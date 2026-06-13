@@ -27,4 +27,9 @@ features: []
   #   sellerBucket: "REPLACE_WITH_SELLER_BUCKET"   # private; GetObject-only
   #   sellerBucketRegion: "us-east-1"
   #   latestVersion: "1.0.0"
-  #   templateKey: "features/my-paid-extension/v1.0.0/template.yaml"
+  #   # VERSION-FREE template path (same convention as OSS extensions): the
+  #   # newest publish overwrites template.yaml; versioned artifacts (ui-bundle.js,
+  #   # config preset) live under <base>/<version>/. The feature stack derives the
+  #   # <version> subfolder from its baked FEATURE_VERSION, so no version-bearing
+  #   # value is stored as a (stale-able) CloudFormation parameter.
+  #   templateKey: "extensions/my-paid-extension/template.yaml"

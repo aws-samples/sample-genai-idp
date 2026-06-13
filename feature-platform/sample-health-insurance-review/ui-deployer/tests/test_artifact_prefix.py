@@ -1,12 +1,12 @@
-"""Unit tests for _artifact_prefix — defeats a stale FeatureKeyPrefix.
+"""Unit tests for _artifact_prefix — derives the versioned artifact path.
 
-CloudFormation's "Update stack" preserves existing parameter values, so the
-FeatureKeyPrefix parameter (prefilled as `.../features/<id>/v<version>`) can
-stay pinned at an OLD version while FEATURE_VERSION advances. Trusting the
-stale prefix made the ui-deployer copy the OLD bundle into the NEW version's
-WebUIBucket key (host then served stale code; FeatureLoader warned
-"bundle version X does not match registered Y"). _artifact_prefix re-anchors
-the trailing version segment to FEATURE_VERSION.
+The ui-deployer reads its versioned artifacts (ui-bundle.js, config preset) from
+`<FeatureArtifactPrefix>/<FEATURE_VERSION>/...`. FeatureArtifactPrefix is the
+VERSION-FREE base (`<prefix>/extensions/<id>`) passed as a CloudFormation
+parameter; FEATURE_VERSION is baked into the template at publish time. Because no
+version-bearing value is a CFN parameter, a stack Update can't leave a stale
+version pinned (the bug this layout fixes): the artifact path always tracks the
+baked FEATURE_VERSION.
 """
 
 from __future__ import annotations
@@ -19,15 +19,17 @@ import pytest
 
 _HANDLER_DIR = Path(__file__).resolve().parents[1]
 
+_BASE = "idp-cli/extensions/sample-health-insurance-review"
 
-def _load(monkeypatch, *, feature_version: str, key_prefix: str):
+
+def _load(monkeypatch, *, feature_version: str, artifact_prefix: str = _BASE):
     monkeypatch.setenv("FEATURE_ID", "sample-health-insurance-review")
     monkeypatch.setenv("FEATURE_DISPLAY_NAME", "Sample: Health Insurance Review")
     monkeypatch.setenv("FEATURE_VERSION", feature_version)
     monkeypatch.setenv("MAIN_STACK_NAME", "IDP")
     monkeypatch.setenv("WEBUI_BUCKET", "webui")
     monkeypatch.setenv("FEATURE_BUCKET", "artifacts")
-    monkeypatch.setenv("FEATURE_KEY_PREFIX", key_prefix)
+    monkeypatch.setenv("FEATURE_ARTIFACT_PREFIX", artifact_prefix)
     monkeypatch.setenv(
         "APPSYNC_API_URL", "https://x.appsync-api.us-west-2.amazonaws.com/graphql"
     )
@@ -40,41 +42,24 @@ def _load(monkeypatch, *, feature_version: str, key_prefix: str):
     return m
 
 
-_BASE = "idp-cli/0.5.15.dev5/sample-features/features/sample-health-insurance-review"
+def test_joins_base_and_feature_version(monkeypatch):
+    mod = _load(monkeypatch, feature_version="0.1.8")
+    assert mod._artifact_prefix() == f"{_BASE}/0.1.8"
 
 
-def test_reanchors_stale_version_segment_to_feature_version(monkeypatch):
-    """The real bug: prefix pinned at v0.1.3, FEATURE_VERSION is 0.1.7."""
-    mod = _load(monkeypatch, feature_version="0.1.7", key_prefix=f"{_BASE}/v0.1.3")
-    assert mod._artifact_prefix() == f"{_BASE}/v0.1.7"
+def test_version_comes_from_feature_version_not_prefix(monkeypatch):
+    """Even if the base somehow carried a version-like segment, the join uses
+    FEATURE_VERSION as the source of truth."""
+    mod = _load(monkeypatch, feature_version="0.2.0", artifact_prefix=_BASE)
+    assert mod._artifact_prefix().endswith("/0.2.0")
 
 
-def test_leaves_matching_version_untouched(monkeypatch):
-    mod = _load(monkeypatch, feature_version="0.1.7", key_prefix=f"{_BASE}/v0.1.7")
-    assert mod._artifact_prefix() == f"{_BASE}/v0.1.7"
+def test_trailing_slash_on_prefix_is_normalized(monkeypatch):
+    mod = _load(monkeypatch, feature_version="0.1.8", artifact_prefix=f"{_BASE}/")
+    assert mod._artifact_prefix() == f"{_BASE}/0.1.8"
 
 
-def test_strips_trailing_slash_then_reanchors(monkeypatch):
-    """Trailing slash is normalized at module load; still re-anchors."""
-    mod = _load(monkeypatch, feature_version="0.1.7", key_prefix=f"{_BASE}/v0.1.3/")
-    assert mod._artifact_prefix() == f"{_BASE}/v0.1.7"
-
-
-def test_no_trailing_version_segment_left_untouched(monkeypatch):
-    """If the prefix doesn't end in a vXXX segment, leave it as-is."""
-    mod = _load(monkeypatch, feature_version="0.1.7", key_prefix=_BASE)
-    assert mod._artifact_prefix() == _BASE
-
-
-def test_bundle_src_key_uses_feature_version(monkeypatch):
-    """End-to-end of the path logic: src copies FROM the FEATURE_VERSION
-    artifact, not the stale prefix version."""
-    mod = _load(monkeypatch, feature_version="0.1.7", key_prefix=f"{_BASE}/v0.1.3")
-    # _artifact_prefix feeds both the bundle copy and the preset fetch.
-    assert mod._artifact_prefix().endswith("/v0.1.7")
-
-
-@pytest.mark.parametrize("version", ["0.1.7", "1.0.0", "2.3.4-rc1"])
+@pytest.mark.parametrize("version", ["0.1.8", "1.0.0", "2.3.4-rc1"])
 def test_various_semver_versions(monkeypatch, version):
-    mod = _load(monkeypatch, feature_version=version, key_prefix=f"{_BASE}/v0.1.3")
-    assert mod._artifact_prefix() == f"{_BASE}/v{version}"
+    mod = _load(monkeypatch, feature_version=version)
+    assert mod._artifact_prefix() == f"{_BASE}/{version}"

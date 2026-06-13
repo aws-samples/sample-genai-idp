@@ -36,11 +36,14 @@ Parameters:
       for OSS). The ui-deployer copies the UI bundle and config preset from here.
       Pre-filled by the host's getFeatureLaunchUrl.
 
-  FeatureKeyPrefix:
+  FeatureArtifactPrefix:
     Type: String
-    Description: Full S3 key prefix of this feature version's artifacts in
-      FeatureBucket (the ui-deployer reads <FeatureKeyPrefix>/ui-bundle.js and
-      <FeatureKeyPrefix>/config-preset/claims-config.yaml).
+    Description: Version-free S3 base prefix of this extension's artifacts in
+      FeatureBucket (e.g. <artifacts-prefix>/extensions/sample-health-insurance-review).
+      The ui-deployer reads <FeatureArtifactPrefix>/<version>/ui-bundle.js and
+      <FeatureArtifactPrefix>/<version>/config-preset/claims-config.yaml, where
+      <version> is derived from the template-baked FEATURE_VERSION (so no
+      version-bearing value is stored as a stale-able CFN parameter).
       Pre-filled by the host's getFeatureLaunchUrl.
 
   LogLevel:
@@ -300,13 +303,14 @@ Resources:
             Version: '2012-10-17'
             Statement:
               # GetObject only — the FeatureBucket (the host's artifacts bucket
-              # for OSS) is GetObject-only by contract; we never list it. The
-              # ui-deployer copies known keys under this feature's key prefix:
-              # ui-bundle.js and config-preset/claims-config.yaml (a missing
-              # key surfaces as NoSuchKey, which the handler logs).
+              # for OSS) is GetObject-only by contract; we never list it. Scoped
+              # to this extension's version-free base; the ui-deployer reads
+              # <version>/ui-bundle.js and <version>/config-preset/claims-config.yaml
+              # under it (a missing key surfaces as NoSuchKey, which the handler
+              # logs).
               - Effect: Allow
                 Action: s3:GetObject
-                Resource: !Sub 'arn:${AWS::Partition}:s3:::${FeatureBucket}/${FeatureKeyPrefix}/*'
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${FeatureBucket}/${FeatureArtifactPrefix}/*'
         - PolicyName: WriteWebUIBucketPrefix
           PolicyDocument:
             Version: '2012-10-17'
@@ -361,12 +365,12 @@ Resources:
           MAIN_STACK_NAME: !Ref MainStackName
           WEBUI_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WebUIBucketName' }
           FEATURE_BUCKET: !Ref FeatureBucket
-          FEATURE_KEY_PREFIX: !Ref FeatureKeyPrefix
+          FEATURE_ARTIFACT_PREFIX: !Ref FeatureArtifactPrefix
           APPSYNC_API_URL: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiUrl' }
           FEATURE_API_ENDPOINT: !GetAtt FeatureApi.ApiEndpoint
           HOOK_FUNCTION_ARN: !GetAtt ClaimStatusHookFunction.Arn
-          # Relative key of the preset under FEATURE_KEY_PREFIX; must match
-          # feature.yaml -> configPreset.path.
+          # Relative key of the preset under <FeatureArtifactPrefix>/<version>/;
+          # must match feature.yaml -> configPreset.path.
           CONFIG_PRESET_RELATIVE_KEY: config-preset/claims-config.yaml
           LOG_LEVEL: !Ref LogLevel
 

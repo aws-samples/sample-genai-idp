@@ -27,7 +27,7 @@ def mod(monkeypatch):
     monkeypatch.setenv("MAIN_STACK_NAME", "IDP")
     monkeypatch.setenv("WEBUI_BUCKET", "webui")
     monkeypatch.setenv("FEATURE_BUCKET", "artifacts")
-    monkeypatch.setenv("FEATURE_KEY_PREFIX", "idp-cli/x/sample-features/features/f/v")
+    monkeypatch.setenv("FEATURE_ARTIFACT_PREFIX", "idp-cli/extensions/f")
     monkeypatch.setenv(
         "APPSYNC_API_URL", "https://x.appsync-api.us-west-2.amazonaws.com/graphql"
     )

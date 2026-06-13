@@ -10,9 +10,11 @@ import pytest
 from _helpers import make_appsync_event
 
 _CATALOG_KEY = "config_library/catalog.json"
-# OSS feature artifacts live under this prefix in the artifacts bucket (which,
-# in these tests, is the same mock bucket used as ConfigurationBucket).
-_ARTIFACT_PREFIX = "artifacts/genai-idp/0.0.0/sample-features"
+# OSS extension artifacts live under this VERSION-FREE base in the artifacts
+# bucket (which, in these tests, is the same mock bucket used as
+# ConfigurationBucket). The template is at <base>/template.yaml; versioned
+# artifacts under <base>/<version>/.
+_ARTIFACT_PREFIX = "artifacts/genai-idp/extensions/docs-by-status"
 
 
 def _preload(monkeypatch, mock_stack, load_lambda):
@@ -69,27 +71,27 @@ def test_happy_path_new_install(monkeypatch, mock_stack, load_lambda):
 
     assert result["featureId"] == "docs-by-status"
     assert result["version"] == "1.2.3"
-    # OSS template URL is a bare S3 URL against the artifacts bucket, under the
-    # feature's versioned key prefix — no presign.
+    # OSS template URL is a bare S3 URL against the artifacts bucket, at the
+    # VERSION-FREE extension base — no presign, no version in the path.
     expected = (
         f"https://{bucket}.s3.us-east-1.amazonaws.com/"
-        f"{_ARTIFACT_PREFIX}/features/docs-by-status/v1.2.3/template.yaml"
+        f"{_ARTIFACT_PREFIX}/template.yaml"
     )
     assert result["templateUrl"] == expected
     # New install → suggested stackName is derived
     assert result["stackName"] == "idp-main-feature-docs-by-status"
 
-    # Parameters include MainStackName + FeatureBucket + FeatureKeyPrefix.
-    # FeatureVersion is intentionally NOT here — it's baked into the template at
-    # publish time. See `_parameters_for_feature` docstring.
+    # Parameters include MainStackName + FeatureBucket + FeatureArtifactPrefix.
+    # Neither FeatureVersion nor any versioned prefix is a parameter — the
+    # version is baked into the template at publish time. See
+    # `_parameters_for_feature` docstring.
     params = json.loads(result["parameters"])
     assert params["MainStackName"] == "idp-main"
     assert "FeatureVersion" not in params
+    assert "FeatureKeyPrefix" not in params
     assert params["FeatureBucket"] == bucket
-    assert (
-        params["FeatureKeyPrefix"]
-        == f"{_ARTIFACT_PREFIX}/features/docs-by-status/v1.2.3"
-    )
+    # Version-free base — no /features/<id>/v<ver> suffix.
+    assert params["FeatureArtifactPrefix"] == _ARTIFACT_PREFIX
 
     # Launch URL is well-formed and includes all parameters
     parsed = urlparse(result["launchUrl"])
@@ -209,8 +211,12 @@ def test_explicit_version_overrides_latest(monkeypatch, mock_stack, load_lambda)
         groups=["Admin"],
     )
     result = mod.handler(event, None)
+    # The requested version is reflected in the response, but the template URL
+    # is version-free (the version reaches the stack via the baked template, not
+    # the URL/params), so it does NOT appear in templateUrl.
     assert result["version"] == "1.0.0"
-    assert "v1.0.0" in result["templateUrl"]
+    assert "1.0.0" not in result["templateUrl"]
+    assert result["templateUrl"].endswith(f"{_ARTIFACT_PREFIX}/template.yaml")
 
 
 def test_non_admin_is_rejected(monkeypatch, mock_stack, load_lambda):
@@ -258,9 +264,10 @@ def test_missing_featureId_raises(monkeypatch, mock_stack, load_lambda):
 def test_oss_feature_bucket_and_prefix_come_from_catalog(
     monkeypatch, mock_stack, load_lambda
 ):
-    """OSS FeatureBucket/FeatureKeyPrefix CFN params are derived from the
+    """OSS FeatureBucket/FeatureArtifactPrefix CFN params are derived from the
     catalog entry's artifactBucket/artifactPrefix (stamped by idp-cli publish),
-    so the feature stack's ui-deployer reads from the artifacts bucket.
+    so the feature stack's ui-deployer reads from the artifacts bucket. The
+    prefix is the version-free extension base.
     """
     bucket = mock_stack["bucket"]
     _put_catalog(bucket, [_oss_entry("docs-by-status", "1.2.3", bucket)])
@@ -273,10 +280,8 @@ def test_oss_feature_bucket_and_prefix_come_from_catalog(
 
     params = json.loads(result["parameters"])
     assert params["FeatureBucket"] == bucket
-    assert (
-        params["FeatureKeyPrefix"]
-        == f"{_ARTIFACT_PREFIX}/features/docs-by-status/v1.2.3"
-    )
+    assert params["FeatureArtifactPrefix"] == _ARTIFACT_PREFIX
+    assert "FeatureKeyPrefix" not in params
 
 
 # ---------------------------------------------------------------------------
@@ -313,10 +318,11 @@ def test_marketplace_entitled_returns_presigned_seller_url(
     monkeypatch, mock_stack, load_lambda
 ):
     bucket = mock_stack["bucket"]
-    # Seller template object lives in the (here, same mock) seller bucket.
+    # Seller template object lives in the (here, same mock) seller bucket, at
+    # the VERSION-FREE extension base (same convention as OSS).
     _put(
         bucket,
-        "features/my-paid-extension/v0.1.4/template.yaml",
+        "extensions/my-paid-extension/template.yaml",
         "AWSTemplateFormatVersion: '2010-09-09'",
     )
     _put_catalog(
@@ -330,7 +336,7 @@ def test_marketplace_entitled_returns_presigned_seller_url(
                 "productCode": "prod-xyz",
                 "sellerBucket": bucket,
                 "sellerBucketRegion": "us-east-1",
-                "templateKey": "features/my-paid-extension/v0.1.4/template.yaml",
+                "templateKey": "extensions/my-paid-extension/template.yaml",
             }
         ],
     )
@@ -346,20 +352,22 @@ def test_marketplace_entitled_returns_presigned_seller_url(
 
     assert result["featureId"] == "my-paid-extension"
     assert result["version"] == "0.1.4"
-    # Presigned GetObject URL for the seller-bucket template.
+    # Presigned GetObject URL for the seller-bucket template (version-free path).
     parsed = urlparse(result["templateUrl"])
     qs = parse_qs(parsed.query)
-    assert "features/my-paid-extension/v0.1.4/template.yaml" in parsed.path
+    assert "extensions/my-paid-extension/template.yaml" in parsed.path
     # Presigned (SigV4 "X-Amz-Signature" or SigV2 "Signature" depending on
     # the botocore signing config) — either way it carries a signature.
     assert "X-Amz-Signature" in qs or "Signature" in qs
     # The launch URL embeds the presigned template URL.
     assert "templateURL=" in result["launchUrl"]
     # The feature stack's ui-deployer reads its UI bundle from the SELLER
-    # bucket, under the template's key prefix.
+    # bucket, under the version-free extension base (the template's directory);
+    # it derives the <version> subfolder from the baked FEATURE_VERSION.
     params = json.loads(result["parameters"])
     assert params["FeatureBucket"] == bucket
-    assert params["FeatureKeyPrefix"] == "features/my-paid-extension/v0.1.4"
+    assert params["FeatureArtifactPrefix"] == "extensions/my-paid-extension"
+    assert "FeatureKeyPrefix" not in params
 
 
 def test_marketplace_not_entitled_raises(monkeypatch, mock_stack, load_lambda):

@@ -41,9 +41,10 @@ _FEATURE_VERSION = os.environ["FEATURE_VERSION"]
 _MAIN_STACK_NAME = os.environ["MAIN_STACK_NAME"]
 _WEBUI_BUCKET = os.environ["WEBUI_BUCKET"]
 _FEATURE_BUCKET = os.environ["FEATURE_BUCKET"]
-# Full key prefix of this version's artifacts in FEATURE_BUCKET (the host's
-# artifacts bucket), e.g. "<prefix>/<version>/sample-features/features/<id>/v<ver>".
-_FEATURE_KEY_PREFIX = os.environ["FEATURE_KEY_PREFIX"].rstrip("/")
+# Version-FREE base prefix of this extension's artifacts in FEATURE_BUCKET (the
+# host's artifacts bucket), e.g. "<prefix>/extensions/<id>". The versioned
+# ui-bundle.js lives under "<base>/<FEATURE_VERSION>/".
+_FEATURE_ARTIFACT_PREFIX = os.environ["FEATURE_ARTIFACT_PREFIX"].rstrip("/")
 _APPSYNC_URL = os.environ["APPSYNC_API_URL"]
 _FEATURE_API_ENDPOINT = os.environ.get("FEATURE_API_ENDPOINT", "")
 
@@ -68,15 +69,27 @@ if _FEATURE_VERSION == "<FEATURE_VERSION_TOKEN>" or "TOKEN" in _FEATURE_VERSION:
 _s3 = boto3.client("s3")
 
 
+def _artifact_prefix() -> str:
+    """Versioned source artifact prefix in FEATURE_BUCKET.
+
+    FEATURE_ARTIFACT_PREFIX is the VERSION-FREE base (`<prefix>/extensions/<id>`)
+    passed as a CloudFormation parameter; the versioned ui-bundle.js lives under
+    `<base>/<FEATURE_VERSION>/`. FEATURE_VERSION is baked into the template at
+    publish time (a literal, not a parameter), so it can never go stale on a
+    stack Update — there is no version-bearing CFN parameter to drift.
+    """
+    return f"{_FEATURE_ARTIFACT_PREFIX}/{_FEATURE_VERSION}"
+
+
 # ---------------------------------------------------------------------------
 # UI bundle copy
 # ---------------------------------------------------------------------------
 def _bundle_ui(request_type: str) -> str:
     """Return the uiBundlePath registered with the host (used for RegisterFeature)."""
-    # Source is the published artifact under FeatureKeyPrefix in the artifacts
-    # bucket; destination is the host's canonical WebUIBucket layout that
-    # FeatureLoader fetches.
-    src_key = f"{_FEATURE_KEY_PREFIX}/ui-bundle.js"
+    # Source is the published versioned artifact under the extension base in the
+    # artifacts bucket; destination is the host's canonical WebUIBucket layout
+    # that FeatureLoader fetches.
+    src_key = f"{_artifact_prefix()}/ui-bundle.js"
     dst_key = f"features/{_FEATURE_ID}/v{_FEATURE_VERSION}/ui-bundle.js"
 
     if request_type in ("Create", "Update"):

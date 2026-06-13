@@ -40,11 +40,13 @@ Two feature kinds are supported, distinguished by the catalog manifest's
 `source` field (read from ConfigurationBucket, GetObject-only — no listing):
 
   - **OSS features** (`source="oss"`) — artifacts live in the artifacts bucket
-    (the same bucket the main template is published to), under
-    `<artifactPrefix>/features/<id>/v<version>/`. The catalog entry carries
-    `artifactBucket` + `artifactPrefix`; the launch URL is a bare S3 HTTPS URL
-    (no presign), inheriting the artifacts bucket's access model — exactly like
-    the main-stack quick-create link.
+    (the same bucket the main template is published to), under a VERSION-FREE
+    base `<artifactPrefix>` = `<prefix>/extensions/<id>`: the template at
+    `<artifactPrefix>/template.yaml` and versioned artifacts under
+    `<artifactPrefix>/<version>/`. The catalog entry carries `artifactBucket` +
+    `artifactPrefix`; the launch URL is a bare S3 HTTPS URL (no presign),
+    inheriting the artifacts bucket's access model — exactly like the main-stack
+    quick-create link.
 
   - **Marketplace features** (`source="marketplace"`) — the template lives in a
     PRIVATE seller bucket (GetObject-only, no public read). This resolver first
@@ -301,12 +303,13 @@ def _describe_stack_arn(stack_name: str) -> Optional[str]:
 def _oss_template_https_url(bucket: str, key_prefix: str) -> str:
     """Bare virtual-hosted-style S3 URL for an OSS feature template.
 
-    OSS feature artifacts are published to the same artifacts bucket as the main
-    template (under `<prefix>/<version>/sample-features/features/<id>/v<ver>/`),
-    so the Launch Stack URL inherits the main template's own access model: the
-    object is public for the public release and private for a self-publish —
-    exactly like the main-stack quick-create link. No presign (cf. marketplace,
-    whose private seller bucket always requires one).
+    OSS extension artifacts are published to the same artifacts bucket as the
+    main template, under a VERSION-FREE base `<prefix>/extensions/<id>`, with
+    the template at `<base>/template.yaml` (newest publish overwrites it — like
+    idp-main.yaml). `key_prefix` is that version-free base; the Launch Stack URL
+    inherits the main template's own access model (public for the public
+    release, private for a self-publish — no presign; cf. marketplace, whose
+    private seller bucket always requires one).
     """
     return f"https://{bucket}.s3.{_ARTIFACT_REGION}.amazonaws.com/{key_prefix}/template.yaml"
 
@@ -371,7 +374,7 @@ def _parameters_for_feature(
     version: str,
     manifest: Optional[Dict[str, Any]],
     feature_bucket: str,
-    feature_key_prefix: str,
+    feature_artifact_prefix: str,
 ) -> Dict[str, str]:
     """Compute the set of pre-filled CFN parameters.
 
@@ -380,20 +383,22 @@ def _parameters_for_feature(
       - FeatureBucket — the bucket the feature stack's ui-deployer reads the UMD
         bundle from to copy into the main stack's WebUIBucket. For OSS this is
         the artifacts bucket; for marketplace, the seller bucket.
-      - FeatureKeyPrefix — the full key prefix of this feature's artifacts in
-        FeatureBucket (e.g. `<prefix>/<version>/sample-features/features/<id>/v<ver>`
-        for OSS, or the seller template's prefix). The ui-deployer reads
-        `<FeatureKeyPrefix>/ui-bundle.js`. MUST be pre-filled — feature
+      - FeatureArtifactPrefix — the VERSION-FREE S3 base prefix of this
+        extension's artifacts in FeatureBucket (`<prefix>/extensions/<id>` for
+        OSS, or the seller base for marketplace). The ui-deployer reads
+        `<FeatureArtifactPrefix>/<version>/ui-bundle.js`, deriving <version>
+        from the template-baked FEATURE_VERSION. MUST be pre-filled — feature
         templates declare these without a default.
 
-    `FeatureVersion` is intentionally NOT a CFN parameter. The version is
-    baked into the published template at upload time by `idp-feature-cli
-    publish` (which substitutes a `<FEATURE_VERSION_TOKEN>` placeholder).
-    Why? CloudFormation Console's "Update stack" wizard ignores `param_*`
-    URL overrides — admins clicking "Update" on an installed feature would
-    have stayed on the old version even though we passed the new one. By
-    making the new version a literal in the template, CFN sees a real
-    template change and the update applies cleanly.
+    `FeatureVersion` is intentionally NOT a CFN parameter, and neither is the
+    version part of FeatureArtifactPrefix. The version is baked into the
+    published template at upload time by `idp-feature-cli publish` (which
+    substitutes a `<FEATURE_VERSION_TOKEN>` placeholder). Why? CloudFormation
+    Console's "Update stack" wizard PRESERVES existing parameter values and
+    ignores `param_*` URL overrides — so a versioned parameter would go stale
+    on update (the bug this design fixes), and admins clicking "Update" would
+    stay on the old version. By keeping the version only in the baked template,
+    CFN sees a real template change and the update applies cleanly.
 
     The publisher may advertise additional defaults in `manifest.json ->
     defaultParameters` — which override these if needed.
@@ -401,7 +406,7 @@ def _parameters_for_feature(
     params: Dict[str, str] = {
         "MainStackName": _MAIN_STACK_NAME,
         "FeatureBucket": feature_bucket,
-        "FeatureKeyPrefix": feature_key_prefix,
+        "FeatureArtifactPrefix": feature_artifact_prefix,
     }
     if manifest:
         defaults: Dict[str, Any] = manifest.get("defaultParameters") or {}
@@ -460,14 +465,17 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         template_url = _presign_seller_template(
             seller_bucket, seller_region, template_key
         )
-        # Marketplace feature's UI bundle lives in the seller bucket alongside
-        # the template; the ui-deployer reads from the template's key prefix.
+        # Same convention as OSS: `templateKey` is the VERSION-FREE
+        # `<seller-base>/template.yaml`; its directory is the version-free
+        # extension base the feature stack self-locates versioned artifacts
+        # under (`<base>/<version>/...`).
         param_feature_bucket = seller_bucket
-        param_feature_key_prefix = template_key.rsplit("/", 1)[0]
+        param_feature_artifact_prefix = template_key.rsplit("/", 1)[0]
     else:
-        # OSS: artifacts live in the artifacts bucket under
-        # <artifactPrefix>/features/<id>/v<ver>/. Build a bare template URL
-        # (no presign) — same access model as the main-stack quick-create link.
+        # OSS: artifacts live in the artifacts bucket under the version-free
+        # extension base `<prefix>/extensions/<id>`, template at
+        # `<base>/template.yaml`. Bare template URL (no presign) — same access
+        # model as the main-stack quick-create link.
         artifact_bucket = catalog_entry.get("artifactBucket") or ""
         artifact_prefix = catalog_entry.get("artifactPrefix") or ""
         version = args.get("version") or catalog_entry.get("latestVersion") or ""
@@ -479,9 +487,15 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             )
         manifest = None
         param_feature_bucket = artifact_bucket
-        param_feature_key_prefix = f"{artifact_prefix}/features/{feature_id}/v{version}"
+        # artifactPrefix is the VERSION-FREE extension base
+        # (`<prefix>/extensions/<id>`). The template lives at `<base>/template.yaml`
+        # (version-free); the feature stack self-locates its versioned artifacts
+        # under `<base>/<version>/...` from its baked FEATURE_VERSION. We pass the
+        # version-free base as FeatureArtifactPrefix — nothing version-bearing is
+        # stored as a CFN parameter that could go stale on Update.
+        param_feature_artifact_prefix = artifact_prefix
         template_url = _oss_template_https_url(
-            artifact_bucket, param_feature_key_prefix
+            artifact_bucket, param_feature_artifact_prefix
         )
 
     # If the feature is already installed, look up its stackName from the
@@ -495,7 +509,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         version,
         manifest,
         feature_bucket=param_feature_bucket,
-        feature_key_prefix=param_feature_key_prefix,
+        feature_artifact_prefix=param_feature_artifact_prefix,
     )
 
     # Resolve the existing stack's full ARN. If we can — and the stack is in

@@ -7,16 +7,17 @@ Extends the minimal docs-by-status ui-deployer with the two "vertical pack"
 registrations the Claims Review sample demonstrates:
 
 On Create or Update:
-  1. Copies s3://<FEATURE_BUCKET>/<FEATURE_KEY_PREFIX>/ui-bundle.js
+  1. Copies s3://<FEATURE_BUCKET>/<FEATURE_ARTIFACT_PREFIX>/<FEATURE_VERSION>/ui-bundle.js
      into s3://<WEBUI_BUCKET>/features/<FEATURE_ID>/v<FEATURE_VERSION>/ui-bundle.js
   2. Calls the host's AppSync `registerFeature` mutation (IAM auth) to add a
      row to InstalledFeatures.
-  3. Calls `registerFeatureHooks` to attach the ClaimStatusHookFunction to the
-     postRuleValidation pipeline point (hook ARN passed in via env var).
-  4. Downloads the bundled config preset (config-preset/claims-config.yaml,
-     uploaded by the publisher under FEATURE_KEY_PREFIX) and calls
-     `applyFeatureConfigPreset`, creating a NON-ACTIVE config version
+  3. Downloads the bundled config preset (config-preset/claims-config.yaml,
+     uploaded by the publisher under <FEATURE_ARTIFACT_PREFIX>/<FEATURE_VERSION>),
+     INJECTS the postRuleValidation hook into its rule_validation.postHook, and
+     calls `applyFeatureConfigPreset` — creating a NON-ACTIVE config version
      `sample-health-insurance-review-v<FEATURE_VERSION>` for an admin to activate.
+     (The hook travels inside the preset, not via a separate registerFeatureHooks
+     call, so activating that version brings the rules and hook together.)
 
 On Delete:
   1. Deletes the copied UI bundle.
@@ -34,7 +35,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import urllib.request
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
@@ -54,16 +54,17 @@ _FEATURE_VERSION = os.environ["FEATURE_VERSION"]
 _MAIN_STACK_NAME = os.environ["MAIN_STACK_NAME"]
 _WEBUI_BUCKET = os.environ["WEBUI_BUCKET"]
 _FEATURE_BUCKET = os.environ["FEATURE_BUCKET"]
-# Full key prefix of this version's artifacts in FEATURE_BUCKET (the host's
-# artifacts bucket), e.g. "<prefix>/<version>/sample-features/features/<id>/v<ver>".
-_FEATURE_KEY_PREFIX = os.environ["FEATURE_KEY_PREFIX"].rstrip("/")
+# Version-FREE base prefix of this extension's artifacts in FEATURE_BUCKET (the
+# host's artifacts bucket), e.g. "<prefix>/extensions/<id>". The versioned
+# artifacts live under "<base>/<FEATURE_VERSION>/...".
+_FEATURE_ARTIFACT_PREFIX = os.environ["FEATURE_ARTIFACT_PREFIX"].rstrip("/")
 _APPSYNC_URL = os.environ["APPSYNC_API_URL"]
 _FEATURE_API_ENDPOINT = os.environ.get("FEATURE_API_ENDPOINT", "")
 # ARN of this feature's postRuleValidation hook Lambda (template.yaml).
 _HOOK_FUNCTION_ARN = os.environ.get("HOOK_FUNCTION_ARN", "")
-# Key of the bundled config preset, relative to FEATURE_KEY_PREFIX. Matches
-# feature.yaml -> configPreset.path (the publisher uploads it at the same
-# relative path under the version prefix).
+# Key of the bundled config preset, relative to the versioned artifact prefix.
+# Matches feature.yaml -> configPreset.path (the publisher uploads it under
+# "<base>/<version>/<configPreset.path>").
 _CONFIG_PRESET_RELATIVE_KEY = os.environ.get(
     "CONFIG_PRESET_RELATIVE_KEY", "config-preset/claims-config.yaml"
 )
@@ -90,28 +91,16 @@ _s3 = boto3.client("s3")
 
 
 def _artifact_prefix() -> str:
-    """Source artifact prefix in FEATURE_BUCKET, re-anchored to FEATURE_VERSION.
+    """Versioned source artifact prefix in FEATURE_BUCKET.
 
-    FEATURE_KEY_PREFIX is a CloudFormation *parameter* prefilled by the host's
-    getFeatureLaunchUrl as `<...>/features/<id>/v<version>`. CloudFormation's
-    "Update stack" wizard PRESERVES existing parameter values unless explicitly
-    overridden, so on a version bump this parameter can stay pinned at the OLD
-    version (e.g. v0.1.3) while FEATURE_VERSION — substituted into the template
-    at publish time — correctly advances (e.g. 0.1.7). Trusting the stale
-    prefix made the deployer copy the OLD bundle into the NEW version's
-    WebUIBucket key, so the host served stale code and FeatureLoader warned
-    "bundle version X does not match registered Y".
-
-    FEATURE_VERSION is the source of truth (it must match the registered
-    version), so we rewrite the trailing `.../v<anything>` segment of the
-    prefix to `.../v<FEATURE_VERSION>`. If the prefix has no trailing version
-    segment, we leave it untouched.
+    FEATURE_ARTIFACT_PREFIX is the VERSION-FREE base (`<prefix>/extensions/<id>`)
+    passed as a CloudFormation parameter. The versioned artifacts the deployer
+    reads (ui-bundle.js, config preset) live under `<base>/<FEATURE_VERSION>/`.
+    FEATURE_VERSION is baked into the template at publish time (a literal, not a
+    parameter), so it can never go stale on a stack Update — which is the whole
+    point of this layout: there is no version-bearing CFN parameter to drift.
     """
-    prefix = _FEATURE_KEY_PREFIX
-    parent, sep, last = prefix.rpartition("/")
-    if sep and re.fullmatch(r"v.+", last):
-        return f"{parent}/v{_FEATURE_VERSION}"
-    return prefix
+    return f"{_FEATURE_ARTIFACT_PREFIX}/{_FEATURE_VERSION}"
 
 
 # ---------------------------------------------------------------------------
@@ -331,8 +320,8 @@ def _apply_config_preset() -> None:
     the hook is part of the very version the admin activates — no separate
     registerFeatureHooks call, no orphaned hook.
     """
-    # Use the version-anchored prefix (see _artifact_prefix) so a stale
-    # FeatureKeyPrefix parameter can't make us apply an old version's preset.
+    # Read from the versioned prefix (<base>/<FEATURE_VERSION>/...); the version
+    # comes from the baked FEATURE_VERSION, not a stale-able CFN parameter.
     preset_key = f"{_artifact_prefix()}/{_CONFIG_PRESET_RELATIVE_KEY}"
     logger.info("Fetching config preset s3://%s/%s", _FEATURE_BUCKET, preset_key)
     resp = _s3.get_object(Bucket=_FEATURE_BUCKET, Key=preset_key)

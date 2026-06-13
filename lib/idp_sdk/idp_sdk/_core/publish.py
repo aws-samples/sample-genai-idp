@@ -1508,13 +1508,15 @@ STDERR:
     def build_and_upload_sample_features(self):
         """Build and upload bundled sample feature(s) to the artifact bucket.
 
-        Produces artifacts under
-            s3://<artifact-bucket>/<prefix>/<version>/sample-features/features/<id>/...
+        Produces artifacts under a VERSION-FREE extension base:
+            s3://<artifact-bucket>/<prefix>/extensions/<id>/template.yaml
+            s3://<artifact-bucket>/<prefix>/extensions/<id>/<version>/...
 
-        At deploy time, when EnableFeaturePlatform=true, the main stack's
-        PublishSampleFeature custom resource copies these objects into the
-        auto-created feature bucket (layout: features/<id>/...) so the feature
-        appears in the catalog with no manual `idp-feature-cli publish` step.
+        OSS extensions install directly from the artifacts bucket (no host-side
+        copy): the generated catalog.json carries each feature's artifactBucket
+        + (version-free) artifactPrefix, and getFeatureLaunchUrl builds the
+        Launch Stack URL from those. The feature's ui-deployer then copies the
+        UI bundle into the host's WebUIBucket at install/update time.
 
         Returns ``(hash, file_list)`` — empty when no bundled feature
         directories are present (e.g. a trimmed checkout).
@@ -1804,12 +1806,15 @@ STDERR:
             "docsUrl": manifest.docsUrl or "",
             "source": "oss",
             "latestVersion": manifest.version,
-            # OSS feature artifacts live in the (same) artifacts bucket the main
-            # template is published to, under sample-features/. The host builds
-            # the Launch Stack template URL + ui-deployer source from these —
-            # no separate, stack-owned feature bucket needed.
+            # OSS extension artifacts live in the (same) artifacts bucket the
+            # main template is published to, under a VERSION-FREE extension base
+            # `<prefix>/extensions/<id>`. The host's getFeatureLaunchUrl builds
+            # the (version-free) Launch Stack template URL from artifactPrefix +
+            # "/template.yaml"; the feature template self-locates its versioned
+            # artifacts under `<artifactPrefix>/<version>/...` from its baked
+            # FEATURE_VERSION. No separate, stack-owned feature bucket needed.
             "artifactBucket": self.bucket,
-            "artifactPrefix": f"{self.prefix_and_version}/sample-features",
+            "artifactPrefix": f"{self.prefix}/extensions/{manifest.featureId}",
         }
         return file_list, catalog_entry
 
@@ -1818,20 +1823,34 @@ STDERR:
     ):
         """Upload a built sample feature's artifacts to the artifact bucket.
 
-        Mirrors the layout `idp-feature-cli publish` produces, under
-        `<prefix>/<version>/sample-features/features/<featureId>/...`, so the
-        main-stack Lambdas see the feature exactly as if it had been published
-        by a developer. Returns the list of uploaded relative paths.
+        Uses a VERSION-FREE extension base, mirroring how the main template is
+        published (see _upload_version_pointer, which keys off self.prefix not
+        self.prefix_and_version):
+
+            <prefix>/extensions/<id>/template.yaml      # version-free; newest publish wins
+            <prefix>/extensions/<id>/latest.json        # version-free pointer
+            <prefix>/extensions/<id>/<version>/ui-bundle.js
+            <prefix>/extensions/<id>/<version>/<configPreset.path>
+            <prefix>/extensions/<id>/<version>/manifest.json
+
+        The template is version-free so the host's getFeatureLaunchUrl points at
+        a stable URL (and a stack Update sees the newest template), while the
+        version-specific artifacts live under a <version>/ subfolder that the
+        feature template self-locates from its baked FEATURE_VERSION — so no
+        version-bearing value is stored as a stale-able CloudFormation
+        parameter. Returns the list of uploaded relative paths (relative to the
+        extension base).
         """
-        artifact_root = f"{self.prefix_and_version}/sample-features"
         feature_id = manifest.featureId
         version = manifest.version
+        extension_root = f"{self.prefix}/extensions/{feature_id}"
+        version_root = f"{version}"
         uploaded = []
 
         def _put(body, rel_key, content_type):
             self.s3_client.put_object(
                 Bucket=self.bucket,
-                Key=f"{artifact_root}/{rel_key}",
+                Key=f"{extension_root}/{rel_key}",
                 Body=body,
                 ContentType=content_type,
             )
@@ -1841,14 +1860,15 @@ STDERR:
             self.s3_client.upload_file(
                 str(local_path),
                 self.bucket,
-                f"{artifact_root}/{rel_key}",
+                f"{extension_root}/{rel_key}",
                 ExtraArgs={"ContentType": content_type},
             )
             uploaded.append(rel_key)
 
-        # template.yaml — prefer the sam-packaged version (CodeUri rewritten to
-        # s3://...). Bake <FEATURE_VERSION_TOKEN> -> manifest.version so the
-        # feature stack's ui-deployer copies from the correct versioned prefix.
+        # template.yaml — VERSION-FREE path; prefer the sam-packaged version
+        # (CodeUri rewritten to s3://...). Bake <FEATURE_VERSION_TOKEN> ->
+        # manifest.version so the feature stack's ui-deployer derives the
+        # versioned artifact subfolder from FEATURE_VERSION.
         template_source = (
             packaged_template_path
             if packaged_template_path is not None
@@ -1858,21 +1878,21 @@ STDERR:
         baked_text = template_text.replace("<FEATURE_VERSION_TOKEN>", version)
         _put(
             baked_text.encode("utf-8"),
-            f"features/{feature_id}/v{version}/template.yaml",
+            "template.yaml",
             "application/x-yaml",
         )
 
         _upload(
             bundle_path,
-            f"features/{feature_id}/v{version}/ui-bundle.js",
+            f"{version_root}/ui-bundle.js",
             "application/javascript",
         )
 
         # Config preset — if the manifest declares one. The feature stack's
-        # ui-deployer downloads it from `<FeatureKeyPrefix>/<configPreset.path>`
-        # at install to call applyFeatureConfigPreset, so it MUST be uploaded
-        # at the same relative path under the version prefix (mirrors
-        # FeaturePublisher._upload_artifacts for developer-published features).
+        # ui-deployer downloads it from
+        # `<FeatureArtifactPrefix>/<version>/<configPreset.path>` at install to
+        # call applyFeatureConfigPreset, so it MUST be uploaded at that same
+        # relative path under the version subfolder.
         config_preset = getattr(manifest, "configPreset", None)
         if config_preset and getattr(config_preset, "path", None):
             preset_local = feature_dir / config_preset.path
@@ -1884,7 +1904,7 @@ STDERR:
                 )
                 _upload(
                     preset_local,
-                    f"features/{feature_id}/v{version}/{config_preset.path}",
+                    f"{version_root}/{config_preset.path}",
                     preset_ct,
                 )
             else:
@@ -1909,10 +1929,13 @@ STDERR:
         }
         _put(
             json.dumps(manifest_data, indent=2, sort_keys=True).encode("utf-8"),
-            f"features/{feature_id}/v{version}/manifest.json",
+            f"{version_root}/manifest.json",
             "application/json",
         )
 
+        # Version-free pointer (mirrors idp-main-latest.json). Not read by the
+        # host resolver at runtime (it reads catalog.json) — kept for parity and
+        # ad-hoc inspection.
         latest_data = {
             "featureId": feature_id,
             "version": version,
@@ -1923,13 +1946,13 @@ STDERR:
         }
         _put(
             json.dumps(latest_data, indent=2, sort_keys=True).encode("utf-8"),
-            f"features/{feature_id}/latest.json",
+            "latest.json",
             "application/json",
         )
 
         self.log_success(
-            f"Uploaded {len(uploaded)} sample-feature artifacts to "
-            f"s3://{self.bucket}/{artifact_root}/ ({feature_id} v{version})"
+            f"Uploaded {len(uploaded)} extension artifacts to "
+            f"s3://{self.bucket}/{extension_root}/ ({feature_id} v{version})"
         )
         return sorted(uploaded)
 
@@ -2125,11 +2148,12 @@ STDERR:
                     "<MULTI_DOC_DISCOVERY_BUILD_HASH_TOKEN>": self.get_directory_checksum(
                         "src/lambda/multi_doc_discovery"
                     )[:16],
-                    # Feature Platform: the bundled sample feature(s) uploaded to
-                    # the artifact bucket under sample-features/. The hash drives
-                    # the PublishSampleFeature custom resource's re-run; the list
-                    # tells it exactly which objects to copy into the auto-created
-                    # feature bucket. Empty when no bundled features were built.
+                    # Feature Platform: the bundled extension(s) uploaded to the
+                    # artifact bucket under <prefix>/extensions/<id>/. These
+                    # tokens carry the build hash + uploaded file list for
+                    # change detection; OSS extensions install directly from the
+                    # artifacts bucket (no host-side copy resource). Empty when
+                    # no bundled features were built.
                     "<SAMPLE_FEATURES_HASH_TOKEN>": sample_features_hash,
                     "<SAMPLE_FEATURES_LIST_TOKEN>": json.dumps(
                         sample_features_list or []

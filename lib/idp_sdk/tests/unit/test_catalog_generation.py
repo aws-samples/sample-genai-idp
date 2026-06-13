@@ -74,7 +74,7 @@ features:
     sellerBucket: "seller-prod"
     sellerBucketRegion: "us-east-1"
     latestVersion: "0.1.4"
-    templateKey: "features/idp-monitor/v0.1.4/template.yaml"
+    templateKey: "extensions/idp-monitor/template.yaml"
 """,
     )
     oss = [
