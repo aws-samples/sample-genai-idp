@@ -74,8 +74,7 @@ def test_happy_path_new_install(monkeypatch, mock_stack, load_lambda):
     # OSS template URL is a bare S3 URL against the artifacts bucket, at the
     # VERSION-FREE extension base — no presign, no version in the path.
     expected = (
-        f"https://{bucket}.s3.us-east-1.amazonaws.com/"
-        f"{_ARTIFACT_PREFIX}/template.yaml"
+        f"https://{bucket}.s3.us-east-1.amazonaws.com/{_ARTIFACT_PREFIX}/template.yaml"
     )
     assert result["templateUrl"] == expected
     # New install → suggested stackName is derived
