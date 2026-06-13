@@ -308,9 +308,7 @@ class FeaturePublisher:
         )
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "").strip()
-            raise RuntimeError(
-                f"{step} failed (exit {result.returncode}).\n{detail}"
-            )
+            raise RuntimeError(f"{step} failed (exit {result.returncode}).\n{detail}")
 
     def _upload_version_artifacts(
         self,

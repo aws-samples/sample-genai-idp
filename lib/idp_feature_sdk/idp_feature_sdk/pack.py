@@ -669,7 +669,9 @@ def create_or_update_stack(
         if "No updates are to be performed" in msg:
             cons.log("[green]✓[/green] No changes — stack already up to date")
             return existing["StackId"] if existing else stack_name
-        raise RuntimeError(f"{'Update' if is_update else 'Create'} failed: {exc}") from exc
+        raise RuntimeError(
+            f"{'Update' if is_update else 'Create'} failed: {exc}"
+        ) from exc
 
     if not wait:
         return stack_arn
