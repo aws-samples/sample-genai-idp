@@ -270,12 +270,10 @@ class FeaturePublisher:
                 "CodeUri paths. Install the AWS SAM CLI and retry."
             )
         self.console.log("[cyan]▸[/cyan] Running sam build…")
-        subprocess.run(
-            ["sam", "build"], cwd=self.project_dir, check=True, capture_output=True
-        )
+        self._run_sam(["sam", "build"], step="sam build")
         out = self.project_dir / ".aws-sam" / "packaged.yaml"
         self.console.log("[cyan]▸[/cyan] Running sam package…")
-        subprocess.run(
+        self._run_sam(
             [
                 "sam",
                 "package",
@@ -288,9 +286,7 @@ class FeaturePublisher:
                 "--region",
                 region,
             ],
-            cwd=self.project_dir,
-            check=True,
-            capture_output=True,
+            step="sam package",
         )
         if not out.is_file():
             raise RuntimeError(
@@ -299,6 +295,22 @@ class FeaturePublisher:
             )
         self.console.log(f"[green]✓[/green] SAM package complete → {out}")
         return out
+
+    def _run_sam(self, cmd: List[str], *, step: str) -> None:
+        """Run a SAM subprocess, surfacing captured stdout/stderr on failure.
+
+        `check=True` + `capture_output=True` alone would bury the real `sam`
+        error inside CalledProcessError; we re-raise a RuntimeError that
+        includes the captured output so the user sees the actual cause.
+        """
+        result = subprocess.run(
+            cmd, cwd=self.project_dir, capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(
+                f"{step} failed (exit {result.returncode}).\n{detail}"
+            )
 
     def _upload_version_artifacts(
         self,
