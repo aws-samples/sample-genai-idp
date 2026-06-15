@@ -27,6 +27,7 @@ class TestDocumentCompression:
             output_bucket="output-bucket",
             status=Status.CLASSIFYING,
             num_pages=2,
+            config_version="sample-health-insurance-review-v0.1.0",
         )
 
         # Add pages with large content
@@ -83,6 +84,11 @@ class TestDocumentCompression:
         assert compressed_data["status"] == "CLASSIFYING"
         assert compressed_data["sections"] == ["section_1", "section_2"]
         assert compressed_data["compressed"] is True
+        # config_version travels in the lightweight wrapper so consumers that
+        # never decompress (e.g. the pipeline-hooks dispatcher) can honor it.
+        assert (
+            compressed_data["config_version"] == "sample-health-insurance-review-v0.1.0"
+        )
         assert "s3_uri" in compressed_data
         assert "timestamp" in compressed_data
 
@@ -277,6 +283,15 @@ class TestDocumentCompression:
         with patch("boto3.client") as mock_boto3:
             mock_s3 = Mock()
             mock_boto3.return_value = mock_s3
+
+            # Give the fixture realistic page content. The wrapper is a small,
+            # near-fixed set of fields, so the "<20% of full document" check is
+            # only meaningful against a representatively-sized document rather
+            # than the tiny toy fixture shared by the other tests.
+            self.document.pages["1"].forms = {
+                f"field_{i}": f"value for field {i} on the invoice page"
+                for i in range(40)
+            }
 
             # Get sizes
             full_document_json = self.document.to_json()

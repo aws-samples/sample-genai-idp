@@ -89,6 +89,52 @@ def test_read_hooks_filters_disabled_and_arnless(monkeypatch):
     assert hooks[1]["order"] == 50
 
 
+def test_pinned_config_version_from_document_is_honored(monkeypatch):
+    """A config_version on the document payload pins hook resolution.
+
+    The host's compressed-document wrapper carries config_version (see
+    Document.compress), so the dispatcher must resolve hooks from the version
+    the document was processed under rather than scanning for IsActive. This is
+    what lets a per-document config selection drive its own postRuleValidation
+    hook even when a different version is active.
+    """
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+
+    # Fail the test if the active-version scan is ever consulted: a pinned
+    # version must short-circuit before any table scan.
+    def _no_scan(table, pinned):
+        assert pinned == "pinned-v1.0.0"
+        return pinned
+
+    monkeypatch.setattr(mod, "_resolve_active_version", _no_scan)
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: object())
+
+    seen_versions = []
+
+    def _read(table, version, point):
+        seen_versions.append(version)
+        return [{"featureId": "f", "arn": "arn:f", "order": 1, "onError": "continue"}]
+
+    monkeypatch.setattr(mod, "_read_hooks_from_config", _read)
+    monkeypatch.setattr(
+        mod,
+        "_invoke_hook",
+        lambda h, p: {"featureId": "f", "arn": "arn:f", "ok": True, "result": None},
+    )
+
+    out = mod.lambda_handler(
+        {
+            "hookPoint": "postRuleValidation",
+            "document": {"compressed": True, "config_version": "pinned-v1.0.0"},
+        },
+        None,
+    )
+
+    assert out["configVersion"] == "pinned-v1.0.0"
+    assert seen_versions == ["pinned-v1.0.0"]
+
+
 def test_onerror_fail_raises(monkeypatch):
     monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
     mod = _reload()
