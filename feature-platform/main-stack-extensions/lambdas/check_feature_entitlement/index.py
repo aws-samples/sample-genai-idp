@@ -109,6 +109,7 @@ def _read_catalog_source(feature_id: str) -> Optional[str]:
             return src if isinstance(src, str) else None
     return None
 
+
 # Short explicit timeouts (override botocore's 60s default) so a stalled cold-
 # start TLS/HTTP exchange is retried and fails fast inside the 30s Lambda
 # budget, rather than hanging the whole invocation until Lambda kills it.
