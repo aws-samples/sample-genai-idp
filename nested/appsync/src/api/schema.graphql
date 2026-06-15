@@ -1367,6 +1367,8 @@ input RegisterFeatureInput {
   featureApiEndpoint: String
   iconUrl: String
   installedBy: String
+  productCode: String
+  marketplaceListingUrl: String
 }
 
 """One pipeline hook registration the host's Step Functions workflow

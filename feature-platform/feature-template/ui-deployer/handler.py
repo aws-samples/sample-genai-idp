@@ -47,6 +47,11 @@ _FEATURE_BUCKET = os.environ["FEATURE_BUCKET"]
 _FEATURE_ARTIFACT_PREFIX = os.environ["FEATURE_ARTIFACT_PREFIX"].rstrip("/")
 _APPSYNC_URL = os.environ["APPSYNC_API_URL"]
 _FEATURE_API_ENDPOINT = os.environ.get("FEATURE_API_ENDPOINT", "")
+# Marketplace identity, baked from feature.yaml at publish time (empty for
+# non-marketplace features). Forwarded to registerFeature so the host's install
+# row carries the product code — no per-host FeatureProductCodeMap needed.
+_FEATURE_PRODUCT_CODE = os.environ.get("FEATURE_PRODUCT_CODE", "")
+_FEATURE_LISTING_URL = os.environ.get("FEATURE_LISTING_URL", "")
 
 # Fail fast (with a clear message in CloudWatch) if a publish-time token is
 # unsubstituted/empty. Both FEATURE_VERSION and FEATURE_ARTIFACT_PREFIX are
@@ -184,6 +189,8 @@ def _register(ui_bundle_path: str, stack_id: str) -> None:
                 "uiBundlePath": ui_bundle_path,
                 "featureApiEndpoint": _FEATURE_API_ENDPOINT or None,
                 "installedBy": caller.get("Arn", "unknown"),
+                "productCode": _FEATURE_PRODUCT_CODE or None,
+                "marketplaceListingUrl": _FEATURE_LISTING_URL or None,
             }
         },
     )

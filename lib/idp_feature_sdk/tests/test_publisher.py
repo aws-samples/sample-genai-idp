@@ -89,6 +89,11 @@ def test_both_tokens_baked_into_template(
     # package re-emits YAML, which may drop the surrounding quotes, so match
     # the value regardless of quoting.)
     assert f"ArtifactPrefix: {_BASE}" in tmpl or f"ArtifactPrefix: '{_BASE}'" in tmpl
+    # Marketplace identity tokens are baked from the manifest's marketplace block.
+    assert "<FEATURE_PRODUCT_CODE_TOKEN>" not in tmpl
+    assert "<FEATURE_LISTING_URL_TOKEN>" not in tmpl
+    assert "ProductCode: prod-demo" in tmpl or "ProductCode: 'prod-demo'" in tmpl
+    assert "prodview-XYZ" in tmpl
 
 
 def test_result_urls_point_at_version_free_template(

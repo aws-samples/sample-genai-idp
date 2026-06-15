@@ -9,8 +9,9 @@ Marketplace endpoint and the local marketplace-simulator — `boto3` picks the
 endpoint from the `AWS_ENDPOINT_URL_MARKETPLACE_ENTITLEMENT_SERVICE` env var
 (set by the nested stack when `SimulatorEntitlementEndpoint` is non-empty).
 
-Each feature is mapped to a Marketplace product code via a lookup table passed
-in through the `FEATURE_PRODUCT_CODE_MAP` env var (JSON object). The caller's
+Each feature's Marketplace product code is read from its `InstalledFeatures`
+row — baked from the feature manifest at publish time and written at install —
+so the host needs no per-feature product-code configuration. The caller's
 CustomerIdentifier is resolved from:
   1. `X-Amzn-Marketplace-Customer-Identifier` header via event.request.headers
      (when the main stack is deployed inside a subscribed account), or
@@ -29,7 +30,8 @@ Returns `{state: ACTIVE, expiresAt}` if at least one entitlement is active.
 Returns `{state: EXPIRED, expiresAt}` if an entitlement exists but has expired.
 
 Environment:
-    FEATURE_PRODUCT_CODE_MAP   JSON, e.g. '{"docs-by-status": "abcdef123"}'
+    INSTALLED_FEATURES_TABLE   DynamoDB table holding installed-feature rows
+                               (productCode per featureId, baked from the manifest).
     DEFAULT_CUSTOMER_IDENTIFIER  (optional) fallback customer identifier
     SIMULATOR_SOURCE_TAG       "auto" | "simulator" | "marketplace"
     CONFIGURATION_BUCKET       (optional) bucket holding catalog.json; used to
@@ -51,21 +53,31 @@ from botocore.exceptions import BotoCoreError, ClientError
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-_FEATURE_PRODUCT_CODE_MAP_RAW = os.environ.get("FEATURE_PRODUCT_CODE_MAP", "{}")
 _DEFAULT_CUSTOMER_IDENTIFIER = os.environ.get("DEFAULT_CUSTOMER_IDENTIFIER", "")
 _SOURCE_TAG = os.environ.get("SIMULATOR_SOURCE_TAG", "marketplace")
 _CONFIGURATION_BUCKET = os.environ.get("CONFIGURATION_BUCKET", "")
 _CATALOG_KEY = os.environ.get("CATALOG_KEY", "config_library/catalog.json")
+_INSTALLED_FEATURES_TABLE = os.environ.get("INSTALLED_FEATURES_TABLE", "")
 
-try:
-    _FEATURE_PRODUCT_CODE_MAP: Dict[str, str] = json.loads(
-        _FEATURE_PRODUCT_CODE_MAP_RAW
-    )
-    if not isinstance(_FEATURE_PRODUCT_CODE_MAP, dict):
-        raise ValueError("FEATURE_PRODUCT_CODE_MAP must be a JSON object")
-except ValueError as exc:
-    logger.warning("FEATURE_PRODUCT_CODE_MAP is not valid JSON: %s. Using {}.", exc)
-    _FEATURE_PRODUCT_CODE_MAP = {}
+_dynamodb = boto3.resource("dynamodb")
+
+
+def _installed_product_code(feature_id: str) -> Optional[str]:
+    """Read productCode from the feature's InstalledFeatures row (baked from the
+    manifest at install time). Returns None when absent."""
+    if not _INSTALLED_FEATURES_TABLE:
+        return None
+    try:
+        row = (
+            _dynamodb.Table(_INSTALLED_FEATURES_TABLE)
+            .get_item(Key={"featureId": feature_id})
+            .get("Item")
+            or {}
+        )
+    except Exception as exc:  # noqa: BLE001 — treat lookup failure as "absent"
+        logger.warning("Could not read InstalledFeatures row for %s: %s", feature_id, exc)
+        return None
+    return row.get("productCode")
 
 # Lazily constructed so unit tests can patch endpoint_url via env vars.
 _entitlement_client = None
@@ -252,23 +264,25 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "source": "oss",
         }
 
-    # In simulator mode, synthesize product code + customer identifier to
-    # match what subscribe_feature synthesizes, so subscribe → check finds
-    # the same entitlement row. In marketplace mode, return NONE when not
-    # configured (rather than crashing) so the UI can still render the page
-    # and prompt the admin to configure the mapping.
-    product_code = _FEATURE_PRODUCT_CODE_MAP.get(feature_id)
+    # Resolve product code from the feature's InstalledFeatures row (baked from
+    # the manifest at install). In simulator mode, synthesize one when absent to
+    # match what subscribe_feature synthesizes, so subscribe → check find the
+    # same entitlement row. In marketplace mode, return NONE when absent (rather
+    # than crashing) so the UI can still render the page.
+    product_code = _installed_product_code(feature_id)
     if not product_code:
         if _SOURCE_TAG == "simulator":
             product_code = f"prod-{feature_id}-sim"
             logger.info(
-                "No productCode mapped for %r; using synthesized %r for simulator mode.",
+                "No productCode on the install row for %r; using synthesized %r "
+                "for simulator mode.",
                 feature_id,
                 product_code,
             )
         else:
             logger.info(
-                "No productCode mapped for feature %s; returning NONE.", feature_id
+                "No productCode on the install row for feature %s; returning NONE.",
+                feature_id,
             )
             return {
                 "featureId": feature_id,

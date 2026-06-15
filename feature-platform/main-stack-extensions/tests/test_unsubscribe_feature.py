@@ -1,4 +1,10 @@
-"""Unit tests for the unsubscribe_feature Lambda."""
+"""Unit tests for the unsubscribe_feature Lambda.
+
+The product code comes from the feature's InstalledFeatures row (DynamoDB, via
+moto) — baked from the manifest at install — not a host env map. Tests that
+exercise the expire flow seed that row via the `installed_features_table`
+fixture; the simulator POST itself is mocked at urllib.
+"""
 
 from __future__ import annotations
 
@@ -7,21 +13,31 @@ import json
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
 
+import boto3
 import pytest
 from _helpers import make_appsync_event
+
+
+def _seed_row(table_name, feature_id, *, product_code=None):
+    item = {"featureId": feature_id}
+    if product_code is not None:
+        item["productCode"] = product_code
+    boto3.resource("dynamodb", region_name="us-east-1").Table(table_name).put_item(
+        Item=item
+    )
 
 
 def _preload(
     monkeypatch,
     load_lambda,
     *,
+    table_name="",
     simulator_endpoint="http://sim.example.com",
-    product_map='{"docs-by-status":"prod123"}',
     default_customer="CUST-default",
     source_tag="simulator",
 ):
     monkeypatch.setenv("SIMULATOR_ADMIN_ENDPOINT", simulator_endpoint)
-    monkeypatch.setenv("FEATURE_PRODUCT_CODE_MAP", product_map)
+    monkeypatch.setenv("INSTALLED_FEATURES_TABLE", table_name)
     monkeypatch.setenv("DEFAULT_CUSTOMER_IDENTIFIER", default_customer)
     monkeypatch.setenv("ADMIN_GROUP", "Admin")
     monkeypatch.setenv("SIMULATOR_SOURCE_TAG", source_tag)
@@ -37,8 +53,9 @@ def _mock_urlopen_response(mod, body: dict):
     return patch.object(mod.urllib.request, "urlopen", return_value=resp)
 
 
-def test_happy_path(monkeypatch, load_lambda):
-    mod = _preload(monkeypatch, load_lambda)
+def test_happy_path(monkeypatch, load_lambda, installed_features_table):
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
+    mod = _preload(monkeypatch, load_lambda, table_name=installed_features_table)
     sim_body = {
         "customerIdentifier": "CUST-default",
         "productCode": "prod123",
@@ -70,8 +87,8 @@ def test_happy_path(monkeypatch, load_lambda):
     assert result["expiresAt"].endswith("Z")
 
 
-def test_rejects_non_admin(monkeypatch, load_lambda):
-    mod = _preload(monkeypatch, load_lambda)
+def test_rejects_non_admin(monkeypatch, load_lambda, installed_features_table):
+    mod = _preload(monkeypatch, load_lambda, table_name=installed_features_table)
     with pytest.raises(Exception, match="Admin"):
         mod.handler(
             make_appsync_event(
@@ -83,8 +100,8 @@ def test_rejects_non_admin(monkeypatch, load_lambda):
         )
 
 
-def test_missing_feature_id(monkeypatch, load_lambda):
-    mod = _preload(monkeypatch, load_lambda)
+def test_missing_feature_id(monkeypatch, load_lambda, installed_features_table):
+    mod = _preload(monkeypatch, load_lambda, table_name=installed_features_table)
     with pytest.raises(ValueError, match="featureId"):
         mod.handler(
             make_appsync_event("unsubscribeFeature", {}, groups=["Admin"]),
@@ -92,10 +109,16 @@ def test_missing_feature_id(monkeypatch, load_lambda):
         )
 
 
-def test_missing_product_code_mapping_marketplace_mode_raises(monkeypatch, load_lambda):
-    """In marketplace mode, unmapped featureId raises UnsubscribeError."""
+def test_missing_product_code_marketplace_mode_raises(
+    monkeypatch, load_lambda, installed_features_table
+):
+    """In marketplace mode, a feature whose install row has no productCode raises."""
+    _seed_row(installed_features_table, "docs-by-status")  # no productCode
     mod = _preload(
-        monkeypatch, load_lambda, product_map='{"other":"x"}', source_tag="marketplace"
+        monkeypatch,
+        load_lambda,
+        table_name=installed_features_table,
+        source_tag="marketplace",
     )
     with pytest.raises(mod.UnsubscribeError, match="productCode"):
         mod.handler(
@@ -108,11 +131,17 @@ def test_missing_product_code_mapping_marketplace_mode_raises(monkeypatch, load_
         )
 
 
-def test_missing_product_code_mapping_simulator_mode_synthesizes(
-    monkeypatch, load_lambda
+def test_missing_product_code_simulator_mode_synthesizes(
+    monkeypatch, load_lambda, installed_features_table
 ):
-    """In simulator mode, unmapped featureId is synthesized (prod-<id>-sim)."""
-    mod = _preload(monkeypatch, load_lambda, product_map="{}", source_tag="simulator")
+    """In simulator mode, a row without a productCode is synthesized (prod-<id>-sim)."""
+    _seed_row(installed_features_table, "docs-by-status")  # no productCode
+    mod = _preload(
+        monkeypatch,
+        load_lambda,
+        table_name=installed_features_table,
+        source_tag="simulator",
+    )
     captured: dict = {}
 
     def fake_post(url, body):  # noqa: ARG001
@@ -133,8 +162,14 @@ def test_missing_product_code_mapping_simulator_mode_synthesizes(
     assert captured["body"]["productCode"] == "prod-docs-by-status-sim"
 
 
-def test_missing_simulator_endpoint(monkeypatch, load_lambda):
-    mod = _preload(monkeypatch, load_lambda, simulator_endpoint="")
+def test_missing_simulator_endpoint(monkeypatch, load_lambda, installed_features_table):
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
+    mod = _preload(
+        monkeypatch,
+        load_lambda,
+        table_name=installed_features_table,
+        simulator_endpoint="",
+    )
     with pytest.raises(mod.UnsubscribeError, match="SIMULATOR_ADMIN_ENDPOINT"):
         mod.handler(
             make_appsync_event(
@@ -146,8 +181,9 @@ def test_missing_simulator_endpoint(monkeypatch, load_lambda):
         )
 
 
-def test_simulator_http_error(monkeypatch, load_lambda):
-    mod = _preload(monkeypatch, load_lambda)
+def test_simulator_http_error(monkeypatch, load_lambda, installed_features_table):
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
+    mod = _preload(monkeypatch, load_lambda, table_name=installed_features_table)
     err = HTTPError(
         url="http://sim.example.com/admin/entitlements/expire",
         code=500,
@@ -167,8 +203,11 @@ def test_simulator_http_error(monkeypatch, load_lambda):
             )
 
 
-def test_simulator_connection_refused(monkeypatch, load_lambda):
-    mod = _preload(monkeypatch, load_lambda)
+def test_simulator_connection_refused(
+    monkeypatch, load_lambda, installed_features_table
+):
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
+    mod = _preload(monkeypatch, load_lambda, table_name=installed_features_table)
     err = URLError("connection refused")
     with patch.object(mod.urllib.request, "urlopen", side_effect=err):
         with pytest.raises(mod.UnsubscribeError, match="reach simulator"):
@@ -182,8 +221,11 @@ def test_simulator_connection_refused(monkeypatch, load_lambda):
             )
 
 
-def test_falls_back_expires_at_when_simulator_omits_it(monkeypatch, load_lambda):
-    mod = _preload(monkeypatch, load_lambda)
+def test_falls_back_expires_at_when_simulator_omits_it(
+    monkeypatch, load_lambda, installed_features_table
+):
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
+    mod = _preload(monkeypatch, load_lambda, table_name=installed_features_table)
     with _mock_urlopen_response(mod, {"state": "EXPIRED"}):
         result = mod.handler(
             make_appsync_event(

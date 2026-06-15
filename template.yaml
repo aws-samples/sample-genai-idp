@@ -947,15 +947,6 @@ Parameters:
       used when FeaturePlatformSimulatorEndpoint is set. Required for
       real-Marketplace production use.
 
-  FeaturePlatformProductCodeMap:
-    Type: String
-    Default: '{}'
-    Description: >-
-      (Optional) JSON map {featureId -> Marketplace productCode}. Leave as
-      the default '{}' to auto-synthesize 'prod-<featureId>-sim' product
-      codes in simulator mode. Required for real-Marketplace production use,
-      e.g. {"docs-by-status":"prod-docs-by-status"}.
-
   DefaultFeatureId:
     Type: String
     Default: ''
@@ -1323,7 +1314,6 @@ Metadata:
           - EnableFeaturePlatform
           - FeaturePlatformSimulatorEndpoint
           - FeaturePlatformDefaultCustomerIdentifier
-          - FeaturePlatformProductCodeMap
           - DefaultFeatureId
           - ConsoleTitle
       - Label:
@@ -1344,8 +1334,6 @@ Metadata:
         default: "Marketplace/Simulator Endpoint (optional — auto-subscribe if blank)"
       FeaturePlatformDefaultCustomerIdentifier:
         default: "Marketplace Customer Identifier (optional)"
-      FeaturePlatformProductCodeMap:
-        default: "Marketplace Product Code Map JSON (optional)"
       DefaultFeatureId:
         default: "Default Feature Landing Page (optional)"
       ConsoleTitle:
@@ -2815,7 +2803,6 @@ Resources:
           - 'auto'
           - 'marketplace'
         DefaultCustomerIdentifier: !Ref FeaturePlatformDefaultCustomerIdentifier
-        FeatureProductCodeMap: !Ref FeaturePlatformProductCodeMap
         AdminGroupName: 'Admin'
         # ConfigurationTable is shared between the main stack's pipeline and
         # the registerFeatureHooks resolver; passing the name here lets the

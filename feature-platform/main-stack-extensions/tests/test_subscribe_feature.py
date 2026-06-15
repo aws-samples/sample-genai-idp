@@ -1,34 +1,46 @@
 """Unit tests for the subscribe_feature Lambda.
 
-The Lambda no longer POSTs to the simulator — it returns a Marketplace (or
-simulator) URL the UI should redirect the admin to. These tests verify the
-URL composition, env-var-driven behaviour, and admin / argument validation.
+The Lambda returns a Marketplace (or simulator) URL the UI should redirect the
+admin to. The product code + marketplace listing URL now come from the feature's
+InstalledFeatures row (baked from the manifest at install) — not a host env map.
+These tests seed that row via the `installed_features_table` fixture.
 """
 
 from __future__ import annotations
 
 from urllib.parse import parse_qs, urlparse
 
+import boto3
 import pytest
 from _helpers import make_appsync_event
+
+
+def _seed_row(table_name, feature_id, *, product_code=None, listing_url=None):
+    """Put an InstalledFeatures row carrying the marketplace identity."""
+    item = {"featureId": feature_id}
+    if product_code is not None:
+        item["productCode"] = product_code
+    if listing_url is not None:
+        item["marketplaceListingUrl"] = listing_url
+    boto3.resource("dynamodb", region_name="us-east-1").Table(table_name).put_item(
+        Item=item
+    )
 
 
 def _preload(
     monkeypatch,
     load_lambda,
     *,
+    table_name="",
     simulator_endpoint="http://sim.example.com",
-    product_map='{"docs-by-status":"prod123"}',
     offer_map="{}",
-    marketplace_url_map="{}",
     default_customer="CUST-default",
     default_buyer_account="111122223333",
     source_tag="simulator",
 ):
     monkeypatch.setenv("SIMULATOR_ADMIN_ENDPOINT", simulator_endpoint)
-    monkeypatch.setenv("FEATURE_PRODUCT_CODE_MAP", product_map)
+    monkeypatch.setenv("INSTALLED_FEATURES_TABLE", table_name)
     monkeypatch.setenv("FEATURE_OFFER_ID_MAP", offer_map)
-    monkeypatch.setenv("FEATURE_MARKETPLACE_URL_MAP", marketplace_url_map)
     monkeypatch.setenv("DEFAULT_CUSTOMER_IDENTIFIER", default_customer)
     monkeypatch.setenv("DEFAULT_BUYER_ACCOUNT_ID", default_buyer_account)
     monkeypatch.setenv("ADMIN_GROUP", "Admin")
@@ -37,8 +49,9 @@ def _preload(
     return load_lambda("subscribe_feature")
 
 
-def test_happy_path_simulator_mode(monkeypatch, load_lambda):
-    mod = _preload(monkeypatch, load_lambda)
+def test_happy_path_simulator_mode(monkeypatch, load_lambda, installed_features_table):
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
+    mod = _preload(monkeypatch, load_lambda, table_name=installed_features_table)
     result = mod.handler(
         make_appsync_event(
             "subscribeFeature",
@@ -69,9 +82,12 @@ def test_happy_path_simulator_mode(monkeypatch, load_lambda):
     assert q["returnUrl"] == ["http://app/features/docs-by-status"]
 
 
-def test_simulator_mode_synthesizes_product_code(monkeypatch, load_lambda):
-    """In simulator mode, unmapped featureIds fall back to prod-<id>-sim."""
-    mod = _preload(monkeypatch, load_lambda, product_map="{}")
+def test_simulator_mode_synthesizes_product_code(
+    monkeypatch, load_lambda, installed_features_table
+):
+    """In simulator mode, a row without a productCode falls back to prod-<id>-sim."""
+    _seed_row(installed_features_table, "docs-by-status")  # no productCode
+    mod = _preload(monkeypatch, load_lambda, table_name=installed_features_table)
     result = mod.handler(
         make_appsync_event(
             "subscribeFeature", {"featureId": "docs-by-status"}, groups=["Admin"]
@@ -82,14 +98,17 @@ def test_simulator_mode_synthesizes_product_code(monkeypatch, load_lambda):
     assert "prod-docs-by-status-sim" in result["marketplaceUrl"]
 
 
-def test_marketplace_mode_requires_product_code(monkeypatch, load_lambda):
-    """In marketplace mode, unmapped featureId raises SubscribeError."""
+def test_marketplace_mode_requires_product_code(
+    monkeypatch, load_lambda, installed_features_table
+):
+    """In marketplace mode, a feature whose install row has no productCode raises."""
+    _seed_row(installed_features_table, "docs-by-status")  # no productCode
     mod = _preload(
         monkeypatch,
         load_lambda,
+        table_name=installed_features_table,
         source_tag="marketplace",
         simulator_endpoint="",
-        product_map='{"other":"x"}',
     )
     with pytest.raises(mod.SubscribeError, match="productCode"):
         mod.handler(
@@ -100,15 +119,22 @@ def test_marketplace_mode_requires_product_code(monkeypatch, load_lambda):
         )
 
 
-def test_marketplace_mode_uses_marketplace_url_map(monkeypatch, load_lambda):
-    """In marketplace mode, returns the URL from FEATURE_MARKETPLACE_URL_MAP."""
+def test_marketplace_mode_uses_install_row_listing_url(
+    monkeypatch, load_lambda, installed_features_table
+):
+    """In marketplace mode, returns the listing URL from the install row."""
+    _seed_row(
+        installed_features_table,
+        "docs-by-status",
+        product_code="prod123",
+        listing_url="https://aws.amazon.com/marketplace/pp/prodview-abc",
+    )
     mod = _preload(
         monkeypatch,
         load_lambda,
+        table_name=installed_features_table,
         source_tag="marketplace",
         simulator_endpoint="",
-        product_map='{"docs-by-status":"prod123"}',
-        marketplace_url_map='{"docs-by-status":"https://aws.amazon.com/marketplace/pp/prodview-abc"}',
     )
     result = mod.handler(
         make_appsync_event(
@@ -122,17 +148,20 @@ def test_marketplace_mode_uses_marketplace_url_map(monkeypatch, load_lambda):
     assert result["source"] == "marketplace"
 
 
-def test_marketplace_mode_requires_marketplace_url(monkeypatch, load_lambda):
-    """In marketplace mode without a URL map AND no simulator fallback, raises."""
+def test_marketplace_mode_requires_listing_url(
+    monkeypatch, load_lambda, installed_features_table
+):
+    """Marketplace mode, row has productCode but no listing URL AND no simulator
+    fallback → raises."""
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
     mod = _preload(
         monkeypatch,
         load_lambda,
+        table_name=installed_features_table,
         source_tag="marketplace",
         simulator_endpoint="",  # no simulator fallback
-        product_map='{"docs-by-status":"prod123"}',
-        marketplace_url_map="{}",
     )
-    with pytest.raises(mod.SubscribeError, match="marketplace URL"):
+    with pytest.raises(mod.SubscribeError, match="listing URL"):
         mod.handler(
             make_appsync_event(
                 "subscribeFeature", {"featureId": "docs-by-status"}, groups=["Admin"]
@@ -141,11 +170,15 @@ def test_marketplace_mode_requires_marketplace_url(monkeypatch, load_lambda):
         )
 
 
-def test_offer_id_is_threaded_through(monkeypatch, load_lambda):
+def test_offer_id_is_threaded_through(
+    monkeypatch, load_lambda, installed_features_table
+):
     """When FEATURE_OFFER_ID_MAP has an entry, offerId appears in the URL."""
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
     mod = _preload(
         monkeypatch,
         load_lambda,
+        table_name=installed_features_table,
         offer_map='{"docs-by-status":"offer-abc123"}',
     )
     result = mod.handler(
@@ -158,8 +191,8 @@ def test_offer_id_is_threaded_through(monkeypatch, load_lambda):
     assert q["offerId"] == ["offer-abc123"]
 
 
-def test_rejects_non_admin(monkeypatch, load_lambda):
-    mod = _preload(monkeypatch, load_lambda)
+def test_rejects_non_admin(monkeypatch, load_lambda, installed_features_table):
+    mod = _preload(monkeypatch, load_lambda, table_name=installed_features_table)
     with pytest.raises(Exception, match="Admin"):
         mod.handler(
             make_appsync_event(
@@ -169,8 +202,8 @@ def test_rejects_non_admin(monkeypatch, load_lambda):
         )
 
 
-def test_missing_feature_id(monkeypatch, load_lambda):
-    mod = _preload(monkeypatch, load_lambda)
+def test_missing_feature_id(monkeypatch, load_lambda, installed_features_table):
+    mod = _preload(monkeypatch, load_lambda, table_name=installed_features_table)
     with pytest.raises(ValueError, match="featureId"):
         mod.handler(
             make_appsync_event("subscribeFeature", {}, groups=["Admin"]),
@@ -178,9 +211,17 @@ def test_missing_feature_id(monkeypatch, load_lambda):
         )
 
 
-def test_missing_simulator_endpoint_in_simulator_mode(monkeypatch, load_lambda):
+def test_missing_simulator_endpoint_in_simulator_mode(
+    monkeypatch, load_lambda, installed_features_table
+):
     """Simulator mode + no endpoint → SubscribeError (can't build URL)."""
-    mod = _preload(monkeypatch, load_lambda, simulator_endpoint="")
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
+    mod = _preload(
+        monkeypatch,
+        load_lambda,
+        table_name=installed_features_table,
+        simulator_endpoint="",
+    )
     with pytest.raises(mod.SubscribeError, match="SIMULATOR_ADMIN_ENDPOINT"):
         mod.handler(
             make_appsync_event(
@@ -190,8 +231,11 @@ def test_missing_simulator_endpoint_in_simulator_mode(monkeypatch, load_lambda):
         )
 
 
-def test_header_customer_identifier_takes_precedence(monkeypatch, load_lambda):
-    mod = _preload(monkeypatch, load_lambda)
+def test_header_customer_identifier_takes_precedence(
+    monkeypatch, load_lambda, installed_features_table
+):
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
+    mod = _preload(monkeypatch, load_lambda, table_name=installed_features_table)
     result = mod.handler(
         make_appsync_event(
             "subscribeFeature",
@@ -205,10 +249,16 @@ def test_header_customer_identifier_takes_precedence(monkeypatch, load_lambda):
 
 
 def test_default_customer_identifier_for_simulator_when_missing(
-    monkeypatch, load_lambda
+    monkeypatch, load_lambda, installed_features_table
 ):
     """Simulator mode with no default customer → falls back to cust-idp-default."""
-    mod = _preload(monkeypatch, load_lambda, default_customer="")
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
+    mod = _preload(
+        monkeypatch,
+        load_lambda,
+        table_name=installed_features_table,
+        default_customer="",
+    )
     result = mod.handler(
         make_appsync_event(
             "subscribeFeature", {"featureId": "docs-by-status"}, groups=["Admin"]
@@ -218,9 +268,12 @@ def test_default_customer_identifier_for_simulator_when_missing(
     assert result["customerIdentifier"] == "cust-idp-default"
 
 
-def test_return_url_defaults_when_not_supplied(monkeypatch, load_lambda):
+def test_return_url_defaults_when_not_supplied(
+    monkeypatch, load_lambda, installed_features_table
+):
     """If the caller didn't supply returnUrl, a default /features/<id> is used."""
-    mod = _preload(monkeypatch, load_lambda)
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
+    mod = _preload(monkeypatch, load_lambda, table_name=installed_features_table)
     result = mod.handler(
         make_appsync_event(
             "subscribeFeature", {"featureId": "docs-by-status"}, groups=["Admin"]

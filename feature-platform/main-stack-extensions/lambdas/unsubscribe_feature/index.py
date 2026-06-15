@@ -20,24 +20,36 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+import boto3
+
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 _SIMULATOR_ADMIN_ENDPOINT = os.environ.get("SIMULATOR_ADMIN_ENDPOINT", "").rstrip("/")
-_FEATURE_PRODUCT_CODE_MAP_RAW = os.environ.get("FEATURE_PRODUCT_CODE_MAP", "{}")
 _DEFAULT_CUSTOMER_IDENTIFIER = os.environ.get("DEFAULT_CUSTOMER_IDENTIFIER", "")
 _ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
 _SOURCE_TAG = os.environ.get("SIMULATOR_SOURCE_TAG", "simulator")
+_INSTALLED_FEATURES_TABLE = os.environ.get("INSTALLED_FEATURES_TABLE", "")
 
-try:
-    _FEATURE_PRODUCT_CODE_MAP: Dict[str, str] = json.loads(
-        _FEATURE_PRODUCT_CODE_MAP_RAW
-    )
-    if not isinstance(_FEATURE_PRODUCT_CODE_MAP, dict):
-        raise ValueError("FEATURE_PRODUCT_CODE_MAP must be a JSON object")
-except ValueError as exc:
-    logger.warning("FEATURE_PRODUCT_CODE_MAP is not valid JSON: %s. Using {}.", exc)
-    _FEATURE_PRODUCT_CODE_MAP = {}
+_dynamodb = boto3.resource("dynamodb")
+
+
+def _installed_product_code(feature_id: str) -> Optional[str]:
+    """Read productCode from the feature's InstalledFeatures row (baked from the
+    manifest at install). Returns None when absent."""
+    if not _INSTALLED_FEATURES_TABLE:
+        return None
+    try:
+        row = (
+            _dynamodb.Table(_INSTALLED_FEATURES_TABLE)
+            .get_item(Key={"featureId": feature_id})
+            .get("Item")
+            or {}
+        )
+    except Exception as exc:  # noqa: BLE001 — treat lookup failure as "absent"
+        logger.warning("Could not read InstalledFeatures row for %s: %s", feature_id, exc)
+        return None
+    return row.get("productCode")
 
 
 class AuthorizationError(Exception):
@@ -136,22 +148,24 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     if not feature_id or not isinstance(feature_id, str):
         raise ValueError("featureId is required")
 
-    # In simulator mode, synthesize the same product code + customer
-    # identifier as subscribe_feature / check_feature_entitlement so the
-    # simulator's expire-entitlement call targets the row we created.
-    product_code = _FEATURE_PRODUCT_CODE_MAP.get(feature_id)
+    # Resolve product code from the feature's InstalledFeatures row (baked from
+    # the manifest at install). In simulator mode, synthesize the same code as
+    # subscribe_feature / check_feature_entitlement so the simulator's
+    # expire-entitlement call targets the row we created.
+    product_code = _installed_product_code(feature_id)
     if not product_code:
         if _SOURCE_TAG == "simulator":
             product_code = f"prod-{feature_id}-sim"
             logger.info(
-                "No productCode mapped for %r; synthesizing %r for simulator mode.",
+                "No productCode on the install row for %r; synthesizing %r for "
+                "simulator mode.",
                 feature_id,
                 product_code,
             )
         else:
             raise UnsubscribeError(
-                f"No productCode mapped for feature {feature_id!r}. "
-                f"Configure FeaturePlatformProductCodeMap to include this feature."
+                f"No productCode for feature {feature_id!r}. Publish the feature "
+                f"with marketplace.productCode set in feature.yaml and reinstall."
             )
 
     customer_identifier = _resolve_customer_identifier(event)

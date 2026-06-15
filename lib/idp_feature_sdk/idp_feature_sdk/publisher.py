@@ -380,9 +380,24 @@ class FeaturePublisher:
         baked_template = self.project_dir / ".idp-feature-sdk-template-baked.yaml"
         try:
             template_text = template_local.read_text(encoding="utf-8")
-            baked_text = template_text.replace(
-                "<FEATURE_VERSION_TOKEN>", manifest.version
-            ).replace("<FEATURE_ARTIFACT_PREFIX_TOKEN>", extension_base)
+            # Also bake the marketplace identity so it travels with the feature
+            # into the host's InstalledFeatures row at install time:
+            #   <FEATURE_PRODUCT_CODE_TOKEN>  -> marketplace.productCode
+            #   <FEATURE_LISTING_URL_TOKEN>   -> marketplace.listingUrl
+            # Both are OPTIONAL (empty for non-marketplace features) — no warning
+            # if the placeholders are absent, unlike the required tokens above.
+            baked_text = (
+                template_text.replace("<FEATURE_VERSION_TOKEN>", manifest.version)
+                .replace("<FEATURE_ARTIFACT_PREFIX_TOKEN>", extension_base)
+                .replace(
+                    "<FEATURE_PRODUCT_CODE_TOKEN>",
+                    manifest.marketplace.productCode or "",
+                )
+                .replace(
+                    "<FEATURE_LISTING_URL_TOKEN>",
+                    manifest.marketplace.listingUrl or "",
+                )
+            )
             if "<FEATURE_VERSION_TOKEN>" not in template_text:
                 self.console.log(
                     "[yellow]![/yellow] template.yaml has no <FEATURE_VERSION_TOKEN> "

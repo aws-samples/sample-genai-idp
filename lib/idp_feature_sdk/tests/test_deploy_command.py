@@ -31,6 +31,14 @@ _HOST_TEMPLATE = (
     '"Resources":{"T":{"Type":"AWS::SNS::Topic"}}}'
 )
 
+# Host template that declares the simulator-endpoint parameter, so deploy can
+# read it back from describe-stacks and trigger the auto-seed.
+_HOST_TEMPLATE_WITH_SIM = (
+    '{"AWSTemplateFormatVersion":"2010-09-09",'
+    '"Parameters":{"FeaturePlatformSimulatorEndpoint":{"Type":"String"}},'
+    '"Resources":{"T":{"Type":"AWS::SNS::Topic"}}}'
+)
+
 # A published feature template (already has the deploy params; tokens baked).
 _PUBLISHED_FEATURE_TEMPLATE = (
     "AWSTemplateFormatVersion: '2010-09-09'\n"
@@ -339,3 +347,97 @@ def test_template_url_requires_bucket_when_unparseable(aws_env) -> None:
         )
         assert result.exit_code == 1
         assert "feature bucket" in result.output.lower()
+
+
+def _create_host_with_sim(cfn, endpoint: str) -> None:
+    cfn.create_stack(
+        StackName=_HOST,
+        TemplateBody=_HOST_TEMPLATE_WITH_SIM,
+        Parameters=[
+            {
+                "ParameterKey": "FeaturePlatformSimulatorEndpoint",
+                "ParameterValue": endpoint,
+            }
+        ],
+    )
+
+
+def test_from_code_auto_seeds_simulator_when_host_has_endpoint(
+    demo_feature_project: Path, aws_env, monkeypatch
+) -> None:
+    """When the host stack carries FeaturePlatformSimulatorEndpoint, deploy seeds
+    the feature's product in that simulator using the manifest marketplace block."""
+    import idp_feature_sdk.cli as cli_mod
+
+    captured: dict = {}
+
+    def _fake_seed(*, simulator_endpoint, manifest, console):
+        captured["endpoint"] = simulator_endpoint
+        captured["productCode"] = manifest.marketplace.productCode
+
+    monkeypatch.setattr(cli_mod, "_seed_simulator_product", _fake_seed)
+
+    with mock_aws():
+        cfn = boto3.client("cloudformation", region_name="us-east-1")
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket="feature-bucket-test-us-east-1")
+        _create_host_with_sim(cfn, "https://sim.example.com")
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "deploy",
+                "--from-code",
+                str(demo_feature_project),
+                "--host-stack-name",
+                _HOST,
+                "--region",
+                "us-east-1",
+                "--bucket-basename",
+                "feature-bucket-test",
+                "--wait",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert captured == {
+            "endpoint": "https://sim.example.com",
+            "productCode": "prod-demo",
+        }
+
+
+def test_from_code_skips_seed_when_host_has_no_endpoint(
+    demo_feature_project: Path, aws_env, monkeypatch
+) -> None:
+    """No FeaturePlatformSimulatorEndpoint on the host → no simulator seeding."""
+    import idp_feature_sdk.cli as cli_mod
+
+    called = {"seeded": False}
+    monkeypatch.setattr(
+        cli_mod,
+        "_seed_simulator_product",
+        lambda **k: called.__setitem__("seeded", True),
+    )
+
+    with mock_aws():
+        cfn = boto3.client("cloudformation", region_name="us-east-1")
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket="feature-bucket-test-us-east-1")
+        _create_host(cfn)  # plain host, no sim endpoint param
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "deploy",
+                "--from-code",
+                str(demo_feature_project),
+                "--host-stack-name",
+                _HOST,
+                "--region",
+                "us-east-1",
+                "--bucket-basename",
+                "feature-bucket-test",
+                "--wait",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert called["seeded"] is False

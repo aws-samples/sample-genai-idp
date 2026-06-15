@@ -73,12 +73,35 @@
       "properties": {
         "productCode": {
           "type": "string",
-          "description": "AWS Marketplace product code. When set, the main-stack FeatureProductCodeMap must include this entry for entitlements to resolve."
+          "description": "AWS Marketplace product code. Baked into the feature template and written to the host's InstalledFeatures row at install time, so the host's subscribe/entitlement resolvers find it without any per-host configuration."
         },
         "listingUrl": {
           "type": "string",
           "format": "uri",
-          "description": "Public Marketplace listing URL shown in the NONE/EXPIRED UI states."
+          "description": "Public Marketplace listing URL shown in the NONE/EXPIRED UI states. Flows to the InstalledFeatures row alongside productCode."
+        },
+        "pricingModel": {
+          "type": "string",
+          "enum": ["contract", "contract-with-payg", "subscription", "free"],
+          "description": "Pricing model used when auto-seeding the marketplace simulator product on deploy. Defaults to 'free'."
+        },
+        "dimensions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["apiName"],
+            "properties": {
+              "apiName": {
+                "type": "string",
+                "maxLength": 15,
+                "description": "Dimension API name (<= 15 chars, as required by the simulator / AWS Marketplace)."
+              },
+              "displayName": { "type": "string" },
+              "category": { "type": "string" }
+            }
+          },
+          "description": "Pricing dimensions used when auto-seeding the simulator product on deploy. Defaults to a single 'cap_units' dimension."
         }
       }
     },

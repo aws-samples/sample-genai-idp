@@ -78,7 +78,6 @@ Resources:
         FeatureBucketRegion: !Ref FeaturePlatformFeatureBucketRegion
         SimulatorEntitlementEndpoint: !Ref FeaturePlatformSimulatorEndpoint
         DefaultCustomerIdentifier: !Ref FeaturePlatformDefaultCustomerIdentifier
-        FeatureProductCodeMap: !Ref FeaturePlatformProductCodeMap
         AdminGroupName: 'Admin'
         LogLevel: !Ref LogLevel
 ```

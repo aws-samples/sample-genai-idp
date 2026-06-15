@@ -136,13 +136,6 @@ Parameters:
       dev/simulator setups where the main stack wasn't launched through
       Marketplace.
 
-  FeatureProductCodeMap:
-    Type: String
-    Default: '{}'
-    Description: JSON map from featureId to Marketplace product code. e.g.
-      {"docs-by-status":"abcdef123"}. Callers of checkFeatureEntitlement get
-      NONE for any featureId not listed here.
-
   FeatureOfferIdMap:
     Type: String
     Default: '{}'
@@ -150,14 +143,6 @@ Parameters:
       subscribeFeature redirect. In simulator mode the simulator auto-creates
       a default public offer when this is empty. In production (real AWS
       Marketplace) a pre-existing offerId must be provided per feature.
-
-  FeatureMarketplaceUrlMap:
-    Type: String
-    Default: '{}'
-    Description: JSON map from featureId to the AWS Marketplace product-page
-      URL the UI should redirect the admin to when they click "Subscribe".
-      Required in production (SIMULATOR_SOURCE_TAG=marketplace); ignored in
-      simulator mode where the URL is built from SimulatorEntitlementEndpoint.
 
   DefaultBuyerAccountId:
     Type: String
@@ -451,7 +436,9 @@ Resources:
       Role: !GetAtt FeaturePlatformLambdaRole.Arn
       Environment:
         Variables:
-          FEATURE_PRODUCT_CODE_MAP: !Ref FeatureProductCodeMap
+          # productCode is read from the feature's InstalledFeatures row (baked
+          # from the manifest at install) — no per-feature host configuration.
+          INSTALLED_FEATURES_TABLE: !Ref InstalledFeaturesTable
           DEFAULT_CUSTOMER_IDENTIFIER: !Ref DefaultCustomerIdentifier
           SIMULATOR_SOURCE_TAG: !Ref SubscriptionMode
           AWS_ENDPOINT_URL_MARKETPLACE_ENTITLEMENT_SERVICE: !Ref SimulatorEntitlementEndpoint
@@ -476,9 +463,10 @@ Resources:
       Environment:
         Variables:
           SIMULATOR_ADMIN_ENDPOINT: !Ref SimulatorEntitlementEndpoint
-          FEATURE_PRODUCT_CODE_MAP: !Ref FeatureProductCodeMap
+          # productCode + marketplaceListingUrl come from the feature's
+          # InstalledFeatures row (baked from the manifest at install).
+          INSTALLED_FEATURES_TABLE: !Ref InstalledFeaturesTable
           FEATURE_OFFER_ID_MAP: !Ref FeatureOfferIdMap
-          FEATURE_MARKETPLACE_URL_MAP: !Ref FeatureMarketplaceUrlMap
           DEFAULT_CUSTOMER_IDENTIFIER: !Ref DefaultCustomerIdentifier
           DEFAULT_BUYER_ACCOUNT_ID: !Ref DefaultBuyerAccountId
           ADMIN_GROUP: !Ref AdminGroupName
@@ -494,7 +482,8 @@ Resources:
       Environment:
         Variables:
           SIMULATOR_ADMIN_ENDPOINT: !Ref SimulatorEntitlementEndpoint
-          FEATURE_PRODUCT_CODE_MAP: !Ref FeatureProductCodeMap
+          # productCode comes from the feature's InstalledFeatures row.
+          INSTALLED_FEATURES_TABLE: !Ref InstalledFeaturesTable
           DEFAULT_CUSTOMER_IDENTIFIER: !Ref DefaultCustomerIdentifier
           ADMIN_GROUP: !Ref AdminGroupName
           SIMULATOR_SOURCE_TAG: !Ref SubscriptionMode

@@ -1,7 +1,9 @@
 """Unit tests for the check_feature_entitlement Lambda.
 
 moto does not implement marketplace-entitlement, so we use botocore.stub.Stubber
-to programme the boto3 client inside the module after import.
+to programme the boto3 client inside the module after import. The product code
+now comes from the feature's InstalledFeatures row (DynamoDB, via moto) — baked
+from the manifest at install — rather than a host env map.
 """
 
 from __future__ import annotations
@@ -17,16 +19,25 @@ from botocore.stub import Stubber
 _CATALOG_KEY = "config_library/catalog.json"
 
 
+def _seed_row(table_name, feature_id, *, product_code=None):
+    item = {"featureId": feature_id}
+    if product_code is not None:
+        item["productCode"] = product_code
+    boto3.resource("dynamodb", region_name="us-east-1").Table(table_name).put_item(
+        Item=item
+    )
+
+
 def _preload(
     monkeypatch,
     load_lambda,
     *,
-    product_map='{"docs-by-status":"prod123"}',
+    table_name="",
     default_customer="CUST-default",
     source_tag="simulator",
     configuration_bucket="",
 ):
-    monkeypatch.setenv("FEATURE_PRODUCT_CODE_MAP", product_map)
+    monkeypatch.setenv("INSTALLED_FEATURES_TABLE", table_name)
     monkeypatch.setenv("DEFAULT_CUSTOMER_IDENTIFIER", default_customer)
     monkeypatch.setenv("SIMULATOR_SOURCE_TAG", source_tag)
     monkeypatch.setenv("CONFIGURATION_BUCKET", configuration_bucket)
@@ -68,10 +79,16 @@ def _stub(
     return stubber
 
 
-def test_none_when_no_product_code_mapped_marketplace_mode(monkeypatch, load_lambda):
-    """Marketplace mode: unmapped featureId returns NONE (can't synthesize)."""
+def test_none_when_no_product_code_marketplace_mode(
+    monkeypatch, load_lambda, installed_features_table
+):
+    """Marketplace mode: a feature whose install row has no productCode → NONE."""
+    _seed_row(installed_features_table, "docs-by-status")  # no productCode
     mod = _preload(
-        monkeypatch, load_lambda, product_map='{"other":"x"}', source_tag="marketplace"
+        monkeypatch,
+        load_lambda,
+        table_name=installed_features_table,
+        source_tag="marketplace",
     )
     result = mod.handler(
         make_appsync_event("checkFeatureEntitlement", {"featureId": "docs-by-status"}),
@@ -87,12 +104,17 @@ def test_none_when_no_product_code_mapped_marketplace_mode(monkeypatch, load_lam
     }
 
 
-def test_synthesized_product_code_simulator_mode(monkeypatch, load_lambda):
-    """Simulator mode: unmapped featureId uses synthesized prod-<id>-sim code
-    and calls GetEntitlements against it. Here we seed an empty response so
-    the caller sees NONE but productCode + source should reflect the synthesis."""
+def test_synthesized_product_code_simulator_mode(
+    monkeypatch, load_lambda, installed_features_table
+):
+    """Simulator mode: a row without a productCode uses synthesized prod-<id>-sim
+    and calls GetEntitlements against it."""
+    _seed_row(installed_features_table, "docs-by-status")  # no productCode
     mod = _preload(
-        monkeypatch, load_lambda, product_map='{"other":"x"}', source_tag="simulator"
+        monkeypatch,
+        load_lambda,
+        table_name=installed_features_table,
+        source_tag="simulator",
     )
     _stub(
         mod,
@@ -110,10 +132,17 @@ def test_synthesized_product_code_simulator_mode(monkeypatch, load_lambda):
     assert result["source"] == "simulator"
 
 
-def test_none_when_no_customer_identifier_marketplace_mode(monkeypatch, load_lambda):
+def test_none_when_no_customer_identifier_marketplace_mode(
+    monkeypatch, load_lambda, installed_features_table
+):
     """Marketplace mode: no CustomerIdentifier returns NONE."""
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
     mod = _preload(
-        monkeypatch, load_lambda, default_customer="", source_tag="marketplace"
+        monkeypatch,
+        load_lambda,
+        table_name=installed_features_table,
+        default_customer="",
+        source_tag="marketplace",
     )
     result = mod.handler(
         make_appsync_event("checkFeatureEntitlement", {"featureId": "docs-by-status"}),
@@ -125,11 +154,18 @@ def test_none_when_no_customer_identifier_marketplace_mode(monkeypatch, load_lam
     assert result["source"] == "marketplace"
 
 
-def test_synthesized_customer_identifier_simulator_mode(monkeypatch, load_lambda):
+def test_synthesized_customer_identifier_simulator_mode(
+    monkeypatch, load_lambda, installed_features_table
+):
     """Simulator mode: missing CustomerIdentifier falls back to 'cust-idp-default'
     and calls GetEntitlements against it."""
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
     mod = _preload(
-        monkeypatch, load_lambda, default_customer="", source_tag="simulator"
+        monkeypatch,
+        load_lambda,
+        table_name=installed_features_table,
+        default_customer="",
+        source_tag="simulator",
     )
     _stub(
         mod,
@@ -147,8 +183,11 @@ def test_synthesized_customer_identifier_simulator_mode(monkeypatch, load_lambda
     assert result["source"] == "simulator"
 
 
-def test_active_when_active_entitlement(monkeypatch, load_lambda):
-    mod = _preload(monkeypatch, load_lambda)
+def test_active_when_active_entitlement(
+    monkeypatch, load_lambda, installed_features_table
+):
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
+    mod = _preload(monkeypatch, load_lambda, table_name=installed_features_table)
     future = datetime.now(timezone.utc) + timedelta(days=30)
     stubber = _stub(
         mod,
@@ -177,8 +216,11 @@ def test_active_when_active_entitlement(monkeypatch, load_lambda):
     assert result["productCode"] == "prod123"
 
 
-def test_expired_when_only_expired_entitlement(monkeypatch, load_lambda):
-    mod = _preload(monkeypatch, load_lambda)
+def test_expired_when_only_expired_entitlement(
+    monkeypatch, load_lambda, installed_features_table
+):
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
+    mod = _preload(monkeypatch, load_lambda, table_name=installed_features_table)
     past = datetime.now(timezone.utc) - timedelta(days=30)
     stubber = _stub(mod, entitlements=[{"ExpirationDate": past}])
     try:
@@ -194,8 +236,11 @@ def test_expired_when_only_expired_entitlement(monkeypatch, load_lambda):
     assert result["expiresAt"]
 
 
-def test_active_beats_expired_when_both_present(monkeypatch, load_lambda):
-    mod = _preload(monkeypatch, load_lambda)
+def test_active_beats_expired_when_both_present(
+    monkeypatch, load_lambda, installed_features_table
+):
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
+    mod = _preload(monkeypatch, load_lambda, table_name=installed_features_table)
     past = datetime.now(timezone.utc) - timedelta(days=30)
     future = datetime.now(timezone.utc) + timedelta(days=30)
     stubber = _stub(
@@ -217,8 +262,9 @@ def test_active_beats_expired_when_both_present(monkeypatch, load_lambda):
     assert result["state"] == "ACTIVE"
 
 
-def test_active_when_no_expiration(monkeypatch, load_lambda):
-    mod = _preload(monkeypatch, load_lambda)
+def test_active_when_no_expiration(monkeypatch, load_lambda, installed_features_table):
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
+    mod = _preload(monkeypatch, load_lambda, table_name=installed_features_table)
     stubber = _stub(mod, entitlements=[{"Dimension": "X"}])
     try:
         result = mod.handler(
@@ -233,8 +279,11 @@ def test_active_when_no_expiration(monkeypatch, load_lambda):
     assert result["expiresAt"] is None
 
 
-def test_none_when_empty_entitlements(monkeypatch, load_lambda):
-    mod = _preload(monkeypatch, load_lambda)
+def test_none_when_empty_entitlements(
+    monkeypatch, load_lambda, installed_features_table
+):
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
+    mod = _preload(monkeypatch, load_lambda, table_name=installed_features_table)
     stubber = _stub(mod, entitlements=[])
     try:
         result = mod.handler(
@@ -248,8 +297,16 @@ def test_none_when_empty_entitlements(monkeypatch, load_lambda):
     assert result["state"] == "NONE"
 
 
-def test_header_customer_identifier_takes_precedence(monkeypatch, load_lambda):
-    mod = _preload(monkeypatch, load_lambda, default_customer="CUST-default")
+def test_header_customer_identifier_takes_precedence(
+    monkeypatch, load_lambda, installed_features_table
+):
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
+    mod = _preload(
+        monkeypatch,
+        load_lambda,
+        table_name=installed_features_table,
+        default_customer="CUST-default",
+    )
     future = datetime.now(timezone.utc) + timedelta(days=30)
     stubber = _stub(
         mod,
@@ -301,12 +358,12 @@ def test_auto_mode_returns_active_without_marketplace_call(monkeypatch, load_lam
     assert mod._entitlement_client is None
 
 
-def test_malformed_env_var_map_falls_back_to_empty(monkeypatch, load_lambda):
-    # Malformed JSON → empty map → marketplace mode returns NONE for any feature.
+def test_no_table_falls_back_to_none_marketplace_mode(monkeypatch, load_lambda):
+    # No InstalledFeatures table configured → no productCode → marketplace NONE.
     mod = _preload(
         monkeypatch,
         load_lambda,
-        product_map="this-is-not-json",
+        table_name="",
         source_tag="marketplace",
     )
     result = mod.handler(
@@ -329,11 +386,11 @@ def test_oss_feature_short_circuits_to_active_marketplace_mode(
         bucket,
         [{"featureId": "docs-by-status", "source": "oss", "latestVersion": "1.0.0"}],
     )
-    # No product code mapped — marketplace mode would otherwise return NONE.
+    # No productCode on the install row — marketplace mode would otherwise be NONE.
     mod = _preload(
         monkeypatch,
         load_lambda,
-        product_map="{}",
+        table_name=mock_stack["table_name"],
         source_tag="marketplace",
         configuration_bucket=bucket,
     )
@@ -357,7 +414,7 @@ def test_marketplace_feature_still_gated_when_catalog_present(
     monkeypatch, mock_stack, load_lambda
 ):
     """A catalog entry with source=marketplace does NOT short-circuit — the
-    entitlement check still runs (here: unmapped product code → NONE)."""
+    entitlement check still runs (here: no productCode on the row → NONE)."""
     bucket = mock_stack["bucket"]
     _put_catalog(
         bucket,
@@ -366,7 +423,7 @@ def test_marketplace_feature_still_gated_when_catalog_present(
     mod = _preload(
         monkeypatch,
         load_lambda,
-        product_map="{}",
+        table_name=mock_stack["table_name"],
         source_tag="marketplace",
         configuration_bucket=bucket,
     )

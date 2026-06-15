@@ -244,6 +244,12 @@ Resources:
           APPSYNC_API_URL: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiUrl' }
           FEATURE_API_ENDPOINT: !GetAtt FeatureApi.ApiEndpoint
           LOG_LEVEL: !Ref LogLevel
+          # Marketplace identity, baked from feature.yaml at publish time (empty
+          # for non-marketplace features). The ui-deployer forwards these to the
+          # host's registerFeature mutation so the install row carries the
+          # product code — no per-host FeatureProductCodeMap needed.
+          FEATURE_PRODUCT_CODE: '<FEATURE_PRODUCT_CODE_TOKEN>'
+          FEATURE_LISTING_URL: '<FEATURE_LISTING_URL_TOKEN>'
 
   RegisterFeatureResource:
     Type: AWS::CloudFormation::CustomResource
@@ -255,6 +261,10 @@ Resources:
       # is a real template change CFN must update.
       FeatureVersion: '<FEATURE_VERSION_TOKEN>'
       FeatureDisplayName: !Ref FeatureDisplayName
+      # Re-trigger the custom resource when the baked marketplace identity
+      # changes (e.g. a productCode added in a later publish).
+      FeatureProductCode: '<FEATURE_PRODUCT_CODE_TOKEN>'
+      FeatureListingUrl: '<FEATURE_LISTING_URL_TOKEN>'
 
 Outputs:
   FeatureApiEndpoint:

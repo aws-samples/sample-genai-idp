@@ -48,6 +48,11 @@ _OPTIONAL_FIELDS = (
     "featureApiEndpoint",
     "iconUrl",
     "installedBy",
+    # Marketplace identity, baked from the feature manifest at publish time and
+    # persisted here so the host's subscribe/entitlement resolvers can read the
+    # product code straight from the install row — no per-host configuration.
+    "productCode",
+    "marketplaceListingUrl",
 )
 
 

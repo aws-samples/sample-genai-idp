@@ -23,6 +23,8 @@ VALID_INPUT = {
     "uiBundlePath": "features/docs-by-status/v1.0.4/",
     "featureApiEndpoint": "https://abc.execute-api.us-east-1.amazonaws.com",
     "installedBy": "admin@example.com",
+    "productCode": "prod-docs-by-status",
+    "marketplaceListingUrl": "https://aws.amazon.com/marketplace/pp/prodview-abc",
 }
 
 
@@ -46,6 +48,30 @@ def test_register_feature_happy_path(
     )["Item"]
     assert row["displayName"] == "Sample: Document Status (feature add-on)"
     assert row["featureApiEndpoint"] == VALID_INPUT["featureApiEndpoint"]
+    # Marketplace identity is persisted so subscribe/check can read it.
+    assert row["productCode"] == "prod-docs-by-status"
+    assert row["marketplaceListingUrl"] == VALID_INPUT["marketplaceListingUrl"]
+
+
+def test_register_feature_omits_absent_marketplace_fields(
+    monkeypatch, installed_features_table, load_lambda
+):
+    """A feature with no marketplace identity (empty tokens omitted by the
+    ui-deployer) persists no productCode / marketplaceListingUrl attributes."""
+    mod = _preload(monkeypatch, installed_features_table, load_lambda)
+    minimal = {
+        k: v
+        for k, v in VALID_INPUT.items()
+        if k not in ("productCode", "marketplaceListingUrl")
+    }
+    mod.handler(make_appsync_event("registerFeature", {"input": minimal}), None)
+    row = (
+        boto3.resource("dynamodb", region_name="us-east-1")
+        .Table(installed_features_table)
+        .get_item(Key={"featureId": "docs-by-status"})["Item"]
+    )
+    assert "productCode" not in row
+    assert "marketplaceListingUrl" not in row
 
 
 def test_register_feature_is_idempotent_overwrite(

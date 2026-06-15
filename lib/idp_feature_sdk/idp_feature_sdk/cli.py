@@ -752,6 +752,18 @@ def deploy_cmd(
         template_url = result.template_url
         feature_id = result.feature_id
         version: Optional[str] = result.version
+
+        # Zero-touch subscribe: if the host points at a marketplace simulator and
+        # this feature declares a productCode, create + publish the product in the
+        # simulator now so the admin can Subscribe immediately after install with
+        # no manual seeding. Best-effort (see _seed_simulator_product).
+        sim_endpoint = _host_stack_value(host, "FeaturePlatformSimulatorEndpoint")
+        if sim_endpoint:
+            _seed_simulator_product(
+                simulator_endpoint=sim_endpoint,
+                manifest=load_manifest(from_code),
+                console=console,
+            )
     else:
         # Deploy an already-published template — no publish, no SAM/Docker.
         # The feature stack still resolves its UI bundle / agent zip from the
@@ -872,6 +884,112 @@ def _parse_published_template_url(url: str) -> tuple[Optional[str], Optional[str
             feature_id = segments[idx + 1]
 
     return feature_id, bucket
+
+
+def _host_stack_value(host: dict, key: str) -> Optional[str]:
+    """Read a Parameter or Output value named `key` from a describe-stacks dict.
+    Returns None (or "" treated as None) when absent."""
+    for coll in (host.get("Parameters") or [], host.get("Outputs") or []):
+        for item in coll:
+            if item.get("ParameterKey") == key or item.get("OutputKey") == key:
+                val = item.get("ParameterValue") or item.get("OutputValue")
+                return val or None
+    return None
+
+
+def _seed_simulator_product(
+    *,
+    simulator_endpoint: str,
+    manifest,
+    console: Console,
+) -> None:
+    """Create + publish the feature's product in the marketplace simulator so a
+    deployed feature can be subscribed to with no manual `curl`. Best-effort and
+    idempotent: an unreachable simulator or an already-existing product is logged,
+    not fatal — deploy must not fail because the simulator is offline.
+
+    Uses the feature manifest's marketplace block (productCode, displayName,
+    pricingModel, dimensions) with sensible defaults so a plain feature seeds a
+    free product with one `cap_units` dimension.
+    """
+    import json as _json
+    import ssl
+    import urllib.error
+    import urllib.request
+
+    product_code = manifest.marketplace.productCode
+    if not product_code:
+        return  # not a marketplace feature — nothing to seed
+
+    base = simulator_endpoint.rstrip("/")
+    pricing = manifest.marketplace.pricingModel or "free"
+    dimensions = manifest.marketplace.dimensions or [
+        {"apiName": "cap_units", "displayName": "Capacity", "category": "Units"}
+    ]
+    # nip.io / self-signed simulator certs — tolerate like `curl -k`, scoped here.
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    def _post(path: str, payload: Optional[dict]) -> int:
+        data = _json.dumps(payload).encode("utf-8") if payload is not None else b""
+        req = urllib.request.Request(
+            f"{base}{path}",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+            return resp.status
+
+    console.rule("[bold]Seeding marketplace simulator…[/bold]")
+    try:
+        _post(
+            "/admin/products",
+            {
+                "productCode": product_code,
+                "name": manifest.displayName,
+                "pricingModel": pricing,
+                "dimensions": dimensions,
+            },
+        )
+        console.log(f"[green]✓[/green] Created simulator product {product_code}")
+    except urllib.error.HTTPError as exc:
+        # 409/400 "already exists" is fine — idempotent re-deploy.
+        if exc.code in (400, 409):
+            console.log(
+                f"[dim]Product {product_code} already exists in simulator — reusing.[/dim]"
+            )
+        else:
+            console.log(
+                f"[yellow]![/yellow] Could not create simulator product "
+                f"{product_code}: {exc}. Seed it manually if Subscribe fails."
+            )
+            return
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        console.log(
+            f"[yellow]![/yellow] Simulator at {base} unreachable ({exc}); skipping "
+            f"product seed. Seed it manually if Subscribe fails."
+        )
+        return
+
+    # Publish locks pricing/dimensions (like real Marketplace). Idempotent.
+    try:
+        _post(f"/admin/products/{product_code}/publish", None)
+        console.log(f"[green]✓[/green] Published simulator product {product_code}")
+    except urllib.error.HTTPError as exc:
+        if exc.code in (400, 409):
+            console.log(f"[dim]Product {product_code} already published.[/dim]")
+        else:
+            console.log(
+                f"[yellow]![/yellow] Could not publish simulator product "
+                f"{product_code}: {exc}."
+            )
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        console.log(
+            f"[yellow]![/yellow] Could not publish simulator product "
+            f"{product_code}: {exc}."
+        )
 
 
 @main.command("show-schema")

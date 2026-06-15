@@ -61,6 +61,8 @@ def demo_feature_project(tmp_path: Path) -> Path:
             Description: demo feat v<FEATURE_VERSION_TOKEN>
             Metadata:
               ArtifactPrefix: '<FEATURE_ARTIFACT_PREFIX_TOKEN>'
+              ProductCode: '<FEATURE_PRODUCT_CODE_TOKEN>'
+              ListingUrl: '<FEATURE_LISTING_URL_TOKEN>'
             Parameters:
               MainStackName:
                 Type: String

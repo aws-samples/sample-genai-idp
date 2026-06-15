@@ -36,6 +36,9 @@ class UiSpec:
 class MarketplaceSpec:
     productCode: Optional[str] = None  # noqa: N815
     listingUrl: Optional[str] = None  # noqa: N815
+    # Used only when auto-seeding the marketplace simulator product on deploy.
+    pricingModel: Optional[str] = None  # noqa: N815
+    dimensions: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -158,6 +161,8 @@ def load_manifest(project_dir: Path | str) -> FeatureManifest:
         marketplace=MarketplaceSpec(
             productCode=marketplace.get("productCode"),
             listingUrl=marketplace.get("listingUrl"),
+            pricingModel=marketplace.get("pricingModel"),
+            dimensions=list(marketplace.get("dimensions") or []),
         ),
         defaultParameters=dict(raw.get("defaultParameters") or {}),
         capabilities=list(raw.get("capabilities") or []),

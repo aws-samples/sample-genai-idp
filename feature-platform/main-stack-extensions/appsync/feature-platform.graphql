@@ -88,6 +88,8 @@ input RegisterFeatureInput {
   featureApiEndpoint: String
   iconUrl: String
   installedBy: String
+  productCode: String
+  marketplaceListingUrl: String
 }
 
 # NOTE: This file is a REFERENCE SNAPSHOT only. The source of truth lives
