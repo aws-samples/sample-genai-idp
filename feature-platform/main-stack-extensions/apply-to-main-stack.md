@@ -45,11 +45,6 @@ Parameters:
     Type: String
     Default: ''
 
-  FeaturePlatformProductCodeMap:
-    Type: String
-    Default: '{}'
-    Description: JSON {featureId -> Marketplace productCode} map.
-
 Conditions:
   # ... existing conditions ...
   IsFeaturePlatformEnabled: !Equals [!Ref EnableFeaturePlatform, 'true']
