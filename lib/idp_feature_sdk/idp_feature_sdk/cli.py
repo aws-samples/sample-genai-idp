@@ -505,8 +505,22 @@ def deploy_pack_cmd(
 
 
 @main.command("deploy")
-@click.argument(
-    "project_dir", type=click.Path(exists=True, file_okay=False, path_type=Path)
+@click.option(
+    "--from-code",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    default=None,
+    help="Path to a local feature project directory (containing feature.yaml). "
+    "When set, the CLI publishes from this code first (version-free layout, "
+    "tokens baked) then deploys the resulting template. Mirrors "
+    "`idp-cli deploy --from-code`. Mutually exclusive with --template-url.",
+)
+@click.option(
+    "--template-url",
+    default=None,
+    help="HTTPS URL of an ALREADY-published, version-free feature template "
+    "(`.../extensions/<id>/template.yaml`, printed by `publish`). Use this to "
+    "deploy a feature without rebuilding/republishing it. Mutually exclusive "
+    "with --from-code.",
 )
 @click.option(
     "--host-stack-name",
@@ -524,18 +538,19 @@ def deploy_pack_cmd(
 @click.option(
     "--feature-bucket",
     default=None,
-    help="S3 bucket to publish feature artifacts to (and that the feature stack "
-    "reads from). Defaults to the per-account artifacts bucket "
-    "`idp-accelerator-artifacts-<account>-<region>`, auto-created if missing — "
-    "the same convention as `idp-cli deploy`.",
+    help="S3 bucket the feature artifacts live in (and that the feature stack "
+    "reads from). With --from-code, the publish target — defaults to the "
+    "per-account artifacts bucket `idp-accelerator-artifacts-<account>-<region>`, "
+    "auto-created if missing (same convention as `idp-cli deploy`). With "
+    "--template-url, the bucket is parsed from the URL host unless given here.",
 )
 @click.option(
     "--prefix",
     "s3_prefix",
     default="idp-cli",
     show_default=True,
-    help="Key prefix under --feature-bucket. Final layout: "
-    "<bucket>/<prefix>/extensions/<feature-id>/.",
+    help="Key prefix under --feature-bucket (used with --from-code). Final "
+    "layout: <bucket>/<prefix>/extensions/<feature-id>/.",
 )
 @click.option(
     "--stack-name",
@@ -559,7 +574,8 @@ def deploy_pack_cmd(
     "--make-public",
     is_flag=True,
     default=False,
-    help="Upload artifacts with ACL=public-read (see `publish`).",
+    help="Upload artifacts with ACL=public-read (used with --from-code; see "
+    "`publish`).",
 )
 @click.option(
     "--wait",
@@ -570,7 +586,8 @@ def deploy_pack_cmd(
     "immediately after submitting the create/update.",
 )
 def deploy_cmd(
-    project_dir: Path,
+    from_code: Optional[Path],
+    template_url: Optional[str],
     host_stack_name: str,
     region: Optional[str],
     feature_bucket: Optional[str],
@@ -582,20 +599,45 @@ def deploy_cmd(
     make_public: bool,
     wait: bool,
 ) -> None:
-    """Publish ONE feature from source and install it into a running host stack.
+    """Install ONE feature into a running host stack.
 
-    The per-extension analogue of `idp-cli deploy`: publishes the feature
-    (version-free layout, tokens baked) then create-or-updates its feature
-    CloudFormation stack against the named host stack. The RegisterFeature
-    custom resource in the template self-registers the feature and copies its
-    UI bundle — identical to a console install.
+    The per-extension analogue of `idp-cli deploy`. Two modes:
 
-        idp-feature-cli deploy feature-platform/sample-health-insurance-review \\
+    \b
+    1. Publish-then-deploy from local source (the fast inner loop):
+
+        idp-feature-cli deploy --from-code ./my-feature \\
             --host-stack-name IDP-FeaturePlatform --region us-west-2
+
+    \b
+    2. Deploy an ALREADY-published template (no rebuild):
+
+        idp-feature-cli deploy \\
+            --template-url https://<bucket>.s3.<region>.amazonaws.com/extensions/<id>/template.yaml \\
+            --host-stack-name IDP-FeaturePlatform
+
+    Either way, the create-or-update targets the same stack a console install
+    creates, so re-running it upgrades in place. The RegisterFeature custom
+    resource in the template self-registers the feature and copies its UI bundle.
     """
     import boto3
 
     from .pack import _describe_one, create_or_update_stack, ensure_artifacts_bucket
+
+    # Mutex: exactly one source. Mirrors `deploy-pack` (--wrapper-url/--from-code).
+    if from_code and template_url:
+        console.print(
+            "[red]✗ --from-code and --template-url are mutually exclusive. "
+            "Use --from-code to publish-then-deploy from local source, or "
+            "--template-url to deploy an already-published template.[/red]"
+        )
+        sys.exit(1)
+    if not from_code and not template_url:
+        console.print(
+            "[red]✗ Pass either --from-code (publish-then-deploy from local "
+            "source) or --template-url (deploy an already-published template).[/red]"
+        )
+        sys.exit(1)
 
     # Resolve region: explicit flag wins, else the AWS session region
     # (AWS_REGION / AWS_DEFAULT_REGION / profile), matching `idp-cli deploy`.
@@ -624,33 +666,62 @@ def deploy_cmd(
         )
         sys.exit(1)
 
-    # 2. Resolve the feature bucket (auto-derive + create if omitted).
-    if not feature_bucket:
+    # 2. Resolve (template_url, feature_bucket, feature_id, version) by mode.
+    if from_code:
+        # Auto-derive + create the feature bucket if omitted.
+        if not feature_bucket:
+            try:
+                feature_bucket = ensure_artifacts_bucket(
+                    region=region, console=console, make_public=make_public
+                )
+            except RuntimeError as exc:
+                console.print(f"[red]✗ {exc}[/red]")
+                sys.exit(1)
+
+        # Publish the feature (reuse FeaturePublisher — version-free + tokens baked).
+        console.rule("[bold]Publishing feature…[/bold]")
         try:
-            feature_bucket = ensure_artifacts_bucket(
-                region=region, console=console, make_public=make_public
+            publisher = FeaturePublisher(from_code, console=console)
+            result = publisher.publish(
+                feature_bucket=feature_bucket,
+                region=region,
+                s3_prefix=s3_prefix,
+                make_public=make_public,
             )
-        except RuntimeError as exc:
-            console.print(f"[red]✗ {exc}[/red]")
+        except (ManifestError, RuntimeError, ValueError) as exc:
+            console.print(f"[red]✗ Publish failed: {exc}[/red]")
             sys.exit(1)
+        template_url = result.template_url
+        feature_id = result.feature_id
+        version: Optional[str] = result.version
+    else:
+        # Deploy an already-published template — no publish, no SAM/Docker.
+        # The feature stack still resolves its UI bundle / agent zip from the
+        # FeatureBucket param + the BAKED FeatureArtifactPrefix, so a bucket is
+        # required even though the template URL is explicit. Prefer the explicit
+        # flag; else parse the bucket from the URL host (publish emits
+        # https://<bucket>.s3.<region>.amazonaws.com/<key>).
+        feature_id, url_bucket = _parse_published_template_url(template_url)
+        if not feature_bucket:
+            feature_bucket = url_bucket
+        if not feature_bucket:
+            console.print(
+                "[red]✗ Could not determine the feature bucket from "
+                f"{template_url!r}. Pass --feature-bucket explicitly.[/red]"
+            )
+            sys.exit(1)
+        if not feature_id and not stack_name:
+            console.print(
+                "[red]✗ Could not parse the feature id from "
+                f"{template_url!r} (expected .../extensions/<id>/template.yaml). "
+                "Pass --stack-name explicitly.[/red]"
+            )
+            sys.exit(1)
+        version = None
 
-    # 3. Publish the feature (reuse FeaturePublisher — version-free + tokens baked).
-    console.rule("[bold]Publishing feature…[/bold]")
-    try:
-        publisher = FeaturePublisher(project_dir, console=console)
-        result = publisher.publish(
-            feature_bucket=feature_bucket,
-            region=region,
-            s3_prefix=s3_prefix,
-            make_public=make_public,
-        )
-    except (ManifestError, RuntimeError, ValueError) as exc:
-        console.print(f"[red]✗ Publish failed: {exc}[/red]")
-        sys.exit(1)
+    feature_stack = stack_name or f"{host_stack_name}-feature-{feature_id}"
 
-    feature_stack = stack_name or f"{host_stack_name}-feature-{result.feature_id}"
-
-    # 4. Resolve parameters. FeatureArtifactPrefix + FeatureVersion are BAKED
+    # 3. Resolve parameters. FeatureArtifactPrefix + FeatureVersion are BAKED
     #    into the template (not params). MainStackName + FeatureBucket are part
     #    of every feature template's contract, so submit them unconditionally.
     params: list[dict[str, str]] = [
@@ -669,7 +740,7 @@ def deploy_cmd(
     }
     if any(v is not None for v in optional.values()):
         try:
-            validation = cfn.validate_template(TemplateURL=result.template_url)
+            validation = cfn.validate_template(TemplateURL=template_url)
         except Exception as exc:
             console.print(f"[red]✗ Failed to validate feature template: {exc}[/red]")
             sys.exit(1)
@@ -678,13 +749,13 @@ def deploy_cmd(
             if value is not None and key in expected:
                 params.append({"ParameterKey": key, "ParameterValue": value})
 
-    # 5. Create-or-update the feature stack.
+    # 4. Create-or-update the feature stack.
     console.rule(f"[bold]Deploying feature stack {feature_stack}…[/bold]")
     try:
         arn = create_or_update_stack(
             cfn=cfn,
             stack_name=feature_stack,
-            template_url=result.template_url,
+            template_url=template_url,
             parameters=params,
             wait=wait,
             console=console,
@@ -695,11 +766,44 @@ def deploy_cmd(
 
     console.print()
     console.rule("[bold]Deployed[/bold]")
-    console.print(f"  featureId:      {result.feature_id}")
-    console.print(f"  version:        {result.version}")
+    console.print(f"  featureId:      {feature_id or '(from --stack-name)'}")
+    if version:
+        console.print(f"  version:        {version}")
     console.print(f"  host stack:     {host_stack_name}")
     console.print(f"  feature stack:  {arn}")
-    console.print(f"  template:       {result.template_url}")
+    console.print(f"  template:       {template_url}")
+
+
+def _parse_published_template_url(url: str) -> tuple[Optional[str], Optional[str]]:
+    """Parse a published feature template URL into (feature_id, bucket).
+
+    Recognises the version-free layout `.../extensions/<id>/template.yaml` and
+    the virtual-hosted S3 URL form `https://<bucket>.s3.<region>.amazonaws.com/`
+    that `publish` emits. Either element is None when it can't be determined
+    (the caller falls back to an explicit flag).
+    """
+    from urllib.parse import unquote, urlparse
+
+    parsed = urlparse(url)
+
+    # bucket: virtual-hosted style `<bucket>.s3[.<region>].amazonaws.com`.
+    bucket: Optional[str] = None
+    host = parsed.netloc.split(":", 1)[0]
+    labels = host.split(".")
+    if len(labels) >= 2 and labels[1] in ("s3", "s3-website") or "s3" in labels:
+        # `<bucket>.s3.<region>.amazonaws.com` → first label is the bucket.
+        if "amazonaws.com" in host and labels[0] not in ("s3",):
+            bucket = labels[0]
+
+    # feature_id: the segment after `extensions/` in the key path.
+    feature_id: Optional[str] = None
+    segments = [unquote(s) for s in parsed.path.split("/") if s]
+    if "extensions" in segments:
+        idx = segments.index("extensions")
+        if idx + 1 < len(segments):
+            feature_id = segments[idx + 1]
+
+    return feature_id, bucket
 
 
 @main.command("show-schema")

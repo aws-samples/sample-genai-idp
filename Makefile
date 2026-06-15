@@ -371,6 +371,8 @@ endif
 	@sed -i.bak 's/^__version__ = ".*"/__version__ = "$(V)"/' lib/idp_sdk/idp_sdk/__init__.py && rm -f lib/idp_sdk/idp_sdk/__init__.py.bak
 	@sed -i.bak 's/^version = ".*"/version = "$(V)"/' lib/idp_mcp_connector_pkg/pyproject.toml && rm -f lib/idp_mcp_connector_pkg/pyproject.toml.bak
 	@sed -i.bak 's/^__version__ = ".*"/__version__ = "$(V)"/' lib/idp_mcp_connector_pkg/idp_mcp_connector/__init__.py && rm -f lib/idp_mcp_connector_pkg/idp_mcp_connector/__init__.py.bak
+	@sed -i.bak 's/^version = ".*"/version = "$(V)"/' lib/idp_feature_sdk/pyproject.toml && rm -f lib/idp_feature_sdk/pyproject.toml.bak
+	@sed -i.bak 's/^__version__ = ".*"/__version__ = "$(V)"/' lib/idp_feature_sdk/idp_feature_sdk/__init__.py && rm -f lib/idp_feature_sdk/idp_feature_sdk/__init__.py.bak
 	@echo -e "$(GREEN)✅ Version updated to $(V) in:$(NC)"
 	@echo "  - VERSION"
 	@echo "  - lib/idp_cli_pkg/pyproject.toml"
@@ -381,6 +383,9 @@ endif
 	@echo "  - lib/idp_common_pkg/setup.py"
 	@echo "  - lib/idp_mcp_connector_pkg/pyproject.toml"
 	@echo "  - lib/idp_mcp_connector_pkg/idp_mcp_connector/__init__.py"
+	@echo "  - lib/idp_feature_sdk/pyproject.toml"
+	@echo "  - lib/idp_feature_sdk/idp_feature_sdk/__init__.py"
+
 
 ##@ Documentation
 docs: docs-build ## Build and serve the documentation site locally
