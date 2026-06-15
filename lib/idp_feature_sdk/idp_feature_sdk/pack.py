@@ -739,28 +739,38 @@ def ensure_artifacts_bucket(
     *,
     region: str,
     console: Optional[Console] = None,
+    make_public: bool = False,
 ) -> str:
     """Auto-generate the per-account artifacts bucket name and create it
-    if missing. Also ensures a bucket policy granting public read on
-    the `packs/*` and `host/*` prefixes. Returns the bucket name.
+    if missing. Returns the bucket name.
 
     Mirrors `idp-cli deploy --from-code` for the bucket name so the same
-    bucket can host both flows. The bucket policy is applied
-    idempotently — if a customer already has their own policy on the
-    bucket, the pack policy is merged in.
+    bucket can host both flows.
 
-    Why a public-prefix bucket policy:
-      Cross-account pack deploys (the wrapper template, the host
-      accelerator template, every Lambda zip referenced by them) need
-      to be downloadable without IAM. We can't use object ACLs because
-      modern buckets default to BucketOwnerEnforced, which rejects
-      ACLs entirely.
+    Security model (matches `idp-cli publish`): **private by default**.
+
+      * Without ``make_public`` (the default), the bucket is treated as a
+        same-account artifacts bucket. A freshly-created bucket has all
+        four S3 Block Public Access (BPA) flags enabled. A *pre-existing*
+        bucket is left untouched — we NEVER weaken its BPA settings, so a
+        manual security remediation can't be silently reverted by a
+        publish run.
+      * With ``make_public=True`` (opt-in, e.g. ``--make-public``), the
+        bucket's ``BlockPublicPolicy``/``RestrictPublicBuckets`` flags are
+        relaxed and a bucket policy granting public read on the ``packs/*``
+        and ``host/*`` prefixes is applied/merged. This is only needed for
+        sharing published artifacts for *cross-account* pack deploys,
+        where the deploying account's pre-stager Lambda fetches the
+        wrapper/host/feature templates via plain HTTPS (object ACLs don't
+        work — modern buckets default to BucketOwnerEnforced, which
+        rejects ACLs entirely).
     """
     cons = console or Console()
     sts = boto3.client("sts", region_name=region)
     account_id = sts.get_caller_identity()["Account"]
     bucket = f"idp-accelerator-artifacts-{account_id}-{region}"
     s3 = boto3.client("s3", region_name=region)
+    bucket_created = False
     try:
         s3.head_bucket(Bucket=bucket)
         cons.log(
@@ -778,6 +788,7 @@ def ensure_artifacts_bucket(
                         Bucket=bucket,
                         CreateBucketConfiguration={"LocationConstraint": region},
                     )
+                bucket_created = True
             except Exception as create_exc:
                 raise RuntimeError(
                     f"Failed to create artifacts bucket {bucket!r}: {create_exc}"
@@ -787,6 +798,39 @@ def ensure_artifacts_bucket(
                 f"Cannot access artifacts bucket {bucket!r}: {exc}"
             ) from exc
 
+    if not make_public:
+        # Secure by default. Never weaken Block Public Access on a bucket
+        # we didn't just create — that would silently revert any manual
+        # security remediation an operator applied.
+        if bucket_created:
+            secure_pab = {
+                "BlockPublicAcls": True,
+                "IgnorePublicAcls": True,
+                "BlockPublicPolicy": True,
+                "RestrictPublicBuckets": True,
+            }
+            try:
+                s3.put_public_access_block(
+                    Bucket=bucket,
+                    PublicAccessBlockConfiguration=secure_pab,
+                )
+                cons.log(
+                    "[green]✓[/green] enabled S3 Block Public Access on new "
+                    "artifacts bucket"
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Couldn't enable Block Public Access on new bucket {bucket}: {exc}"
+                ) from exc
+        else:
+            cons.log(
+                "[dim]Block Public Access settings left unchanged on existing "
+                "bucket (private same-account deploy). Pass --make-public to "
+                "share artifacts for cross-account pack deploys.[/dim]"
+            )
+        return bucket
+
+    # ---- make_public=True: opt-in public artifacts (cross-account) ----
     # Allow bucket-level public policy (it stays blocked by default on
     # newly-created buckets; pre-existing buckets may also have block-all).
     # We loudly check the result rather than ignoring failures — a bucket

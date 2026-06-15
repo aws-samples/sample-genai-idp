@@ -139,9 +139,11 @@ def publish(
 @click.option(
     "--artifacts-bucket",
     required=True,
-    help="Public S3 bucket for the pack's published artifacts. Objects are "
-    "uploaded with ACL=public-read so the wrapper can be deployed cross-account "
-    "without bucket policy gymnastics.",
+    help="S3 bucket for the pack's published artifacts. For CROSS-ACCOUNT "
+    "deploys the bucket must grant public read on the `packs/*` prefix "
+    "(use `deploy-pack --from-code --make-public` to provision one, or set "
+    "the policy yourself). This command does not modify the bucket's "
+    "Block Public Access settings.",
 )
 @click.option(
     "--artifacts-prefix",
@@ -313,6 +315,17 @@ def publish_pack_cmd(
     default=False,
     help="Return immediately after CreateStack instead of waiting for CREATE_COMPLETE.",
 )
+@click.option(
+    "--make-public",
+    is_flag=True,
+    default=False,
+    help="Make the auto-created artifacts bucket world-readable on the "
+    "`packs/*` and `host/*` prefixes (disables Block Public Access for "
+    "bucket policies). ONLY needed to share published artifacts for "
+    "CROSS-ACCOUNT pack deploys. Default: private (same-account). A "
+    "pre-existing bucket's Block Public Access settings are never "
+    "weakened unless this flag is set.",
+)
 def deploy_pack_cmd(
     wrapper_url: Optional[str],
     from_code: Optional[Path],
@@ -327,6 +340,7 @@ def deploy_pack_cmd(
     region: str,
     extra_params: tuple,
     no_wait: bool,
+    make_public: bool,
 ) -> None:
     """Deploy a vertical-product pack to a fresh CloudFormation stack.
 
@@ -390,7 +404,7 @@ def deploy_pack_cmd(
 
             try:
                 artifacts_bucket = ensure_artifacts_bucket(
-                    region=region, console=console
+                    region=region, console=console, make_public=make_public
                 )
             except RuntimeError as exc:
                 console.print(f"[red]✗ {exc}[/red]")
@@ -613,7 +627,9 @@ def deploy_cmd(
     # 2. Resolve the feature bucket (auto-derive + create if omitted).
     if not feature_bucket:
         try:
-            feature_bucket = ensure_artifacts_bucket(region=region, console=console)
+            feature_bucket = ensure_artifacts_bucket(
+                region=region, console=console, make_public=make_public
+            )
         except RuntimeError as exc:
             console.print(f"[red]✗ {exc}[/red]")
             sys.exit(1)
