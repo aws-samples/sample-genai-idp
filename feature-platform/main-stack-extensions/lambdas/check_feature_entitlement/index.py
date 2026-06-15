@@ -75,9 +75,12 @@ def _installed_product_code(feature_id: str) -> Optional[str]:
             or {}
         )
     except Exception as exc:  # noqa: BLE001 — treat lookup failure as "absent"
-        logger.warning("Could not read InstalledFeatures row for %s: %s", feature_id, exc)
+        logger.warning(
+            "Could not read InstalledFeatures row for %s: %s", feature_id, exc
+        )
         return None
     return row.get("productCode")
+
 
 # Lazily constructed so unit tests can patch endpoint_url via env vars.
 _entitlement_client = None

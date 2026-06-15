@@ -89,7 +89,9 @@ _FEATURE_OFFER_ID_MAP = _load_json_map(
 )
 
 
-def _installed_marketplace_identity(feature_id: str) -> Tuple[Optional[str], Optional[str]]:
+def _installed_marketplace_identity(
+    feature_id: str,
+) -> Tuple[Optional[str], Optional[str]]:
     """Read (productCode, marketplaceListingUrl) from the feature's
     InstalledFeatures row — baked from the feature manifest at install time, so
     the host needs no per-feature configuration. Returns (None, None) when the
@@ -104,7 +106,9 @@ def _installed_marketplace_identity(feature_id: str) -> Tuple[Optional[str], Opt
             or {}
         )
     except Exception as exc:  # noqa: BLE001 — treat lookup failure as "absent"
-        logger.warning("Could not read InstalledFeatures row for %s: %s", feature_id, exc)
+        logger.warning(
+            "Could not read InstalledFeatures row for %s: %s", feature_id, exc
+        )
         return None, None
     return row.get("productCode"), row.get("marketplaceListingUrl")
 

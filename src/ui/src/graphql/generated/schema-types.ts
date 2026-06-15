@@ -1386,6 +1386,8 @@ export type RegisterFeatureInput = {
   iconUrl?: InputMaybe<Scalars['String']['input']>;
   installedBy?: InputMaybe<Scalars['String']['input']>;
   installedVersion: Scalars['String']['input'];
+  marketplaceListingUrl?: InputMaybe<Scalars['String']['input']>;
+  productCode?: InputMaybe<Scalars['String']['input']>;
   stackId: Scalars['String']['input'];
   stackName: Scalars['String']['input'];
   stackRegion: Scalars['String']['input'];
