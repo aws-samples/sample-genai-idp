@@ -38,7 +38,7 @@ def aws_credentials(monkeypatch):
 
 
 def test_new_bucket_default_is_private(aws_credentials):
-    """A freshly-created bucket (no --make-public) gets ALL four BPA flags on
+    """A freshly-created bucket (no --public) gets ALL four BPA flags on
     and gets NO public bucket policy."""
     with mock_aws():
         bucket = ensure_artifacts_bucket(region=REGION)

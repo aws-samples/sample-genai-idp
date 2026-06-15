@@ -302,7 +302,7 @@ iterate on. Then:
 idp-feature-cli validate ./my-feature       # validate against the manifest schema
 idp-feature-cli build ./my-feature           # build CFN + Lambda + UMD UI bundle
 idp-feature-cli publish ./my-feature \        # upload artifacts + print Launch Stack URL
-    --feature-bucket <your-feature-bucket> \
+    --bucket-basename <your-feature-bucket> \   # region appended automatically (matches `idp-cli publish`)
     --region us-east-1
 ```
 

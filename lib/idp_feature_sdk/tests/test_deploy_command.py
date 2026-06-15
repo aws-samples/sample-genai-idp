@@ -80,7 +80,7 @@ def test_missing_host_stack_errors(demo_feature_project: Path, aws_env) -> None:
                 "no-such-host",
                 "--region",
                 "us-east-1",
-                "--feature-bucket",
+                "--bucket-basename",
                 "feature-bucket-test",
                 "--wait",
             ],
@@ -99,7 +99,7 @@ def test_region_auto_detected_from_session(
     with mock_aws():
         cfn = boto3.client("cloudformation", region_name="us-east-1")
         s3 = boto3.client("s3", region_name="us-east-1")
-        s3.create_bucket(Bucket="feature-bucket-test")
+        s3.create_bucket(Bucket="feature-bucket-test-us-east-1")
         _create_host(cfn)
 
         runner = CliRunner()
@@ -112,7 +112,7 @@ def test_region_auto_detected_from_session(
                 "--host-stack-name",
                 _HOST,
                 # no --region: must auto-detect us-east-1 from the session
-                "--feature-bucket",
+                "--bucket-basename",
                 "feature-bucket-test",
                 "--wait",
             ],
@@ -127,7 +127,7 @@ def test_create_path_submits_expected_params(
     with mock_aws():
         cfn = boto3.client("cloudformation", region_name="us-east-1")
         s3 = boto3.client("s3", region_name="us-east-1")
-        s3.create_bucket(Bucket="feature-bucket-test")
+        s3.create_bucket(Bucket="feature-bucket-test-us-east-1")
         _create_host(cfn)
 
         runner = CliRunner()
@@ -141,7 +141,7 @@ def test_create_path_submits_expected_params(
                 _HOST,
                 "--region",
                 "us-east-1",
-                "--feature-bucket",
+                "--bucket-basename",
                 "feature-bucket-test",
                 "--wait",
             ],
@@ -151,7 +151,7 @@ def test_create_path_submits_expected_params(
         # Feature stack was created with the default derived name.
         params = _stack_params(cfn, _DEFAULT_FEATURE_STACK)
         assert params["MainStackName"] == _HOST
-        assert params["FeatureBucket"] == "feature-bucket-test"
+        assert params["FeatureBucket"] == "feature-bucket-test-us-east-1"
         # Baked, not params.
         assert "FeatureVersion" not in params
         assert "FeatureArtifactPrefix" not in params
@@ -163,7 +163,7 @@ def test_update_path_is_used_when_stack_exists(
     with mock_aws():
         cfn = boto3.client("cloudformation", region_name="us-east-1")
         s3 = boto3.client("s3", region_name="us-east-1")
-        s3.create_bucket(Bucket="feature-bucket-test")
+        s3.create_bucket(Bucket="feature-bucket-test-us-east-1")
         _create_host(cfn)
 
         runner = CliRunner()
@@ -175,7 +175,7 @@ def test_update_path_is_used_when_stack_exists(
             _HOST,
             "--region",
             "us-east-1",
-            "--feature-bucket",
+            "--bucket-basename",
             "feature-bucket-test",
             "--wait",
         ]
@@ -192,7 +192,7 @@ def test_custom_stack_name_override(demo_feature_project: Path, aws_env) -> None
     with mock_aws():
         cfn = boto3.client("cloudformation", region_name="us-east-1")
         s3 = boto3.client("s3", region_name="us-east-1")
-        s3.create_bucket(Bucket="feature-bucket-test")
+        s3.create_bucket(Bucket="feature-bucket-test-us-east-1")
         _create_host(cfn)
 
         runner = CliRunner()
@@ -206,7 +206,7 @@ def test_custom_stack_name_override(demo_feature_project: Path, aws_env) -> None
                 _HOST,
                 "--region",
                 "us-east-1",
-                "--feature-bucket",
+                "--bucket-basename",
                 "feature-bucket-test",
                 "--stack-name",
                 "my-custom-feature-stack",
@@ -292,7 +292,7 @@ def test_template_url_skips_publish_and_deploys(aws_env, monkeypatch) -> None:
 
 
 def test_template_url_explicit_bucket_overrides_url(aws_env) -> None:
-    """An explicit --feature-bucket wins over the bucket parsed from the URL."""
+    """An explicit --bucket-basename wins over the bucket parsed from the URL."""
     with mock_aws():
         cfn = boto3.client("cloudformation", region_name="us-east-1")
         s3 = boto3.client("s3", region_name="us-east-1")
@@ -306,7 +306,7 @@ def test_template_url_explicit_bucket_overrides_url(aws_env) -> None:
                 "deploy",
                 "--template-url",
                 url,
-                "--feature-bucket",
+                "--bucket-basename",
                 "override-bucket",
                 "--host-stack-name",
                 _HOST,
@@ -321,7 +321,7 @@ def test_template_url_explicit_bucket_overrides_url(aws_env) -> None:
 
 
 def test_template_url_requires_bucket_when_unparseable(aws_env) -> None:
-    """A non-S3-host URL with no --feature-bucket errors helpfully."""
+    """A non-S3-host URL with no --bucket-basename errors helpfully."""
     with mock_aws():
         cfn = boto3.client("cloudformation", region_name="us-east-1")
         _create_host(cfn)

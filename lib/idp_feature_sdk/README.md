@@ -44,14 +44,17 @@ idp-feature-cli validate ./my-feature
 # Build artifacts into ./my-feature/dist/
 idp-feature-cli build ./my-feature
 
-# Validate → build → upload → update latest.json → print Launch Stack URL
+# Validate → build → upload → update latest.json → print Launch Stack URL.
+# --bucket-basename is a basename — the region is appended automatically (so
+# `idp-marketplace-dev` in us-east-1 becomes `idp-marketplace-dev-us-east-1`),
+# matching `idp-cli publish`. Omit it to use the per-account default bucket.
 idp-feature-cli publish ./my-feature \
-    --feature-bucket idp-marketplace-dev \
+    --bucket-basename idp-marketplace-dev \
     --region us-east-1
 
 # Also register with the local simulator (for end-to-end testing)
 idp-feature-cli publish ./my-feature \
-    --feature-bucket idp-marketplace-dev \
+    --bucket-basename idp-marketplace-dev \
     --region us-east-1 \
     --register-with-simulator http://127.0.0.1:8080 \
     --simulator-product-code prod-docs-by-status
@@ -65,11 +68,11 @@ idp-feature-cli publish ./my-feature \
 idp-feature-cli deploy --from-code ./my-feature \
     --host-stack-name IDP-FeaturePlatform
     # --region defaults to the AWS session region (like `idp-cli deploy`)
-    # --feature-bucket defaults to idp-accelerator-artifacts-<account>-<region>
+    # --bucket-basename defaults to idp-accelerator-artifacts-<account>-<region>
     # --wait (opt-in) blocks until the stack reaches a terminal state
 #
 #   B) --template-url: deploy an ALREADY-published template (no rebuild). The
-#      feature bucket is parsed from the URL unless --feature-bucket is given.
+#      feature bucket is parsed from the URL unless --bucket-basename is given.
 idp-feature-cli deploy \
     --template-url https://<bucket>.s3.<region>.amazonaws.com/extensions/<id>/template.yaml \
     --host-stack-name IDP-FeaturePlatform

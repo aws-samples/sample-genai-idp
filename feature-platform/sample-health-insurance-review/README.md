@@ -97,7 +97,7 @@ To publish a copy to your own feature bucket for testing:
 
 ```bash
 cd feature-platform/sample-health-insurance-review
-idp-feature-cli publish . --feature-bucket <your-bucket> --region us-east-1
+idp-feature-cli publish . --bucket-basename <your-bucket> --region us-east-1
 ```
 
 ## Tests

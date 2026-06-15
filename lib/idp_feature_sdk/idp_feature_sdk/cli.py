@@ -20,6 +20,59 @@ from .scaffold import ScaffoldError, ScaffoldOptions, scaffold_feature
 console = Console()
 
 
+def _resolve_bucket(
+    bucket_basename: Optional[str],
+    region: str,
+    *,
+    make_public: bool = False,
+) -> str:
+    """Resolve a `--bucket-basename` to a full S3 bucket name.
+
+    Mirrors `idp-cli`'s bucket semantics so the two CLIs behave identically:
+
+      * An explicit basename has the region appended — ``my-artifacts`` in
+        ``us-east-1`` becomes ``my-artifacts-us-east-1`` — and is used as-is.
+      * When omitted, the per-account artifacts bucket
+        ``idp-accelerator-artifacts-<account>-<region>`` is auto-generated and
+        created if missing (via :func:`ensure_artifacts_bucket`).
+
+    Exits the process with a helpful message if bucket creation fails.
+    """
+    if bucket_basename:
+        return f"{bucket_basename}-{region}"
+    from .pack import ensure_artifacts_bucket
+
+    try:
+        return ensure_artifacts_bucket(
+            region=region, console=console, make_public=make_public
+        )
+    except RuntimeError as exc:
+        console.print(f"[red]✗ {exc}[/red]")
+        sys.exit(1)
+
+
+def _parse_parameters(parameters: Optional[str]) -> dict[str, str]:
+    """Parse a `--parameters key=value,key2=value2` string into a dict.
+
+    Mirrors `idp-cli deploy`'s parser: splits on commas that precede a
+    ``key=`` token, so values may themselves contain commas (e.g. subnet
+    lists). Returns an empty dict for ``None``/empty input.
+    """
+    if not parameters:
+        return {}
+    import re
+
+    parsed: dict[str, str] = {}
+    for match in re.finditer(
+        r"([A-Za-z][A-Za-z0-9]*)=((?:(?![A-Za-z][A-Za-z0-9]*=).)*)",
+        parameters,
+    ):
+        key = match.group(1).strip()
+        value = match.group(2).strip().rstrip(",")
+        parsed[key] = value
+    return parsed
+
+
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(package_name="idp-feature-sdk")
 def main() -> None:
@@ -66,12 +119,17 @@ def build(project_dir: Path) -> None:
     "project_dir", type=click.Path(exists=True, file_okay=False, path_type=Path)
 )
 @click.option(
-    "--feature-bucket", required=True, help="S3 bucket to upload artifacts to."
+    "--bucket-basename",
+    default=None,
+    help="S3 bucket basename for artifacts — region is appended automatically "
+    "(auto-generated as idp-accelerator-artifacts-<account>-<region> if not "
+    "provided). Matches `idp-cli publish`.",
 )
 @click.option("--region", default="us-east-1", show_default=True)
 @click.option("--prefix", "s3_prefix", default="features", show_default=True)
 @click.option(
-    "--make-public",
+    "--public",
+    "make_public",
     is_flag=True,
     default=False,
     help="Upload objects with ACL=public-read. Required for Launch Stack URLs to "
@@ -91,7 +149,7 @@ def build(project_dir: Path) -> None:
 )
 def publish(
     project_dir: Path,
-    feature_bucket: str,
+    bucket_basename: Optional[str],
     region: str,
     s3_prefix: str,
     make_public: bool,
@@ -99,6 +157,7 @@ def publish(
     simulator_product_code: Optional[str],
 ) -> None:
     """Validate → build → upload → update latest.json. Prints a Launch Stack URL on success."""
+    feature_bucket = _resolve_bucket(bucket_basename, region, make_public=make_public)
     try:
         publisher = FeaturePublisher(project_dir, console=console)
         result = publisher.publish(
@@ -137,20 +196,22 @@ def publish(
     "project_dir", type=click.Path(exists=True, file_okay=False, path_type=Path)
 )
 @click.option(
-    "--artifacts-bucket",
+    "--bucket-basename",
     required=True,
-    help="S3 bucket for the pack's published artifacts. For CROSS-ACCOUNT "
-    "deploys the bucket must grant public read on the `packs/*` prefix "
-    "(use `deploy-pack --from-code --make-public` to provision one, or set "
+    help="S3 bucket basename for the pack's published artifacts — region is "
+    "appended automatically (matches `idp-cli`). For CROSS-ACCOUNT deploys "
+    "the resulting bucket must grant public read on the `packs/*` prefix "
+    "(use `deploy-pack --from-code --public` to provision one, or set "
     "the policy yourself). This command does not modify the bucket's "
     "Block Public Access settings.",
 )
 @click.option(
-    "--artifacts-prefix",
+    "--prefix",
+    "artifacts_prefix",
     default="packs",
     show_default=True,
-    help="Key prefix under <artifacts-bucket>. Final layout: "
-    "<artifacts-bucket>/<artifacts-prefix>/<feature-id>/v<version>/.",
+    help="Key prefix under the artifacts bucket. Final layout: "
+    "<bucket>/<prefix>/<feature-id>/v<version>/.",
 )
 @click.option(
     "--host-template-url",
@@ -168,7 +229,7 @@ def publish(
 )
 def publish_pack_cmd(
     project_dir: Path,
-    artifacts_bucket: str,
+    bucket_basename: str,
     artifacts_prefix: str,
     host_template_url: str,
     region: str,
@@ -184,6 +245,7 @@ def publish_pack_cmd(
     """
     from .pack import PackPublisher
 
+    artifacts_bucket = f"{bucket_basename}-{region}"
     try:
         publisher = PackPublisher(project_dir, console=console)
         result = publisher.publish(
@@ -248,26 +310,26 @@ def publish_pack_cmd(
     "Ignored when --wrapper-url is used.",
 )
 @click.option(
-    "--artifacts-bucket",
+    "--bucket-basename",
     default=None,
-    help="(Optional, used with --from-code) Public S3 bucket for "
-    "published artifacts. Auto-generated as "
-    "`idp-accelerator-artifacts-<account-id>-<region>` and auto-created "
-    "if missing — same convention as `idp-cli deploy`. With --build "
-    "accelerator|all, host artifacts go under <bucket>/host/, pack "
-    "artifacts under <bucket>/packs/.",
+    help="(Optional, used with --from-code) S3 bucket basename for published "
+    "artifacts — region is appended automatically (matches `idp-cli deploy`). "
+    "Auto-generated as `idp-accelerator-artifacts-<account-id>-<region>` and "
+    "auto-created if not provided. With --build accelerator|all, host artifacts "
+    "go under <bucket>/host/, pack artifacts under <bucket>/packs/.",
 )
 @click.option(
-    "--artifacts-prefix",
+    "--prefix",
+    "artifacts_prefix",
     default="packs",
     show_default=True,
-    help="Key prefix under --artifacts-bucket for the pack's artifacts.",
+    help="Key prefix under the artifacts bucket for the pack's artifacts.",
 )
 @click.option(
     "--host-artifacts-prefix",
     default="host",
     show_default=True,
-    help="Key prefix under --artifacts-bucket for the host accelerator. "
+    help="Key prefix under the artifacts bucket for the host accelerator. "
     "Only used with --build accelerator|all.",
 )
 @click.option(
@@ -303,20 +365,23 @@ def publish_pack_cmd(
     help="AWS region to deploy into. Must match the wrapper's region.",
 )
 @click.option(
-    "--parameter",
+    "--parameters",
     "extra_params",
-    multiple=True,
-    help="Extra wrapper parameters as KEY=VALUE (repeatable). "
-    "Used to override values that were baked at publish time.",
+    default=None,
+    help="Extra wrapper parameters as key=value,key2=value2 (matches "
+    "`idp-cli deploy`). Used to override values baked at publish time.",
 )
 @click.option(
-    "--no-wait",
+    "--wait",
     is_flag=True,
     default=False,
-    help="Return immediately after CreateStack instead of waiting for CREATE_COMPLETE.",
+    help="Wait for the wrapper stack to reach a terminal CloudFormation state "
+    "before returning (matches `idp-cli deploy --wait`). Default: return "
+    "immediately after submitting the create.",
 )
 @click.option(
-    "--make-public",
+    "--public",
+    "make_public",
     is_flag=True,
     default=False,
     help="Make the auto-created artifacts bucket world-readable on the "
@@ -330,7 +395,7 @@ def deploy_pack_cmd(
     wrapper_url: Optional[str],
     from_code: Optional[Path],
     build_target: str,
-    artifacts_bucket: Optional[str],
+    bucket_basename: Optional[str],
     artifacts_prefix: str,
     host_artifacts_prefix: str,
     host_template_url: Optional[str],
@@ -338,8 +403,8 @@ def deploy_pack_cmd(
     stack_name: str,
     admin_email: str,
     region: str,
-    extra_params: tuple,
-    no_wait: bool,
+    extra_params: Optional[str],
+    wait: bool,
     make_public: bool,
 ) -> None:
     """Deploy a vertical-product pack to a fresh CloudFormation stack.
@@ -359,7 +424,7 @@ def deploy_pack_cmd(
 
         idp-feature-cli deploy-pack \\
             --from-code subscription-features/feature-platform/claims-pack \\
-            --artifacts-bucket <public-bucket> \\
+            --bucket-basename <public-bucket> \\
             --host-template-url <existing-host-url> \\
             --stack-name <name> \\
             --admin-email <email>
@@ -385,30 +450,17 @@ def deploy_pack_cmd(
         )
         sys.exit(1)
 
-    extras: dict[str, str] = {}
-    for kv in extra_params:
-        if "=" not in kv:
-            console.print(f"[red]✗ --parameter must be KEY=VALUE; got {kv!r}[/red]")
-            sys.exit(1)
-        k, v = kv.split("=", 1)
-        extras[k] = v
+    extras = _parse_parameters(extra_params)
 
     # ----- --from-code branch: publish first, derive wrapper_url -----
     if from_code:
-        if not artifacts_bucket:
-            # Mirror `idp-cli deploy --from-code`: auto-generate per-account
-            # bucket name and create it if missing. The naming convention
-            # matches what idp-cli uses so a single bucket can host both
-            # host-only deploys and pack deploys.
-            from .pack import ensure_artifacts_bucket
-
-            try:
-                artifacts_bucket = ensure_artifacts_bucket(
-                    region=region, console=console, make_public=make_public
-                )
-            except RuntimeError as exc:
-                console.print(f"[red]✗ {exc}[/red]")
-                sys.exit(1)
+        # Resolve the artifacts bucket the same way `idp-cli deploy --from-code`
+        # does: an explicit basename gets the region appended; when omitted, the
+        # per-account bucket is auto-generated and created if missing. A single
+        # bucket can host both host-only deploys and pack deploys.
+        artifacts_bucket = _resolve_bucket(
+            bucket_basename, region, make_public=make_public
+        )
 
         # Resolve source-dir for the host accelerator publish (when needed).
         if build_target in ("accelerator", "all"):
@@ -493,7 +545,7 @@ def deploy_pack_cmd(
             admin_email=admin_email,
             region=region,
             extra_parameters=extras,
-            wait=not no_wait,
+            wait=wait,
             console=console,
         )
     except RuntimeError as exc:
@@ -536,20 +588,21 @@ def deploy_pack_cmd(
     "(AWS_REGION / AWS_DEFAULT_REGION / profile), matching `idp-cli deploy`.",
 )
 @click.option(
-    "--feature-bucket",
+    "--bucket-basename",
     default=None,
     help="S3 bucket the feature artifacts live in (and that the feature stack "
-    "reads from). With --from-code, the publish target — defaults to the "
-    "per-account artifacts bucket `idp-accelerator-artifacts-<account>-<region>`, "
-    "auto-created if missing (same convention as `idp-cli deploy`). With "
-    "--template-url, the bucket is parsed from the URL host unless given here.",
+    "reads from). With --from-code, this is a basename — region is appended "
+    "automatically (matches `idp-cli deploy`) — and defaults to the per-account "
+    "artifacts bucket `idp-accelerator-artifacts-<account>-<region>`, auto-created "
+    "if not provided. With --template-url, an explicit value is the literal "
+    "bucket name (used as-is); otherwise the bucket is parsed from the URL host.",
 )
 @click.option(
     "--prefix",
     "s3_prefix",
     default="idp-cli",
     show_default=True,
-    help="Key prefix under --feature-bucket (used with --from-code). Final "
+    help="Key prefix under the feature bucket (used with --from-code). Final "
     "layout: <bucket>/<prefix>/extensions/<feature-id>/.",
 )
 @click.option(
@@ -571,7 +624,8 @@ def deploy_pack_cmd(
     help="Override the PermissionsBoundaryArn parameter.",
 )
 @click.option(
-    "--make-public",
+    "--public",
+    "make_public",
     is_flag=True,
     default=False,
     help="Upload artifacts with ACL=public-read (used with --from-code; see "
@@ -590,7 +644,7 @@ def deploy_cmd(
     template_url: Optional[str],
     host_stack_name: str,
     region: Optional[str],
-    feature_bucket: Optional[str],
+    bucket_basename: Optional[str],
     s3_prefix: str,
     stack_name: Optional[str],
     feature_display_name: Optional[str],
@@ -622,7 +676,7 @@ def deploy_cmd(
     """
     import boto3
 
-    from .pack import _describe_one, create_or_update_stack, ensure_artifacts_bucket
+    from .pack import _describe_one, create_or_update_stack
 
     # Mutex: exactly one source. Mirrors `deploy-pack` (--wrapper-url/--from-code).
     if from_code and template_url:
@@ -668,15 +722,12 @@ def deploy_cmd(
 
     # 2. Resolve (template_url, feature_bucket, feature_id, version) by mode.
     if from_code:
-        # Auto-derive + create the feature bucket if omitted.
-        if not feature_bucket:
-            try:
-                feature_bucket = ensure_artifacts_bucket(
-                    region=region, console=console, make_public=make_public
-                )
-            except RuntimeError as exc:
-                console.print(f"[red]✗ {exc}[/red]")
-                sys.exit(1)
+        # Resolve the publish target: explicit basename gets the region
+        # appended; when omitted, auto-generate + create the per-account
+        # bucket (matches `idp-cli deploy --from-code`).
+        feature_bucket = _resolve_bucket(
+            bucket_basename, region, make_public=make_public
+        )
 
         # Publish the feature (reuse FeaturePublisher — version-free + tokens baked).
         console.rule("[bold]Publishing feature…[/bold]")
@@ -701,13 +752,15 @@ def deploy_cmd(
         # required even though the template URL is explicit. Prefer the explicit
         # flag; else parse the bucket from the URL host (publish emits
         # https://<bucket>.s3.<region>.amazonaws.com/<key>).
+        # In this mode --bucket-basename (if given) is the literal bucket name
+        # backing the template URL, not a basename to suffix — an explicit value
+        # wins, else parse it from the URL host.
         feature_id, url_bucket = _parse_published_template_url(template_url)
-        if not feature_bucket:
-            feature_bucket = url_bucket
+        feature_bucket = bucket_basename or url_bucket
         if not feature_bucket:
             console.print(
                 "[red]✗ Could not determine the feature bucket from "
-                f"{template_url!r}. Pass --feature-bucket explicitly.[/red]"
+                f"{template_url!r}. Pass --bucket-basename explicitly.[/red]"
             )
             sys.exit(1)
         if not feature_id and not stack_name:
@@ -880,7 +933,7 @@ def init_cmd(
     console.print("    cd feature-ui && npm install && cd ..")
     console.print("    idp-feature-cli validate .")
     console.print("    idp-feature-cli build .")
-    console.print("    idp-feature-cli publish . --feature-bucket <bucket>")
+    console.print("    idp-feature-cli publish . --bucket-basename <bucket>")
 
 
 if __name__ == "__main__":

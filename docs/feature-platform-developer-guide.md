@@ -268,7 +268,7 @@ and on its not-yet-installed page. It's driven by the manifest/catalog
 ```bash
 idp-feature-cli build ./my-feature                     # build + validate the UMD UI bundle
 idp-feature-cli publish ./my-feature \                 # sam package + upload + latest.json + Launch URL
-    --feature-bucket <bucket> --region us-east-1
+    --bucket-basename <bucket> --region us-east-1        # region appended automatically (matches `idp-cli publish`)
 ```
 
 - **OSS**: artifacts ride along with the accelerator's normal `idp-cli publish`;
@@ -288,11 +288,11 @@ use `idp-feature-cli deploy` (the per-extension analogue of `idp-cli deploy`):
 idp-feature-cli deploy --from-code ./my-feature \
     --host-stack-name IDP-FeaturePlatform
 # --region defaults to the AWS session region (like `idp-cli deploy`)
-# --feature-bucket defaults to idp-accelerator-artifacts-<account>-<region>
+# --bucket-basename defaults to idp-accelerator-artifacts-<account>-<region>
 # --wait (opt-in) blocks until the feature stack reaches a terminal state
 
 # B) From an already-published template — no rebuild (the feature bucket is
-#    parsed from the URL unless --feature-bucket is given):
+#    parsed from the URL unless --bucket-basename is given):
 idp-feature-cli deploy \
     --template-url https://<bucket>.s3.<region>.amazonaws.com/extensions/<id>/template.yaml \
     --host-stack-name IDP-FeaturePlatform
@@ -334,7 +334,7 @@ to exercise the Subscribe → Install → Active flow without a real listing:
 2. Publish with simulator registration:
    ```bash
    idp-feature-cli publish ./my-feature \
-       --feature-bucket <bucket> --region us-east-1 \
+       --bucket-basename <bucket> --region us-east-1 \
        --register-with-simulator <simulator-endpoint> \
        --simulator-product-code <product-code>
    ```

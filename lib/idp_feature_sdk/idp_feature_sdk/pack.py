@@ -348,7 +348,7 @@ class PackPublisher:
                 f"take effect — most likely cause is account-level S3 "
                 f"Block Public Access. Disable BlockPublicPolicy + "
                 f"RestrictPublicBuckets at the account level, or pass "
-                f"--artifacts-bucket pointing at a bucket where you "
+                f"--bucket-basename pointing at a bucket where you "
                 f"control BPA."
             ) from exc
         except Exception as exc:
@@ -872,7 +872,7 @@ def ensure_artifacts_bucket(
             f"PutPublicAccessBlock — the change didn't stick. This usually means the "
             f"AWS account has account-level S3 Block Public Access enabled. Disable "
             f"those settings on account 's3control put-public-access-block', or pass "
-            f"--artifacts-bucket pointing at a bucket where you control the BPA."
+            f"--bucket-basename pointing at a bucket where you control the BPA."
         )
 
     # Set or merge the public-prefix bucket policy.
