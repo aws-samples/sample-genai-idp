@@ -33,24 +33,3 @@ features: []
   #   # <version> subfolder from its baked FEATURE_VERSION, so no version-bearing
   #   # value is stored as a (stale-able) CloudFormation parameter.
   #   templateKey: "extensions/my-paid-extension/template.yaml"
-  - featureId: idp-monitor
-    displayName: "IDP Monitor"
-    description: "Real-time monitoring dashboard: volume, latency, cost, failures, throttles, document types, and AI-powered insights."
-    iconUrl: ""
-    productCode: "prod-idp-monitor"
-    marketplaceListingUrl: "https://aws.amazon.com/marketplace/pp/REPLACE-idp-monitor"
-    sellerBucket: "idp-accelerator-artifacts-912625584728-us-west-2"
-    sellerBucketRegion: "us-west-2"
-    latestVersion: "0.1.20"
-    templateKey: "extensions/idp-monitor/template.yaml"
-
-  - featureId: idp-autotune
-    displayName: "IDP AutoTune"
-    description: "Autonomous configuration optimization: a Bedrock AgentCore agent iteratively tunes extraction/classification/OCR settings within a per-page cost budget."
-    iconUrl: ""
-    productCode: "prod-idp-autotune"
-    marketplaceListingUrl: "https://aws.amazon.com/marketplace/pp/REPLACE-idp-autotune"
-    sellerBucket: "idp-accelerator-artifacts-912625584728-us-west-2"
-    sellerBucketRegion: "us-west-2"
-    latestVersion: "0.1.2-fix2"
-    templateKey: "extensions/idp-autotune/template.yaml"
