@@ -34,11 +34,13 @@ def _preload(
     *,
     table_name="",
     default_customer="CUST-default",
+    buyer_account="111122223333",
     source_tag="simulator",
     configuration_bucket="",
 ):
     monkeypatch.setenv("INSTALLED_FEATURES_TABLE", table_name)
     monkeypatch.setenv("DEFAULT_CUSTOMER_IDENTIFIER", default_customer)
+    monkeypatch.setenv("DEFAULT_BUYER_ACCOUNT_ID", buyer_account)
     monkeypatch.setenv("SIMULATOR_SOURCE_TAG", source_tag)
     monkeypatch.setenv("CONFIGURATION_BUCKET", configuration_bucket)
     monkeypatch.setenv("CATALOG_KEY", _CATALOG_KEY)
@@ -63,17 +65,24 @@ def _stub(
     *,
     expected_product="prod123",
     expected_customer="CUST-default",
+    expected_account=None,
 ):
-    """Inject a Stubber against the module's boto3 client and seed a response."""
+    """Inject a Stubber against the module's boto3 client and seed a response.
+
+    Pass `expected_account` to assert the buyer-account filter
+    (CUSTOMER_AWS_ACCOUNT_ID) instead of the CUSTOMER_IDENTIFIER filter.
+    """
     client = mod._client()
     stubber = Stubber(client)
+    filt = (
+        {"CUSTOMER_AWS_ACCOUNT_ID": [expected_account]}
+        if expected_account is not None
+        else {"CUSTOMER_IDENTIFIER": [expected_customer]}
+    )
     stubber.add_response(
         "get_entitlements",
         {"Entitlements": entitlements or []},
-        {
-            "ProductCode": expected_product,
-            "Filter": {"CUSTOMER_IDENTIFIER": [expected_customer]},
-        },
+        {"ProductCode": expected_product, "Filter": filt},
     )
     stubber.activate()
     return stubber
@@ -154,31 +163,42 @@ def test_none_when_no_customer_identifier_marketplace_mode(
     assert result["source"] == "marketplace"
 
 
-def test_synthesized_customer_identifier_simulator_mode(
+def test_missing_customer_identifier_filters_by_buyer_account_simulator_mode(
     monkeypatch, load_lambda, installed_features_table
 ):
-    """Simulator mode: missing CustomerIdentifier falls back to 'cust-idp-default'
-    and calls GetEntitlements against it."""
+    """Simulator mode: with no CustomerIdentifier, GetEntitlements is filtered by
+    the buyer AWS account (the deterministic key shared with subscribe) — NOT a
+    synthesized customer id. The resolved customer id is echoed from the matched
+    entitlement."""
     _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
     mod = _preload(
         monkeypatch,
         load_lambda,
         table_name=installed_features_table,
         default_customer="",
+        buyer_account="111122223333",
         source_tag="simulator",
     )
+    future = datetime.now(timezone.utc) + timedelta(days=30)
     _stub(
         mod,
-        entitlements=[],
+        entitlements=[
+            {
+                "ProductCode": "prod123",
+                "CustomerIdentifier": "cust-62c036d80d5c",
+                "ExpirationDate": future,
+            }
+        ],
         expected_product="prod123",
-        expected_customer="cust-idp-default",
+        expected_account="111122223333",
     )
     result = mod.handler(
         make_appsync_event("checkFeatureEntitlement", {"featureId": "docs-by-status"}),
         None,
     )
-    assert result["state"] == "NONE"
-    assert result["customerIdentifier"] == "cust-idp-default"
+    assert result["state"] == "ACTIVE"
+    # Customer id is echoed from the matched entitlement (looked up by account).
+    assert result["customerIdentifier"] == "cust-62c036d80d5c"
     assert result["productCode"] == "prod123"
     assert result["source"] == "simulator"
 

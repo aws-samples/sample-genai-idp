@@ -33,6 +33,9 @@ Environment:
     INSTALLED_FEATURES_TABLE   DynamoDB table holding installed-feature rows
                                (productCode per featureId, baked from the manifest).
     DEFAULT_CUSTOMER_IDENTIFIER  (optional) fallback customer identifier
+    DEFAULT_BUYER_ACCOUNT_ID   buyer AWS account used as the GetEntitlements
+                               filter when no CustomerIdentifier is available
+                               (the deterministic key shared with subscribeFeature).
     SIMULATOR_SOURCE_TAG       "auto" | "simulator" | "marketplace"
     CONFIGURATION_BUCKET       (optional) bucket holding catalog.json; used to
                                detect OSS features. Blank disables the OSS check.
@@ -54,6 +57,7 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 _DEFAULT_CUSTOMER_IDENTIFIER = os.environ.get("DEFAULT_CUSTOMER_IDENTIFIER", "")
+_DEFAULT_BUYER_ACCOUNT_ID = os.environ.get("DEFAULT_BUYER_ACCOUNT_ID", "111122223333")
 _SOURCE_TAG = os.environ.get("SIMULATOR_SOURCE_TAG", "marketplace")
 _CONFIGURATION_BUCKET = os.environ.get("CONFIGURATION_BUCKET", "")
 _CATALOG_KEY = os.environ.get("CATALOG_KEY", "config_library/catalog.json")
@@ -159,15 +163,29 @@ def _resolve_customer_identifier(event: Dict[str, Any]) -> Optional[str]:
 
 
 def _get_entitlements(
-    product_code: str, customer_identifier: str
+    product_code: str,
+    *,
+    customer_identifier: Optional[str] = None,
+    customer_aws_account_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
+    """Call GetEntitlements filtered by customer identifier OR buyer AWS account.
+
+    The two filters are mutually exclusive (per the real API). When the caller
+    has a concrete CustomerIdentifier (Marketplace header / configured default)
+    we filter by it; otherwise we filter by the buyer AWS account, which is the
+    deterministic key both subscribe and check share in simulator mode (the
+    simulator mints a random CustomerIdentifier per subscribe, so the account is
+    the only id known on both sides ahead of time).
+    """
     client = _client()
-    # Filters per the real GetEntitlements API: CUSTOMER_IDENTIFIER is a list of values.
+    if customer_identifier:
+        filt = {"CUSTOMER_IDENTIFIER": [customer_identifier]}
+    elif customer_aws_account_id:
+        filt = {"CUSTOMER_AWS_ACCOUNT_ID": [customer_aws_account_id]}
+    else:
+        return []
     try:
-        resp = client.get_entitlements(
-            ProductCode=product_code,
-            Filter={"CUSTOMER_IDENTIFIER": [customer_identifier]},
-        )
+        resp = client.get_entitlements(ProductCode=product_code, Filter=filt)
     except (ClientError, BotoCoreError) as exc:
         logger.warning("GetEntitlements failed for product %s: %s", product_code, exc)
         return []
@@ -296,13 +314,23 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "source": "none",
             }
 
+    # Resolve who to look up. A concrete CustomerIdentifier (Marketplace header
+    # or configured default) wins. Otherwise — the common simulator case — fall
+    # back to the buyer AWS account, the deterministic key shared with
+    # subscribe_feature: the simulator mints a RANDOM CustomerIdentifier per
+    # subscribe, so the account is the only id both sides know ahead of time.
+    # GetEntitlements(CUSTOMER_AWS_ACCOUNT_ID) resolves it to whatever the
+    # subscription recorded. (In simulator mode the buyer account always has a
+    # value; in real-Marketplace mode without a header/default we return NONE.)
     customer_identifier = _resolve_customer_identifier(event)
+    account_filter = None
     if not customer_identifier:
-        if _SOURCE_TAG == "simulator":
-            customer_identifier = "cust-idp-default"
+        if _SOURCE_TAG == "simulator" and _DEFAULT_BUYER_ACCOUNT_ID:
+            account_filter = _DEFAULT_BUYER_ACCOUNT_ID
             logger.info(
-                "No CustomerIdentifier provided; using default %r for simulator mode.",
-                customer_identifier,
+                "No CustomerIdentifier provided; filtering by buyer AWS account "
+                "%r for simulator mode.",
+                account_filter,
             )
         else:
             logger.info(
@@ -318,14 +346,24 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "source": _SOURCE_TAG,
             }
 
-    entitlements = _get_entitlements(product_code, customer_identifier)
+    entitlements = _get_entitlements(
+        product_code,
+        customer_identifier=customer_identifier,
+        customer_aws_account_id=account_filter,
+    )
     evaluated = _evaluate(entitlements)
+
+    # Echo back the resolved customer identifier from the matched entitlement
+    # when we looked up by account (so the UI can display it).
+    resolved_cid = customer_identifier
+    if resolved_cid is None and entitlements:
+        resolved_cid = entitlements[0].get("CustomerIdentifier")
 
     return {
         "featureId": feature_id,
         "state": evaluated["state"],
         "expiresAt": evaluated["expiresAt"],
-        "customerIdentifier": customer_identifier,
+        "customerIdentifier": resolved_cid,
         "productCode": product_code,
         "source": _SOURCE_TAG,
     }

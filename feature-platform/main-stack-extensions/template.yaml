@@ -440,6 +440,10 @@ Resources:
           # from the manifest at install) — no per-feature host configuration.
           INSTALLED_FEATURES_TABLE: !Ref InstalledFeaturesTable
           DEFAULT_CUSTOMER_IDENTIFIER: !Ref DefaultCustomerIdentifier
+          # Buyer AWS account — the deterministic GetEntitlements filter shared
+          # with subscribeFeature when no explicit CustomerIdentifier is present
+          # (the simulator mints a random CustomerIdentifier per subscribe).
+          DEFAULT_BUYER_ACCOUNT_ID: !Ref DefaultBuyerAccountId
           SIMULATOR_SOURCE_TAG: !Ref SubscriptionMode
           AWS_ENDPOINT_URL_MARKETPLACE_ENTITLEMENT_SERVICE: !Ref SimulatorEntitlementEndpoint
           # Catalog lookup: OSS features short-circuit to ACTIVE (install-direct,
