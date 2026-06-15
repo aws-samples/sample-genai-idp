@@ -1,13 +1,14 @@
 """End-to-end tests for FeaturePublisher against a moto-mocked S3.
 
 Asserts the VERSION-FREE layout (identical to the bundled publisher in
-idp_sdk/_core/publish.py):
+idp_sdk/_core/publish.py). The default prefix is EMPTY, so the layout is the
+bare `extensions/<id>/...` the catalog's `templateKey` records:
 
-    <prefix>/extensions/<id>/template.yaml          # version-free, both tokens baked
-    <prefix>/extensions/<id>/latest.json            # version-free pointer
-    <prefix>/extensions/<id>/<version>/ui-bundle.js
-    <prefix>/extensions/<id>/<version>/manifest.json
-    <prefix>/extensions/<id>/<version>/sha256.txt
+    [<prefix>/]extensions/<id>/template.yaml        # version-free, both tokens baked
+    [<prefix>/]extensions/<id>/latest.json          # version-free pointer
+    [<prefix>/]extensions/<id>/<version>/ui-bundle.js
+    [<prefix>/]extensions/<id>/<version>/manifest.json
+    [<prefix>/]extensions/<id>/<version>/sha256.txt
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from idp_feature_sdk import FeaturePublisher
 
 _FEATURE_ID = "demo-feature"
 _VERSION = "1.2.3"
-_BASE = f"features/extensions/{_FEATURE_ID}"  # default s3_prefix="features"
+_BASE = f"extensions/{_FEATURE_ID}"  # default s3_prefix="" → no leading segment
 _VERSION_PREFIX = f"{_BASE}/{_VERSION}"
 
 
@@ -49,6 +50,24 @@ def test_publish_uploads_version_free_layout(
     assert f"{_VERSION_PREFIX}/sha256.txt" in keys
     # No object carries the version in the template's key.
     assert f"{_VERSION_PREFIX}/template.yaml" not in keys
+    # Default prefix is empty → bare `extensions/...`, no leading slash.
+    assert all(not k.startswith("/") for k in keys)
+    assert not any(k.startswith("features/") for k in keys)
+
+
+def test_explicit_prefix_joins_cleanly(
+    demo_feature_project: Path, feature_bucket: str
+) -> None:
+    """A non-empty --prefix becomes `<prefix>/extensions/...` with a single
+    separator; a stray trailing slash never yields `//`."""
+    result = FeaturePublisher(demo_feature_project).publish(
+        feature_bucket=feature_bucket, region="us-east-1", s3_prefix="features/"
+    )
+    keys = _keys(feature_bucket)
+    base = f"features/extensions/{_FEATURE_ID}"
+    assert f"{base}/template.yaml" in keys
+    assert result.template_url.endswith(f"{base}/template.yaml")
+    assert not any("//" in k for k in keys)
 
 
 def test_both_tokens_baked_into_template(

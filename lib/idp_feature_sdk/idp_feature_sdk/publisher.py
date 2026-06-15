@@ -7,11 +7,14 @@ Publishes one version of a feature to the feature bucket in the VERSION-FREE
 layout the main-stack Lambdas expect (identical to the bundled publisher,
 idp_sdk/_core/publish.py):
 
-    s3://<feature-bucket>/<prefix>/extensions/<id>/template.yaml   # version-free
-    s3://<feature-bucket>/<prefix>/extensions/<id>/latest.json     # version-free
-    s3://<feature-bucket>/<prefix>/extensions/<id>/<version>/ui-bundle.js
-    s3://<feature-bucket>/<prefix>/extensions/<id>/<version>/manifest.json
-    s3://<feature-bucket>/<prefix>/extensions/<id>/<version>/sha256.txt
+    s3://<feature-bucket>/[<prefix>/]extensions/<id>/template.yaml   # version-free
+    s3://<feature-bucket>/[<prefix>/]extensions/<id>/latest.json     # version-free
+    s3://<feature-bucket>/[<prefix>/]extensions/<id>/<version>/ui-bundle.js
+    s3://<feature-bucket>/[<prefix>/]extensions/<id>/<version>/manifest.json
+    s3://<feature-bucket>/[<prefix>/]extensions/<id>/<version>/sha256.txt
+
+The `<prefix>` is optional (default empty): with no prefix the layout is the bare
+`extensions/<id>/...` the catalog's `templateKey` records.
 
 The template is version-free (newest publish overwrites it); both the version
 and the artifact base prefix are BAKED into the template at publish time
@@ -141,7 +144,7 @@ class FeaturePublisher:
         *,
         feature_bucket: str,
         region: str = "us-east-1",
-        s3_prefix: str = "features",
+        s3_prefix: str = "",
         make_public: bool = False,
         register_with_simulator: Optional[str] = None,
         simulator_product_code: Optional[str] = None,
@@ -160,7 +163,17 @@ class FeaturePublisher:
         # parameters — the CFN console "Update stack" wizard drops parameters on
         # a template change, which previously left an empty prefix and a
         # `s3://bucket//<version>/...` bad key.
-        extension_base = f"{s3_prefix}/extensions/{manifest.featureId}"
+        #
+        # The prefix is OPTIONAL: an empty/blank prefix yields the bare
+        # `extensions/<id>/...` layout the catalog's `templateKey` convention
+        # expects (no leading segment, no leading slash). A non-empty prefix is
+        # joined with a single separator (no `//` from a trailing slash).
+        clean_prefix = s3_prefix.strip("/")
+        extension_base = (
+            f"{clean_prefix}/extensions/{manifest.featureId}"
+            if clean_prefix
+            else f"extensions/{manifest.featureId}"
+        )
         version_prefix = f"{extension_base}/{manifest.version}/"
         latest_key = f"{extension_base}/latest.json"
 

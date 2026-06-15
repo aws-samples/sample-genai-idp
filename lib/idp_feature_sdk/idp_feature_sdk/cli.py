@@ -126,7 +126,14 @@ def build(project_dir: Path) -> None:
     "provided). Matches `idp-cli publish`.",
 )
 @click.option("--region", default="us-east-1", show_default=True)
-@click.option("--prefix", "s3_prefix", default="features", show_default=True)
+@click.option(
+    "--prefix",
+    "s3_prefix",
+    default="",
+    help="Optional S3 key prefix under the bucket. Default (empty) yields the "
+    "bare `extensions/<id>/...` layout that the catalog's `templateKey` "
+    "expects; a non-empty prefix becomes `<prefix>/extensions/<id>/...`.",
+)
 @click.option(
     "--public",
     "make_public",
