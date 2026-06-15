@@ -180,6 +180,15 @@ Parameters:
       step reads the same row. Leave blank to disable the
       registerFeatureHooks resolvers (vertical-product packs only).
 
+  ReportingBucketName:
+    Type: String
+    Default: ''
+    Description: Name of the host's Reporting bucket (analytics/Athena results
+      and reporting data). Re-exported as `<MainStackName>-ReportingBucketName`
+      (and `-ReportingBucketArn`) so feature stacks that read reporting data or
+      write Athena query results (e.g. idp-monitor) can grant themselves scoped
+      s3 access. Leave blank to skip the export.
+
   ConfigurationBucketName:
     Type: String
     Default: ''
@@ -213,6 +222,7 @@ Conditions:
 
   HasConfigurationTable: !Not [!Equals [!Ref ConfigurationTableName, '']]
   HasConfigurationBucket: !Not [!Equals [!Ref ConfigurationBucketName, '']]
+  HasReportingBucket: !Not [!Equals [!Ref ReportingBucketName, '']]
   HasOutputBucket: !Not [!Equals [!Ref OutputBucketName, '']]
   HasWorkingBucket: !Not [!Equals [!Ref WorkingBucketName, '']]
   HasDiscoveryBucket: !Not [!Equals [!Ref DiscoveryBucketName, '']]
@@ -914,4 +924,55 @@ Outputs:
     Value: !Ref DiscoveryBucketName
     Export:
       Name: !Sub '${MainStackName}-DiscoveryBucketName'
+
+  TrackingTableArn:
+    Description: >-
+      ARN of the main stack's TrackingTable, constructed from the table name
+      (the parent passes only the name). Feature stacks that scan/query
+      document state (e.g. idp-monitor) import this to scope
+      dynamodb:Scan/Query/GetItem on the table and its indexes
+      (`<arn>/index/*`).
+    Value: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TrackingTableName}'
+    Export:
+      Name: !Sub '${MainStackName}-TrackingTableArn'
+
+  ConfigurationTableName:
+    Condition: HasConfigurationTable
+    Description: >-
+      Re-export of the main stack's ConfigurationTable name. Feature stacks
+      that read host configuration (e.g. idp-monitor) import this to scope
+      dynamodb:Query/GetItem/Scan on the table.
+    Value: !Ref ConfigurationTableName
+    Export:
+      Name: !Sub '${MainStackName}-ConfigurationTableName'
+
+  ConfigurationTableArn:
+    Condition: HasConfigurationTable
+    Description: >-
+      ARN of the main stack's ConfigurationTable, constructed from the table
+      name (the parent passes only the name). Feature stacks import this to
+      scope dynamodb access on the configuration table.
+    Value: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigurationTableName}'
+    Export:
+      Name: !Sub '${MainStackName}-ConfigurationTableArn'
+
+  ReportingBucketName:
+    Condition: HasReportingBucket
+    Description: >-
+      Re-export of the main stack's Reporting bucket name. Feature stacks that
+      read reporting/analytics data or write Athena query results (e.g.
+      idp-monitor) import this to scope s3 access.
+    Value: !Ref ReportingBucketName
+    Export:
+      Name: !Sub '${MainStackName}-ReportingBucketName'
+
+  ReportingBucketArn:
+    Condition: HasReportingBucket
+    Description: >-
+      ARN of the main stack's Reporting bucket, constructed from the bucket
+      name. Feature stacks import this to scope s3:GetObject/ListBucket on
+      reporting data and s3:PutObject on `athena-results/*`.
+    Value: !Sub 'arn:${AWS::Partition}:s3:::${ReportingBucketName}'
+    Export:
+      Name: !Sub '${MainStackName}-ReportingBucketArn'
 

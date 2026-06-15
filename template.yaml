@@ -2791,6 +2791,14 @@ Resources:
         # host's Rules Discovery flow (sample-health-insurance-review) know where
         # uploadDiscoveryDocument presigns uploads.
         DiscoveryBucketName: !Ref DiscoveryBucket
+        # Reporting bucket name re-exported (as name + ARN) so feature stacks
+        # that read reporting/analytics data or write Athena query results
+        # (e.g. idp-monitor) can grant themselves scoped s3 access. Mirrors the
+        # bucket-or-name selection used elsewhere for the Reporting bucket.
+        ReportingBucketName: !If
+          - ShouldCreateReportingBucket
+          - !Ref ReportingBucket
+          - !Ref ReportingBucketName
 
         # Region of the artifacts bucket (= this stack's region), used to build
         # the bare OSS feature template URL in getFeatureLaunchUrl.
