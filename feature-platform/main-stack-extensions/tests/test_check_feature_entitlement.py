@@ -6,11 +6,15 @@ to programme the boto3 client inside the module after import.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
+import boto3
 import pytest
 from _helpers import make_appsync_event
 from botocore.stub import Stubber
+
+_CATALOG_KEY = "config_library/catalog.json"
 
 
 def _preload(
@@ -20,15 +24,26 @@ def _preload(
     product_map='{"docs-by-status":"prod123"}',
     default_customer="CUST-default",
     source_tag="simulator",
+    configuration_bucket="",
 ):
     monkeypatch.setenv("FEATURE_PRODUCT_CODE_MAP", product_map)
     monkeypatch.setenv("DEFAULT_CUSTOMER_IDENTIFIER", default_customer)
     monkeypatch.setenv("SIMULATOR_SOURCE_TAG", source_tag)
+    monkeypatch.setenv("CONFIGURATION_BUCKET", configuration_bucket)
+    monkeypatch.setenv("CATALOG_KEY", _CATALOG_KEY)
     monkeypatch.setenv("LOG_LEVEL", "DEBUG")
     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
     return load_lambda("check_feature_entitlement")
+
+
+def _put_catalog(bucket: str, features: list) -> None:
+    boto3.client("s3", region_name="us-east-1").put_object(
+        Bucket=bucket,
+        Key=_CATALOG_KEY,
+        Body=json.dumps({"schemaVersion": "1.0", "features": features}).encode("utf-8"),
+    )
 
 
 def _stub(
@@ -296,6 +311,67 @@ def test_malformed_env_var_map_falls_back_to_empty(monkeypatch, load_lambda):
     )
     result = mod.handler(
         make_appsync_event("checkFeatureEntitlement", {"featureId": "docs-by-status"}),
+        None,
+    )
+    assert result["state"] == "NONE"
+    assert result["source"] == "none"
+
+
+def test_oss_feature_short_circuits_to_active_marketplace_mode(
+    monkeypatch, mock_stack, load_lambda
+):
+    """OSS catalog features have no Marketplace contract — even with a simulator/
+    Marketplace endpoint configured (source_tag=marketplace), they short-circuit
+    to ACTIVE so the UI shows the Install prompt, not 'Subscription required'.
+    No entitlement client is constructed for the OSS path."""
+    bucket = mock_stack["bucket"]
+    _put_catalog(
+        bucket,
+        [{"featureId": "docs-by-status", "source": "oss", "latestVersion": "1.0.0"}],
+    )
+    # No product code mapped — marketplace mode would otherwise return NONE.
+    mod = _preload(
+        monkeypatch,
+        load_lambda,
+        product_map="{}",
+        source_tag="marketplace",
+        configuration_bucket=bucket,
+    )
+    result = mod.handler(
+        make_appsync_event("checkFeatureEntitlement", {"featureId": "docs-by-status"}),
+        None,
+    )
+    assert result == {
+        "featureId": "docs-by-status",
+        "state": "ACTIVE",
+        "expiresAt": None,
+        "customerIdentifier": None,
+        "productCode": None,
+        "source": "oss",
+    }
+    # Contract: the OSS path never touches the marketplace-entitlement client.
+    assert mod._entitlement_client is None
+
+
+def test_marketplace_feature_still_gated_when_catalog_present(
+    monkeypatch, mock_stack, load_lambda
+):
+    """A catalog entry with source=marketplace does NOT short-circuit — the
+    entitlement check still runs (here: unmapped product code → NONE)."""
+    bucket = mock_stack["bucket"]
+    _put_catalog(
+        bucket,
+        [{"featureId": "idp-monitor", "source": "marketplace", "latestVersion": "1.0"}],
+    )
+    mod = _preload(
+        monkeypatch,
+        load_lambda,
+        product_map="{}",
+        source_tag="marketplace",
+        configuration_bucket=bucket,
+    )
+    result = mod.handler(
+        make_appsync_event("checkFeatureEntitlement", {"featureId": "idp-monitor"}),
         None,
     )
     assert result["state"] == "NONE"

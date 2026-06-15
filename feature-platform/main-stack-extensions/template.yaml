@@ -445,6 +445,10 @@ Resources:
           DEFAULT_CUSTOMER_IDENTIFIER: !Ref DefaultCustomerIdentifier
           SIMULATOR_SOURCE_TAG: !Ref SubscriptionMode
           AWS_ENDPOINT_URL_MARKETPLACE_ENTITLEMENT_SERVICE: !Ref SimulatorEntitlementEndpoint
+          # Catalog lookup: OSS features short-circuit to ACTIVE (install-direct,
+          # no entitlement). Mirrors GetFeatureLaunchUrlFunction.
+          CONFIGURATION_BUCKET: !Ref ConfigurationBucketName
+          CATALOG_KEY: !Ref CatalogKey
           LOG_LEVEL: !Ref LogLevel
 
   # Admin-only Mutation resolvers that POST to the simulator's admin API to
