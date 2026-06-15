@@ -148,18 +148,49 @@ def test_marketplace_mode_uses_install_row_listing_url(
     assert result["source"] == "marketplace"
 
 
+def test_simulator_endpoint_wins_over_install_listing_url(
+    monkeypatch, load_lambda, installed_features_table
+):
+    """Regression: when a simulator endpoint is configured it is authoritative —
+    redirect to the simulator product page, NOT the feature's (possibly
+    placeholder) real-Marketplace listing URL from the install row."""
+    _seed_row(
+        installed_features_table,
+        "docs-by-status",
+        product_code="prod123",
+        listing_url="https://aws.amazon.com/marketplace/pp/REPLACE-docs-by-status",
+    )
+    mod = _preload(
+        monkeypatch,
+        load_lambda,
+        table_name=installed_features_table,
+        source_tag="marketplace",
+        simulator_endpoint="http://sim.example.com",
+    )
+    result = mod.handler(
+        make_appsync_event(
+            "subscribeFeature", {"featureId": "docs-by-status"}, groups=["Admin"]
+        ),
+        None,
+    )
+    assert result["marketplaceUrl"].startswith(
+        "http://sim.example.com/marketplace/pp/prod123"
+    )
+    assert "REPLACE-docs-by-status" not in result["marketplaceUrl"]
+
+
 def test_marketplace_mode_requires_listing_url(
     monkeypatch, load_lambda, installed_features_table
 ):
-    """Marketplace mode, row has productCode but no listing URL AND no simulator
-    fallback → raises."""
+    """No simulator endpoint AND no listing URL on the install row → raises
+    (true-production feature published without marketplace.listingUrl)."""
     _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
     mod = _preload(
         monkeypatch,
         load_lambda,
         table_name=installed_features_table,
         source_tag="marketplace",
-        simulator_endpoint="",  # no simulator fallback
+        simulator_endpoint="",  # production: no simulator
     )
     with pytest.raises(mod.SubscribeError, match="listing URL"):
         mod.handler(
@@ -211,10 +242,11 @@ def test_missing_feature_id(monkeypatch, load_lambda, installed_features_table):
         )
 
 
-def test_missing_simulator_endpoint_in_simulator_mode(
+def test_no_endpoint_and_no_listing_url_raises(
     monkeypatch, load_lambda, installed_features_table
 ):
-    """Simulator mode + no endpoint → SubscribeError (can't build URL)."""
+    """No simulator endpoint and no listing URL on the row → SubscribeError
+    (can't build a redirect URL either way)."""
     _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
     mod = _preload(
         monkeypatch,
@@ -222,7 +254,7 @@ def test_missing_simulator_endpoint_in_simulator_mode(
         table_name=installed_features_table,
         simulator_endpoint="",
     )
-    with pytest.raises(mod.SubscribeError, match="SIMULATOR_ADMIN_ENDPOINT"):
+    with pytest.raises(mod.SubscribeError, match="listing URL"):
         mod.handler(
             make_appsync_event(
                 "subscribeFeature", {"featureId": "docs-by-status"}, groups=["Admin"]

@@ -224,32 +224,29 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     return_url = _resolve_return_url(event, feature_id)
 
     # Build the URL the UI should redirect to.
-    if _SOURCE_TAG == "marketplace":
-        marketplace_url = installed_listing_url
-        if not marketplace_url:
-            # Allow fallback to a simulator endpoint if one is configured — useful
-            # for staged rollouts where a feature is being tested with the
-            # simulator while others are live.
-            if not _SIMULATOR_ADMIN_ENDPOINT:
-                raise SubscribeError(
-                    f"No marketplace listing URL for feature {feature_id!r}. "
-                    f"Publish the feature with marketplace.listingUrl set in "
-                    f"feature.yaml and reinstall."
-                )
-            marketplace_url = _build_simulator_url(
-                product_code=product_code,
-                offer_id=_FEATURE_OFFER_ID_MAP.get(feature_id),
-                feature_id=feature_id,
-                buyer_account_id=_DEFAULT_BUYER_ACCOUNT_ID,
-                return_url=return_url,
-            )
-    else:
+    #
+    # A configured simulator endpoint is AUTHORITATIVE: when one is set, the host
+    # is in simulator/dev mode for ALL features and we redirect to the simulator's
+    # product page — matching check_feature_entitlement, which points boto3 at the
+    # same endpoint for every feature (no per-feature simulator-vs-real split).
+    # The feature's real AWS Marketplace listing URL (from its install row) is
+    # used only in true production, where there is NO simulator endpoint.
+    if _SIMULATOR_ADMIN_ENDPOINT:
         marketplace_url = _build_simulator_url(
             product_code=product_code,
             offer_id=_FEATURE_OFFER_ID_MAP.get(feature_id),
             feature_id=feature_id,
             buyer_account_id=_DEFAULT_BUYER_ACCOUNT_ID,
             return_url=return_url,
+        )
+    elif installed_listing_url:
+        marketplace_url = installed_listing_url
+    else:
+        raise SubscribeError(
+            f"No simulator endpoint and no marketplace listing URL for feature "
+            f"{feature_id!r}. Configure FeaturePlatformSimulatorEndpoint, or "
+            f"publish the feature with marketplace.listingUrl set in feature.yaml "
+            f"and reinstall."
         )
 
     logger.info(
