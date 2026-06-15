@@ -221,8 +221,16 @@ features:
     sellerBucket: "<your-private-seller-bucket>"
     sellerBucketRegion: "us-east-1"
     latestVersion: "0.1.0"
-    templateKey: "features/my-feature/v0.1.0/template.yaml"
+    templateKey: "extensions/my-feature/template.yaml"   # version-free; overwritten each publish
 ```
+
+`templateKey` is **version-free**: each publish overwrites
+`extensions/<id>/template.yaml`, and its directory `extensions/<id>` is the
+version-free base the host passes to the feature stack as `FeatureArtifactPrefix`.
+Versioned artifacts (UI bundle, config preset, agent source) live under
+`extensions/<id>/<version>/`; the stack derives the `<version>` subfolder from its
+baked `FEATURE_VERSION`, so no version-bearing value is stored as a stale-able CFN
+parameter.
 
 The host's seller-bucket access also requires:
 - the seller bucket's **bucket policy** grants the host's feature-platform role
