@@ -56,15 +56,23 @@ idp-feature-cli publish ./my-feature \
     --register-with-simulator http://127.0.0.1:8080 \
     --simulator-product-code prod-docs-by-status
 
-# Publish AND install one feature into a RUNNING host stack (per-extension
-# analogue of `idp-cli deploy`). Publishes the feature, then create-or-updates
-# its feature CloudFormation stack against the named host stack — the same
-# stack a console install creates, so re-running it upgrades in place.
-idp-feature-cli deploy ./my-feature \
+# Install one feature into a RUNNING host stack (per-extension analogue of
+# `idp-cli deploy`). Two modes, mirroring `idp-cli deploy`:
+#
+#   A) --from-code: publish from source, then create-or-update the feature's
+#      CloudFormation stack — the same stack a console install creates, so
+#      re-running it upgrades in place.
+idp-feature-cli deploy --from-code ./my-feature \
     --host-stack-name IDP-FeaturePlatform
     # --region defaults to the AWS session region (like `idp-cli deploy`)
     # --feature-bucket defaults to idp-accelerator-artifacts-<account>-<region>
     # --wait (opt-in) blocks until the stack reaches a terminal state
+#
+#   B) --template-url: deploy an ALREADY-published template (no rebuild). The
+#      feature bucket is parsed from the URL unless --feature-bucket is given.
+idp-feature-cli deploy \
+    --template-url https://<bucket>.s3.<region>.amazonaws.com/extensions/<id>/template.yaml \
+    --host-stack-name IDP-FeaturePlatform
 
 # Inspect the manifest schema
 idp-feature-cli show-schema
@@ -75,7 +83,7 @@ idp-feature-cli show-schema
 | Command       | What it does                                                                 |
 |---------------|------------------------------------------------------------------------------|
 | `publish`     | Uploads artifacts to S3; prints a Launch Stack URL. Does **not** touch CFN.  |
-| `deploy`      | `publish` + create-or-update **this feature's** stack into an existing host. |
+| `deploy`      | Create-or-update **this feature's** stack into an existing host — either `--from-code` (publish first) or `--template-url` (already published). |
 | `deploy-pack` | Deploys a self-contained *pack* that stands up its **own** host stack.       |
 
 `deploy` is the fast inner loop for iterating one extension from source against

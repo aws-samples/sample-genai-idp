@@ -284,20 +284,32 @@ without redeploying the whole accelerator or clicking the console Launch URL —
 use `idp-feature-cli deploy` (the per-extension analogue of `idp-cli deploy`):
 
 ```bash
-idp-feature-cli deploy ./my-feature \
+# A) From source — publish then deploy (the inner dev loop):
+idp-feature-cli deploy --from-code ./my-feature \
     --host-stack-name IDP-FeaturePlatform
 # --region defaults to the AWS session region (like `idp-cli deploy`)
 # --feature-bucket defaults to idp-accelerator-artifacts-<account>-<region>
 # --wait (opt-in) blocks until the feature stack reaches a terminal state
+
+# B) From an already-published template — no rebuild (the feature bucket is
+#    parsed from the URL unless --feature-bucket is given):
+idp-feature-cli deploy \
+    --template-url https://<bucket>.s3.<region>.amazonaws.com/extensions/<id>/template.yaml \
+    --host-stack-name IDP-FeaturePlatform
 ```
 
-> Requires the **AWS SAM CLI** (`sam`) on `PATH`: both `publish` and `deploy`
-> run `sam build` + `sam package` to rewrite the template's Lambda `CodeUri:`
-> paths to `s3://...` (CloudFormation runs the SAM transform server-side when
-> deploying via TemplateURL and rejects local paths).
+`--from-code` and `--template-url` are mutually exclusive (mirroring
+`idp-cli deploy`'s `--from-code` / `--template-url`); pass exactly one.
 
-It publishes the feature (version-free layout, version + artifact-prefix tokens
-baked into the template) and then create-or-updates the feature stack
+> The `--from-code` path requires the **AWS SAM CLI** (`sam`) on `PATH`: both
+> `publish` and `deploy --from-code` run `sam build` + `sam package` to rewrite
+> the template's Lambda `CodeUri:` paths to `s3://...` (CloudFormation runs the
+> SAM transform server-side when deploying via TemplateURL and rejects local
+> paths). The `--template-url` path needs neither SAM nor Docker.
+
+With `--from-code` it publishes the feature (version-free layout, version +
+artifact-prefix tokens baked into the template); either way it then
+create-or-updates the feature stack
 `<host-stack-name>-feature-<feature-id>` — the same name the host's
 `getFeatureLaunchUrl` resolver uses for a console install, so re-running it
 upgrades that stack in place rather than creating a duplicate (override with

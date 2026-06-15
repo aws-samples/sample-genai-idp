@@ -1,11 +1,14 @@
 """Tests for `idp-feature-cli deploy` against moto-mocked CloudFormation + S3.
 
-The deploy command publishes one feature (version-free layout) and
-create-or-updates its feature stack against a running host stack. These tests
-exercise: missing-host-stack guard, the create path, the update path, the
+The deploy command installs one feature into a running host stack, in two
+modes: `--from-code` (publish the version-free layout from source, then
+create-or-update the feature stack) and `--template-url` (deploy an
+already-published template without rebuilding). These tests exercise: the
+source mutex, missing-host-stack guard, the create path, the update path, the
 submitted parameter set (MainStackName + FeatureBucket present;
-FeatureArtifactPrefix/FeatureVersion absent — they are baked), and the
-default feature stack name.
+FeatureArtifactPrefix/FeatureVersion absent — they are baked), the default
+feature stack name, and the --template-url no-publish path (bucket/feature-id
+parsed from the URL).
 """
 
 from __future__ import annotations
@@ -28,6 +31,16 @@ _HOST_TEMPLATE = (
     '"Resources":{"T":{"Type":"AWS::SNS::Topic"}}}'
 )
 
+# A published feature template (already has the deploy params; tokens baked).
+_PUBLISHED_FEATURE_TEMPLATE = (
+    "AWSTemplateFormatVersion: '2010-09-09'\n"
+    "Parameters:\n"
+    "  MainStackName: {Type: String}\n"
+    "  FeatureBucket: {Type: String}\n"
+    "Resources:\n"
+    "  Dummy: {Type: AWS::SNS::Topic}\n"
+)
+
 
 @pytest.fixture
 def aws_env(monkeypatch):
@@ -38,6 +51,14 @@ def aws_env(monkeypatch):
 
 def _create_host(cfn) -> None:
     cfn.create_stack(StackName=_HOST, TemplateBody=_HOST_TEMPLATE)
+
+
+def _publish_template_object(s3, bucket: str, feature_id: str) -> str:
+    """Put a version-free feature template in S3 and return its HTTPS URL
+    (the virtual-hosted form `publish` emits)."""
+    key = f"extensions/{feature_id}/template.yaml"
+    s3.put_object(Bucket=bucket, Key=key, Body=_PUBLISHED_FEATURE_TEMPLATE)
+    return f"https://{bucket}.s3.us-east-1.amazonaws.com/{key}"
 
 
 def _stack_params(cfn, stack_name) -> dict[str, str]:
@@ -53,6 +74,7 @@ def test_missing_host_stack_errors(demo_feature_project: Path, aws_env) -> None:
             main,
             [
                 "deploy",
+                "--from-code",
                 str(demo_feature_project),
                 "--host-stack-name",
                 "no-such-host",
@@ -85,6 +107,7 @@ def test_region_auto_detected_from_session(
             main,
             [
                 "deploy",
+                "--from-code",
                 str(demo_feature_project),
                 "--host-stack-name",
                 _HOST,
@@ -112,6 +135,7 @@ def test_create_path_submits_expected_params(
             main,
             [
                 "deploy",
+                "--from-code",
                 str(demo_feature_project),
                 "--host-stack-name",
                 _HOST,
@@ -145,6 +169,7 @@ def test_update_path_is_used_when_stack_exists(
         runner = CliRunner()
         common = [
             "deploy",
+            "--from-code",
             str(demo_feature_project),
             "--host-stack-name",
             _HOST,
@@ -175,6 +200,7 @@ def test_custom_stack_name_override(demo_feature_project: Path, aws_env) -> None
             main,
             [
                 "deploy",
+                "--from-code",
                 str(demo_feature_project),
                 "--host-stack-name",
                 _HOST,
@@ -192,3 +218,124 @@ def test_custom_stack_name_override(demo_feature_project: Path, aws_env) -> None
         cfn.describe_stacks(StackName="my-custom-feature-stack")
         with pytest.raises(Exception):
             cfn.describe_stacks(StackName=_DEFAULT_FEATURE_STACK)
+
+
+def test_mutex_from_code_xor_template_url(demo_feature_project: Path, aws_env) -> None:
+    """Exactly one of --from-code / --template-url is required."""
+    runner = CliRunner()
+    # Both → error.
+    both = runner.invoke(
+        main,
+        [
+            "deploy",
+            "--from-code",
+            str(demo_feature_project),
+            "--template-url",
+            "https://b.s3.us-east-1.amazonaws.com/extensions/demo-feature/template.yaml",
+            "--host-stack-name",
+            _HOST,
+            "--region",
+            "us-east-1",
+        ],
+    )
+    assert both.exit_code == 1
+    assert "mutually exclusive" in both.output
+
+    # Neither → error.
+    neither = runner.invoke(
+        main,
+        ["deploy", "--host-stack-name", _HOST, "--region", "us-east-1"],
+    )
+    assert neither.exit_code == 1
+    assert "either --from-code" in neither.output
+
+
+def test_template_url_skips_publish_and_deploys(aws_env, monkeypatch) -> None:
+    """--template-url deploys an already-published template WITHOUT publishing.
+
+    The bucket is parsed from the URL host; MainStackName + FeatureBucket are
+    submitted; FeaturePublisher.publish is never called.
+    """
+    import idp_feature_sdk.cli as cli_mod
+
+    def _boom(*_a, **_k):  # pragma: no cover - must not be reached
+        raise AssertionError("publish() must not run in the --template-url path")
+
+    monkeypatch.setattr(cli_mod.FeaturePublisher, "publish", _boom)
+
+    with mock_aws():
+        cfn = boto3.client("cloudformation", region_name="us-east-1")
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket="published-bucket")
+        _create_host(cfn)
+        url = _publish_template_object(s3, "published-bucket", _FEATURE_ID)
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "deploy",
+                "--template-url",
+                url,
+                "--host-stack-name",
+                _HOST,
+                "--region",
+                "us-east-1",
+                "--wait",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        # Default stack name derived from the feature id parsed out of the URL.
+        params = _stack_params(cfn, _DEFAULT_FEATURE_STACK)
+        assert params["MainStackName"] == _HOST
+        # Bucket came from the URL host, not an explicit flag.
+        assert params["FeatureBucket"] == "published-bucket"
+
+
+def test_template_url_explicit_bucket_overrides_url(aws_env) -> None:
+    """An explicit --feature-bucket wins over the bucket parsed from the URL."""
+    with mock_aws():
+        cfn = boto3.client("cloudformation", region_name="us-east-1")
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket="published-bucket")
+        _create_host(cfn)
+        url = _publish_template_object(s3, "published-bucket", _FEATURE_ID)
+
+        result = CliRunner().invoke(
+            main,
+            [
+                "deploy",
+                "--template-url",
+                url,
+                "--feature-bucket",
+                "override-bucket",
+                "--host-stack-name",
+                _HOST,
+                "--region",
+                "us-east-1",
+                "--wait",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        params = _stack_params(cfn, _DEFAULT_FEATURE_STACK)
+        assert params["FeatureBucket"] == "override-bucket"
+
+
+def test_template_url_requires_bucket_when_unparseable(aws_env) -> None:
+    """A non-S3-host URL with no --feature-bucket errors helpfully."""
+    with mock_aws():
+        cfn = boto3.client("cloudformation", region_name="us-east-1")
+        _create_host(cfn)
+        result = CliRunner().invoke(
+            main,
+            [
+                "deploy",
+                "--template-url",
+                "https://cdn.example.com/extensions/demo-feature/template.yaml",
+                "--host-stack-name",
+                _HOST,
+                "--region",
+                "us-east-1",
+            ],
+        )
+        assert result.exit_code == 1
+        assert "feature bucket" in result.output.lower()

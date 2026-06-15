@@ -785,19 +785,27 @@ def _parse_published_template_url(url: str) -> tuple[Optional[str], Optional[str
     from urllib.parse import unquote, urlparse
 
     parsed = urlparse(url)
-
-    # bucket: virtual-hosted style `<bucket>.s3[.<region>].amazonaws.com`.
-    bucket: Optional[str] = None
     host = parsed.netloc.split(":", 1)[0]
-    labels = host.split(".")
-    if len(labels) >= 2 and labels[1] in ("s3", "s3-website") or "s3" in labels:
-        # `<bucket>.s3.<region>.amazonaws.com` → first label is the bucket.
-        if "amazonaws.com" in host and labels[0] not in ("s3",):
-            bucket = labels[0]
+    segments = [unquote(s) for s in parsed.path.split("/") if s]
+
+    # bucket: virtual-hosted style `<bucket>.s3[.<region>].amazonaws.com` keeps
+    # the bucket before the first `.s3` label; path-style
+    # `s3[.<region>].amazonaws.com/<bucket>/<key>` puts it in the first path
+    # segment.
+    bucket: Optional[str] = None
+    if host.startswith("s3.") or host.startswith("s3-"):
+        if segments:
+            bucket = segments[0]
+            segments = segments[1:]
+    else:
+        marker = host.find(".s3.")
+        if marker == -1:
+            marker = host.find(".s3-")
+        if marker > 0:
+            bucket = host[:marker]
 
     # feature_id: the segment after `extensions/` in the key path.
     feature_id: Optional[str] = None
-    segments = [unquote(s) for s in parsed.path.split("/") if s]
     if "extensions" in segments:
         idx = segments.index("extensions")
         if idx + 1 < len(segments):
