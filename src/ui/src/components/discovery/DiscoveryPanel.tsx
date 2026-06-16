@@ -828,7 +828,7 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
     <SpaceBetween size="l">
       <Container header={<Header variant="h2">Discovery</Header>}>
         <Alert type="warning" header="Important Notice">
-          Use the Discocery feature in non-production environments to discover class models from documents and images. 
+          Use the Discovery feature in non-production environments to discover class models from documents and images. 
           Discovery creates a starting point, not a final class model config. Be sure to inspect, test and 
           refine the generated custom class configuration before exporting it to production.
         </Alert>

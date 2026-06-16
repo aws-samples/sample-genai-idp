@@ -409,11 +409,26 @@ components/
 1. **Pattern-based**: Define file patterns (e.g., `*.pdf`) with bucket type selection
    - **Input Bucket**: Scan main processing bucket for matching files
    - **Test Set Bucket**: Scan dedicated test set bucket for matching files
-   - **Description**: Optional description field to document the test set purpose
+   - **Description**: Optional description field (max 500 characters) to document the test set purpose
+   - **Document Classification Type**: Optional metadata to categorize test set classification characteristics:
+     - **Unspecified**: No classification type specified (default)
+     - **Single Class**: All documents in test set belong to same document class
+     - **Multi Class**: Documents span multiple document classes
+     - **Packet Splitting**: Test set designed for document splitting evaluation (packets containing multiple sub-documents)
    - **Modified after filter**: Optional time filter to include only recently modified files — choose a preset (Last 1 hour, 24 hours, 7 days, etc.) or pick a custom date/time (useful for incremental workflows)
 2. **Zip Upload**: Upload zip containing `input/` and `baseline/` folders
-   - **Description**: Optional description field to document the test set purpose
+   - **Description**: Optional description field (max 500 characters) to document the test set purpose
+   - **Document Classification Type**: Optional metadata (same values as pattern-based creation)
 3. **Direct Upload**: Files uploaded directly to TestSetBucket are auto-detected
+
+### Editing Test Sets
+
+You can edit a test set's description and document classification type after creation:
+
+1. Select a single test set in the table
+2. Click **Edit** to open the edit modal
+3. Update the **Description** (max 500 characters) or **Document Classification Type**
+4. Click **Update** to save changes
 
 ### Adding Documents to Existing Test Sets
 

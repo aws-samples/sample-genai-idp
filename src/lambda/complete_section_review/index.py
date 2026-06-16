@@ -38,7 +38,24 @@ def handler(event, context):
     username = identity.get("username", "")
     user_email = identity.get("claims", {}).get("email", "")
     user_groups = identity.get("claims", {}).get("cognito:groups", [])
+    if isinstance(user_groups, str):
+        user_groups = [user_groups]
     is_admin = "Admin" in user_groups
+
+    # Defense-in-depth RBAC: all HITL review operations are Admin+Reviewer. The
+    # schema enforces this via @aws_cognito_user_pools(cognito_groups), but we
+    # also gate it server-side so a Viewer/Author can never reach these
+    # operations even if the schema directive is missing or misconfigured (e.g.
+    # the prior @aws_auth directive, which AppSync silently ignores on a
+    # multi-auth API).
+    if not ({"Admin", "Reviewer"}.intersection(user_groups)):
+        logger.warning(
+            f"Forbidden: caller {user_email} (groups={user_groups}) "
+            f"attempted HITL operation '{field_name}'"
+        )
+        raise ValueError(
+            "Unauthorized: review operations require Admin or Reviewer group"
+        )
 
     if field_name == "claimReview":
         if not object_key:

@@ -310,6 +310,15 @@ class BatchOperation:
         )
         result = json.loads(response["Payload"].read())
 
+        # Check for Lambda function errors (AWS returns StatusCode=200 for invocation success,
+        # but function errors are indicated by errorMessage in the payload)
+        if "errorMessage" in result:
+            error_type = result.get("errorType", "Unknown")
+            error_msg = result["errorMessage"]
+            raise IDPProcessingError(
+                f"Test runner execution failed ({error_type}): {error_msg}"
+            )
+
         resources = processor.resources
         test_set_bucket = resources.get("TestSetBucket")
         s3_client = boto3.client("s3", region_name=self._client._region)

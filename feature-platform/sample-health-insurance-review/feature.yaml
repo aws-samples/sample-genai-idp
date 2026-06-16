@@ -1,0 +1,45 @@
+# Listed in config_library/extensions-oss.yaml so it appears as available to
+# install in the host UI catalog. This is the "advanced" sample feature — it
+# exercises every part of the Feature Platform contract that the minimal
+# docs-by-status sample does not: a bundled config preset (applied at install
+# as a non-active config version), a postRuleValidation pipeline hook, host
+# GraphQL calls from the feature UI (Rules Discovery), and a multi-route
+# feature API backed by the feature's own DynamoDB table.
+featureId: sample-health-insurance-review
+displayName: "Sample: Health Insurance Review"
+version: 0.1.0
+description: |
+  Illustrative lightweight health insurance claims review vertical built on the IDP 
+  Accelerator rule validation pipeline. Ships a prior-authorization config preset,
+  a postRuleValidation pipeline hook that derives a deterministic claim status, and a 
+  two-tab UI: discover validation rules from a payer policy document, and review processed 
+  claims with per-rule results. Try it with the documents in samples/rule-validation/.
+# OSS docs-site slug — the UI "Learn more" link resolves this against the
+# published docs site. Source: docs/extensions/sample-health-insurance-review.md.
+docsUrl: extensions/sample-health-insurance-review
+template:
+  path: template.yaml
+  requiresMainStackName: true
+ui:
+  bundlePath: feature-ui/dist/ui-bundle.js
+  buildCommand: "cd feature-ui && npm ci && npm run build"
+# Bundled config preset — uploaded by the publisher next to the feature's
+# artifacts; the feature stack's ui-deployer downloads it at install time and
+# calls the host's applyFeatureConfigPreset mutation. The preset becomes a
+# NON-ACTIVE config version (`sample-health-insurance-review-v<version>`) that an admin
+# activates from the Configuration UI.
+configPreset:
+  path: config-preset/claims-config.yaml
+# Pipeline hook: the host's Step Functions workflow invokes this feature's
+# ClaimStatusHookFunction (template.yaml logical ID) after rule validation
+# completes for each document. Registered via the host's registerFeatureHooks
+# mutation by the ui-deployer custom resource.
+pipelineHooks:
+  postRuleValidation: ClaimStatusHookFunction
+defaultParameters:
+  LogLevel: INFO
+capabilities:
+  - reads-documents
+  - custom-api
+  - registers-pipeline-hooks
+  - applies-config-preset

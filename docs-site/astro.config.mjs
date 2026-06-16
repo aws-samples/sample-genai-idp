@@ -121,6 +121,24 @@ export default defineConfig({
         {
           label: "Integration & Extensions",
           items: [
+            { label: "Feature Platform", slug: "feature-platform" },
+            {
+              label: "Feature Platform Developer Guide",
+              slug: "feature-platform-developer-guide",
+            },
+            {
+              label: "Extensions",
+              items: [
+                {
+                  label: "Sample: Document Status (feature add-on)",
+                  slug: "extensions/sample-document-status",
+                },
+                {
+                  label: "Sample: Health Insurance Review",
+                  slug: "extensions/sample-health-insurance-review",
+                },
+              ],
+            },
             {
               label: "Post-Processing Lambda Hook",
               slug: "post-processing-lambda-hook",
@@ -199,7 +217,10 @@ export default defineConfig({
         {
           label: "New & Uncategorized",
           items: [
+            { label: "Dependency Mirroring", slug: "dependency-mirroring" },
+            { label: "Idp Deployment Ai Guide", slug: "idp-deployment-ai-guide" },
             { label: "Missing Page Handling", slug: "missing-page-handling" },
+            { label: "Openai Models", slug: "openai-models" },
             { label: "Setup Development Env Windows", slug: "setup-development-env-windows" },
             { label: "Version Update Indicator", slug: "version-update-indicator" },
           ],

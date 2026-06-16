@@ -9,7 +9,7 @@ This runbook deploys the GenAI IDP Accelerator in a **fully private / air-gapped
 - Web UI served via an **internal ALB** (no CloudFront, no public internet)
 - AppSync API accessible **only from inside the VPC** (no public endpoint)
 - All Lambda → AWS service traffic routed through **VPC Interface Endpoints**
-- Browser → S3 presigned uploads routed through the **S3 Interface VPC Endpoint** (bucket virtual-host addressing, SigV4)
+- Browser → S3 presigned uploads routed through **global S3** (default, via NAT) or optionally through the **S3 Interface VPC Endpoint** (opt-in via `S3PresignedUrlViaVpcEndpoint=true`)
 - Internet-facing features (MCP Gateway, Knowledge Base) **disabled**
 
 > For standard public deployments, see [Deployment Guide](./deployment.md).
@@ -30,9 +30,8 @@ Internal ALB (private DNS, ALB scheme=internal)
     └── browser also calls (via VPN/DC):
         ├── AppSync GraphQL API     → AppSync Interface VPC Endpoint
         ├── Cognito user-pool          (public — needs egress, see WorkSpaces note)
-        └── S3 presigned upload     → S3 Interface VPC Endpoint
-                                       (bucket-vhost host:
-                                        bucket.<vpce-id>-<random>.s3.<region>.vpce.amazonaws.com)
+        └── S3 presigned upload     → global s3.amazonaws.com (default, via NAT)
+                                       OR S3 Interface VPC Endpoint (opt-in)
 
 Lambda functions (in VPC subnets, attached to LambdaSecurityGroup)
     │
@@ -41,7 +40,7 @@ Lambda functions (in VPC subnets, attached to LambdaSecurityGroup)
          Lambda, Events, Athena, STS, S3, DynamoDB, ...)
 ```
 
-The S3 VPCE deployed by the ALB stack is reused for **both browser uploads (presigned URLs) and Lambda → S3 traffic**. Endpoint security group allows inbound 443 from both the ALB SG and the Lambda SG.
+The S3 VPCE deployed by the ALB stack is used for **ALB → S3 static asset serving and Lambda → S3 traffic**. Browser uploads use global S3 by default (via NAT); set `S3PresignedUrlViaVpcEndpoint=true` to route them through the VPCE instead (requires corporate network DNS/routing to VPCE hostnames).
 
 ---
 
@@ -64,11 +63,13 @@ Mode B fits central-network-account topologies where one team manages all VPC en
 
 See [Deployment Guide → Dependencies](./deployment.md#dependencies) for AWS CLI, SAM CLI, Python 3.12+, Node.js 22+. Docker is **not** required locally — images are built in AWS by CodeBuild.
 
+> **Note**: When `DeployInVPC=true`, all CodeBuild projects (WebUI build, Docker image builds, SDLC pipeline) run inside the VPC. They require either a **NAT Gateway** for public registry access or an **internal artifact repository** (JFrog Artifactory, AWS CodeArtifact, etc.) for air-gapped builds. See [Dependency Mirroring](./dependency-mirroring.md) for generating the full dependency manifest.
+
 ### 2. VPC requirements
 
 - **At least 2 subnets in different Availability Zones** — required by ALB
 - **DNS resolution enabled** on the VPC — `enableDnsSupport=true` and `enableDnsHostnames=true`
-- **DNS hostnames enabled on the S3 Interface VPCE** — `PrivateDnsEnabled` is **off** for S3 VPCEs by AWS design; bucket-vhost addressing routes via the per-endpoint `bucket.<vpce-id>-<random>.s3.<region>.vpce.amazonaws.com` name. **VPC DNS resolution is what makes that name resolvable** for in-VPC clients (Lambdas, browsers on VPN).
+- **DNS hostnames enabled on the S3 Interface VPCE** — `PrivateDnsEnabled` is **off** for S3 VPCEs by AWS design; bucket-vhost addressing routes via the per-endpoint `bucket.<vpce-id>-<random>.s3.<region>.vpce.amazonaws.com` name. **VPC DNS resolution is what makes that name resolvable** for in-VPC clients (Lambdas). Browsers only need to resolve this name when `S3PresignedUrlViaVpcEndpoint=true`; with the default (`false`), browsers use `s3.amazonaws.com` via NAT.
 - **Subnet IDs** for the ALB (can match Lambda subnets)
 - **No `0.0.0.0/0 → IGW` or `→ NAT` route** on the Lambda subnet — proves no public-internet egress (verify after deployment)
 
@@ -173,6 +174,7 @@ https://<region>.console.aws.amazon.com/cloudformation/home?region=<region>#/sta
 |-----------|-------------|
 | `LambdaSecurityGroupId` | BYO Lambda SG. Empty = stack creates one. |
 | `ALBAllowedCIDRs` | Restrict ALB ingress to specific CIDRs. Empty = VPC CIDR. |
+| `S3PresignedUrlViaVpcEndpoint` | Set to `true` to route browser S3 uploads through the VPCE instead of global S3. Default `false` (uses NAT). |
 | `ApiGatewayVpcEndpointId` | Required if `EnableHeadless=true`. |
 | `ArtifactsBucketKmsKeyArn` | Required if artifact bucket is KMS-encrypted. |
 
@@ -288,6 +290,7 @@ S3VpcEndpointDnsNameOverride=$DNS_NAME"
 | `AppSyncVisibility` | `PRIVATE` | API only inside VPC. **Immutable** — recreate stack to change. |
 | `LambdaSubnetIds` | subnet ids | Subnets where Lambdas run (can match `ALBSubnetIds`) |
 | `LambdaSecurityGroupId` | (optional) sg-id | BYO Lambda SG; stack creates one if empty |
+| `S3PresignedUrlViaVpcEndpoint` | (optional) `true`/`false` | Route browser S3 uploads via VPCE (`true`) or global S3 via NAT (`false`, default) |
 | `S3VpcEndpointIdOverride` | (Mode B) `vpce-...` | BYO S3 VPCE id |
 | `S3VpcEndpointDnsNameOverride` | (Mode B) full DNS w/ suffix | BYO S3 VPCE DNS name (required if id override is set) |
 | `EnableMCP` | `false` | Disable AgentCore Gateway (public-only) |
@@ -413,13 +416,15 @@ VPN clients are **source-NAT'd to the IP of the VPN-association subnet** (AWS Cl
 | Target SG | Add ingress | Port | Reason |
 |-----------|-------------|------|--------|
 | ALB SG (`<stack>-ALBSecurityGroup`) | <NAT-subnet-CIDR> (e.g. `10.1.3.0/24`) | 443 | Browser → ALB. Default ALB SG only allows VPC CIDR. |
-| ALB-stack endpoint SG (`<stack>-EndpointSecurityGroup`) | <NAT-subnet-CIDR> | 443 | Browser → S3 VPCE for presigned upload. |
+| ALB-stack endpoint SG (`<stack>-EndpointSecurityGroup`) | <NAT-subnet-CIDR> | 443 | Browser → S3 VPCE for presigned upload. **Only needed when `S3PresignedUrlViaVpcEndpoint=true`.** |
 
 **AWS Client VPN example**: client tunnel IPs are 172.16.0.0/22, but inbound packets to ALB/VPCE are seen as coming from the VPN association subnet (e.g. 10.1.3.0/24). Authorize 10.1.3.0/24, not 172.16.0.0/22.
 
 **Site-to-Site VPN over VGW + corporate VPN**: source-NAT happens at the customer firewall. Use the post-NAT IP range advertised into the VPC.
 
 > Production with Direct Connect / Transit Gateway: typically no NAT — clients reach VPC with on-prem IPs. Authorize those CIDRs on the ALB and endpoint SGs as part of standard onboarding.
+
+> **Note:** When `S3PresignedUrlViaVpcEndpoint=false` (default), browser uploads go to `s3.amazonaws.com` via NAT/internet — no endpoint SG ingress rule needed for browsers.
 
 ---
 
@@ -436,29 +441,30 @@ Open the URL via VPN/DC. Confirm:
 - ✅ Login succeeds
 - ✅ Upload a doc — status updates live (`QUEUED → OCR → CLASSIFICATION → EXTRACTION → ...`) without page reload
 - ✅ Browser DevTools → Network → WS tab shows active WebSocket to `*.appsync-realtime-api.<region>.amazonaws.com`
-- ✅ DevTools → Network for upload POST shows host = `<bucket>.bucket.vpce-<id>-<random>.s3.<region>.vpce.amazonaws.com` — confirms private path
+- ✅ DevTools → Network for upload POST shows:
+  - If `S3PresignedUrlViaVpcEndpoint=true`: host = `<bucket>.bucket.vpce-<id>-<random>.s3.<region>.vpce.amazonaws.com`
+  - If `S3PresignedUrlViaVpcEndpoint=false` (default): host = `<bucket>.s3.<region>.amazonaws.com` (via NAT)
 
-### Verify private path (post-deploy)
+### Verify upload path (post-deploy)
 
 ```bash
-# 1) Confirm presigned URL host is VPCE bucket-vhost
+# 1) Check presigned URL mode
 LG=$(aws cloudformation describe-stack-resources --stack-name <appsync-nested> \
   --query 'StackResources[?LogicalResourceId==`UploadResolverFunction`].PhysicalResourceId' --output text)
 aws lambda get-function-configuration --function-name $LG --region <region> \
   --query 'Environment.Variables.S3_ENDPOINT_URL' --output text
-# Expect: https://bucket.vpce-<id>-<random>.s3.<region>.vpce.amazonaws.com
+# If S3PresignedUrlViaVpcEndpoint=true:
+#   Expect: https://bucket.vpce-<id>-<random>.s3.<region>.vpce.amazonaws.com
+# If S3PresignedUrlViaVpcEndpoint=false (default):
+#   Expect: None (no env var set — presigned URLs use global s3.amazonaws.com)
 
-# 2) Confirm Lambda subnet has no internet route
+# 2) Confirm Lambda subnet routing
 aws ec2 describe-route-tables \
   --filters "Name=association.subnet-id,Values=<lambda-subnet-id>" \
   --region <region> \
   --query 'RouteTables[0].Routes[].[DestinationCidrBlock,DestinationPrefixListId,GatewayId]' --output text
-# Expect: no row with 0.0.0.0/0; only "<vpc-cidr> local" + S3/DDB prefix-list rows.
-
-# 3) Confirm S3 access logs show VPCE host (after delay up to 1 hour)
-aws s3 cp s3://<logging-bucket>/input-bucket-logs/ /tmp/s3logs/ --recursive --region <region>
-grep -h "vpce-<id>-<random>" /tmp/s3logs/* | head
-# Expect rows on REST.PUT.OBJECT / REST.POST.OBJECT with the VPCE host as the request endpoint.
+# For S3PresignedUrlViaVpcEndpoint=false: NAT route (0.0.0.0/0 → nat-xxx) is expected
+# For fully air-gapped (=true): no 0.0.0.0/0 route; only "<vpc-cidr> local" + prefix-list rows
 ```
 
 ### Cognito IDP egress (browser-only consideration)
@@ -526,22 +532,507 @@ See [Deployment Guide → SSM tunneling](./deployment.md) — applies unchanged.
 
 When `WebUIHosting=ALB` and `AppSyncVisibility=PRIVATE`:
 
-- **S3 CORS origins** → ALB URL
-- **Cognito callback / logout URLs** → ALB URL
-- **UI build** → `VITE_CLOUDFRONT_DOMAIN` set to ALB URL
+- **S3 CORS origins** → ALB URL, plus `CustomDomainUrl` when set
+- **Cognito callback / logout URLs** → ALB URL, plus `CustomDomainUrl` (with and without trailing slash) when set
+- **UI build** → `VITE_CLOUDFRONT_DOMAIN` set to the ALB URL by default, or `""` when `CustomDomainUrl` is set (the Web UI then uses `window.location.origin` so both URLs work side by side — see [ALB Hosting → Custom Domain](./alb-hosting.md#custom-domain-in-front-of-alb))
 - **S3 bucket policy** → `aws:sourceVpce` condition restricts access to the chosen VPCE
+- **CodeBuild projects** (WebUI build, Docker image builds, SDLC pipeline) → placed in VPC with `LambdaSecurityGroup`; requires NAT or internal artifact repository for dependency resolution
 - **Lambda functions (~21)** → placed in `LambdaSubnetIds` with `LambdaSecurityGroup`
-- **`S3_ENDPOINT_URL` env** injected on:
+- **`S3_ENDPOINT_URL` env** injected on backend Lambdas (always, when deployed in VPC with ALB):
+  - `ConfigurationCopyFunction` (custom resource S3 copies)
+  - `FccDatasetDeployerFunction` (custom resource S3 copies)
+  - `TestSetZipExtractorFunction`
+- **`S3_ENDPOINT_URL` env** injected on presigner Lambdas (only when `S3PresignedUrlViaVpcEndpoint=true` or BYO endpoint override is set):
   - `UploadResolverFunction` (browser presigned POST)
   - `DiscoveryUploadResolverFunction`
   - `TestSetResolverFunction`
-  - `TestSetZipExtractorFunction`
   - `ApiHandlerFunction` (jobs API presigner)
-  - `ConfigurationCopyFunction` (custom resource S3 copies)
-  - `FccDatasetDeployerFunction` (custom resource S3 copies)
   - All AppSync resolver Lambdas via the AppSync nested-stack `S3EndpointUrl` parameter
-- **Lambda S3 client** uses `signature_version=s3v4` + `addressing_style=virtual` when `S3_ENDPOINT_URL` is set; falls back to default `path` style when unset (CloudFront/public mode)
+- **Lambda S3 client** uses `signature_version=s3v4` + `addressing_style=virtual` when `S3_ENDPOINT_URL` is set; falls back to default `path` style when unset (global S3)
 - **ALB-stack S3 VPCE endpoint SG** ingress 443 from `LambdaSecurityGroupId` (when set) **and** from ALB SG
+
+---
+
+## AppSync DNS resolution in cross-VPC and hybrid networks
+
+### The problem
+
+When `AppSyncVisibility=PRIVATE`, the IDP stack creates an AppSync API that is **only reachable via VPC Interface Endpoints**. The frontend (browser) is baked at build time with the standard AppSync GraphQL URL:
+
+```
+https://{api_id}.appsync-api.{region}.amazonaws.com/graphql
+```
+
+The Amplify JS SDK also derives the WebSocket (realtime/subscriptions) URL automatically:
+
+```
+wss://{api_id}.appsync-realtime-api.{region}.amazonaws.com/graphql
+```
+
+For the browser to reach these endpoints, DNS must resolve both hostnames to the **private IP addresses** of the AppSync VPC Interface Endpoint (`com.amazonaws.{region}.appsync-api`).
+
+**When does this "just work"?**
+
+If the AppSync VPC endpoint is created **in the same VPC** where the browser's DNS queries are resolved (i.e., the VPC's built-in Route 53 Resolver at `<VPC-CIDR-base>+2`), and `PrivateDnsEnabled: true` is set on that endpoint, then DNS resolution works automatically. This is the case when:
+
+- The user is on a VPN whose DNS server is the VPC's `.2` resolver
+- The user is on a WorkSpace or EC2 instance in that VPC
+- Lambdas are in the same VPC as the endpoint
+
+**When does it NOT work?**
+
+`PrivateDnsEnabled` only injects DNS overrides into the **VPC that owns the endpoint**. It does NOT propagate across:
+
+- VPC peering connections
+- Transit Gateway attachments
+- Cross-account VPC associations
+- On-premises networks connected via Direct Connect or Site-to-Site VPN (unless DNS is forwarded to the VPC resolver)
+
+This is the **central network account** scenario (Mode B): a networking team manages all VPC endpoints in a shared-services VPC, and the IDP workload VPC connects via Transit Gateway or peering. The browser (on corporate VPN) and the Lambdas (in the workload VPC) cannot resolve the AppSync hostname because the private DNS override lives only in the central VPC.
+
+### Why this differs from S3
+
+For S3, the IDP stack solves this by rewriting presigned URLs to use the VPCE-specific DNS name (`bucket.vpce-xxx.s3.region.vpce.amazonaws.com`). This works because:
+
+1. The IDP stack controls the presigner Lambda and can inject `S3_ENDPOINT_URL`
+2. S3 VPCE DNS names are resolvable from any VPC (they are public DNS names that happen to route to VPCE IPs when resolved from within the VPC)
+3. No custom headers are needed — S3 uses the `Host` header that the browser sets naturally from the URL
+
+**AppSync cannot use the same approach** because:
+
+1. When using the VPCE DNS name directly (`vpce-xxx.appsync-api.region.vpce.amazonaws.com`), AppSync requires a `Host` or `X-AppSync-Domain` header set to the original API hostname
+2. **Browsers cannot set custom headers on WebSocket upgrade requests** — the WebSocket protocol (`new WebSocket(url)`) does not support custom headers in browser JavaScript
+3. The Amplify JS SDK constructs the WebSocket URL internally and does not expose a hook to inject headers
+4. Changing the GraphQL URL to a VPCE DNS name would break all real-time subscriptions (document status updates, chat streaming)
+
+Therefore, the solution for AppSync must operate at the **DNS layer** — making the standard AppSync hostname resolve to the correct private IPs regardless of which VPC the client is in.
+
+---
+
+### Solution A: Route 53 Private Hosted Zone (recommended)
+
+This is the AWS-recommended approach for cross-VPC and cross-account private AppSync access (see [AWS Blog: Architecture Patterns for AppSync Private APIs](https://aws.amazon.com/blogs/mobile/architecture-patterns-for-aws-appsync-private-apis/), Patterns 2–4).
+
+#### How it works
+
+1. Create **two API-ID-scoped** Route 53 Private Hosted Zones (PHZs) — one named for the exact GraphQL hostname (`{api_id}.appsync-api.{region}.amazonaws.com`) and one for the exact realtime hostname (`{api_id}.appsync-realtime-api.{region}.amazonaws.com`)
+2. In each zone, create an apex `A`-record **alias** to the AppSync VPC Interface Endpoint (both hostnames are served by the same `com.amazonaws.{region}.appsync-api` endpoint)
+3. Associate **both** PHZs with every VPC that needs to resolve the AppSync hostname (workload VPC, shared-services VPC, etc.)
+4. For on-premises/hybrid browsers: set up a Route 53 Resolver Inbound Endpoint and configure the corporate DNS to conditionally forward **only these two FQDNs** to it
+
+> **Why scope to the API ID instead of the whole `appsync-api.{region}.amazonaws.com` domain?** Route 53 resolves the **most specific** matching private hosted zone first. A PHZ named for the exact API hostname overrides DNS for *only this API*; every other AppSync API in the region — yours or another team's, public or private — keeps resolving through normal public DNS. A PHZ created at the regional `appsync-api.{region}.amazonaws.com` apex would instead intercept **all** AppSync DNS in every associated VPC, which can break unrelated applications. The scoped approach below is the least-blast-radius default; see [Important considerations](#important-considerations) for the regional-zone alternative and when it makes sense.
+
+#### When to use
+
+- Central network account manages VPC endpoints in a shared VPC
+- Workload VPC connects to shared VPC via Transit Gateway or VPC peering
+- On-premises users access the IDP UI via Direct Connect or Site-to-Site VPN
+- Multiple VPCs need to reach the same private AppSync API
+
+#### Prerequisites
+
+- The AppSync VPC Interface Endpoint (`com.amazonaws.{region}.appsync-api`) must exist in at least one VPC (the central/shared VPC)
+- `PrivateDnsEnabled` should be set to **false** on that endpoint. Enabling it makes AWS create a managed PHZ for the *regional* `appsync-api.{region}.amazonaws.com` domain inside the endpoint's VPC, which reintroduces the blanket interception the scoped zones are designed to avoid. The two scoped PHZs below replace its function for this API only.
+- The VPC endpoint must have a security group allowing inbound HTTPS (443) from the source networks
+
+#### Important: realtime (WebSocket) endpoint
+
+The Amplify SDK derives the realtime URL by replacing `appsync-api` with `appsync-realtime-api` in the hostname. These are **two different parent domains**, so each needs its **own** scoped Private Hosted Zone — you cannot place the realtime record inside the `appsync-api` zone:
+
+- PHZ `{api_id}.appsync-api.{region}.amazonaws.com` → apex alias to the VPC endpoint (GraphQL: queries and mutations)
+- PHZ `{api_id}.appsync-realtime-api.{region}.amazonaws.com` → apex alias to the **same** VPC endpoint (WebSocket: subscriptions)
+
+Both hostnames are served by the same `com.amazonaws.{region}.appsync-api` endpoint service, so both aliases point at the same endpoint DNS name. If you create only the `appsync-api` zone, queries and mutations work but all real-time subscriptions (live document status, chat streaming) silently fail.
+
+#### Manual steps (no script)
+
+These steps are performed by the networking team or the person managing Route 53 in the account that owns the VPC endpoint.
+
+**Step 1: Identify the AppSync API ID and region**
+
+The IDP stack outputs the full GraphQL URL. Extract the API ID:
+
+```bash
+# From the IDP stack outputs:
+GRAPHQL_URL=$(aws cloudformation describe-stacks --stack-name IDP-PRIVATE \
+  --query 'Stacks[0].Outputs[?OutputKey==`AppSyncEndpointForDNS`].OutputValue' \
+  --output text --region <region>)
+echo $GRAPHQL_URL
+# Example: abcdef1234.appsync-api.us-east-1.amazonaws.com
+
+API_ID=$(echo $GRAPHQL_URL | cut -d. -f1)
+REGION=$(echo $GRAPHQL_URL | cut -d. -f3)
+echo "API_ID=$API_ID  REGION=$REGION"
+```
+
+**Step 2: Identify the AppSync VPC Endpoint**
+
+```bash
+APPSYNC_VPCE_ID=$(aws ec2 describe-vpc-endpoints \
+  --filters "Name=service-name,Values=com.amazonaws.${REGION}.appsync-api" \
+             "Name=vpc-id,Values=<central-vpc-id>" \
+  --query 'VpcEndpoints[0].VpcEndpointId' \
+  --output text --region $REGION)
+echo $APPSYNC_VPCE_ID
+```
+
+**Step 3: Create two API-ID-scoped Private Hosted Zones**
+
+Create one PHZ named for the exact GraphQL hostname and one for the exact realtime hostname. Because each zone name is the full API FQDN, Route 53 overrides DNS for *only this API* — other AppSync APIs in the region are unaffected.
+
+```bash
+# Scoped PHZ #1 — GraphQL (HTTP) hostname for THIS API only
+PHZ_API_ID=$(aws route53 create-hosted-zone \
+  --name "${API_ID}.appsync-api.${REGION}.amazonaws.com" \
+  --vpc VPCRegion=${REGION},VPCId=<central-vpc-id> \
+  --caller-reference "idp-appsync-api-$(date +%s)" \
+  --hosted-zone-config Comment="Private DNS for IDP AppSync ${API_ID} (GraphQL)",PrivateZone=true \
+  --query 'HostedZone.Id' --output text | sed 's|/hostedzone/||')
+
+# Scoped PHZ #2 — Realtime (WebSocket) hostname for THIS API only
+PHZ_RT_ID=$(aws route53 create-hosted-zone \
+  --name "${API_ID}.appsync-realtime-api.${REGION}.amazonaws.com" \
+  --vpc VPCRegion=${REGION},VPCId=<central-vpc-id> \
+  --caller-reference "idp-appsync-realtime-$(date +%s)" \
+  --hosted-zone-config Comment="Private DNS for IDP AppSync ${API_ID} (realtime)",PrivateZone=true \
+  --query 'HostedZone.Id' --output text | sed 's|/hostedzone/||')
+
+echo "PHZ_API_ID=$PHZ_API_ID  PHZ_RT_ID=$PHZ_RT_ID"
+```
+
+**Step 4: Create an apex alias record in each scoped zone**
+
+Each zone gets a single record at its **apex** (the record name equals the zone name) aliased to the AppSync VPC endpoint. Both zones target the same endpoint DNS name.
+
+```bash
+# Get the VPC endpoint's regional DNS name + its hosted zone ID (the alias target).
+# Both values come from the same DnsEntries[0] element so they stay consistent.
+VPCE_HZ_ID=$(aws ec2 describe-vpc-endpoints \
+  --vpc-endpoint-ids $APPSYNC_VPCE_ID \
+  --query 'VpcEndpoints[0].DnsEntries[0].HostedZoneId' \
+  --output text --region $REGION)
+
+VPCE_DNS=$(aws ec2 describe-vpc-endpoints \
+  --vpc-endpoint-ids $APPSYNC_VPCE_ID \
+  --query 'VpcEndpoints[0].DnsEntries[0].DnsName' \
+  --output text --region $REGION | sed 's|^\*\.||')
+
+# Apex alias in the GraphQL zone → AppSync VPC endpoint
+# EvaluateTargetHealth is false: a VPC interface endpoint is highly available by
+# design and exposes no Route 53-evaluable health signal, so true adds no benefit.
+aws route53 change-resource-record-sets --hosted-zone-id $PHZ_API_ID --change-batch '{
+  "Changes": [
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "'${API_ID}'.appsync-api.'${REGION}'.amazonaws.com",
+        "Type": "A",
+        "AliasTarget": {
+          "HostedZoneId": "'${VPCE_HZ_ID}'",
+          "DNSName": "'${VPCE_DNS}'",
+          "EvaluateTargetHealth": false
+        }
+      }
+    }
+  ]
+}'
+
+# Apex alias in the realtime zone → SAME AppSync VPC endpoint
+aws route53 change-resource-record-sets --hosted-zone-id $PHZ_RT_ID --change-batch '{
+  "Changes": [
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "'${API_ID}'.appsync-realtime-api.'${REGION}'.amazonaws.com",
+        "Type": "A",
+        "AliasTarget": {
+          "HostedZoneId": "'${VPCE_HZ_ID}'",
+          "DNSName": "'${VPCE_DNS}'",
+          "EvaluateTargetHealth": false
+        }
+      }
+    }
+  ]
+}'
+```
+
+**Step 5: Associate both PHZs with the workload VPC**
+
+Both zones must be associated with every VPC where DNS queries originate.
+
+If the workload VPC is in the **same account**:
+
+```bash
+for ZID in $PHZ_API_ID $PHZ_RT_ID; do
+  aws route53 associate-vpc-with-hosted-zone \
+    --hosted-zone-id $ZID \
+    --vpc VPCRegion=${REGION},VPCId=<workload-vpc-id>
+done
+```
+
+If the workload VPC is in a **different account** (cross-account), repeat the authorize → associate → cleanup sequence for **each** zone:
+
+```bash
+for ZID in $PHZ_API_ID $PHZ_RT_ID; do
+  # In the account that owns the PHZ (central/networking account):
+  aws route53 create-vpc-association-authorization \
+    --hosted-zone-id $ZID \
+    --vpc VPCRegion=${REGION},VPCId=<workload-vpc-id-in-other-account>
+
+  # In the workload account (use that account's credentials/profile):
+  aws route53 associate-vpc-with-hosted-zone \
+    --hosted-zone-id $ZID \
+    --vpc VPCRegion=${REGION},VPCId=<workload-vpc-id-in-other-account>
+
+  # Back in the PHZ-owner account (cleanup — recommended):
+  aws route53 delete-vpc-association-authorization \
+    --hosted-zone-id $ZID \
+    --vpc VPCRegion=${REGION},VPCId=<workload-vpc-id-in-other-account>
+done
+```
+
+**Step 6 (hybrid/on-prem only): Route 53 Resolver Inbound Endpoint**
+
+If users access the IDP UI from on-premises (via Direct Connect or VPN) and their DNS does not use the VPC's `.2` resolver, you need a Route 53 Resolver Inbound Endpoint:
+
+```bash
+# Create resolver inbound endpoint in the VPC associated with the scoped PHZs
+RESOLVER_EP=$(aws route53resolver create-resolver-endpoint \
+  --creator-request-id "idp-appsync-inbound-$(date +%s)" \
+  --name "idp-appsync-inbound" \
+  --security-group-ids <sg-allowing-dns-from-onprem> \
+  --direction INBOUND \
+  --ip-addresses SubnetId=<subnet-1> SubnetId=<subnet-2> \
+  --region $REGION \
+  --query 'ResolverEndpoint.Id' --output text)
+
+# Get the resolver endpoint IPs
+aws route53resolver list-resolver-endpoint-ip-addresses \
+  --resolver-endpoint-id $RESOLVER_EP --region $REGION \
+  --query 'IpAddresses[].Ip' --output text
+```
+
+Then configure your on-premises DNS server (Active Directory, BIND, Unbound, etc.) to **conditionally forward** the two **API-specific FQDNs** to the resolver endpoint IPs:
+
+- `{api_id}.appsync-api.{region}.amazonaws.com`
+- `{api_id}.appsync-realtime-api.{region}.amazonaws.com`
+
+Scoping the forwarder to these exact names (rather than the regional `appsync-api.{region}.amazonaws.com` parent) keeps on-premises resolution of every other AppSync API on its normal public path. Windows DNS, BIND, and Unbound all support conditional forwarding keyed to a full FQDN.
+
+> **Note**: If your DNS appliance can only forward at a broader suffix, you may forward `appsync-api.{region}.amazonaws.com` and `appsync-realtime-api.{region}.amazonaws.com` instead. The blast radius stays contained on the AWS side — the scoped PHZs only answer for this API's two hostnames, so any other AppSync name forwarded in still resolves via public DNS through the VPC resolver.
+
+> **Note**: If you already have a Route 53 Resolver Inbound Endpoint for other AWS services (e.g., S3, STS), you can reuse it. Just add the two AppSync FQDNs to your on-premises conditional forwarder configuration.
+
+#### Verification
+
+From a machine using the VPC DNS (or the forwarded DNS path):
+
+```bash
+# Should resolve to private IPs (10.x.x.x or 172.x.x.x) of the VPC endpoint ENIs
+nslookup ${API_ID}.appsync-api.${REGION}.amazonaws.com
+nslookup ${API_ID}.appsync-realtime-api.${REGION}.amazonaws.com
+
+# Both should return the same set of private IPs
+
+# Scoping check — a DIFFERENT AppSync API must still resolve to PUBLIC IPs,
+# proving the scoped zones did not capture the whole regional domain:
+nslookup some-other-api-id.appsync-api.${REGION}.amazonaws.com
+# Expect: public AppSync IPs (not the VPC endpoint ENIs)
+```
+
+From the browser (DevTools → Network tab):
+- GraphQL requests to `{api_id}.appsync-api.{region}.amazonaws.com` should succeed
+- WebSocket connection to `{api_id}.appsync-realtime-api.{region}.amazonaws.com` should establish
+- Document status updates should appear in real-time without page reload
+
+#### Important considerations
+
+| Consideration | Detail |
+|---------------|--------|
+| **Scoped zones do not affect other APIs** | Because each PHZ is named for the exact API FQDN, Route 53's most-specific-match means these zones override DNS for **only this API**. Other AppSync APIs in the region (public or private, yours or another team's) keep resolving through normal public DNS. This is the key advantage over a regional-domain PHZ. |
+| **Two zones per private API** | Each `AppSyncVisibility=PRIVATE` API needs its own pair of zones (`appsync-api` + `appsync-realtime-api`). Deploying multiple private IDP stacks in the same region simply means another pair of scoped zones per stack — there is no shared zone to maintain and no record-enumeration burden. |
+| **Regional-zone alternative** | If you genuinely want a single PHZ to cover **every** AppSync API in a VPC, you can instead create one PHZ at the regional apex `appsync-api.{region}.amazonaws.com` (and `appsync-realtime-api.{region}.amazonaws.com`) and add an alias record per API ID inside it. This is simpler to reason about for a fleet of private APIs, but it **intercepts all AppSync DNS** in associated VPCs — any AppSync API you do not add a record for will fail to resolve. Use it only when every AppSync consumer in those VPCs is private and accounted for. |
+| **Endpoint in multiple AZs** | Deploy the AppSync VPC endpoint in at least 2 AZs for high availability. The alias record automatically load-balances across all endpoint ENIs. |
+| **PrivateDnsEnabled conflict** | If `PrivateDnsEnabled=true` is set on the AppSync VPC endpoint, AWS creates a managed PHZ for the regional `appsync-api.{region}.amazonaws.com` domain in the endpoint's VPC. For VPCs associated with both that managed zone and your scoped zone, the scoped zone wins (most-specific match) — but to avoid confusion and unintended blanket interception, set `PrivateDnsEnabled=false` when using the PHZ approach. |
+| **No IDP stack changes required** | This is purely a DNS/networking configuration. The IDP stack, frontend code, and Amplify SDK work unchanged. |
+
+---
+
+### Solution B: ALB reverse proxy for AppSync (advanced)
+
+This approach routes all AppSync traffic through the existing internal ALB using a reverse proxy (NGINX). The browser never connects directly to the AppSync endpoint — all GraphQL and WebSocket traffic flows through the ALB.
+
+#### When to use
+
+Use this approach **only** when:
+
+- The customer requires that the browser communicates with a **single endpoint** (the ALB) and cannot make direct connections to any other hostname
+- No Private Hosted Zone can be created (organizational policy, no Route 53 access, or DNS infrastructure constraints)
+- No DNS forwarder can be configured on the corporate network
+- The security team mandates that all traffic from the browser must pass through a controlled proxy
+
+> **Important**: This approach adds infrastructure complexity, operational overhead, and latency. Solution A (PHZ) is simpler and recommended for most deployments.
+
+#### How it works
+
+```
+Browser (VPN/DC client)
+    │
+    │ HTTPS (all traffic to single ALB hostname)
+    ▼
+Internal ALB
+    │
+    ├── /              → S3 (Web UI bucket, existing)
+    ├── /graphql       → NGINX target group → AppSync VPC Endpoint (GraphQL)
+    ├── /graphql/ws    → NGINX target group → AppSync VPC Endpoint (WebSocket)
+    │
+    └── S3 presigned uploads still go direct to S3 VPCE (unchanged)
+```
+
+The NGINX proxy:
+1. Receives GraphQL HTTP requests on `/graphql` and WebSocket upgrade requests on `/graphql/ws`
+2. Injects the required `X-AppSync-Domain` header (which the browser cannot set for WebSocket)
+3. Forwards the request to the AppSync VPC Endpoint private IPs
+4. Handles WebSocket connection upgrades and long-lived connections
+
+#### Why NGINX is required
+
+AWS AppSync requires the `Host` or `X-AppSync-Domain` header to identify which API to route to when accessed via the VPC endpoint DNS name. For HTTP requests, the Amplify SDK could theoretically be configured to add this header. However:
+
+- **WebSocket connections in browsers do not support custom headers** — the `new WebSocket(url)` API in JavaScript does not accept headers
+- The Amplify JS SDK uses `new WebSocket(...)` internally for AppSync subscriptions
+- Therefore, a server-side proxy that injects the header is the **only** way to make subscriptions work without DNS-level resolution
+
+#### Architecture components
+
+| Component | Purpose |
+|-----------|---------|
+| **NGINX container** (ECS Fargate or EC2) | Reverse proxy that adds `X-AppSync-Domain` header and forwards to AppSync VPCE |
+| **ALB target group** | Routes `/graphql` and `/graphql/ws` paths to the NGINX container |
+| **ALB listener rules** | Path-based routing rules on the existing ALB HTTPS listener |
+| **Security group** | NGINX task SG: ingress 443 from ALB SG, egress 443 to AppSync endpoint SG |
+
+#### NGINX configuration example
+
+```nginx
+# /etc/nginx/conf.d/appsync-proxy.conf
+
+upstream appsync_backend {
+    # Use the AppSync VPC endpoint ENI private IPs directly,
+    # OR use the VPCE DNS name if resolvable from the NGINX container's VPC
+    server <vpce-eni-ip-1>:443;
+    server <vpce-eni-ip-2>:443;
+    # Alternative: use VPCE DNS (requires VPC DNS resolution)
+    # server <vpce-id>-<random>.appsync-api.<region>.vpce.amazonaws.com:443;
+}
+
+server {
+    listen 443 ssl;
+    server_name _;
+
+    # TLS termination handled by ALB — NGINX receives plain HTTP from ALB
+    # If ALB passes through TLS (unlikely), configure ssl_certificate here
+    listen 80;
+
+    # GraphQL HTTP requests (queries, mutations)
+    location /graphql {
+        proxy_pass https://appsync_backend/graphql;
+        proxy_ssl_server_name on;
+        proxy_ssl_name <api_id>.appsync-api.<region>.amazonaws.com;
+
+        # Required: tell AppSync which API this request is for
+        proxy_set_header X-AppSync-Domain <api_id>.appsync-api.<region>.amazonaws.com;
+        proxy_set_header Host <api_id>.appsync-api.<region>.amazonaws.com;
+
+        # Pass through auth headers from the browser
+        proxy_pass_request_headers on;
+
+        proxy_ssl_session_reuse off;
+        proxy_redirect off;
+    }
+
+    # WebSocket connections (subscriptions/realtime)
+    location /graphql/ws {
+        proxy_pass https://appsync_backend/graphql;
+        proxy_ssl_server_name on;
+        proxy_ssl_name <api_id>.appsync-realtime-api.<region>.amazonaws.com;
+
+        # Required: tell AppSync this is a realtime connection
+        proxy_set_header X-AppSync-Domain <api_id>.appsync-realtime-api.<region>.amazonaws.com;
+        proxy_set_header Host <api_id>.appsync-realtime-api.<region>.amazonaws.com;
+
+        # WebSocket upgrade headers
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # Long-lived WebSocket connections
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+
+        proxy_pass_request_headers on;
+        proxy_ssl_session_reuse off;
+        proxy_redirect off;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Health check endpoint for ALB target group
+    location /health {
+        return 200 'OK';
+        add_header Content-Type text/plain;
+    }
+}
+```
+
+#### Frontend changes required
+
+When using the ALB proxy approach, the frontend must be configured to send AppSync traffic to the ALB instead of the standard AppSync URL. This requires changing `VITE_APPSYNC_GRAPHQL_URL` at build time:
+
+```
+# Instead of: https://{api_id}.appsync-api.{region}.amazonaws.com/graphql
+# Set to:     https://<alb-hostname>/graphql
+```
+
+Additionally, the Amplify JS SDK must be configured to use a custom WebSocket URL. This requires **custom Amplify configuration** — the default Amplify AppSync client derives the realtime URL from the GraphQL URL by replacing `appsync-api` with `appsync-realtime-api`. When the GraphQL URL is the ALB, this derivation breaks.
+
+> **Warning**: Modifying the Amplify SDK's WebSocket behavior requires either:
+> - A custom `AppSyncRealTimeSubscriptionHandlerProvider` (Amplify v6+)
+> - Or replacing the Amplify GraphQL client with a custom implementation
+>
+> This is non-trivial and requires frontend code changes that are **not currently implemented** in the IDP accelerator. This approach should be treated as a custom engineering effort.
+
+#### Tradeoffs
+
+| Aspect | PHZ approach (Solution A) | ALB proxy approach (Solution B) |
+|--------|---------------------------|----------------------------------|
+| **Infrastructure** | Route 53 PHZ + optional Resolver Endpoint | NGINX container (Fargate/EC2) + ALB rules + target group |
+| **Latency** | Zero additional hops | +1 hop (ALB → NGINX → AppSync VPCE) |
+| **Cost** | ~$0.50/mo per PHZ + $0.40/mo per Resolver Endpoint | Fargate: ~$30–50/mo (2 tasks for HA) + ALB rules |
+| **Operational complexity** | Low — DNS records are static once created | High — container monitoring, scaling, patching, health checks |
+| **Frontend changes** | None | Yes — custom AppSync URL + custom WebSocket handling |
+| **WebSocket support** | Native (Amplify SDK works unchanged) | Requires NGINX WebSocket proxy + custom frontend config |
+| **Failure modes** | DNS propagation delay (seconds) | Container crash, OOM, connection exhaustion, TLS cert rotation |
+| **Existing deployment impact** | None | Requires stack update + frontend rebuild |
+| **Amplify SDK compatibility** | Full — standard URLs, standard behavior | Partial — requires custom realtime provider |
+
+#### When NOT to use the ALB proxy
+
+- If you can create a Private Hosted Zone → use Solution A
+- If you can configure a DNS forwarder on the corporate network → use Solution A
+- If real-time subscriptions (document status updates) are critical and you cannot invest in custom Amplify configuration → use Solution A
+- If you want zero additional infrastructure to maintain → use Solution A
+
+---
+
+### Summary: which approach to choose
+
+| Scenario | Recommended approach |
+|----------|---------------------|
+| Single VPC — endpoint in same VPC as browser/Lambdas | No action needed. `PrivateDnsEnabled=true` on the endpoint handles everything. |
+| Cross-VPC (Transit Gateway / peering) — same account | **Solution A** — scoped PHZs associated with every VPC that resolves the API |
+| Cross-account — central networking account owns endpoints | **Solution A** — scoped PHZs with cross-account VPC association |
+| Hybrid (on-premises browsers via DC/VPN) | **Solution A** — scoped PHZs + Route 53 Resolver Inbound Endpoint + corporate DNS conditional forwarder (scoped to the two API FQDNs) |
+| Hard requirement: browser must ONLY talk to ALB, no DNS changes possible | **Solution B** — ALB proxy (requires custom frontend work) |
 
 ---
 
@@ -564,10 +1055,14 @@ When `WebUIHosting=ALB` and `AppSyncVisibility=PRIVATE`:
 | **App spins after login** | TLS cert SAN does not include the ALB DNS. Run cert script step B. Browsers silently block JS to mismatched hosts. |
 | **`generate_self_signed_cert.sh` fails: `ASN1_mbstring_ncopy:string too long`** | ALB DNS exceeds 64-char CommonName limit. Update to the latest script — it uses a short fixed CN and puts the long DNS in SAN only. |
 | **Login hangs on `cognito-idp.amazonaws.com` (browser inside VPC)** | No VPCE for Cognito IDP. Browser needs internet egress: NAT GW in a public subnet + private route `0.0.0.0/0 → NAT GW`. End-user browsers on VPN don't need this. |
+| **CodeBuild fails: timeout on `pip install` / `npm ci`** | CodeBuild is in the VPC but has no route to package registries. Add a NAT Gateway, or configure an internal artifact repository and set registry environment variables. See [Dependency Mirroring](./dependency-mirroring.md). |
 | **CodeBuild fails: `AccessDenied: kms:Decrypt`** | Artifact bucket is KMS-encrypted but `ArtifactsBucketKmsKeyArn` was not passed. Redeploy with the key ARN. |
 | **`UpdateDefaultConfig` custom resource fails: `NoSuchKey`** | Same as above — `ConfigurationCopyFunction` silently skipped due to missing `kms:Decrypt`. Pass `ArtifactsBucketKmsKeyArn`. |
 | **`cfn-lint E3002 Transforms unexpected` during publish** | Pre-existing schema lag for ALB ListenerRule `Transforms` (host-header-rewrite, url-rewrite). Repo-level `.cfnlintrc.yaml` ignores E3002 — confirm it exists at repo root. |
 | **Mode B: change-set fails with `S3VpcEndpointDnsNameOverride is required when S3VpcEndpointIdOverride is set`** | Working as intended. Both override params must be supplied together. Set both, or clear both to use Mode A. |
+| **Browser GraphQL fails: `ERR_NAME_NOT_RESOLVED` on `*.appsync-api.<region>.amazonaws.com`** | Browser cannot resolve the AppSync hostname. In cross-VPC/hybrid deployments, the AppSync VPC endpoint's `PrivateDnsEnabled` only works within the VPC that owns the endpoint. See "AppSync DNS resolution" section above — create the two API-ID-scoped Route 53 PHZs (`appsync-api` + `appsync-realtime-api`), add an apex alias in each, and associate both with the VPC where DNS queries originate. |
+| **Browser GraphQL works but WebSocket/subscriptions fail** | (a) The realtime hostname is not resolving — it needs its **own** scoped PHZ (`{api_id}.appsync-realtime-api.{region}.amazonaws.com`); it cannot live inside the `appsync-api` zone because it is a different parent domain. Both `{api_id}.appsync-api.{region}.amazonaws.com` AND `{api_id}.appsync-realtime-api.{region}.amazonaws.com` must resolve to the VPC endpoint. (b) AppSync endpoint SG missing ingress 443 from the browser's source network. (c) If using ALB proxy: WebSocket upgrade path (`/graphql/ws`) not configured in NGINX. |
+| **`nslookup` resolves AppSync to public IPs (not VPC endpoint IPs)** | One of the scoped PHZs is not associated with the VPC where the DNS query runs (remember there are **two** zones — `appsync-api` and `appsync-realtime-api` — and both must be associated), or `PrivateDnsEnabled` interference. Verify associations for each zone: `aws route53 get-hosted-zone --id <phz-id>` → check the `VPCs` list. |
 
 ---
 
@@ -589,3 +1084,6 @@ When `WebUIHosting=ALB` and `AppSyncVisibility=PRIVATE`:
 - VPC endpoints template — `scripts/vpc-endpoints.yaml` (17 services + 2 gateways)
 - Self-signed cert script — `scripts/generate_self_signed_cert.sh`
 - Lambda S3 client pattern — `nested/appsync/src/lambda/upload_resolver/index.py`, `src/lambda/api_handler/index.py`
+- AWS docs: [Using AppSync Private APIs](https://docs.aws.amazon.com/appsync/latest/devguide/using-private-apis.html)
+- AWS blog: [Architecture Patterns for AppSync Private APIs](https://aws.amazon.com/blogs/mobile/architecture-patterns-for-aws-appsync-private-apis/) (Patterns 2–4 cover cross-VPC/cross-account/hybrid)
+- AWS docs: [Centralized access to VPC private endpoints](https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/centralized-access-to-vpc-private-endpoints.html)

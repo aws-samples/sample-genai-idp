@@ -66,6 +66,21 @@ def handler(event, context):
     field = event.get("info", {}).get("fieldName", "")
     arguments = event.get("arguments", {})
 
+    # Defense-in-depth authorization. The GraphQL schema restricts these
+    # mutations to the Admin group via @aws_cognito_user_pools(cognito_groups),
+    # but we also enforce the group server-side so the mutating operations are
+    # never reachable by a non-Admin caller even if the schema directive is
+    # missing or misconfigured (e.g. the prior @aws_auth directive, which
+    # AppSync silently ignores on a multi-auth API).
+    if field in ("createUser", "updateUser", "deleteUser"):
+        caller = _get_caller_identity(event)
+        if not caller["is_admin"]:
+            logger.warning(
+                f"Forbidden: caller {caller['email']} (groups={caller['groups']}) "
+                f"attempted Admin-only operation '{field}'"
+            )
+            raise Exception("Unauthorized: Admin group membership required")
+
     if field == "createUser":
         return create_user(arguments)
     elif field == "updateUser":

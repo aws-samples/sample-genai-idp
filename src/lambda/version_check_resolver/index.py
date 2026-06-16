@@ -4,38 +4,41 @@
 """
 GraphQL resolver for ``getLatestPublishedVersion``.
 
-Lists the public artifacts S3 prefix for versioned IDP CloudFormation
-templates of the form ``<prefix>/idp-main_<version>.yaml`` and returns
-the highest semver along with its template URL.
+Reads a single pointer object — ``<prefix>/idp-main-latest.json`` — from the
+public artifacts bucket (overwritten by ``idp-cli publish`` on every release)
+and returns its ``version`` + ``templateUrl``. This is a GetObject of one known
+key: **no ListObjectsV2**, so it works against the public release bucket (which
+permits GetObject only, not listing).
 
-The check is opt-in: when the ``PUBLIC_ARTIFACTS_BUCKET`` environment
-variable is empty, the resolver immediately returns ``checkEnabled=False``
-so the UI hides the "Update available" indicator. This is the default
-for headless and private-network deployments.
+Pointer shape::
 
-Result is cached at module scope for ``CACHE_TTL_SECONDS`` to avoid
-re-listing S3 on every page load.
+    { "version": "0.5.15", "templateUrl": "https://s3...idp-main_0.5.15.yaml" }
+
+The check is opt-in: when the ``PUBLIC_ARTIFACTS_BUCKET`` environment variable
+is empty, the resolver immediately returns ``checkEnabled=False`` so the UI
+hides the "Update available" indicator (the default for headless/private-network
+deployments). Result is cached at module scope for ``CACHE_TTL_SECONDS``.
 """
 
+import json
 import logging
 import os
-import re
 import time
 from typing import Any
 
 import boto3
 from botocore import UNSIGNED
 from botocore.config import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 # Module-level config (read once per cold start)
 PUBLIC_ARTIFACTS_BUCKET = os.environ.get("PUBLIC_ARTIFACTS_BUCKET", "").strip()
-PUBLIC_ARTIFACTS_PREFIX = os.environ.get(
-    "PUBLIC_ARTIFACTS_PREFIX", "artifacts/genai-idp"
-).strip().strip("/")
+PUBLIC_ARTIFACTS_PREFIX = (
+    os.environ.get("PUBLIC_ARTIFACTS_PREFIX", "artifacts/genai-idp").strip().strip("/")
+)
 PUBLIC_ARTIFACTS_REGION = os.environ.get(
     "PUBLIC_ARTIFACTS_REGION", os.environ.get("AWS_REGION", "us-east-1")
 ).strip()
@@ -47,92 +50,59 @@ CACHE_TTL_SECONDS = int(os.environ.get("VERSION_CHECK_CACHE_TTL", "600"))
 # In-memory cache keyed by Lambda warm container.
 _CACHE: dict[str, Any] = {"timestamp": 0.0, "value": None}
 
-# Match `<prefix>/idp-main_<version>.yaml`. The version segment supports
-# typical PEP 440 forms (e.g. ``0.5.11``, ``0.5.11.dev1``, ``1.2.3rc1``).
-_VERSION_KEY_RE = re.compile(
-    r"^(?P<basename>[A-Za-z0-9_\-]+)_(?P<version>[0-9][0-9A-Za-z.\-+]*)\.yaml$"
-)
+
+def _pointer_key() -> str:
+    """Key of the latest-version pointer (version-stripped prefix)."""
+    base = f"{PUBLIC_ARTIFACTS_PREFIX}/" if PUBLIC_ARTIFACTS_PREFIX else ""
+    return f"{base}{MAIN_TEMPLATE_BASENAME}-latest.json"
 
 
-def _parse_version(version: str) -> tuple[Any, ...] | None:
-    """Return a sortable key for ``version``, or ``None`` if unparseable.
+def _read_latest_pointer() -> dict[str, Any] | None:
+    """GetObject the latest-version pointer. None if absent/unreadable.
 
-    Uses ``packaging.version.Version`` (PEP 440). Versions that don't
-    conform to PEP 440 (e.g. legacy ``0.4.10-wip1`` style) return ``None``
-    so the caller can skip them — they predate the current versioning
-    scheme and should not outrank current ``.devN`` / ``.rcN`` releases.
-
-    Pre-releases (``.dev``, ``rc``) sort BELOW the matching final release.
+    Tries an unsigned request first (so a public bucket needs no per-account
+    IAM grant), falling back to signed credentials. GetObject only — no listing.
     """
-    try:
-        from packaging.version import InvalidVersion, Version
-    except ImportError:  # pragma: no cover - packaging is bundled by boto3
-        logger.debug("packaging not available, using fallback version sort")
-        # Fallback: split on non-numeric characters so 0.5.11 sorts cleanly,
-        # but suffixed forms (0.5.11.dev1) sort just below 0.5.11.
-        parts: list[int] = []
-        for chunk in re.split(r"[^0-9]+", version):
-            if chunk == "":
-                continue
-            try:
-                parts.append(int(chunk))
-            except ValueError:
-                continue
-        if not parts:
-            return None
-        has_suffix = bool(re.search(r"[A-Za-z]", version))
-        return (tuple(parts), 0 if has_suffix else 1)
+    key = _pointer_key()
+
+    def _get(client: Any) -> dict[str, Any]:
+        resp = client.get_object(Bucket=PUBLIC_ARTIFACTS_BUCKET, Key=key)
+        return json.loads(resp["Body"].read().decode("utf-8"))
 
     try:
-        return (Version(version),)
-    except InvalidVersion:
-        return None
-
-
-
-def _list_published_versions(bucket: str, prefix: str) -> list[tuple[str, str]]:
-    """List ``(version, s3_key)`` pairs from the public bucket.
-
-    Uses unsigned requests so the resolver can read public buckets without
-    a per-account IAM grant; falls back to default credentials if the
-    bucket isn't anonymously listable.
-    """
-    versions: list[tuple[str, str]] = []
-    list_prefix = f"{prefix}/" if prefix and not prefix.endswith("/") else prefix
-
-    def _collect(client: Any) -> None:
-        paginator = client.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=bucket, Prefix=list_prefix):
-            for obj in page.get("Contents", []) or []:
-                key = obj["Key"]
-                # Strip the prefix, then match basename_<version>.yaml
-                relative = key[len(list_prefix) :] if list_prefix else key
-                if "/" in relative:
-                    # Skip nested objects (e.g. layers/, templates/v0.5.11/)
-                    continue
-                m = _VERSION_KEY_RE.match(relative)
-                if not m:
-                    continue
-                if m.group("basename") != MAIN_TEMPLATE_BASENAME:
-                    continue
-                versions.append((m.group("version"), key))
-
-    try:
-        unsigned_client = boto3.client(
+        unsigned = boto3.client(
             "s3",
             region_name=PUBLIC_ARTIFACTS_REGION,
             config=Config(signature_version=UNSIGNED),
         )
-        _collect(unsigned_client)
+        return _get(unsigned)
     except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "Unknown")
+        # NoSuchKey/403 on the unsigned path → retry signed (private bucket).
         logger.warning(
-            "Unsigned S3 list failed (%s); retrying with signed credentials",
-            exc.response.get("Error", {}).get("Code", "Unknown"),
+            "Unsigned GetObject of %s failed (%s); retrying signed", key, code
         )
-        signed_client = boto3.client("s3", region_name=PUBLIC_ARTIFACTS_REGION)
-        _collect(signed_client)
-
-    return versions
+        try:
+            return _get(boto3.client("s3", region_name=PUBLIC_ARTIFACTS_REGION))
+        except ClientError as exc2:
+            code2 = exc2.response.get("Error", {}).get("Code", "Unknown")
+            if code2 in ("NoSuchKey", "404", "NotFound", "AccessDenied", "403"):
+                logger.info(
+                    "No version pointer at s3://%s/%s (%s)",
+                    PUBLIC_ARTIFACTS_BUCKET,
+                    key,
+                    code2,
+                )
+                return None
+            raise
+    except (BotoCoreError, ValueError) as exc:
+        logger.warning(
+            "Bad/unreadable version pointer s3://%s/%s: %s",
+            PUBLIC_ARTIFACTS_BUCKET,
+            key,
+            exc,
+        )
+        return None
 
 
 def _build_response(
@@ -172,61 +142,40 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
         return cached
 
     try:
-        versions = _list_published_versions(
-            PUBLIC_ARTIFACTS_BUCKET, PUBLIC_ARTIFACTS_PREFIX
-        )
+        pointer = _read_latest_pointer()
     except ClientError as exc:
         code = exc.response.get("Error", {}).get("Code", "Unknown")
         message = exc.response.get("Error", {}).get("Message", str(exc))
-        logger.error(
-            "Failed to list public artifacts s3://%s/%s: %s (%s)",
-            PUBLIC_ARTIFACTS_BUCKET,
-            PUBLIC_ARTIFACTS_PREFIX,
-            message,
-            code,
-        )
+        logger.error("Failed to read version pointer: %s (%s)", message, code)
         # Don't cache failures — we want the next page load to retry.
         return _build_response(check_enabled=True, error_message=f"{code}: {message}")
     except Exception as exc:  # noqa: BLE001 - surface but don't crash the UI
-        logger.error("Unexpected error listing public artifacts: %s", exc, exc_info=True)
+        logger.error("Unexpected error reading version pointer: %s", exc, exc_info=True)
         return _build_response(check_enabled=True, error_message=str(exc))
 
-    if not versions:
+    latest_version = (pointer or {}).get("version")
+    if not pointer or not isinstance(latest_version, str) or not latest_version:
         logger.warning(
-            "No versioned templates found at s3://%s/%s",
+            "No usable version pointer at s3://%s/%s",
             PUBLIC_ARTIFACTS_BUCKET,
-            PUBLIC_ARTIFACTS_PREFIX,
+            _pointer_key(),
         )
         result = _build_response(check_enabled=True)
         _CACHE.update(timestamp=now, value=result)
         return result
 
-    # Drop versions that don't conform to PEP 440 (legacy ``-wipN`` etc.) so
-    # they don't outrank current ``.devN`` releases.
-    parseable = [(v, k, key) for v, k in versions if (key := _parse_version(v)) is not None]
-    if not parseable:
-        logger.warning(
-            "No PEP 440-parseable versioned templates found at s3://%s/%s",
-            PUBLIC_ARTIFACTS_BUCKET,
-            PUBLIC_ARTIFACTS_PREFIX,
-        )
-        result = _build_response(check_enabled=True)
-        _CACHE.update(timestamp=now, value=result)
-        return result
-    parseable.sort(key=lambda item: item[2], reverse=True)
-    latest_version, latest_key, _ = parseable[0]
-
-    template_url = (
+    # Prefer the pointer's own templateUrl; fall back to the conventional
+    # versioned key if the publisher didn't include one.
+    template_url = pointer.get("templateUrl") or (
         f"https://s3.{PUBLIC_ARTIFACTS_REGION}.amazonaws.com/"
-        f"{PUBLIC_ARTIFACTS_BUCKET}/{latest_key}"
+        f"{PUBLIC_ARTIFACTS_BUCKET}/{PUBLIC_ARTIFACTS_PREFIX}/"
+        f"{MAIN_TEMPLATE_BASENAME}_{latest_version}.yaml"
     )
     result = _build_response(
         check_enabled=True,
         latest_version=latest_version,
         template_url=template_url,
     )
-    logger.info(
-        "Latest published version: %s (%s)", latest_version, template_url
-    )
+    logger.info("Latest published version: %s (%s)", latest_version, template_url)
     _CACHE.update(timestamp=now, value=result)
     return result

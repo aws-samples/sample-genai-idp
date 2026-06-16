@@ -38,18 +38,43 @@ ABORTABLE_STATUSES = {
 }
 
 
+def _caller_in_groups(event, allowed):
+    """Defense-in-depth RBAC check against the caller's Cognito groups.
+
+    The schema restricts this field via @aws_cognito_user_pools(cognito_groups),
+    but we also enforce the group server-side so the operation is never reachable
+    by an unauthorized caller even if the schema directive is missing or
+    misconfigured (e.g. the prior @aws_auth directive, which AppSync silently
+    ignores on a multi-auth API).
+    """
+    groups = (event.get("identity") or {}).get("claims", {}).get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [groups]
+    return bool(set(allowed).intersection(groups))
+
+
 def handler(event, context):
     """
     Lambda handler for aborting document workflows.
-    
+
     This resolver handles the abortWorkflow GraphQL mutation, which allows users
     to cancel processing for one or more documents. For QUEUED documents, it marks
     them as ABORTED so the queue processor skips them. For documents with active
     workflows, it calls StopExecution on the Step Functions execution.
     """
     logger.info(f"Abort workflow resolver invoked with event: {json.dumps(sanitize_event_for_logging(event))}")
-    
+
     try:
+        # Defense-in-depth: abortWorkflow is an Admin+Author operation.
+        if not _caller_in_groups(event, ("Admin", "Author")):
+            return {
+                "success": False,
+                "message": "Unauthorized: abortWorkflow requires Admin or Author group",
+                "abortedCount": 0,
+                "failedCount": 0,
+                "errors": ["Unauthorized: abortWorkflow requires Admin or Author group"],
+            }
+
         # Extract arguments from GraphQL event
         args = event.get('arguments', {})
         object_keys = args.get('objectKeys', [])

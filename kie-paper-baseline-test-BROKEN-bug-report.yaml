@@ -1,0 +1,773 @@
+# Configuration downloaded from stack: kaleko-IDPAutoTune-dev
+# Format: full
+
+config_type: Config
+use_bda: false
+enable_blueprint_optimization: false
+managed: false
+test_set: null
+notes: RealKIE FCC broadcast advertising invoices - explicit config with no defaults
+ocr:
+  backend: none
+  model_id: us.amazon.nova-2-lite-v1:0
+  model_lambda_hook_arn: null
+  system_prompt: You are an expert OCR system. Extract all text from the provided image accurately, preserving layout where
+    possible.
+  task_prompt: Extract all text from this document image. Preserve the layout, including paragraphs, tables, and formatting.
+  features:
+  - name: LAYOUT
+  max_workers: 20
+  image:
+    target_width: null
+    target_height: null
+    dpi: null
+    preprocessing: null
+classification:
+  model: us.amazon.nova-2-lite-v1:0
+  model_lambda_hook_arn: null
+  system_prompt: 'You are a multimodal document classification expert that analyzes business documents using both visual layout
+    and textual content. Your task is to classify single-page documents into predefined categories based on their structural
+    patterns, visual features, and text content. Your output must be valid JSON according to the requested format. <variables>
+    <document-ocr-data>: OCR-extracted text content from the document page that provides textual information for classification
+    <document-image>: Visual representation of the document page that provides layout, formatting, and visual structure information
+    <document-types>: List of valid document types with their descriptions that the document must be classified into </variables>'
+  task_prompt: "<task-description> Analyze the provided document using both its visual layout and textual content to determine\
+    \ its document type and whether this page begins a new document or continues the previous one. </task-description>\n<document-types>\
+    \ {CLASS_NAMES_AND_DESCRIPTIONS} </document-types>\n<classification-instructions> Follow these steps to classify the document:\
+    \ 1. Examine the visual layout: headers, logos, formatting, structure, and visual organization 2. Analyze the textual\
+    \ content: key phrases, terminology, purpose, and information type 3. Identify distinctive features that match the document\
+    \ type descriptions 4. Decide if this page starts a new document (output \"start\") or continues the previous document\
+    \ (output \"continue\") 5. Consider both visual and textual evidence together to determine the best match 6. CRITICAL:\
+    \ Only use document types explicitly listed in the <document-types> section </classification-instructions>\n<output-format>\
+    \ {\n  \"classification_reason\": \"Detailed reasoning including specific visual and textual evidence that led to this\
+    \ classification\",\n  \"class\": \"exact_document_type_from_list\",\n  \"document_boundary\": \"start or continue\"\n\
+    } </output-format>\n<<CACHEPOINT>>\n<document-ocr-data> {DOCUMENT_TEXT} </document-ocr-data>\n<document-image> {DOCUMENT_IMAGE}\
+    \ </document-image>\n<final-instructions> Analyze the document above by: 1. Applying the <classification-instructions>\
+    \ to examine both visual and textual features 2. Selecting ONLY from document types in <document-types> 3. Providing clear\
+    \ reasoning with specific evidence 4. Outputting in the exact JSON format specified in <output-format> </final-instructions>"
+  temperature: 0.0
+  top_p: 0.0
+  top_k: 5.0
+  max_tokens: 4096
+  maxPagesForClassification: ALL
+  classificationMethod: multimodalPageLevelClassification
+  sectionSplitting: llm_determined
+  contextPagesCount: 0
+  image:
+    target_width: null
+    target_height: null
+    dpi: null
+    preprocessing: null
+extraction:
+  model: us.anthropic.claude-sonnet-4-6
+  model_lambda_hook_arn: null
+  system_prompt: You are a document assistant. Respond only with JSON. Never make up data, only provide data found in the
+    document being provided.
+  task_prompt: '<background> You are an expert in document analysis and information extraction. You can understand and extract
+    key information from documents classified as type: {DOCUMENT_CLASS}. </background>
+
+    <task> Your task is to take the unstructured text provided and convert it into a well-organized table format using JSON.
+    Identify the main entities, attributes, or categories mentioned in the attributes list below and use them as keys in the
+    JSON object. Then, extract the relevant information from the text and populate the corresponding values in the JSON object.
+    </task>
+
+    If the attributes section below contains a list of attribute names and descriptions, then output only those attributes,
+    using the provided descriptions as guidance for finding the correct values.
+
+    <attributes> {ATTRIBUTE_NAMES_AND_DESCRIPTIONS} </attributes>
+
+    <<CACHEPOINT>>
+
+    <document-text> {DOCUMENT_TEXT} </document-text> <document_image> {DOCUMENT_IMAGE} </document_image>
+
+    <final-instructions> Extract key information from the document and return a JSON object. Ensure the output is properlyformatted
+    JSON with quoted keys and values </final-instructions>'
+  temperature: 0.0
+  top_p: 0.0
+  top_k: 5.0
+  max_tokens: 64000
+  image:
+    target_width: null
+    target_height: null
+    dpi: null
+    preprocessing: null
+  agentic:
+    enabled: false
+    review_agent: false
+    review_agent_model: us.anthropic.claude-sonnet-4-6
+    max_concurrent_batches: 1
+    table_parsing:
+      enabled: true
+      min_confidence_threshold: 95.0
+      min_parse_success_rate: 0.9
+      use_confidence_data: true
+      max_empty_line_gap: 3
+      auto_merge_adjacent_tables: true
+  missing_field_handling:
+    enabled: false
+    representation: omit
+  custom_prompt_lambda_arn: null
+assessment:
+  enabled: false
+  hitl_enabled: false
+  model: us.amazon.nova-lite-v1:0
+  model_lambda_hook_arn: null
+  system_prompt: You are a document analysis assessment expert. Your role is to evaluate the confidence and accuracy of data
+    extraction results by analyzing them against source documents. Provide accurate confidence scores for each assessment.
+    When bounding boxes are requested, provide precise coordinate locations where information appears in the document.
+  task_prompt: "<background> You are an expert document analysis assessment system. Your task is to evaluate the confidence\
+    \ of extraction results for a document of class {DOCUMENT_CLASS} and provide precise spatial localization for each field.\
+    \ </background>\n<task> Analyze the extraction results against the source document and provide confidence assessments\
+    \ AND bounding box coordinates for each extracted attribute. Consider factors such as: 1. Text clarity and OCR quality\
+    \ in the source regions  2. Alignment between extracted values and document content  3. Presence of clear evidence supporting\
+    \ the extraction  4. Potential ambiguity or uncertainty in the source material  5. Completeness and accuracy of the extracted\
+    \ information 6. Precise spatial location of each field in the document </task>\n<assessment-guidelines> For each attribute,\
+    \ provide:  - A confidence score between 0.0 and 1.0 where:\n   - 1.0 = Very high confidence, clear and unambiguous evidence\n\
+    \   - 0.8-0.9 = High confidence, strong evidence with minor uncertainty\n   - 0.6-0.7 = Medium confidence, reasonable\
+    \ evidence but some ambiguity\n   - 0.4-0.5 = Low confidence, weak or unclear evidence\n   - 0.0-0.3 = Very low confidence,\
+    \ little to no supporting evidence\n- A clear explanation of the confidence reasoning - Precise spatial coordinates where\
+    \ the field appears in the document\nGuidelines:  - Base assessments on actual document content and OCR quality  - Consider\
+    \ both text-based evidence and visual/layout clues  - Account for OCR confidence scores when provided  - Be objective\
+    \ and specific in reasoning  - If an extraction appears incorrect, score accordingly with explanation - Provide tight,\
+    \ accurate bounding boxes around the actual text </assessment-guidelines>\n<spatial-localization-guidelines> For each\
+    \ field, provide bounding box coordinates: - bbox: [x1, y1, x2, y2] coordinates in normalized 0-1000 scale - page: Page\
+    \ number where the field appears (starting from 1)\nCoordinate system: - Use normalized scale 0-1000 for both x and y\
+    \ axes - x1, y1 = top-left corner of bounding box   - x2, y2 = bottom-right corner of bounding box - Ensure x2 > x1 and\
+    \ y2 > y1 - Make bounding boxes tight around the actual text content - If a field spans multiple lines, create a bounding\
+    \ box that encompasses all relevant text </spatial-localization-guidelines>\n<final-instructions> Analyze the extraction\
+    \ results against the source document and provide confidence assessments with spatial localization. Return a JSON object\
+    \ with the following structure based on the attribute type:\nFor SIMPLE attributes:  {\n  \"simple_attribute_name\": {\n\
+    \    \"confidence\": 0.85,\n    \"bbox\": [100, 200, 300, 250],\n    \"page\": 1\n  }\n}\nFor GROUP attributes (nested\
+    \ object structure):  {\n  \"group_attribute_name\": {\n    \"sub_attribute_1\": {\n      \"confidence\": 0.90,\n    \
+    \  \"bbox\": [150, 300, 250, 320],\n      \"page\": 1\n    },\n    \"sub_attribute_2\": {\n      \"confidence\": 0.75,\n\
+    \      \"bbox\": [150, 325, 280, 345],\n      \"page\": 1\n    }\n  }\n}\nFor LIST attributes (array of assessed items):\
+    \  {\n  \"list_attribute_name\": [\n    {\n      \"item_attribute_1\": {\n        \"confidence\": 0.95,\n        \"bbox\"\
+    : [100, 400, 200, 420],\n        \"page\": 1\n      },\n      \"item_attribute_2\": {\n        \"confidence\": 0.88,\n\
+    \        \"bbox\": [250, 400, 350, 420],\n        \"page\": 1\n      }\n    },\n    {\n      \"item_attribute_1\": {\n\
+    \        \"confidence\": 0.92,\n        \"bbox\": [100, 425, 200, 445],\n        \"page\": 1\n      },\n      \"item_attribute_2\"\
+    : {\n        \"confidence\": 0.70,\n        \"bbox\": [250, 425, 350, 445],\n        \"page\": 1\n      }\n    }\n  ]\n\
+    }\nIMPORTANT:   - For LIST attributes like \"Transactions\", assess EACH individual item in the list separately with individual\
+    \ bounding boxes - Each transaction should be assessed as a separate object in the array with its own spatial coordinates\
+    \ - Do NOT provide aggregate assessments for list items - assess each one individually with precise locations - Include\
+    \ assessments AND bounding boxes for ALL attributes present in the extraction results - Match the exact structure of the\
+    \ extracted data - Provide page numbers for all bounding boxes (starting from 1) </final-instructions>\n<<CACHEPOINT>>\n\
+    <document-image> {DOCUMENT_IMAGE} </document-image>\n<ocr-text-confidence-results> {OCR_TEXT_CONFIDENCE} </ocr-text-confidence-results>\n\
+    <<CACHEPOINT>>\n<attributes-definitions> {ATTRIBUTE_NAMES_AND_DESCRIPTIONS} </attributes-definitions>\n<extraction-results>\
+    \ {EXTRACTION_RESULTS} </extraction-results>"
+  temperature: 0.0
+  top_p: 0.0
+  top_k: 5.0
+  max_tokens: 10000
+  default_confidence_threshold: 0.8
+  validation_enabled: false
+  image:
+    target_width: null
+    target_height: null
+    dpi: null
+    preprocessing: null
+  granular:
+    enabled: true
+    list_batch_size: 1
+    simple_batch_size: 3
+    max_workers: 20
+summarization:
+  enabled: false
+  model: us.amazon.nova-pro-v1:0
+  model_lambda_hook_arn: null
+  system_prompt: 'You are a document summarization expert who can analyze and summarize documents from various domains including
+    medical, financial, legal, and general business documents. Your task is to create a summary that captures the key information,
+    main points, and important details from the document. Your output must be in valid JSON format. \nSummarization Style:
+    Balanced\\nCreate a balanced summary that provides a moderate level of detail. Include the main points and key supporting
+    information, while maintaining the document''s overall structure. Aim for a comprehensive yet concise summary.\n Your
+    output MUST be in valid JSON format with markdown content. You MUST strictly adhere to the output format specified in
+    the instructions.'
+  task_prompt: "<document-text> {DOCUMENT_TEXT} </document-text>\n<extracted-attributes> {EXTRACTION_RESULTS} </extracted-attributes>\n\
+    Analyze the provided document (<document-text>) along with the extracted attributes (<extracted-attributes>) to create\
+    \ a comprehensive and accurate summary.\nCRITICAL INSTRUCTION: You MUST return your response as valid JSON with the EXACT\
+    \ structure shown at the end of these instructions. Do not include any explanations, notes, or text outside of the JSON\
+    \ structure.\nCreate a summary that captures the essential information from the document. Your summary should:\n1. **Integrate\
+    \ Extracted Attributes**: Begin with a \"Key Information\" section that highlights the most important extracted attributes\
+    \ in a structured format (use tables or lists as appropriate)\n2. **Validate and Reference**: Cross-reference the document\
+    \ text with extracted values to ensure accuracy. When mentioning specific values, prefer the extracted attributes when\
+    \ they are available\n3. **Maintain Document Structure**: Preserve the original document's organizational structure where\
+    \ appropriate, using the extracted attributes to enhance each section\n4. **Highlight Critical Data**: Emphasize important\
+    \ extracted values such as:\n   - Names, addresses, and identification numbers\n   - Dates and time periods\n   - Monetary\
+    \ amounts and financial figures\n   - Status indicators and classifications\n   - Any calculated or derived values\n\n\
+    5. **Use Markdown Formatting**: Apply markdown for better readability:\n   - Use headers (##, ###) for sections\n   -\
+    \ Create tables for structured data from extracted attributes\n   - Use **bold** for important values and *italics* for\
+    \ emphasis\n   - Create lists (bullet or numbered) for multiple items\n\n6. **Provide Context**: For each extracted value\
+    \ mentioned, provide brief context from the document text to explain its significance\n7. **Citation System**: Cite all\
+    \ facts using inline citations in the format [Cite-X, Page-Y] where X is a sequential citation number and Y is the page\
+    \ number. Format citations as markdown links: [[Cite-1, Page-3]](#cite-1-page-3)\n8. **Data Completeness**: If extracted\
+    \ attributes are missing or empty, note this in the summary and rely more heavily on the document text\n9. **References\
+    \ Section**: At the end, include a \"References\" section listing all citations with their exact text from the source\
+    \ document\nStructure your summary as follows: - **Key Information** (from extracted attributes) - **Document Overview**\
+    \ - **Detailed Sections** (based on document structure) - **Summary and Conclusions** - **References**\nOutput Format:\n\
+    You MUST return ONLY valid JSON with the following structure and nothing else:\n```json {\n  \"summary\": \"A comprehensive\
+    \ summary in markdown format that integrates extracted attributes with document text, includes inline citations linked\
+    \ to a references section at the bottom\"\n} ```\nDo not include any text, explanations, or notes outside of this JSON\
+    \ structure. The JSON must be properly formatted and parseable."
+  temperature: 0.0
+  top_p: 0.0
+  top_k: 5.0
+  max_tokens: 4096
+chat:
+  enabled: false
+  model: us.anthropic.claude-opus-4-7:1m
+  model_lambda_hook_arn: null
+  system_prompt: You are an assistant that answers questions about the attached document text. If you don't know the answer,
+    say so. Do not invent information. Use the prior chat history provided as context. Respond in plain text, not JSON.
+  temperature: 0.0
+  top_p: 0.1
+  top_k: 5.0
+  max_tokens: 4096
+rule_validation:
+  enabled: false
+  semaphore: 5
+  max_chunk_size: 8000
+  token_size: 4
+  overlap_percentage: 10
+  response_prefix: <response>
+  recommendation_options: 'Pass: The requirement criteria are fully met.
+
+    Fail: The requirement is partially met or requires additional information.
+
+    Information Not Found: No relevant data exists in the document content.'
+  extraction_results: null
+  fact_extraction:
+    model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+    system_prompt: 'You are a Document Fact Extraction Specialist responsible for identifying and extracting factual evidence
+      that is relevant to rule validation.
+
+
+      ## Your Role
+
+      Your sole task is to extract facts and evidence that can be used to validate compliance with a specific rule. You do
+      NOT make compliance decisions - you only gather and cite relevant factual evidence.
+
+
+      ## Variables
+
+      - <rule>: The compliance rule or requirement that facts should be extracted for
+
+      - <document-text>: The source document content to extract facts from
+
+      - <extracted-attributes>: Pre-extracted attributes that may contain relevant facts
+
+
+      ## Guidelines
+
+      1. Extract facts that are directly relevant to validating the specified rule
+
+      2. Facts can be extracted from BOTH <document-text> AND <extracted-attributes>
+
+      3. Each fact must include page number(s) indicating where the fact was found
+
+      4. Remain objective - extract facts that both support and contradict the rule
+
+      5. Do not interpret or make judgments about compliance
+
+      6. Never fabricate or assume facts not present in the provided sources'
+    task_prompt: "Extract relevant facts and evidence that can be used to validate the rule provided.\n\n<extracted-attributes>\n\
+      {EXTRACTION_RESULTS}\n</extracted-attributes>\n\n<instructions>\nFollow these steps to extract relevant facts:\n\nSTEP\
+      \ 1 - ANALYZE THE RULE\nReview the rule provided in <rule></rule> tags to understand:\n- What specific criteria or conditions\
+      \ need to be validated\n- What type of evidence would be relevant (dates, amounts, names, conditions, etc.)\n- What\
+      \ key terms or concepts to search for\n\nSTEP 2 - SEARCH FOR EVIDENCE\nReview BOTH sources for relevant facts:\n\nFrom\
+      \ <document-text></document-text>:\n- Statements, data, or information that relate to the rule criteria\n- Specific\
+      \ values, dates, identifiers, or conditions mentioned\n- Any context that clarifies or qualifies the relevant information\n\
+      \nFrom <extracted-attributes></extracted-attributes>:\n- Pre-extracted values that are relevant to the rule\n- Structured\
+      \ data that can support rule validation\n- Any attributes with associated page references\n\nSTEP 3 - EXTRACT FACTS\
+      \ WITH CITATIONS\nFor each relevant piece of evidence found:\n- Extract the factual information verbatim or accurately\
+      \ paraphrased\n- Record the page number(s) from which the fact was extracted\n- Note the relevance to the specific rule\
+      \ being validated\n\nSTEP 4 - COMPILE STRUCTURED OUTPUT\nFormat all extracted facts as a structured JSON response.\n\
+      \nJSON RESPONSE FORMAT:\n{{\n  \"extracted_facts\": [\n    {{\n      \"fact\": \"The specific factual information extracted\"\
+      ,\n      \"citation\": \"Page number(s) from which this fact is extracted\",\n      \"relevance\": \"Brief explanation\
+      \ of how this fact relates to the rule\"\n    }}\n  ],\n  \"extraction_summary\": \"Brief summary of what evidence was\
+      \ found and any gaps identified\"\n}}\n\nIMPORTANT RULES:\n- Include ALL relevant facts from both sources, even if they\
+      \ contradict each other\n- Each fact must have a valid citation with page number(s)\n- Do not include compliance decisions\
+      \ or recommendations\n- If no relevant facts are found, return empty array and note this in the summary\n- Ensure output\
+      \ is valid JSON\n</instructions>\n\n<<CACHEPOINT>>\n\n<document-text>\n{DOCUMENT_TEXT}\n</document-text>\n\n<rule>\n\
+      {rule}\n</rule>\n\nCRITICAL: Respond ONLY with the JSON format inside <response></response> XML tags.\nDo not include\
+      \ any explanatory text, commentary, or additional text before or after the <response> tags.\nYour entire response must\
+      \ contain only the <response> tags with the JSON inside."
+    temperature: 0.0
+    top_p: 0.0
+    top_k: 20.0
+    max_tokens: 4096
+  rule_validation_orchestrator:
+    model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
+    system_prompt: 'You are a Compliance Validation Specialist responsible for analyzing extracted evidence and making final
+      compliance determinations.
+
+
+      ## Your Role
+
+      Your task is to review facts and evidence extracted from documents, analyze their relevance and completeness, and make
+      a definitive compliance recommendation for a given rule.
+
+
+      ## Variables
+
+      - <rule>: The compliance rule or requirement being validated
+
+      - <extracted_evidence>: Facts and citations extracted from the document by the fact extraction step
+
+      - <recommendation_options>: Available compliance decision options to choose from
+
+      - <policy_class>: The category or classification of the policy being validated
+
+
+      ## Guidelines
+
+      1. Base decisions strictly on the extracted evidence provided
+
+      2. Consider all facts, including contradictory evidence
+
+      3. Select the most appropriate recommendation from the provided options
+
+      4. Provide clear reasoning with specific citations from the extracted evidence
+
+      5. If evidence is insufficient, clearly state what is missing
+
+      6. Keep reasoning concise, factual, and in a single paragraph
+
+      7. Never introduce assumptions or facts not present in the extracted evidence'
+    task_prompt: "Analyze the extracted evidence and determine compliance with the specified rule.\n\n<instructions>\nFollow\
+      \ these steps to make a compliance determination:\n\nSTEP 1 - REVIEW EXTRACTED EVIDENCE\nExamine all facts provided\
+      \ in <extracted_evidence></extracted_evidence> tags:\n- Identify key facts relevant to the rule criteria\n- Note the\
+      \ citations and source pages for each fact\n- Identify any contradictory or conflicting evidence\n\nSTEP 2 - ASSESS\
+      \ EVIDENCE COMPLETENESS\nDetermine if the extracted evidence is sufficient to validate the rule:\n- Does the evidence\
+      \ directly address the rule requirements?\n- Are there gaps in the evidence that prevent a conclusive determination?\n\
+      - Is the evidence consistent or are there conflicts to resolve?\n\nSTEP 3 - EVALUATE AGAINST RULE CRITERIA\nCompare\
+      \ the extracted evidence against the rule in <rule></rule> tags:\n- Determine if evidence supports compliance with the\
+      \ rule\n- Determine if evidence indicates non-compliance\n- Determine if evidence is insufficient for a conclusion\n\
+      \nSTEP 4 - SELECT RECOMMENDATION\nBased on your evaluation, select ONE option from <recommendation_options></recommendation_options>:\n\
+      - Review all available options provided in the recommendation_options\n- Select the option that best matches your evidence-based\
+      \ conclusion\n- Consider whether evidence supports compliance, indicates non-compliance, or is insufficient\n- Match\
+      \ your determination to the most appropriate option from those provided\n\nSTEP 5 - FORMULATE REASONING\nConstruct a\
+      \ concise reasoning statement that:\n- Summarizes the key evidence supporting the decision\n- Includes specific page\
+      \ citations from the extracted evidence\n- Explains why this evidence leads to the chosen recommendation\n- Notes any\
+      \ evidence gaps if applicable\n\nJSON RESPONSE FORMAT:\n{{\n  \"recommendation\": \"Select one keyword option from <recommendation_options>.\
+      \ Return ONLY the keyword (e.g., first word or phrase before any separator)\",\n  \"reasoning\": \"Concise summary of\
+      \ extracted evidence supporting the decision with specific page citations in a single paragraph without line breaks\"\
+      ,\n  \"supporting_pages\": [\"consolidated list of page numbers containing relevant evidence\"]\n}}\n\nSUPPORTING PAGES\
+      \ RULES:\n1. Include ONLY page numbers from the extracted evidence that support the decision\n2. If no evidence exists,\
+      \ supporting_pages should be an empty list []\n3. For non-compliance recommendations, include pages reviewed that contain\
+      \ evidence of non-compliance\n4. Consolidate all unique page numbers from the extracted evidence\n\nRESPONSE RULES:\n\
+      1. Provide exactly ONE compliance determination\n2. Use only basic punctuation (. , : ;) in reasoning\n3. Avoid special\
+      \ characters or line breaks in reasoning\n4. All JSON fields must be included\n5. For non-compliance or partial findings,\
+      \ explicitly state what evidence was missing or insufficient\n</instructions>\n\n<<CACHEPOINT>>\n\n<extracted_evidence>\n\
+      {extracted_evidence}\n</extracted_evidence>\n\n<recommendation_options>\n{recommendation_options}\n</recommendation_options>\n\
+      \n<policy_class>{policy_class}</policy_class>\n\n<rule>{rule}</rule>\n\nCRITICAL: Respond ONLY with the JSON format\
+      \ inside <response></response> XML tags.\nDo not include any explanatory text, commentary, or additional text before\
+      \ or after the <response> tags.\nYour entire response must contain only the <response> tags with the JSON inside."
+    temperature: 0.0
+    top_p: 0.0
+    top_k: 20.0
+    max_tokens: 4096
+agents:
+  error_analyzer:
+    model_id: us.anthropic.claude-sonnet-4-6
+    lookback_hours: 24
+    error_patterns:
+    - ERROR
+    - CRITICAL
+    - FATAL
+    - Exception
+    - Traceback
+    - Failed
+    - Timeout
+    - AccessDenied
+    - ThrottlingException
+    system_prompt: "You are an intelligent error analysis agent for the GenAI IDP (Intelligent Document Processing) system\
+      \ with access to specialized diagnostic tools.\n\nSYSTEM ARCHITECTURE:\nThe GenAI IDP system processes documents through\
+      \ an AWS Step Functions state machine with the following pipeline stages:\n- OCR Stage: Extracts text/layout from documents\
+      \ using Amazon Textract or Amazon Bedrock Data Automation (BDA)\n- Classification Stage: Identifies the document class\
+      \ using a Bedrock LLM\n- Extraction Stage: Extracts structured fields using a Bedrock LLM based on class-specific configuration\n\
+      - Assessment Stage: Evaluates extraction quality using a Bedrock LLM\n- Summarization Stage (optional): Generates a\
+      \ document summary\n- Evaluation Stage (optional): Scores extraction accuracy against ground truth\n\nBDA Alternative\
+      \ Branch:\n- InvokeBDA → BDA Completion (EventBridge-triggered) → BDA ProcessResults\n- BDA jobs are asynchronous; failures\
+      \ may appear in EventBridge delivery or the BDA service itself\n\nKey AWS services involved:\n- AWS Step Functions:\
+      \ Orchestrates the pipeline workflow\n- AWS Lambda: Executes each stage as an independent function\n- Amazon DynamoDB:\
+      \ Tracks document status and metadata per stage\n- Amazon CloudWatch: Captures logs from each Lambda function\n- AWS\
+      \ X-Ray: Provides distributed tracing across Lambda and Bedrock calls\n- Amazon Bedrock: Provides LLM inference for\
+      \ classification, extraction, assessment, and summarization\n- Amazon Textract: Performs OCR for non-BDA documents\n\
+      - Amazon S3: Stores input documents, OCR results, and extracted output\n\nINVESTIGATION WORKFLOW:\n1. Identify the document\
+      \ status in DynamoDB to understand which pipeline stage failed\n2. Retrieve Step Functions execution details to get\
+      \ the execution timeline and error event\n3. Collect CloudWatch logs from the failing Lambda stage for detailed error\
+      \ messages\n4. Use X-Ray traces to identify performance bottlenecks or cascading failures across services\n5. Synthesize\
+      \ all evidence to determine root cause — never stop at the first error message\n\nTOOL USAGE:\n- Document-specific analysis\
+      \ (user provides a filename or document ID):\n  → Use cloudwatch_document_logs and dynamodb_status as primary tools\n\
+      - System-wide or batch analysis (no specific document):\n  → Use cloudwatch_logs and dynamodb_query to identify patterns\n\
+      - Workflow failures and execution timeline:\n  → Use stepfunction_details for the execution event history\n- Lambda\
+      \ configuration and environment context:\n  → Use lambda_lookup to check timeout settings, memory, and environment variables\n\
+      - Distributed service interaction issues:\n  → Use xray_trace or xray_performance_analysis\n\nAlways use at least 2\
+      \ different tool sources before concluding a root cause. If a tool call returns no useful data, try an alternative —\
+      \ never guess without evidence.\n\nINVESTIGATION STRATEGY:\nUse this approach for all investigations, whether a single\
+      \ document or a large batch:\n\n1. TRIAGE: Check DynamoDB for document status and which stage failed. For batches, get\
+      \ a count of failed documents and their error status distribution.\n\n2. SAMPLE: For multiple failures, select 2-3 representative\
+      \ failed documents. Avoid over-sampling — additional documents yield diminishing returns.\n\n3. TRACE THE CAUSAL CHAIN\
+      \ for each sampled document:\n   DynamoDB status → Step Functions execution timeline → CloudWatch error logs → X-Ray\
+      \ traces\n\n4. APPLY THE \"5 WHYS\" — Never stop at the first error. Keep asking \"what caused THIS?\":\n   Finding:\
+      \ \"Extraction Lambda timed out\" → Why?\n   \"Lambda waited 14 minutes on Bedrock InvokeModel\" → Why was it slow?\n\
+      \   \"Bedrock returned ThrottlingException, triggering exponential backoff\" → Why throttled?\n   \"Batch of 200 docs\
+      \ with extraction concurrency=10 exceeded Bedrock RPM quota\"\n   ROOT CAUSE: \"Extraction concurrency too high for\
+      \ the configured Bedrock account quota\"\n\n5. DISTINGUISH SYSTEMIC vs ISOLATED FAILURES:\n   - Same error type across\
+      \ many documents → systemic issue (quota, permissions, configuration, service limit)\n   - Different errors across documents\
+      \ → per-document issues (bad input, edge cases, unsupported format)\n\n6. VALIDATE: Does the identified root cause explain\
+      \ ALL observed failures?\n\nROOT CAUSE vs SYMPTOM GUIDE:\n- SYMPTOM: \"Document processing failed\"\n- SYMPTOM: \"Extraction\
+      \ Lambda returned error\"\n- CLOSER:  \"ThrottlingException from Bedrock InvokeModel\"\n- ROOT CAUSE: \"Bedrock RPM\
+      \ quota exceeded — batch concurrency generated too many concurrent API calls\"\n\n- SYMPTOM: \"Classification failed\"\
+      \n- CLOSER:  \"Textract API timeout\"\n- ROOT CAUSE: \"150-page PDF exceeded Textract async processing limit for the\
+      \ configured region\"\n\nCOMMON ERROR PATTERNS:\nUse these patterns to guide your investigation and accelerate diagnosis:\n\
+      \n1. THROTTLING — ThrottlingException, TooManyRequestsException, \"Rate exceeded\", \"Too many requests\"\n   Likely\
+      \ cause: Batch size × concurrency > Bedrock RPM/TPM quota, or Textract TPS limit exceeded\n   Check: Concurrent Lambda\
+      \ executions, batch size, Bedrock model quotas\n\n2. TIMEOUT — \"Task timed out\", \"Lambda timeout\", \"socket timeout\"\
+      , \"Connection reset\"\n   Likely cause: Large document (many pages), undersized Lambda timeout or memory, slow Bedrock\
+      \ inference\n   Check: Document page count, Lambda timeout configuration, model response latency in X-Ray\n\n3. CONFIGURATION\
+      \ ERROR — KeyError, missing field, \"not found in config\", validation error, AttributeError\n   Likely cause: Class\
+      \ definition or attribute names in config don't match expected schema; config changes deployed incorrectly\n   Check:\
+      \ DynamoDB config table, class definitions, attribute names for the affected document class\n\n4. PERMISSIONS — AccessDeniedException,\
+      \ \"not authorized\", \"is not authorized to perform\", ExpiredToken\n   Likely cause: Missing IAM policy, cross-account\
+      \ access issue, Bedrock model access not granted, KMS policy gap\n   Check: Lambda execution role policies, Bedrock\
+      \ model access in the console, S3 bucket policies\n\n5. INPUT QUALITY — empty extraction results, very low confidence,\
+      \ \"unable to parse\", Textract errors on specific pages\n   Likely cause: Poor scan quality, handwritten content, unsupported\
+      \ file format, corrupted PDF\n   Check: OCR output in S3, original document quality, Textract response for page-level\
+      \ errors\n\n6. BDA-SPECIFIC — \"BDA Job Failed\", blueprint mismatch, async job timeout, missing EventBridge event\n\
+      \   Likely cause: Blueprint schema mismatch with document type, BDA service limit, EventBridge delivery failure\n  \
+      \ Check: BDA project configuration, blueprint compatibility, EventBridge rule and DLQ\n\n7. BEDROCK MODEL ERRORS — ModelErrorException,\
+      \ \"model returned an error\", context length exceeded\n   Likely cause: Document content too large for model context\
+      \ window, model unavailable in region, prompt issue\n   Check: Document page count, OCR text length, model availability,\
+      \ extraction prompt configuration\n\nOUTPUT FORMAT:\nAlways format your response with exactly these three sections in\
+      \ this order:\n\n## Root Cause\n**Confidence:** [HIGH | MEDIUM | LOW]\nIdentify the specific underlying technical reason\
+      \ why the error occurred. Focus on the primary cause, not symptoms.\n\n## Recommendations\nProvide specific, actionable\
+      \ steps to resolve the issue. Limit to top three recommendations only.\n\n<details>\n<summary><strong>Evidence</strong></summary>\n\
+      \nFormat evidence with source information. Include relevant data from tool responses:\n\n**For CloudWatch logs:**\n\
+      **Log Group:** [full log_group name]\n**Log Stream:** [full log_stream name]\n```\n[ERROR] timestamp message\n```\n\n\
+      **For other sources (DynamoDB, Step Functions, X-Ray):**\n**Source:** [service name and resource]\n```\nRelevant data\
+      \ from tool response\n```\n\n</details>\n\nFORMATTING RULES:\n- Use the exact three-section structure above\n- Add Confidence\
+      \ (HIGH/MEDIUM/LOW) as the first line of the Root Cause section\n- Make the Evidence section collapsible using HTML\
+      \ details tags\n- Include relevant data from all tool responses used\n- For CloudWatch: Show complete log group and\
+      \ log stream names without truncation\n- Present evidence data in code blocks with appropriate source labels\n\nRECOMMENDATION\
+      \ GUIDELINES:\nFor code-related issues or system bugs:\n- Do not suggest code modifications — users cannot change Lambda\
+      \ code\n- Describe the error in detail with timestamps and context so it can be reported\n\nFor configuration-related\
+      \ issues:\n- Direct users to the UI configuration panel\n- Specify the exact configuration section and parameter name\n\
+      \nFor operational issues (throttling, timeouts, quotas):\n- Provide immediate remediation steps (e.g., reduce concurrency,\
+      \ reprocess failed documents)\n- Include preventive measures to avoid recurrence\n\nCOMMON MISTAKES TO AVOID:\n- Do\
+      \ NOT report \"Lambda function returned error\" as a root cause — that is a symptom\n- Do NOT recommend \"check CloudWatch\
+      \ logs\" as a recommendation — you are already doing that\n- Do NOT suggest code changes — users cannot modify Lambda\
+      \ functions\n- Do NOT speculate about root cause without corroborating tool evidence\n- Do NOT investigate more than\
+      \ 3 sample documents in a batch — focus on pattern recognition\n- Do NOT include search quality reflections, meta-analysis,\
+      \ or sections not listed in the output format above"
+    parameters:
+      max_log_events: 5
+      time_range_hours_default: 24
+      max_log_message_length: 400
+      max_events_per_log_group: 5
+      max_log_groups: 20
+      max_stepfunction_timeline_events: 50
+      max_stepfunction_error_length: 400
+      xray_slow_segment_threshold_ms: 5000
+      xray_error_rate_threshold: 0.05
+      xray_response_time_threshold_ms: 10000
+      xray_analysis_hours: 3
+      settings_cache_ttl_seconds: 300
+  chat_companion:
+    model_id: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    error_patterns:
+    - ERROR
+    - CRITICAL
+    - FATAL
+    - Exception
+    - Traceback
+    - Failed
+    - Timeout
+    - AccessDenied
+    - ThrottlingException
+    system_prompt: "You are an intelligent error analysis agent for the GenAI IDP (Intelligent Document Processing) system\
+      \ with access to specialized diagnostic tools.\n\nSYSTEM ARCHITECTURE:\nThe GenAI IDP system processes documents through\
+      \ an AWS Step Functions state machine with the following pipeline stages:\n- OCR Stage: Extracts text/layout from documents\
+      \ using Amazon Textract or Amazon Bedrock Data Automation (BDA)\n- Classification Stage: Identifies the document class\
+      \ using a Bedrock LLM\n- Extraction Stage: Extracts structured fields using a Bedrock LLM based on class-specific configuration\n\
+      - Assessment Stage: Evaluates extraction quality using a Bedrock LLM\n- Summarization Stage (optional): Generates a\
+      \ document summary\n- Evaluation Stage (optional): Scores extraction accuracy against ground truth\n\nBDA Alternative\
+      \ Branch:\n- InvokeBDA → BDA Completion (EventBridge-triggered) → BDA ProcessResults\n- BDA jobs are asynchronous; failures\
+      \ may appear in EventBridge delivery or the BDA service itself\n\nKey AWS services involved:\n- AWS Step Functions:\
+      \ Orchestrates the pipeline workflow\n- AWS Lambda: Executes each stage as an independent function\n- Amazon DynamoDB:\
+      \ Tracks document status and metadata per stage\n- Amazon CloudWatch: Captures logs from each Lambda function\n- AWS\
+      \ X-Ray: Provides distributed tracing across Lambda and Bedrock calls\n- Amazon Bedrock: Provides LLM inference for\
+      \ classification, extraction, assessment, and summarization\n- Amazon Textract: Performs OCR for non-BDA documents\n\
+      - Amazon S3: Stores input documents, OCR results, and extracted output\n\nINVESTIGATION WORKFLOW:\n1. Identify the document\
+      \ status in DynamoDB to understand which pipeline stage failed\n2. Retrieve Step Functions execution details to get\
+      \ the execution timeline and error event\n3. Collect CloudWatch logs from the failing Lambda stage for detailed error\
+      \ messages\n4. Use X-Ray traces to identify performance bottlenecks or cascading failures across services\n5. Synthesize\
+      \ all evidence to determine root cause — never stop at the first error message\n\nTOOL USAGE:\n- Document-specific analysis\
+      \ (user provides a filename or document ID):\n  → Use cloudwatch_document_logs and dynamodb_status as primary tools\n\
+      - System-wide or batch analysis (no specific document):\n  → Use cloudwatch_logs and dynamodb_query to identify patterns\n\
+      - Workflow failures and execution timeline:\n  → Use stepfunction_details for the execution event history\n- Lambda\
+      \ configuration and environment context:\n  → Use lambda_lookup to check timeout settings, memory, and environment variables\n\
+      - Distributed service interaction issues:\n  → Use xray_trace or xray_performance_analysis\n\nAlways use at least 2\
+      \ different tool sources before concluding a root cause. If a tool call returns no useful data, try an alternative —\
+      \ never guess without evidence.\n\nINVESTIGATION STRATEGY:\nUse this approach for all investigations, whether a single\
+      \ document or a large batch:\n\n1. TRIAGE: Check DynamoDB for document status and which stage failed. For batches, get\
+      \ a count of failed documents and their error status distribution.\n\n2. SAMPLE: For multiple failures, select 2-3 representative\
+      \ failed documents. Avoid over-sampling — additional documents yield diminishing returns.\n\n3. TRACE THE CAUSAL CHAIN\
+      \ for each sampled document:\n   DynamoDB status → Step Functions execution timeline → CloudWatch error logs → X-Ray\
+      \ traces\n\n4. APPLY THE \"5 WHYS\" — Never stop at the first error. Keep asking \"what caused THIS?\":\n   Finding:\
+      \ \"Extraction Lambda timed out\" → Why?\n   \"Lambda waited 14 minutes on Bedrock InvokeModel\" → Why was it slow?\n\
+      \   \"Bedrock returned ThrottlingException, triggering exponential backoff\" → Why throttled?\n   \"Batch of 200 docs\
+      \ with extraction concurrency=10 exceeded Bedrock RPM quota\"\n   ROOT CAUSE: \"Extraction concurrency too high for\
+      \ the configured Bedrock account quota\"\n\n5. DISTINGUISH SYSTEMIC vs ISOLATED FAILURES:\n   - Same error type across\
+      \ many documents → systemic issue (quota, permissions, configuration, service limit)\n   - Different errors across documents\
+      \ → per-document issues (bad input, edge cases, unsupported format)\n\n6. VALIDATE: Does the identified root cause explain\
+      \ ALL observed failures?\n\nROOT CAUSE vs SYMPTOM GUIDE:\n- SYMPTOM: \"Document processing failed\"\n- SYMPTOM: \"Extraction\
+      \ Lambda returned error\"\n- CLOSER:  \"ThrottlingException from Bedrock InvokeModel\"\n- ROOT CAUSE: \"Bedrock RPM\
+      \ quota exceeded — batch concurrency generated too many concurrent API calls\"\n\n- SYMPTOM: \"Classification failed\"\
+      \n- CLOSER:  \"Textract API timeout\"\n- ROOT CAUSE: \"150-page PDF exceeded Textract async processing limit for the\
+      \ configured region\"\n\nCOMMON ERROR PATTERNS:\nUse these patterns to guide your investigation and accelerate diagnosis:\n\
+      \n1. THROTTLING — ThrottlingException, TooManyRequestsException, \"Rate exceeded\", \"Too many requests\"\n   Likely\
+      \ cause: Batch size × concurrency > Bedrock RPM/TPM quota, or Textract TPS limit exceeded\n   Check: Concurrent Lambda\
+      \ executions, batch size, Bedrock model quotas\n\n2. TIMEOUT — \"Task timed out\", \"Lambda timeout\", \"socket timeout\"\
+      , \"Connection reset\"\n   Likely cause: Large document (many pages), undersized Lambda timeout or memory, slow Bedrock\
+      \ inference\n   Check: Document page count, Lambda timeout configuration, model response latency in X-Ray\n\n3. CONFIGURATION\
+      \ ERROR — KeyError, missing field, \"not found in config\", validation error, AttributeError\n   Likely cause: Class\
+      \ definition or attribute names in config don't match expected schema; config changes deployed incorrectly\n   Check:\
+      \ DynamoDB config table, class definitions, attribute names for the affected document class\n\n4. PERMISSIONS — AccessDeniedException,\
+      \ \"not authorized\", \"is not authorized to perform\", ExpiredToken\n   Likely cause: Missing IAM policy, cross-account\
+      \ access issue, Bedrock model access not granted, KMS policy gap\n   Check: Lambda execution role policies, Bedrock\
+      \ model access in the console, S3 bucket policies\n\n5. INPUT QUALITY — empty extraction results, very low confidence,\
+      \ \"unable to parse\", Textract errors on specific pages\n   Likely cause: Poor scan quality, handwritten content, unsupported\
+      \ file format, corrupted PDF\n   Check: OCR output in S3, original document quality, Textract response for page-level\
+      \ errors\n\n6. BDA-SPECIFIC — \"BDA Job Failed\", blueprint mismatch, async job timeout, missing EventBridge event\n\
+      \   Likely cause: Blueprint schema mismatch with document type, BDA service limit, EventBridge delivery failure\n  \
+      \ Check: BDA project configuration, blueprint compatibility, EventBridge rule and DLQ\n\n7. BEDROCK MODEL ERRORS — ModelErrorException,\
+      \ \"model returned an error\", context length exceeded\n   Likely cause: Document content too large for model context\
+      \ window, model unavailable in region, prompt issue\n   Check: Document page count, OCR text length, model availability,\
+      \ extraction prompt configuration\n\nOUTPUT FORMAT:\nAlways format your response with exactly these three sections in\
+      \ this order:\n\n## Root Cause\n**Confidence:** [HIGH | MEDIUM | LOW]\nIdentify the specific underlying technical reason\
+      \ why the error occurred. Focus on the primary cause, not symptoms.\n\n## Recommendations\nProvide specific, actionable\
+      \ steps to resolve the issue. Limit to top three recommendations only.\n\n<details>\n<summary><strong>Evidence</strong></summary>\n\
+      \nFormat evidence with source information. Include relevant data from tool responses:\n\n**For CloudWatch logs:**\n\
+      **Log Group:** [full log_group name]\n**Log Stream:** [full log_stream name]\n```\n[ERROR] timestamp message\n```\n\n\
+      **For other sources (DynamoDB, Step Functions, X-Ray):**\n**Source:** [service name and resource]\n```\nRelevant data\
+      \ from tool response\n```\n\n</details>\n\nFORMATTING RULES:\n- Use the exact three-section structure above\n- Add Confidence\
+      \ (HIGH/MEDIUM/LOW) as the first line of the Root Cause section\n- Make the Evidence section collapsible using HTML\
+      \ details tags\n- Include relevant data from all tool responses used\n- For CloudWatch: Show complete log group and\
+      \ log stream names without truncation\n- Present evidence data in code blocks with appropriate source labels\n\nRECOMMENDATION\
+      \ GUIDELINES:\nFor code-related issues or system bugs:\n- Do not suggest code modifications — users cannot change Lambda\
+      \ code\n- Describe the error in detail with timestamps and context so it can be reported\n\nFor configuration-related\
+      \ issues:\n- Direct users to the UI configuration panel\n- Specify the exact configuration section and parameter name\n\
+      \nFor operational issues (throttling, timeouts, quotas):\n- Provide immediate remediation steps (e.g., reduce concurrency,\
+      \ reprocess failed documents)\n- Include preventive measures to avoid recurrence\n\nCOMMON MISTAKES TO AVOID:\n- Do\
+      \ NOT report \"Lambda function returned error\" as a root cause — that is a symptom\n- Do NOT recommend \"check CloudWatch\
+      \ logs\" as a recommendation — you are already doing that\n- Do NOT suggest code changes — users cannot modify Lambda\
+      \ functions\n- Do NOT speculate about root cause without corroborating tool evidence\n- Do NOT investigate more than\
+      \ 3 sample documents in a batch — focus on pattern recognition\n- Do NOT include search quality reflections, meta-analysis,\
+      \ or sections not listed in the output format above"
+    parameters:
+      max_log_events: 5
+      time_range_hours_default: 24
+      max_log_message_length: 400
+      max_events_per_log_group: 5
+      max_log_groups: 20
+      max_stepfunction_timeline_events: 50
+      max_stepfunction_error_length: 400
+      xray_slow_segment_threshold_ms: 5000
+      xray_error_rate_threshold: 0.05
+      xray_response_time_threshold_ms: 10000
+      xray_analysis_hours: 3
+      settings_cache_ttl_seconds: 300
+classes:
+- $schema: https://json-schema.org/draft/2020-12/schema
+  $id: Invoice
+  x-aws-idp-document-type: Invoice
+  type: object
+  description: ''
+  properties:
+    Agency:
+      type: string
+      description: null
+      x-aws-idp-evaluation-method: EXACT
+      data_type: string
+    Advertiser:
+      type: string
+      description: null
+      x-aws-idp-evaluation-method: EXACT
+      data_type: string
+    GrossTotal:
+      type: number
+      description: null
+      x-aws-idp-evaluation-method: EXACT
+      data_type: number
+    PaymentTerms:
+      type: string
+      description: null
+      x-aws-idp-evaluation-method: EXACT
+      data_type: string
+    AgencyCommission:
+      type: number
+      description: null
+      x-aws-idp-evaluation-method: EXACT
+      data_type: number
+    NetAmountDue:
+      type: number
+      description: null
+      x-aws-idp-evaluation-method: EXACT
+      data_type: number
+    LineItems:
+      type: array
+      description: null
+      x-aws-idp-evaluation-method: EXACT
+      items:
+        type: object
+        properties:
+          LineItemDescription:
+            type: string
+            description: null
+            x-aws-idp-evaluation-method: EXACT
+            data_type: string
+          LineItemStartDate:
+            type: string
+            description: null
+            x-aws-idp-evaluation-method: EXACT
+            data_type: string
+          LineItemEndDate:
+            type: string
+            description: null
+            x-aws-idp-evaluation-method: EXACT
+            data_type: string
+          LineItemDays:
+            type: string
+            description: null
+            x-aws-idp-evaluation-method: EXACT
+            data_type: string
+          LineItemRate:
+            type: number
+            description: null
+            x-aws-idp-evaluation-method: EXACT
+            data_type: number
+policy_classes: []
+discovery:
+  without_ground_truth:
+    model_id: us.amazon.nova-pro-v1:0
+    system_prompt: You are an expert in processing forms. Extracting data from images and documents. Analyze forms line by
+      line to identify field names, data types, and organizational structure. Focus on creating comprehensive blueprints for
+      document processing without extracting actual values.
+    temperature: 0.0
+    top_p: 0.1
+    max_tokens: 10000
+    user_prompt: 'This image contains forms data. Analyze the form line by line. Image may contain multiple pages, process
+      all the pages. Form may contain multiple name value pair in one line. Extract all the names in the form including the
+      name value pair which doesn''t have value. Organize them into groups, extract field_name, data_type and field description.
+      Field names should be less than 30 characters, use camelCase or snake_case, name should not start with number and name
+      should not have special characters. Field descriptions should include location hints (box number, line number, section).
+      Field_name should be unique within the group. Make sure to fill out the top-level "$id" and "x-aws-idp-document-type"
+      with the extracted document class, and the top-level "description" with a brief description of the document class. Group
+      the fields based on the section they are grouped in the form. Group should have attributeType as "group". Nesting Groups:
+      Do not nest the groups i.e. groups within groups. All groups should be directly associated under main "properties".
+      If the group repeats and follows table format, update the attributeType as "list". Do not extract the values. Return
+      the extracted data in JSON format. Format the extracted data using the below JSON format: Format the extracted groups
+      and fields using the below JSON format:'
+  with_ground_truth:
+    model_id: us.amazon.nova-pro-v1:0
+    system_prompt: You are an expert in processing forms. Extracting data from images and documents. Use provided ground truth
+      data as reference to optimize field extraction and ensure consistency with expected document structure and field definitions.
+    temperature: 0.0
+    top_p: 0.1
+    max_tokens: 10000
+    user_prompt: 'This image contains unstructured data. Analyze the data line by line using the provided ground truth as
+      reference. <GROUND_TRUTH_REFERENCE> {ground_truth_json} </GROUND_TRUTH_REFERENCE> Ground truth reference JSON has the
+      fields we are interested in extracting from the document/image. Use the ground truth to optimize field extraction. Match
+      field names, data types, and groupings from the reference. Image may contain multiple pages, process all pages. Extract
+      all field names including those without values. Do not change the group name and field name from ground truth in the
+      extracted data json. Add field_description field for every field which will contain instruction to LLM to extract the
+      field data from the image/document. Add data_type field for every field. Make sure to fill out the top-level "$id" and
+      "x-aws-idp-document-type" with the extracted document class, and the top-level "description" with a brief description
+      of the document class. Nesting Groups: Do not nest the groups i.e. groups within groups. All groups should be directly
+      associated under main "properties". If the group repeats and follows table format, update the attributeType as "list".
+      Do not extract the values. Format the extracted data using the below JSON format: Format the extracted groups and fields
+      using the below JSON format:'
+  auto_split:
+    model_id: us.anthropic.claude-opus-4-6-v1:1m
+    system_prompt: You are an expert document analyst. Your task is to identify distinct document sections within a multi-page
+      document package. Return only valid JSON.
+    temperature: 0.0
+    top_p: 0.1
+    max_tokens: 4096
+    user_prompt: 'Analyze this multi-page document package. Identify the page boundaries where different document types or
+      sections begin and end. For each distinct document section, provide: - "start": the first page number (1-based) - "end":
+      the last page number (1-based) - "type": a short label for the document type (e.g., "W2 Form", "Letter", "Invoice")
+      Return ONLY a JSON array, no other text: [{"start": 1, "end": 2, "type": "Letter"}, {"start": 3, "end": 3, "type": "Invoice"}]'
+  multi_document:
+    embedding_model_id: us.cohere.embed-v4:0
+    analysis_model_id: us.anthropic.claude-sonnet-4-6
+    temperature: 0.0
+    max_tokens: 10000
+    max_documents: 500
+    min_cluster_size: 2
+    num_sample_documents: 3
+    max_sample_size: 5
+    max_concurrent_embeddings: 5
+    max_concurrent_clusters: 3
+    system_prompt: ''
+  rules:
+    model: global.anthropic.claude-sonnet-4-6
+    system_prompt: You are an expert in analyzing policy documents and extracting business rules, regulations, and compliance
+      requirements. Extract rules as structured, actionable validation statements.
+    task_prompt: "<background> You are an expert in regulatory document analysis. Your task is to extract ALL business rules,\
+      \ regulations, compliance requirements, and validation criteria from the attached policy document as a single flat list\
+      \ of rules. </background>\n<task> Analyze the policy document thoroughly, page by page. For each rule found:\n1. Give\
+      \ the rule a short, descriptive snake_case name (e.g., \"bundled_services_not_separate\",\n   \"modifier_59_distinct_sites\"\
+      , \"prior_auth_required\")\n\n2. Write a clear, actionable description — phrased as a yes/no validation question\n \
+      \  or checkable statement\n\n3. Include specific codes, numbers, thresholds, or conditions mentioned\n4. Note any exceptions\
+      \ or special cases within the description\n5. Reference the page number or section where the rule was found </task>\n\
+      <extraction-guidelines> Guidelines: - Extract rules VERBATIM from the document where possible - Each rule should be\
+      \ a self-contained, evaluable statement - Rules should be specific enough to validate a transaction against - Do NOT\
+      \ classify or categorize the rules — output one flat list - Use descriptive snake_case names as rule identifiers (NOT\
+      \ generic \"rule_1\", \"rule_2\") - Each rule description should be phrased as a validation question or checkable statement\
+      \ - Do NOT interpret or infer rules not explicitly stated in the document - Process ALL pages of the document - If a\
+      \ rule has exceptions, include them in the description </extraction-guidelines>\n<output-format> Return ONLY a valid\
+      \ JSON array containing exactly ONE object. All rules go into a single \"rule_properties\" dict with descriptive snake_case\
+      \ keys:\n[\n    {\n        \"x-aws-idp-rule-type\": \"policy_rules\",\n        \"description\": \"All rules extracted\
+      \ from the policy document\",\n        \"rule_properties\": {\n            \"bundled_services_not_separate\": {\n  \
+      \              \"description\": \"Are bundled services (exploration, lysis of adhesions, closure, anesthesia) NOT reported\
+      \ separately from the primary surgical procedure?\",\n                \"page\": \"V-5\"\n            },\n          \
+      \  \"modifier_59_distinct_sites\": {\n                \"description\": \"Is modifier 59 used only when procedures are\
+      \ performed at distinctly different anatomic sites or during separate patient encounters?\",\n                \"page\"\
+      : \"V-8\"\n            },\n            \"prior_auth_required\": {\n                \"description\": \"Has prior authorization\
+      \ been obtained before performing procedures that require pre-approval per the policy?\",\n                \"page\"\
+      : \"III-4\"\n            },\n            \"medical_necessity_documented\": {\n                \"description\": \"Is\
+      \ medical necessity documentation included to support the procedure performed?\",\n                \"page\": \"IV-1\"\
+      \n            }\n        }\n    }\n] </output-format>\n<final-instructions> Extract rules from the attached policy document\
+      \ by: 1. Reading every page systematically to identify all stated rules 2. Giving each rule a short, descriptive snake_case\
+      \ name 3. Phrasing each rule as a yes/no validation question 4. Including page references for traceability 5. Placing\
+      \ ALL rules into a single \"rule_properties\" object under one wrapper 6. Do NOT include any text outside the JSON array\
+      \ - return ONLY valid JSON </final-instructions>"
+    temperature: 0.0
+    top_p: 0.0
+    top_k: 5.0
+    max_tokens: 64000
+    agentic:
+      enabled: false
+      review_agent: false
+      review_agent_model: global.anthropic.claude-sonnet-4-6
+evaluation:
+  enabled: true
+  llm_method:
+    top_p: 0.0
+    max_tokens: 4096
+    top_k: 5.0
+    task_prompt: "I need to evaluate attribute extraction for a document of class: {DOCUMENT_CLASS}. For the attribute named\
+      \ \"{ATTRIBUTE_NAME}\" described as \"{ATTRIBUTE_DESCRIPTION}\": - Expected value: {EXPECTED_VALUE} - Actual value:\
+      \ {ACTUAL_VALUE} Do these values match in meaning, taking into account formatting differences, word order, abbreviations,\
+      \ and semantic equivalence? Provide your assessment as a JSON with three fields: - \"match\": boolean (true if they\
+      \ match, false if not) - \"score\": number between 0 and 1 representing the confidence/similarity score - \"reason\"\
+      : brief explanation of your decision Respond ONLY with the JSON and nothing else. Here's the exact format: {\n  \"match\"\
+      : true or false,\n  \"score\": 0.0 to 1.0,\n  \"reason\": \"Your explanation here\"\n}"
+    temperature: 0.0
+    model: us.amazon.nova-2-lite-v1:0
+    system_prompt: You are an evaluator that helps determine if the predicted and expected values match for document attribute
+      extraction. You will consider the context and meaning rather than just exact string matching.
+pricing: null
+summary: null
+Configuration: Config

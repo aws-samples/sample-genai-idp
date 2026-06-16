@@ -1,0 +1,14 @@
+mutation UpdateTestSet($input: UpdateTestSetInput!) {
+  updateTestSet(input: $input) {
+    id
+    name
+    description
+    filePattern
+    fileCount
+    status
+    createdAt
+    error
+    lastAddResult
+    documentClassType
+  }
+}

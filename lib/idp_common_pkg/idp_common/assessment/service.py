@@ -823,6 +823,7 @@ class AssessmentService:
             temperature = self.config.assessment.temperature
             top_k = self.config.assessment.top_k
             top_p = self.config.assessment.top_p
+            reasoning_effort = self.config.assessment.reasoning_effort
             max_tokens = self.config.assessment.max_tokens
             system_prompt = self.config.assessment.system_prompt
 
@@ -877,6 +878,7 @@ class AssessmentService:
                 max_tokens=max_tokens,
                 context="Assessment",
                 model_lambda_hook_arn=self.config.assessment.model_lambda_hook_arn,
+                reasoning_effort=reasoning_effort,
             )
 
             total_duration = time.time() - request_start_time

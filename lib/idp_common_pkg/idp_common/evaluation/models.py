@@ -637,14 +637,27 @@ class DocumentEvaluationResult:
                 sections.append("")
                 continue  # Skip attribute display for failed sections
 
+            # Note any fields excluded from scoring due to validation errors, so
+            # reduced coverage is explicit rather than hidden in the attribute table.
+            skipped_count = sr.metrics.get("skipped_field_count", 0)
+            if skipped_count:
+                sections.append(
+                    f"> ⚠️ **{skipped_count} field(s) were excluded from scoring** "
+                    f"because they could not be validated against the schema. "
+                    f"The remaining fields were evaluated normally. See the "
+                    f"`__SKIPPED__` rows below for details."
+                )
+                sections.append("")
+
             # Section metrics with enhanced formatting (normal case)
             sections.append("#### Metrics")
             metrics_table = (
                 "| Metric | Value | Rating |\n| ------ | :----: | :----: |\n"
             )
             for metric, value in sr.metrics.items():
-                # Skip the evaluation_failed flag in normal display
-                if metric == "evaluation_failed":
+                # Skip the evaluation_failed flag and the skipped-field count
+                # (rendered as a note above, not a scored metric)
+                if metric in ("evaluation_failed", "skipped_field_count"):
                     continue
 
                 # Add a visual indicator based on metric value

@@ -223,9 +223,46 @@ class MissingFieldHandlingConfig(BaseModel):
         return v_str
 
 
+class PipelineHook(BaseModel):
+    """A single pipeline-hook registration stored inline in a config version
+    under a processing step's `postHook` list.
+
+    Feature Platform features (and admins) register post-step hooks by adding
+    entries here; the host's pipeline-hooks dispatcher
+    (patterns/unified/src/pipeline_hooks_function) reads the active version's
+    `<step>.postHook` list and invokes each enabled hook Lambda after that step.
+
+    This MUST be a declared field on every step config (extra="ignore" would
+    otherwise silently drop `postHook` whenever a config round-trips through
+    IDPConfig — e.g. Save-as-Version, updateConfiguration, or the
+    sparse-config auto-migration in ConfigurationManager — leaving the
+    dispatcher with no hook to call).
+    """
+
+    # extra="allow" so future hook fields don't get dropped on round-trip.
+    model_config = ConfigDict(extra="allow")
+
+    featureId: str = Field(  # noqa: N815 — matches stored config key
+        description="Owner feature id, for traceability and replace-on-reregister"
+    )
+    arn: str = Field(description="Lambda ARN the dispatcher invokes")
+    order: int = Field(
+        default=100, description="Lower runs first within a hook point"
+    )
+    onError: str = Field(  # noqa: N815 — matches stored config key
+        default="continue",
+        description="continue | skip-remaining | fail",
+    )
+    enabled: bool = Field(default=True, description="Whether this hook is active")
+
+
 class ExtractionConfig(BaseModel):
     """Document extraction configuration"""
 
+    postHook: List[PipelineHook] = Field(  # noqa: N815 — matches stored config key
+        default_factory=list,
+        description="Pipeline hooks invoked after extraction (Feature Platform)",
+    )
     model: str = Field(
         default="us.amazon.nova-pro-v1:0",
         description="Bedrock model ID for extraction. Use 'LambdaHook' to invoke a custom Lambda function instead of Bedrock.",
@@ -245,6 +282,13 @@ class ExtractionConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
+    )
     max_tokens: int = Field(
         default=10000,
         gt=0,
@@ -293,6 +337,10 @@ class ExtractionConfig(BaseModel):
 class ClassificationConfig(BaseModel):
     """Document classification configuration"""
 
+    postHook: List[PipelineHook] = Field(  # noqa: N815 — matches stored config key
+        default_factory=list,
+        description="Pipeline hooks invoked after classification (Feature Platform)",
+    )
     model: str = Field(
         default="us.amazon.nova-pro-v1:0",
         description="Bedrock model ID for classification. Use 'LambdaHook' to invoke a custom Lambda function instead of Bedrock.",
@@ -310,6 +358,13 @@ class ClassificationConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
+    )
     max_tokens: int = Field(
         default=4096,
         gt=0,
@@ -424,6 +479,10 @@ class GranularAssessmentConfig(BaseModel):
 class AssessmentConfig(BaseModel):
     """Document assessment configuration"""
 
+    postHook: List[PipelineHook] = Field(  # noqa: N815 — matches stored config key
+        default_factory=list,
+        description="Pipeline hooks invoked after assessment (Feature Platform)",
+    )
     enabled: bool = Field(default=True, description="Enable assessment")
     hitl_enabled: bool = Field(
         default=False,
@@ -448,6 +507,13 @@ class AssessmentConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
+    )
     max_tokens: int = Field(
         default=10000,
         gt=0,
@@ -489,6 +555,10 @@ class AssessmentConfig(BaseModel):
 class SummarizationConfig(BaseModel):
     """Document summarization configuration"""
 
+    postHook: List[PipelineHook] = Field(  # noqa: N815 — matches stored config key
+        default_factory=list,
+        description="Pipeline hooks invoked after summarization (Feature Platform)",
+    )
     enabled: bool = Field(default=True, description="Enable summarization")
     model: str = Field(
         default="us.amazon.nova-premier-v1:0",
@@ -507,6 +577,13 @@ class SummarizationConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
+    )
     max_tokens: int = Field(
         default=4096,
         gt=0,
@@ -575,6 +652,13 @@ class ChatConfig(BaseModel):
             "not exceed the selected model's limit."
         ),
     )
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
+    )
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
     @classmethod
@@ -602,6 +686,10 @@ class OCRFeature(BaseModel):
 class OCRConfig(BaseModel):
     """OCR configuration"""
 
+    postHook: List[PipelineHook] = Field(  # noqa: N815 — matches stored config key
+        default_factory=list,
+        description="Pipeline hooks invoked after OCR (Feature Platform)",
+    )
     backend: str = Field(
         default="textract", description="OCR backend (textract or bedrock)"
     )
@@ -618,6 +706,13 @@ class OCRConfig(BaseModel):
     )
     task_prompt: Optional[str] = Field(
         default=None, description="Task prompt for Bedrock OCR"
+    )
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
     )
     features: List[OCRFeature] = Field(
         default_factory=list, description="Textract features to enable"
@@ -1292,6 +1387,10 @@ class RuleValidationConfig(BaseModel):
     rule_validation_orchestrator: Optional[RuleValidationOrchestratorConfig] = Field(
         default=None, description="Configuration for rule validation summarization"
     )
+    postHook: List[PipelineHook] = Field(  # noqa: N815 — matches stored config key
+        default_factory=list,
+        description="Pipeline hooks invoked after rule validation (Feature Platform)",
+    )
 
     @field_validator(
         "semaphore",
@@ -1318,6 +1417,13 @@ class EvaluationLLMMethodConfig(BaseModel):
         description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
     )
     top_k: float = Field(default=5.0, ge=0.0)
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
+    )
     task_prompt: str = Field(
         default="""
         I need to evaluate attribute extraction for a document of class: {DOCUMENT_CLASS}.

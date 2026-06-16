@@ -1,0 +1,26 @@
+# Listed in config_library/extensions-oss.yaml so it appears as available to
+# install in the host UI catalog. (Features deployed directly via CloudFormation
+# self-register and show up once installed even without a catalog entry — see
+# docs/feature-platform-developer-guide.md.)
+featureId: docs-by-status
+displayName: "Sample: Document Status (feature add-on)"
+version: 0.1.0
+description: |
+  Demonstrates the Feature Platform host contract end-to-end. Adds a "Docs By
+  Status" page with a simple pie chart of how many documents are in each status (NEW,
+  QUEUED, RUNNING, COMPLETED, FAILED) — handy as a reference for authoring your
+  own extension.
+# OSS docs-site slug — the UI "Learn more" link resolves this against the
+# published docs site. Source: docs/extensions/sample-document-status.md.
+docsUrl: extensions/sample-document-status
+template:
+  path: template.yaml
+  requiresMainStackName: true
+ui:
+  bundlePath: feature-ui/dist/ui-bundle.js
+  buildCommand: "cd feature-ui && npm ci && npm run build"
+defaultParameters:
+  LogLevel: INFO
+capabilities:
+  - reads-documents
+  - custom-api

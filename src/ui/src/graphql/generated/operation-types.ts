@@ -67,6 +67,18 @@ export type AgentJobConnection = {
   nextToken?: Maybe<Scalars['String']['output']>;
 };
 
+/**
+ * Input for applyFeatureConfigPreset. `config` is the parsed preset
+ * document (JSON-encoded); metadata fields (IsActive, Managed, …) are
+ * stripped server-side.
+ */
+export type ApplyFeatureConfigPresetInput = {
+  config: Scalars['AWSJSON']['input'];
+  description?: InputMaybe<Scalars['String']['input']>;
+  featureId: Scalars['String']['input'];
+  version: Scalars['String']['input'];
+};
+
 export type AvailableModelsResult = {
   baseModels: Array<BaseModelInfo>;
   customModels: Array<CustomModelInfo>;
@@ -96,6 +108,25 @@ export type CapacityResult = {
   quotaRequirements?: Maybe<Array<Maybe<QuotaRequirement>>>;
   recommendations?: Maybe<Array<Maybe<Scalars['String']['output']>>>;
   success: Scalars['Boolean']['output'];
+};
+
+/**
+ * A feature published to the feature bucket (available in the catalog), whether
+ * or not it is installed in this IDP stack. Drives the "Subscribe" CTA in the UI
+ * for features that haven't been installed yet.
+ */
+export type CatalogFeature = {
+  artifactBucket?: Maybe<Scalars['String']['output']>;
+  artifactPrefix?: Maybe<Scalars['String']['output']>;
+  description?: Maybe<Scalars['String']['output']>;
+  displayName: Scalars['String']['output'];
+  docsUrl?: Maybe<Scalars['String']['output']>;
+  featureId: Scalars['String']['output'];
+  iconUrl?: Maybe<Scalars['String']['output']>;
+  latestVersion: Scalars['String']['output'];
+  marketplaceListingUrl?: Maybe<Scalars['String']['output']>;
+  productCode?: Maybe<Scalars['String']['output']>;
+  source?: Maybe<Scalars['String']['output']>;
 };
 
 export type ChatDocumentMessage = {
@@ -327,6 +358,11 @@ export type Document = DynamoDbBase & {
   WorkflowStatus?: Maybe<Scalars['String']['output']>;
 };
 
+export type DocumentClassType =
+  | 'MULTI_CLASS'
+  | 'PACKET_SPLITTING'
+  | 'SINGLE_CLASS';
+
 export type DocumentCount = {
   count: Scalars['Int']['output'];
 };
@@ -357,6 +393,46 @@ export type DynamoDbBase = {
   ExpiresAfter?: Maybe<Scalars['AWSTimestamp']['output']>;
   PK: Scalars['ID']['output'];
   SK: Scalars['ID']['output'];
+};
+
+/** Receipt returned by applyFeatureConfigPreset. */
+export type FeatureConfigPresetResult = {
+  appliedAt: Scalars['AWSDateTime']['output'];
+  configVersionName: Scalars['String']['output'];
+  featureId: Scalars['String']['output'];
+};
+
+/** Subscription / entitlement state for a feature. */
+export type FeatureEntitlement = {
+  customerIdentifier?: Maybe<Scalars['String']['output']>;
+  expiresAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  featureId: Scalars['String']['output'];
+  marketplaceUrl?: Maybe<Scalars['String']['output']>;
+  productCode?: Maybe<Scalars['String']['output']>;
+  source: Scalars['String']['output'];
+  state: FeatureEntitlementState;
+};
+
+export type FeatureEntitlementState =
+  | 'ACTIVE'
+  | 'EXPIRED'
+  | 'NONE';
+
+/** Snapshot returned by registerFeatureHooks. */
+export type FeatureHooksRegistration = {
+  featureId: Scalars['String']['output'];
+  hookCount: Scalars['Int']['output'];
+  registeredAt: Scalars['AWSDateTime']['output'];
+};
+
+/** CloudFormation Console quick-create URL + metadata for installing/updating a feature. */
+export type FeatureLaunchUrl = {
+  featureId: Scalars['String']['output'];
+  launchUrl: Scalars['String']['output'];
+  parameters: Scalars['AWSJSON']['output'];
+  stackName: Scalars['String']['output'];
+  templateUrl: Scalars['String']['output'];
+  version: Scalars['String']['output'];
 };
 
 export type FileContentsResponse = {
@@ -413,6 +489,37 @@ export type FinetuningJobStatus =
   | 'STOPPING'
   | 'TRAINING'
   | 'VALIDATING';
+
+/**
+ * A feature installed in this IDP stack via AWS Marketplace (or the simulator).
+ *
+ * Authorized for BOTH Cognito user pool callers (the web UI reading
+ * `listInstalledFeatures`) AND IAM callers (the ui-deployer Lambda in each
+ * feature stack, which invokes the `registerFeature` mutation with SigV4
+ * signing and then reads the returned `InstalledFeature` fields). Without
+ * `@aws_iam`, the feature stack's `RegisterFeatureResource` custom resource
+ * fails at CREATE time with:
+ *
+ *     AppSync errors: Not Authorized to access featureId on type InstalledFeature
+ *
+ * because AppSync's default auth mode (Cognito) denies field reads to the
+ * IAM-signed caller even though the mutation itself is tagged `@aws_iam`.
+ */
+export type InstalledFeature = {
+  displayName: Scalars['String']['output'];
+  featureApiEndpoint?: Maybe<Scalars['String']['output']>;
+  featureId: Scalars['String']['output'];
+  iconUrl?: Maybe<Scalars['String']['output']>;
+  installedAt: Scalars['AWSDateTime']['output'];
+  installedBy?: Maybe<Scalars['String']['output']>;
+  installedVersion: Scalars['String']['output'];
+  latestVersion?: Maybe<Scalars['String']['output']>;
+  stackId?: Maybe<Scalars['String']['output']>;
+  stackName: Scalars['String']['output'];
+  stackRegion: Scalars['String']['output'];
+  uiBundlePath: Scalars['String']['output'];
+  updateAvailable: Scalars['Boolean']['output'];
+};
 
 export type LatencyDistribution = {
   baseLatency?: Maybe<Scalars['String']['output']>;
@@ -485,6 +592,16 @@ export type Mutation = {
   addDocumentsToTestSetFromUpload?: Maybe<TestSetUploadResponse>;
   addTestSet?: Maybe<TestSet>;
   addTestSetFromUpload?: Maybe<TestSetUploadResponse>;
+  /**
+   * Features with a manifest `configPreset`: write the bundled preset to
+   * the host's ConfigurationTable as a new, NON-ACTIVE config version named
+   * `<featureId>-v<version>`. Installation never changes the active config —
+   * an admin reviews and activates the preset from the Configuration UI.
+   * Idempotent: re-applying the same featureId+version overwrites the row,
+   * so CloudFormation stack Updates are safe. IAM-authenticated; called by
+   * the feature stack's ui-deployer custom resource.
+   */
+  applyFeatureConfigPreset: FeatureConfigPresetResult;
   autoDetectSections?: Maybe<Scalars['String']['output']>;
   claimReview?: Maybe<Document>;
   completeSectionReview?: Maybe<Document>;
@@ -505,7 +622,27 @@ export type Mutation = {
   probeCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   processChanges: ProcessChangesResponse;
   publishCircuitBreakerStatus?: Maybe<CircuitBreakerStatus>;
+  /** Called by a feature stack's RegisterFeature custom resource once the stack has deployed. */
+  registerFeature: InstalledFeature;
+  /**
+   * Vertical-product packs only: register the feature's pipeline-hook
+   * Lambda ARNs with the host. The host's Step Functions workflow reads the
+   * registry once at execution start and dispatches to the registered hooks
+   * at each pipeline point (post-OCR, post-classification, post-extraction,
+   * post-assessment, post-rule-validation, post-summarization).
+   * Returns a snapshot of the merged registration. Idempotent on featureId
+   * — re-registration with a different hook set replaces the prior entry.
+   * IAM-authenticated; called by the feature stack's RegisterFeature
+   * custom resource.
+   */
+  registerFeatureHooks: FeatureHooksRegistration;
   releaseReview?: Maybe<Document>;
+  /**
+   * Delete all of a feature's preset config versions on uninstall. A
+   * version that is currently ACTIVE is preserved (never yank the running
+   * config); it is skipped with a warning and the call still succeeds.
+   */
+  removeFeatureConfigPreset: Scalars['Boolean']['output'];
   reprocessDocument: Scalars['Boolean']['output'];
   restoreDefaultPricing?: Maybe<UpdatePricingResponse>;
   resumeCircuitBreaker?: Maybe<CircuitBreakerStatus>;
@@ -515,7 +652,34 @@ export type Mutation = {
   skipAllSectionsReview?: Maybe<Document>;
   startMultiDocDiscovery?: Maybe<MultiDocDiscoveryJob>;
   startTestRun?: Maybe<TestRun>;
+  /**
+   * Admin-only: initiate a subscription for a feature. Returns a
+   * `FeatureEntitlement` whose `marketplaceUrl` is the AWS Marketplace (or
+   * simulator) URL the UI must redirect the admin to in order to accept
+   * pricing, EULA, and the AWS Customer Agreement. The entitlement `state`
+   * remains NONE until the admin completes the Marketplace flow; the UI
+   * should re-query `checkFeatureEntitlement` when the admin returns from
+   * the Marketplace tab. Optional `returnUrl` is threaded through so the
+   * Marketplace page can deep-link the admin back to the feature page.
+   * Returns null when EnableFeaturePlatform=false (no resolver attached).
+   */
+  subscribeFeature?: Maybe<FeatureEntitlement>;
   syncBdaIdp?: Maybe<SyncBdaIdpResponse>;
+  /** Called by a feature stack's RegisterFeature custom resource on stack delete. */
+  unregisterFeature: Scalars['Boolean']['output'];
+  /**
+   * Vertical-product packs only: remove all hook registrations for a
+   * feature. Called from the feature stack's Delete custom resource.
+   */
+  unregisterFeatureHooks: Scalars['Boolean']['output'];
+  /**
+   * Admin-only: cancel a subscription for a feature by marking the simulator
+   * entitlement EXPIRED. With the real Marketplace, the UI should redirect the
+   * user to the AWS Marketplace Subscription Management portal instead of
+   * calling this. Returns the updated FeatureEntitlement, or null when
+   * EnableFeaturePlatform=false (no resolver attached).
+   */
+  unsubscribeFeature?: Maybe<FeatureEntitlement>;
   updateAgentChatMessage?: Maybe<AgentChatMessage>;
   updateAgentJobStatus?: Maybe<Scalars['Boolean']['output']>;
   updateChatSessionTitle?: Maybe<ChatSession>;
@@ -526,6 +690,7 @@ export type Mutation = {
   updateDocumentStatus?: Maybe<Document>;
   updateFinetuningJobStatus?: Maybe<FinetuningJob>;
   updatePricing?: Maybe<UpdatePricingResponse>;
+  updateTestSet?: Maybe<TestSet>;
   updateUser?: Maybe<User>;
   uploadDiscoveryDocument: DisPresignedUrlResponse;
   uploadDocument: PresignedUrlResponse;
@@ -560,6 +725,7 @@ export type MutationAddDocumentsToTestSetFromUploadArgs = {
 export type MutationAddTestSetArgs = {
   bucketType: Scalars['String']['input'];
   description?: InputMaybe<Scalars['String']['input']>;
+  documentClassType?: InputMaybe<DocumentClassType>;
   fileCount: Scalars['Int']['input'];
   filePattern: Scalars['String']['input'];
   modifiedAfter?: InputMaybe<Scalars['String']['input']>;
@@ -569,6 +735,11 @@ export type MutationAddTestSetArgs = {
 
 export type MutationAddTestSetFromUploadArgs = {
   input: TestSetUploadInput;
+};
+
+
+export type MutationApplyFeatureConfigPresetArgs = {
+  input: ApplyFeatureConfigPresetInput;
 };
 
 
@@ -680,8 +851,23 @@ export type MutationPublishCircuitBreakerStatusArgs = {
 };
 
 
+export type MutationRegisterFeatureArgs = {
+  input: RegisterFeatureInput;
+};
+
+
+export type MutationRegisterFeatureHooksArgs = {
+  input: RegisterFeatureHooksInput;
+};
+
+
 export type MutationReleaseReviewArgs = {
   objectKey: Scalars['String']['input'];
+};
+
+
+export type MutationRemoveFeatureConfigPresetArgs = {
+  featureId: Scalars['String']['input'];
 };
 
 
@@ -743,12 +929,33 @@ export type MutationStartTestRunArgs = {
 };
 
 
+export type MutationSubscribeFeatureArgs = {
+  featureId: Scalars['String']['input'];
+  returnUrl?: InputMaybe<Scalars['String']['input']>;
+};
+
+
 export type MutationSyncBdaIdpArgs = {
   bdaProjectArn?: InputMaybe<Scalars['String']['input']>;
   direction?: InputMaybe<Scalars['String']['input']>;
   saveArn?: InputMaybe<Scalars['Boolean']['input']>;
   syncMode?: InputMaybe<Scalars['String']['input']>;
   versionName?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type MutationUnregisterFeatureArgs = {
+  featureId: Scalars['String']['input'];
+};
+
+
+export type MutationUnregisterFeatureHooksArgs = {
+  featureId: Scalars['String']['input'];
+};
+
+
+export type MutationUnsubscribeFeatureArgs = {
+  featureId: Scalars['String']['input'];
 };
 
 
@@ -822,6 +1029,11 @@ export type MutationUpdatePricingArgs = {
 };
 
 
+export type MutationUpdateTestSetArgs = {
+  input: UpdateTestSetInput;
+};
+
+
 export type MutationUpdateUserArgs = {
   allowedConfigVersions?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
   userId: Scalars['ID']['input'];
@@ -873,6 +1085,17 @@ export type PageInput = {
   TextUri?: InputMaybe<Scalars['String']['input']>;
 };
 
+/**
+ * One pipeline hook registration the host's Step Functions workflow
+ * dispatches to at the named pipeline point.
+ */
+export type PipelineHookInput = {
+  arn: Scalars['String']['input'];
+  onError?: InputMaybe<Scalars['String']['input']>;
+  order?: InputMaybe<Scalars['Int']['input']>;
+  point: Scalars['String']['input'];
+};
+
 export type PresignedUploadUrl = {
   fileName: Scalars['String']['output'];
   objectKey: Scalars['String']['output'];
@@ -901,6 +1124,11 @@ export type ProcessChangesResponse = {
 
 export type Query = {
   calculateCapacity?: Maybe<CapacityResult>;
+  /**
+   * Check the subscription/entitlement state for a single feature for the caller.
+   * Returns null when EnableFeaturePlatform=false (no resolver attached).
+   */
+  checkFeatureEntitlement?: Maybe<FeatureEntitlement>;
   compareTestRuns?: Maybe<TestRunComparison>;
   getAgentChatMessages?: Maybe<Array<Maybe<AgentChatMessage>>>;
   getAgentJobStatus?: Maybe<AgentJob>;
@@ -911,6 +1139,11 @@ export type Query = {
   getConfigurationLibraryFile?: Maybe<ConfigurationLibraryFileResponse>;
   getDocument?: Maybe<Document>;
   getDocumentCount?: Maybe<DocumentCount>;
+  /**
+   * Admin-only: get a CloudFormation Console quick-create URL for installing or updating a feature.
+   * Returns null when EnableFeaturePlatform=false (no resolver attached).
+   */
+  getFeatureLaunchUrl?: Maybe<FeatureLaunchUrl>;
   getFileContents?: Maybe<FileContentsResponse>;
   getFinetuningJob?: Maybe<FinetuningJob>;
   getLatestPublishedVersion?: Maybe<LatestPublishedVersion>;
@@ -925,6 +1158,13 @@ export type Query = {
   listAvailableAgents?: Maybe<Array<Maybe<Agent>>>;
   listAvailableModels?: Maybe<AvailableModelsResult>;
   listBucketFiles?: Maybe<Array<Maybe<Scalars['String']['output']>>>;
+  /**
+   * List all features published to the feature bucket (the catalog), whether
+   * installed or not. The UI takes the union of this + listInstalledFeatures to
+   * show a "Subscribe" CTA for catalog-only features.
+   * Returns null when EnableFeaturePlatform=false (no resolver attached).
+   */
+  listCatalogFeatures?: Maybe<Array<CatalogFeature>>;
   listChatSessions?: Maybe<ChatSessionConnection>;
   listConfigurationLibrary?: Maybe<ConfigurationLibraryResponse>;
   listDiscoveryJobs?: Maybe<DiscoveryJobList>;
@@ -933,6 +1173,11 @@ export type Query = {
   listDocumentsDateHour?: Maybe<DocumentList>;
   listDocumentsDateShard?: Maybe<DocumentList>;
   listFinetuningJobs?: Maybe<FinetuningJobConnection>;
+  /**
+   * List all features currently installed in this IDP stack.
+   * Returns null when EnableFeaturePlatform=false (no resolver attached).
+   */
+  listInstalledFeatures?: Maybe<Array<InstalledFeature>>;
   listUsers?: Maybe<UserList>;
   queryKnowledgeBase?: Maybe<Scalars['String']['output']>;
   submitAgentQuery?: Maybe<AgentJob>;
@@ -943,6 +1188,11 @@ export type Query = {
 
 export type QueryCalculateCapacityArgs = {
   input: Scalars['String']['input'];
+};
+
+
+export type QueryCheckFeatureEntitlementArgs = {
+  featureId: Scalars['String']['input'];
 };
 
 
@@ -986,6 +1236,12 @@ export type QueryGetDocumentArgs = {
 export type QueryGetDocumentCountArgs = {
   endDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
   startDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
+};
+
+
+export type QueryGetFeatureLaunchUrlArgs = {
+  featureId: Scalars['String']['input'];
+  version?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -1111,6 +1367,31 @@ export type QuotaRequirement = {
 
 export type QuotasUsed = {
   bedrock_models?: Maybe<Scalars['AWSJSON']['output']>;
+};
+
+/**
+ * Input for registerFeatureHooks. Replaces the prior hook set for this
+ * feature in its entirety (idempotent).
+ */
+export type RegisterFeatureHooksInput = {
+  featureId: Scalars['String']['input'];
+  hooks: Array<PipelineHookInput>;
+};
+
+/** Input passed by the feature stack's RegisterFeature custom resource. */
+export type RegisterFeatureInput = {
+  displayName: Scalars['String']['input'];
+  featureApiEndpoint?: InputMaybe<Scalars['String']['input']>;
+  featureId: Scalars['String']['input'];
+  iconUrl?: InputMaybe<Scalars['String']['input']>;
+  installedBy?: InputMaybe<Scalars['String']['input']>;
+  installedVersion: Scalars['String']['input'];
+  marketplaceListingUrl?: InputMaybe<Scalars['String']['input']>;
+  productCode?: InputMaybe<Scalars['String']['input']>;
+  stackId: Scalars['String']['input'];
+  stackName: Scalars['String']['input'];
+  stackRegion: Scalars['String']['input'];
+  uiBundlePath: Scalars['String']['input'];
 };
 
 export type Section = {
@@ -1247,6 +1528,7 @@ export type TestRunStatus = {
 export type TestSet = {
   createdAt: Scalars['AWSDateTime']['output'];
   description?: Maybe<Scalars['String']['output']>;
+  documentClassType?: Maybe<DocumentClassType>;
   error?: Maybe<Scalars['String']['output']>;
   fileCount?: Maybe<Scalars['Int']['output']>;
   filePattern?: Maybe<Scalars['String']['output']>;
@@ -1264,6 +1546,7 @@ export type TestSetDocumentsUploadInput = {
 
 export type TestSetUploadInput = {
   description?: InputMaybe<Scalars['String']['input']>;
+  documentClassType?: InputMaybe<DocumentClassType>;
   fileName: Scalars['String']['input'];
   fileSize: Scalars['Int']['input'];
 };
@@ -1365,6 +1648,12 @@ export type UpdatePricingResponse = {
   success: Scalars['Boolean']['output'];
 };
 
+export type UpdateTestSetInput = {
+  description?: InputMaybe<Scalars['String']['input']>;
+  documentClassType?: InputMaybe<DocumentClassType>;
+  id: Scalars['String']['input'];
+};
+
 export type User = {
   allowedConfigVersions?: Maybe<Array<Maybe<Scalars['String']['output']>>>;
   createdAt?: Maybe<Scalars['AWSDateTime']['output']>;
@@ -1423,10 +1712,11 @@ export type AddTestSetMutationVariables = Exact<{
   bucketType: Scalars['String']['input'];
   fileCount: Scalars['Int']['input'];
   modifiedAfter?: InputMaybe<Scalars['String']['input']>;
+  documentClassType?: InputMaybe<DocumentClassType>;
 }>;
 
 
-export type AddTestSetMutation = { addTestSet?: { id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, createdAt: string } | null };
+export type AddTestSetMutation = { addTestSet?: { id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, createdAt: string, documentClassType?: DocumentClassType | null } | null };
 
 export type AddTestSetFromUploadMutationVariables = Exact<{
   input: TestSetUploadInput;
@@ -1690,6 +1980,13 @@ export type UpdatePricingMutationVariables = Exact<{
 
 export type UpdatePricingMutation = { updatePricing?: { success: boolean, message?: string | null, error?: { type?: string | null, message?: string | null } | null } | null };
 
+export type UpdateTestSetMutationVariables = Exact<{
+  input: UpdateTestSetInput;
+}>;
+
+
+export type UpdateTestSetMutation = { updateTestSet?: { id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, status?: string | null, createdAt: string, error?: string | null, lastAddResult?: string | null, documentClassType?: DocumentClassType | null } | null };
+
 export type UpdateUserMutationVariables = Exact<{
   userId: Scalars['ID']['input'];
   allowedConfigVersions?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>> | InputMaybe<Scalars['String']['input']>>;
@@ -1865,7 +2162,7 @@ export type GetTestRunsQuery = { getTestRuns?: Array<{ testRunId: string, testSe
 export type GetTestSetsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetTestSetsQuery = { getTestSets?: Array<{ id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, status?: string | null, createdAt: string, error?: string | null, lastAddResult?: string | null } | null> | null };
+export type GetTestSetsQuery = { getTestSets?: Array<{ id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, status?: string | null, createdAt: string, error?: string | null, lastAddResult?: string | null, documentClassType?: DocumentClassType | null } | null> | null };
 
 export type ListAgentJobsQueryVariables = Exact<{
   limit?: InputMaybe<Scalars['Int']['input']>;

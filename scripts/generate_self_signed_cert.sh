@@ -93,14 +93,8 @@ CERT_FILE="$TMPDIR/certificate.pem"
 
 echo "Generating self-signed certificate for domain: $DOMAIN (valid for $DAYS days)" >&2
 
-# X.509 commonName has a 64-char hard limit (RFC 5280 ub-common-name).
-# Internal ALB hostnames frequently exceed that (e.g.
-# "internal-<stack>-webui-alb-<id>.<region>.elb.amazonaws.com" can be 70+ chars),
-# which makes openssl fail with: "ASN1_mbstring_ncopy:string too long".
-# Modern browsers ignore CN entirely and only validate against subjectAltName,
-# so we use a short fixed CN and place the full hostname in SAN where it has
-# no length cap.
-SHORT_CN="idp-self-signed"
+# CN field is limited to 64 characters; use the full domain only in the SAN.
+CN="${DOMAIN:0:64}"
 
 # Generate private key and self-signed certificate
 openssl req -x509 -nodes \
@@ -108,7 +102,7 @@ openssl req -x509 -nodes \
     -newkey rsa:2048 \
     -keyout "$KEY_FILE" \
     -out "$CERT_FILE" \
-    -subj "/CN=$SHORT_CN" \
+    -subj "/CN=$CN" \
     -addext "subjectAltName=DNS:$DOMAIN" \
     2>/dev/null
 

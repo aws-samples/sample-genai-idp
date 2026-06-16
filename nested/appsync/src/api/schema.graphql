@@ -566,6 +566,12 @@ type TestSetValidationResponse @aws_cognito_user_pools @aws_iam {
   testSetId: String
 }
 
+enum DocumentClassType {
+  SINGLE_CLASS
+  MULTI_CLASS
+  PACKET_SPLITTING
+}
+
 type TestSet @aws_cognito_user_pools @aws_iam {
   id: String!
   name: String!
@@ -576,18 +582,26 @@ type TestSet @aws_cognito_user_pools @aws_iam {
   createdAt: AWSDateTime!
   error: String
   lastAddResult: String
+  documentClassType: DocumentClassType
 }
 
 input TestSetUploadInput {
   fileName: String!
   fileSize: Int!
   description: String
+  documentClassType: DocumentClassType
 }
 
 input TestSetDocumentsUploadInput {
   testSetId: String!
   fileName: String!
   fileSize: Int!
+}
+
+input UpdateTestSetInput {
+  id: String!
+  description: String
+  documentClassType: DocumentClassType
 }
 
 input FileUploadInfo {
@@ -696,7 +710,7 @@ type CircuitBreakerStatus @aws_cognito_user_pools @aws_iam {
 }
 
 # =============================================================================
-# RBAC: Role-Based Access Control via @aws_auth(cognito_groups: [...])
+# RBAC: Role-Based Access Control via @aws_cognito_user_pools(cognito_groups: [...])
 #
 # Roles (Cognito Groups):
 #   - Admin: Full access to all operations
@@ -704,8 +718,16 @@ type CircuitBreakerStatus @aws_cognito_user_pools @aws_iam {
 #   - Reviewer: Can review documents and perform HITL operations
 #   - Viewer: Read-only access (default for authenticated users)
 #
-# Note: @aws_cognito_user_pools allows any authenticated user
-#       @aws_auth(cognito_groups: [...]) restricts to specific groups
+# Note: @aws_cognito_user_pools (no args) allows any authenticated user
+#       @aws_cognito_user_pools(cognito_groups: [...]) restricts to specific groups
+#
+# IMPORTANT: Do NOT use @aws_auth(cognito_groups: [...]) on this API. This API
+# has an additional authorization provider (AWS_IAM) configured, and on a
+# multi-auth API AppSync silently ignores @aws_auth — every field decorated with
+# it becomes reachable by ANY authenticated user regardless of group. Use
+# @aws_cognito_user_pools(cognito_groups: [...]), which IS evaluated on
+# multi-auth APIs. Group checks are also enforced defensively in the resolver
+# Lambdas (defense-in-depth).
 # =============================================================================
 type Mutation {
   # Internal/IAM operations (Step Functions, Lambda)
@@ -737,27 +759,27 @@ type Mutation {
 
   # Admin-only operations
   deleteConfigVersion(versionName: String!): UpdateConfigurationResponse
-    @aws_auth(cognito_groups: ["Admin"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin"])
   createUser(email: String!, persona: String!, allowedConfigVersions: [String]): User
-    @aws_auth(cognito_groups: ["Admin"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin"])
   updateUser(userId: ID!, allowedConfigVersions: [String]): User
-    @aws_auth(cognito_groups: ["Admin"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin"])
   deleteUser(userId: ID!): Boolean
-    @aws_auth(cognito_groups: ["Admin"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin"])
   updatePricing(pricingConfig: AWSJSON!): UpdatePricingResponse
-    @aws_auth(cognito_groups: ["Admin"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin"])
   restoreDefaultPricing: UpdatePricingResponse
-    @aws_auth(cognito_groups: ["Admin"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin"])
 
   # Admin + Author operations
   deleteDocument(objectKeys: [String!]!): Boolean!
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   updateConfiguration(versionName: String!, customConfig: AWSJSON!, description: String): UpdateConfigurationResponse
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   setActiveVersion(versionName: String!): UpdateConfigurationResponse
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   syncBdaIdp(direction: String, versionName: String, bdaProjectArn: String, saveArn: Boolean, syncMode: String): SyncBdaIdpResponse
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   uploadDocument(
     fileName: String!
     contentType: String
@@ -765,7 +787,7 @@ type Mutation {
     bucket: String
     version: String
   ): PresignedUrlResponse!
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   uploadDiscoveryDocument(
     fileName: String!
     contentType: String
@@ -778,13 +800,13 @@ type Mutation {
     skipJobCreation: Boolean
     discoveryType: String
   ): DisPresignedUrlResponse!
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   autoDetectSections(
     documentKey: String!
     bucket: String!
     version: String
   ): String
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   startMultiDocDiscovery(
     s3Bucket: String
     s3Prefix: String
@@ -792,42 +814,44 @@ type Mutation {
     zipFileName: String
     zipFileSize: Int
   ): MultiDocDiscoveryJob
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   uploadMultiDocDiscoveryZip(
     fileName: String!
     fileSize: Int!
     configVersion: String!
   ): TestSetUploadResponse
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   copyToBaseline(objectKey: String!): CopyToBaselineResponse!
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   reprocessDocument(objectKeys: [String!]!, version: String): Boolean!
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   abortWorkflow(objectKeys: [String!]!): AbortWorkflowResponse!
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   deleteDiscoveryJob(jobId: ID!): Boolean!
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   startTestRun(input: TestRunInput!): TestRun
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   deleteTests(testRunIds: [String!]!): Boolean!
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   abortTestRuns(testRunIds: [String!]!): AbortWorkflowResponse!
-    @aws_auth(cognito_groups: ["Admin", "Author"])
-  addTestSet(name: String!, description: String, filePattern: String!, bucketType: String!, fileCount: Int!, modifiedAfter: String): TestSet
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  addTestSet(name: String!, description: String, filePattern: String!, bucketType: String!, fileCount: Int!, modifiedAfter: String, documentClassType: DocumentClassType): TestSet
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   addTestSetFromUpload(input: TestSetUploadInput!): TestSetUploadResponse
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   addDocumentsToTestSet(testSetId: String!, filePattern: String!, bucketType: String!, fileCount: Int!, modifiedAfter: String): TestSet
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   addDocumentsToTestSetFromUpload(input: TestSetDocumentsUploadInput!): TestSetUploadResponse
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  updateTestSet(input: UpdateTestSetInput!): TestSet
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   deleteTestSets(testSetIds: [String!]!): Boolean!
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   # Fine-Tuning (Admin + Author)
   createFinetuningJob(input: CreateFinetuningJobInput!): FinetuningJob
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   deleteFinetuningJob(jobId: ID!): Boolean
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
 
   # Admin + Reviewer operations (HITL review workflow)
   processChanges(
@@ -835,23 +859,25 @@ type Mutation {
     modifiedSections: [ModifiedSectionInput!]!
     modifiedPages: [ModifiedPageInput!]
   ): ProcessChangesResponse!
-    @aws_auth(cognito_groups: ["Admin", "Reviewer"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Reviewer"])
   completeSectionReview(objectKey: String!, sectionId: String!, editedData: AWSJSON): Document
-    @aws_auth(cognito_groups: ["Admin", "Reviewer"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Reviewer"])
   skipAllSectionsReview(objectKey: String!): Document
-    @aws_auth(cognito_groups: ["Admin", "Reviewer"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Reviewer"])
   claimReview(objectKey: String!): Document
-    @aws_auth(cognito_groups: ["Admin", "Reviewer"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Reviewer"])
   releaseReview(objectKey: String!): Document
-    @aws_auth(cognito_groups: ["Admin", "Reviewer"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Reviewer"])
 
   # All authenticated users (creates state but read-like operations)
   deleteAgentJob(jobId: ID!): Boolean @aws_cognito_user_pools
   # Agent Chat operations (all authenticated Cognito users + IAM for backend)
   # Note: Reviewer exclusion from Agent Chat is enforced at the QUERY level —
   # all supporting queries (listChatSessions, getChatMessages, listAvailableAgents)
-  # have @aws_auth directives excluding Reviewer. The mutations use @aws_cognito_user_pools
-  # because @aws_auth + @aws_iam is not supported on the same field in AppSync.
+  # have @aws_cognito_user_pools(cognito_groups) directives excluding Reviewer.
+  # The mutations below use unrestricted @aws_cognito_user_pools because a
+  # cognito_groups restriction cannot be combined with @aws_iam on the same
+  # field in AppSync (and these fields need IAM for the backend publish path).
   sendAgentChatMessage(
     prompt: String!
     sessionId: String
@@ -886,15 +912,88 @@ type Mutation {
 
   # Circuit Breaker admin controls — Admin only.
   pauseCircuitBreaker(reason: String!): CircuitBreakerStatus
-    @aws_auth(cognito_groups: ["Admin"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin"])
   resumeCircuitBreaker(reason: String!): CircuitBreakerStatus
-    @aws_auth(cognito_groups: ["Admin"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin"])
   probeCircuitBreaker(reason: String!): CircuitBreakerStatus
-    @aws_auth(cognito_groups: ["Admin"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin"])
   # IAM-only fan-out trigger used by circuit_breaker_manager Lambda.
   # Return value is what subscribers receive; all successful calls to this
   # mutation broadcast to onCircuitBreakerStatusChange.
   publishCircuitBreakerStatus(status: AWSJSON!): CircuitBreakerStatus @aws_iam
+
+  # === Feature Platform (optional) — mutations ===========================
+  # Only wired up server-side when EnableFeaturePlatform=true. See the
+  # matching note near type Query. Inlined here (rather than a separate
+  # `extend type Mutation` block) because AppSync silently rejects schemas
+  # that mix top-level + extend definitions in one SDL file and falls back
+  # to the previously-deployed schema.
+  #
+  # Return types on the user-facing fields below are intentionally NULLABLE
+  # (no trailing `!`). When EnableFeaturePlatform=false the resolvers are
+  # not deployed; with non-nullable returns AppSync responds with the
+  # confusing error "Cannot return null for non-nullable type ... within
+  # parent 'Mutation' (/subscribeFeature)". Making the return nullable lets
+  # the UI hooks (which already guard against null payloads) fail
+  # gracefully instead of surfacing a GraphQL error to the admin.
+  # The `registerFeature`/`unregisterFeature` mutations stay non-nullable
+  # because they're @aws_iam and only invoked by feature stacks, which by
+  # definition only exist when the feature platform is enabled.
+  # -----------------------------------------------------------------------
+  """Called by a feature stack's RegisterFeature custom resource once the stack has deployed."""
+  registerFeature(input: RegisterFeatureInput!): InstalledFeature! @aws_iam
+
+  """Called by a feature stack's RegisterFeature custom resource on stack delete."""
+  unregisterFeature(featureId: String!): Boolean! @aws_iam
+
+  """Vertical-product packs only: register the feature's pipeline-hook
+  Lambda ARNs with the host. The host's Step Functions workflow reads the
+  registry once at execution start and dispatches to the registered hooks
+  at each pipeline point (post-OCR, post-classification, post-extraction,
+  post-assessment, post-rule-validation, post-summarization).
+  Returns a snapshot of the merged registration. Idempotent on featureId
+  — re-registration with a different hook set replaces the prior entry.
+  IAM-authenticated; called by the feature stack's RegisterFeature
+  custom resource."""
+  registerFeatureHooks(input: RegisterFeatureHooksInput!): FeatureHooksRegistration! @aws_iam
+
+  """Vertical-product packs only: remove all hook registrations for a
+  feature. Called from the feature stack's Delete custom resource."""
+  unregisterFeatureHooks(featureId: String!): Boolean! @aws_iam
+
+  """Features with a manifest `configPreset`: write the bundled preset to
+  the host's ConfigurationTable as a new, NON-ACTIVE config version named
+  `<featureId>-v<version>`. Installation never changes the active config —
+  an admin reviews and activates the preset from the Configuration UI.
+  Idempotent: re-applying the same featureId+version overwrites the row,
+  so CloudFormation stack Updates are safe. IAM-authenticated; called by
+  the feature stack's ui-deployer custom resource."""
+  applyFeatureConfigPreset(input: ApplyFeatureConfigPresetInput!): FeatureConfigPresetResult! @aws_iam
+
+  """Delete all of a feature's preset config versions on uninstall. A
+  version that is currently ACTIVE is preserved (never yank the running
+  config); it is skipped with a warning and the call still succeeds."""
+  removeFeatureConfigPreset(featureId: String!): Boolean! @aws_iam
+
+  """Admin-only: initiate a subscription for a feature. Returns a
+  `FeatureEntitlement` whose `marketplaceUrl` is the AWS Marketplace (or
+  simulator) URL the UI must redirect the admin to in order to accept
+  pricing, EULA, and the AWS Customer Agreement. The entitlement `state`
+  remains NONE until the admin completes the Marketplace flow; the UI
+  should re-query `checkFeatureEntitlement` when the admin returns from
+  the Marketplace tab. Optional `returnUrl` is threaded through so the
+  Marketplace page can deep-link the admin back to the feature page.
+  Returns null when EnableFeaturePlatform=false (no resolver attached)."""
+  subscribeFeature(featureId: String!, returnUrl: String): FeatureEntitlement
+    @aws_auth(cognito_groups: ["Admin"])
+
+  """Admin-only: cancel a subscription for a feature by marking the simulator
+  entitlement EXPIRED. With the real Marketplace, the UI should redirect the
+  user to the AWS Marketplace Subscription Management portal instead of
+  calling this. Returns the updated FeatureEntitlement, or null when
+  EnableFeaturePlatform=false (no resolver attached)."""
+  unsubscribeFeature(featureId: String!): FeatureEntitlement
+    @aws_auth(cognito_groups: ["Admin"])
 }
 
 type DocumentPage @aws_cognito_user_pools @aws_iam {
@@ -909,7 +1008,7 @@ type DocumentCount @aws_cognito_user_pools @aws_iam {
 # RBAC for Queries:
 # Most queries are open to all authenticated users, with server-side filtering in Lambda resolvers
 # (e.g., reviewer document filtering, config-version scoping). Feature-specific queries that should
-# not be accessible to Reviewer role are restricted via @aws_auth directives at the field level.
+# not be accessible to Reviewer role are restricted via @aws_cognito_user_pools(cognito_groups) directives at the field level.
 # Document queries remain open to all roles (filtering is done server-side in resolvers).
 type Query @aws_cognito_user_pools @aws_iam {
   # Document queries - all authenticated users (reviewer filtering done in resolver)
@@ -937,13 +1036,13 @@ type Query @aws_cognito_user_pools @aws_iam {
 
   # Configuration & pricing queries - Admin, Author, Viewer (not Reviewer)
   getConfigVersions: ConfigurationVersionsResponse
-    @aws_auth(cognito_groups: ["Admin", "Author", "Viewer"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
   getConfigVersion(versionName: String!): ConfigurationResponse
-    @aws_auth(cognito_groups: ["Admin", "Author", "Viewer"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
   getPricing: PricingResponse
-    @aws_auth(cognito_groups: ["Admin", "Author", "Viewer"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
   calculateCapacity(input: String!): CapacityResult
-    @aws_auth(cognito_groups: ["Admin", "Author", "Viewer"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
 
   # Deployment / version metadata queries — open to all authenticated users
   # (the version number itself isn't sensitive; the UI gates the
@@ -952,7 +1051,7 @@ type Query @aws_cognito_user_pools @aws_iam {
 
   # Agent Chat & Code Explorer queries
   # Note: These need both Cognito and IAM auth (for return type resolution).
-  # AppSync does not support @aws_auth(cognito_groups:[...]) + @aws_iam on the same field.
+  # AppSync does not support a @aws_cognito_user_pools(cognito_groups:[...]) restriction + @aws_iam on the same field.
   # Reviewer exclusion is enforced by UI navigation (Agent Chat hidden for Reviewer)
   # and session scoping (users only see their own sessions).
   listAvailableAgents: [Agent] @aws_cognito_user_pools @aws_iam
@@ -969,41 +1068,41 @@ type Query @aws_cognito_user_pools @aws_iam {
 
   # Discovery queries - Admin, Author only
   listDiscoveryJobs: DiscoveryJobList
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
 
   # Agent query system - Admin, Author, Viewer (not Reviewer)
   submitAgentQuery(query: String!, agentIds: [String!]!): AgentJob
-    @aws_auth(cognito_groups: ["Admin", "Author", "Viewer"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
   getAgentJobStatus(jobId: ID!): AgentJob
-    @aws_auth(cognito_groups: ["Admin", "Author", "Viewer"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
   listAgentJobs(limit: Int, nextToken: String): AgentJobConnection
-    @aws_auth(cognito_groups: ["Admin", "Author", "Viewer"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
 
   # Test Studio queries - Admin, Author only
   getTestRun(testRunId: String!): TestRun
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   getTestRuns(timePeriodHours: Int, startDateTime: AWSDateTime, endDateTime: AWSDateTime): [TestRun]
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   getTestRunStatus(testRunId: String!): TestRunStatus
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   compareTestRuns(testRunIds: [String!]!): TestRunComparison
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   getTestSets: [TestSet]
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   listBucketFiles(bucketType: String!, filePattern: String!, modifiedAfter: String): [String]
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   validateTestFileName(fileName: String!): TestSetValidationResponse
-    @aws_auth(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
 
   # Configuration Library queries - Admin, Author, Viewer (not Reviewer)
   listConfigurationLibrary(pattern: String!): ConfigurationLibraryResponse
-    @aws_auth(cognito_groups: ["Admin", "Author", "Viewer"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
   getConfigurationLibraryFile(
     pattern: String!
     configName: String!
     fileName: String!
   ): ConfigurationLibraryFileResponse
-    @aws_auth(cognito_groups: ["Admin", "Author", "Viewer"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
 
   # User Management queries
   listUsers: UserList @aws_cognito_user_pools
@@ -1017,6 +1116,37 @@ type Query @aws_cognito_user_pools @aws_iam {
 
   # Circuit Breaker status — any authenticated user can read.
   getCircuitBreakerStatus: CircuitBreakerStatus
+
+  # === Feature Platform (optional) — queries =============================
+  # These fields are only wired up server-side when EnableFeaturePlatform=true
+  # (resolvers live in the prototype/feature-platform/main-stack-extensions
+  # nested stack). When the feature platform is off they are unresolved and
+  # return null. The UI hides them behind the EnableFeaturePlatform flag.
+  #
+  # Return types are intentionally NULLABLE (no trailing `!`) so that with
+  # EnableFeaturePlatform=false (no resolver attached) AppSync returns
+  # `data: { ...: null }` instead of the confusing "Cannot return null for
+  # non-nullable type ..." error. The UI hooks (`useCatalogFeatures`,
+  # `useInstalledFeatures`, `useFeatureEntitlement`, `useFeatureLaunchUrl`)
+  # all coerce null → empty list / sensible default.
+  # -----------------------------------------------------------------------
+  """List all features currently installed in this IDP stack.
+  Returns null when EnableFeaturePlatform=false (no resolver attached)."""
+  listInstalledFeatures: [InstalledFeature!] @aws_cognito_user_pools
+
+  """List all features published to the feature bucket (the catalog), whether
+  installed or not. The UI takes the union of this + listInstalledFeatures to
+  show a "Subscribe" CTA for catalog-only features.
+  Returns null when EnableFeaturePlatform=false (no resolver attached)."""
+  listCatalogFeatures: [CatalogFeature!] @aws_cognito_user_pools
+
+  """Check the subscription/entitlement state for a single feature for the caller.
+  Returns null when EnableFeaturePlatform=false (no resolver attached)."""
+  checkFeatureEntitlement(featureId: String!): FeatureEntitlement @aws_cognito_user_pools
+
+  """Admin-only: get a CloudFormation Console quick-create URL for installing or updating a feature.
+  Returns null when EnableFeaturePlatform=false (no resolver attached)."""
+  getFeatureLaunchUrl(featureId: String!, version: String): FeatureLaunchUrl @aws_cognito_user_pools
 }
 
 type Subscription @aws_cognito_user_pools @aws_iam {
@@ -1123,6 +1253,175 @@ type AvailableModelsResult @aws_cognito_user_pools @aws_iam {
   baseModels: [BaseModelInfo!]!
   customModels: [CustomModelInfo!]!
 }
+
+# =============================================================================
+# === Feature Platform (optional) — BEGIN ====================================
+# Added by prototype/feature-platform/main-stack-extensions/
+# Guarded in CFN by the `EnableFeaturePlatform` parameter / `IsFeaturePlatformEnabled`
+# condition. The block below can be lifted out cleanly by removing everything
+# between BEGIN/END markers if the feature platform is ever removed.
+# =============================================================================
+
+"""A feature installed in this IDP stack via AWS Marketplace (or the simulator).
+
+Authorized for BOTH Cognito user pool callers (the web UI reading
+`listInstalledFeatures`) AND IAM callers (the ui-deployer Lambda in each
+feature stack, which invokes the `registerFeature` mutation with SigV4
+signing and then reads the returned `InstalledFeature` fields). Without
+`@aws_iam`, the feature stack's `RegisterFeatureResource` custom resource
+fails at CREATE time with:
+
+    AppSync errors: Not Authorized to access featureId on type InstalledFeature
+
+because AppSync's default auth mode (Cognito) denies field reads to the
+IAM-signed caller even though the mutation itself is tagged `@aws_iam`.
+"""
+type InstalledFeature @aws_iam @aws_cognito_user_pools {
+  featureId: String!
+  displayName: String!
+  installedVersion: String!
+  latestVersion: String
+  updateAvailable: Boolean!
+  stackName: String!
+  stackRegion: String!
+  stackId: String
+  uiBundlePath: String!
+  featureApiEndpoint: String
+  iconUrl: String
+  installedAt: AWSDateTime!
+  installedBy: String
+}
+
+"""A feature published to the feature bucket (available in the catalog), whether
+or not it is installed in this IDP stack. Drives the "Subscribe" CTA in the UI
+for features that haven't been installed yet."""
+type CatalogFeature @aws_cognito_user_pools {
+  featureId: String!
+  displayName: String!
+  latestVersion: String!
+  iconUrl: String
+  # Short human-readable description shown in the UI (nav hover tooltip and the
+  # not-yet-installed feature page). Sourced from the feature's manifest.
+  description: String
+  # "Learn more" doc link. For OSS features this is a docs-site slug (e.g.
+  # "extensions/sample-document-status") the UI resolves against the published docs
+  # site; may also be an absolute URL. Empty for marketplace features (the UI
+  # falls back to marketplaceListingUrl).
+  docsUrl: String
+  # "oss" (open-source bundled feature, installable directly) or
+  # "marketplace" (closed-source extension requiring an AWS Marketplace
+  # subscription). Defaults to "oss" when absent.
+  source: String
+  # Marketplace-only: the AWS Marketplace product code GetEntitlements is
+  # queried against, and the public listing page the Subscribe CTA links to.
+  # Null/empty for OSS features.
+  productCode: String
+  marketplaceListingUrl: String
+  # OSS-only: the artifacts bucket + key prefix where this feature's
+  # template/ui-bundle were published (under sample-features/). The host builds
+  # the Launch Stack URL from these. Null/empty for marketplace features (which
+  # use a private sellerBucket instead).
+  artifactBucket: String
+  artifactPrefix: String
+}
+
+"""Subscription / entitlement state for a feature."""
+type FeatureEntitlement {
+  featureId: String!
+  state: FeatureEntitlementState!
+  expiresAt: AWSDateTime
+  customerIdentifier: String
+  productCode: String
+  source: String!      # "marketplace" | "simulator" | "none"
+  # Populated by subscribeFeature — the AWS Marketplace (or simulator) URL the
+  # UI must redirect the admin to in order to accept terms and complete the
+  # subscription. Null on all other resolvers.
+  marketplaceUrl: String
+}
+
+enum FeatureEntitlementState {
+  NONE
+  ACTIVE
+  EXPIRED
+}
+
+"""CloudFormation Console quick-create URL + metadata for installing/updating a feature."""
+type FeatureLaunchUrl {
+  featureId: String!
+  version: String!
+  launchUrl: String!          # https://console.aws.amazon.com/cloudformation/home?region=X#/stacks/quickcreate?...
+  templateUrl: String!        # S3 https URL (or simulator URL) of the feature template
+  stackName: String!          # Suggested stackName (e.g. idp-feature-docs-by-status)
+  parameters: AWSJSON!        # Prefilled parameter values (JSON-encoded map)
+}
+
+"""Input passed by the feature stack's RegisterFeature custom resource."""
+input RegisterFeatureInput {
+  featureId: String!
+  displayName: String!
+  installedVersion: String!
+  stackName: String!
+  stackId: String!
+  stackRegion: String!
+  uiBundlePath: String!
+  featureApiEndpoint: String
+  iconUrl: String
+  installedBy: String
+  productCode: String
+  marketplaceListingUrl: String
+}
+
+"""One pipeline hook registration the host's Step Functions workflow
+dispatches to at the named pipeline point."""
+input PipelineHookInput {
+  point: String!     # postOcr | postClassification | postExtraction | postAssessment | postRuleValidation | postSummarization
+  arn: String!       # Lambda ARN to invoke
+  order: Int         # ordering within hooks at the same point (lower = earlier). Default 100.
+  onError: String    # 'continue' | 'fail' | 'skip-remaining'. Default 'continue'.
+}
+
+"""Input for registerFeatureHooks. Replaces the prior hook set for this
+feature in its entirety (idempotent)."""
+input RegisterFeatureHooksInput {
+  featureId: String!
+  hooks: [PipelineHookInput!]!
+}
+
+"""Snapshot returned by registerFeatureHooks."""
+type FeatureHooksRegistration @aws_iam {
+  featureId: String!
+  hookCount: Int!
+  registeredAt: AWSDateTime!
+}
+
+"""Input for applyFeatureConfigPreset. `config` is the parsed preset
+document (JSON-encoded); metadata fields (IsActive, Managed, …) are
+stripped server-side."""
+input ApplyFeatureConfigPresetInput {
+  featureId: String!
+  version: String!       # feature version, e.g. "0.1.0" → config version "<featureId>-v0.1.0"
+  config: AWSJSON!
+  description: String
+}
+
+"""Receipt returned by applyFeatureConfigPreset."""
+type FeatureConfigPresetResult @aws_iam {
+  featureId: String!
+  configVersionName: String!   # e.g. "claims-review-v0.1.0" — what the admin sees in the Configuration UI
+  appliedAt: AWSDateTime!
+}
+
+# NOTE: The feature-platform Query/Mutation fields are inlined into the main
+# `type Query` / `type Mutation` declarations earlier in this file (search for
+# "Feature Platform (optional) — queries" and "Feature Platform (optional) —
+# mutations"). `extend type` blocks on the same schema file cause AppSync to
+# reject the schema silently and fall back to the previously-deployed version,
+# which is why listCatalogFeatures / subscribeFeature used to return
+# "Field 'X' in type 'Query/Mutation' is undefined" even though the fields
+# appeared in this file.
+# =============================================================================
+# === Feature Platform (optional) — END ======================================
+# =============================================================================
 
 schema {
   query: Query

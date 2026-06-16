@@ -741,6 +741,10 @@ class Document:
                 "status": self.status.value,
                 "num_pages": self.num_pages,
                 "sections": sections_for_map,  # For Step Functions Map state
+                # config_version travels in the lightweight wrapper so consumers
+                # that never decompress (e.g. the pipeline-hooks dispatcher) can
+                # still honor the version the document was processed under.
+                "config_version": self.config_version,
                 "compressed": True,
             }
 

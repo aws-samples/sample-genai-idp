@@ -1,0 +1,32 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+#
+# Open-source extensions bundled with the accelerator. `idp-cli publish` builds
+# each one and adds it (source: "oss") to the generated catalog.json. To add an
+# OSS extension: scaffold it, then add a `{ path: <repo-relative-dir> }` entry.
+#
+# Only `path` is needed here — displayName / description / version / iconUrl all
+# come from each feature's own feature.yaml manifest at publish time (unlike
+# extensions-marketplace.yaml, whose closed-source features have no in-repo
+# manifest to read, so their metadata is given inline). This avoids duplicating
+# — and drifting from — the manifest.
+#
+# Note: an entry here is what makes a feature appear as *available to install*
+# in the catalog. A feature deployed directly via CloudFormation still
+# self-registers and shows up once installed (supports "unadvertised"
+# features) — the catalog entry only adds it to the not-yet-installed list.
+#
+# See docs/feature-platform-developer-guide.md. Counterpart for paid
+# extensions: extensions-marketplace.yaml.
+
+schemaVersion: "1.0"
+
+features:
+  # Minimal contract reference: publish → catalog → install → UI registration,
+  # HTTP API + Cognito JWT, cross-stack imports, KMS.
+  - path: feature-platform/sample-feature
+  # Advanced vertical showcase: config preset applied at install, a
+  # postRuleValidation pipeline hook, host-GraphQL calls from the feature UI
+  # (Rules Discovery), and a multi-route feature API. See
+  # docs/extensions/sample-health-insurance-review.md.
+  - path: feature-platform/sample-health-insurance-review

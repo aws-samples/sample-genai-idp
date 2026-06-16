@@ -40,9 +40,11 @@ const logger = new ConsoleLogger('GenAIIDPLayout');
 
 interface GenAIIDPLayoutProps {
   children?: React.ReactNode;
+  /** Override the right-side info (Tools) panel. Defaults to the document ToolsPanel. */
+  tools?: React.ReactNode;
 }
 
-const GenAIIDPLayout = ({ children }: GenAIIDPLayoutProps): React.JSX.Element => {
+const GenAIIDPLayout = ({ children, tools }: GenAIIDPLayoutProps): React.JSX.Element => {
   const { navigationOpen, setNavigationOpen } = useAppContext();
 
   const notifications = useNotifications();
@@ -118,7 +120,7 @@ const GenAIIDPLayout = ({ children }: GenAIIDPLayoutProps): React.JSX.Element =>
         onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
         breadcrumbs={<Breadcrumbs />}
         notifications={<Flashbar items={notifications as import('@cloudscape-design/components').FlashbarProps.MessageDefinition[]} />}
-        tools={<ToolsPanel />}
+        tools={tools ?? <ToolsPanel />}
         toolsOpen={toolsOpen}
         onToolsChange={({ detail }) => setToolsOpen(detail.open)}
         splitPanelOpen={splitPanelOpen}

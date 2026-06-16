@@ -41,21 +41,35 @@ Parameters:
     Default: "private"
     Description: Value for the Environment tag applied to all resources.
 
+  VpcCidr:
+    Type: String
+    Description: >-
+      Primary CIDR block of the VPC (e.g. 10.1.0.0/16).
+      Added to the VPC endpoint security group so that browsers running
+      inside the VPC (WorkSpaces, VPN clients, bastions) can reach the
+      AppSync and other Interface Endpoints directly on port 443.
+      Auto-detected by deploy-vpc-endpoints.py if not supplied manually.
+
   # ──────────────────────────────────────────────────────────
   # Per-endpoint creation flags
   #
-  # REQUIRED by the IDP application (14 endpoints):
+  # REQUIRED by the IDP application (15 endpoints):
   #   appsync-api, appsync, sqs, states, kms, logs,
   #   bedrock-runtime, ssm (Lambda→SSM Parameter Store calls),
   #   secretsmanager, lambda, events, athena,
   #   textract (OCR pattern — ocr/service.py calls Textract API),
-  #   sts (BDA pattern — bda/bda_service.py and bda/blueprint_optimizer.py call STS for AssumeRole)
+  #   sts (BDA pattern — bda/bda_service.py and bda/blueprint_optimizer.py call STS for AssumeRole),
+  #   monitoring (CloudWatch — workflow_tracker publishes metrics, dashboard_merger manages dashboards)
   #
   # REQUIRED only for SSM Session Manager testing bastion (2 endpoints):
   #   ssmmessages  — SSM Session Manager port-forwarding channel
   #   ec2messages  — SSM agent ↔ SSM service communication
   #   (If you are accessing the UI via VPN/Direct Connect in production,
   #    you do NOT need ssmmessages or ec2messages.)
+  #
+  # NOTE: Cognito endpoints (cognito-idp, cognito-identity) are NOT included.
+  # AWS blocks PrivateLink when the User Pool has a domain configured.
+  # Cognito auth traffic must flow through the NAT gateway.
   #
   # Set any flag to "false" if the endpoint already exists in the VPC.
   # Use scripts/check-vpc-endpoints.sh to auto-detect and generate the correct deploy command.
@@ -171,6 +185,16 @@ Parameters:
       that call STS AssumeRole (bda/bda_service.py, bda/blueprint_optimizer.py).
       Set to "false" if already exists.
 
+  CreateMonitoringEndpoint:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Create the monitoring (CloudWatch Metrics) Interface endpoint. Required for
+      workflow_tracker Lambda (publishes custom metrics via put_metric_data) and
+      dashboard_merger Lambda (manages CloudWatch dashboards).
+      Set to "false" if already exists.
+
 Conditions:
   CreateGatewayEndpoints: !Not
     - !Equals [ !Join [ "", !Ref RouteTableIds ], "" ]
@@ -191,12 +215,17 @@ Conditions:
   ShouldCreateAthenaEndpoint: !Equals [ !Ref CreateAthenaEndpoint, "true" ]
   ShouldCreateTextractEndpoint: !Equals [ !Ref CreateTextractEndpoint, "true" ]
   ShouldCreateStsEndpoint: !Equals [ !Ref CreateStsEndpoint, "true" ]
+  ShouldCreateMonitoringEndpoint: !Equals [ !Ref CreateMonitoringEndpoint, "true" ]
 
 Resources:
 
   ##########################################################################
   # Endpoint Security Group
-  # Allows inbound HTTPS (443) from the Lambda security group
+  # Allows inbound HTTPS (443) from:
+  #   1. The Lambda security group (Lambda → AWS service calls)
+  #   2. The VPC CIDR (browser clients inside the VPC — WorkSpaces, VPN,
+  #      bastion — making direct AppSync GraphQL requests to the Interface
+  #      Endpoint without going through the ALB)
   ##########################################################################
 
   VpcEndpointSecurityGroup:
@@ -210,6 +239,11 @@ Resources:
           ToPort: 443
           SourceSecurityGroupId: !Ref LambdaSecurityGroupId
           Description: !Sub "Allow HTTPS from IDP Lambda functions (${IDPStackName})"
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VpcCidr
+          Description: "Allow HTTPS from VPC clients (WorkSpaces, VPN, bastion) for browser AppSync access"
       Tags:
         - Key: Name
           Value: !Sub "${IDPStackName}-vpc-endpoints-sg"
@@ -560,6 +594,29 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub "${IDPStackName}-sts"
+        - Key: IDPStack
+          Value: !Ref IDPStackName
+        - Key: Environment
+          Value: !Ref EnvironmentTag
+
+  ##########################################################################
+  # CloudWatch Monitoring Endpoint
+  ##########################################################################
+
+  MonitoringVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: ShouldCreateMonitoringEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.monitoring"
+      VpcEndpointType: Interface
+      SubnetIds: !Ref SubnetIds
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+      PrivateDnsEnabled: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${IDPStackName}-monitoring"
         - Key: IDPStack
           Value: !Ref IDPStackName
         - Key: Environment
