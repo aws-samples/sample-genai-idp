@@ -9,7 +9,16 @@ equivalent is a 'Cancel subscription' redirect to the AWS Marketplace
 Subscription Management portal; when pointed at the real Marketplace we
 simply no-op here (the UI redirects the user to the portal instead).
 
-Env vars mirror subscribe_feature's. See that module for docs.
+The simulator's expire admin API requires a concrete CustomerIdentifier, but
+the simulator mints a RANDOM CustomerIdentifier per subscribe (cust-<uuid>) that
+the host never sees. So, exactly like check_feature_entitlement, when no concrete
+CustomerIdentifier is available we resolve it via GetEntitlements filtered by the
+buyer AWS account (DEFAULT_BUYER_ACCOUNT_ID — the deterministic key subscribe
+records under) and expire whatever id the subscription minted.
+
+Env vars mirror subscribe_feature's, plus DEFAULT_BUYER_ACCOUNT_ID and the
+marketplace-entitlement endpoint for the account-resolution lookup. See
+subscribe_feature / check_feature_entitlement for docs.
 """
 
 import json
@@ -21,17 +30,64 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import boto3
+from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 _SIMULATOR_ADMIN_ENDPOINT = os.environ.get("SIMULATOR_ADMIN_ENDPOINT", "").rstrip("/")
 _DEFAULT_CUSTOMER_IDENTIFIER = os.environ.get("DEFAULT_CUSTOMER_IDENTIFIER", "")
+_DEFAULT_BUYER_ACCOUNT_ID = os.environ.get("DEFAULT_BUYER_ACCOUNT_ID", "111122223333")
 _ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
 _SOURCE_TAG = os.environ.get("SIMULATOR_SOURCE_TAG", "simulator")
 _INSTALLED_FEATURES_TABLE = os.environ.get("INSTALLED_FEATURES_TABLE", "")
 
 _dynamodb = boto3.resource("dynamodb")
+
+# Lazily constructed marketplace-entitlement client (boto3 picks up the
+# simulator endpoint from AWS_ENDPOINT_URL_MARKETPLACE_ENTITLEMENT_SERVICE).
+# Short timeouts so a stalled cold-start exchange fails fast inside the Lambda
+# budget rather than hanging until Lambda kills it.
+_entitlement_client = None
+_CLIENT_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=5,
+    retries={"max_attempts": 3, "mode": "standard"},
+)
+
+
+def _client():
+    global _entitlement_client
+    if _entitlement_client is None:
+        _entitlement_client = boto3.client(
+            "marketplace-entitlement", config=_CLIENT_CONFIG
+        )
+    return _entitlement_client
+
+
+def _resolve_customer_by_account(product_code: str, account_id: str) -> Optional[str]:
+    """Resolve the CustomerIdentifier the subscription was recorded under by
+    filtering GetEntitlements on the buyer AWS account (the deterministic key
+    shared with subscribe). Returns the first matched entitlement's
+    CustomerIdentifier, or None when none is found / the call fails."""
+    try:
+        resp = _client().get_entitlements(
+            ProductCode=product_code,
+            Filter={"CUSTOMER_AWS_ACCOUNT_ID": [account_id]},
+        )
+    except (ClientError, BotoCoreError) as exc:
+        logger.warning(
+            "GetEntitlements (by account) failed for product %s: %s",
+            product_code,
+            exc,
+        )
+        return None
+    for ent in resp.get("Entitlements", []) or []:
+        cid = ent.get("CustomerIdentifier")
+        if cid:
+            return cid
+    return None
 
 
 def _installed_product_code(feature_id: str) -> Optional[str]:
@@ -170,20 +226,33 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 f"with marketplace.productCode set in feature.yaml and reinstall."
             )
 
+    # Resolve who to expire. A concrete CustomerIdentifier (Marketplace header or
+    # configured default) wins. Otherwise — the common simulator case — resolve
+    # it via GetEntitlements filtered by the buyer AWS account, the deterministic
+    # key subscribe records under: the simulator mints a RANDOM CustomerIdentifier
+    # per subscribe, so the account is the only id both sides know ahead of time.
+    # Keyed on DEFAULT_BUYER_ACCOUNT_ID being set (not SOURCE_TAG == "simulator"),
+    # because the main stack only ever emits "auto" / "marketplace" — never
+    # "simulator" — so gating on it would leave this dead. Mirrors the resolution
+    # in check_feature_entitlement.
     customer_identifier = _resolve_customer_identifier(event)
-    if not customer_identifier:
-        if _SOURCE_TAG == "simulator":
-            customer_identifier = "cust-idp-default"
+    if not customer_identifier and _DEFAULT_BUYER_ACCOUNT_ID:
+        customer_identifier = _resolve_customer_by_account(
+            product_code, _DEFAULT_BUYER_ACCOUNT_ID
+        )
+        if customer_identifier:
             logger.info(
-                "No CustomerIdentifier provided; using default %r for simulator mode.",
+                "No CustomerIdentifier provided; resolved %r via buyer AWS account %r.",
                 customer_identifier,
+                _DEFAULT_BUYER_ACCOUNT_ID,
             )
-        else:
-            raise UnsubscribeError(
-                "No CustomerIdentifier available. Configure "
-                "FeaturePlatformDefaultCustomerIdentifier or pass "
-                "X-Amzn-Marketplace-Customer-Identifier."
-            )
+    if not customer_identifier:
+        raise UnsubscribeError(
+            "No CustomerIdentifier available and none could be resolved from the "
+            "buyer AWS account (no active subscription found). Configure "
+            "FeaturePlatformDefaultCustomerIdentifier or pass "
+            "X-Amzn-Marketplace-Customer-Identifier."
+        )
 
     sim_resp = _expire_entitlement(customer_identifier, product_code, feature_id)
     expires_at = _iso(sim_resp.get("expiresAt"))

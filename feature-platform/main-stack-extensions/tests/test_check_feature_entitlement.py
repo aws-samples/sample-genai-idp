@@ -141,17 +141,29 @@ def test_synthesized_product_code_simulator_mode(
     assert result["source"] == "simulator"
 
 
-def test_none_when_no_customer_identifier_marketplace_mode(
+def test_marketplace_mode_no_customer_identifier_filters_by_buyer_account(
     monkeypatch, load_lambda, installed_features_table
 ):
-    """Marketplace mode: no CustomerIdentifier returns NONE."""
+    """Marketplace mode: with no CustomerIdentifier, GetEntitlements falls back to
+    the buyer AWS account (CUSTOMER_AWS_ACCOUNT_ID) — the same deterministic key
+    subscribe uses. The fallback is keyed on DEFAULT_BUYER_ACCOUNT_ID, NOT on
+    SOURCE_TAG, because the main stack only ever emits "auto" or "marketplace"
+    (never "simulator"), and an endpoint-configured stack points at the simulator
+    while tagged "marketplace". An account with no subscription → empty → NONE."""
     _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
     mod = _preload(
         monkeypatch,
         load_lambda,
         table_name=installed_features_table,
         default_customer="",
+        buyer_account="111122223333",
         source_tag="marketplace",
+    )
+    _stub(
+        mod,
+        entitlements=[],
+        expected_product="prod123",
+        expected_account="111122223333",
     )
     result = mod.handler(
         make_appsync_event("checkFeatureEntitlement", {"featureId": "docs-by-status"}),

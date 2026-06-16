@@ -489,6 +489,14 @@ Resources:
           # productCode comes from the feature's InstalledFeatures row.
           INSTALLED_FEATURES_TABLE: !Ref InstalledFeaturesTable
           DEFAULT_CUSTOMER_IDENTIFIER: !Ref DefaultCustomerIdentifier
+          # Buyer AWS account + entitlement endpoint: when no explicit
+          # CustomerIdentifier is present, unsubscribe resolves the random
+          # simulator-minted CustomerIdentifier via GetEntitlements filtered by
+          # this account (the deterministic key subscribe records under) before
+          # POSTing the expire to the simulator admin API. Mirrors
+          # CheckFeatureEntitlementFunction.
+          DEFAULT_BUYER_ACCOUNT_ID: !Ref DefaultBuyerAccountId
+          AWS_ENDPOINT_URL_MARKETPLACE_ENTITLEMENT_SERVICE: !Ref SimulatorEntitlementEndpoint
           ADMIN_GROUP: !Ref AdminGroupName
           SIMULATOR_SOURCE_TAG: !Ref SubscriptionMode
           LOG_LEVEL: !Ref LogLevel

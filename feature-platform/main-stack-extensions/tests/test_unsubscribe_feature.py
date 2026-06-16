@@ -16,6 +16,7 @@ from urllib.error import HTTPError, URLError
 import boto3
 import pytest
 from _helpers import make_appsync_event
+from botocore.stub import Stubber
 
 
 def _seed_row(table_name, feature_id, *, product_code=None):
@@ -34,14 +35,19 @@ def _preload(
     table_name="",
     simulator_endpoint="http://sim.example.com",
     default_customer="CUST-default",
+    buyer_account="111122223333",
     source_tag="simulator",
 ):
     monkeypatch.setenv("SIMULATOR_ADMIN_ENDPOINT", simulator_endpoint)
     monkeypatch.setenv("INSTALLED_FEATURES_TABLE", table_name)
     monkeypatch.setenv("DEFAULT_CUSTOMER_IDENTIFIER", default_customer)
+    monkeypatch.setenv("DEFAULT_BUYER_ACCOUNT_ID", buyer_account)
     monkeypatch.setenv("ADMIN_GROUP", "Admin")
     monkeypatch.setenv("SIMULATOR_SOURCE_TAG", source_tag)
     monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
     return load_lambda("unsubscribe_feature")
 
 
@@ -219,6 +225,89 @@ def test_simulator_connection_refused(
                 ),
                 None,
             )
+
+
+def test_no_customer_identifier_resolves_by_buyer_account(
+    monkeypatch, load_lambda, installed_features_table
+):
+    """With no concrete CustomerIdentifier, unsubscribe resolves the random
+    simulator-minted id via GetEntitlements filtered by the buyer AWS account,
+    then expires THAT id against the simulator admin API."""
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
+    mod = _preload(
+        monkeypatch,
+        load_lambda,
+        table_name=installed_features_table,
+        default_customer="",  # force the account-resolution path
+        buyer_account="111122223333",
+    )
+    # Stub GetEntitlements(by account) → the random id the subscription minted.
+    stubber = Stubber(mod._client())
+    stubber.add_response(
+        "get_entitlements",
+        {"Entitlements": [{"CustomerIdentifier": "cust-62c036d80d5c"}]},
+        {
+            "ProductCode": "prod123",
+            "Filter": {"CUSTOMER_AWS_ACCOUNT_ID": ["111122223333"]},
+        },
+    )
+    stubber.activate()
+    sim_body = {"state": "EXPIRED", "expiresAt": 1_700_000_000.0}
+    try:
+        with _mock_urlopen_response(mod, sim_body) as patched:
+            result = mod.handler(
+                make_appsync_event(
+                    "unsubscribeFeature",
+                    {"featureId": "docs-by-status"},
+                    groups=["Admin"],
+                ),
+                None,
+            )
+            sent = json.loads(patched.call_args.args[0].data.decode("utf-8"))
+            # The expire targets the resolved (random) id, not a synthesized one.
+            assert sent["customerIdentifier"] == "cust-62c036d80d5c"
+            assert sent["productCode"] == "prod123"
+    finally:
+        stubber.deactivate()
+    assert result["state"] == "EXPIRED"
+    assert result["customerIdentifier"] == "cust-62c036d80d5c"
+
+
+def test_no_customer_identifier_and_no_subscription_raises(
+    monkeypatch, load_lambda, installed_features_table
+):
+    """No concrete CustomerIdentifier and no entitlement under the buyer account
+    (nothing to resolve) → UnsubscribeError rather than expiring a wrong id."""
+    _seed_row(installed_features_table, "docs-by-status", product_code="prod123")
+    mod = _preload(
+        monkeypatch,
+        load_lambda,
+        table_name=installed_features_table,
+        default_customer="",
+        buyer_account="111122223333",
+    )
+    stubber = Stubber(mod._client())
+    stubber.add_response(
+        "get_entitlements",
+        {"Entitlements": []},
+        {
+            "ProductCode": "prod123",
+            "Filter": {"CUSTOMER_AWS_ACCOUNT_ID": ["111122223333"]},
+        },
+    )
+    stubber.activate()
+    try:
+        with pytest.raises(mod.UnsubscribeError, match="No CustomerIdentifier"):
+            mod.handler(
+                make_appsync_event(
+                    "unsubscribeFeature",
+                    {"featureId": "docs-by-status"},
+                    groups=["Admin"],
+                ),
+                None,
+            )
+    finally:
+        stubber.deactivate()
 
 
 def test_falls_back_expires_at_when_simulator_omits_it(

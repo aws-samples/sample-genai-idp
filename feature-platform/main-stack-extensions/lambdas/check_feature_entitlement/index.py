@@ -320,16 +320,25 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     # subscribe_feature: the simulator mints a RANDOM CustomerIdentifier per
     # subscribe, so the account is the only id both sides know ahead of time.
     # GetEntitlements(CUSTOMER_AWS_ACCOUNT_ID) resolves it to whatever the
-    # subscription recorded. (In simulator mode the buyer account always has a
-    # value; in real-Marketplace mode without a header/default we return NONE.)
+    # subscription recorded.
+    #
+    # The account fallback is keyed on DEFAULT_BUYER_ACCOUNT_ID being set, NOT on
+    # SOURCE_TAG == "simulator": the main stack only ever emits SOURCE_TAG "auto"
+    # (no endpoint, short-circuited above) or "marketplace" (any endpoint set —
+    # whether the standalone simulator or a real Marketplace API). There is no
+    # "simulator" path from the main stack, so gating on it left the fallback
+    # dead and every post-subscribe check returned NONE. CUSTOMER_AWS_ACCOUNT_ID
+    # is a real Marketplace filter, so this is correct in both modes: in
+    # simulator mode the buyer account is the deterministic shared key; in real-
+    # Marketplace mode it only resolves entitlements actually subscribed under
+    # that account (and a header/default CustomerIdentifier still wins first).
     customer_identifier = _resolve_customer_identifier(event)
     account_filter = None
     if not customer_identifier:
-        if _SOURCE_TAG == "simulator" and _DEFAULT_BUYER_ACCOUNT_ID:
+        if _DEFAULT_BUYER_ACCOUNT_ID:
             account_filter = _DEFAULT_BUYER_ACCOUNT_ID
             logger.info(
-                "No CustomerIdentifier provided; filtering by buyer AWS account "
-                "%r for simulator mode.",
+                "No CustomerIdentifier provided; filtering by buyer AWS account %r.",
                 account_filter,
             )
         else:
