@@ -3393,16 +3393,27 @@ STDERR:
         )
 
         try:
-            # Get all objects with the prefix
+            # Collect objects across BOTH artifact prefixes:
+            #   1. `<prefix>/<version>/`  — the versioned main-stack artifacts
+            #      (Lambda/layer code zips, config_library, sam-objects, etc.).
+            #   2. `<prefix>/extensions/` — the VERSION-FREE sample-feature base
+            #      written by _upload_sample_feature_artifacts. These live as a
+            #      SIBLING of prefix_and_version (e.g. `idp/extensions/<id>/...`
+            #      vs `idp/0.5.16/...`), so the versioned pass alone never
+            #      reaches them. Without this a cross-account public deploy hits
+            #      S3 403 (Access Denied) the moment CloudFormation fetches the
+            #      extension's `extensions/<id>/template.yaml`.
             paginator = self.s3_client.get_paginator("list_objects_v2")
-            page_iterator = paginator.paginate(
-                Bucket=self.bucket, Prefix=self.prefix_and_version
-            )
+            acl_prefixes = [
+                self.prefix_and_version,
+                f"{self.prefix}/extensions",
+            ]
 
             objects = []
-            for page in page_iterator:
-                if "Contents" in page:
-                    objects.extend(page["Contents"])
+            for acl_prefix in acl_prefixes:
+                for page in paginator.paginate(Bucket=self.bucket, Prefix=acl_prefix):
+                    if "Contents" in page:
+                        objects.extend(page["Contents"])
 
             if not objects:
                 self.console.print("[yellow]No objects found to set ACLs on[/yellow]")

@@ -110,3 +110,64 @@ def test_layout_and_token_baking(monkeypatch, tmp_path):
     for rel in uploaded:
         assert "sample-features" not in rel
         assert "/0.5.0/" not in f"{base}/{rel}"
+
+
+def _acl_is_public(s3, bucket, key):
+    grants = s3.get_object_acl(Bucket=bucket, Key=key)["Grants"]
+    return any(
+        g.get("Grantee", {}).get("URI", "").endswith("AllUsers")
+        and g.get("Permission") == "READ"
+        for g in grants
+    )
+
+
+@mock_aws
+def test_set_public_acls_covers_version_free_extension_base(monkeypatch, tmp_path):
+    """set_public_acls must make the VERSION-FREE `<prefix>/extensions/...`
+    sample-feature artifacts public, not just the `<prefix>/<version>/` tree.
+
+    The extension base is a SIBLING of prefix_and_version (e.g.
+    `idp/extensions/<id>/...` vs `idp/0.5.0/...`), so paginating on
+    prefix_and_version alone leaves the extension template + bundle PRIVATE.
+    A same-account deploy never notices (the deployer owns the bucket); a
+    cross-account public deploy hits S3 403 the moment CloudFormation fetches
+    `extensions/<id>/template.yaml`.
+    """
+    monkeypatch.chdir(tmp_path)
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket=_BUCKET)
+
+    pub = IDPPublisher(verbose=False)
+    pub.bucket = _BUCKET
+    pub.prefix = _PREFIX
+    pub.version = "0.5.0"
+    pub.prefix_and_version = f"{_PREFIX}/0.5.0"
+    pub.main_template = "idp-main.yaml"
+    pub.public = True
+    pub.s3_client = s3
+
+    base = f"{_PREFIX}/extensions/{_FEATURE_ID}"
+    # Versioned main-stack artifact, main templates, and the version-free
+    # extension artifacts — all uploaded PRIVATE (no ACL).
+    versioned_key = f"{_PREFIX}/0.5.0/layers/idp_common.zip"
+    main_template_key = f"{_PREFIX}/idp-main.yaml"
+    main_versioned_template_key = f"{_PREFIX}/idp-main_0.5.0.yaml"
+    ext_template_key = f"{base}/template.yaml"
+    ext_bundle_key = f"{base}/{_VERSION}/ui-bundle.js"
+    for key in (
+        versioned_key,
+        main_template_key,
+        main_versioned_template_key,
+        ext_template_key,
+        ext_bundle_key,
+    ):
+        s3.put_object(Bucket=_BUCKET, Key=key, Body=b"x")
+    assert not _acl_is_public(s3, _BUCKET, ext_template_key)
+
+    pub.set_public_acls()
+
+    # Both the versioned tree AND the version-free extension base are public.
+    assert _acl_is_public(s3, _BUCKET, versioned_key)
+    assert _acl_is_public(s3, _BUCKET, ext_template_key)
+    assert _acl_is_public(s3, _BUCKET, ext_bundle_key)
+    assert _acl_is_public(s3, _BUCKET, main_template_key)
