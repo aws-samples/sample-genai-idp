@@ -88,7 +88,9 @@ def test_both_tokens_baked_into_template(
     assert f"demo feat v{_VERSION}" in tmpl
     # FeatureBucket's Default is baked to the publish bucket so a console
     # "Update stack" that drops the param falls back to it, not an empty string.
-    assert f"Default: {feature_bucket}" in tmpl or f"Default: '{feature_bucket}'" in tmpl
+    assert (
+        f"Default: {feature_bucket}" in tmpl or f"Default: '{feature_bucket}'" in tmpl
+    )
     # Artifact-prefix token is replaced with the version-free base. (sam
     # package re-emits YAML, which may drop the surrounding quotes, so match
     # the value regardless of quoting.)
