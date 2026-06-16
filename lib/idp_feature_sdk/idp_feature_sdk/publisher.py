@@ -214,6 +214,19 @@ class FeaturePublisher:
             bundle_info=bundle_info,
             make_public=make_public,
         )
+
+        # 2b. When publishing public, set public-read on EVERY object under the
+        #     extension base. The per-upload ACL (ExtraArgs in _upload) only
+        #     covers the publisher's OWN uploads (template/ui-bundle/manifest);
+        #     the Lambda + LAYER code zips under <version>/sam-objects/ are
+        #     uploaded by `sam package`, which takes no ACL flag — so without
+        #     this pass they stay private and a cross-account deploy fails with
+        #     S3 403 when Lambda fetches the layer/code zip. Mirrors the bundled
+        #     publisher (idp_sdk/_core/publish.py:set_public_acls).
+        if make_public:
+            self._set_public_acls(
+                s3=s3, bucket=feature_bucket, prefix=extension_base
+            )
         self.console.log(
             f"[green]✓[/green] Updated s3://{feature_bucket}/{latest_key} "
             f"→ {manifest.version}"
@@ -262,6 +275,29 @@ class FeaturePublisher:
         if self._s3 is None:
             self._s3 = boto3.client("s3", region_name=region)
         return self._s3
+
+    def _set_public_acls(self, *, s3: Any, bucket: str, prefix: str) -> None:
+        """Set `public-read` on every object under ``prefix`` (the extension
+        base, including the ``sam-objects/`` zips uploaded by ``sam package``).
+
+        Required for cross-account public distribution: the deploying account's
+        Lambda/CloudFormation fetches the layer + code zips over plain HTTPS, so
+        they must be world-readable. The per-upload ACL only covers the
+        publisher's own uploads. Mirrors ``set_public_acls`` in the bundled
+        publisher (idp_sdk/_core/publish.py).
+        """
+        paginator = s3.get_paginator("list_objects_v2")
+        count = 0
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                s3.put_object_acl(
+                    Bucket=bucket, Key=obj["Key"], ACL="public-read"
+                )
+                count += 1
+        self.console.log(
+            f"[green]✓[/green] Set public-read on {count} object(s) under "
+            f"s3://{bucket}/{prefix}/"
+        )
 
     def _sam_build_and_package(
         self,

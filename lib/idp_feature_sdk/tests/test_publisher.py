@@ -70,6 +70,41 @@ def test_explicit_prefix_joins_cleanly(
     assert not any("//" in k for k in keys)
 
 
+def _acl_is_public(s3, bucket: str, key: str) -> bool:
+    grants = s3.get_object_acl(Bucket=bucket, Key=key)["Grants"]
+    return any(
+        g.get("Grantee", {}).get("URI", "").endswith("AllUsers")
+        and g.get("Permission") == "READ"
+        for g in grants
+    )
+
+
+def test_set_public_acls_covers_sam_objects(
+    demo_feature_project: Path, feature_bucket: str
+) -> None:
+    """The post-upload ACL pass must make EVERY object under the extension
+    base public — including the `sam-objects/` code/layer zips that
+    `sam package` uploads privately (per-upload ACL never touches them).
+    Without this a cross-account public deploy fails with S3 403 when Lambda
+    fetches the layer zip.
+    """
+    s3 = boto3.client("s3", region_name="us-east-1")
+    base = f"extensions/{_FEATURE_ID}"
+    # Simulate sam package's PRIVATE uploads (no ACL) under the version prefix.
+    sam_key = f"{base}/{_VERSION}/sam-objects/deadbeefcafe"
+    s3.put_object(Bucket=feature_bucket, Key=sam_key, Body=b"layer-zip")
+    other_key = f"{base}/template.yaml"
+    s3.put_object(Bucket=feature_bucket, Key=other_key, Body=b"tmpl")
+    assert not _acl_is_public(s3, feature_bucket, sam_key)
+
+    FeaturePublisher(demo_feature_project)._set_public_acls(
+        s3=s3, bucket=feature_bucket, prefix=base
+    )
+
+    assert _acl_is_public(s3, feature_bucket, sam_key)
+    assert _acl_is_public(s3, feature_bucket, other_key)
+
+
 def test_both_tokens_baked_into_template(
     demo_feature_project: Path, feature_bucket: str
 ) -> None:
