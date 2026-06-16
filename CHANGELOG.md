@@ -5,6 +5,8 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.5.15]
+
 ### Added
 
 - **Feature Platform — installable features ("marketplace of extensions")** — The main stack can now host *installable features*: independent CloudFormation stacks that an admin launches into the same account, which upload their UI bundle into the host's `WebUIBucket` and register themselves in a new `InstalledFeatures` DynamoDB table. Registered features appear as nav items in an "Extensions" section of the existing web UI, each rendering its own UMD-loaded React bundle via a shared host-globals contract (`window.IdpFeatures.register`). Backed by a nested `FeaturePlatformStack` (under `feature-platform/main-stack-extensions/`) exposing AppSync operations for catalog listing, entitlement, install/uninstall, and registration. Two feature kinds are distinguished by a `source` field: **OSS features** (bundled, open-source — installed via a plain CloudFormation quick-create URL) and **Marketplace features** (closed-source, *future* — handed out as a presigned URL only after `GetEntitlements` confirms an AWS Marketplace subscription; none ship today). Discovery is **manifest-driven**: `idp-cli publish` writes a single `catalog.json` into the stack's own ConfigurationBucket, read at runtime with one `GetObject` (no `ListObjectsV2`; the deployed stack does not depend on the artifacts bucket for the catalog). **On by default** (`EnableFeaturePlatform=true`) in **auto-subscribe** mode (every catalog feature treated as subscribed, UI goes straight to Install); set `FeaturePlatformSimulatorEndpoint` to attach a marketplace-simulator or real Marketplace endpoint, or `EnableFeaturePlatform=false` to remove the platform entirely. Features can also ship a **config preset** — applied at install as a new, non-active config version (`<featureId>-v<version>`) for an admin to activate, so installation never changes the active configuration — via IAM-auth AppSync mutations `applyFeatureConfigPreset` / `removeFeatureConfigPreset`. The main stack re-exports `OutputBucketName`, `WorkingBucketName`, and `DiscoveryBucketName` for features that read processing results or drive the host's Rules Discovery flow. See the new [Feature Platform](docs/feature-platform.md) and [Developer Guide](docs/feature-platform-developer-guide.md).
@@ -33,6 +35,12 @@ SPDX-License-Identifier: MIT-0
 ### Changed
 
 - ⚠️ **Behavioral change for air-gapped ALB deployments: browser S3 presigned uploads now default to global S3 instead of the S3 VPC Interface Endpoint.** Previously, selecting `WebUIHosting=ALB` automatically forced all presigner Lambdas to generate presigned URLs targeting the S3 VPCE hostname (`*.vpce-xxx.s3.<region>.vpce.amazonaws.com`), which required the browser's corporate network to resolve and route VPCE DNS — a configuration many customers can't or don't want to set up (uploads failed with `NS_Net_Timeout`). Presigned-URL routing is now decoupled from ALB hosting via a new `S3PresignedUrlViaVpcEndpoint` parameter (default `"false"`): presigned URLs use global `s3.amazonaws.com`, so browser uploads transit NAT/internet with no special DNS needed. **Migration:** existing `WebUIHosting=ALB` stacks that rely on VPCE presigned uploads (fully air-gapped browser networks with no NAT path) must set `S3PresignedUrlViaVpcEndpoint=true` on their next stack update, otherwise browser uploads switch to global S3. Stacks setting `S3VpcEndpointIdOverride` (BYO endpoint) are unaffected — they continue to use the VPCE. A CloudFormation `Rules` assertion rejects `S3PresignedUrlViaVpcEndpoint=true` unless an S3 VPCE is available (`WebUIHosting=ALB` or `S3VpcEndpointIdOverride` set).
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.15.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.15.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.15.yaml`
+
 
 ## [0.5.14]
 
