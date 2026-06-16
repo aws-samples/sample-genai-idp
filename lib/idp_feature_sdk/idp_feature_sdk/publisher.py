@@ -224,9 +224,7 @@ class FeaturePublisher:
         #     S3 403 when Lambda fetches the layer/code zip. Mirrors the bundled
         #     publisher (idp_sdk/_core/publish.py:set_public_acls).
         if make_public:
-            self._set_public_acls(
-                s3=s3, bucket=feature_bucket, prefix=extension_base
-            )
+            self._set_public_acls(s3=s3, bucket=feature_bucket, prefix=extension_base)
         self.console.log(
             f"[green]✓[/green] Updated s3://{feature_bucket}/{latest_key} "
             f"→ {manifest.version}"
@@ -290,9 +288,7 @@ class FeaturePublisher:
         count = 0
         for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
             for obj in page.get("Contents", []):
-                s3.put_object_acl(
-                    Bucket=bucket, Key=obj["Key"], ACL="public-read"
-                )
+                s3.put_object_acl(Bucket=bucket, Key=obj["Key"], ACL="public-read")
                 count += 1
         self.console.log(
             f"[green]✓[/green] Set public-read on {count} object(s) under "

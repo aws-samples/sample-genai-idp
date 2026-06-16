@@ -190,6 +190,19 @@ class HeadlessTemplateTransformer:
             "DOCUMENTKB",
         }
 
+        # Feature Platform nested stack — gated on EnableFeaturePlatform=true.
+        # Its parameters wire in GraphQLApi (ApiId/Arn/GraphQLUrl), UserPool,
+        # UserPoolClient, WebUIBucket, and DiscoveryBucket — all removed in
+        # headless mode — and it DependsOn the (removed) APPSYNCSTACK. Left in
+        # place, its dangling `!GetAtt GraphQLApi.*` refs cause
+        # "Template error: instance of Fn::GetAtt references undefined resource
+        # GraphQLApi" at deploy time. EnableFeaturePlatform is forced to
+        # 'false' in _remove_parameters so the IsFeaturePlatformDisabled-gated
+        # TrackingTableName export stays active.
+        self.feature_platform_resources: Set[str] = {
+            "FeaturePlatformStack",
+        }
+
         self.discovery_resources: Set[str] = {
             "DiscoveryBucket",
             "DiscoveryBucketPolicy",
@@ -277,6 +290,8 @@ class HeadlessTemplateTransformer:
             "MCPConnectorClientSecret",
             "S3DiscoveryBucketName",
             "S3DiscoveryBucketConsoleURL",
+            # References !GetAtt GraphQLApi.GraphQLUrl (AppSync removed headless)
+            "AppSyncEndpointForDNS",
         }
 
         # ---- Conditions to remove ----
@@ -331,6 +346,7 @@ class HeadlessTemplateTransformer:
             | self.hitl_resources
             | self.kb_resources
             | self.discovery_resources
+            | self.feature_platform_resources
         )
 
     # ---- Public API ----
@@ -519,6 +535,15 @@ class HeadlessTemplateTransformer:
         if "EnableMCP" in parameters:
             parameters["EnableMCP"]["Default"] = "false"
             logger.info("Modified EnableMCP parameter default to 'false'")
+
+        # Force Feature Platform off — its nested stack (removed above) wires
+        # in AppSync/Cognito/WebUI/Discovery resources that don't exist in
+        # headless mode. Setting the default to 'false' keeps
+        # IsFeaturePlatformDisabled true so the main stack's
+        # TrackingTableName export (gated on that condition) stays active.
+        if "EnableFeaturePlatform" in parameters:
+            parameters["EnableFeaturePlatform"]["Default"] = "false"
+            logger.info("Modified EnableFeaturePlatform parameter default to 'false'")
 
         logger.info(
             f"Removed {len(removed)} parameters ({original_count} → {len(parameters)})"
