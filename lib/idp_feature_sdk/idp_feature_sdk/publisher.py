@@ -356,14 +356,19 @@ class FeaturePublisher:
                 f"[green]✓[/green] Uploaded s3://{bucket}/{key} ({size:,} bytes)"
             )
 
-        # Bake BOTH publish-time tokens into the (version-free) template before
+        # Bake the publish-time tokens into the (version-free) template before
         # upload, so the published template is self-contained:
         #   <FEATURE_VERSION_TOKEN>          -> manifest.version
         #   <FEATURE_ARTIFACT_PREFIX_TOKEN>  -> extension_base
+        #   <FEATURE_BUCKET_TOKEN>           -> bucket
         # Baking (rather than passing CFN parameters) is essential because the
         # CloudFormation console's "Update stack" wizard drops/blanks parameters
         # on a template change — which previously left an empty prefix and a
-        # `s3://bucket//<version>/...` bad key. The template lives at the
+        # `s3://bucket//<version>/...` bad key. The bucket is still a real CFN
+        # parameter (the host's getFeatureLaunchUrl / an installer who re-staged
+        # artifacts overrides it at deploy), but baking it as the parameter's
+        # DEFAULT means a console Update that drops the param falls back to the
+        # publish bucket instead of an empty string. The template lives at the
         # VERSION-FREE base (`<extension_base>/template.yaml`); newest publish
         # overwrites it. This mirrors the bundled publisher
         # (idp_sdk/_core/publish.py:_upload_sample_feature_artifacts) exactly.
@@ -389,6 +394,7 @@ class FeaturePublisher:
             baked_text = (
                 template_text.replace("<FEATURE_VERSION_TOKEN>", manifest.version)
                 .replace("<FEATURE_ARTIFACT_PREFIX_TOKEN>", extension_base)
+                .replace("<FEATURE_BUCKET_TOKEN>", bucket)
                 .replace(
                     "<FEATURE_PRODUCT_CODE_TOKEN>",
                     manifest.marketplace.productCode or "",

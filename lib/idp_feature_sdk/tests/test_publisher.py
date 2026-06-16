@@ -4,7 +4,7 @@ Asserts the VERSION-FREE layout (identical to the bundled publisher in
 idp_sdk/_core/publish.py). The default prefix is EMPTY, so the layout is the
 bare `extensions/<id>/...` the catalog's `templateKey` records:
 
-    [<prefix>/]extensions/<id>/template.yaml        # version-free, both tokens baked
+    [<prefix>/]extensions/<id>/template.yaml        # version-free, publish tokens baked
     [<prefix>/]extensions/<id>/latest.json          # version-free pointer
     [<prefix>/]extensions/<id>/<version>/ui-bundle.js
     [<prefix>/]extensions/<id>/<version>/manifest.json
@@ -84,7 +84,11 @@ def test_both_tokens_baked_into_template(
     )
     assert "<FEATURE_VERSION_TOKEN>" not in tmpl
     assert "<FEATURE_ARTIFACT_PREFIX_TOKEN>" not in tmpl
+    assert "<FEATURE_BUCKET_TOKEN>" not in tmpl
     assert f"demo feat v{_VERSION}" in tmpl
+    # FeatureBucket's Default is baked to the publish bucket so a console
+    # "Update stack" that drops the param falls back to it, not an empty string.
+    assert f"Default: {feature_bucket}" in tmpl or f"Default: '{feature_bucket}'" in tmpl
     # Artifact-prefix token is replaced with the version-free base. (sam
     # package re-emits YAML, which may drop the surrounding quotes, so match
     # the value regardless of quoting.)

@@ -36,10 +36,14 @@ Parameters:
 
   FeatureBucket:
     Type: String
+    Default: <FEATURE_BUCKET_TOKEN>
     Description: S3 bucket holding this version's artifacts (the host's artifacts
       bucket for OSS features, or a seller bucket for marketplace features). The
       ui-deployer custom resource copies the UI bundle from here into the host's
-      WebUIBucket. Pre-filled by the host's getFeatureLaunchUrl.
+      WebUIBucket. Pre-filled by the host's getFeatureLaunchUrl. The default is
+      baked to the publish bucket at publish time (<FEATURE_BUCKET_TOKEN>), so a
+      console "Update stack" that drops this param falls back to it rather than
+      an empty string; an installer who re-staged artifacts overrides it.
 
   # NOTE: the version-free artifact base (<prefix>/extensions/<id>) is NOT a CFN
   # parameter. Like FEATURE_VERSION, it is baked into this template at publish

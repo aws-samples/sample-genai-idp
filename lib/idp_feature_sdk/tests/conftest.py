@@ -68,6 +68,7 @@ def demo_feature_project(tmp_path: Path) -> Path:
                 Type: String
               FeatureBucket:
                 Type: String
+                Default: <FEATURE_BUCKET_TOKEN>
             Resources:
               Dummy:
                 Type: AWS::SNS::Topic
