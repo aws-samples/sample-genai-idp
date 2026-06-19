@@ -31,8 +31,14 @@ import time
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
 
-# The 14 Interface endpoint services IDP requires
+# The 17 Interface endpoint services for IDP private deployment
 # Maps CFN parameter name → AWS service suffix
+#
+# NOTE: Cognito endpoints (cognito-idp, cognito-identity) are intentionally
+# NOT included. The IDP stack creates a Cognito domain (Hosted UI / Managed Login)
+# which is incompatible with PrivateLink — AWS blocks all cognito-idp VPC endpoint
+# calls when a domain is configured. Cognito auth traffic must flow through the
+# NAT gateway to the public Cognito service instead.
 REQUIRED_ENDPOINTS = {
     "CreateAppSyncApiEndpoint":      "appsync-api",
     "CreateAppSyncControlEndpoint":  "appsync",
@@ -52,6 +58,9 @@ REQUIRED_ENDPOINTS = {
     "CreateTextractEndpoint":        "textract",
     # BDA pattern: bda/bda_service.py and bda/blueprint_optimizer.py call STS AssumeRole
     "CreateStsEndpoint":             "sts",
+    # CloudWatch Metrics & Dashboards — workflow_tracker publishes custom metrics,
+    # dashboard_merger manages CloudWatch dashboards
+    "CreateMonitoringEndpoint":      "monitoring",
 }
 
 
@@ -70,6 +79,12 @@ def parse_args():
     parser.add_argument(
         "--subnet-ids",
         help="Comma-separated subnet IDs (auto-read from IDP stack if omitted)",
+    )
+    parser.add_argument(
+        "--route-table-ids",
+        help="Comma-separated route table IDs for S3/DynamoDB Gateway endpoints (free). "
+             "When provided, creates S3 and DynamoDB Gateway endpoints in addition to "
+             "Interface endpoints. Get the route table ID from your VPC stack outputs.",
     )
     parser.add_argument("--region", default=None, help="AWS region (default: from AWS config)")
     parser.add_argument("--profile", default=None, help="AWS CLI profile name")
@@ -181,6 +196,19 @@ def main():
         sys.exit(1)
     print(f"   Lambda SG: {lambda_sg}")
 
+    # ── Auto-lookup VPC CIDR ──────────────────────────────────────────────
+    # The endpoint security group must also allow inbound HTTPS from the VPC
+    # CIDR so that browsers running inside the VPC (WorkSpaces, VPN clients,
+    # bastions) can reach the AppSync Interface Endpoint directly.
+    print(f"🔍 Looking up VPC CIDR for {args.vpc_id}...")
+    try:
+        vpc_resp = ec2.describe_vpcs(VpcIds=[args.vpc_id])
+        vpc_cidr = vpc_resp["Vpcs"][0]["CidrBlock"]
+    except ClientError as e:
+        print(f"❌ Could not look up VPC CIDR for '{args.vpc_id}': {e}")
+        sys.exit(1)
+    print(f"   VPC CIDR:  {vpc_cidr}")
+
     # ── Read subnet IDs ───────────────────────────────────────────────────
     subnet_ids = args.subnet_ids
     if not subnet_ids:
@@ -208,29 +236,24 @@ def main():
             print(f"   ➕ {full:<50} missing — will create")
             create_list.append(service)
 
+    # ── Warn if Cognito endpoints exist (they break login) ───────────────
+    cognito_found = []
+    for service in ("cognito-idp", "cognito-identity"):
+        if endpoint_exists(ec2, args.vpc_id, region, service):
+            cognito_found.append(service)
+            full = f"com.amazonaws.{region}.{service}"
+            print(f"   ⚠️  {full:<50} detected — will break login!")
+    if cognito_found:
+        print("\n⚠️  WARNING: Cognito VPC endpoints detected in this VPC!")
+        print("   AWS blocks PrivateLink access when the User Pool has a domain configured.")
+        print("   Login will fail with:")
+        print('     "PrivateLink access is disabled for the user pool that has ManagedLogin configured"')
+        print("   Fix: delete the cognito-idp and cognito-identity VPC endpoints from this VPC.\n")
+
     print(f"\n📊 Summary: {len(create_list)} to create, {len(skip_list)} already exist")
 
     if not create_list:
         print("\n✅ All required VPC endpoints already exist. Nothing to deploy.")
-        sys.exit(0)
-
-    # ── Build CFN parameters ──────────────────────────────────────────────
-    parameters = [
-        {"ParameterKey": "IDPStackName",           "ParameterValue": args.stack_name},
-        {"ParameterKey": "VpcId",                  "ParameterValue": args.vpc_id},
-        {"ParameterKey": "SubnetIds",              "ParameterValue": subnet_ids},
-        {"ParameterKey": "LambdaSecurityGroupId",  "ParameterValue": lambda_sg},
-    ]
-    for param, val in skip_params.items():
-        parameters.append({"ParameterKey": param, "ParameterValue": val})
-
-    # ── Dry run ───────────────────────────────────────────────────────────
-    if args.dry_run:
-        print("\n🔍 DRY RUN — would deploy with these parameters:")
-        for p in parameters:
-            print(f"   {p['ParameterKey']}={p['ParameterValue']}")
-        print(f"\nStack: {endpoints_stack_name}")
-        print("Run without --dry-run to deploy.")
         sys.exit(0)
 
     # ── Deploy ────────────────────────────────────────────────────────────
@@ -246,7 +269,7 @@ def main():
         print("   Run this script from the repository root directory.")
         sys.exit(1)
 
-    # Check if stack already exists
+    # Check if stack already exists (must happen before building parameters below)
     stack_exists = False
     try:
         resp = cf.describe_stacks(StackName=endpoints_stack_name)
@@ -265,6 +288,36 @@ def main():
             stack_exists = False
         else:
             raise
+
+    # ── Build CFN parameters ──────────────────────────────────────────────
+    parameters = [
+        {"ParameterKey": "IDPStackName",           "ParameterValue": args.stack_name},
+        {"ParameterKey": "VpcId",                  "ParameterValue": args.vpc_id},
+        {"ParameterKey": "SubnetIds",              "ParameterValue": subnet_ids},
+        {"ParameterKey": "LambdaSecurityGroupId",  "ParameterValue": lambda_sg},
+        {"ParameterKey": "VpcCidr",                "ParameterValue": vpc_cidr},
+    ]
+    if args.route_table_ids:
+        parameters.append({"ParameterKey": "RouteTableIds", "ParameterValue": args.route_table_ids})
+        print(f"   Route Tables: {args.route_table_ids} (will create S3 + DynamoDB Gateway endpoints)")
+    # IMPORTANT: For UPDATE operations, never pass CreateXxx=false for endpoints
+    # that are already managed by the stack — CloudFormation would DELETE them.
+    # Instead, use UsePreviousValue=true so existing resources are retained.
+    # For CREATE operations (new stack), pass "false" explicitly so they are skipped.
+    for param in skip_params:
+        if stack_exists:
+            parameters.append({"ParameterKey": param, "UsePreviousValue": True})
+        else:
+            parameters.append({"ParameterKey": param, "ParameterValue": "false"})
+
+    # ── Dry run ───────────────────────────────────────────────────────────
+    if args.dry_run:
+        print("\n🔍 DRY RUN — would deploy with these parameters:")
+        for p in parameters:
+            print(f"   {p['ParameterKey']}={p.get('ParameterValue', '<UsePreviousValue>')}")
+        print(f"\nStack: {endpoints_stack_name}")
+        print("Run without --dry-run to deploy.")
+        sys.exit(0)
 
     try:
         if stack_exists:

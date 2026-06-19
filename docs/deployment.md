@@ -115,9 +115,10 @@ You need to have the following packages installed on your computer:
 2. aws (AWS CLI)
 3. [sam (AWS SAM)](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html)
 4. python 3.12 or later
-5. A local Docker daemon
-6. Python packages: `pip install boto3 rich typer PyYAML botocore setuptools ruff build cfn-lint`
-7. **Node.js 22.12+** and **npm** (required for UI validation in publish script)
+5. Python packages: `pip install boto3 rich typer PyYAML botocore setuptools ruff build cfn-lint`
+6. **Node.js 22.12+** and **npm** (required for UI validation in publish script)
+
+> **Docker is NOT required on your workstation.** Lambda functions are packaged as source code by `idp-cli publish` and uploaded to S3; AWS CodeBuild builds the container images during stack deployment.
 
 For guidance on setting up a development environment, see:
 
@@ -217,7 +218,7 @@ When completed, the command displays:
 - The CloudFormation template's S3 URL
 - A 1-click URL for launching the stack creation in the CloudFormation console
 
-> **Note**: Ensure Docker is running — Lambda functions are deployed as container images built during the publish process.
+> **Note**: Docker is **not required** on your workstation for `idp-cli publish`. The publish script packages source code and uploads it to S3; AWS CodeBuild builds the Lambda container images in the cloud during the subsequent CloudFormation stack deployment.
 
 **Troubleshooting Build Issues:**
 If the build fails, use the `--verbose` flag to see detailed error messages:
@@ -284,8 +285,8 @@ The solution **automatically** deploys all Lambda functions as container images 
 
 ### Prerequisites
 
-- **Docker** must be running on your build machine (for local builds via `idp-cli publish` or `idp-cli deploy --from-code`)
-- Your AWS credentials must have **ECR permissions**
+- **Docker is NOT required on your workstation** — `idp-cli publish` packages source code and uploads it to S3; AWS CodeBuild builds all Lambda container images in the cloud during stack deployment.
+- Your AWS credentials must have **ECR permissions** (for CodeBuild to push images during deployment)
 
 ### How It Works
 

@@ -21,7 +21,7 @@ exclude = [
 
 [project]
 name = "idp_common"
-version = "0.5.14"
+version = "0.5.15"
 description = "Common utilities for GenAI IDP Accelerator patterns"
 authors = [{ name = "AWS", email = "noreply@amazon.com" }]
 requires-python = ">=3.12,<3.14"
@@ -101,7 +101,7 @@ rule_validation = [
 
 # Reporting module dependencies
 reporting = [
-  "pyarrow==20.0.0", # For Parquet conversion
+  "pyarrow==23.0.1", # For Parquet conversion
 ]
 
 # Appsync module dependencies
@@ -155,11 +155,11 @@ test = [
   "pytest-cov>=4.1.0",
   "pytest-xdist>=3.3.1",            # For parallel test execution
   "requests (>=2.32.3,<3.0.0)",
-  "pyarrow==20.0.0",
+  "pyarrow==23.0.1",
   "PyYAML==6.0.2",
   "openpyxl==3.1.5",
   "python-docx==1.2.0",
-  "moto[s3]==5.1.8",                # For mocking AWS services in tests
+  "moto[s3,cloudformation]==5.1.8", # For mocking AWS services in tests (cloudformation extra needed by feature-platform launch-url tests)
   "Pillow==12.1.1",                 # Required for image processing in assessment tests
   "rich>=13.0.0",                   # Required for publish tests
   "idp_common[agentic-extraction]", # Required for agentic_idp tests
@@ -190,7 +190,7 @@ all = [
   "numpy==1.26.4",
   "pandas==2.2.3",
   "requests==2.33.0",
-  "pyarrow==20.0.0",
+  "pyarrow==23.0.1",
   "openpyxl==3.1.5",
   "python-docx==1.2.0",
   "strands-agents==1.14.0; python_version>='3.10'",

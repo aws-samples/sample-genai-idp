@@ -1,0 +1,979 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Feature Platform extensions — nested stack deployed from the main IDP stack
+  when EnableFeaturePlatform=true. Adds the InstalledFeatures table, 4 AppSync
+  resolvers + Lambdas, and the prefix-scoped bucket policy that lets feature
+  stacks write their UI bundles under features/<id>/* in the main WebUIBucket.
+
+  Nothing here is destructive: the template is purely additive. It references
+  the main stack's existing GraphQLApi, WebUIBucket, UserPool, UsersTable via
+  parameters — the main stack passes !Ref / !GetAtt values through.
+
+Parameters:
+
+  MainStackName:
+    Type: String
+    Description: Name of the parent IDP stack. Stamped into CloudFormation
+      Console quick-create URLs for feature stacks so they can look up the
+      main stack's Exports.
+
+  GraphQLApiId:
+    Type: String
+    Description: AppSync API id of the main stack's GraphQL API.
+
+  GraphQLApiArn:
+    Type: String
+    Description: AppSync API ARN of the main stack's GraphQL API.
+
+  AppSyncApiUrl:
+    Type: String
+    Description: AppSync API URL (https://xxx.appsync-api.<region>.amazonaws.com/graphql).
+
+  UserPoolId:
+    Type: String
+    Description: Cognito User Pool id of the main stack.
+
+  UserPoolClientId:
+    Type: String
+    Description: Cognito User Pool Client id of the main stack. Feature stacks
+      use this as the JWT audience when verifying tokens issued by the User
+      Pool (HTTP API JwtConfiguration.audience).
+
+  TrackingTableName:
+    Type: String
+    Description: DynamoDB TrackingTable name from the main stack. Feature
+      stacks that need to read document state (e.g. docs-by-status) grant
+      themselves `dynamodb:Scan`/`Query` on this table name. Re-exported as
+      `<MainStackName>-TrackingTableName` for Fn::ImportValue usage by
+      feature stacks. The main stack's `TrackingTableName` export is
+      conditionally suppressed when EnableFeaturePlatform=true so this
+      nested stack is the sole producer (avoids "Export already exported
+      by stack" errors during stack updates).
+
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Default: ''
+    Description: ARN of the main stack's customer-managed KMS key used to
+      encrypt the TrackingTable (and other main-stack DynamoDB tables).
+      Re-exported as `<MainStackName>-CustomerManagedEncryptionKeyArn` so
+      feature stacks that query encrypted main-stack tables can grant
+      themselves `kms:Decrypt` on the correct key. Leave blank if the main
+      stack uses AWS-managed encryption only — feature stacks will just
+      skip the grant.
+
+  WebUIBucketName:
+
+    Type: String
+    Description: S3 bucket serving the web UI. Feature stacks will write their
+      UMD UI bundles under features/<featureId>/* inside this bucket.
+
+  OutputBucketName:
+    Type: String
+    Default: ''
+    Description: Name of the main stack's Output bucket (processed-document
+      results). Re-exported as `<MainStackName>-OutputBucketName` so feature
+      stacks that read processing results (e.g. sample-health-insurance-review reads
+      `<doc_id>/rule_validation/consolidated/consolidated_summary.json`)
+      can grant themselves scoped s3:GetObject. Leave blank to skip the
+      export.
+
+  WorkingBucketName:
+    Type: String
+    Default: ''
+    Description: Name of the main stack's Working bucket (intermediate
+      workflow state). Pipeline-hook payloads carry the document as a
+      compressed reference into this bucket
+      (Document.serialize_document), so feature hook Lambdas need
+      s3:GetObject here to load the document. Re-exported as
+      `<MainStackName>-WorkingBucketName`. Leave blank to skip the export.
+
+  DiscoveryBucketName:
+    Type: String
+    Default: ''
+    Description: Name of the main stack's Discovery bucket (where
+      uploadDiscoveryDocument presigns uploads). Re-exported as
+      `<MainStackName>-DiscoveryBucketName` so feature UIs that drive the
+      host's Rules Discovery flow (e.g. sample-health-insurance-review) can learn the bucket
+      to pass to uploadDiscoveryDocument. Leave blank to skip the export.
+
+  WebUIBucketArn:
+    Type: String
+    Description: ARN of the WebUIBucket.
+
+  ArtifactRegion:
+    Type: String
+    Default: 'us-east-1'
+    Description: Region of the host's artifacts bucket, used to build the bare
+      S3 HTTPS template URL for OSS feature installs (getFeatureLaunchUrl).
+      Typically the main stack's own region.
+
+  SimulatorEntitlementEndpoint:
+    Type: String
+    Default: ''
+    Description: Override for the marketplace-entitlement endpoint (e.g.
+      https://mp-sim.example.com). Leave blank to use the real AWS Marketplace
+      endpoint. Also used by subscribeFeature / unsubscribeFeature resolvers
+      (they POST to `<endpoint>/admin/entitlements[/expire]`).
+
+  SubscriptionMode:
+    Type: String
+    Default: 'marketplace'
+    AllowedValues: ['auto', 'simulator', 'marketplace']
+    Description: Sets the SIMULATOR_SOURCE_TAG env var on the entitlement
+      Lambdas. 'auto' short-circuits checkFeatureEntitlement to ACTIVE for
+      every feature (no Marketplace call) — used when the main stack
+      neither deploys the simulator nor is configured with a real
+      Marketplace endpoint. 'simulator' targets the auto-deployed
+      simulator EC2. 'marketplace' targets a real or admin-supplied
+      Marketplace endpoint.
+
+  DefaultCustomerIdentifier:
+    Type: String
+    Default: ''
+    Description: Fallback CustomerIdentifier used when no
+      X-Amzn-Marketplace-Customer-Identifier header is present. Useful in
+      dev/simulator setups where the main stack wasn't launched through
+      Marketplace.
+
+  FeatureOfferIdMap:
+    Type: String
+    Default: '{}'
+    Description: JSON map from featureId to Marketplace offerId used by the
+      subscribeFeature redirect. In simulator mode the simulator auto-creates
+      a default public offer when this is empty. In production (real AWS
+      Marketplace) a pre-existing offerId must be provided per feature.
+
+  DefaultBuyerAccountId:
+    Type: String
+    Default: '111122223333'
+    Description: 12-digit simulator buyer account id used as the default
+      subscriber in the Marketplace Simulation flow. Ignored in real AWS
+      Marketplace mode (the buyer is resolved from AWS account context).
+
+  AdminGroupName:
+    Type: String
+    Default: 'Admin'
+    Description: Cognito group that getFeatureLaunchUrl requires.
+
+  ConfigurationTableName:
+    Type: String
+    Default: ''
+    Description: Name of the host's ConfigurationTable. The
+      registerFeatureHooks resolver writes hook registrations to a
+      System#PipelineHooks row in this table; the SFN's LoadPipelineHooks
+      step reads the same row. Leave blank to disable the
+      registerFeatureHooks resolvers (vertical-product packs only).
+
+  ReportingBucketName:
+    Type: String
+    Default: ''
+    Description: Name of the host's Reporting bucket (analytics/Athena results
+      and reporting data). Re-exported as `<MainStackName>-ReportingBucketName`
+      (and `-ReportingBucketArn`) so feature stacks that read reporting data or
+      write Athena query results (e.g. idp-monitor) can grant themselves scoped
+      s3 access. Leave blank to skip the export.
+
+  ConfigurationBucketName:
+    Type: String
+    Default: ''
+    Description: Name of the host's ConfigurationBucket. The catalog manifest
+      (catalog.json) is copied here at deploy time; listCatalogFeatures and
+      getFeatureLaunchUrl read it at runtime with a single GetObject (no
+      ListObjectsV2). Leave blank to disable catalog-driven discovery.
+
+  CatalogKey:
+    Type: String
+    Default: 'config_library/catalog.json'
+    Description: Key of the catalog manifest within ConfigurationBucket.
+
+  SellerBucketObjectArns:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: (Optional) Object-level S3 ARNs (each ending in /*) of private
+      AWS Marketplace seller buckets that hold closed-source feature templates,
+      e.g. the S3 object ARN of idp-seller-prod with a /* suffix.
+      getFeatureLaunchUrl presigns GetObject against these (after an entitlement
+      check) so the CFN console can fetch the template. Each seller bucket's own
+      bucket policy must also grant this stack's role s3:GetObject. Leave blank
+      for OSS-only stacks.
+
+  LogLevel:
+    Type: String
+    Default: 'INFO'
+    AllowedValues: [DEBUG, INFO, WARNING, ERROR]
+
+Conditions:
+
+  HasConfigurationTable: !Not [!Equals [!Ref ConfigurationTableName, '']]
+  HasConfigurationBucket: !Not [!Equals [!Ref ConfigurationBucketName, '']]
+  HasReportingBucket: !Not [!Equals [!Ref ReportingBucketName, '']]
+  HasOutputBucket: !Not [!Equals [!Ref OutputBucketName, '']]
+  HasWorkingBucket: !Not [!Equals [!Ref WorkingBucketName, '']]
+  HasDiscoveryBucket: !Not [!Equals [!Ref DiscoveryBucketName, '']]
+  HasCustomerManagedEncryptionKey: !Not [!Equals [!Ref CustomerManagedEncryptionKeyArn, '']]
+  HasSellerBuckets: !Not [!Equals [!Join ['', !Ref SellerBucketObjectArns], '']]
+
+Globals:
+
+  Function:
+    Runtime: python3.12
+    Timeout: 30
+    MemorySize: 256
+    Tracing: Active
+    Architectures: [arm64]
+
+Resources:
+
+  ###########################################################################
+  # DynamoDB — one row per installed feature
+  ###########################################################################
+  InstalledFeaturesTable:
+    Type: AWS::DynamoDB::Table
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: featureId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: featureId
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+
+  ###########################################################################
+  # IAM role used by ALL 4 feature-platform Lambdas
+  # (smaller blast radius than inheriting the main-stack Lambda role)
+  ###########################################################################
+  FeaturePlatformLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: !Sub "lambda.${AWS::URLSuffix}" }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: InstalledFeaturesTableAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Scan
+                Resource: !GetAtt InstalledFeaturesTable.Arn
+        # NB: the host resolvers no longer read OSS feature artifacts from a
+        # stack-owned feature bucket. list_installed_features + getFeatureLaunchUrl
+        # read the catalog (CatalogRead below) for versions/locations; OSS launch
+        # URLs are bare artifacts-bucket URLs (no GetObject by the host), and the
+        # feature stack's own role reads its artifacts at install time.
+        - !If
+          - HasConfigurationBucket
+          - PolicyName: CatalogRead
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                # GetObject on the catalog manifest in the stack's own
+                # ConfigurationBucket. Single-object read, no ListBucket.
+                - Effect: Allow
+                  Action: s3:GetObject
+                  Resource: !Sub 'arn:${AWS::Partition}:s3:::${ConfigurationBucketName}/${CatalogKey}'
+          - !Ref AWS::NoValue
+        - !If
+          - HasSellerBuckets
+          - PolicyName: SellerBucketPresign
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                # GetObject on private Marketplace seller buckets so
+                # get_feature_launch_url can presign the closed-source template
+                # for an entitled admin. The seller bucket's own bucket policy
+                # must also grant this role. GetObject-only — no ListBucket.
+                - Effect: Allow
+                  Action: s3:GetObject
+                  Resource: !Ref SellerBucketObjectArns
+          - !Ref AWS::NoValue
+        - PolicyName: MarketplaceEntitlement
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - aws-marketplace:GetEntitlements
+                Resource: '*'
+        # `getFeatureLaunchUrl` calls cloudformation:DescribeStacks to resolve
+        # an existing feature stack's ARN. The ARN is then embedded in a
+        # CloudFormation Console "update stack" URL, which avoids the
+        # AlreadyExistsException users hit when re-running quickcreate against
+        # a feature that is already installed. Scoped to feature stacks
+        # launched under this main stack's namespace
+        # (`<MainStackName>-feature-*`).
+        - PolicyName: DescribeFeatureStacks
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${MainStackName}-feature-*/*'
+        # registerFeatureHooks / unregisterFeatureHooks resolver writes
+        # the active `Config#<version>` row in the host's
+        # ConfigurationTable. Hooks are stored INLINE in each step's
+        # `postHook` list within the active version (since v0.1.x); the
+        # resolver needs Scan to find which version is active and
+        # GetItem/PutItem on the row itself.
+        # applyFeatureConfigPreset / removeFeatureConfigPreset shares this
+        # policy: it writes `Config#<featureId>-v<version>` preset rows and
+        # needs DeleteItem to remove inactive preset versions at uninstall.
+        - !If
+          - HasConfigurationTable
+          - PolicyName: WriteActiveConfigForHooks
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - dynamodb:GetItem
+                    - dynamodb:PutItem
+                    - dynamodb:UpdateItem
+                    - dynamodb:DeleteItem
+                    - dynamodb:Scan
+                  Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigurationTableName}'
+                - !If
+                  - HasCustomerManagedEncryptionKey
+                  - Effect: Allow
+                    Action:
+                      - kms:Encrypt
+                      - kms:Decrypt
+                      - kms:GenerateDataKey
+                      - kms:DescribeKey
+                    Resource: !Ref CustomerManagedEncryptionKeyArn
+                  - !Ref AWS::NoValue
+          - !Ref AWS::NoValue
+
+  ###########################################################################
+  # 4 Lambdas
+  ###########################################################################
+  ListInstalledFeaturesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./lambdas/list_installed_features/
+      Handler: index.handler
+      Role: !GetAtt FeaturePlatformLambdaRole.Arn
+      Environment:
+        Variables:
+          INSTALLED_FEATURES_TABLE: !Ref InstalledFeaturesTable
+          # Reads catalog.json (ConfigurationBucket) for each feature's
+          # latestVersion to flag "update available". No feature-bucket access.
+          CONFIGURATION_BUCKET: !Ref ConfigurationBucketName
+          CATALOG_KEY: !Ref CatalogKey
+          LOG_LEVEL: !Ref LogLevel
+
+  # Lists the feature catalog from catalog.json (ConfigurationBucket) so the nav
+  # can show entries for features that are installable/subscribe-able but not yet
+  # installed. Single GetObject of the catalog — no bucket listing.
+  ListCatalogFeaturesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./lambdas/list_catalog_features/
+      Handler: index.handler
+      Role: !GetAtt FeaturePlatformLambdaRole.Arn
+      Environment:
+        Variables:
+          CONFIGURATION_BUCKET: !Ref ConfigurationBucketName
+          CATALOG_KEY: !Ref CatalogKey
+          LOG_LEVEL: !Ref LogLevel
+
+  RegisterFeatureFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./lambdas/register_feature/
+      Handler: index.handler
+      Role: !GetAtt FeaturePlatformLambdaRole.Arn
+      Environment:
+        Variables:
+          INSTALLED_FEATURES_TABLE: !Ref InstalledFeaturesTable
+          LOG_LEVEL: !Ref LogLevel
+
+  GetFeatureLaunchUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./lambdas/get_feature_launch_url/
+      Handler: index.handler
+      Role: !GetAtt FeaturePlatformLambdaRole.Arn
+      Environment:
+        Variables:
+          INSTALLED_FEATURES_TABLE: !Ref InstalledFeaturesTable
+          CONFIGURATION_BUCKET: !Ref ConfigurationBucketName
+          CATALOG_KEY: !Ref CatalogKey
+          # Region for the bare OSS template URL (artifacts bucket = same region
+          # as this stack).
+          ARTIFACT_REGION: !Ref ArtifactRegion
+          # Marketplace features: entitlement check before presigning the
+          # private seller-bucket template. Mirrors check_feature_entitlement.
+          DEFAULT_CUSTOMER_IDENTIFIER: !Ref DefaultCustomerIdentifier
+          AWS_ENDPOINT_URL_MARKETPLACE_ENTITLEMENT_SERVICE: !Ref SimulatorEntitlementEndpoint
+          MAIN_STACK_NAME: !Ref MainStackName
+          ADMIN_GROUP: !Ref AdminGroupName
+          LOG_LEVEL: !Ref LogLevel
+
+  CheckFeatureEntitlementFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./lambdas/check_feature_entitlement/
+      Handler: index.handler
+      Role: !GetAtt FeaturePlatformLambdaRole.Arn
+      Environment:
+        Variables:
+          # productCode is read from the feature's InstalledFeatures row (baked
+          # from the manifest at install) — no per-feature host configuration.
+          INSTALLED_FEATURES_TABLE: !Ref InstalledFeaturesTable
+          DEFAULT_CUSTOMER_IDENTIFIER: !Ref DefaultCustomerIdentifier
+          # Buyer AWS account — the deterministic GetEntitlements filter shared
+          # with subscribeFeature when no explicit CustomerIdentifier is present
+          # (the simulator mints a random CustomerIdentifier per subscribe).
+          DEFAULT_BUYER_ACCOUNT_ID: !Ref DefaultBuyerAccountId
+          SIMULATOR_SOURCE_TAG: !Ref SubscriptionMode
+          AWS_ENDPOINT_URL_MARKETPLACE_ENTITLEMENT_SERVICE: !Ref SimulatorEntitlementEndpoint
+          # Catalog lookup: OSS features short-circuit to ACTIVE (install-direct,
+          # no entitlement). Mirrors GetFeatureLaunchUrlFunction.
+          CONFIGURATION_BUCKET: !Ref ConfigurationBucketName
+          CATALOG_KEY: !Ref CatalogKey
+          LOG_LEVEL: !Ref LogLevel
+
+  # Admin-only Mutation resolvers that POST to the simulator's admin API to
+  # flip an entitlement on/off. Real-Marketplace deployments (no simulator
+  # endpoint) will get a SubscribeError at runtime — in that case the UI is
+  # expected to redirect to the Marketplace Subscription Management portal
+  # rather than invoking these mutations. Kept behind the same admin group
+  # check as getFeatureLaunchUrl.
+  SubscribeFeatureFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./lambdas/subscribe_feature/
+      Handler: index.handler
+      Role: !GetAtt FeaturePlatformLambdaRole.Arn
+      Environment:
+        Variables:
+          SIMULATOR_ADMIN_ENDPOINT: !Ref SimulatorEntitlementEndpoint
+          # productCode + marketplaceListingUrl come from the feature's
+          # InstalledFeatures row (baked from the manifest at install).
+          INSTALLED_FEATURES_TABLE: !Ref InstalledFeaturesTable
+          FEATURE_OFFER_ID_MAP: !Ref FeatureOfferIdMap
+          DEFAULT_CUSTOMER_IDENTIFIER: !Ref DefaultCustomerIdentifier
+          DEFAULT_BUYER_ACCOUNT_ID: !Ref DefaultBuyerAccountId
+          ADMIN_GROUP: !Ref AdminGroupName
+          SIMULATOR_SOURCE_TAG: !Ref SubscriptionMode
+          LOG_LEVEL: !Ref LogLevel
+
+  UnsubscribeFeatureFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./lambdas/unsubscribe_feature/
+      Handler: index.handler
+      Role: !GetAtt FeaturePlatformLambdaRole.Arn
+      Environment:
+        Variables:
+          SIMULATOR_ADMIN_ENDPOINT: !Ref SimulatorEntitlementEndpoint
+          # productCode comes from the feature's InstalledFeatures row.
+          INSTALLED_FEATURES_TABLE: !Ref InstalledFeaturesTable
+          DEFAULT_CUSTOMER_IDENTIFIER: !Ref DefaultCustomerIdentifier
+          # Buyer AWS account + entitlement endpoint: when no explicit
+          # CustomerIdentifier is present, unsubscribe resolves the random
+          # simulator-minted CustomerIdentifier via GetEntitlements filtered by
+          # this account (the deterministic key subscribe records under) before
+          # POSTing the expire to the simulator admin API. Mirrors
+          # CheckFeatureEntitlementFunction.
+          DEFAULT_BUYER_ACCOUNT_ID: !Ref DefaultBuyerAccountId
+          AWS_ENDPOINT_URL_MARKETPLACE_ENTITLEMENT_SERVICE: !Ref SimulatorEntitlementEndpoint
+          ADMIN_GROUP: !Ref AdminGroupName
+          SIMULATOR_SOURCE_TAG: !Ref SubscriptionMode
+          LOG_LEVEL: !Ref LogLevel
+
+  RegisterFeatureHooksFunction:
+    Type: AWS::Serverless::Function
+    Condition: HasConfigurationTable
+    Properties:
+      CodeUri: ./lambdas/register_feature_hooks/
+      Handler: index.handler
+      Role: !GetAtt FeaturePlatformLambdaRole.Arn
+      Environment:
+        Variables:
+          CONFIGURATION_TABLE: !Ref ConfigurationTableName
+          LOG_LEVEL: !Ref LogLevel
+
+  # applyFeatureConfigPreset / removeFeatureConfigPreset resolver. Writes a
+  # feature's bundled config preset (manifest `configPreset.path`, uploaded
+  # by the publisher and downloaded by the feature stack's ui-deployer) into
+  # the ConfigurationTable as a NEW, NON-ACTIVE version named
+  # `Config#<featureId>-v<version>`. An admin then activates it from the
+  # Configuration UI — installation never silently changes the active config.
+  ApplyFeatureConfigPresetFunction:
+    Type: AWS::Serverless::Function
+    Condition: HasConfigurationTable
+    Properties:
+      CodeUri: ./lambdas/apply_feature_config_preset/
+      Handler: index.handler
+      Role: !GetAtt FeaturePlatformLambdaRole.Arn
+      Environment:
+        Variables:
+          CONFIGURATION_TABLE: !Ref ConfigurationTableName
+          LOG_LEVEL: !Ref LogLevel
+
+  ###########################################################################
+  # AppSync plumbing: 1 service role + 1 Lambda data source per Lambda +
+  # resolvers wired to Query/Mutation field names matching the schema fragment.
+  ###########################################################################
+  AppSyncServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: !Sub "appsync.${AWS::URLSuffix}" }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeFeaturePlatformLambdas
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !GetAtt ListInstalledFeaturesFunction.Arn
+                  - !GetAtt ListCatalogFeaturesFunction.Arn
+                  - !GetAtt RegisterFeatureFunction.Arn
+                  - !GetAtt GetFeatureLaunchUrlFunction.Arn
+                  - !GetAtt CheckFeatureEntitlementFunction.Arn
+                  - !GetAtt SubscribeFeatureFunction.Arn
+                  - !GetAtt UnsubscribeFeatureFunction.Arn
+              - !If
+                - HasConfigurationTable
+                - Effect: Allow
+                  Action: lambda:InvokeFunction
+                  Resource:
+                    - !GetAtt RegisterFeatureHooksFunction.Arn
+                    - !GetAtt ApplyFeatureConfigPresetFunction.Arn
+                - !Ref AWS::NoValue
+
+  ListInstalledFeaturesDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      Name: FeaturePlatformListInstalledFeatures
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt ListInstalledFeaturesFunction.Arn
+
+  ListCatalogFeaturesDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      Name: FeaturePlatformListCatalogFeatures
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt ListCatalogFeaturesFunction.Arn
+
+  RegisterFeatureDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      Name: FeaturePlatformRegisterFeature
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt RegisterFeatureFunction.Arn
+
+  GetFeatureLaunchUrlDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      Name: FeaturePlatformGetLaunchUrl
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt GetFeatureLaunchUrlFunction.Arn
+
+  CheckFeatureEntitlementDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      Name: FeaturePlatformCheckEntitlement
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt CheckFeatureEntitlementFunction.Arn
+
+  SubscribeFeatureDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      Name: FeaturePlatformSubscribeFeature
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt SubscribeFeatureFunction.Arn
+
+  UnsubscribeFeatureDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      Name: FeaturePlatformUnsubscribeFeature
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt UnsubscribeFeatureFunction.Arn
+
+  ListInstalledFeaturesResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Query
+      FieldName: listInstalledFeatures
+      DataSourceName: !GetAtt ListInstalledFeaturesDataSource.Name
+
+  ListCatalogFeaturesResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Query
+      FieldName: listCatalogFeatures
+      DataSourceName: !GetAtt ListCatalogFeaturesDataSource.Name
+
+  CheckFeatureEntitlementResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Query
+      FieldName: checkFeatureEntitlement
+      DataSourceName: !GetAtt CheckFeatureEntitlementDataSource.Name
+
+  GetFeatureLaunchUrlResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Query
+      FieldName: getFeatureLaunchUrl
+      DataSourceName: !GetAtt GetFeatureLaunchUrlDataSource.Name
+
+  RegisterFeatureResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Mutation
+      FieldName: registerFeature
+      DataSourceName: !GetAtt RegisterFeatureDataSource.Name
+
+  UnregisterFeatureResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Mutation
+      FieldName: unregisterFeature
+      DataSourceName: !GetAtt RegisterFeatureDataSource.Name
+
+  SubscribeFeatureResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Mutation
+      FieldName: subscribeFeature
+      DataSourceName: !GetAtt SubscribeFeatureDataSource.Name
+
+  UnsubscribeFeatureResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Mutation
+      FieldName: unsubscribeFeature
+      DataSourceName: !GetAtt UnsubscribeFeatureDataSource.Name
+
+  RegisterFeatureHooksDataSource:
+    Type: AWS::AppSync::DataSource
+    Condition: HasConfigurationTable
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      Name: FeaturePlatformRegisterFeatureHooks
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt RegisterFeatureHooksFunction.Arn
+
+  RegisterFeatureHooksResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: HasConfigurationTable
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Mutation
+      FieldName: registerFeatureHooks
+      DataSourceName: !GetAtt RegisterFeatureHooksDataSource.Name
+
+  UnregisterFeatureHooksResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: HasConfigurationTable
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Mutation
+      FieldName: unregisterFeatureHooks
+      DataSourceName: !GetAtt RegisterFeatureHooksDataSource.Name
+
+  ApplyFeatureConfigPresetDataSource:
+    Type: AWS::AppSync::DataSource
+    Condition: HasConfigurationTable
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      Name: FeaturePlatformApplyConfigPreset
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt ApplyFeatureConfigPresetFunction.Arn
+
+  ApplyFeatureConfigPresetResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: HasConfigurationTable
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Mutation
+      FieldName: applyFeatureConfigPreset
+      DataSourceName: !GetAtt ApplyFeatureConfigPresetDataSource.Name
+
+  RemoveFeatureConfigPresetResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: HasConfigurationTable
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Mutation
+      FieldName: removeFeatureConfigPreset
+      DataSourceName: !GetAtt ApplyFeatureConfigPresetDataSource.Name
+
+  ###########################################################################
+  # WebUIBucket prefix-scoped policy
+  # -----------------------------------------------------------------
+  # This is the bucket policy **statement** that the main stack's
+  # WebUIBucketPolicy must include when the feature platform is enabled.
+  # Because CFN doesn't allow a nested stack to modify a bucket policy owned
+  # by the parent, we expose a SSM Parameter here that the main stack's
+  # WebUIBucketPolicy `Fn::Transform` (or apply-to-main-stack.md patch) merges.
+  #
+  # The policy allows any same-account principal tagged with
+  #   aws:PrincipalTag/idp:feature-id=<id>
+  # to write under features/<id>/*. The ui-deployer custom resource in each
+  # feature stack assumes a role that carries that session tag.
+  ###########################################################################
+  WebUIBucketFeaturePolicyStatement:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${MainStackName}/feature-platform/webui-bucket-policy-statement'
+      Type: String
+      Description: Policy statement fragment the main stack's WebUIBucketPolicy merges.
+      Value: !Sub |
+        {
+          "Sid": "AllowFeatureStackUiBundleWrites",
+          "Effect": "Allow",
+          "Principal": { "AWS": "*" },
+          "Action": [
+            "s3:PutObject",
+            "s3:PutObjectAcl",
+            "s3:DeleteObject",
+            "s3:ListBucket"
+          ],
+          "Resource": [
+            "${WebUIBucketArn}",
+            "${WebUIBucketArn}/features/*"
+          ],
+          "Condition": {
+            "StringEquals": {
+              "aws:PrincipalAccount": "${AWS::AccountId}"
+            },
+            "StringLike": {
+              "aws:PrincipalTag/idp:feature-id": "*",
+              "s3:prefix": [ "features/*" ]
+            }
+          }
+        }
+
+Outputs:
+
+  InstalledFeaturesTableName:
+    Description: InstalledFeatures DDB table name
+    Value: !Ref InstalledFeaturesTable
+    Export:
+      Name: !Sub '${MainStackName}-InstalledFeaturesTableName'
+
+  InstalledFeaturesTableArn:
+    Description: InstalledFeatures DDB table ARN
+    Value: !GetAtt InstalledFeaturesTable.Arn
+    Export:
+      Name: !Sub '${MainStackName}-InstalledFeaturesTableArn'
+
+  RegisterFeatureLambdaArn:
+    Description: ARN of the registerFeature resolver Lambda. Feature stacks grant
+      lambda:InvokeFunction to their RegisterFeature custom-resource role.
+    Value: !GetAtt RegisterFeatureFunction.Arn
+    Export:
+      Name: !Sub '${MainStackName}-RegisterFeatureLambdaArn'
+
+  WebUIBucketName:
+    Description: Re-export of the main stack's WebUIBucket name (feature stacks
+      read this to know where to upload their UMD bundle).
+    Value: !Ref WebUIBucketName
+    Export:
+      Name: !Sub '${MainStackName}-WebUIBucketName'
+
+  WebUIBucketArn:
+    Description: Re-export of the main stack's WebUIBucket ARN.
+    Value: !Ref WebUIBucketArn
+    Export:
+      Name: !Sub '${MainStackName}-WebUIBucketArn'
+
+  AppSyncApiUrl:
+    Description: Re-export of main stack's AppSync API URL.
+    Value: !Ref AppSyncApiUrl
+    Export:
+      Name: !Sub '${MainStackName}-AppSyncApiUrl'
+
+  AppSyncApiArn:
+    Description: Re-export of main stack's AppSync API ARN (feature stacks grant
+      appsync:GraphQL on this for their RegisterFeature custom-resource role).
+    Value: !Ref GraphQLApiArn
+    Export:
+      Name: !Sub '${MainStackName}-AppSyncApiArn'
+
+  UserPoolId:
+    Description: Re-export of main stack's Cognito User Pool id (feature APIs
+      verify JWTs against this).
+    Value: !Ref UserPoolId
+    Export:
+      Name: !Sub '${MainStackName}-UserPoolId'
+
+  UserPoolClientId:
+    Description: Re-export of main stack's Cognito User Pool Client id
+      (feature HTTP APIs set this as the JWT `audience` when verifying
+      tokens issued by the User Pool).
+    Value: !Ref UserPoolClientId
+    Export:
+      Name: !Sub '${MainStackName}-UserPoolClientId'
+
+  TrackingTableName:
+    Description: >-
+      Re-export of main stack's TrackingTable name. Feature stacks that
+      need document state (e.g. docs-by-status) read this via
+      Fn::ImportValue '<MainStackName>-TrackingTableName' and grant
+      themselves scoped dynamodb:Scan/Query on the resulting ARN. The
+      main stack's template.yaml also has a TrackingTableName Output
+      with the same export name, but it is conditionally suppressed
+      whenever EnableFeaturePlatform=true so that this nested stack is
+      the sole producer of the export (avoids the "Export already
+      exported by stack" error during stack updates).
+    Value: !Ref TrackingTableName
+    Export:
+      Name: !Sub '${MainStackName}-TrackingTableName'
+
+  CustomerManagedEncryptionKeyArn:
+    Description: >-
+      Re-export of the main stack's customer-managed KMS key ARN
+      that encrypts the TrackingTable. Feature stacks querying the table
+      grant themselves `kms:Decrypt` on this ARN — without it, DynamoDB
+      responds with `AccessDeniedException: KMS key access denied`.
+    Value: !Ref CustomerManagedEncryptionKeyArn
+    Export:
+      Name: !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn'
+
+  OutputBucketName:
+    Condition: HasOutputBucket
+    Description: >-
+      Re-export of the main stack's Output bucket name. Feature stacks
+      that present processing results (e.g. sample-health-insurance-review reads
+      rule-validation consolidated summaries) import this to grant
+      themselves scoped s3:GetObject on result keys.
+    Value: !Ref OutputBucketName
+    Export:
+      Name: !Sub '${MainStackName}-OutputBucketName'
+
+  WorkingBucketName:
+    Condition: HasWorkingBucket
+    Description: >-
+      Re-export of the main stack's Working bucket name. Pipeline-hook
+      payloads reference compressed document state in this bucket, so
+      feature hook Lambdas import it to grant themselves s3:GetObject
+      for Document decompression.
+    Value: !Ref WorkingBucketName
+    Export:
+      Name: !Sub '${MainStackName}-WorkingBucketName'
+
+  DiscoveryBucketName:
+    Condition: HasDiscoveryBucket
+    Description: >-
+      Re-export of the main stack's Discovery bucket name. Feature UIs that
+      drive the host's Rules Discovery flow (uploadDiscoveryDocument) import
+      this so they can pass the correct bucket; the feature API surfaces it
+      to its UI via a /config route.
+    Value: !Ref DiscoveryBucketName
+    Export:
+      Name: !Sub '${MainStackName}-DiscoveryBucketName'
+
+  TrackingTableArn:
+    Description: >-
+      ARN of the main stack's TrackingTable, constructed from the table name
+      (the parent passes only the name). Feature stacks that scan/query
+      document state (e.g. idp-monitor) import this to scope
+      dynamodb:Scan/Query/GetItem on the table and its indexes
+      (`<arn>/index/*`).
+    Value: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TrackingTableName}'
+    Export:
+      Name: !Sub '${MainStackName}-TrackingTableArn'
+
+  ConfigurationTableName:
+    Condition: HasConfigurationTable
+    Description: >-
+      Re-export of the main stack's ConfigurationTable name. Feature stacks
+      that read host configuration (e.g. idp-monitor) import this to scope
+      dynamodb:Query/GetItem/Scan on the table.
+    Value: !Ref ConfigurationTableName
+    Export:
+      Name: !Sub '${MainStackName}-ConfigurationTableName'
+
+  ConfigurationTableArn:
+    Condition: HasConfigurationTable
+    Description: >-
+      ARN of the main stack's ConfigurationTable, constructed from the table
+      name (the parent passes only the name). Feature stacks import this to
+      scope dynamodb access on the configuration table.
+    Value: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigurationTableName}'
+    Export:
+      Name: !Sub '${MainStackName}-ConfigurationTableArn'
+
+  ReportingBucketName:
+    Condition: HasReportingBucket
+    Description: >-
+      Re-export of the main stack's Reporting bucket name. Feature stacks that
+      read reporting/analytics data or write Athena query results (e.g.
+      idp-monitor) import this to scope s3 access.
+    Value: !Ref ReportingBucketName
+    Export:
+      Name: !Sub '${MainStackName}-ReportingBucketName'
+
+  ReportingBucketArn:
+    Condition: HasReportingBucket
+    Description: >-
+      ARN of the main stack's Reporting bucket, constructed from the bucket
+      name. Feature stacks import this to scope s3:GetObject/ListBucket on
+      reporting data and s3:PutObject on `athena-results/*`.
+    Value: !Sub 'arn:${AWS::Partition}:s3:::${ReportingBucketName}'
+    Export:
+      Name: !Sub '${MainStackName}-ReportingBucketArn'
+

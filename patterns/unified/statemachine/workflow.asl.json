@@ -177,6 +177,26 @@
                     "BackoffRate": 2.5
                 }
             ],
+            "Next": "PostOcrHook"
+        },
+        "PostOcrHook": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
+                "Payload": {
+                    "hookPoint": "postOcr",
+                    "executionArn.$": "$$.Execution.Id",
+                    "document.$": "$.OCRResult.document"
+                }
+            },
+            "ResultPath": "$.HookResults.postOcr",
+            "Retry": [
+                { "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2 }
+            ],
+            "Catch": [
+                { "ErrorEquals": ["States.ALL"], "ResultPath": "$.HookResults.postOcr.error", "Next": "ClassificationStep" }
+            ],
             "Next": "ClassificationStep"
         },
         "ClassificationStep": {
@@ -205,6 +225,26 @@
                     "MaxAttempts": 8,
                     "BackoffRate": 2.5
                 }
+            ],
+            "Next": "PostClassificationHook"
+        },
+        "PostClassificationHook": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
+                "Payload": {
+                    "hookPoint": "postClassification",
+                    "executionArn.$": "$$.Execution.Id",
+                    "document.$": "$.ClassificationResult.document"
+                }
+            },
+            "ResultPath": "$.HookResults.postClassification",
+            "Retry": [
+                { "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2 }
+            ],
+            "Catch": [
+                { "ErrorEquals": ["States.ALL"], "ResultPath": "$.HookResults.postClassification.error", "Next": "ProcessSections" }
             ],
             "Next": "ProcessSections"
         },
@@ -244,6 +284,27 @@
                                 "BackoffRate": 2.5
                             }
                         ],
+                        "Next": "PostExtractionHook"
+                    },
+                    "PostExtractionHook": {
+                        "Type": "Task",
+                        "Resource": "arn:aws:states:::lambda:invoke",
+                        "Parameters": {
+                            "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
+                            "Payload": {
+                                "hookPoint": "postExtraction",
+                                "executionArn.$": "$$.Execution.Id",
+                                "document.$": "$.document",
+                                "section.$": "$"
+                            }
+                        },
+                        "ResultPath": "$.HookResults",
+                        "Retry": [
+                            { "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2 }
+                        ],
+                        "Catch": [
+                            { "ErrorEquals": ["States.ALL"], "ResultPath": "$.HookResults.error", "Next": "AssessmentStep" }
+                        ],
                         "Next": "AssessmentStep"
                     },
                     "AssessmentStep": {
@@ -273,6 +334,27 @@
                                 "MaxAttempts": 8,
                                 "BackoffRate": 2.5
                             }
+                        ],
+                        "Next": "PostAssessmentHook"
+                    },
+                    "PostAssessmentHook": {
+                        "Type": "Task",
+                        "Resource": "arn:aws:states:::lambda:invoke",
+                        "Parameters": {
+                            "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
+                            "Payload": {
+                                "hookPoint": "postAssessment",
+                                "executionArn.$": "$$.Execution.Id",
+                                "document.$": "$.document",
+                                "section.$": "$"
+                            }
+                        },
+                        "ResultPath": "$.HookResults",
+                        "Retry": [
+                            { "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2 }
+                        ],
+                        "Catch": [
+                            { "ErrorEquals": ["States.ALL"], "ResultPath": "$.HookResults.error", "Next": "SectionComplete" }
                         ],
                         "Next": "SectionComplete"
                     },
@@ -445,6 +527,26 @@
                 }
             ],
             "ResultPath": "$.RuleValidationOrchestrationResult",
+            "Next": "PostRuleValidationHook"
+        },
+        "PostRuleValidationHook": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
+                "Payload": {
+                    "hookPoint": "postRuleValidation",
+                    "executionArn.$": "$$.Execution.Id",
+                    "document.$": "$.RuleValidationOrchestrationResult.document"
+                }
+            },
+            "ResultPath": "$.HookResults.postRuleValidation",
+            "Retry": [
+                { "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2 }
+            ],
+            "Catch": [
+                { "ErrorEquals": ["States.ALL"], "ResultPath": "$.HookResults.postRuleValidation.error", "Next": "SummarizationStep" }
+            ],
             "Next": "SummarizationStep"
         },
         "CheckHITLRequired": {
@@ -490,6 +592,26 @@
                     "MaxAttempts": 8,
                     "BackoffRate": 2.5
                 }
+            ],
+            "Next": "PostSummarizationHook"
+        },
+        "PostSummarizationHook": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
+                "Payload": {
+                    "hookPoint": "postSummarization",
+                    "executionArn.$": "$$.Execution.Id",
+                    "document.$": "$"
+                }
+            },
+            "ResultPath": null,
+            "Retry": [
+                { "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2 }
+            ],
+            "Catch": [
+                { "ErrorEquals": ["States.ALL"], "ResultPath": null, "Next": "EvaluationStep" }
             ],
             "Next": "EvaluationStep"
         },

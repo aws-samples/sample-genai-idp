@@ -434,6 +434,60 @@ Resources:
                       type: string
                       description: "Feature - select one of the supported OCR feature types"
                       enum: ["TABLES", "FORMS", "SIGNATURES", "LAYOUT"]
+              postHook:
+                type: array
+                collapsible: true
+                defaultExpanded: false
+                sectionLabel: Post-step pipeline hooks
+                description: >-
+                  Lambda functions invoked after this step completes,
+                  before the next step runs. Each hook receives the
+                  document state and returns a JSON-serializable result
+                  (logged for traceability). Hooks let vertical-product
+                  packs (claims, loans, etc.) inject business logic
+                  without forking the accelerator. Admins can edit, add,
+                  reorder, or disable hooks here. The Lambda function
+                  ARN must EITHER be tagged with `idp:feature-id=<anything>`
+                  (vertical packs do this automatically) OR have a function
+                  name starting with `GENAIIDP-` (admin-managed Lambdas).
+                  Functions outside both categories will be rejected by
+                  the dispatcher's IAM policy at invoke time.
+                listLabel: Post-step pipeline hooks
+                itemLabel: Hook
+                order: 99
+                items:
+                  type: object
+                  required:
+                    - featureId
+                    - arn
+                  properties:
+                    featureId:
+                      type: string
+                      description: Feature that owns this hook (label only)
+                      order: 0
+                    arn:
+                      type: string
+                      description: >-
+                        Lambda function ARN to invoke. Must either be
+                        tagged `idp:feature-id=<anything>` OR have a
+                        function name beginning with `GENAIIDP-`.
+                      order: 1
+                    order:
+                      type: number
+                      description: Execution order (lower = earlier)
+                      default: 100
+                      order: 2
+                    onError:
+                      type: string
+                      enum: ["continue", "fail", "skip-remaining"]
+                      default: continue
+                      description: Behavior when this hook errors
+                      order: 3
+                    enabled:
+                      type: boolean
+                      description: Disable without removing
+                      default: true
+                      order: 4
           classes:
             order: 2
             type: array
@@ -881,6 +935,60 @@ Resources:
                 type: string
                 description: Task prompt - include placeholders {CLASS_NAMES_AND_DESCRIPTIONS} (replaced with the class names and descriptions for all specified classes), {FEW_SHOT_EXAMPLES} (replaced by classPrompt and image data from examples in class definitions), {DOCUMENT_TEXT} (replaced by the OCR output), and for multi-modal classification {DOCUMENT_IMAGE} (replaced by the page image attachment). Optionally include {CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS} (replaced with class names, descriptions, AND schema attribute field names — useful for disambiguating classes with similar names but different extraction schemas; opt-in and cost-neutral when not referenced). Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
                 order: 9
+              postHook:
+                type: array
+                collapsible: true
+                defaultExpanded: false
+                sectionLabel: Post-step pipeline hooks
+                description: >-
+                  Lambda functions invoked after this step completes,
+                  before the next step runs. Each hook receives the
+                  document state and returns a JSON-serializable result
+                  (logged for traceability). Hooks let vertical-product
+                  packs (claims, loans, etc.) inject business logic
+                  without forking the accelerator. Admins can edit, add,
+                  reorder, or disable hooks here. The Lambda function
+                  ARN must EITHER be tagged with `idp:feature-id=<anything>`
+                  (vertical packs do this automatically) OR have a function
+                  name starting with `GENAIIDP-` (admin-managed Lambdas).
+                  Functions outside both categories will be rejected by
+                  the dispatcher's IAM policy at invoke time.
+                listLabel: Post-step pipeline hooks
+                itemLabel: Hook
+                order: 99
+                items:
+                  type: object
+                  required:
+                    - featureId
+                    - arn
+                  properties:
+                    featureId:
+                      type: string
+                      description: Feature that owns this hook (label only)
+                      order: 0
+                    arn:
+                      type: string
+                      description: >-
+                        Lambda function ARN to invoke. Must either be
+                        tagged `idp:feature-id=<anything>` OR have a
+                        function name beginning with `GENAIIDP-`.
+                      order: 1
+                    order:
+                      type: number
+                      description: Execution order (lower = earlier)
+                      default: 100
+                      order: 2
+                    onError:
+                      type: string
+                      enum: ["continue", "fail", "skip-remaining"]
+                      default: continue
+                      description: Behavior when this hook errors
+                      order: 3
+                    enabled:
+                      type: boolean
+                      description: Disable without removing
+                      default: true
+                      order: 4
           extraction:
             order: 5
             type: object
@@ -1069,6 +1177,60 @@ Resources:
                 type: string
                 description: "(Optional) ARN of a Lambda function to generate custom extraction prompts. Function name must start with 'GENAIIDP-'. If not provided, default prompts will be used. The Lambda function receives the complete config, prompt placeholders, default task prompt content, and serialized document, and returns custom system_prompt and task_prompt_content. Example: arn:partition:lambda:us-east-1:123456789012:function:GENAIIDP-my-extractor"
                 order: 9
+              postHook:
+                type: array
+                collapsible: true
+                defaultExpanded: false
+                sectionLabel: Post-step pipeline hooks
+                description: >-
+                  Lambda functions invoked after this step completes,
+                  before the next step runs. Each hook receives the
+                  document state and returns a JSON-serializable result
+                  (logged for traceability). Hooks let vertical-product
+                  packs (claims, loans, etc.) inject business logic
+                  without forking the accelerator. Admins can edit, add,
+                  reorder, or disable hooks here. The Lambda function
+                  ARN must EITHER be tagged with `idp:feature-id=<anything>`
+                  (vertical packs do this automatically) OR have a function
+                  name starting with `GENAIIDP-` (admin-managed Lambdas).
+                  Functions outside both categories will be rejected by
+                  the dispatcher's IAM policy at invoke time.
+                listLabel: Post-step pipeline hooks
+                itemLabel: Hook
+                order: 99
+                items:
+                  type: object
+                  required:
+                    - featureId
+                    - arn
+                  properties:
+                    featureId:
+                      type: string
+                      description: Feature that owns this hook (label only)
+                      order: 0
+                    arn:
+                      type: string
+                      description: >-
+                        Lambda function ARN to invoke. Must either be
+                        tagged `idp:feature-id=<anything>` OR have a
+                        function name beginning with `GENAIIDP-`.
+                      order: 1
+                    order:
+                      type: number
+                      description: Execution order (lower = earlier)
+                      default: 100
+                      order: 2
+                    onError:
+                      type: string
+                      enum: ["continue", "fail", "skip-remaining"]
+                      default: continue
+                      description: Behavior when this hook errors
+                      order: 3
+                    enabled:
+                      type: boolean
+                      description: Disable without removing
+                      default: true
+                      order: 4
           assessment:
             order: 6
             type: object
@@ -1257,6 +1419,60 @@ Resources:
                 format: textarea
                 description: Task prompt - supports placeholders {DOCUMENT_TEXT} (markdown text), {OCR_TEXT_CONFIDENCE} (OCR text blocks with confidence), {DOCUMENT_CLASS}, {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}, {EXTRACTION_RESULTS}, {GRANULAR_CONTEXT} and {DOCUMENT_IMAGE}. Use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
                 order: 12
+              postHook:
+                type: array
+                collapsible: true
+                defaultExpanded: false
+                sectionLabel: Post-step pipeline hooks
+                description: >-
+                  Lambda functions invoked after this step completes,
+                  before the next step runs. Each hook receives the
+                  document state and returns a JSON-serializable result
+                  (logged for traceability). Hooks let vertical-product
+                  packs (claims, loans, etc.) inject business logic
+                  without forking the accelerator. Admins can edit, add,
+                  reorder, or disable hooks here. The Lambda function
+                  ARN must EITHER be tagged with `idp:feature-id=<anything>`
+                  (vertical packs do this automatically) OR have a function
+                  name starting with `GENAIIDP-` (admin-managed Lambdas).
+                  Functions outside both categories will be rejected by
+                  the dispatcher's IAM policy at invoke time.
+                listLabel: Post-step pipeline hooks
+                itemLabel: Hook
+                order: 99
+                items:
+                  type: object
+                  required:
+                    - featureId
+                    - arn
+                  properties:
+                    featureId:
+                      type: string
+                      description: Feature that owns this hook (label only)
+                      order: 0
+                    arn:
+                      type: string
+                      description: >-
+                        Lambda function ARN to invoke. Must either be
+                        tagged `idp:feature-id=<anything>` OR have a
+                        function name beginning with `GENAIIDP-`.
+                      order: 1
+                    order:
+                      type: number
+                      description: Execution order (lower = earlier)
+                      default: 100
+                      order: 2
+                    onError:
+                      type: string
+                      enum: ["continue", "fail", "skip-remaining"]
+                      default: continue
+                      description: Behavior when this hook errors
+                      order: 3
+                    enabled:
+                      type: boolean
+                      description: Disable without removing
+                      default: true
+                      order: 4
           summarization:
             order: 7
             type: object
@@ -1363,6 +1579,60 @@ Resources:
                 format: textarea
                 description: Task prompt - supports parameters {DOCUMENT_TEXT} and {EXTRACTION_RESULTS}. Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
                 order: 8
+              postHook:
+                type: array
+                collapsible: true
+                defaultExpanded: false
+                sectionLabel: Post-step pipeline hooks
+                description: >-
+                  Lambda functions invoked after this step completes,
+                  before the next step runs. Each hook receives the
+                  document state and returns a JSON-serializable result
+                  (logged for traceability). Hooks let vertical-product
+                  packs (claims, loans, etc.) inject business logic
+                  without forking the accelerator. Admins can edit, add,
+                  reorder, or disable hooks here. The Lambda function
+                  ARN must EITHER be tagged with `idp:feature-id=<anything>`
+                  (vertical packs do this automatically) OR have a function
+                  name starting with `GENAIIDP-` (admin-managed Lambdas).
+                  Functions outside both categories will be rejected by
+                  the dispatcher's IAM policy at invoke time.
+                listLabel: Post-step pipeline hooks
+                itemLabel: Hook
+                order: 99
+                items:
+                  type: object
+                  required:
+                    - featureId
+                    - arn
+                  properties:
+                    featureId:
+                      type: string
+                      description: Feature that owns this hook (label only)
+                      order: 0
+                    arn:
+                      type: string
+                      description: >-
+                        Lambda function ARN to invoke. Must either be
+                        tagged `idp:feature-id=<anything>` OR have a
+                        function name beginning with `GENAIIDP-`.
+                      order: 1
+                    order:
+                      type: number
+                      description: Execution order (lower = earlier)
+                      default: 100
+                      order: 2
+                    onError:
+                      type: string
+                      enum: ["continue", "fail", "skip-remaining"]
+                      default: continue
+                      description: Behavior when this hook errors
+                      order: 3
+                    enabled:
+                      type: boolean
+                      description: Disable without removing
+                      default: true
+                      order: 4
           evaluation:
             order: 9
             type: object
@@ -2373,9 +2643,62 @@ Resources:
                     format: textarea
                     description: Task prompt for rule validation orchestrator - supports placeholders {recommendation_options}, {extracted_evidence}, {policy_class}, and {rule}. Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
                     order: 6
+              postHook:
+                type: array
+                collapsible: true
+                defaultExpanded: false
+                sectionLabel: Post-step pipeline hooks
+                description: >-
+                  Lambda functions invoked after this step completes,
+                  before the next step runs. Each hook receives the
+                  document state and returns a JSON-serializable result
+                  (logged for traceability). Hooks let vertical-product
+                  packs (claims, loans, etc.) inject business logic
+                  without forking the accelerator. Admins can edit, add,
+                  reorder, or disable hooks here. The Lambda function
+                  ARN must EITHER be tagged with `idp:feature-id=<anything>`
+                  (vertical packs do this automatically) OR have a function
+                  name starting with `GENAIIDP-` (admin-managed Lambdas).
+                  Functions outside both categories will be rejected by
+                  the dispatcher's IAM policy at invoke time.
+                listLabel: Post-step pipeline hooks
+                itemLabel: Hook
+                order: 99
+                items:
+                  type: object
+                  required:
+                    - featureId
+                    - arn
+                  properties:
+                    featureId:
+                      type: string
+                      description: Feature that owns this hook (label only)
+                      order: 0
+                    arn:
+                      type: string
+                      description: >-
+                        Lambda function ARN to invoke. Must either be
+                        tagged `idp:feature-id=<anything>` OR have a
+                        function name beginning with `GENAIIDP-`.
+                      order: 1
+                    order:
+                      type: number
+                      description: Execution order (lower = earlier)
+                      default: 100
+                      order: 2
+                    onError:
+                      type: string
+                      enum: ["continue", "fail", "skip-remaining"]
+                      default: continue
+                      description: Behavior when this hook errors
+                      order: 3
+                    enabled:
+                      type: boolean
+                      description: Disable without removing
+                      default: true
+                      order: 4
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
-
 
   UpdateDefaultConfig:
     Type: AWS::CloudFormation::CustomResource
@@ -2511,24 +2834,29 @@ Resources:
                     - kms:DescribeKey
                   Resource: !Ref ArtifactsBucketKmsKeyArn
                 - !Ref AWS::NoValue
-              # Required for VPC-enabled CodeBuild projects
-              - Effect: Allow
-                Action:
-                  - ec2:CreateNetworkInterface
-                  - ec2:DescribeNetworkInterfaces
-                  - ec2:DeleteNetworkInterface
-                  - ec2:DescribeSecurityGroups
-                  - ec2:DescribeSubnets
-                  - ec2:DescribeVpcs
-                  - ec2:DescribeDhcpOptions
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - ec2:CreateNetworkInterfacePermission
-                Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*"
-                Condition:
-                  StringEquals:
-                    ec2:AuthorizedService: !Sub "codebuild.${AWS::URLSuffix}"
+              - !If
+                - DeployInVPC
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterface
+                    - ec2:DescribeNetworkInterfaces
+                    - ec2:DeleteNetworkInterface
+                    - ec2:DescribeSecurityGroups
+                    - ec2:DescribeSubnets
+                    - ec2:DescribeVpcs
+                    - ec2:DescribeDhcpOptions
+                  Resource: "*"
+                - !Ref AWS::NoValue
+              - !If
+                - DeployInVPC
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterfacePermission
+                  Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*"
+                  Condition:
+                    StringEquals:
+                      ec2:AuthorizedService: !Sub "codebuild.${AWS::URLSuffix}"
+                - !Ref AWS::NoValue
 
   DockerBuildProject:
     Type: AWS::CodeBuild::Project
@@ -3970,6 +4298,93 @@ Resources:
       LogGroupName: !Sub "/${AWS::StackName}/lambda/SummarizationFunction"
       RetentionInDays: !Ref LogRetentionDays
 
+  ##########################################################################
+  # PipelineHooksDispatcherFunction — invoked from the SFN at each pipeline
+  # extension point. Reads `Configuration#System#PipelineHooks` from the
+  # ConfigurationTable and fans out to feature-registered hook Lambdas.
+  # Zero-cost when no hooks are registered (one DDB GetItem + return).
+  ##########################################################################
+  PipelineHooksDispatcherFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: !Sub "lambda.${AWS::URLSuffix}" }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: ReadActiveConfigForHooks
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # GetItem on any Config#* row, plus Scan to find the
+              # IsActive=true version when the document doesn't pin one.
+              # Hooks are stored inline in each config version under
+              # `<step>.postHook` lists.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Scan
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigurationTable}'
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+              # Two parallel allow paths for hook Lambdas:
+              #
+              # 1. Tag-based ABAC for vertical-product packs. Pack-shipped
+              #    hook Lambdas MUST carry the tag `idp:feature-id=<id>`
+              #    (see e.g. claims-pack/template.yaml). The condition
+              #    matches any value of that tag.
+              #
+              # 2. Name-prefix for admin-managed Lambdas. Mirrors the
+              #    GENAIIDP-* convention used elsewhere in the host (e.g.
+              #    custom-extraction-prompt). Admins can paste any
+              #    GENAIIDP-* function ARN into the postHook fields without
+              #    having to tag it.
+              #
+              # The dispatcher trusts whichever clears IAM. Function ARNs
+              # outside both categories fail closed with AccessDenied —
+              # the schema description warns admins.
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:*'
+                Condition:
+                  StringLike:
+                    'aws:ResourceTag/idp:feature-id': '*'
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Sub 'arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:GENAIIDP-*'
+
+  PipelineHooksDispatcherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      CodeUri: src/pipeline_hooks_function/
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      Architectures: [arm64]
+      Timeout: 60
+      MemorySize: 256
+      Tracing: Active
+      Role: !GetAtt PipelineHooksDispatcherFunctionRole.Arn
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+
+  PipelineHooksDispatcherFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${PipelineHooksDispatcherFunction}'
+      RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   EvaluationFunction:
     Type: AWS::Serverless::Function
     DependsOn: DockerBuildRun
@@ -4679,6 +5094,9 @@ Resources:
         # Shared tail functions
         SummarizationLambdaArn: !GetAtt SummarizationFunction.Arn
         EvaluationLambdaArn: !GetAtt EvaluationFunction.Arn
+        # Pipeline-hooks dispatcher — invoked by the SFN at each extension
+        # point. Returns immediately when no hooks are registered.
+        PipelineHooksDispatcherLambdaArn: !GetAtt PipelineHooksDispatcherFunction.Arn
         OutputBucket: !Ref OutputBucket
       Logging:
         Level: ALL
@@ -4715,6 +5133,9 @@ Resources:
             FunctionName: !Ref SummarizationFunction
         - LambdaInvokePolicy:
             FunctionName: !Ref EvaluationFunction
+        # Pipeline-hooks dispatcher — single SFN Task per hook point.
+        - LambdaInvokePolicy:
+            FunctionName: !Ref PipelineHooksDispatcherFunction
         - CloudWatchLogsFullAccess
 
   StateMachineLogGroup:

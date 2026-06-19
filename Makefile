@@ -65,12 +65,14 @@ setup: ## Install all packages into current Python environment (no venv)
 	$$SETUP_PIP install -e lib/idp_sdk && \
 	echo "Installing idp_mcp_connector package..." && \
 	$$SETUP_PIP install -e lib/idp_mcp_connector_pkg && \
+	echo "Installing idp_feature_sdk package..." && \
+	$$SETUP_PIP install -e lib/idp_feature_sdk && \
 	echo "Installing capacity planning test dependencies..." && \
 	$$SETUP_PIP install -r src/lambda/calculate_capacity/requirements-test.txt && \
 	echo "Installing cfn-lint for CloudFormation template validation..." && \
 	$$SETUP_PIP install cfn-lint && \
 	echo "" && \
-	echo -e "$(GREEN)✅ Setup complete! idp_common, idp-cli, idp_sdk, idp_mcp_connector, and test dependencies are now installed.$(NC)" && \
+	echo -e "$(GREEN)✅ Setup complete! idp_common, idp-cli, idp_sdk, idp_mcp_connector, idp_feature_sdk, and test dependencies are now installed.$(NC)" && \
 	echo -e "$(YELLOW)   Tip: Use 'make setup-venv' instead to install into an isolated virtual environment.$(NC)"
 
 setup-venv: ## Create .venv and install all packages into it
@@ -94,13 +96,15 @@ setup-venv: ## Create .venv and install all packages into it
 	$(VENV_DIR)/bin/pip install -e lib/idp_sdk
 	@echo "Installing idp_mcp_connector package..."
 	$(VENV_DIR)/bin/pip install -e lib/idp_mcp_connector_pkg
+	@echo "Installing idp_feature_sdk package..."
+	$(VENV_DIR)/bin/pip install -e lib/idp_feature_sdk
 	@echo "Installing capacity planning test dependencies..."
 	$(VENV_DIR)/bin/pip install -r src/lambda/calculate_capacity/requirements-test.txt
 	@echo "Installing cfn-lint for CloudFormation template validation..."
 	$(VENV_DIR)/bin/pip install cfn-lint
 	@echo ""
 	@echo -e "$(GREEN)✅ Setup complete! Virtual environment created at $(VENV_DIR)$(NC)"
-	@echo -e "$(GREEN)   idp_common, idp-cli, idp_sdk, idp_mcp_connector, and test dependencies are now installed.$(NC)"
+	@echo -e "$(GREEN)   idp_common, idp-cli, idp_sdk, idp_mcp_connector, idp_feature_sdk, and test dependencies are now installed.$(NC)"
 	@echo -e "$(YELLOW)   All 'make' targets will automatically use $(VENV_DIR)/bin/python.$(NC)"
 	@echo -e "$(YELLOW)   To activate manually: source $(VENV_DIR)/bin/activate$(NC)"
 
@@ -154,7 +158,7 @@ validate-buildspec: ## Validate AWS CodeBuild buildspec files
 check-arn-partitions: ## Check CloudFormation templates for hardcoded ARN partitions
 	@echo "Checking CloudFormation templates for hardcoded ARN partitions and service principals..."
 	@FOUND_ISSUES=0; \
-	for template in template.yaml patterns/*/template.yaml patterns/*/sagemaker_classifier_endpoint.yaml options/*/template.yaml; do \
+	for template in template.yaml patterns/*/template.yaml patterns/*/sagemaker_classifier_endpoint.yaml options/*/template.yaml feature-platform/*/template.yaml; do \
 		if [ -f "$$template" ]; then \
 			echo "Checking $$template..."; \
 			ARN_MATCHES=$$(grep -n "arn:aws:" "$$template" | grep -v "arn:\$${AWS::Partition}:" || true); \
@@ -197,10 +201,17 @@ typecheck-pr: ## Type check only files changed vs TARGET_BRANCH (default: main)
 	$(PYTHON) scripts/sdlc/typecheck_pr_changes.py $(TARGET_BRANCH)
 
 ##@ Testing
-test: ## Run all tests (idp_common, cli, sdk, capacity, circuit breaker, config library)
+test: ## Run all tests (idp_common, cli, sdk, feature platform, capacity, circuit breaker, config library)
 	$(MAKE) -C lib/idp_common_pkg test PYTHON=$(PYTHON)
 	cd lib/idp_cli_pkg && $(PYTHON) -m pytest -v
 	cd lib/idp_sdk && $(PYTHON) -m pytest -m "not integration" -v
+	@echo "Running idp_feature_sdk tests..."
+	cd lib/idp_feature_sdk && $(PYTHON) -m pytest -v
+	@echo "Running feature platform tests (plumbing resolvers + feature template)..."
+	cd feature-platform/main-stack-extensions && $(PYTHON) -m pytest -v
+	cd feature-platform/feature-template/feature-api && $(PYTHON) -m pytest -v
+	@echo "Running pipeline-hooks dispatcher tests..."
+	cd lib/idp_common_pkg && $(PYTHON) -m pytest tests/unit/lambdas/test_pipeline_hooks_dispatcher.py -v
 	@echo "Running capacity planning Lambda tests..."
 	cd src/lambda/calculate_capacity && $(PYTHON) -m pytest -v
 	@echo "Running circuit breaker Lambda tests..."
@@ -360,6 +371,8 @@ endif
 	@sed -i.bak 's/^__version__ = ".*"/__version__ = "$(V)"/' lib/idp_sdk/idp_sdk/__init__.py && rm -f lib/idp_sdk/idp_sdk/__init__.py.bak
 	@sed -i.bak 's/^version = ".*"/version = "$(V)"/' lib/idp_mcp_connector_pkg/pyproject.toml && rm -f lib/idp_mcp_connector_pkg/pyproject.toml.bak
 	@sed -i.bak 's/^__version__ = ".*"/__version__ = "$(V)"/' lib/idp_mcp_connector_pkg/idp_mcp_connector/__init__.py && rm -f lib/idp_mcp_connector_pkg/idp_mcp_connector/__init__.py.bak
+	@sed -i.bak 's/^version = ".*"/version = "$(V)"/' lib/idp_feature_sdk/pyproject.toml && rm -f lib/idp_feature_sdk/pyproject.toml.bak
+	@sed -i.bak 's/^__version__ = ".*"/__version__ = "$(V)"/' lib/idp_feature_sdk/idp_feature_sdk/__init__.py && rm -f lib/idp_feature_sdk/idp_feature_sdk/__init__.py.bak
 	@echo -e "$(GREEN)✅ Version updated to $(V) in:$(NC)"
 	@echo "  - VERSION"
 	@echo "  - lib/idp_cli_pkg/pyproject.toml"
@@ -370,6 +383,9 @@ endif
 	@echo "  - lib/idp_common_pkg/setup.py"
 	@echo "  - lib/idp_mcp_connector_pkg/pyproject.toml"
 	@echo "  - lib/idp_mcp_connector_pkg/idp_mcp_connector/__init__.py"
+	@echo "  - lib/idp_feature_sdk/pyproject.toml"
+	@echo "  - lib/idp_feature_sdk/idp_feature_sdk/__init__.py"
+
 
 ##@ Documentation
 docs: docs-build ## Build and serve the documentation site locally

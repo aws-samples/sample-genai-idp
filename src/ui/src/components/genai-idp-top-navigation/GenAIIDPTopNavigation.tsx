@@ -6,6 +6,7 @@ import { signOut } from 'aws-amplify/auth';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
 import useAppContext from '../../contexts/app';
+import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
 import useUserDisplayName from '../../hooks/use-user-display-name';
 
@@ -60,10 +61,17 @@ const SignOutModal = ({ visible, setVisible }: SignOutModalProps): React.JSX.Ele
 
 const GenAIIDPTopNavigation = (): React.JSX.Element => {
   const { user } = useAppContext();
+  const { settings } = useSettingsContext();
   const { isAdmin, isAuthor, isReviewer, isViewer, loading: roleLoading } = useUserRole();
   const { displayName } = useUserDisplayName();
   const userId = displayName || user?.username || 'user';
   const [isSignOutModalVisible, setIsSignOutModalVisiblesetVisible] = useState(false);
+
+  // Banner title is configurable per-deployment so vertical-product packs
+  // (Claims, Loans, etc.) can swap the default "IDP Accelerator Console"
+  // text without rebuilding the UI. Set ConsoleTitle in the host's SSM
+  // Settings parameter (driven by the ConsoleTitle CFN parameter).
+  const consoleTitle = ((settings as Record<string, unknown> | undefined)?.ConsoleTitle as string | undefined) || 'IDP Accelerator Console';
 
   // Determine role display
   const getRoleDisplay = (): string => {
@@ -82,7 +90,7 @@ const GenAIIDPTopNavigation = (): React.JSX.Element => {
     <>
       <div id="top-navigation" style={{ position: 'sticky', top: 0, zIndex: 1002 }}>
         <TopNavigation
-          identity={{ href: '#', title: 'IDP Accelerator Console' }}
+          identity={{ href: '#', title: consoleTitle }}
           i18nStrings={{ overflowMenuTriggerText: 'More' }}
           utilities={[
             {

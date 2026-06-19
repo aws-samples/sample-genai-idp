@@ -149,6 +149,16 @@ def main():
 
     print("Setting up SRT (Sample Security Review Tool)...")
 
+    # Clean .srt directory to ensure fresh installation and prevent stale cache issues
+    if srt_dir.exists():
+        print("Cleaning existing .srt directory for fresh setup...")
+        try:
+            shutil.rmtree(srt_dir)
+            print("✅ Removed .srt directory")
+        except Exception as e:
+            print(f"⚠️  Warning: Could not remove .srt directory: {e}")
+            # Continue anyway - setup might still work
+
     # Create .srt directory
     srt_dir.mkdir(exist_ok=True)
 
