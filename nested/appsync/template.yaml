@@ -61,6 +61,10 @@ Parameters:
   DiscoveryTrackingTableName:
     Type: String
 
+  BootstrapTrackingTableName:
+    Type: String
+    Default: ""
+
   UsersTableName:
     Type: String
     Default: ""
@@ -324,6 +328,7 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TrackingTableName}"
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AgentTableName}"
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DiscoveryTrackingTableName}"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${BootstrapTrackingTableName}"
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChatMessagesTableName}"
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChatSessionsTableName}"
               - Effect: Allow
@@ -395,6 +400,17 @@ Resources:
       ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
       DynamoDBConfig:
         TableName: !Ref DiscoveryTrackingTableName
+        AwsRegion: !Ref AWS::Region
+
+  BootstrapTableDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      Name: BootstrapTableDataSource
+      Type: AMAZON_DYNAMODB
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      DynamoDBConfig:
+        TableName: !Ref BootstrapTrackingTableName
         AwsRegion: !Ref AWS::Region
 
 
@@ -2113,6 +2129,73 @@ Resources:
           $util.qr($expValues.put(":completedAt", $util.dynamodb.toDynamoDB($util.time.nowISO8601())))
           #set($updateExpression = "${updateExpression}, #completedAt = :completedAt")
         #end
+
+        {
+          "version": "2018-05-29",
+          "operation": "UpdateItem",
+          "key": {
+            "jobId": $util.dynamodb.toDynamoDBJson($ctx.args.jobId)
+          },
+          "update": {
+            "expression": "$updateExpression",
+            "expressionNames": $utils.toJson($expNames),
+            "expressionValues": $utils.toJson($expValues)
+          }
+        }
+      ResponseMappingTemplate: |-
+        $util.toJson($ctx.result)
+
+  ##########################################################################
+  # UpdateConfigBootstrapJobStatusResolver
+  ##########################################################################
+  UpdateConfigBootstrapJobStatusResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Mutation
+      FieldName: updateConfigBootstrapJobStatus
+      DataSourceName: !GetAtt BootstrapTableDataSource.Name
+      RequestMappingTemplate: |-
+        #set($validStatuses = ["QUEUED", "IN_PROGRESS", "COMPLETED", "FAILED"])
+        #if(!$validStatuses.contains($ctx.args.status))
+          $util.error("Invalid status value", "ValidationException")
+        #end
+
+        #set($expNames = {})
+        #set($expValues = {})
+
+        $util.qr($expNames.put("#status", "status"))
+        $util.qr($expValues.put(":status", $util.dynamodb.toDynamoDB($ctx.args.status)))
+        #set($updateExpression = "SET #status = :status")
+
+        #if($ctx.args.statusMessage)
+          $util.qr($expNames.put("#statusMessage", "statusMessage"))
+          $util.qr($expValues.put(":statusMessage", $util.dynamodb.toDynamoDB($ctx.args.statusMessage)))
+          #set($updateExpression = "${updateExpression}, #statusMessage = :statusMessage")
+        #end
+
+        #if($ctx.args.errorMessage)
+          $util.qr($expNames.put("#errorMessage", "errorMessage"))
+          $util.qr($expValues.put(":errorMessage", $util.dynamodb.toDynamoDB($ctx.args.errorMessage)))
+          #set($updateExpression = "${updateExpression}, #errorMessage = :errorMessage")
+        #end
+
+        #if($ctx.args.configVersion)
+          $util.qr($expNames.put("#configVersion", "configVersion"))
+          $util.qr($expValues.put(":configVersion", $util.dynamodb.toDynamoDB($ctx.args.configVersion)))
+          #set($updateExpression = "${updateExpression}, #configVersion = :configVersion")
+        #end
+
+        #if($ctx.args.testSetId)
+          $util.qr($expNames.put("#testSetId", "testSetId"))
+          $util.qr($expValues.put(":testSetId", $util.dynamodb.toDynamoDB($ctx.args.testSetId)))
+          #set($updateExpression = "${updateExpression}, #testSetId = :testSetId")
+        #end
+
+        $util.qr($expNames.put("#updatedAt", "updatedAt"))
+        $util.qr($expValues.put(":updatedAt", $util.dynamodb.toDynamoDB($util.time.nowISO8601())))
+        #set($updateExpression = "${updateExpression}, #updatedAt = :updatedAt")
 
         {
           "version": "2018-05-29",

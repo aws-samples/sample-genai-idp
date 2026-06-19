@@ -9,6 +9,12 @@ import { Notification } from '../types/common';
 const logger = new ConsoleLogger('useNotifications');
 
 const dismissedInitialNotificationsStorageKey = 'dismissedInitialNotifications';
+
+const isQuickStartWidgetEnabled = (): boolean => {
+  const flag = import.meta.env.VITE_ENABLE_QUICK_START_WIDGET;
+  return flag === undefined || flag === 'true' || flag === true;
+};
+
 const initialNotifications: Omit<Notification, 'onDismiss'>[] = [
   {
     type: 'info',
@@ -16,6 +22,14 @@ const initialNotifications: Omit<Notification, 'onDismiss'>[] = [
     dismissible: true,
     dismissLabel: 'Dismiss message',
     id: 'welcome-1',
+    ...(isQuickStartWidgetEnabled()
+      ? {
+          buttonText: 'Quick Start',
+          onButtonClick: () => {
+            window.dispatchEvent(new CustomEvent('openQuickStart'));
+          },
+        }
+      : {}),
   },
 ];
 

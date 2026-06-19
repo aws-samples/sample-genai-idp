@@ -15,6 +15,7 @@ import DocumentsQueryRoutes from './DocumentsQueryRoutes';
 import DocumentsAnalyticsRoutes from './DocumentsAnalyticsRoutes';
 import TestStudioRoutes from './TestStudioRoutes';
 import AgentChatRoutes from './AgentChatRoutes';
+import QuickStartWidget from '../components/agent-chat/QuickStartWidget';
 
 import {
   DOCUMENTS_PATH,
@@ -58,6 +59,7 @@ const AuthRoutes = ({ redirectParam }: AuthRoutesProps): React.JSX.Element => {
         <Route path={LOGOUT_PATH} element={<Button onClick={signOut}>Sign Out</Button>} />
         <Route path="*" element={<Navigate to={DEFAULT_PATH} replace />} />
       </Routes>
+      <QuickStartWidget />
     </SettingsContext.Provider>
   );
 };

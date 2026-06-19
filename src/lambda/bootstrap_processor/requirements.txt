@@ -1,0 +1,5 @@
+# idp_common provided by Lambda Layers (base + synthesis)
+# Base layer: core + docs_service + image. Synthesis layer: core + synthesis.
+
+aws-requests-auth==0.4.3
+requests==2.32.4

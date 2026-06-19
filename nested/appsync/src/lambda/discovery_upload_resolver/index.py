@@ -343,9 +343,14 @@ def handle_start_multi_doc_discovery(event, context):
     is_zip_upload = bool(zip_file_name)
     prefix = s3_prefix
 
-    # For zip uploads, the prefix is the zip file key in the discovery bucket
+    # For zip uploads, the prefix is the zip file key in the discovery bucket.
+    # The uploadMultiDocDiscoveryZip mutation already created the key under its
+    # own job id and returned it as objectKey; the caller passes that back as
+    # s3Prefix so we reference the SAME object. Fall back to constructing the
+    # path only if no prefix was supplied (legacy callers).
     if is_zip_upload:
-        prefix = f"multi-doc-discovery/{job_id}/upload/{zip_file_name}"
+        if not prefix:
+            prefix = f"multi-doc-discovery/{job_id}/upload/{zip_file_name}"
         bucket = os.environ.get('DISCOVERY_BUCKET', '')
 
     logger.info(

@@ -149,6 +149,74 @@ class IDPAgentFactory:
             sample_queries=[],
         )
 
+    def create_conversational_agent(
+        self,
+        agent_id: str,
+        session_id: str,
+        config: Dict[str, Any],
+        session: Any,
+        **kwargs,
+    ) -> Any:
+        """Create a single specialized agent as the top-level conversational agent.
+
+        Use this instead of the orchestrator when a mode pins to exactly one
+        agent (e.g. Quick Start) and that agent is itself multi-turn. Returns the
+        raw Strands Agent (not wrapped in IDPAgent), matching
+        create_conversational_orchestrator.
+        """
+        import logging
+        import os
+
+        logger = logging.getLogger(__name__)
+
+        if agent_id not in self._registry:
+            raise ValueError(f"Agent ID '{agent_id}' not found in registry")
+
+        from ..utils.conversation_manager import DropAndSlideConversationManager
+        from ..utils.memory_provider import DynamoDBMemoryHookProvider
+
+        logger.info(
+            f"Creating conversational agent '{agent_id}' for session {session_id}"
+        )
+
+        memory_table_name = os.environ.get("ID_HELPER_CHAT_MEMORY_TABLE")
+        hooks = []
+        if not memory_table_name:
+            logger.warning(
+                "ID_HELPER_CHAT_MEMORY_TABLE not set, memory will not be persisted"
+            )
+        else:
+            hooks.append(
+                DynamoDBMemoryHookProvider(
+                    table_name=memory_table_name,
+                    session_id=session_id,
+                    region_name=os.environ.get("BEDROCK_REGION", "us-east-1"),
+                    max_message_size_kb=float(
+                        os.environ.get("MAX_MESSAGE_SIZE_KB", "8.5")
+                    ),
+                    max_history_turns=int(
+                        os.environ.get("MAX_CONVERSATION_TURNS", "20")
+                    ),
+                )
+            )
+            logger.info(f"Created memory provider for session {session_id}")
+
+        info = self._registry[agent_id]
+        creator_func = info["creator_func"]
+        agent = creator_func(config=config, session=session, hooks=hooks, **kwargs)
+
+        agent.conversation_manager = DropAndSlideConversationManager(
+            tools_to_drop=(),
+            keep_call_stub=True,
+            window_size=int(os.environ.get("MAX_CONVERSATION_TURNS", "20")),
+            should_truncate_results=True,
+        )
+
+        logger.info(
+            f"Conversational agent '{agent_id}' created for session {session_id}"
+        )
+        return agent
+
     def create_conversational_orchestrator(
         self,
         agent_ids: List[str],

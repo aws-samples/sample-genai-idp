@@ -471,6 +471,15 @@ type DiscoveryJob @aws_cognito_user_pools @aws_iam {
   reflectionReport: String
 }
 
+type ConfigBootstrapJob @aws_cognito_user_pools @aws_iam {
+  jobId: ID!
+  status: String!
+  statusMessage: String
+  errorMessage: String
+  configVersion: String
+  testSetId: String
+}
+
 type MultiDocDiscoveryJob @aws_cognito_user_pools @aws_iam {
   jobId: ID!
   status: String!
@@ -755,6 +764,14 @@ type Mutation {
     discoveredClasses: String
     reflectionReport: String
   ): DiscoveryJob @aws_iam
+  updateConfigBootstrapJobStatus(
+    jobId: ID!
+    status: String!
+    statusMessage: String
+    errorMessage: String
+    configVersion: String
+    testSetId: String
+  ): ConfigBootstrapJob @aws_iam
   updateFinetuningJobStatus(jobId: ID!, status: FinetuningJobStatus!, errorMessage: String): FinetuningJob @aws_iam
 
   # Admin-only operations
@@ -1053,6 +1070,8 @@ type Subscription @aws_cognito_user_pools @aws_iam {
     @aws_subscribe(mutations: ["updateAgentJobStatus"])
   onDiscoveryJobStatusChange(jobId: ID!): DiscoveryJob
     @aws_subscribe(mutations: ["updateDiscoveryJobStatus"])
+  onConfigBootstrapJobStatusChange(jobId: ID!): ConfigBootstrapJob
+    @aws_subscribe(mutations: ["updateConfigBootstrapJobStatus"])
   onAgentChatMessageUpdate(sessionId: String!): AgentChatMessage
     @aws_subscribe(mutations: ["sendAgentChatMessage"])
   onChatDocumentMessageUpdate(sessionId: String!): ChatDocumentMessage
