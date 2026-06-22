@@ -9,6 +9,10 @@ SPDX-License-Identifier: MIT-0
 
 - **Configurable Lambda architecture** — New `LambdaArchitecture` parameter (`arm64` or `x86_64`) for all unified pattern Lambda container images. Defaults to `arm64` (Graviton) for best price-performance. Use `x86_64` when deploying with custom base images that only support AMD64. The parameter flows through to CodeBuild (`--platform` flag) and Dockerfile (`FROM` image suffix).
 
+### Removed
+
+- **Global split panel ("documents selected")** — Removed the persistent bottom split panel from the global Web UI layout and deleted the related split-panel components and `use-split-panel` hook. The split-panel was noisy on non-document-list pages and only provided full details for single-document selection; reintroduce as an opt-in, per-page component if needed (recommendation: enable only on `DocumentList`).
+
 ## [0.5.15]
 
 ### Added

@@ -10,7 +10,6 @@ import { DocumentsContext } from '../../contexts/documents';
 import { Document } from '../../types/documents';
 
 import useNotifications from '../../hooks/use-notifications';
-import useSplitPanel from '../../hooks/use-split-panel';
 import useGraphQlApi from '../../hooks/use-graphql-api';
 import useAppContext from '../../contexts/app';
 
@@ -27,7 +26,6 @@ import { appLayoutLabels } from '../common/labels';
 import Navigation from './navigation';
 import Breadcrumbs from './breadcrumbs';
 import ToolsPanel from './tools-panel';
-import SplitPanel from './documents-split-panel';
 import ConfigurationLayout from '../configuration-layout';
 import PricingLayout from '../pricing-layout';
 import CapacityPlanningLayout from '../capacity-planning/CapacityPlanningLayout';
@@ -90,8 +88,6 @@ const GenAIIDPLayout = ({ children, tools }: GenAIIDPLayoutProps): React.JSX.Ele
     abortWorkflows,
   } = useGraphQlApi({ initialPeriodsToLoad });
 
-  const { splitPanelOpen, onSplitPanelToggle, splitPanelSize, onSplitPanelResize } = useSplitPanel(selectedItems);
-
   const documentsContextValue = {
     documents,
     getDocumentDetailsFromIds,
@@ -123,11 +119,6 @@ const GenAIIDPLayout = ({ children, tools }: GenAIIDPLayoutProps): React.JSX.Ele
         tools={tools ?? <ToolsPanel />}
         toolsOpen={toolsOpen}
         onToolsChange={({ detail }) => setToolsOpen(detail.open)}
-        splitPanelOpen={splitPanelOpen}
-        onSplitPanelToggle={onSplitPanelToggle}
-        splitPanelSize={splitPanelSize}
-        onSplitPanelResize={onSplitPanelResize}
-        splitPanel={<SplitPanel />}
         content={
           children || (
             <Routes>
