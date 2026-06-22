@@ -13,6 +13,8 @@ This module provides document classification capabilities for the IDP Accelerato
 - **Optional regex-based classification for enhanced performance**
   - Document name regex matching when all pages should be classified as the same class
   - Page content regex matching for multi-modal page-level classification
+- **Valid-class enforcement with re-prompt/retry** (page-level) — rejects
+  out-of-vocabulary predictions and re-prompts the model with the allowed classes
 - Direct integration with the Document data model
 - Support for both text and image content
 - Concurrent processing of multiple pages
@@ -215,6 +217,43 @@ See `notebooks/examples/step2_classification_with_regex.ipynb` for interactive d
 - Performance comparisons between regex and LLM methods
 - Configuration examples and best practices
 - Error handling scenarios
+
+## Enforcing a Valid Class Vocabulary (Validation + Retry)
+
+For `multimodalPageLevelClassification`, the service can guarantee the predicted
+class is always one of the configured classes. After each LLM call, the
+predicted class is validated against `self.valid_doc_types` (built from the
+configured `classes`). On an out-of-vocabulary prediction the service
+re-prompts the model — re-sending the original request content with an appended
+correction message that lists the allowed classes — and retries up to a
+configurable limit. Because classification runs at `temperature=0`, this
+single-turn re-prompt (rather than an identical re-send) is what lets the model
+change its answer.
+
+Implemented in `ClassificationService.classify_page_bedrock` with the helper
+`_build_validation_retry_content`. Metering is aggregated across all attempts.
+
+```yaml
+classification:
+  enforceValidClasses: true       # default: true
+  maxValidationRetries: 2         # default: 2
+  invalidClassFallback: unclassified  # default: unclassified
+```
+
+- `enforceValidClasses` — when `false`, an invalid class is logged and used
+  as-is (legacy behavior); the loop runs exactly once.
+- `maxValidationRetries` — number of re-prompts after the initial attempt
+  (`0` = no retries).
+- `invalidClassFallback` — class assigned when all retries are exhausted; the
+  resulting `PageClassification.classification.metadata` then carries a
+  `validation_error` string. The document is **not** failed.
+
+> Holistic (`textbasedHolisticClassification`) does not use this loop yet; it
+> still logs a warning and uses an unknown type as-is.
+
+See `notebooks/misc/classification-valid-class-enforcement.ipynb` for a
+deterministic, mock-driven walkthrough of all three scenarios (retry-then-valid,
+retries-exhausted-fallback, and enforcement-disabled).
 
 ## Usage Example
 

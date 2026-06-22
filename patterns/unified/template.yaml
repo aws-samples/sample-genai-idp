@@ -911,6 +911,26 @@ Resources:
                 default: 0
                 order: 3.6
                 dependsOn: { field: "classificationMethod", value: "multimodalPageLevelClassification" }
+              enforceValidClasses:
+                type: boolean
+                description: "When enabled, the predicted class is validated against the defined class vocabulary. If the model returns a class that is not in the list, it is re-prompted with the valid choices and retried (see Max Validation Retries). If retries are exhausted, the page is assigned the Invalid Class Fallback and flagged with a validation error. When disabled, an out-of-vocabulary prediction is used as-is (legacy behavior). Only applies to multimodalPageLevelClassification."
+                default: true
+                order: 3.7
+                dependsOn: { field: "classificationMethod", value: "multimodalPageLevelClassification" }
+              maxValidationRetries:
+                type: integer
+                description: "Maximum number of times to re-prompt the model when it returns a class outside the defined vocabulary. Only used when Enforce Valid Classes is enabled. 0 disables retries (a single invalid prediction goes straight to the fallback)."
+                minimum: 0
+                maximum: 5
+                default: 2
+                order: 3.8
+                dependsOn: { field: "enforceValidClasses", value: true }
+              invalidClassFallback:
+                type: string
+                description: "Class label assigned to a page when all validation retries are exhausted. Should be one of your defined classes, or the built-in 'unclassified'. Only used when Enforce Valid Classes is enabled."
+                default: "unclassified"
+                order: 3.9
+                dependsOn: { field: "enforceValidClasses", value: true }
               temperature:
                 type: number
                 minimum: 0

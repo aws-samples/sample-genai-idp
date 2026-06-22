@@ -124,6 +124,31 @@ class TestConfigModels:
         assert config.extraction.top_p == 0.1
         assert config.extraction.max_tokens == 10000
 
+    def test_classification_valid_class_enforcement_defaults(self):
+        """New class-enforcement fields default to enabled with sane values."""
+        from idp_common.config.models import ClassificationConfig
+
+        cfg = ClassificationConfig()
+        assert cfg.enforceValidClasses is True
+        assert cfg.maxValidationRetries == 2
+        assert cfg.invalidClassFallback == "unclassified"
+
+    def test_classification_valid_class_enforcement_parsing(self):
+        """String-typed stored config values parse into the correct types."""
+        from idp_common.config.models import ClassificationConfig
+
+        cfg = ClassificationConfig(
+            enforceValidClasses="false",
+            maxValidationRetries="3",
+            invalidClassFallback="other",
+        )
+        assert cfg.enforceValidClasses is False
+        assert cfg.maxValidationRetries == 3
+        assert cfg.invalidClassFallback == "other"
+
+        # Negative retries are clamped to 0.
+        assert ClassificationConfig(maxValidationRetries="-1").maxValidationRetries == 0
+
     def test_config_type_hints(self):
         """Test that config can be used as type hint"""
 
