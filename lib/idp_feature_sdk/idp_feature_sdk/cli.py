@@ -268,9 +268,7 @@ def publish_pack_cmd(
     """
     from .pack import PackPublisher
 
-    artifacts_bucket = _resolve_bucket(
-        bucket_basename, region, make_public=make_public
-    )
+    artifacts_bucket = _resolve_bucket(bucket_basename, region, make_public=make_public)
     try:
         publisher = PackPublisher(project_dir, console=console)
         result = publisher.publish(

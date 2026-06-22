@@ -4614,7 +4614,7 @@ Resources:
             - UseCloudFrontHosting
             - Effect: Allow
               Principal:
-                Service: cloudfront.amazonaws.com
+                Service: !Sub "cloudfront.${AWS::URLSuffix}"
               Action: s3:GetObject
               Resource: !Sub "${WebUIBucket.Arn}/*"
               Condition:
