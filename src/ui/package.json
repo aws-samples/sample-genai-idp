@@ -57,7 +57,7 @@
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "serialize-javascript": "^7.0.5",
-    "tmp": "^0.2.6",
+    "tmp": "^0.2.7",
     "uuid": "^11.1.0",
     "vuera": "^0.2.7",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.2/xlsx-0.20.2.tgz"

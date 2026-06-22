@@ -59,7 +59,7 @@ extras_require = {
     ],
     # Reporting module dependencies
     "reporting": [
-        "pyarrow==20.0.0",  # For Parquet conversion
+        "pyarrow==23.0.1",  # For Parquet conversion
     ],
     # Appsync module dependencies
     "appsync": [
@@ -76,7 +76,7 @@ extras_require = {
         "pytest-cov>=4.1.0",
         "pytest-xdist>=3.3.1",  # For parallel test execution
         "requests>=2.32.3,<3.0.0",
-        "pyarrow==20.0.0",
+        "pyarrow==23.0.1",
         "PyYAML==6.0.2",
         "openpyxl==3.1.5",
         "python-docx==1.2.0",
@@ -105,7 +105,7 @@ extras_require = {
         "numpy==1.26.4",
         "pandas==2.2.3",
         "requests==2.32.4",
-        "pyarrow==20.0.0",
+        "pyarrow==23.0.1",
         "openpyxl==3.1.5",
         "python-docx==1.2.0",
         "strands-agents==1.14.0",  # Pin to exact working version
@@ -117,7 +117,7 @@ extras_require = {
 
 setup(
     name="idp_common",
-    version="0.5.14",
+    version="0.5.15",
     packages=find_packages(
         exclude=[
             "build",

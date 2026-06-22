@@ -533,6 +533,32 @@ Parameters:
       "aws ec2 describe-vpc-endpoints --vpc-endpoint-ids <id> --query
       'VpcEndpoints[0].DnsEntries[0].DnsName'" then strip the leading "*.".
 
+  CustomDomainUrl:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^https://[a-z0-9.-]+(:[0-9]+)?$"
+    ConstraintDescription: >-
+      Must be empty or start with "https://" followed by a lowercase host
+      (and optional :port) with no path or trailing slash
+      (e.g. https://idp.example.com).
+    Description: >
+      Optional. Public-facing custom domain URL through which end users access
+      the Web UI (e.g. https://idp.example.com). Required when the application
+      is fronted by a customer-owned DNS alias, an Okta/SAML/OIDC SSO domain,
+      or any origin other than the auto-generated ALB or CloudFront URL. When
+      set, this origin is added to all S3 bucket CORS AllowedOrigins and to
+      Cognito App Client CallbackURLs / LogoutURLs so that browser uploads
+      and OAuth redirects succeed from the custom domain. The Web UI also
+      switches to using window.location.origin for OAuth redirects, which
+      keeps both the ALB URL and the custom domain working simultaneously.
+      Must include scheme (https://) and lowercase host only — no uppercase,
+      no trailing slash, no path. Lowercase is required because the Web UI's
+      Amplify config lowercases the redirect URL before sending it to
+      Cognito (browsers normalize the Origin header host to lowercase), and
+      Cognito matches CallbackURLs case-sensitively after that. Leave empty
+      for standard deployments where the ALB or CloudFront URL is the only
+      browser entry point.
+
   S3PresignedUrlViaVpcEndpoint:
     Type: String
     Default: "false"
@@ -886,6 +912,77 @@ Parameters:
       choice for almost all deployments. Only change if you need a custom
       hardened AMI. Ignored when DeployBastionHost=false.
 
+  # =========================================================================
+  # === Feature Platform (optional) — BEGIN ================================
+  # Everything between BEGIN/END markers may be lifted cleanly if the feature
+  # platform is removed. All resources gate on `EnableFeaturePlatform`.
+  # See feature-platform/ and docs/feature-platform.md.
+  #
+  # The open-source distribution ships the platform ON by default in
+  # auto-subscribe mode: every catalog feature is treated as subscribed and
+  # the UI goes straight to the Install prompt. No marketplace simulator is
+  # bundled. To exercise the paid Subscribe → buyer-console → Active flow,
+  # deploy the standalone marketplace-simulator (shipped separately) and set
+  # FeaturePlatformSimulatorEndpoint on this stack — no rebuild required.
+  # =========================================================================
+
+  EnableFeaturePlatform:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Set to 'true' (default) to enable the Feature Platform (catalog,
+      InstalledFeatures table, AppSync resolvers, install flow). When no
+      FeaturePlatformSimulatorEndpoint is configured, all features in the
+      catalog are treated as automatically subscribed and the UI goes
+      straight to the Install prompt. Set to 'false' to remove the platform
+      entirely (no platform resources are created).
+
+  FeaturePlatformSimulatorEndpoint:
+    Type: String
+    Default: ''
+    Description: >-
+      (Optional) Endpoint URL of a marketplace-simulator (e.g.
+      https://simulator.example.com) or a real AWS Marketplace API. Leave
+      blank (default) for auto-subscribe mode — no entitlement checks, every
+      catalog feature is installable. Set it to bolt entitlement checks onto
+      a running stack with no rebuild; deploy the standalone simulator from
+      the feature-extensions distribution and point this at its endpoint.
+
+  FeaturePlatformDefaultCustomerIdentifier:
+    Type: String
+    Default: ''
+    Description: >-
+      (Optional) Marketplace customer identifier used when the incoming
+      request has no X-Amzn-Marketplace-Customer-Identifier header. Only
+      used when FeaturePlatformSimulatorEndpoint is set. Required for
+      real-Marketplace production use.
+
+  DefaultFeatureId:
+    Type: String
+    Default: ''
+    Description: >-
+      (Optional) Vertical-product packs only. featureId of the feature that
+      should be the default landing page after sign-in (e.g.
+      'claims-pack'). When set, authenticated users are redirected to
+      /features/<id> instead of /documents on first navigation. Empty
+      string preserves the standard /documents landing. Surfaced to the
+      UI via the SSM Settings parameter — no UI rebuild required to change.
+
+  ConsoleTitle:
+    Type: String
+    Default: ''
+    Description: >-
+      (Optional) Title shown in the Web UI top navigation banner. Empty
+      string falls back to "IDP Accelerator Console". Vertical-product
+      packs set this (e.g. "Claims Processing Console") so the banner
+      reflects the deployed product. Surfaced via the SSM Settings
+      parameter — change with a stack update, no UI rebuild required.
+
+  # =========================================================================
+  # === Feature Platform (optional) — END ==================================
+  # =========================================================================
+
 Rules:
   MLflowTrackingURIRequired:
     RuleCondition: !Equals [ !Ref EnableMLflow, "true" ]
@@ -1031,6 +1128,18 @@ Conditions:
   UseCloudFrontHosting: !Equals [ !Ref WebUIHosting, "CloudFront" ]
   UseALBHosting: !Equals [ !Ref WebUIHosting, "ALB" ]
   HasS3VpcEndpointOverride: !Not [!Equals [!Ref S3VpcEndpointIdOverride, ""]]
+  # True when a customer-owned domain (DNS alias, Okta/SAML SSO domain, etc.)
+  # fronts the application. Drives three template behaviours:
+  #   1. Adds the custom origin to every browser-accessed S3 bucket's CORS
+  #      AllowedOrigins so direct presigned-URL uploads/downloads succeed.
+  #   2. Adds the custom origin (with and without trailing slash, lowercased)
+  #      to Cognito App Client CallbackURLs / LogoutURLs so OAuth redirects
+  #      land back on the custom domain.
+  #   3. Sets VITE_CLOUDFRONT_DOMAIN to "" at Web UI build time, which makes
+  #      Amplify use window.location.origin for redirectSignIn /
+  #      redirectSignOut. This keeps the ALB and the custom domain working
+  #      side-by-side instead of pinning OAuth to a single host.
+  HasCustomDomain: !Not [!Equals [!Ref CustomDomainUrl, ""]]
   # True when an S3 VPC Interface Endpoint EXISTS (either auto-provisioned by
   # ALB stack or customer-provided via override). Used for:
   #   - Backend Lambda S3 access (HasS3VpcEndpointAndVpc)
@@ -1059,6 +1168,23 @@ Conditions:
   CircuitBreakerTriggerServiceUnavailableEnabled: !Equals [ !Ref CircuitBreakerTriggerServiceUnavailable, "true" ]
   CircuitBreakerTriggerThrottlingEnabled: !Equals [ !Ref CircuitBreakerTriggerThrottling, "true" ]
   CircuitBreakerTriggerQuotaLimitEnabled: !Equals [ !Ref CircuitBreakerTriggerQuotaLimit, "true" ]
+
+  # Feature Platform
+  IsFeaturePlatformEnabled: !Equals [ !Ref EnableFeaturePlatform, 'true' ]
+  # Inverse condition used to gate the main stack's
+  # `${AWS::StackName}-TrackingTableName` Output so that it isn't declared at
+  # the same time as the FeaturePlatformStack's identically-named export
+  # (which would fail with "Export already exported by stack ...").
+  IsFeaturePlatformDisabled: !Equals [ !Ref EnableFeaturePlatform, 'false' ]
+  # Auto-subscribe mode: feature platform is on but no external Marketplace /
+  # simulator endpoint is configured. The entitlement Lambda short-circuits to
+  # ACTIVE so every catalog feature is treated as subscribed and the UI goes
+  # straight to the Install prompt. Setting FeaturePlatformSimulatorEndpoint
+  # switches the platform into marketplace mode with real entitlement checks.
+  IsAutoSubscribeMode:
+    !And
+      - !Condition IsFeaturePlatformEnabled
+      - !Equals [ !Ref FeaturePlatformSimulatorEndpoint, '' ]
 
 Metadata:
   cfn-lint:
@@ -1166,6 +1292,7 @@ Metadata:
           - S3PresignedUrlViaVpcEndpoint
           - S3VpcEndpointIdOverride
           - S3VpcEndpointDnsNameOverride
+          - CustomDomainUrl
       - Label:
           default: "Private Network (AppSync=PRIVATE requires ALB hosting)"
         Parameters:
@@ -1198,6 +1325,14 @@ Metadata:
           - LambdaArchitecture
           - EnableECRImageScanning
       - Label:
+          default: "Feature Platform (optional)"
+        Parameters:
+          - EnableFeaturePlatform
+          - FeaturePlatformSimulatorEndpoint
+          - FeaturePlatformDefaultCustomerIdentifier
+          - DefaultFeatureId
+          - ConsoleTitle
+      - Label:
           default: "General Configuration"
         Parameters:
           - MaxConcurrentWorkflows
@@ -1208,6 +1343,17 @@ Metadata:
           - LogRetentionDays
 
     ParameterLabels:
+      # --- Feature Platform ---
+      EnableFeaturePlatform:
+        default: "Enable Feature Platform"
+      FeaturePlatformSimulatorEndpoint:
+        default: "Marketplace/Simulator Endpoint (optional — auto-subscribe if blank)"
+      FeaturePlatformDefaultCustomerIdentifier:
+        default: "Marketplace Customer Identifier (optional)"
+      DefaultFeatureId:
+        default: "Default Feature Landing Page (optional)"
+      ConsoleTitle:
+        default: "Console Title (optional)"
       AdminEmail:
         default: "Admin Email Address"
       AllowedSignUpEmailDomain:
@@ -1280,14 +1426,16 @@ Metadata:
         default: "ALB - Allowed CIDR Ranges"
       S3PresignedUrlViaVpcEndpoint:
         default: "Route Browser S3 Uploads via VPC Endpoint"
-      S3VpcEndpointIdOverride:
-        default: "BYO S3 VPC Endpoint ID (optional)"
-      S3VpcEndpointDnsNameOverride:
-        default: "BYO S3 VPC Endpoint DNS Name (optional)"
       AppSyncVisibility:
         default: "AppSync API Visibility (GLOBAL or PRIVATE)"
       LambdaSubnetIds:
         default: "Lambda Subnet IDs (required when AppSyncVisibility=PRIVATE)"
+      S3VpcEndpointIdOverride:
+        default: "ALB - S3 Interface VPC Endpoint ID (BYO endpoint, optional)"
+      S3VpcEndpointDnsNameOverride:
+        default: "ALB - S3 Interface VPC Endpoint Regional DNS Name (BYO endpoint, optional)"
+      CustomDomainUrl:
+        default: "ALB - Custom Domain URL (https://host, no trailing slash, optional)"
       ArtifactsBucketKmsKeyArn:
         default: "Artifacts Bucket KMS Key ARN (optional, for pre-created KMS-encrypted bucket)"
       CircuitBreakerEnabled:
@@ -2593,6 +2741,97 @@ Resources:
           - ""
         CircuitBreakerEnabled: !Ref CircuitBreakerEnabled
 
+  ##########################################################################
+  # === Feature Platform (optional) — BEGIN ===============================
+  # Deployed only when EnableFeaturePlatform=true. Adds an InstalledFeatures
+  # DDB table + AppSync Lambdas for listing/registering/installing features
+  # and checking Marketplace entitlements. Feature stacks register themselves
+  # with this host and have their UI bundles rendered inside the main IDP web
+  # UI. With no FeaturePlatformSimulatorEndpoint set the platform runs in
+  # auto-subscribe mode (every catalog feature installable; no entitlement
+  # checks). See feature-platform/main-stack-extensions/.
+  ##########################################################################
+
+  # NB: there is no stack-owned "feature bucket". OSS feature artifacts live in
+  # the artifacts bucket the main template is published to (under
+  # sample-features/); the catalog entry (catalog.json) carries each feature's
+  # artifactBucket + artifactPrefix, and getFeatureLaunchUrl builds the Launch
+  # Stack URL directly from those. Marketplace features use a private seller
+  # bucket declared in config_library/extensions-marketplace.yaml.
+
+  FeaturePlatformStack:
+    Type: AWS::CloudFormation::Stack
+    Condition: IsFeaturePlatformEnabled
+    DependsOn:
+      - APPSYNCSTACK  # Attach resolvers only after main schema is finalised
+    Properties:
+      TemplateURL: ./feature-platform/main-stack-extensions/.aws-sam/packaged.yaml
+      Parameters:
+        MainStackName: !Ref AWS::StackName
+        GraphQLApiId: !GetAtt GraphQLApi.ApiId
+        GraphQLApiArn: !GetAtt GraphQLApi.Arn
+        AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
+        UserPoolId: !Ref UserPool
+        # Feature stacks with HTTP APIs use these two as the JWT audience
+        # (Cognito Client id) and as the document-state table name for
+        # scoped `dynamodb:Scan`/`Query` — e.g. `docs-by-status` counts
+        # documents per status by scanning the main stack's TrackingTable.
+        UserPoolClientId: !Ref UserPoolClient
+        TrackingTableName: !Ref TrackingTable
+        # Exposed to feature stacks so they can grant `kms:Decrypt` on the
+        # key that encrypts TrackingTable. Without it, a feature Lambda
+        # querying the table gets `AccessDeniedException: KMS key access
+        # denied`.
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        WebUIBucketName: !Ref WebUIBucket
+        WebUIBucketArn: !GetAtt WebUIBucket.Arn
+        # Output + Working bucket names re-exported for feature stacks:
+        # Output so features can read processing results (e.g. sample-health-insurance-review
+        # reads rule-validation consolidated summaries), Working so feature
+        # hook Lambdas can load the compressed document payloads the
+        # pipeline-hooks dispatcher hands them.
+        OutputBucketName: !Ref OutputBucket
+        WorkingBucketName: !Ref WorkingBucket
+        # Discovery bucket name re-exported so feature UIs that drive the
+        # host's Rules Discovery flow (sample-health-insurance-review) know where
+        # uploadDiscoveryDocument presigns uploads.
+        DiscoveryBucketName: !Ref DiscoveryBucket
+        # Reporting bucket name re-exported (as name + ARN) so feature stacks
+        # that read reporting/analytics data or write Athena query results
+        # (e.g. idp-monitor) can grant themselves scoped s3 access. Mirrors the
+        # bucket-or-name selection used elsewhere for the Reporting bucket.
+        ReportingBucketName: !If
+          - ShouldCreateReportingBucket
+          - !Ref ReportingBucket
+          - !Ref ReportingBucketName
+
+        # Region of the artifacts bucket (= this stack's region), used to build
+        # the bare OSS feature template URL in getFeatureLaunchUrl.
+        ArtifactRegion: !Ref AWS::Region
+        # The endpoint the entitlement Lambda targets. Blank in auto-subscribe
+        # mode (the Lambda short-circuits to ACTIVE). Set it to a simulator or
+        # real Marketplace endpoint to enable entitlement checks.
+        SimulatorEntitlementEndpoint: !Ref FeaturePlatformSimulatorEndpoint
+        # 'auto' short-circuits the entitlement Lambda to ACTIVE for every
+        # feature (no endpoint, no Marketplace call). 'marketplace' targets a
+        # real or admin-supplied Marketplace/simulator endpoint.
+        SubscriptionMode: !If
+          - IsAutoSubscribeMode
+          - 'auto'
+          - 'marketplace'
+        DefaultCustomerIdentifier: !Ref FeaturePlatformDefaultCustomerIdentifier
+        AdminGroupName: 'Admin'
+        # ConfigurationTable is shared between the main stack's pipeline and
+        # the registerFeatureHooks resolver; passing the name here lets the
+        # nested stack add the dynamic-pipeline-hooks plumbing.
+        ConfigurationTableName: !Ref ConfigurationTable
+        # ConfigurationBucket holds catalog.json (copied in at deploy time by
+        # ConfigurationCopyFunction). listCatalogFeatures / getFeatureLaunchUrl
+        # read it at runtime — the catalog source, no artifacts-bucket dependency.
+        ConfigurationBucketName: !Ref ConfigurationBucket
+        LogLevel: !Ref LogLevel
+  # === Feature Platform (optional) — END =================================
+
   CustomerManagedEncryptionKey:
     DependsOn:
       - IsStacknameLengthOK
@@ -2918,6 +3157,10 @@ Resources:
                 - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
+              # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
+              # Empty CustomDomainUrl resolves to AWS::NoValue → list entry is
+              # omitted so the array stays exactly as before for default deploys.
+              - !If [HasCustomDomain, !Ref CustomDomainUrl, !Ref "AWS::NoValue"]
             ExposedHeaders:
               - "ETag"
               - "x-amz-server-side-encryption"
@@ -2995,6 +3238,10 @@ Resources:
                 - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
+              # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
+              # Empty CustomDomainUrl resolves to AWS::NoValue → list entry is
+              # omitted so the array stays exactly as before for default deploys.
+              - !If [HasCustomDomain, !Ref CustomDomainUrl, !Ref "AWS::NoValue"]
             ExposedHeaders:
               - "ETag"
               - "x-amz-server-side-encryption"
@@ -3114,6 +3361,10 @@ Resources:
                 - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
+              # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
+              # Empty CustomDomainUrl resolves to AWS::NoValue → list entry is
+              # omitted so the array stays exactly as before for default deploys.
+              - !If [HasCustomDomain, !Ref CustomDomainUrl, !Ref "AWS::NoValue"]
             ExposedHeaders:
               - "ETag"
               - "x-amz-server-side-encryption"
@@ -3600,6 +3851,10 @@ Resources:
                 - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
+              # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
+              # Empty CustomDomainUrl resolves to AWS::NoValue → list entry is
+              # omitted so the array stays exactly as before for default deploys.
+              - !If [HasCustomDomain, !Ref CustomDomainUrl, !Ref "AWS::NoValue"]
             ExposedHeaders:
               - "ETag"
               - "x-amz-server-side-encryption"
@@ -3721,6 +3976,10 @@ Resources:
                 - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
+              # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
+              # Empty CustomDomainUrl resolves to AWS::NoValue → list entry is
+              # omitted so the array stays exactly as before for default deploys.
+              - !If [HasCustomDomain, !Ref CustomDomainUrl, !Ref "AWS::NoValue"]
             ExposedHeaders:
               - "ETag"
               - "x-amz-server-side-encryption"
@@ -3790,6 +4049,10 @@ Resources:
                 - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
+              # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
+              # Empty CustomDomainUrl resolves to AWS::NoValue → list entry is
+              # omitted so the array stays exactly as before for default deploys.
+              - !If [HasCustomDomain, !Ref CustomDomainUrl, !Ref "AWS::NoValue"]
             ExposedHeaders:
               - "ETag"
               - "x-amz-server-side-encryption"
@@ -4265,6 +4528,10 @@ Resources:
                 - !GetAtt GetLowercaseAlbUrl.Lowercase
               # For local development only
               - "http://localhost:3000"
+              # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
+              # Empty CustomDomainUrl resolves to AWS::NoValue → list entry is
+              # omitted so the array stays exactly as before for default deploys.
+              - !If [HasCustomDomain, !Ref CustomDomainUrl, !Ref "AWS::NoValue"]
             ExposedHeaders:
               - "ETag"
               - "x-amz-server-side-encryption"
@@ -4930,6 +5197,12 @@ Resources:
         # When PublicArtifactsBucket is empty the UI hides the indicator entirely.
         PublicArtifactsBucket: !Ref PublicArtifactsBucket
         PublicArtifactsPrefix: !Ref PublicArtifactsPrefix
+        # Vertical-product packs: redirects post-login navigation to
+        # /features/<id> instead of /documents when set. Read by AuthRoutes.
+        DefaultFeatureId: !Ref DefaultFeatureId
+        # Vertical-product packs: customise the top-navigation banner.
+        # Read by GenAIIDPTopNavigation; defaults to "IDP Accelerator Console".
+        ConsoleTitle: !Ref ConsoleTitle
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 
@@ -7459,6 +7732,12 @@ Resources:
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}/"
           - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
+        # Custom domain entries — both with and without trailing slash because
+        # browsers and OAuth libraries vary in normalisation. Cognito matches
+        # callback URLs case-sensitively after exact-string compare, so we add
+        # both forms to avoid a class of "redirect_mismatch" errors.
+        - !If [HasCustomDomain, !Ref CustomDomainUrl, !Ref "AWS::NoValue"]
+        - !If [HasCustomDomain, !Sub "${CustomDomainUrl}/", !Ref "AWS::NoValue"]
         - !Sub "https://${AWS::Region}.quicksight.aws.amazon.com/sn/oauthcallback"
         - https://us-east-1.quicksight.aws.amazon.com/sn/oauthcallback
         - https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback
@@ -7470,6 +7749,8 @@ Resources:
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}/"
           - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
+        - !If [HasCustomDomain, !Ref CustomDomainUrl, !Ref "AWS::NoValue"]
+        - !If [HasCustomDomain, !Sub "${CustomDomainUrl}/", !Ref "AWS::NoValue"]
         - !Sub "https://${AWS::Region}.quicksight.aws.amazon.com/sn/oauthcallback"
         - https://us-east-1.quicksight.aws.amazon.com/sn/oauthcallback
         - https://us-west-2.quicksight.aws.amazon.com/sn/oauthcallback
@@ -7607,6 +7888,10 @@ Resources:
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}/"
           - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
+        # Custom domain — both forms (no trailing slash and trailing slash)
+        # so OAuth redirects match regardless of how the browser normalises.
+        - !If [HasCustomDomain, !Ref CustomDomainUrl, !Ref "AWS::NoValue"]
+        - !If [HasCustomDomain, !Sub "${CustomDomainUrl}/", !Ref "AWS::NoValue"]
       LogoutURLs: !If
         - HasExternalIdP
         - - !If
@@ -7617,6 +7902,8 @@ Resources:
             - UseCloudFrontHosting
             - !Sub "https://${CloudFrontDistribution.DomainName}/"
             - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
+          - !If [HasCustomDomain, !Ref CustomDomainUrl, !Ref "AWS::NoValue"]
+          - !If [HasCustomDomain, !Sub "${CustomDomainUrl}/", !Ref "AWS::NoValue"]
         - !Ref AWS::NoValue
       AccessTokenValidity: 1
       EnableTokenRevocation: true
@@ -9606,10 +9893,19 @@ Resources:
               - !Ref ExternalIdPAutoLogin
               - "false"
           - Name: VITE_CLOUDFRONT_DOMAIN
+            # When a custom domain is configured, leave this empty so
+            # aws-exports.js falls back to window.location.origin for
+            # OAuth redirectSignIn / redirectSignOut. That fallback makes
+            # the same build work whether the user lands on the ALB URL,
+            # the CloudFront URL, or the custom domain — the Amplify OAuth
+            # flow always starts and returns on the same origin.
             Value: !If
-              - UseCloudFrontHosting
-              - !Sub "https://${CloudFrontDistribution.DomainName}/"
-              - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
+              - HasCustomDomain
+              - ""
+              - !If
+                - UseCloudFrontHosting
+                - !Sub "https://${CloudFrontDistribution.DomainName}/"
+                - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
           - Name: VITE_TEST_SET_BUCKET_NAME
             Value: !Ref TestSetBucket
           - Name: VITE_INPUT_BUCKET_NAME
@@ -10960,3 +11256,40 @@ Outputs:
       security group on all VPC Interface Endpoints they create for this stack.
       See scripts/vpc-endpoints.yaml for the endpoint template.
     Value: !GetAtt LambdaVpcSecurityGroup.GroupId
+  AppSyncEndpointForDNS:
+    Condition: UsePrivateAppSync
+    Description: >-
+      Fully-qualified AppSync GraphQL hostname, provided for private-network
+      DNS setup when AppSyncVisibility=PRIVATE. For cross-VPC, cross-account,
+      or hybrid (on-premises) access, create TWO API-ID-scoped Route 53 Private
+      Hosted Zones — one named for this exact hostname and one for its realtime
+      counterpart (this hostname with 'appsync-api' replaced by
+      'appsync-realtime-api') — and add an apex A-record alias in each,
+      targeting the AppSync VPC Interface Endpoint (EvaluateTargetHealth=false).
+      Scope the zones to these exact hostnames, NOT the broader regional
+      'appsync-api.<region>' service domain, so DNS for every other
+      AppSync API in the region is unaffected. Both zones must be associated
+      with each VPC that resolves the API. See docs/deployment-private-network.md,
+      "AppSync DNS resolution in cross-VPC and hybrid networks".
+    Value: !Select
+      - 2
+      - !Split ["/", !GetAtt GraphQLApi.GraphQLUrl]
+
+  # ── Feature Platform cross-stack export ───────────────────────────────────
+  # `${AWS::StackName}-TrackingTableName` lets installed feature stacks
+  # Fn::ImportValue the main stack's document tracking table (e.g. the
+  # docs-by-status sample scans it for per-status counts).
+  #
+  # This export is *conditionally suppressed* when EnableFeaturePlatform=true,
+  # because the FeaturePlatformStack nested stack
+  # (feature-platform/main-stack-extensions/template.yaml) re-exports the same
+  # name for feature-stack consumption. CloudFormation rejects two stacks
+  # declaring the same export name, so when the Feature Platform is enabled it
+  # owns the export, and when it is disabled the main stack owns it. Either way
+  # a feature stack that Fn::ImportValue's this name sees the same value.
+  TrackingTableName:
+    Condition: IsFeaturePlatformDisabled
+    Description: Name of the DynamoDB document tracking table (feature-stack cross-stack ref)
+    Value: !Ref TrackingTable
+    Export:
+      Name: !Sub "${AWS::StackName}-TrackingTableName"

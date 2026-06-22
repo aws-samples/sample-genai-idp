@@ -1,0 +1,278 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Feature template scaffold v<FEATURE_VERSION_TOKEN> — copy to your feature
+  repo and customise. Deploys into the same AWS account as the main IDP stack
+  (referenced by MainStackName). Registers itself with the host on
+  Create/Update, and unregisters on Delete. Copies the UMD UI bundle into the
+  host's WebUIBucket.
+
+Parameters:
+
+  MainStackName:
+    Type: String
+    Description: Name of the parent IDP Accelerator stack. Used to import
+      WebUIBucketName, AppSyncApiUrl, AppSyncApiArn, etc. via Fn::ImportValue.
+
+  # NOTE: There is intentionally no FeatureVersion parameter. The version is
+  # baked into this template at publish time by `idp-feature-cli publish`,
+  # which substitutes the literal string `<FEATURE_VERSION_TOKEN>` (see
+  # below) with the value from feature.yaml -> version. Why bake it in
+  # instead of using a CFN Parameter? CloudFormation Console's "Update
+  # stack" wizard ignores `param_*` query-string overrides — admins
+  # clicking "Update" from the IDP nav would otherwise stay on the old
+  # version. By making the new template literally contain the new version
+  # string, CFN sees a real template change and the update applies cleanly
+  # without UI gymnastics.
+
+  FeatureId:
+    Type: String
+    Default: my-feature
+    Description: Must match feature.yaml -> featureId. Used as the S3 prefix for the UI bundle.
+
+  FeatureDisplayName:
+    Type: String
+    Default: My Feature
+
+  FeatureBucket:
+    Type: String
+    Default: <FEATURE_BUCKET_TOKEN>
+    Description: S3 bucket holding this version's artifacts (the host's artifacts
+      bucket for OSS features, or a seller bucket for marketplace features). The
+      ui-deployer custom resource copies the UI bundle from here into the host's
+      WebUIBucket. Pre-filled by the host's getFeatureLaunchUrl. The default is
+      baked to the publish bucket at publish time (<FEATURE_BUCKET_TOKEN>), so a
+      console "Update stack" that drops this param falls back to it rather than
+      an empty string; an installer who re-staged artifacts overrides it.
+
+  # NOTE: the version-free artifact base (<prefix>/extensions/<id>) is NOT a CFN
+  # parameter. Like FEATURE_VERSION, it is baked into this template at publish
+  # time (the publisher substitutes <FEATURE_ARTIFACT_PREFIX_TOKEN>). A CFN
+  # parameter would be dropped/blanked by the console "Update stack" wizard on a
+  # template change, which produced an empty prefix and a `//<version>/` bad S3
+  # key. The ui-deployer reads <baked-prefix>/<FEATURE_VERSION>/ui-bundle.js;
+  # both halves are template literals, so a stack Update can never carry a stale
+  # value.
+
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues: [DEBUG, INFO, WARNING, ERROR]
+
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ''
+    Description: Optional IAM permissions boundary ARN applied to created roles.
+
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, '']]
+
+Globals:
+
+  Function:
+    Runtime: python3.12
+    Timeout: 60
+    MemorySize: 256
+    Tracing: Active
+    Architectures: [arm64]
+
+Resources:
+
+  ###########################################################################
+  # Optional: feature's own API (HTTP API Gateway + Lambda).
+  # Cognito JWT authorizer points at the main stack's User Pool.
+  ###########################################################################
+  FeatureApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      # CORS is served by API Gateway's built-in preflight handler. Without
+      # this block, OPTIONS preflight requests hit the default JWT authorizer,
+      # which rejects them (no Authorization header on preflight) and the
+      # browser shows "Failed to fetch" before it can ever send the GET.
+      # API Gateway HTTP APIs handle OPTIONS entirely inside the gateway when
+      # CorsConfiguration is set — preflight never reaches the authorizer or
+      # the backend Lambda.
+      #
+      # AllowOrigins='*' is safe here because the API uses Bearer JWT
+      # authentication (Authorization header), NOT cookies. The browser's
+      # same-origin policy only restricts credentialed requests; with
+      # AllowCredentials unset (default false), wildcard origin is fine and
+      # CORS-compliant.
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        AllowHeaders:
+          - authorization
+          - content-type
+          - x-amz-date
+          - x-amz-security-token
+        MaxAge: 600
+      Auth:
+        DefaultAuthorizer: CognitoJwt
+        Authorizers:
+          CognitoJwt:
+            JwtConfiguration:
+              issuer: !Sub
+                - 'https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${UserPoolId}'
+                - UserPoolId: { 'Fn::ImportValue': !Sub '${MainStackName}-UserPoolId' }
+              audience:
+                # Accept any of the main stack's app clients. The main stack
+                # publishes a UserPoolClientId export; list extras here.
+                - !Sub
+                  - '${ClientId}'
+                  - ClientId: { 'Fn::ImportValue': !Sub '${MainStackName}-UserPoolClientId' }
+            IdentitySource: '$request.header.Authorization'
+
+  FeatureApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: feature-api/
+      Handler: handler.lambda_handler
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          MAIN_STACK_NAME: !Ref MainStackName
+      Events:
+        # NOTE: Method must NOT be ANY. When the route is `ANY /{proxy+}`, it
+        # matches OPTIONS too, so API Gateway's built-in CORS preflight
+        # handler (enabled via CorsConfiguration above) is bypassed — the
+        # OPTIONS preflight ends up at the JWT authorizer, which rejects it
+        # with 401 and the browser reports "Failed to fetch". List only the
+        # methods the handler serves; add additional `Event` entries per
+        # method (e.g. PostRoot with Method: POST) if your API needs more.
+        Root:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FeatureApi
+            Path: /{proxy+}
+            Method: GET
+
+  ###########################################################################
+  # CloudWatch Log Groups — explicit retention to avoid never-expire default
+  ###########################################################################
+  FeatureApiFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FeatureApiFunction}'
+      RetentionInDays: 30
+
+  UiDeployerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${UiDeployerFunction}'
+      RetentionInDays: 30
+
+  ###########################################################################
+  # UI deployer: copies the UMD bundle from the feature bucket into the main
+  # stack's WebUIBucket under features/<featureId>/v<version>/.
+  ###########################################################################
+  UiDeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref 'AWS::NoValue']
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: !Sub "lambda.${AWS::URLSuffix}" }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Tags:
+        # session tag used by the main-stack bucket policy to scope writes
+        - Key: 'idp:feature-id'
+          Value: !Ref FeatureId
+      Policies:
+        - PolicyName: ReadFeatureBucket
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # GetObject only — the FeatureBucket (the host's artifacts bucket
+              # for OSS, or a private seller bucket for marketplace) is
+              # GetObject-only by contract; we never list it. Scoped to this
+              # extension's version-free base; the ui-deployer reads
+              # <version>/ui-bundle.js under it.
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${FeatureBucket}/<FEATURE_ARTIFACT_PREFIX_TOKEN>/*'
+        - PolicyName: WriteWebUIBucketPrefix
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                  - s3:DeleteObject
+                Resource: !Sub
+                  - 'arn:${AWS::Partition}:s3:::${Bucket}/features/${FeatureId}/*'
+                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-WebUIBucketName' }
+        - PolicyName: InvokeAppSync
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: appsync:GraphQL
+                Resource:
+                  - !Sub
+                    - '${ApiArn}/types/Mutation/fields/registerFeature'
+                    - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
+                  - !Sub
+                    - '${ApiArn}/types/Mutation/fields/unregisterFeature'
+                    - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
+
+  UiDeployerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ui-deployer/
+      Handler: handler.lambda_handler
+      Role: !GetAtt UiDeployerRole.Arn
+      Environment:
+        Variables:
+          FEATURE_ID: !Ref FeatureId
+          FEATURE_DISPLAY_NAME: !Ref FeatureDisplayName
+          # Version is substituted at publish time — see top-of-file note
+          # on why this is not a CFN parameter.
+          FEATURE_VERSION: '<FEATURE_VERSION_TOKEN>'
+          MAIN_STACK_NAME: !Ref MainStackName
+          WEBUI_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WebUIBucketName' }
+          FEATURE_BUCKET: !Ref FeatureBucket
+          # Baked at publish time (see top-of-file note) — NOT a CFN param.
+          FEATURE_ARTIFACT_PREFIX: '<FEATURE_ARTIFACT_PREFIX_TOKEN>'
+          APPSYNC_API_URL: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiUrl' }
+          FEATURE_API_ENDPOINT: !GetAtt FeatureApi.ApiEndpoint
+          LOG_LEVEL: !Ref LogLevel
+          # Marketplace identity, baked from feature.yaml at publish time (empty
+          # for non-marketplace features). The ui-deployer forwards these to the
+          # host's registerFeature mutation so the install row carries the
+          # product code — no per-host FeatureProductCodeMap needed.
+          FEATURE_PRODUCT_CODE: '<FEATURE_PRODUCT_CODE_TOKEN>'
+          FEATURE_LISTING_URL: '<FEATURE_LISTING_URL_TOKEN>'
+
+  RegisterFeatureResource:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt UiDeployerFunction.Arn
+      # Properties below are echoed as inputs to the Lambda; changing any
+      # causes CloudFormation to invoke Update.
+      # FeatureVersion is substituted at publish time so the new version
+      # is a real template change CFN must update.
+      FeatureVersion: '<FEATURE_VERSION_TOKEN>'
+      FeatureDisplayName: !Ref FeatureDisplayName
+      # Re-trigger the custom resource when the baked marketplace identity
+      # changes (e.g. a productCode added in a later publish).
+      FeatureProductCode: '<FEATURE_PRODUCT_CODE_TOKEN>'
+      FeatureListingUrl: '<FEATURE_LISTING_URL_TOKEN>'
+
+Outputs:
+  FeatureApiEndpoint:
+    Description: Base URL for this feature's API.
+    Value: !GetAtt FeatureApi.ApiEndpoint
+  InstalledVersion:
+    Value: '<FEATURE_VERSION_TOKEN>'

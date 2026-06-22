@@ -236,3 +236,60 @@ class TestChatConfig:
         """temperature must be within [0, 1] like other model sections."""
         with pytest.raises(Exception):  # Pydantic ValidationError
             ChatConfig.model_validate({"temperature": 2.0})
+
+
+class TestPipelineHookPreservation:
+    """Feature Platform pipeline hooks are stored inline in a config version
+    under `<step>.postHook`. The host's dispatcher reads them from the raw
+    DynamoDB row, but several write paths round-trip the config through
+    IDPConfig validation (Save-as-Version, updateConfiguration, and the
+    sparse-config auto-migration in ConfigurationManager). If `postHook` were
+    not a declared field, extra="ignore" would silently drop it on those
+    round-trips, leaving the dispatcher with no hook to invoke (symptom: a
+    feature's post-step hook never fires, e.g. the Claims Dashboard stays
+    empty). These tests lock the field in on every hookable step.
+    """
+
+    _HOOK = {
+        "featureId": "sample-health-insurance-review",
+        "arn": "arn:aws:lambda:us-west-2:111122223333:function:ClaimStatusHook",
+        "order": 100,
+        "onError": "continue",
+        "enabled": True,
+    }
+    _STEPS = [
+        "ocr",
+        "classification",
+        "extraction",
+        "assessment",
+        "rule_validation",
+        "summarization",
+    ]
+
+    def test_post_hook_survives_idp_config_round_trip_all_steps(self):
+        cfg_dict = {step: {"postHook": [self._HOOK]} for step in self._STEPS}
+        dumped = IDPConfig.model_validate(cfg_dict).model_dump(mode="python")
+        for step in self._STEPS:
+            hooks = dumped[step]["postHook"]
+            assert len(hooks) == 1, f"{step}.postHook dropped on round-trip"
+            assert hooks[0]["arn"].endswith(":ClaimStatusHook")
+            assert hooks[0]["featureId"] == "sample-health-insurance-review"
+            assert hooks[0]["onError"] == "continue"
+            assert hooks[0]["enabled"] is True
+
+    def test_post_hook_defaults_to_empty_list(self):
+        """No hooks configured → empty list, never None (dispatcher iterates it)."""
+        cfg = IDPConfig.model_validate({})
+        assert cfg.rule_validation.postHook == []
+        assert cfg.classification.postHook == []
+
+    def test_sparse_rule_validation_overlay_keeps_hook_and_merges_defaults(self):
+        """The real failure mode: a sparse preset overlay carrying only
+        rule_validation.postHook must keep the hook AND inherit classification
+        defaults (system_prompt) once merged into a full IDPConfig."""
+        cfg = IDPConfig.model_validate(
+            {"rule_validation": {"enabled": True, "postHook": [self._HOOK]}}
+        )
+        assert len(cfg.rule_validation.postHook) == 1
+        # classification still has its default model (not wiped out).
+        assert cfg.classification.model

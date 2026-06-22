@@ -1377,6 +1377,44 @@ STDERR:
             self.console.print(str(e), style="red", markup=False)
             sys.exit(1)
 
+    def _upload_version_pointer(self):
+        """Write `<prefix>/idp-main-latest.json` to the public artifacts bucket.
+
+        A single small pointer object the Web UI's getLatestPublishedVersion
+        resolver reads (GetObject of one known key — no ListObjectsV2, so it
+        works against the public release bucket). Overwritten on every publish;
+        lives at the version-stripped prefix so it always names the newest
+        release. `templateUrl` points at the versioned main template.
+        """
+        basename = self.main_template.replace(".yaml", "")  # e.g. "idp-main"
+        pointer_key = f"{self.prefix}/{basename}-latest.json"
+        versioned_key = f"{self.prefix}/{basename}_{self.version}.yaml"
+        body = json.dumps(
+            {
+                "version": self.version,
+                "templateUrl": (
+                    f"https://s3.{self.region}.amazonaws.com/{self.bucket}/{versioned_key}"
+                ),
+            },
+            indent=2,
+        ).encode("utf-8")
+        try:
+            self.s3_client.put_object(
+                Bucket=self.bucket,
+                Key=pointer_key,
+                Body=body,
+                ContentType="application/json",
+            )
+            self.console.print(
+                f"[green]✅ Version pointer updated: s3://{self.bucket}/{pointer_key} "
+                f"→ {self.version}[/green]"
+            )
+        except Exception as e:  # noqa: BLE001 — non-fatal; the indicator is optional
+            self.console.print(
+                f"[yellow]⚠️  Failed to write version pointer (the 'update "
+                f"available' indicator may not work): {e}[/yellow]"
+            )
+
     def _check_and_upload_template(self, template_path, s3_key, description):
         """Helper method to check if template exists in S3 and upload if missing"""
         try:
@@ -1399,13 +1437,550 @@ STDERR:
                 )
                 self.console.print(str(e), style="red", markup=False)
 
+    # Directories under feature-platform/ that contain bundled features to
+    # publish automatically during deploy so a fresh stack has a working
+    # feature in its catalog without a manual `idp-feature-cli publish`.
+    # Public builds bundle only the reference sample; proprietary features
+    # live in the separate idp-extensions repo and are published there.
+    #
+    # The list of OSS feature directories to bundle is declared in
+    # config_library/extensions-oss.yaml (the OSS counterpart of
+    # extensions-marketplace.yaml). _DEFAULT_BUNDLED_FEATURE_DIRS is the
+    # fallback used only when that file is absent (e.g. a trimmed checkout).
+    _OSS_EXTENSIONS_FILE = "config_library/extensions-oss.yaml"
+    _DEFAULT_BUNDLED_FEATURE_DIRS = [
+        "feature-platform/sample-feature",
+    ]
+
+    def _bundled_feature_dirs(self):
+        """Return the OSS feature directories to bundle, from extensions-oss.yaml.
+
+        The file shares the shape of extensions-marketplace.yaml:
+            schemaVersion: "1.0"
+            features:
+              - path: feature-platform/sample-feature
+
+        Falls back to _DEFAULT_BUNDLED_FEATURE_DIRS when the file is absent. A
+        malformed file is a hard error — a broken list would silently drop
+        bundled features from the catalog.
+        """
+        path = Path(self._OSS_EXTENSIONS_FILE)
+        if not path.is_file():
+            self.log_verbose(
+                f"{self._OSS_EXTENSIONS_FILE} not found — using default bundled "
+                f"feature list ({self._DEFAULT_BUNDLED_FEATURE_DIRS})."
+            )
+            return list(self._DEFAULT_BUNDLED_FEATURE_DIRS)
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError as exc:
+            self.log_error(f"Malformed {self._OSS_EXTENSIONS_FILE}: {exc}")
+            sys.exit(1)
+        entries = data.get("features") or []
+        if not isinstance(entries, list):
+            self.log_error(f"{self._OSS_EXTENSIONS_FILE} 'features' must be a list.")
+            sys.exit(1)
+        dirs = []
+        for entry in entries:
+            if not isinstance(entry, dict) or not entry.get("path"):
+                self.log_error(
+                    f"{self._OSS_EXTENSIONS_FILE} each feature must be a mapping "
+                    f"with a 'path' key; got {entry!r}"
+                )
+                sys.exit(1)
+            dirs.append(entry["path"])
+        return dirs
+
+    def _get_feature_deps(self, feature_dir):
+        """Return the list of source paths a feature's build depends on."""
+        return [
+            str(feature_dir / "feature.yaml"),
+            str(feature_dir / "template.yaml"),
+            str(feature_dir / "feature-api"),
+            str(feature_dir / "feature-ui" / "src"),
+            str(feature_dir / "feature-ui" / "package.json"),
+            str(feature_dir / "feature-ui" / "vite.config.ts"),
+            str(feature_dir / "feature-ui" / "tsconfig.json"),
+            str(feature_dir / "feature-ui" / "index.html"),
+            str(feature_dir / "ui-deployer"),
+        ]
+
+    def build_and_upload_sample_features(self):
+        """Build and upload bundled sample feature(s) to the artifact bucket.
+
+        Produces artifacts under a VERSION-FREE extension base:
+            s3://<artifact-bucket>/<prefix>/extensions/<id>/template.yaml
+            s3://<artifact-bucket>/<prefix>/extensions/<id>/<version>/...
+
+        OSS extensions install directly from the artifacts bucket (no host-side
+        copy): the generated catalog.json carries each feature's artifactBucket
+        + (version-free) artifactPrefix, and getFeatureLaunchUrl builds the
+        Launch Stack URL from those. The feature's ui-deployer then copies the
+        UI bundle into the host's WebUIBucket at install/update time.
+
+        Returns ``(hash, file_list)`` — empty when no bundled feature
+        directories are present (e.g. a trimmed checkout).
+        """
+        feature_dirs = [
+            Path(d) for d in self._bundled_feature_dirs() if Path(d).is_dir()
+        ]
+        if not feature_dirs:
+            self.log_verbose(
+                "No bundled feature directories found — skipping sample-feature "
+                "publish (feature bucket will start empty)."
+            )
+            return "", []
+
+        self.log_phase("Building Sample Features", "🧩")
+
+        # Lazy import — idp_feature_sdk ships in lib/idp_feature_sdk/ but some
+        # CI envs strip feature trees before this runs.
+        try:
+            from idp_feature_sdk.manifest import load_manifest
+            from idp_feature_sdk.publisher import FeaturePublisher
+        except ImportError as exc:
+            raise RuntimeError(
+                "idp_feature_sdk is required to build bundled features but is not "
+                "installed. Install it with: pip install -e lib/idp_feature_sdk/\n"
+                f"Original error: {exc}"
+            )
+
+        _PUBLISH_FORMAT_VERSION = "v3-multi-feature"
+        all_file_lists = []
+        all_checksums = []
+        oss_catalog_entries = []
+
+        for feature_dir in feature_dirs:
+            self.log_task(f"Processing bundled feature: {feature_dir.name}")
+            file_list, catalog_entry = self._build_and_upload_single_feature(
+                feature_dir, load_manifest, FeaturePublisher
+            )
+            all_file_lists.extend(file_list)
+            if catalog_entry:
+                oss_catalog_entries.append(catalog_entry)
+
+            deps = self._get_feature_deps(feature_dir)
+            per_feature_checksum = hashlib.sha256(
+                "".join(
+                    self.get_file_checksum(d)
+                    if os.path.isfile(d)
+                    else self.get_source_files_checksum(d)
+                    for d in deps
+                    if os.path.exists(d)
+                ).encode()
+            ).hexdigest()
+            all_checksums.append(per_feature_checksum)
+
+        combined_checksum = hashlib.sha256(
+            (_PUBLISH_FORMAT_VERSION + "".join(all_checksums)).encode()
+        ).hexdigest()
+        return combined_checksum[:16], all_file_lists, oss_catalog_entries
+
+    # Checked-in curated list of closed-source (Marketplace) extensions.
+    _MARKETPLACE_EXTENSIONS_FILE = "config_library/extensions-marketplace.yaml"
+    # Written into config_library/ so the existing ConfigurationCopyFunction
+    # copies it into the stack's ConfigurationBucket at deploy time; the host's
+    # listCatalogFeatures resolver reads it from there at runtime (GetObject,
+    # no ListObjectsV2, no post-deploy artifacts-bucket dependency).
+    _CATALOG_OUTPUT_FILE = "config_library/catalog.json"
+
+    def _load_marketplace_features(self):
+        """Load + normalize the curated marketplace extension list.
+
+        Returns a list of CatalogFeature dicts (source='marketplace'). Missing
+        file → empty list (OSS-only deployment). Malformed file is a hard error
+        — a broken catalog would silently hide paid extensions.
+        """
+        path = Path(self._MARKETPLACE_EXTENSIONS_FILE)
+        if not path.is_file():
+            self.log_verbose(
+                f"{self._MARKETPLACE_EXTENSIONS_FILE} not found — catalog will list "
+                f"OSS features only."
+            )
+            return []
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError as exc:
+            self.log_error(f"Malformed {self._MARKETPLACE_EXTENSIONS_FILE}: {exc}")
+            sys.exit(1)
+        raw = data.get("features") or []
+        entries = []
+        for item in raw:
+            if not isinstance(item, dict) or not item.get("featureId"):
+                self.log_warning(
+                    f"Skipping malformed marketplace extension entry: {item!r}"
+                )
+                continue
+            entries.append(
+                {
+                    "featureId": item["featureId"],
+                    "displayName": item.get("displayName") or item["featureId"],
+                    "description": item.get("description") or "",
+                    "iconUrl": item.get("iconUrl") or "",
+                    # Optional absolute docs URL; if omitted the UI falls back to
+                    # marketplaceListingUrl for the "Learn more" link.
+                    "docsUrl": item.get("docsUrl") or "",
+                    "source": "marketplace",
+                    "latestVersion": item.get("latestVersion") or "",
+                    "productCode": item.get("productCode") or "",
+                    "marketplaceListingUrl": item.get("marketplaceListingUrl") or "",
+                    "sellerBucket": item.get("sellerBucket") or "",
+                    "sellerBucketRegion": item.get("sellerBucketRegion") or "",
+                    "templateKey": item.get("templateKey") or "",
+                }
+            )
+        return entries
+
+    def write_catalog_file(self, oss_catalog_entries):
+        """Merge OSS + marketplace entries and write config_library/catalog.json.
+
+        Called after build_and_upload_sample_features() and BEFORE
+        upload_config_library() / generate_config_file_list() so the file is
+        synced to the artifacts bucket and included in the deploy-time copy
+        FileList. The host never lists buckets — it reads this one file from its
+        own ConfigurationBucket.
+        """
+        marketplace_entries = self._load_marketplace_features()
+        # De-dupe by featureId; OSS bundled features win over a marketplace
+        # entry of the same id (defensive — they shouldn't collide).
+        by_id = {}
+        for entry in marketplace_entries + list(oss_catalog_entries):
+            by_id[entry["featureId"]] = entry
+        catalog = {
+            "schemaVersion": "1.0",
+            "features": sorted(by_id.values(), key=lambda f: f["displayName"].lower()),
+        }
+        out_path = Path(self._CATALOG_OUTPUT_FILE)
+        out_path.write_text(
+            json.dumps(catalog, indent=2, sort_keys=True), encoding="utf-8"
+        )
+        self.log_success(
+            f"Wrote {out_path} ({len(catalog['features'])} features: "
+            f"{len(oss_catalog_entries)} OSS + {len(marketplace_entries)} marketplace)"
+        )
+        return catalog
+
+    def _upload_catalog_to_artifacts(self):
+        """Upload config_library/catalog.json to the artifacts bucket.
+
+        upload_config_library() already ran (it bulk-syncs config_library/
+        before sample features are built), so this uploads the freshly-written
+        catalog.json on its own. It lands under the same
+        `<prefix>/config_library/` path, so the deploy-time copy FileList
+        (generate_config_file_list, which walks the local config_library/ dir)
+        includes it and the ConfigurationCopyFunction copies it into the stack's
+        ConfigurationBucket.
+        """
+        out_path = Path(self._CATALOG_OUTPUT_FILE)
+        if not out_path.is_file():
+            return
+        s3_key = f"{self.prefix_and_version}/config_library/catalog.json"
+        self.s3_client.upload_file(
+            str(out_path),
+            self.bucket,
+            s3_key,
+            ExtraArgs={"ContentType": "application/json"},
+        )
+        self.log_verbose(f"Uploaded catalog.json to s3://{self.bucket}/{s3_key}")
+
+    def _build_and_upload_single_feature(
+        self, feature_dir, load_manifest, FeaturePublisher
+    ):
+        """Build and upload one bundled feature. Returns its uploaded file list."""
+        _PUBLISH_FORMAT_VERSION = "v3-multi-feature"
+
+        deps = self._get_feature_deps(feature_dir)
+        current_checksum = hashlib.sha256(
+            (
+                _PUBLISH_FORMAT_VERSION
+                + "".join(
+                    self.get_file_checksum(d)
+                    if os.path.isfile(d)
+                    else self.get_source_files_checksum(d)
+                    for d in deps
+                    if os.path.exists(d)
+                )
+            ).encode()
+        ).hexdigest()
+
+        bundle_path = feature_dir / "feature-ui" / "dist" / "ui-bundle.js"
+        checksum_file = feature_dir / ".checksum"
+
+        cached = False
+        if checksum_file.is_file() and bundle_path.is_file():
+            try:
+                cached = (
+                    checksum_file.read_text(encoding="utf-8").strip()
+                    == current_checksum
+                )
+            except OSError:
+                cached = False
+
+        # A cache hit is only trustworthy if the on-disk bundle actually carries
+        # the manifest version. Vite bakes feature.yaml -> version into the
+        # bundle at build time; the host's FeatureLoader refuses to run a bundle
+        # whose self-reported version differs from the registered version
+        # ("bundle version X does not match registered Y"), silently serving old
+        # code. A checksum hit against a stale `dist/` (e.g. the version was
+        # bumped but the source checksum collided, or dist/ predates the bump)
+        # would otherwise ship wrong-version code to the new version's S3 key.
+        # So: treat a version-mismatched cached bundle as a cache MISS and
+        # rebuild, rather than trusting the checksum alone.
+        def _bundle_has_version(version: str) -> bool:
+            if not bundle_path.is_file():
+                return False
+            try:
+                return f'"{version}"' in bundle_path.read_text(encoding="utf-8")
+            except OSError:
+                return False
+
+        if cached:
+            manifest = load_manifest(feature_dir)
+            if _bundle_has_version(manifest.version):
+                self.log_cached(
+                    f"Feature {feature_dir.name} source unchanged — "
+                    f"using cached UI bundle"
+                )
+            else:
+                self.log_warning(
+                    f"Feature {feature_dir.name}: cached bundle does not carry "
+                    f"version '{manifest.version}' — forcing a rebuild "
+                    f"(stale dist/ or checksum collision)."
+                )
+                cached = False
+
+        if not cached:
+            publisher = FeaturePublisher(feature_dir, console=self.console)
+            try:
+                manifest = publisher.validate()
+                publisher.build(manifest)
+            except Exception as exc:  # noqa: BLE001 — surface any build failure
+                self.log_error(f"Feature {feature_dir.name} build failed: {exc}")
+                sys.exit(1)
+            try:
+                checksum_file.write_text(current_checksum, encoding="utf-8")
+            except OSError as exc:
+                self.log_warning(f"Could not write {checksum_file}: {exc}")
+
+        # Final guard: after build (cached or fresh) the bundle MUST carry the
+        # manifest version, or we'd upload wrong-version code to the
+        # manifest-version S3 key. Fail loudly — never publish a mismatch.
+        if not _bundle_has_version(manifest.version):
+            self.log_error(
+                f"Feature {feature_dir.name}: built UI bundle does not contain "
+                f"the manifest version '{manifest.version}' even after a rebuild. "
+                f"Check feature-ui/vite.config.ts version injection and that "
+                f"`npm run build` regenerates feature-ui/dist/ui-bundle.js."
+            )
+            sys.exit(1)
+
+        # sam build + sam package on the feature's SAM template so local
+        # CodeUri: paths are rewritten to s3://...
+        self.log_task(
+            f"Packaging {feature_dir.name} SAM template (sam build + sam package)"
+        )
+        self.build_and_package_template(str(feature_dir), force_rebuild=True)
+        packaged_template_path = feature_dir / ".aws-sam" / "packaged.yaml"
+        if not packaged_template_path.is_file():
+            self.log_error(
+                f"Expected packaged template at {packaged_template_path} "
+                f"but it was not produced by sam package"
+            )
+            sys.exit(1)
+
+        file_list = self._upload_sample_feature_artifacts(
+            feature_dir,
+            manifest,
+            bundle_path,
+            packaged_template_path=packaged_template_path,
+        )
+
+        # Catalog entry for this OSS feature — discovery metadata only; the
+        # actual template URL is computed at request time by getFeatureLaunchUrl
+        # from the stack-owned FeatureBucket (no artifacts-bucket dependency).
+        catalog_entry = {
+            "featureId": manifest.featureId,
+            "displayName": manifest.displayName,
+            "description": manifest.description or "",
+            "iconUrl": manifest.iconUrl or "",
+            "docsUrl": manifest.docsUrl or "",
+            "source": "oss",
+            "latestVersion": manifest.version,
+            # OSS extension artifacts live in the (same) artifacts bucket the
+            # main template is published to, under a VERSION-FREE extension base
+            # `<prefix>/extensions/<id>`. The host's getFeatureLaunchUrl builds
+            # the (version-free) Launch Stack template URL from artifactPrefix +
+            # "/template.yaml"; the feature template self-locates its versioned
+            # artifacts under `<artifactPrefix>/<version>/...` from its baked
+            # FEATURE_VERSION. No separate, stack-owned feature bucket needed.
+            "artifactBucket": self.bucket,
+            "artifactPrefix": f"{self.prefix}/extensions/{manifest.featureId}",
+        }
+        return file_list, catalog_entry
+
+    def _upload_sample_feature_artifacts(
+        self, feature_dir, manifest, bundle_path, packaged_template_path=None
+    ):
+        """Upload a built sample feature's artifacts to the artifact bucket.
+
+        Uses a VERSION-FREE extension base, mirroring how the main template is
+        published (see _upload_version_pointer, which keys off self.prefix not
+        self.prefix_and_version):
+
+            <prefix>/extensions/<id>/template.yaml      # version-free; newest publish wins
+            <prefix>/extensions/<id>/latest.json        # version-free pointer
+            <prefix>/extensions/<id>/<version>/ui-bundle.js
+            <prefix>/extensions/<id>/<version>/<configPreset.path>
+            <prefix>/extensions/<id>/<version>/manifest.json
+
+        The template is version-free so the host's getFeatureLaunchUrl points at
+        a stable URL (and a stack Update sees the newest template), while the
+        version-specific artifacts live under a <version>/ subfolder that the
+        feature template self-locates from its baked FEATURE_VERSION — so no
+        version-bearing value is stored as a stale-able CloudFormation
+        parameter. Returns the list of uploaded relative paths (relative to the
+        extension base).
+        """
+        feature_id = manifest.featureId
+        version = manifest.version
+        extension_root = f"{self.prefix}/extensions/{feature_id}"
+        version_root = f"{version}"
+        uploaded = []
+
+        def _put(body, rel_key, content_type):
+            self.s3_client.put_object(
+                Bucket=self.bucket,
+                Key=f"{extension_root}/{rel_key}",
+                Body=body,
+                ContentType=content_type,
+            )
+            uploaded.append(rel_key)
+
+        def _upload(local_path, rel_key, content_type):
+            self.s3_client.upload_file(
+                str(local_path),
+                self.bucket,
+                f"{extension_root}/{rel_key}",
+                ExtraArgs={"ContentType": content_type},
+            )
+            uploaded.append(rel_key)
+
+        # template.yaml — VERSION-FREE path; prefer the sam-packaged version
+        # (CodeUri rewritten to s3://...). Bake two literals into the template
+        # at publish time (NOT CloudFormation parameters — the CFN console's
+        # "Update stack" wizard drops params on a template change, which left
+        # FeatureArtifactPrefix empty and produced a `//<version>/` bad S3 key):
+        #   <FEATURE_VERSION_TOKEN>          -> manifest.version
+        #   <FEATURE_ARTIFACT_PREFIX_TOKEN>  -> <prefix>/extensions/<id>
+        # The ui-deployer reads <prefix>/extensions/<id>/<version>/... — both
+        # halves baked, so a stack Update can never carry a stale or empty
+        # value.
+        template_source = (
+            packaged_template_path
+            if packaged_template_path is not None
+            else feature_dir / manifest.template.path
+        )
+        template_text = Path(template_source).read_text(encoding="utf-8")
+        baked_text = template_text.replace("<FEATURE_VERSION_TOKEN>", version).replace(
+            "<FEATURE_ARTIFACT_PREFIX_TOKEN>", extension_root
+        )
+        _put(
+            baked_text.encode("utf-8"),
+            "template.yaml",
+            "application/x-yaml",
+        )
+
+        _upload(
+            bundle_path,
+            f"{version_root}/ui-bundle.js",
+            "application/javascript",
+        )
+
+        # Config preset — if the manifest declares one. The feature stack's
+        # ui-deployer downloads it from
+        # `<FeatureArtifactPrefix>/<version>/<configPreset.path>` at install to
+        # call applyFeatureConfigPreset, so it MUST be uploaded at that same
+        # relative path under the version subfolder.
+        config_preset = getattr(manifest, "configPreset", None)
+        if config_preset and getattr(config_preset, "path", None):
+            preset_local = feature_dir / config_preset.path
+            if preset_local.is_file():
+                preset_ct = (
+                    "application/x-yaml"
+                    if preset_local.suffix.lower() in (".yaml", ".yml")
+                    else "application/json"
+                )
+                _upload(
+                    preset_local,
+                    f"{version_root}/{config_preset.path}",
+                    preset_ct,
+                )
+            else:
+                self.log_error(
+                    f"Feature {feature_id} declares configPreset.path "
+                    f"'{config_preset.path}' but no file exists at {preset_local}"
+                )
+                sys.exit(1)
+
+        manifest_data = {
+            "featureId": feature_id,
+            "displayName": manifest.displayName,
+            "version": version,
+            "description": manifest.description,
+            "iconUrl": manifest.iconUrl,
+            "capabilities": list(manifest.capabilities),
+            "defaultParameters": dict(manifest.defaultParameters),
+            "marketplace": {
+                "productCode": manifest.marketplace.productCode,
+                "listingUrl": manifest.marketplace.listingUrl,
+            },
+        }
+        _put(
+            json.dumps(manifest_data, indent=2, sort_keys=True).encode("utf-8"),
+            f"{version_root}/manifest.json",
+            "application/json",
+        )
+
+        # Version-free pointer (mirrors idp-main-latest.json). Not read by the
+        # host resolver at runtime (it reads catalog.json) — kept for parity and
+        # ad-hoc inspection.
+        latest_data = {
+            "featureId": feature_id,
+            "version": version,
+            "displayName": manifest.displayName,
+            "publishedAt": datetime.now(timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z"),
+        }
+        _put(
+            json.dumps(latest_data, indent=2, sort_keys=True).encode("utf-8"),
+            "latest.json",
+            "application/json",
+        )
+
+        self.log_success(
+            f"Uploaded {len(uploaded)} extension artifacts to "
+            f"s3://{self.bucket}/{extension_root}/ ({feature_id} v{version})"
+        )
+        return sorted(uploaded)
+
     def build_main_template(
         self,
         webui_zipfile,
         unified_source_zipfile,
         components_needing_rebuild,
+        sample_features_hash="",
+        sample_features_list=None,
     ):
-        """Build and package main template with smart detection"""
+        """Build and package main template with smart detection.
+
+        ``sample_features_hash`` / ``sample_features_list`` carry the result of
+        :meth:`build_and_upload_sample_features` so the main template's
+        PublishSampleFeature custom resource knows what to copy into the
+        auto-created feature bucket and re-runs when the bundled feature
+        source changes. Both default to empty so non-feature-platform builds
+        (and callers that don't bundle features) work unchanged.
+        """
         try:
             self.console.print("[bold cyan]BUILDING main[/bold cyan]")
             # Main template needs rebuilding, if any component needs rebuilding
@@ -1581,6 +2156,16 @@ STDERR:
                     "<MULTI_DOC_DISCOVERY_BUILD_HASH_TOKEN>": self.get_directory_checksum(
                         "src/lambda/multi_doc_discovery"
                     )[:16],
+                    # Feature Platform: the bundled extension(s) uploaded to the
+                    # artifact bucket under <prefix>/extensions/<id>/. These
+                    # tokens carry the build hash + uploaded file list for
+                    # change detection; OSS extensions install directly from the
+                    # artifacts bucket (no host-side copy resource). Empty when
+                    # no bundled features were built.
+                    "<SAMPLE_FEATURES_HASH_TOKEN>": sample_features_hash,
+                    "<SAMPLE_FEATURES_LIST_TOKEN>": json.dumps(
+                        sample_features_list or []
+                    ),
                 }
 
                 # Debug: show layer ARNs being used
@@ -1684,6 +2269,14 @@ STDERR:
                     self._check_and_upload_template(
                         packaged_template_path, s3_key, description
                     )
+
+            # Write/overwrite the latest-version pointer at the (version-
+            # stripped) prefix. The Web UI's getLatestPublishedVersion resolver
+            # GetObjects this ONE known key (no ListObjectsV2 — works on the
+            # public release bucket) to drive the Build Info "update available"
+            # indicator. templateUrl points at the versioned template just
+            # uploaded above.
+            self._upload_version_pointer()
 
             # Validate the template
             if self.skip_validation:
@@ -1900,6 +2493,15 @@ STDERR:
                 "patterns/unified/statemachine",
                 "patterns/unified/buildspec.yml",
                 "Dockerfile.optimized",
+            ],
+            # Feature Platform plumbing nested stack — InstalledFeatures DDB
+            # table + AppSync resolvers/Lambdas. Deployed only when
+            # EnableFeaturePlatform=true; built unconditionally so the nested
+            # template URL the main stack references always resolves.
+            "feature-platform/main-stack-extensions": [
+                "feature-platform/main-stack-extensions/lambdas",
+                "feature-platform/main-stack-extensions/template.yaml",
+                "feature-platform/main-stack-extensions/appsync",
             ],
             "lib": [
                 "./lib/idp_common_pkg"
@@ -2280,7 +2882,12 @@ STDERR:
                 "install",
                 install_spec,
                 "--python-platform",
-                "x86_64-manylinux2014",
+                # manylinux_2_28 (glibc 2.28) matches the Lambda python3.12
+                # runtime (Amazon Linux 2023, glibc 2.34). Required because
+                # pyarrow >= 21 no longer ships manylinux2014 wheels, only
+                # manylinux_2_28. This target still accepts older
+                # manylinux2014 wheels for all other dependencies.
+                "x86_64-manylinux_2_28",
                 "--python-version",
                 "3.12",
                 "--only-binary=:all:",
@@ -2786,16 +3393,27 @@ STDERR:
         )
 
         try:
-            # Get all objects with the prefix
+            # Collect objects across BOTH artifact prefixes:
+            #   1. `<prefix>/<version>/`  — the versioned main-stack artifacts
+            #      (Lambda/layer code zips, config_library, sam-objects, etc.).
+            #   2. `<prefix>/extensions/` — the VERSION-FREE sample-feature base
+            #      written by _upload_sample_feature_artifacts. These live as a
+            #      SIBLING of prefix_and_version (e.g. `idp/extensions/<id>/...`
+            #      vs `idp/0.5.16/...`), so the versioned pass alone never
+            #      reaches them. Without this a cross-account public deploy hits
+            #      S3 403 (Access Denied) the moment CloudFormation fetches the
+            #      extension's `extensions/<id>/template.yaml`.
             paginator = self.s3_client.get_paginator("list_objects_v2")
-            page_iterator = paginator.paginate(
-                Bucket=self.bucket, Prefix=self.prefix_and_version
-            )
+            acl_prefixes = [
+                self.prefix_and_version,
+                f"{self.prefix}/extensions",
+            ]
 
             objects = []
-            for page in page_iterator:
-                if "Contents" in page:
-                    objects.extend(page["Contents"])
+            for acl_prefix in acl_prefixes:
+                for page in paginator.paginate(Bucket=self.bucket, Prefix=acl_prefix):
+                    if "Contents" in page:
+                        objects.extend(page["Contents"])
 
             if not objects:
                 self.console.print("[yellow]No objects found to set ACLs on[/yellow]")
@@ -3040,12 +3658,50 @@ STDERR:
                 time.time() - step_start
             )
 
+            # Build + package the Feature Platform plumbing nested stack so the
+            # `feature-platform/main-stack-extensions/.aws-sam/packaged.yaml`
+            # URL the main template references resolves. It carries its own
+            # parameters (not "nested"/"patterns"), so it is built here rather
+            # than via the category-filtered concurrent builder.
+            fp_plumbing_dir = "feature-platform/main-stack-extensions"
+            if os.path.isdir(fp_plumbing_dir):
+                step_start = time.time()
+                self.build_and_package_template(fp_plumbing_dir, force_rebuild=True)
+                timing_breakdown["Build feature-platform plumbing"] = (
+                    time.time() - step_start
+                )
+
+            # Build + upload bundled sample feature(s) to the artifact bucket
+            # so the feature platform's catalog is pre-populated at deploy time.
+            # Returns empty when no bundled feature dirs exist (trimmed checkout).
+            step_start = time.time()
+            sample_features_hash, sample_features_list, oss_catalog_entries = (
+                self.build_and_upload_sample_features()
+            )
+            timing_breakdown["Build & upload sample features"] = (
+                time.time() - step_start
+            )
+
+            # Write config_library/catalog.json (OSS bundled features +
+            # curated extensions-marketplace.yaml) and upload it to the
+            # artifacts bucket's config_library/ prefix. The deploy-time
+            # ConfigurationCopyFunction then copies it into the stack's own
+            # ConfigurationBucket, where the host reads it at runtime — the
+            # deployed stack never depends on the artifacts bucket for the
+            # catalog, and never lists any bucket.
+            step_start = time.time()
+            self.write_catalog_file(oss_catalog_entries)
+            self._upload_catalog_to_artifacts()
+            timing_breakdown["Write & upload catalog.json"] = time.time() - step_start
+
             # Build main template
             step_start = time.time()
             self.build_main_template(
                 webui_zipfile,
                 unified_source_zipfile,
                 components_needing_rebuild,
+                sample_features_hash=sample_features_hash,
+                sample_features_list=sample_features_list,
             )
             timing_breakdown["Build & upload main template"] = time.time() - step_start
 

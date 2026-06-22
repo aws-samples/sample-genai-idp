@@ -1,0 +1,45 @@
+# Copy this template to a new directory and customise.
+# Schema: `idp-feature-cli show-schema`
+#
+# To appear as *available to install* in the host UI catalog, the feature must
+# be listed in config_library/extensions-oss.yaml (OSS) or
+# extensions-marketplace.yaml (paid). A feature deployed directly via
+# CloudFormation still self-registers and shows up once installed even without
+# a catalog entry — see docs/feature-platform-developer-guide.md.
+
+featureId: my-feature           # DNS-safe slug; also used as S3 prefix & session-tag value
+displayName: My Feature          # Human-readable — shown in nav & feature page
+version: 0.1.0                  # SemVer
+description: |
+  One-paragraph description shown on the Marketplace listing and in the UI.
+
+template:
+  path: template.yaml           # CloudFormation template for the feature stack
+  requiresMainStackName: true   # Required: the template declares a MainStackName parameter
+
+ui:
+  bundlePath: feature-ui/dist/ui-bundle.js   # Output of the UI build
+  buildCommand: "cd feature-ui && npm ci && npm run build"
+
+# docsUrl: extensions/my-feature   # OSS: docs-site slug (docs/extensions/<slug>.md);
+                                    # or an absolute https URL. Shown as the UI
+                                    # "Learn more" link. Marketplace features omit
+                                    # this and fall back to marketplace listingUrl.
+
+# marketplace:                  # Uncomment and fill in once you have a Marketplace listing
+#   productCode: <your AWS Marketplace product code>
+#   listingUrl: https://aws.amazon.com/marketplace/pp/prodview-XYZ
+
+# pipelineHooks:                # Optional: run a Lambda at a processing extension point.
+#   postExtraction: MyHookFunction   # hookPoint -> logical Lambda resource name in template.yaml.
+                                      # Points: postOcr, postClassification, postExtraction,
+                                      # postAssessment, postRuleValidation, postSummarization.
+                                      # The feature stack registers these with the host via
+                                      # registerFeatureHooks at install — see the Developer Guide.
+
+defaultParameters:
+  LogLevel: INFO
+
+capabilities:
+  - custom-api       # remove if this is a client-only feature
+  # - registers-pipeline-hooks   # add if this feature registers pipelineHooks
