@@ -408,15 +408,35 @@ def get_test_results(test_run_id):
                 "config": _get_test_run_config(test_run_id),
             }
     else:
-        # Provide more specific message for ABORTED status
+        # No aggregate metrics have been cached yet. This happens when all
+        # files finished processing but the evaluation aggregation step hasn't
+        # written testRunResult (still running, or it timed out / failed on a
+        # large run). Don't raise — that surfaces as an opaque error and the UI
+        # spins on "Loading..." forever. Return a structured partial TestRun so
+        # the UI can render the in-progress status instead.
         if current_status == "ABORTED":
-            raise ValueError(
-                f"Test run {test_run_id} aborted, evaluating results for completed documents"
+            logger.info(
+                f"Test run {test_run_id} aborted; aggregate metrics not yet available"
             )
         else:
-            raise ValueError(
-                f"Test run {test_run_id} processing completed, evaluating results"
+            logger.info(
+                f"Test run {test_run_id} processing complete; "
+                "aggregate metrics not yet available (evaluation in progress)"
             )
+
+        return {
+            "testRunId": test_run_id,
+            "testSetId": metadata.get("TestSetId"),
+            "testSetName": metadata.get("TestSetName"),
+            "status": current_status,
+            "filesCount": metadata.get("FilesCount", 0),
+            "completedFiles": metadata.get("CompletedFiles", 0),
+            "failedFiles": metadata.get("FailedFiles", 0),
+            "createdAt": _format_datetime(metadata.get("CreatedAt")),
+            "completedAt": _format_datetime(metadata.get("CompletedAt")),
+            "context": metadata.get("Context"),
+            "configVersion": metadata.get("ConfigVersion"),
+        }
 
 
 def _query_test_runs_from_gsi(table, start_iso, end_iso):
