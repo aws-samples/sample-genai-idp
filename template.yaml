@@ -4614,9 +4614,12 @@ Resources:
             - UseCloudFrontHosting
             - Effect: Allow
               Principal:
-                CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
+                Service: cloudfront.amazonaws.com
               Action: s3:GetObject
               Resource: !Sub "${WebUIBucket.Arn}/*"
+              Condition:
+                StringEquals:
+                  "AWS:SourceArn": !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
             - !Ref AWS::NoValue
           - !If
             - UseALBHosting
@@ -9547,12 +9550,16 @@ Resources:
   # Knowledge Base Query Resolver
   ##########################################################################
 
-  CloudFrontOriginAccessIdentity:
-    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+  CloudFrontOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
     Condition: UseCloudFrontHosting
     Properties:
-      CloudFrontOriginAccessIdentityConfig:
-        Comment: !Sub "${AWS::StackName} CloudFront OAI for ${WebUIBucket}"
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-webui-oac"
+        Description: !Sub "${AWS::StackName} CloudFront OAC for ${WebUIBucket}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
 
   # Define a custom response headers policy for security headers
   SecurityHeadersPolicy:
@@ -9648,8 +9655,9 @@ Resources:
         Origins:
           - Id: webapp-s3-bucket
             DomainName: !GetAtt WebUIBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt CloudFrontOriginAccessControl.Id
             S3OriginConfig:
-              OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}"
+              OriginAccessIdentity: ""
         PriceClass: !Ref CloudFrontPriceClass
         Restrictions: !If
           - ShouldEnableGeoRestriction
