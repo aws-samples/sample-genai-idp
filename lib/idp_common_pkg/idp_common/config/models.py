@@ -384,6 +384,26 @@ class ClassificationConfig(BaseModel):
         description="Number of pages before/after target page to include as context for multimodalPageLevelClassification. "
         "0=no context (default), 1=include 1 page on each side, 2=include 2 pages on each side.",
     )
+    enforceValidClasses: bool = Field(
+        default=True,
+        description="When True, validate the predicted class against the configured "
+        "class vocabulary and retry (re-prompting the model) on out-of-vocabulary "
+        "predictions. When False, an out-of-vocabulary prediction is logged and used "
+        "as-is (legacy behavior). Applies to multimodalPageLevelClassification.",
+    )
+    maxValidationRetries: int = Field(
+        default=2,
+        ge=0,
+        description="Maximum number of re-prompt retries when the predicted class is "
+        "not in the configured class vocabulary. Only used when enforceValidClasses "
+        "is True.",
+    )
+    invalidClassFallback: str = Field(
+        default="unclassified",
+        description="Class label assigned when all validation retries are exhausted. "
+        "Should be one of the configured classes or the built-in 'unclassified'. "
+        "Only used when enforceValidClasses is True.",
+    )
     image: ImageConfig = Field(default_factory=ImageConfig)
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
@@ -455,6 +475,25 @@ class ClassificationConfig(BaseModel):
         if result < 0:
             return 0
         return result
+
+    @field_validator("maxValidationRetries", mode="before")
+    @classmethod
+    def parse_max_validation_retries(cls, v: Any) -> int:
+        """Parse maxValidationRetries from string or number, ensuring non-negative value"""
+        if isinstance(v, str):
+            v = int(v) if v.strip() else 2
+        result = int(v)
+        if result < 0:
+            return 0
+        return result
+
+    @field_validator("enforceValidClasses", mode="before")
+    @classmethod
+    def parse_enforce_valid_classes(cls, v: Any) -> bool:
+        """Parse enforceValidClasses from string or bool (config may store as string)"""
+        if isinstance(v, str):
+            return v.strip().lower() in ("true", "1", "yes", "on")
+        return bool(v)
 
 
 class GranularAssessmentConfig(BaseModel):
