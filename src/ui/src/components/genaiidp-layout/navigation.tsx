@@ -3,7 +3,7 @@
 import React, { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import type { SideNavigationProps } from '@cloudscape-design/components';
-import { Badge, Box, Link, Popover, SideNavigation, SpaceBetween } from '@cloudscape-design/components';
+import { Badge, Box, Hotspot, Link, Popover, SideNavigation, SpaceBetween } from '@cloudscape-design/components';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
 import useInstalledFeatures from '../../hooks/use-installed-features';
@@ -28,6 +28,42 @@ import {
 } from '../../routes/constants';
 
 export const documentsNavHeader = { text: 'Tools', href: `#${DEFAULT_PATH}` };
+
+const NAV_HOTSPOTS: Record<string, string> = {
+  [`#${DOCUMENTS_PATH}`]: 'nav-documents',
+  [`#${UPLOAD_DOCUMENT_PATH}`]: 'nav-upload',
+  [`#${CONFIGURATION_PATH}`]: 'nav-configuration',
+  [`#${DISCOVERY_PATH}`]: 'nav-discovery',
+  [`#${TEST_STUDIO_PATH}?tab=sets`]: 'nav-test-sets',
+  [`#${TEST_STUDIO_PATH}?tab=executions`]: 'nav-test-executions',
+};
+
+const withInfoHotspot = (link: SideNavigationProps.Link, hotspotId: string): SideNavigationProps.Link => {
+  const hotspot = React.createElement(Hotspot, { hotspotId, side: 'right' });
+  const info = link.info ? React.createElement(SpaceBetween, { direction: 'horizontal', size: 'xxs' }, link.info, hotspot) : hotspot;
+  return { ...link, info };
+};
+
+const withNavHotspots = (items: readonly SideNavigationProps.Item[]): SideNavigationProps.Item[] =>
+  items.map((item) => {
+    if (item.type === 'section' && Array.isArray((item as SideNavigationProps.Section).items)) {
+      const section = item as SideNavigationProps.Section;
+      if (section.text === 'Extensions (Preview)' && section.items.length > 0) {
+        const [first, ...rest] = section.items;
+        const firstWithHotspot = first.type === 'link' ? withInfoHotspot(first as SideNavigationProps.Link, 'nav-extensions') : first;
+        return { ...section, items: [firstWithHotspot, ...rest] };
+      }
+      return { ...section, items: withNavHotspots(section.items) };
+    }
+    if (item.type === 'link') {
+      const link = item as SideNavigationProps.Link;
+      const hotspotId = NAV_HOTSPOTS[link.href];
+      if (hotspotId) {
+        return withInfoHotspot(link, hotspotId);
+      }
+    }
+    return item;
+  });
 
 // Full navigation items for Admin users (all features)
 export const adminNavItems = [
@@ -467,7 +503,12 @@ const Navigation = ({
   }
 
   return (
-    <SideNavigation items={navigationItems} header={header || documentsNavHeader} activeHref={activeHref} onFollow={onFollowHandler} />
+    <SideNavigation
+      items={withNavHotspots(navigationItems)}
+      header={header || documentsNavHeader}
+      activeHref={activeHref}
+      onFollow={onFollowHandler}
+    />
   );
 };
 

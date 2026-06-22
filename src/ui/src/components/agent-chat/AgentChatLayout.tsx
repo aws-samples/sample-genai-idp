@@ -54,6 +54,7 @@ interface AgentChatLayoutProps {
   customStyles?: React.CSSProperties;
   showModeSelector?: boolean;
   welcomeName?: string;
+  brand?: ChatMode;
 }
 
 const AgentChatLayout = ({
@@ -65,6 +66,7 @@ const AgentChatLayout = ({
   customStyles = {},
   showModeSelector = true,
   welcomeName,
+  brand = 'chat',
 }: AgentChatLayoutProps): React.JSX.Element => {
   const [welcomeAnimated, setWelcomeAnimated] = useState(false);
   const [isLoadingSession, setIsLoadingSession] = useState(false);
@@ -150,12 +152,23 @@ const AgentChatLayout = ({
       updateAgentChatState({ inputValue: query });
     };
 
+    const handleGenerateSyntheticData = (event: CustomEvent<{ className?: string }>) => {
+      if (mode !== 'quick_start') return;
+      const targetClass = event.detail?.className;
+      const prompt = targetClass
+        ? `Generate synthetic test documents for the "${targetClass}" class from one of my existing configurations.`
+        : 'Generate synthetic test documents from one of my existing configurations.';
+      updateAgentChatState({ inputValue: prompt });
+    };
+
     window.addEventListener('insertSampleQuery', handleSampleQueryInsert as EventListener);
+    window.addEventListener('generateSyntheticData', handleGenerateSyntheticData as EventListener);
 
     return () => {
       window.removeEventListener('insertSampleQuery', handleSampleQueryInsert as EventListener);
+      window.removeEventListener('generateSyntheticData', handleGenerateSyntheticData as EventListener);
     };
-  }, [updateAgentChatState]);
+  }, [updateAgentChatState, mode]);
 
   // Track new messages and scroll to new assistant messages (but not while streaming)
   useEffect(() => {
@@ -227,7 +240,7 @@ const AgentChatLayout = ({
     [mode, updateAgentChatState],
   );
 
-  const effectiveTitle = title ?? (mode === 'quick_start' ? 'Quick Start' : 'IDP Agent Companion Chat');
+  const effectiveTitle = title ?? (brand === 'quick_start' ? 'Quick Start' : 'IDP Agent Companion Chat');
   const effectivePlaceholder =
     mode === 'quick_start' ? 'Describe the documents you want to process, or attach examples to get started' : placeholder;
 
@@ -529,7 +542,7 @@ const AgentChatLayout = ({
           {messages.length === 0 ? (
             <div className={`welcome-text ${welcomeAnimated ? 'animate-in' : ''}`}>
               <h2>
-                Welcome to <span>{welcomeName || (mode === 'quick_start' ? 'Quick Start' : 'Agent Companion Chat')}</span>
+                Welcome to <span>{welcomeName || (brand === 'quick_start' ? 'Quick Start' : 'Agent Companion Chat')}</span>
               </h2>
               {mode === 'quick_start' && (
                 <Box variant="p" color="text-body-secondary">
@@ -667,7 +680,7 @@ const AgentChatLayout = ({
                 label="Chat mode"
                 options={[
                   { id: 'chat', text: 'Companion' },
-                  { id: 'quick_start', text: 'Quick Start' },
+                  { id: 'quick_start', text: 'Conductor' },
                 ]}
               />
             )}

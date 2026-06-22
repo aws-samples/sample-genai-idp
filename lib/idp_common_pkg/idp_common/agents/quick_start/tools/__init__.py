@@ -8,6 +8,8 @@ from .bootstrap_tools import (
     check_generator_availability,
     create_config_version,
     estimate_generation_cost,
+    generate_from_existing_config,
+    list_config_versions,
     refine_schema,
     request_document_generation,
     search_catalog,
@@ -21,4 +23,6 @@ __all__ = [
     "check_generator_availability",
     "estimate_generation_cost",
     "request_document_generation",
+    "list_config_versions",
+    "generate_from_existing_config",
 ]

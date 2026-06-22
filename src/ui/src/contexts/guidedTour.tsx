@@ -1,0 +1,141 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import AnnotationContext from '@cloudscape-design/components/annotation-context';
+import type { AnnotationContextProps } from '@cloudscape-design/components/annotation-context';
+import { DOCUMENTS_PATH } from '../routes/constants';
+
+interface GuidedTourContextValue {
+  tutorial: AnnotationContextProps.Tutorial | null;
+  startTour: () => void;
+  exitTour: () => void;
+}
+
+const GuidedTourContext = createContext<GuidedTourContextValue | null>(null);
+
+const DISMISS_LABEL = 'Dismiss tour';
+
+const buildTutorial = (): AnnotationContextProps.Tutorial => ({
+  title: 'Get started with GenAI IDP',
+  description: 'A quick walkthrough of the main areas of the console.',
+  completed: false,
+  completedScreenDescription:
+    "That's the tour! Open the Quick Start assistant any time to build a configuration, generate test data, or get help.",
+  tasks: [
+    {
+      title: 'Find your way around',
+      steps: [
+        {
+          title: 'Documents',
+          content: 'Your processed documents live here — each with status, extracted fields, and confidence scores.',
+          hotspotId: 'nav-documents',
+        },
+        {
+          title: 'Upload documents',
+          content: 'Upload one or more documents to run them through your active configuration.',
+          hotspotId: 'nav-upload',
+        },
+        {
+          title: 'View / edit configuration',
+          content: 'Review, edit, and activate configuration versions — the document classes and fields IDP extracts.',
+          hotspotId: 'nav-configuration',
+        },
+        {
+          title: 'Discovery',
+          content: 'Infer document classes and a schema automatically from a set of example documents.',
+          hotspotId: 'nav-discovery',
+        },
+        {
+          title: 'Test sets',
+          content: 'Manage labeled test sets — including synthetic ones generated for you — to measure extraction accuracy.',
+          hotspotId: 'nav-test-sets',
+        },
+        {
+          title: 'Test executions',
+          content: 'Run a configuration against a test set and review accuracy and confidence results here.',
+          hotspotId: 'nav-test-executions',
+        },
+        {
+          title: 'Extensions',
+          content:
+            'IDP is extensible. Browse and install optional add-ons here — this list grows as new extensions become available, ' +
+            'so capabilities can be added without redeploying.',
+          hotspotId: 'nav-extensions',
+        },
+        {
+          title: 'Get started',
+          content:
+            'Open the Quick Start assistant any time to set up a configuration, generate synthetic test data, or ask questions. ' +
+            'Click it to begin!',
+          hotspotId: 'quick-start-launcher',
+        },
+      ],
+    },
+  ],
+});
+
+const i18nStrings: AnnotationContextProps.I18nStrings = {
+  stepCounterText: (stepIndex, totalStepCount) => `Step ${stepIndex + 1} of ${totalStepCount}`,
+  taskTitle: (taskIndex, taskTitle) => `Task ${taskIndex + 1}: ${taskTitle}`,
+  labelHotspot: (openState) => (openState ? 'Close annotation' : 'Open annotation'),
+  nextButtonText: 'Next',
+  previousButtonText: 'Previous',
+  finishButtonText: 'Finish',
+  labelDismissAnnotation: DISMISS_LABEL,
+};
+
+export const GuidedTourProvider = ({ children }: { children: React.ReactNode }): React.JSX.Element => {
+  const [tutorial, setTutorial] = useState<AnnotationContextProps.Tutorial | null>(null);
+  const navigate = useNavigate();
+
+  const startTour = useCallback(() => {
+    navigate(DOCUMENTS_PATH);
+    window.setTimeout(() => setTutorial(buildTutorial()), 350);
+  }, [navigate]);
+  const exitTour = useCallback(() => setTutorial(null), []);
+
+  useEffect(() => {
+    const handler = () => startTour();
+    window.addEventListener('startTutorial', handler);
+    return () => window.removeEventListener('startTutorial', handler);
+  }, [startTour]);
+
+  useEffect(() => {
+    if (!tutorial) return undefined;
+    const onClickCapture = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest(`[aria-label="${DISMISS_LABEL}"]`)) {
+        exitTour();
+      }
+    };
+    document.addEventListener('click', onClickCapture, true);
+    return () => document.removeEventListener('click', onClickCapture, true);
+  }, [tutorial, exitTour]);
+
+  const value = useMemo(() => ({ tutorial, startTour, exitTour }), [tutorial, startTour, exitTour]);
+
+  return (
+    <GuidedTourContext.Provider value={value}>
+      <AnnotationContext
+        currentTutorial={tutorial}
+        onStartTutorial={() => startTour()}
+        onExitTutorial={() => exitTour()}
+        onFinish={() => exitTour()}
+        i18nStrings={i18nStrings}
+      >
+        {children}
+      </AnnotationContext>
+    </GuidedTourContext.Provider>
+  );
+};
+
+export const useGuidedTour = (): GuidedTourContextValue => {
+  const ctx = useContext(GuidedTourContext);
+  if (!ctx) {
+    throw new Error('useGuidedTour must be used within a GuidedTourProvider');
+  }
+  return ctx;
+};
+
+export default GuidedTourContext;

@@ -172,6 +172,110 @@ def request_document_generation_impl(
     )
 
 
+def _class_id(class_dict: dict) -> str:
+    return (
+        class_dict.get("x-aws-idp-document-type")
+        or class_dict.get("$id")
+        or class_dict.get("title")
+        or ""
+    )
+
+
+def list_config_versions_impl() -> str:
+    from idp_common.config.configuration_manager import ConfigurationManager
+
+    config_manager = ConfigurationManager()
+    versions = config_manager.list_config_versions()
+    out = []
+    for v in versions:
+        name = v.get("versionName")
+        raw = config_manager.get_raw_configuration("Config", name) or {}
+        classes = [_class_id(c) for c in raw.get("classes", []) if _class_id(c)]
+        out.append(
+            {
+                "versionName": name,
+                "isActive": v.get("isActive"),
+                "description": v.get("description", ""),
+                "classes": classes,
+            }
+        )
+    return json.dumps({"versions": out})
+
+
+def generate_from_existing_config_impl(
+    version_name: str,
+    class_name: str,
+    doc_count: int = 3,
+    threshold: int = 7,
+    augment: bool = False,
+) -> str:
+    from idp_common.config.configuration_manager import ConfigurationManager
+
+    queue_url = os.environ.get("BOOTSTRAP_QUEUE_URL")
+    if not queue_url:
+        available, reason = engine.generator_available()
+        if not available:
+            return json.dumps(
+                {
+                    "enqueued": False,
+                    "reason": f"Generator unavailable: {reason}",
+                    "hint": engine.INSTALL_HINT,
+                }
+            )
+        return json.dumps(
+            {"enqueued": False, "reason": "BOOTSTRAP_QUEUE_URL not configured"}
+        )
+
+    config_manager = ConfigurationManager()
+    raw = config_manager.get_raw_configuration("Config", version_name)
+    if not raw:
+        return json.dumps(
+            {"enqueued": False, "reason": f"Config version '{version_name}' not found"}
+        )
+
+    classes = raw.get("classes", [])
+    target = next((c for c in classes if _class_id(c) == class_name), None)
+    if target is None:
+        available_classes = [_class_id(c) for c in classes if _class_id(c)]
+        return json.dumps(
+            {
+                "enqueued": False,
+                "reason": f"Class '{class_name}' not found in version '{version_name}'",
+                "availableClasses": available_classes,
+            }
+        )
+
+    schema = schema_bridge.config_class_to_generator_schema(target)
+    allowed = schema_bridge.field_names(schema)
+
+    import boto3
+
+    job_id = uuid.uuid4().hex
+    message = {
+        "jobId": job_id,
+        "prompt": "",
+        "targetVersion": version_name,
+        "docCount": doc_count,
+        "threshold": threshold,
+        "augment": augment,
+        "generateDocs": True,
+        "preauthoredSchema": schema,
+        "allowedFieldNames": allowed,
+    }
+    boto3.client("sqs").send_message(
+        QueueUrl=queue_url, MessageBody=json.dumps(message)
+    )
+    return json.dumps(
+        {
+            "enqueued": True,
+            "jobId": job_id,
+            "configVersion": version_name,
+            "className": class_name,
+            "docCount": doc_count,
+        }
+    )
+
+
 @strands.tool
 def check_generator_availability() -> str:
     """Check whether synthetic document generation is available in this deployment.
@@ -273,4 +377,42 @@ def request_document_generation(
     """
     return request_document_generation_impl(
         schema_text, config_version, doc_count, threshold, augment
+    )
+
+
+@strands.tool
+def list_config_versions() -> str:
+    """List the user's existing configuration versions and their document classes.
+
+    Use this when the user wants to generate documents from an existing
+    configuration rather than authoring a new schema, so they can pick a version
+    and a document class.
+    """
+    return list_config_versions_impl()
+
+
+@strands.tool
+def generate_from_existing_config(
+    version_name: str,
+    class_name: str,
+    doc_count: int = 3,
+    threshold: int = 7,
+    augment: bool = False,
+) -> str:
+    """Enqueue synthetic-document generation for a class in an EXISTING config version.
+
+    Use this (instead of authoring a new schema) when the user asks to generate
+    documents from one of their existing configurations. First call
+    list_config_versions so the user can pick a version and class. ONLY call this
+    after the user has confirmed and seen the cost/time estimate.
+
+    Args:
+        version_name: The existing config version to read the class schema from.
+        class_name: The document class within that version to generate.
+        doc_count: Number of documents to generate.
+        threshold: Quality threshold (1-10).
+        augment: Whether to apply scan/fax-style image augmentation.
+    """
+    return generate_from_existing_config_impl(
+        version_name, class_name, doc_count, threshold, augment
     )

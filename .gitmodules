@@ -1,3 +1,0 @@
-[submodule "lib/doc-gen-agent"]
-	path = lib/doc-gen-agent
-	url = git@ssh.code.aws.dev:proserve/genaiid/innovation-assets/IDP-data-generation.git

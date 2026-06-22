@@ -15,6 +15,8 @@ from .tools import (
     check_generator_availability,
     create_config_version,
     estimate_generation_cost,
+    generate_from_existing_config,
+    list_config_versions,
     refine_schema,
     request_document_generation,
     search_catalog,
@@ -56,6 +58,14 @@ Follow this flow:
 7. After enqueuing, tell the user the job is running in the background and they
    will see live status updates.
 
+Generating from an existing configuration:
+- If the user wants to generate documents from one of their EXISTING configs
+  (rather than authoring a new schema), call list_config_versions to show their
+  versions and the document classes in each. Let them pick a version and a class.
+- Then follow the same cost-estimate + explicit-confirmation gate as above and
+  call generate_from_existing_config(version_name, class_name, ...). Do NOT
+  re-author a schema in this case - the existing class schema is used as-is.
+
 Uploaded documents (highest-fidelity path):
 - The chat UI lets the user attach their own example documents. When they do,
   the documents are run through multi-document Discovery, which infers schema(s)
@@ -67,6 +77,17 @@ Uploaded documents (highest-fidelity path):
   whether the user wants to (a) refine any of the schemas (use refine_schema) or
   (b) generate synthetic test data for them. Schemas inferred from real documents
   are higher fidelity than prompt-only drafts - prefer them when available.
+
+Modes (you are "Conductor"):
+- This chat has two modes, selectable with the toggle below the message box:
+  "Companion" (general Q&A about the user's documents, analytics, errors, and
+  the codebase) and "Conductor" (you - setup, schema authoring, config versions,
+  and synthetic data generation).
+- If the user's request is really a Companion task (e.g. "how many documents did
+  I process last week?", analytics, error analysis, code questions), tell them
+  briefly that it's better handled in Companion mode and to switch using the
+  toggle labeled "Companion" below the message box. Do not try to answer it
+  yourself.
 
 Be concise and friendly. Always keep the user in control of cost-incurring
 steps. If a real example document would improve fidelity, suggest the user
@@ -91,6 +112,8 @@ def create_quick_start_agent(
         create_config_version,
         check_generator_availability,
         request_document_generation,
+        list_config_versions,
+        generate_from_existing_config,
     ]
 
     bedrock_model = create_strands_bedrock_model(

@@ -18,6 +18,7 @@ import TestStudioRoutes from './TestStudioRoutes';
 import AgentChatRoutes from './AgentChatRoutes';
 import QuickStartWidget from '../components/agent-chat/QuickStartWidget';
 import FeaturesRoutes from './FeaturesRoutes';
+import WelcomePage from '../pages/WelcomePage';
 
 import {
   DOCUMENTS_PATH,
@@ -29,6 +30,8 @@ import {
   TEST_STUDIO_PATH,
   AGENT_CHAT_PATH,
   FEATURES_PATH_PREFIX,
+  WELCOME_PATH,
+  WELCOME_DISMISSED_KEY,
 } from './constants';
 
 const logger = new ConsoleLogger('AuthRoutes');
@@ -60,7 +63,15 @@ const AuthRoutes = ({ redirectParam }: AuthRoutesProps): React.JSX.Element => {
   // guarantees the first navigation honours DefaultFeatureId.
   const settingsLoaded = settings && Object.keys(settings).length > 0;
   const defaultFeatureId = (settings as Record<string, unknown>)?.DefaultFeatureId as string | undefined;
-  const landingPath = defaultFeatureId ? `${FEATURES_PATH_PREFIX}/${defaultFeatureId}` : DEFAULT_PATH;
+  // Landing precedence: a configured vertical-product feature wins; otherwise show
+  // the welcome page unless the user has dismissed it; otherwise the documents list.
+  let welcomeDismissed = false;
+  try {
+    welcomeDismissed = localStorage.getItem(WELCOME_DISMISSED_KEY) === 'true';
+  } catch {
+    /* ignore */
+  }
+  const landingPath = defaultFeatureId ? `${FEATURES_PATH_PREFIX}/${defaultFeatureId}` : welcomeDismissed ? DEFAULT_PATH : WELCOME_PATH;
 
   if (!settingsLoaded) {
     return (
@@ -75,6 +86,7 @@ const AuthRoutes = ({ redirectParam }: AuthRoutesProps): React.JSX.Element => {
   return (
     <SettingsContext.Provider value={settingsContextValue}>
       <Routes>
+        <Route path={WELCOME_PATH} element={<WelcomePage />} />
         <Route path={`${AGENT_CHAT_PATH}/*`} element={<AgentChatRoutes />} />
         <Route path={`${FEATURES_PATH_PREFIX}/*`} element={<FeaturesRoutes />} />
         <Route path={`${DOCUMENTS_KB_QUERY_PATH}/*`} element={<DocumentsQueryRoutes />} />

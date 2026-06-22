@@ -1,11 +1,42 @@
 .quick-start-widget {
+  z-index: 1000;
+}
+
+.quick-start-widget-launcher-wrap {
   position: fixed;
   bottom: 24px;
   right: 24px;
   z-index: 1000;
 }
 
+.quick-start-widget-launcher {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  background: var(--color-background-button-primary-default, #0972d3);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  box-shadow: 0 4px 12px rgba(0, 7, 22, 0.3);
+  touch-action: none;
+}
+
+.quick-start-widget-launcher:hover {
+  background: var(--color-background-button-primary-hover, #033160);
+}
+
+.quick-start-widget-launcher:active {
+  cursor: grabbing;
+}
+
 .quick-start-widget-panel {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 1000;
   width: 550px;
   max-width: calc(100vw - 48px);
   height: 680px;

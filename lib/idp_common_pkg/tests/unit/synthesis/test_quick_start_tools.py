@@ -109,3 +109,63 @@ class TestRequestGenerationGuards:
         assert sent["body"]["targetVersion"] == "v1"
         assert sent["body"]["docCount"] == 4
         assert "NetPay" in sent["body"]["allowedFieldNames"]
+
+
+class TestGenerateFromExistingConfig:
+    def test_list_config_versions(self):
+        from idp_common.agents.quick_start.tools import bootstrap_tools as bt
+
+        mgr = Mock()
+        mgr.list_config_versions.return_value = [
+            {"versionName": "v1", "isActive": True, "description": "d"}
+        ]
+        mgr.get_raw_configuration.return_value = {"classes": [SCHEMA]}
+        with patch(
+            "idp_common.config.configuration_manager.ConfigurationManager",
+            return_value=mgr,
+        ):
+            out = json.loads(bt.list_config_versions_impl())
+        assert out["versions"][0]["versionName"] == "v1"
+        assert out["versions"][0]["classes"] == ["Paystub"]
+
+    def test_generate_from_existing_enqueues(self, monkeypatch):
+        from idp_common.agents.quick_start.tools import bootstrap_tools as bt
+
+        monkeypatch.setenv("BOOTSTRAP_QUEUE_URL", "https://sqs/queue")
+        mgr = Mock()
+        mgr.get_raw_configuration.return_value = {"classes": [SCHEMA]}
+        sent = {}
+
+        class _SQS:
+            def send_message(self, QueueUrl, MessageBody):
+                sent["body"] = json.loads(MessageBody)
+
+        with patch(
+            "idp_common.config.configuration_manager.ConfigurationManager",
+            return_value=mgr,
+        ):
+            with patch("boto3.client", return_value=_SQS()):
+                out = json.loads(
+                    bt.generate_from_existing_config_impl("v1", "Paystub", doc_count=2)
+                )
+        assert out["enqueued"] is True
+        assert sent["body"]["targetVersion"] == "v1"
+        assert sent["body"]["docCount"] == 2
+        assert "NetPay" in sent["body"]["allowedFieldNames"]
+        assert sent["body"]["preauthoredSchema"]["title"] == "Paystub"
+
+    def test_generate_from_existing_missing_class(self, monkeypatch):
+        from idp_common.agents.quick_start.tools import bootstrap_tools as bt
+
+        monkeypatch.setenv("BOOTSTRAP_QUEUE_URL", "https://sqs/queue")
+        mgr = Mock()
+        mgr.get_raw_configuration.return_value = {"classes": [SCHEMA]}
+        with patch(
+            "idp_common.config.configuration_manager.ConfigurationManager",
+            return_value=mgr,
+        ):
+            out = json.loads(
+                bt.generate_from_existing_config_impl("v1", "DoesNotExist")
+            )
+        assert out["enqueued"] is False
+        assert "Paystub" in out["availableClasses"]
