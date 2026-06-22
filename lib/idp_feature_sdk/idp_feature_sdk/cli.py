@@ -206,11 +206,9 @@ def publish(
     "--bucket-basename",
     required=True,
     help="S3 bucket basename for the pack's published artifacts — region is "
-    "appended automatically (matches `idp-cli`). For CROSS-ACCOUNT deploys "
-    "the resulting bucket must grant public read on the `packs/*` prefix "
-    "(use `deploy-pack --from-code --public` to provision one, or set "
-    "the policy yourself). This command does not modify the bucket's "
-    "Block Public Access settings.",
+    "appended automatically (matches `idp-cli`). Private by default; pass "
+    "--public to grant public read on the `packs/*`/`host/*` prefixes for "
+    "CROSS-ACCOUNT deploys. Without --public the bucket is left untouched.",
 )
 @click.option(
     "--prefix",
@@ -234,6 +232,19 @@ def publish(
     default=False,
     help="Skip `npm run build` for the UI bundle (assume dist/ is already built).",
 )
+@click.option(
+    "--public",
+    "make_public",
+    is_flag=True,
+    default=False,
+    help="Make the published artifacts world-readable on the `packs/*` and "
+    "`host/*` prefixes (relaxes BlockPublicPolicy/RestrictPublicBuckets and "
+    "applies a public-read bucket policy). ONLY needed to share artifacts for "
+    "CROSS-ACCOUNT / Quick-Create pack deploys, where the deploying account's "
+    "pre-stager Lambda fetches the wrapper via anonymous HTTPS. Default: "
+    "private (same-account). A pre-existing bucket's Block Public Access "
+    "settings are never weakened unless this flag is set.",
+)
 def publish_pack_cmd(
     project_dir: Path,
     bucket_basename: str,
@@ -241,18 +252,25 @@ def publish_pack_cmd(
     host_template_url: str,
     region: str,
     skip_build: bool,
+    make_public: bool,
 ) -> None:
     """Publish a vertical-product pack as a single-template wrapper.
 
     Builds the feature, uploads all artifacts (template, ui-bundle,
-    config preset, manifest, SAM Lambda zips) public-read, then bakes
-    the artifact URLs into the pack's deploy.yaml as parameter defaults
-    and uploads the result. Prints a Quick-Create URL and an
-    `idp-feature-cli deploy-pack` command for one-click deploy.
+    config preset, manifest, SAM Lambda zips), then bakes the artifact
+    URLs into the pack's deploy.yaml as parameter defaults and uploads
+    the result. Prints a Quick-Create URL and an `idp-feature-cli
+    deploy-pack` command for one-click deploy.
+
+    Private by default (secure, same-account). Pass --public to grant
+    anonymous read for cross-account / Quick-Create deploys — mirrors the
+    `publish` and `deploy-pack` commands.
     """
     from .pack import PackPublisher
 
-    artifacts_bucket = f"{bucket_basename}-{region}"
+    artifacts_bucket = _resolve_bucket(
+        bucket_basename, region, make_public=make_public
+    )
     try:
         publisher = PackPublisher(project_dir, console=console)
         result = publisher.publish(
@@ -261,6 +279,7 @@ def publish_pack_cmd(
             host_template_url=host_template_url,
             region=region,
             skip_feature_build=skip_build,
+            make_public=make_public,
         )
     except (ManifestError, RuntimeError, ValueError, FileNotFoundError) as exc:
         console.print(f"[red]✗ {exc}[/red]")
@@ -524,6 +543,7 @@ def deploy_pack_cmd(
                     artifacts_prefix=artifacts_prefix,
                     host_template_url=host_template_url,
                     region=region,
+                    make_public=make_public,
                 )
                 wrapper_url = result.wrapper_template_url
             except (ManifestError, RuntimeError, ValueError, FileNotFoundError) as exc:

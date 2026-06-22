@@ -201,6 +201,7 @@ class PackPublisher:
         host_template_url: str,
         region: str,
         skip_feature_build: bool = False,
+        make_public: bool = False,
     ) -> PackPublishResult:
         manifest = load_manifest(self.project_dir)
         if manifest.pack is None:
@@ -217,6 +218,14 @@ class PackPublisher:
             )
 
         s3 = boto3.client("s3", region_name=region)
+
+        # When publishing public (opt-in, cross-account), ensure the
+        # `packs/*`/`host/*` public-read bucket policy is in place before
+        # uploading. An explicit `--bucket-basename` skips the auto-bucket
+        # path in `_resolve_bucket`, so the policy is applied here. Without
+        # `--public` the bucket is left untouched (secure, same-account).
+        if make_public:
+            apply_public_artifacts_policy(s3, artifacts_bucket, console=self.console)
         feature_id = manifest.featureId
         version = manifest.version
         # All feature artifacts live under <prefix>/<feature-id>/v<version>/
@@ -234,10 +243,12 @@ class PackPublisher:
             region=region,
         )
 
-        # 3. Upload feature artifacts (template, ui-bundle, manifest, configs)
-        #    and make them publicly readable so the wrapper's pre-stager (which
-        #    runs in the *deploying* account, not the publisher's) can fetch
-        #    them via plain HTTPS.
+        # 3. Upload feature artifacts (template, ui-bundle, manifest, configs).
+        #    Object-level reads are governed by the bucket policy: with
+        #    `--public` the `packs/*` prefix is world-readable so the wrapper's
+        #    pre-stager (which runs in the *deploying* account, not the
+        #    publisher's) can fetch them via plain HTTPS; without it the
+        #    artifacts stay private to the publishing account.
         feat_template_local = self.project_dir / ".aws-sam" / "packaged.yaml"
         # Bake the version token in the SAM-packaged template before upload.
         baked_text = feat_template_local.read_text(encoding="utf-8").replace(
@@ -328,34 +339,46 @@ class PackPublisher:
             f"[green]✓[/green] uploaded wrapper s3://{artifacts_bucket}/{wrapper_key}"
         )
 
-        # 4b. Sanity-check the wrapper is publicly readable. The wrapper's
-        # FeatureBucketPrestager Lambda fetches it via plain HTTPS during
-        # deploy — if the bucket policy didn't take effect (e.g. account-
-        # level S3 Block Public Access overrides) the deploy fails late
-        # with HTTP 403. Catch that here, before CFN starts spinning up.
-        import urllib.error
-        import urllib.request
+        # 4b. When publishing public (opt-in, cross-account), sanity-check the
+        # wrapper is publicly readable. The wrapper's FeatureBucketPrestager
+        # Lambda fetches it via plain HTTPS during deploy — if the bucket
+        # policy didn't take effect (e.g. account-level S3 Block Public Access
+        # overrides) the deploy fails late with HTTP 403. Catch that here,
+        # before CFN starts spinning up.
+        #
+        # Without `--public` the artifacts are private (same-account flow):
+        # the bucket has no public-read policy and an anonymous HEAD would
+        # legitimately 403, so the check is skipped.
+        if make_public:
+            import urllib.error
+            import urllib.request
 
-        try:
-            req = urllib.request.Request(wrapper_url, method="HEAD")
-            with urllib.request.urlopen(req, timeout=15) as r:
-                if r.status != 200:
-                    raise RuntimeError(f"HTTP {r.status}")
-        except urllib.error.HTTPError as exc:
-            raise RuntimeError(
-                f"Published wrapper at {wrapper_url} is not publicly "
-                f"reachable (HTTP {exc.code}). The bucket policy did not "
-                f"take effect — most likely cause is account-level S3 "
-                f"Block Public Access. Disable BlockPublicPolicy + "
-                f"RestrictPublicBuckets at the account level, or pass "
-                f"--bucket-basename pointing at a bucket where you "
-                f"control BPA."
-            ) from exc
-        except Exception as exc:
-            raise RuntimeError(
-                f"Couldn't HEAD the published wrapper at {wrapper_url}: {exc}. "
-                f"Cross-account pack deploys won't work until this is fixed."
-            ) from exc
+            try:
+                req = urllib.request.Request(wrapper_url, method="HEAD")
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    if r.status != 200:
+                        raise RuntimeError(f"HTTP {r.status}")
+            except urllib.error.HTTPError as exc:
+                raise RuntimeError(
+                    f"Published wrapper at {wrapper_url} is not publicly "
+                    f"reachable (HTTP {exc.code}). The bucket policy did not "
+                    f"take effect — most likely cause is account-level S3 "
+                    f"Block Public Access. Disable BlockPublicPolicy + "
+                    f"RestrictPublicBuckets at the account level, or pass "
+                    f"--bucket-basename pointing at a bucket where you "
+                    f"control BPA."
+                ) from exc
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Couldn't HEAD the published wrapper at {wrapper_url}: {exc}. "
+                    f"Cross-account pack deploys won't work until this is fixed."
+                ) from exc
+        else:
+            self._log(
+                "[dim]Artifacts published privately (same-account). Pass "
+                "--public to grant anonymous read for cross-account / "
+                "Quick-Create pack deploys.[/dim]"
+            )
 
         # 5. Quick-Create URL for one-click deploy via the AWS Console.
         quick_create = (
@@ -831,6 +854,27 @@ def ensure_artifacts_bucket(
         return bucket
 
     # ---- make_public=True: opt-in public artifacts (cross-account) ----
+    apply_public_artifacts_policy(s3, bucket, console=cons)
+    return bucket
+
+
+def apply_public_artifacts_policy(
+    s3: Any, bucket: str, *, console: Optional[Console] = None
+) -> None:
+    """Relax BlockPublicPolicy/RestrictPublicBuckets and apply (or merge) the
+    ``packs/*`` + ``host/*`` public-read bucket policy on ``bucket``.
+
+    Opt-in only — callers invoke this when the operator passed ``--public``.
+    It grants anonymous HTTPS read on the published-artifact prefixes so a
+    *deploying* account's pre-stager Lambda (which fetches the wrapper/host/
+    feature templates via plain ``urllib`` over HTTPS, not SigV4) can read
+    them during cross-account pack deploys. Same-account/private flows never
+    call this, so a bucket's Block Public Access settings are left untouched.
+
+    Raises ``RuntimeError`` with an actionable message if the public policy
+    cannot be applied (e.g. account-level S3 Block Public Access).
+    """
+    cons = console or Console()
     # Allow bucket-level public policy (it stays blocked by default on
     # newly-created buckets; pre-existing buckets may also have block-all).
     # We loudly check the result rather than ignoring failures — a bucket
@@ -899,7 +943,6 @@ def ensure_artifacts_bucket(
         raise RuntimeError(
             f"Failed to set public-read policy on {bucket!r}: {exc}"
         ) from exc
-    return bucket
 
 
 def publish_host_accelerator(
