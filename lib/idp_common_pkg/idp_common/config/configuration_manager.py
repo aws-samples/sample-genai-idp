@@ -417,28 +417,38 @@ class ConfigurationManager:
             description, bdaProjectArn, bdaSyncStatus, bdaLastSyncedAt
         """
         try:
-            response = self.table.scan(
-                FilterExpression="begins_with(Configuration, :config_prefix)",
-                ExpressionAttributeValues={":config_prefix": f"{CONFIG_TYPE_CONFIG}#"},
-                ProjectionExpression="Configuration, IsActive, CreatedAt, UpdatedAt, Description, BdaProjectArn, BdaSyncStatus, BdaLastSyncedAt, Managed"
-            )
+            # DynamoDB scan returns at most 1MB per call, so paginate through
+            # LastEvaluatedKey to ensure every config version is returned. Without
+            # this loop, versions beyond the first page are silently dropped.
+            scan_kwargs = {
+                "FilterExpression": "begins_with(Configuration, :config_prefix)",
+                "ExpressionAttributeValues": {":config_prefix": f"{CONFIG_TYPE_CONFIG}#"},
+                "ProjectionExpression": "Configuration, IsActive, CreatedAt, UpdatedAt, Description, BdaProjectArn, BdaSyncStatus, BdaLastSyncedAt, Managed",
+            }
 
             versions = []
-            for item in response.get('Items', []):
-                config_key = item.get('Configuration', '')
-                if "#" in config_key:
-                    _, version = config_key.split("#", 1)
-                    versions.append({
-                        "versionName": version,
-                        "isActive": item.get('IsActive'),
-                        "createdAt": item.get('CreatedAt'),
-                        "updatedAt": item.get('UpdatedAt'),
-                        "description": item.get('Description', ""),
-                        "bdaProjectArn": item.get('BdaProjectArn'),
-                        "bdaSyncStatus": item.get('BdaSyncStatus'),
-                        "bdaLastSyncedAt": item.get('BdaLastSyncedAt'),
-                        "managed": item.get('Managed', False),
-                    })
+            while True:
+                response = self.table.scan(**scan_kwargs)
+                for item in response.get('Items', []):
+                    config_key = item.get('Configuration', '')
+                    if "#" in config_key:
+                        _, version = config_key.split("#", 1)
+                        versions.append({
+                            "versionName": version,
+                            "isActive": item.get('IsActive'),
+                            "createdAt": item.get('CreatedAt'),
+                            "updatedAt": item.get('UpdatedAt'),
+                            "description": item.get('Description', ""),
+                            "bdaProjectArn": item.get('BdaProjectArn'),
+                            "bdaSyncStatus": item.get('BdaSyncStatus'),
+                            "bdaLastSyncedAt": item.get('BdaLastSyncedAt'),
+                            "managed": item.get('Managed', False),
+                        })
+
+                last_evaluated_key = response.get('LastEvaluatedKey')
+                if not last_evaluated_key:
+                    break
+                scan_kwargs['ExclusiveStartKey'] = last_evaluated_key
 
             return versions
 
