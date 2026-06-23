@@ -30,6 +30,15 @@ def _keys(bucket: str) -> set[str]:
     return {o["Key"] for o in s3.list_objects_v2(Bucket=bucket).get("Contents", [])}
 
 
+def _acl_is_public(s3, bucket: str, key: str) -> bool:
+    grants = s3.get_object_acl(Bucket=bucket, Key=key)["Grants"]
+    return any(
+        g.get("Grantee", {}).get("URI", "").endswith("AllUsers")
+        and g.get("Permission") == "READ"
+        for g in grants
+    )
+
+
 def _make_pack(project: Path) -> None:
     """Turn the shared demo feature project into a pack: add a `pack:` section
     pointing at a wrapper deploy.yaml that declares the three baked params."""
@@ -174,6 +183,37 @@ def test_explicit_prefix_propagates_to_layout_and_wrapper(
         .decode()
     )
     assert f"Default: '{prefixed_base}'" in wrapper
+
+
+def test_public_makes_wrapper_and_feature_artifacts_readable(
+    demo_feature_project: Path, feature_bucket: str, monkeypatch
+) -> None:
+    """--public must tag the WRAPPER and the feature artifacts public-read —
+    mirroring `publish`. Regression guard for the bug where the wrapper was
+    uploaded with no ACL and the public-read policy only covered the unused
+    `packs/*` prefix, so cross-account / Quick-Create deploys 403'd."""
+    _make_pack(demo_feature_project)
+
+    # The 4b sanity check does a real anonymous HTTPS HEAD on the wrapper URL,
+    # which isn't reachable under moto — stub it; we assert the ACLs directly.
+    monkeypatch.setattr(
+        PackPublisher, "_assert_publicly_readable", lambda self, url: None
+    )
+
+    PackPublisher(demo_feature_project).publish(
+        artifacts_bucket=feature_bucket,
+        artifacts_prefix="",
+        host_template_url=_HOST_URL,
+        region="us-east-1",
+        make_public=True,
+    )
+
+    s3 = boto3.client("s3", region_name="us-east-1")
+    # The wrapper (the Quick-Create target) is public-read.
+    assert _acl_is_public(s3, feature_bucket, f"{_BASE}/deploy.yaml")
+    # The feature artifacts the deploy reads in place are public-read too.
+    assert _acl_is_public(s3, feature_bucket, f"{_BASE}/template.yaml")
+    assert _acl_is_public(s3, feature_bucket, f"{_BASE}/{_VERSION}/ui-bundle.js")
 
 
 def test_unknown_wrapper_param_raises(
