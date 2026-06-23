@@ -6,14 +6,14 @@
 export const SYSTEM = 'System' as const;
 
 /** File extensions accepted for document processing upload (supports backend conversion). */
-export const SUPPORTED_UPLOAD_EXTENSIONS = '.pdf,.png,.jpg,.jpeg,.tiff,.tif,.xlsx,.xls,.csv,.doc,.docx' as const;
+export const SUPPORTED_UPLOAD_EXTENSIONS = '.pdf,.png,.jpg,.jpeg,.tiff,.tif,.xlsx,.xls,.csv,.doc,.docx,.txt' as const;
 
 /** File extensions accepted for Discovery upload (PDF and images only — no backend conversion). */
 export const SUPPORTED_DISCOVERY_EXTENSIONS = '.pdf,.png,.jpg,.jpeg,.tiff,.tif' as const;
 
 /** Human-readable label for supported processing upload formats. */
 export const SUPPORTED_UPLOAD_FORMATS_LABEL =
-  'Supported formats: PDF, PNG, JPEG, TIFF, Excel (XLSX/XLS), CSV, and Word (DOC/DOCX). PDF and image files are processed with Textract; spreadsheet and Word files are supported through backend conversion.' as const;
+  'Supported formats: PDF, PNG, JPEG, TIFF, Excel (XLSX/XLS), CSV, Word (DOC/DOCX), and plain text (TXT). PDF and image files are processed with Textract; spreadsheet, Word, and text files are supported through backend conversion.' as const;
 
 export const LANGUAGE_CODES = [
   { value: '', label: 'Choose a Language' },

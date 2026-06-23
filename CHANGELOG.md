@@ -15,6 +15,10 @@ SPDX-License-Identifier: MIT-0
 
 - **Global split panel ("documents selected")** — Removed the persistent bottom split panel from the global Web UI layout and deleted the related split-panel components and `use-split-panel` hook. The split-panel was noisy on non-document-list pages and only provided full details for single-document selection; reintroduce as an opt-in, per-page component if needed (recommendation: enable only on `DocumentList`).
 
+### Fixed
+
+- **Web UI blocked `.txt` uploads despite backend support (#373)** — The Web UI file picker's upload allow-list (`SUPPORTED_UPLOAD_EXTENSIONS`) omitted `.txt`, so users with plain-text corpora had to bypass the UI and upload directly to S3. The backend OCR service already processes plain text (`_process_non_pdf_document()` → `DocumentConverter.convert_text_to_pages()`), so this was a UI-only gap. Added `.txt` to the allow-list and updated the supported-formats label. Discovery upload remains intentionally PDF/image-only.
+
 ### Changed
 
 - **Web UI CloudFront origin access: OAI → OAC (#369)** — The CloudFront-hosted Web UI now reads its S3 origin (`WebUIBucket`) using **Origin Access Control (OAC)** instead of the legacy **Origin Access Identity (OAI)**. The distribution origin references a new `AWS::CloudFront::OriginAccessControl` resource (SigV4, `SigningBehavior: always`), and the `WebUIBucketPolicy` now grants `s3:GetObject` to the `cloudfront.amazonaws.com` service principal scoped by an `AWS:SourceArn` condition matching this distribution — strictly tighter than the previous shared canonical-user grant. This fixes a **403 / Access Denied** loading the Web UI in accounts whose org-level SCP or data-perimeter guardrails silently deny legacy OAI requests to S3 (OAI requests carry no `aws:SourceAccount`/`aws:SourceArn` and are blocked). OAC is the AWS-recommended successor to OAI. **Upgrade is in-place and non-disruptive:** the CloudFront distribution keeps the same domain name (existing Web UI URLs and the welcome-email link continue to work), and `WebUIBucket` is unaffected. GovCloud and ALB-hosted deployments are unchanged — the resource is gated on `WebUIHosting=CloudFront`.
