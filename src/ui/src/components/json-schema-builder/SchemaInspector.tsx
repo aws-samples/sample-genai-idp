@@ -216,7 +216,7 @@ const SchemaInspector = ({
                   <Button
                     iconName="gen-ai"
                     onClick={() => {
-                      const className = (selectedClass[X_AWS_IDP_DOCUMENT_TYPE] as string) || selectedClass.name;
+                      const className = selectedClass.name;
                       window.dispatchEvent(
                         new CustomEvent('generateSyntheticData', {
                           detail: { className },

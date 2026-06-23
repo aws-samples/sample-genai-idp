@@ -16,7 +16,10 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
 # WeasyPrint runtime libraries + fonts. build-essential/libffi-dev are needed
-# to compile any wheels without prebuilt arm64 artifacts.
+# to compile any wheels without prebuilt arm64 artifacts. libgl1/libglib2.0-0
+# provide libGL.so.1 + libgthread, required by OpenCV (cv2) — augraphy pulls in
+# the non-headless opencv-python, so the augmentation path imports cv2 at module
+# load and fails without these system libraries.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         libpango-1.0-0 \
@@ -28,6 +31,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libharfbuzz0b \
         libfribidi0 \
         libfontconfig1 \
+        libgl1 \
+        libglib2.0-0 \
         fonts-dejavu-core \
         fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
