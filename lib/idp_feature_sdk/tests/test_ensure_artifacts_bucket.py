@@ -88,7 +88,7 @@ def test_preexisting_bucket_bpa_left_untouched(aws_credentials):
 
 def test_make_public_opt_in_relaxes_bpa_and_sets_policy(aws_credentials):
     """With make_public=True, BlockPublicPolicy/RestrictPublicBuckets are
-    relaxed and the packs/host public-read bucket policy is applied."""
+    relaxed and the extensions/host public-read bucket policy is applied."""
     with mock_aws():
         bucket = ensure_artifacts_bucket(region=REGION, make_public=True)
         s3 = boto3.client("s3", region_name=REGION)
@@ -107,7 +107,7 @@ def test_make_public_opt_in_relaxes_bpa_and_sets_policy(aws_credentials):
         )
         assert stmt["Principal"] == "*"
         assert stmt["Action"] == "s3:GetObject"
-        assert any(f"{bucket}/packs/" in r for r in stmt["Resource"])
+        assert any(f"{bucket}/extensions/" in r for r in stmt["Resource"])
         assert any(f"{bucket}/host/" in r for r in stmt["Resource"])
 
 

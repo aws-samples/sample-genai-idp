@@ -89,6 +89,27 @@ idp-feature-cli show-schema
 | `deploy`      | Create-or-update **this feature's** stack into an existing host — either `--from-code` (publish first) or `--template-url` (already published). |
 | `deploy-pack` | Deploys a self-contained *pack* that stands up its **own** host stack.       |
 
+A **pack** (`publish-pack` / `deploy-pack`) publishes its feature artifacts
+exactly like `publish` — shared publisher, so the same `extensions/<id>/`
+version-free layout and the same baked tokens — then bakes the publish
+**bucket + version-free prefix + version** into its wrapper template's
+parameter defaults. The pack's feature stack reads those artifacts *in place*
+via IAM; there is no seller bucket and no pre-stage copy. Declare the wrapper
+parameter names under `pack.wrapperParameters` in `feature.yaml`:
+
+```yaml
+pack:
+  wrapperTemplatePath: deploy.yaml
+  wrapperParameters:
+    hostTemplateUrlParam: IdpAcceleratorTemplateUrl
+    featureBucketParam:   FeatureBucket          # bucket holding the artifacts
+    prefixParam:          FeatureArtifactPrefix  # e.g. extensions/<id>
+    versionParam:         FeatureVersion
+```
+
+(The pre-`#375` `artifactSourceParam` / seller-bucket model is gone; wrappers
+that still declare it must migrate to `featureBucketParam` + `prefixParam`.)
+
 `deploy` is the fast inner loop for iterating one extension from source against
 a live IDP deployment. The feature stack is named
 `<host-stack-name>-feature-<feature-id>` by default (override with
