@@ -56,12 +56,18 @@ class ConfigPresetSpec:
 
 @dataclass(frozen=True)
 class PackWrapperParams:
-    """Names of the wrapper parameters that accept artifact URLs/version.
-    The publisher bakes artifact values into these parameter defaults at
-    publish time so deploy-pack only needs --stack-name + --admin-email."""
+    """Names of the wrapper parameters that locate the published artifacts.
+    The publisher bakes values into these parameter defaults at publish
+    time so deploy-pack only needs --stack-name + --admin-email.
+
+    The pack reads its feature artifacts IN PLACE from the publish bucket
+    (like a normal `deploy`), so the wrapper takes the bucket + version-free
+    prefix rather than a public artifact-source URL — there is no seller
+    bucket and no pre-stage copy."""
 
     hostTemplateUrlParam: str = "IdpAcceleratorTemplateUrl"  # noqa: N815
-    artifactSourceParam: Optional[str] = None  # noqa: N815
+    featureBucketParam: Optional[str] = None  # noqa: N815
+    prefixParam: Optional[str] = None  # noqa: N815
     versionParam: Optional[str] = None  # noqa: N815
 
 
@@ -194,7 +200,8 @@ def _parse_pack(raw: Dict[str, Any]) -> PackSpec:
             hostTemplateUrlParam=params_raw.get(
                 "hostTemplateUrlParam", "IdpAcceleratorTemplateUrl"
             ),
-            artifactSourceParam=params_raw.get("artifactSourceParam"),
+            featureBucketParam=params_raw.get("featureBucketParam"),
+            prefixParam=params_raw.get("prefixParam"),
             versionParam=params_raw.get("versionParam"),
         ),
     )

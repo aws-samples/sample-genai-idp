@@ -204,34 +204,30 @@ def publish(
 )
 @click.option(
     "--bucket-basename",
-    required=True,
+    default=None,
     help="S3 bucket basename for the pack's published artifacts — region is "
-    "appended automatically (matches `idp-cli`). Private by default; pass "
+    "appended automatically (auto-generated as "
+    "idp-accelerator-artifacts-<account>-<region> and created if not "
+    "provided). Matches `idp-cli` / `publish`. Private by default; pass "
     "--public to grant public read on the `packs/*`/`host/*` prefixes for "
     "CROSS-ACCOUNT deploys. Without --public the bucket is left untouched.",
 )
 @click.option(
     "--prefix",
     "artifacts_prefix",
-    default="packs",
-    show_default=True,
-    help="Key prefix under the artifacts bucket. Final layout: "
-    "<bucket>/<prefix>/<feature-id>/v<version>/.",
+    default="",
+    help="Optional S3 key prefix under the artifacts bucket. Default (empty) "
+    "yields the bare `extensions/<id>/...` layout — the SAME layout `publish` "
+    "produces; a non-empty prefix becomes `<prefix>/extensions/<id>/...`.",
 )
 @click.option(
     "--host-template-url",
     required=True,
     help="Public HTTPS URL of the IDP accelerator main template (idp-main.yaml). "
-    "Produced by `python3 publish.py`. Baked into the wrapper as a parameter "
+    "Produced by `idp-cli publish`. Baked into the wrapper as a parameter "
     "default so deploy-pack doesn't need to specify it.",
 )
-@click.option("--region", default="us-west-2", show_default=True)
-@click.option(
-    "--skip-build",
-    is_flag=True,
-    default=False,
-    help="Skip `npm run build` for the UI bundle (assume dist/ is already built).",
-)
+@click.option("--region", default="us-east-1", show_default=True)
 @click.option(
     "--public",
     "make_public",
@@ -240,18 +236,17 @@ def publish(
     help="Make the published artifacts world-readable on the `packs/*` and "
     "`host/*` prefixes (relaxes BlockPublicPolicy/RestrictPublicBuckets and "
     "applies a public-read bucket policy). ONLY needed to share artifacts for "
-    "CROSS-ACCOUNT / Quick-Create pack deploys, where the deploying account's "
-    "pre-stager Lambda fetches the wrapper via anonymous HTTPS. Default: "
-    "private (same-account). A pre-existing bucket's Block Public Access "
-    "settings are never weakened unless this flag is set.",
+    "CROSS-ACCOUNT / Quick-Create pack deploys, where the deploying account "
+    "fetches the wrapper template via anonymous HTTPS. Default: private "
+    "(same-account). A pre-existing bucket's Block Public Access settings are "
+    "never weakened unless this flag is set.",
 )
 def publish_pack_cmd(
     project_dir: Path,
-    bucket_basename: str,
+    bucket_basename: Optional[str],
     artifacts_prefix: str,
     host_template_url: str,
     region: str,
-    skip_build: bool,
     make_public: bool,
 ) -> None:
     """Publish a vertical-product pack as a single-template wrapper.
@@ -276,7 +271,6 @@ def publish_pack_cmd(
             artifacts_prefix=artifacts_prefix,
             host_template_url=host_template_url,
             region=region,
-            skip_feature_build=skip_build,
             make_public=make_public,
         )
     except (ManifestError, RuntimeError, ValueError, FileNotFoundError) as exc:
@@ -288,7 +282,6 @@ def publish_pack_cmd(
     console.print(
         f"  artifacts:        s3://{result.artifact_bucket}/{result.artifact_prefix}/"
     )
-    console.print(f"  artifact source:  {result.artifact_source_url}")
     console.print(f"  feature template: {result.feature_template_url}")
     console.print(f"  host template:    {result.host_template_url}")
     console.print(f"  wrapper template: {result.wrapper_template_url}")
@@ -340,14 +333,16 @@ def publish_pack_cmd(
     "artifacts — region is appended automatically (matches `idp-cli deploy`). "
     "Auto-generated as `idp-accelerator-artifacts-<account-id>-<region>` and "
     "auto-created if not provided. With --build accelerator|all, host artifacts "
-    "go under <bucket>/host/, pack artifacts under <bucket>/packs/.",
+    "go under <bucket>/host/, pack feature artifacts under "
+    "<bucket>/[<prefix>/]extensions/<id>/.",
 )
 @click.option(
     "--prefix",
     "artifacts_prefix",
-    default="packs",
-    show_default=True,
-    help="Key prefix under the artifacts bucket for the pack's artifacts.",
+    default="",
+    help="Optional S3 key prefix under the artifacts bucket for the pack's "
+    "artifacts. Default (empty) yields the bare `extensions/<id>/...` layout — "
+    "the SAME layout `publish`/`deploy` use.",
 )
 @click.option(
     "--host-artifacts-prefix",
@@ -384,7 +379,7 @@ def publish_pack_cmd(
 )
 @click.option(
     "--region",
-    default="us-west-2",
+    default="us-east-1",
     show_default=True,
     help="AWS region to deploy into. Must match the wrapper's region.",
 )
