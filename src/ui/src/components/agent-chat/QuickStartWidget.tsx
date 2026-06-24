@@ -3,10 +3,16 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Button, Icon, Hotspot } from '@cloudscape-design/components';
-import { AgentChatProvider } from '../../contexts/agentChat';
+import { AgentChatProvider, useAgentChatContext } from '../../contexts/agentChat';
 import AgentChatLayout from './AgentChatLayout';
 import { WELCOME_PATH } from '../../routes/constants';
 import './QuickStartWidget.css';
+
+const WidgetHeaderTitle = (): React.JSX.Element => {
+  const { agentChatState } = useAgentChatContext();
+  const title = agentChatState.mode === 'quick_start' ? 'Quick Start' : 'Agent Companion Chat';
+  return <span className="quick-start-widget-title">{title}</span>;
+};
 
 const isWidgetEnabled = (): boolean => {
   const flag = import.meta.env.VITE_ENABLE_QUICK_START_WIDGET;
@@ -174,8 +180,6 @@ const QuickStartWidget = (): React.JSX.Element | null => {
     ...(panelPos ? { left: panelPos.x, top: panelPos.y, right: 'auto', bottom: 'auto' } : {}),
   };
 
-  const headerTitle = initialMode === 'quick_start' ? 'Quick Start' : 'Agent Companion Chat';
-
   return (
     <div className="quick-start-widget">
       <div ref={launcherRef} className="quick-start-widget-launcher-wrap" style={launcherWrapStyle}>
@@ -192,17 +196,17 @@ const QuickStartWidget = (): React.JSX.Element | null => {
         </Hotspot>
       </div>
       <div className="quick-start-widget-panel" role="dialog" aria-label="Assistant" style={panelStyle}>
-        <div className="quick-start-widget-header">
-          <span className="quick-start-widget-title">{headerTitle}</span>
-          <Button variant="icon" iconName="treeview-collapse" ariaLabel="Minimize" onClick={() => setOpen(false)} />
-        </div>
-        <div className="quick-start-widget-chat">
-          {mounted && (
-            <AgentChatProvider initialMode={initialMode}>
-              <AgentChatLayout showHeader={false} brand={initialMode} />
-            </AgentChatProvider>
-          )}
-        </div>
+        {mounted && (
+          <AgentChatProvider initialMode={initialMode}>
+            <div className="quick-start-widget-header">
+              <WidgetHeaderTitle />
+              <Button variant="icon" iconName="treeview-collapse" ariaLabel="Minimize" onClick={() => setOpen(false)} />
+            </div>
+            <div className="quick-start-widget-chat">
+              <AgentChatLayout showHeader={false} />
+            </div>
+          </AgentChatProvider>
+        )}
       </div>
     </div>
   );

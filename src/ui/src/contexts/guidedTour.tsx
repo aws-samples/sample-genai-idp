@@ -67,7 +67,7 @@ const buildTutorial = (): AnnotationContextProps.Tutorial => ({
           title: 'Get started',
           content:
             'Open the Quick Start assistant any time to set up a configuration, generate synthetic test data, or ask questions. ' +
-            'Click it to begin!',
+            'Click Finish to open it now.',
           hotspotId: 'quick-start-launcher',
         },
       ],
@@ -94,6 +94,10 @@ export const GuidedTourProvider = ({ children }: { children: React.ReactNode }):
     window.setTimeout(() => setTutorial(buildTutorial()), 350);
   }, [navigate]);
   const exitTour = useCallback(() => setTutorial(null), []);
+  const finishTour = useCallback(() => {
+    setTutorial(null);
+    window.dispatchEvent(new CustomEvent('openQuickStart'));
+  }, []);
 
   useEffect(() => {
     const handler = () => startTour();
@@ -121,7 +125,7 @@ export const GuidedTourProvider = ({ children }: { children: React.ReactNode }):
         currentTutorial={tutorial}
         onStartTutorial={() => startTour()}
         onExitTutorial={() => exitTour()}
-        onFinish={() => exitTour()}
+        onFinish={() => finishTour()}
         i18nStrings={i18nStrings}
       >
         {children}

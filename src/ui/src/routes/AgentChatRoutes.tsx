@@ -17,7 +17,6 @@ const AgentChatRoutes = (): React.JSX.Element => {
   const [searchParams] = useSearchParams();
 
   const requested = searchParams.get('mode');
-  const brand: ChatMode = requested === 'quick_start' ? 'quick_start' : 'chat';
 
   useEffect(() => {
     if ((requested === 'quick_start' || requested === 'chat') && requested !== agentChatState.mode) {
@@ -27,7 +26,7 @@ const AgentChatRoutes = (): React.JSX.Element => {
 
   return (
     <AgentChatPageLayout>
-      <AgentChatLayout brand={brand} />
+      <AgentChatLayout />
     </AgentChatPageLayout>
   );
 };

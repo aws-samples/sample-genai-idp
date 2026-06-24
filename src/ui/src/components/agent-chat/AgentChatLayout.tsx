@@ -54,7 +54,6 @@ interface AgentChatLayoutProps {
   customStyles?: React.CSSProperties;
   showModeSelector?: boolean;
   welcomeName?: string;
-  brand?: ChatMode;
 }
 
 const AgentChatLayout = ({
@@ -66,7 +65,6 @@ const AgentChatLayout = ({
   customStyles = {},
   showModeSelector = true,
   welcomeName,
-  brand = 'chat',
 }: AgentChatLayoutProps): React.JSX.Element => {
   const [welcomeAnimated, setWelcomeAnimated] = useState(false);
   const [isLoadingSession, setIsLoadingSession] = useState(false);
@@ -240,7 +238,7 @@ const AgentChatLayout = ({
     [mode, updateAgentChatState],
   );
 
-  const effectiveTitle = title ?? (brand === 'quick_start' ? 'Quick Start' : 'IDP Agent Companion Chat');
+  const effectiveTitle = title ?? (mode === 'quick_start' ? 'Quick Start' : 'IDP Agent Companion Chat');
   const effectivePlaceholder =
     mode === 'quick_start' ? 'Describe the documents you want to process, or attach examples to get started' : placeholder;
 
@@ -542,7 +540,7 @@ const AgentChatLayout = ({
           {messages.length === 0 ? (
             <div className={`welcome-text ${welcomeAnimated ? 'animate-in' : ''}`}>
               <h2>
-                Welcome to <span>{welcomeName || (brand === 'quick_start' ? 'Quick Start' : 'Agent Companion Chat')}</span>
+                Welcome to <span>{welcomeName || (mode === 'quick_start' ? 'Quick Start' : 'Agent Companion Chat')}</span>
               </h2>
               {mode === 'quick_start' && (
                 <Box variant="p" color="text-body-secondary">
@@ -680,7 +678,7 @@ const AgentChatLayout = ({
                 label="Chat mode"
                 options={[
                   { id: 'chat', text: 'Companion' },
-                  { id: 'quick_start', text: 'Conductor' },
+                  { id: 'quick_start', text: 'Quick Start' },
                 ]}
               />
             )}
