@@ -87,8 +87,30 @@ The GenAI Intelligent Document Processing (GenAIIDP) Accelerator demonstrates st
 
 - Implement circuit breakers for external service dependencies.
 - Add chaos engineering practices to test resilience under various failure scenarios.
-- Consider multi-region deployment options for disaster recovery.
 - Implement more comprehensive health checks for all components.
+
+### Disaster Recovery
+
+The solution includes several built-in capabilities that form the foundation of a disaster recovery (DR) strategy:
+
+- **Durable, versioned storage**: All S3 buckets (Input, Output, Working, Configuration, Evaluation Baseline, and supporting buckets) have versioning enabled, so objects are protected against accidental overwrite or deletion and prior versions can be recovered.
+- **Point-in-Time Recovery (PITR)**: All DynamoDB tables (tracking, concurrency, configuration, and related tables) have PITR enabled, allowing restoration to any second within the retention window.
+- **Infrastructure as Code**: Because the entire stack is defined in SAM/CloudFormation, the environment can be reliably re-provisioned in another account or region from source.
+- **Stateless compute**: Lambda and Step Functions hold no durable state; recovery depends on restoring S3 and DynamoDB data plus re-deploying the templates.
+
+**Choosing a DR strategy.** The appropriate approach depends on your Recovery Time Objective (RTO) and Recovery Point Objective (RPO):
+
+- **Backup & Restore (lowest cost, higher RTO)**: Rely on S3 versioning and DynamoDB PITR within a region. For cross-region protection, enable [S3 Cross-Region Replication (CRR)](https://docs.aws.amazon.com/AmazonS3/latest/userguide/replication.html) on document and configuration buckets, and use [DynamoDB scheduled/on-demand backups](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/BackupRestore.html) (optionally via [AWS Backup](https://docs.aws.amazon.com/aws-backup/latest/devguide/whatisbackup.html)) copied to a DR region. Re-deploy the CloudFormation stack in the DR region when needed.
+- **Pilot Light / Warm Standby (lower RTO, higher cost)**: Pre-deploy the stack in a second region and continuously replicate data using S3 CRR and [DynamoDB global tables](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GlobalTables.html). Fail over by redirecting document ingestion to the standby region's Input bucket.
+- **Multi-region active/active**: Run independent stacks in multiple regions behind a routing layer. This offers the lowest RTO/RPO but adds the most operational and cost complexity, and requires that the chosen Bedrock models and any Bedrock Data Automation projects are available in all target regions.
+
+**Recommendations**:
+
+- Define explicit RTO and RPO targets for your workload, then select the DR strategy above that meets them at acceptable cost.
+- Enable S3 Cross-Region Replication on the Input, Output, and Configuration buckets for cross-region durability.
+- Use DynamoDB global tables (or AWS Backup with cross-region copy) to protect tracking and configuration state beyond single-region PITR.
+- Verify regional availability of required Bedrock models, Textract, and Bedrock Data Automation in your DR region before committing to a strategy — see [EU Region Model Support](./eu-region-model-support.md) for an example of region-specific model considerations.
+- Regularly test the recovery procedure (restore + redeploy) to validate that RTO/RPO targets are actually achievable and that runbooks stay current.
 
 ## 4. Performance Efficiency
 
@@ -141,22 +163,21 @@ The GenAI Intelligent Document Processing (GenAIIDP) Accelerator demonstrates st
 - Evaluate AWS Graviton-based Lambda functions for improved energy efficiency.
 - Consider implementing regional routing to process documents in regions with lower carbon intensity.
 
-## Pattern-Specific Assessments
+## Processing-Mode-Specific Assessments
 
-### Pattern 1: Bedrock Data Automation (BDA)
+Since v0.5.0, the solution is deployed as a single **Unified Pattern** that combines both processing modes into one stack. The `use_bda` configuration flag (set via the UI) selects the processing path at runtime — there is no longer a pattern selector at deployment time. See the [Architecture Overview](./architecture.md) and [Upgrading to the Unified Pattern](./migration-v04-to-v05.md) for details.
 
-- **Strengths**: Leverages managed BDA service, reducing operational overhead.
+### BDA Mode (`use_bda: true`) — Bedrock Data Automation
+
+- **Strengths**: Leverages the managed Amazon Bedrock Data Automation service for end-to-end processing, reducing operational overhead.
 - **Considerations**: Monitor BDA service quotas and implement appropriate throttling controls.
 
-### Pattern 2: Textract and Bedrock
+### Pipeline Mode (`use_bda: false`, default) — Textract and Bedrock
 
-- **Strengths**: Well-structured workflow with clear separation between OCR and AI processing.
+- **Strengths**: Well-structured workflow with clear separation between OCR (Amazon Textract) and AI processing (Amazon Bedrock).
 - **Considerations**: Optimize token usage in Bedrock models to balance cost and performance.
 
-### Pattern 3: Textract, SageMaker (UDOP), and Bedrock
-
-- **Strengths**: Advanced classification capabilities with custom SageMaker models.
-- **Considerations**: Monitor SageMaker endpoint costs and implement auto-scaling policies.
+> **Note**: The previously separate Pattern-3 (Textract + SageMaker UDOP + Bedrock) configuration was deprecated and removed in v0.5.0. Custom classification models such as UDOP can be integrated into the unified pattern via [Lambda Inference Hooks](./lambda-hook-inference.md).
 
 ## Conclusion
 
@@ -164,4 +185,4 @@ The GenAI Intelligent Document Processing Accelerator demonstrates strong alignm
 
 Key strengths include the serverless architecture, which provides automatic scaling and resilience, and the comprehensive monitoring capabilities that enable operational visibility. The solution's modular design allows for customization and extension to meet specific business requirements.
 
-Areas for potential enhancement include more granular cost controls, multi-region resilience strategies, and sustainability optimizations. By addressing these recommendations, the solution can further improve its alignment with Well-Architected best practices.
+Areas for potential enhancement include more granular cost controls, extending the built-in data-protection capabilities into a full cross-region disaster recovery strategy (see [Disaster Recovery](#disaster-recovery)), and sustainability optimizations. By addressing these recommendations, the solution can further improve its alignment with Well-Architected best practices.
