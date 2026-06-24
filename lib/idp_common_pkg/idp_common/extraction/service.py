@@ -24,6 +24,8 @@ from idp_common.config.schema_constants import (
     SCHEMA_PROPERTIES,
     X_AWS_IDP_DOCUMENT_TYPE,
     X_AWS_IDP_EXTRACTION_MODEL,
+    X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT,
+    X_AWS_IDP_EXTRACTION_TASK_PROMPT,
     X_AWS_IDP_SOURCE_PAGE_TYPES,
 )
 from idp_common.extraction.page_type_resolver import (
@@ -889,7 +891,32 @@ class ExtractionService:
         Returns:
             Tuple of (content, system_prompt)
         """
-        system_prompt = self.config.extraction.system_prompt
+        # Resolve prompts — use per-class system/task prompt overrides if
+        # specified on the class schema, otherwise fall back to the global
+        # extraction prompts. Backward compatible: classes without overrides
+        # use the global prompts unchanged.
+        class_system_prompt_override = self._class_schema.get(
+            X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT
+        )
+        system_prompt = (
+            class_system_prompt_override or self.config.extraction.system_prompt
+        )
+        if class_system_prompt_override:
+            logger.info(
+                f"Using per-class extraction system prompt override for "
+                f"'{self._class_label}'"
+            )
+
+        class_task_prompt_override = self._class_schema.get(
+            X_AWS_IDP_EXTRACTION_TASK_PROMPT
+        )
+        task_prompt = class_task_prompt_override or self.config.extraction.task_prompt
+        if class_task_prompt_override:
+            logger.info(
+                f"Using per-class extraction task prompt override for "
+                f"'{self._class_label}'"
+            )
+
         custom_lambda_arn = self.config.extraction.custom_prompt_lambda_arn
 
         if custom_lambda_arn and custom_lambda_arn.strip():
@@ -907,7 +934,7 @@ class ExtractionService:
             )
 
             # Build default content for Lambda input
-            prompt_template = self.config.extraction.task_prompt
+            prompt_template = task_prompt
             if prompt_template:
                 default_content = self._build_prompt_content(
                     prompt_template, page_images
@@ -946,7 +973,7 @@ class ExtractionService:
             logger.info(
                 "No custom prompt Lambda configured - using default prompt generation"
             )
-            prompt_template = self.config.extraction.task_prompt
+            prompt_template = task_prompt
 
             if not prompt_template:
                 content = self._get_default_prompt_content()
