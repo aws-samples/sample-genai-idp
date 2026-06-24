@@ -207,7 +207,10 @@ const UploadDocumentPanel = (): React.JSX.Element => {
           />
         </FormField>
 
-        <FormField label="Select files to upload" constraintText="Multiple files allowed. Spreadsheet, Word, and text files are converted on the backend.">
+        <FormField
+          label="Select files to upload"
+          constraintText="Multiple files allowed. Spreadsheet, Word, and text files are converted on the backend."
+        >
           <FileUpload
             onChange={({ detail }) => handleFileChange(detail.value)}
             value={selectedFiles}
