@@ -38,6 +38,8 @@ import {
   X_AWS_IDP_DOCUMENT_NAME_REGEX,
   X_AWS_IDP_PAGE_CONTENT_REGEX,
   X_AWS_IDP_EXTRACTION_MODEL,
+  X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT,
+  X_AWS_IDP_EXTRACTION_TASK_PROMPT,
   X_AWS_IDP_EXCLUDE_FROM_PROCESSING,
   X_AWS_IDP_EXCLUSION_REASON,
   X_AWS_IDP_PAGE_TYPES,
@@ -347,6 +349,30 @@ const SchemaInspector = ({
                       ]}
                       filteringType="auto"
                       placeholder="Select model override"
+                    />
+                  </FormField>
+
+                  <FormField
+                    label="Extraction System Prompt Override (Optional)"
+                    description="Override the global extraction system prompt for this class. When set, this prompt is used instead of the global extraction.system_prompt setting. Leave blank to use the default."
+                  >
+                    <Textarea
+                      value={(selectedClass[X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT] as string) || ''}
+                      onChange={({ detail }) => onUpdateClass({ [X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT]: detail.value || undefined })}
+                      placeholder="Use global default"
+                      rows={4}
+                    />
+                  </FormField>
+
+                  <FormField
+                    label="Extraction Task Prompt Override (Optional)"
+                    description="Override the global extraction task prompt for this class. Leave blank to use the default. Supports the same placeholders as the global task prompt: {DOCUMENT_CLASS}, {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}, {FEW_SHOT_EXAMPLES}, {DOCUMENT_TEXT}, {DOCUMENT_IMAGE}, and <<CACHEPOINT>>."
+                  >
+                    <Textarea
+                      value={(selectedClass[X_AWS_IDP_EXTRACTION_TASK_PROMPT] as string) || ''}
+                      onChange={({ detail }) => onUpdateClass({ [X_AWS_IDP_EXTRACTION_TASK_PROMPT]: detail.value || undefined })}
+                      placeholder="Use global default"
+                      rows={8}
                     />
                   </FormField>
 

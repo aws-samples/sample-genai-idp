@@ -77,6 +77,11 @@ export const X_AWS_IDP_PAGE_CONTENT_REGEX = 'x-aws-idp-document-page-content-reg
 // Per-class extraction model override (overrides extraction.model)
 export const X_AWS_IDP_EXTRACTION_MODEL = 'x-aws-idp-extraction-model';
 
+// Per-class extraction prompt overrides (override extraction.system_prompt /
+// extraction.task_prompt for this class). Absent => use the global prompts.
+export const X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT = 'x-aws-idp-extraction-system-prompt';
+export const X_AWS_IDP_EXTRACTION_TASK_PROMPT = 'x-aws-idp-extraction-task-prompt';
+
 /**
  * Mark a class as excluded from downstream processing. When true, sections
  * classified as this class are skipped by extraction, assessment,
