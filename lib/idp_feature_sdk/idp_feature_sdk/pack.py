@@ -37,7 +37,7 @@ from typing import Any, Dict, List, Optional
 import boto3
 from rich.console import Console
 
-from .manifest import load_manifest
+from .manifest import FeatureManifest, load_manifest
 from .publisher import FeaturePublisher
 
 
@@ -56,6 +56,29 @@ class PackPublishResult:
 
 def _public_https_url(bucket: str, region: str, key: str) -> str:
     return f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+
+
+def _bake_wrapper_tokens(
+    wrapper_yaml: str,
+    *,
+    manifest: FeatureManifest,
+    artifact_bucket: str,
+    artifact_prefix: str,
+) -> str:
+    """Substitute the publish-time ``<FEATURE_*_TOKEN>`` placeholders in the
+    wrapper text, mirroring how FeaturePublisher bakes the SAME tokens into the
+    feature template (publisher.py). Lets the wrapper use the version (etc.) in
+    places CloudFormation forbids intrinsics — most notably the top-level
+    ``Description``. All tokens are OPTIONAL: a placeholder that isn't present
+    is simply a no-op, so wrappers that don't use them are unaffected.
+    """
+    return (
+        wrapper_yaml.replace("<FEATURE_VERSION_TOKEN>", manifest.version)
+        .replace("<FEATURE_ARTIFACT_PREFIX_TOKEN>", artifact_prefix)
+        .replace("<FEATURE_BUCKET_TOKEN>", artifact_bucket)
+        .replace("<FEATURE_PRODUCT_CODE_TOKEN>", manifest.marketplace.productCode or "")
+        .replace("<FEATURE_LISTING_URL_TOKEN>", manifest.marketplace.listingUrl or "")
+    )
 
 
 def _bake_wrapper_defaults(
@@ -254,7 +277,20 @@ class PackPublisher:
             defaults[wp.prefixParam] = feat_prefix
         if wp.versionParam:
             defaults[wp.versionParam] = version
-        baked_wrapper = _bake_wrapper_defaults(wrapper_yaml, param_defaults=defaults)
+        # Also bake the publish-time tokens into the wrapper text, the SAME way
+        # FeaturePublisher bakes them into the feature template. The wrapper
+        # parameter Defaults above cover values referenced via !Ref/!Sub, but
+        # CloudFormation forbids intrinsics in a few places (e.g. the top-level
+        # `Description`), so a wrapper that wants the version in such a field
+        # uses `<FEATURE_VERSION_TOKEN>` and relies on this substitution. Tokens
+        # are optional — absent placeholders are simply left untouched.
+        baked_wrapper = _bake_wrapper_tokens(
+            wrapper_yaml,
+            manifest=manifest,
+            artifact_bucket=artifacts_bucket,
+            artifact_prefix=feat_prefix,
+        )
+        baked_wrapper = _bake_wrapper_defaults(baked_wrapper, param_defaults=defaults)
         wrapper_key = f"{feat_prefix}/deploy.yaml"
         # Mirror FeaturePublisher's per-object publicness: with --public, tag
         # the wrapper public-read just like every feature artifact (the bucket

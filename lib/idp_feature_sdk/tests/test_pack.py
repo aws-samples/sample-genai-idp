@@ -59,7 +59,7 @@ def _make_pack(project: Path) -> None:
     (project / "deploy.yaml").write_text(
         dedent("""
             AWSTemplateFormatVersion: '2010-09-09'
-            Description: demo pack wrapper
+            Description: demo pack wrapper v<FEATURE_VERSION_TOKEN>
             Parameters:
               IdpAcceleratorTemplateUrl:
                 Type: String
@@ -214,6 +214,29 @@ def test_public_makes_wrapper_and_feature_artifacts_readable(
     # The feature artifacts the deploy reads in place are public-read too.
     assert _acl_is_public(s3, feature_bucket, f"{_BASE}/template.yaml")
     assert _acl_is_public(s3, feature_bucket, f"{_BASE}/{_VERSION}/ui-bundle.js")
+
+
+def test_wrapper_version_token_is_baked(
+    demo_feature_project: Path, feature_bucket: str
+) -> None:
+    """`<FEATURE_VERSION_TOKEN>` in the wrapper (e.g. in the top-level
+    Description, where CloudFormation forbids !Ref/!Sub) is substituted at
+    publish time — same baking the feature template gets."""
+    _make_pack(demo_feature_project)
+    PackPublisher(demo_feature_project).publish(
+        artifacts_bucket=feature_bucket,
+        artifacts_prefix="",
+        host_template_url=_HOST_URL,
+        region="us-east-1",
+    )
+    s3 = boto3.client("s3", region_name="us-east-1")
+    wrapper = (
+        s3.get_object(Bucket=feature_bucket, Key=f"{_BASE}/deploy.yaml")["Body"]
+        .read()
+        .decode()
+    )
+    assert "<FEATURE_VERSION_TOKEN>" not in wrapper
+    assert f"demo pack wrapper v{_VERSION}" in wrapper
 
 
 def test_unknown_wrapper_param_raises(
