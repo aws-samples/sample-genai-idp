@@ -167,6 +167,69 @@ SPDX-License-Identifier: MIT-0</p>
 <p><strong>Configuration for Boundary Detection:</strong></p>
 <p>The boundary detection is automatically included in the classification results. No special configuration is needed - the system will populate the <code dir="auto">document_boundary</code> field in the metadata for each page:</p>
 <div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="json"><code><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">{</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#7FDBCA;--1:#096E72">"page_id"</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#C789D6;--1:#7C5686">1</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">,</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#7FDBCA;--1:#096E72">"classification"</span><span style="--0:#D6DEEB;--1:#403F53">: {</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#7FDBCA;--1:#096E72">"doc_type"</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#C789D6;--1:#7C5686">invoice</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">,</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#7FDBCA;--1:#096E72">"confidence"</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#F78C6C;--1:#AA0982">0.95</span><span style="--0:#D6DEEB;--1:#403F53">,</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#7FDBCA;--1:#096E72">"metadata"</span><span style="--0:#D6DEEB;--1:#403F53">: {</span></div></div><div class="ec-line"><div class="code"><span class="indent">      </span><span style="--0:#7FDBCA;--1:#096E72">"document_boundary"</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#C789D6;--1:#7C5686">start</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">  </span><span style="--0:#919F9F;--1:#5D6376">// New document begins</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">    </span></span><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="{  &#x22;page_id&#x22;: &#x22;1&#x22;,  &#x22;classification&#x22;: {    &#x22;doc_type&#x22;: &#x22;invoice&#x22;,    &#x22;confidence&#x22;: 0.95,    &#x22;metadata&#x22;: {      &#x22;document_boundary&#x22;: &#x22;start&#x22;  // New document begins    }  }}"><div></div></button></div></figure></div>
+<div class="sl-heading-wrapper level-h5"><h5 id="enforcing-a-valid-class-vocabulary-validation--retry">Enforcing a Valid Class Vocabulary (Validation + Retry)</h5><a class="sl-anchor-link" href="#enforcing-a-valid-class-vocabulary-validation--retry"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Enforcing a Valid Class Vocabulary (Validation + Retry)”</span></a></div>
+<p>With a fixed set of classes, a language model can occasionally return a label
+that is <strong>not</strong> in your configured list (for example predicting <code dir="auto">receipt</code> when
+only <code dir="auto">invoice</code>, <code dir="auto">w2</code>, and <code dir="auto">check</code> are valid). Smaller / cheaper models are
+especially prone to this. <code dir="auto">multimodalPageLevelClassification</code> includes a
+deterministic validation + retry guardrail to prevent out-of-vocabulary
+classifications:</p>
+<ol>
+<li>After the model returns a class, it is validated against the configured
+class vocabulary.</li>
+<li>If the class is <strong>not</strong> valid, the model is <strong>re-prompted</strong> — the original
+request content is re-sent with an appended correction message that lists
+the allowed classes. (This matters: classification runs at <code dir="auto">temperature=0</code>,
+so re-sending an identical request would return the identical invalid
+answer. The correction changes the input and steers the model back to the
+allowed set.)</li>
+<li>The retry repeats up to <code dir="auto">maxValidationRetries</code> times.</li>
+<li>If all retries are exhausted, the page is assigned <code dir="auto">invalidClassFallback</code>
+(default <code dir="auto">unclassified</code>) and flagged with a <code dir="auto">validation_error</code> entry in its
+classification metadata. The document continues processing — there is no
+hard failure.</li>
+</ol>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="yaml"><code><div class="ec-line"><div class="code"><span style="--0:#7FDBCA;--1:#111111">classification</span><span style="--0:#D6DEEB;--1:#403F53">:</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#7FDBCA;--1:#111111">classificationMethod</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#ECC48D;--1:#3B61B0">multimodalPageLevelClassification</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#7FDBCA;--1:#111111">enforceValidClasses</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#FF6A83;--1:#A24848">true</span><span style="--0:#D6DEEB;--1:#403F53">       </span><span style="--0:#919F9F;--1:#5F636F"># Validate + retry on invalid class (default: true)</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#7FDBCA;--1:#111111">maxValidationRetries</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#F78C6C;--1:#AA0982">2</span><span style="--0:#D6DEEB;--1:#403F53">         </span><span style="--0:#919F9F;--1:#5F636F"># Re-prompt up to N times (default: 2)</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#7FDBCA;--1:#111111">invalidClassFallback</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#ECC48D;--1:#3B61B0">unclassified</span><span style="--0:#D6DEEB;--1:#403F53">  </span><span style="--0:#919F9F;--1:#5F636F"># Class used when retries are exhausted (default: unclassified)</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="classification:  classificationMethod: multimodalPageLevelClassification  enforceValidClasses: true       # Validate + retry on invalid class (default: true)  maxValidationRetries: 2         # Re-prompt up to N times (default: 2)  invalidClassFallback: unclassified  # Class used when retries are exhausted (default: unclassified)"><div></div></button></div></figure></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Setting</th><th>Default</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">enforceValidClasses</code></td><td><code dir="auto">true</code></td><td>When <code dir="auto">true</code>, validate the predicted class and re-prompt on out-of-vocabulary results. When <code dir="auto">false</code>, an invalid class is logged and used as-is (legacy behavior).</td></tr><tr><td><code dir="auto">maxValidationRetries</code></td><td><code dir="auto">2</code></td><td>Maximum number of re-prompts. <code dir="auto">0</code> disables retries (a single invalid prediction goes straight to the fallback).</td></tr><tr><td><code dir="auto">invalidClassFallback</code></td><td><code dir="auto">unclassified</code></td><td>Class assigned when retries are exhausted. Set to one of your defined classes, or the built-in <code dir="auto">unclassified</code>.</td></tr></tbody></table>
+<blockquote>
+<p><strong>Behavior change on upgrade:</strong> enforcement is <strong>on by default</strong>. An
+out-of-vocabulary prediction that previously passed through unchanged is now
+corrected or coerced to the fallback class. Set <code dir="auto">enforceValidClasses: false</code>
+to restore the prior “warn and use as-is” behavior.</p>
+<p><strong>Catch-all class:</strong> if you want an explicit “other”/“unknown” bucket, define
+it as one of your classes — the model will then be able to select it
+legitimately, and it counts as a valid prediction.</p>
+<p><strong>Scope:</strong> this loop applies to <code dir="auto">multimodalPageLevelClassification</code>.
+Text-based holistic classification has similar needs but is not covered yet.</p>
+</blockquote>
+<p>A runnable demonstration (forcing an out-of-vocabulary prediction and showing
+the retry correct it) is available in
+<code dir="auto">notebooks/misc/classification-valid-class-enforcement.ipynb</code>.</p>
 <div class="sl-heading-wrapper level-h4"><h4 id="text-based-holistic-classification">Text-Based Holistic Classification</h4><a class="sl-anchor-link" href="#text-based-holistic-classification"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Text-Based Holistic Classification”</span></a></div>
 <ul>
 <li>Analyzes entire document packets to identify logical boundaries</li>

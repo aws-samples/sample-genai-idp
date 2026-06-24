@@ -222,15 +222,15 @@ SPDX-License-Identifier: MIT-0</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="conditional-resource-creation">Conditional Resource Creation</h3><a class="sl-anchor-link" href="#conditional-resource-creation"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Conditional Resource Creation”</span></a></div>
 <p>When <code dir="auto">WebUIHosting=ALB</code>:</p>
 <ul>
-<li>CloudFront distribution, Origin Access Identity, and security headers policy are <strong>not created</strong></li>
+<li>CloudFront distribution, Origin Access Control (OAC), and security headers policy are <strong>not created</strong></li>
 <li>ALB nested stack is created with all ALB infrastructure</li>
 <li>S3 WebUI bucket omits <code dir="auto">WebsiteConfiguration</code> (ALB handles routing)</li>
-<li>S3 bucket policy grants access via <code dir="auto">aws:sourceVpce</code> condition instead of CloudFront OAI</li>
+<li>S3 bucket policy grants access via <code dir="auto">aws:sourceVpce</code> condition instead of CloudFront OAC</li>
 </ul>
 <p>When <code dir="auto">WebUIHosting=CloudFront</code> (default):</p>
 <ul>
 <li>ALB nested stack is <strong>not created</strong></li>
-<li>Standard CloudFront distribution with OAI is created</li>
+<li>Standard CloudFront distribution with Origin Access Control (OAC) is created</li>
 </ul>
 <div class="sl-heading-wrapper level-h3"><h3 id="request-flow-alb-mode">Request Flow (ALB Mode)</h3><a class="sl-anchor-link" href="#request-flow-alb-mode"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Request Flow (ALB Mode)”</span></a></div>
 <ol>
