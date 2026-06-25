@@ -753,6 +753,16 @@ pricing:
 
 
   # ---------------------------------------------------------------------------
+  # LambdaHook OCR providers (per-page) — see samples/lambda-hook-inference/
+  # ---------------------------------------------------------------------------
+  # Mistral OCR hosted API list price: $4 / 1,000 pages. The metering key is the
+  # hook's Lambda function name; "pages" comes from the hook's usage.pages.
+  - name: GENAIIDP-mistral-ocr-hook
+    units:
+      - name: pages
+        price: "0.004"
+
+  # ---------------------------------------------------------------------------
   # AWS Lambda Pricing (US East - N. Virginia)
   # ---------------------------------------------------------------------------
   - name: lambda/requests
