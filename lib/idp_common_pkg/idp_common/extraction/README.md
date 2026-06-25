@@ -707,6 +707,77 @@ Minimum average OCR confidence (Textract scale) for agent to prefer table parsin
 #### `min_parse_success_rate` (float, 0-1, default: 0.90)
 Minimum parse success rate for agent to trust parsed results. Below this threshold, agent should fall back to LLM extraction.
 
+### Schema-Constraint Validation and Model Escalation
+
+Agentic extraction always validates the agent's output against the **Pydantic
+model** generated from the class JSON Schema (`field_constraints=True`), so
+`enum`, `pattern`, numeric bounds and `minItems`/`maxItems` violations are fed
+back to the agent for self-correction during extraction.
+
+The optional `extraction.agentic.validation` block adds **full JSON-Schema
+validation** of the final result — most importantly the `format` keyword
+(`date`, `date-time`, `email`, `uri`, `uuid`, ...), which the generated Pydantic
+model does **not** enforce — and an optional **bounded model escalation** when
+validation still fails.
+
+```yaml
+extraction:
+  agentic:
+    enabled: true
+    validation:
+      enabled: false          # Off by default (no behavior change on upgrade)
+      check_formats: true     # Enforce JSON-Schema 'format' keywords
+      fail_action: escalate   # warn | escalate | reject
+      escalation_model: "us.anthropic.claude-opus-4-8"  # stronger tier; "" = retry same model
+```
+
+How it works:
+
+1. After extraction, the merged result is validated against the full class
+   schema. All violations are collected at once (not one-at-a-time) with
+   human-readable field paths.
+2. `fail_action` controls the response when validation fails:
+   - **`warn`** — record a `validation` block in the result metadata and proceed.
+   - **`escalate`** — re-extract **only the failing top-level fields** with a
+     stronger model (`escalation_model`), then merge the corrected fields back
+     into the result. Scoping to the failing fields keeps the schema, prompt and
+     output small — far cheaper and faster than re-running the whole section —
+     and the fields that already validated are preserved untouched. The merged
+     result is kept only if it is valid or has strictly fewer violations; then
+     warn if it still fails. (When the failures can't be expressed as a field
+     subset — e.g. they're root-level only — it falls back to a whole-section
+     re-extraction.)
+   - **`reject`** — mark `parsing_succeeded=false` so downstream/HITL can act.
+3. The outcome is recorded under `metadata.validation` (see *Audit metadata*
+   below).
+
+**Audit metadata.** Each section's extraction result records, under `metadata`:
+- `extraction_model` and `extraction_model_overridden` — the model that actually
+  ran the section and whether it came from a per-class override.
+- `metadata.validation` — `valid`, `error_count`, `failed_fields`, `errors`
+  (path + validator + message), `check_formats`, `fail_action`,
+  `initial_error_count` / `initial_failed_fields` (before any escalation), and —
+  when escalation ran — `escalated`, `escalation_model`, `escalation_scope`
+  (`field-subset` | `full-section`), `escalation_fields`, and
+  `resolved_by_escalation`.
+
+**Escalation model precedence:** per-class `x-aws-idp-extraction-escalation-model`
+schema extension → global `validation.escalation_model` → the extraction model
+itself (escalation becomes a plain second attempt).
+
+**Null = absent.** Extraction follows the convention "return `null` if a field is
+not found", and the generated Pydantic model makes every non-required property
+`Optional[...] = None`. Validation therefore treats a `null` property as
+**absent**: an optional field left null passes, while a *required* field left
+null surfaces as a `required` violation (not a confusing type error). Enum /
+pattern / format / numeric / `minItems` checks on present values are unaffected.
+
+> **`format: date` caveat.** JSON-Schema `format: date` means ISO-8601
+> (`YYYY-MM-DD`). The default extraction prompt asks the model for `MM/DD/YYYY`,
+> which is **not** a valid `date` format and will fail format validation. If
+> your schema uses `format: date` for non-ISO dates, either set
+> `check_formats: false` or use a `pattern` instead of `format`.
+
 ### Benefits
 
 - **Faster extraction**: Deterministic parsing is faster than LLM inference for well-structured tables
