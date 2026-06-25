@@ -32,6 +32,7 @@ interface PageItem {
   ImageUri?: string;
   TextUri?: string;
   TextConfidenceUri?: string;
+  OcrPageDataUri?: string;
   classReset?: boolean;
   textModified?: boolean;
   newTextUri?: string | null;
@@ -550,6 +551,8 @@ const PagesPanel = ({ pages, documentItem }: PagesPanelProps): React.JSX.Element
         pageId={selectedPage?.Id}
         textUri={selectedPage?.TextUri}
         confidenceUri={selectedPage?.TextConfidenceUri}
+        imageUri={selectedPage?.ImageUri}
+        ocrPageDataUri={selectedPage?.OcrPageDataUri}
         isReadOnly={!isEditMode}
         onSave={handleModalSave}
         onClose={() => {

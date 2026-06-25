@@ -1,12 +1,13 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Modal, Box, SpaceBetween, Button, SegmentedControl, Alert, Spinner } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { Editor } from '@monaco-editor/react';
 import MarkdownViewer from '../document-viewer/MarkdownViewer';
+import PageImageViewer from '../common/PageImageViewer';
 import { getFileContents, uploadDocument } from '../../graphql/generated';
 
 const client = generateClient();
@@ -14,15 +15,51 @@ const logger = new ConsoleLogger('PageTextEditorModal');
 
 const EDITOR_HEIGHT = '600px';
 
+// Confidence color thresholds for OCR bounding-box overlays.
+const CONFIDENCE_HIGH = 90;
+const CONFIDENCE_MEDIUM = 70;
+
+/**
+ * One text unit (LINE) from the consolidated pageData.json artifact.
+ * confidence/geometry are independently optional per the OCR backend.
+ */
+interface OcrPageDataLine {
+  text?: string;
+  confidence?: number | null;
+  geometry?: {
+    boundingBox?: { left: number; top: number; width: number; height: number };
+  } | null;
+}
+
+interface OcrPageData {
+  provider?: string;
+  geometryAvailable?: boolean;
+  confidenceAvailable?: boolean;
+  lines?: OcrPageDataLine[];
+}
+
 interface PageTextEditorModalProps {
   visible: boolean;
   pageId?: string | number;
   textUri?: string;
   confidenceUri?: string;
+  imageUri?: string;
+  ocrPageDataUri?: string;
   isReadOnly?: boolean;
   onSave?: (pageId: string | number | undefined, newTextUri: string | null, newConfidenceUri: string | null) => void;
   onClose?: () => void;
 }
+
+/**
+ * Map an OCR confidence score (0-100) to an overlay color.
+ * Lines without confidence are drawn neutral.
+ */
+const confidenceColor = (confidence: number | null | undefined): string => {
+  if (confidence === null || confidence === undefined) return '#888';
+  if (confidence >= CONFIDENCE_HIGH) return '#2ca02c';
+  if (confidence >= CONFIDENCE_MEDIUM) return '#ff7f0e';
+  return '#d62728';
+};
 
 /**
  * Extract plain text from JSON-wrapped content
@@ -52,6 +89,8 @@ const PageTextEditorModal = ({
   pageId,
   textUri,
   confidenceUri,
+  imageUri,
+  ocrPageDataUri,
   isReadOnly = true,
   onSave,
   onClose,
@@ -61,18 +100,38 @@ const PageTextEditorModal = ({
   const [confidenceContent, setConfidenceContent] = useState('');
   const [originalTextContent, setOriginalTextContent] = useState('');
   const [originalConfidenceContent, setOriginalConfidenceContent] = useState('');
+  const [pageData, setPageData] = useState<OcrPageData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showCloseWarning, setShowCloseWarning] = useState(false);
 
+  // Whether the visual (image + bounding boxes) view is available for this page.
+  const hasVisualView = Boolean(imageUri);
+  const geometryAvailable = Boolean(pageData?.geometryAvailable);
+
+  // Build bounding-box overlays from the consolidated pageData lines. Only lines
+  // that actually carry geometry are drawn; color encodes OCR confidence.
+  const boundingBoxes = useMemo(() => {
+    if (!pageData?.lines) return [];
+    return pageData.lines
+      .filter((line) => line.geometry?.boundingBox)
+      .map((line) => ({
+        geometry: { boundingBox: line.geometry!.boundingBox, page: 1 },
+        color: confidenceColor(line.confidence),
+        label: line.confidence != null ? `${line.text ?? ''} (${line.confidence})` : (line.text ?? ''),
+      }));
+  }, [pageData]);
+
+  const documentPages = useMemo(() => (imageUri ? [{ Id: String(pageId), ImageUri: imageUri }] : []), [imageUri, pageId]);
+
   // Fetch content when modal opens
   useEffect(() => {
     if (visible && textUri) {
       fetchContent();
     }
-  }, [visible, textUri, confidenceUri]);
+  }, [visible, textUri, confidenceUri, ocrPageDataUri]);
 
   // Track unsaved changes
   useEffect(() => {
@@ -123,6 +182,26 @@ const PageTextEditorModal = ({
         } catch (err) {
           logger.warn('Failed to load confidence content:', err);
           // Not critical - continue without confidence
+        }
+      }
+
+      // Fetch consolidated OCR page data (text + confidence + geometry) if
+      // available. Older documents predate this artifact, so absence is normal
+      // and the visual view simply omits bounding-box overlays.
+      if (ocrPageDataUri) {
+        try {
+          const pageDataResponse = await client.graphql({
+            query: getFileContents,
+            variables: { s3Uri: ocrPageDataUri },
+          });
+
+          const pageDataResult = pageDataResponse.data?.getFileContents;
+          if (pageDataResult && !pageDataResult.isBinary && pageDataResult.content) {
+            setPageData(JSON.parse(pageDataResult.content) as OcrPageData);
+          }
+        } catch (err) {
+          logger.warn('Failed to load OCR page data:', err);
+          // Not critical - continue without geometry overlays
         }
       }
     } catch (err) {
@@ -251,6 +330,7 @@ const PageTextEditorModal = ({
     setConfidenceContent('');
     setOriginalTextContent('');
     setOriginalConfidenceContent('');
+    setPageData(null);
     setError(null);
     setHasUnsavedChanges(false);
     if (onClose) {
@@ -309,58 +389,83 @@ const PageTextEditorModal = ({
                   options={[
                     { id: 'text-markdown', text: 'Text + Markdown' },
                     { id: 'text-confidence', text: 'Text + Confidence', disabled: !confidenceUri },
+                    { id: 'page-image', text: 'Page Image', disabled: !hasVisualView },
                   ]}
                 />
               </Box>
 
-              <div style={{ display: 'flex', gap: '4px', minHeight: EDITOR_HEIGHT }}>
-                {/* Left pane: Text editor */}
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, margin: 0 }}>
-                  <Box fontSize="body-s" color="text-label" margin={{ bottom: 'xxxs' }}>
-                    {viewMode === 'text-markdown'
-                      ? `Text (${isReadOnly ? 'read-only' : 'editable'})`
-                      : `Confidence Table (${isReadOnly ? 'read-only' : 'editable'})`}
-                  </Box>
-                  <div style={{ border: '1px solid #e9ebed', height: EDITOR_HEIGHT }}>
-                    <Editor
-                      key={`editor-${viewMode}`}
-                      height={EDITOR_HEIGHT}
-                      defaultLanguage="text"
-                      value={viewMode === 'text-markdown' ? textContent : confidenceContent}
-                      onChange={viewMode === 'text-markdown' ? handleTextChange : handleConfidenceChange}
-                      options={{
-                        readOnly: isReadOnly,
-                        minimap: { enabled: false },
-                        fontSize: 14,
-                        wordWrap: 'on',
-                        wrappingIndent: 'indent',
-                        automaticLayout: true,
-                        scrollBeyondLastLine: false,
-                      }}
-                      theme="vs-light"
-                    />
-                  </div>
+              {viewMode === 'page-image' ? (
+                <div style={{ minHeight: EDITOR_HEIGHT }}>
+                  {geometryAvailable ? (
+                    <Box fontSize="body-s" color="text-body-secondary" margin={{ bottom: 'xs' }}>
+                      Bounding boxes show OCR text lines, colored by confidence (green ≥ {CONFIDENCE_HIGH}, orange ≥ {CONFIDENCE_MEDIUM},
+                      red below). Hover a box to see its text and score.
+                    </Box>
+                  ) : (
+                    <Box margin={{ bottom: 'xs' }}>
+                      <Alert type="info">
+                        This OCR backend did not provide bounding-box geometry for this page; the image is shown without overlays.
+                      </Alert>
+                    </Box>
+                  )}
+                  <PageImageViewer
+                    pageIds={[String(pageId)]}
+                    documentPages={documentPages}
+                    initialPage={String(pageId)}
+                    height={EDITOR_HEIGHT}
+                    boundingBoxes={boundingBoxes}
+                  />
                 </div>
+              ) : (
+                <div style={{ display: 'flex', gap: '4px', minHeight: EDITOR_HEIGHT }}>
+                  {/* Left pane: Text editor */}
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, margin: 0 }}>
+                    <Box fontSize="body-s" color="text-label" margin={{ bottom: 'xxxs' }}>
+                      {viewMode === 'text-markdown'
+                        ? `Text (${isReadOnly ? 'read-only' : 'editable'})`
+                        : `Confidence Table (${isReadOnly ? 'read-only' : 'editable'})`}
+                    </Box>
+                    <div style={{ border: '1px solid #e9ebed', height: EDITOR_HEIGHT }}>
+                      <Editor
+                        key={`editor-${viewMode}`}
+                        height={EDITOR_HEIGHT}
+                        defaultLanguage="text"
+                        value={viewMode === 'text-markdown' ? textContent : confidenceContent}
+                        onChange={viewMode === 'text-markdown' ? handleTextChange : handleConfidenceChange}
+                        options={{
+                          readOnly: isReadOnly,
+                          minimap: { enabled: false },
+                          fontSize: 14,
+                          wordWrap: 'on',
+                          wrappingIndent: 'indent',
+                          automaticLayout: true,
+                          scrollBeyondLastLine: false,
+                        }}
+                        theme="vs-light"
+                      />
+                    </div>
+                  </div>
 
-                {/* Right pane: Markdown Preview */}
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, margin: 0 }}>
-                  <Box fontSize="body-s" color="text-label" margin={{ bottom: 'xxxs' }}>
-                    Markdown Preview (read-only)
-                  </Box>
-                  <div
-                    style={{
-                      border: '1px solid #e9ebed',
-                      height: EDITOR_HEIGHT,
-                      overflow: 'auto',
-                      padding: '16px',
-                      backgroundColor: '#fafafa',
-                    }}
-                    className="page-text-markdown-preview"
-                  >
-                    <MarkdownViewer simple content={viewMode === 'text-markdown' ? textContent : confidenceContent} />
+                  {/* Right pane: Markdown Preview */}
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, margin: 0 }}>
+                    <Box fontSize="body-s" color="text-label" margin={{ bottom: 'xxxs' }}>
+                      Markdown Preview (read-only)
+                    </Box>
+                    <div
+                      style={{
+                        border: '1px solid #e9ebed',
+                        height: EDITOR_HEIGHT,
+                        overflow: 'auto',
+                        padding: '16px',
+                        backgroundColor: '#fafafa',
+                      }}
+                      className="page-text-markdown-preview"
+                    >
+                      <MarkdownViewer simple content={viewMode === 'text-markdown' ? textContent : confidenceContent} />
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </>
           )}
         </Box>

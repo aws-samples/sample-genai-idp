@@ -166,6 +166,8 @@ def discover_existing_ocr_pages(output_bucket, input_key):
                     raw_text_uri=files["rawText.json"],
                     parsed_text_uri=files["result.json"],
                     text_confidence_uri=files["textConfidence.json"],
+                    # pageData.json is optional — older pages predate it
+                    ocr_page_data_uri=files.get("pageData.json"),
                 )
 
     except Exception as e:

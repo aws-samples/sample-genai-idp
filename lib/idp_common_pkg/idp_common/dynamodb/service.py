@@ -213,6 +213,7 @@ class DocumentDynamoDBService:
                     "Class": page.classification or "",
                     "ImageUri": page.image_uri or "",
                     "TextUri": page.parsed_text_uri or page.raw_text_uri or "",
+                    "OcrPageDataUri": page.ocr_page_data_uri or "",
                 }
                 pages_data.append(page_data)
 
@@ -424,6 +425,7 @@ class DocumentDynamoDBService:
                     raw_text_uri=text_uri,
                     parsed_text_uri=text_uri,  # Set both raw and parsed to same URI
                     text_confidence_uri=page_data.get("TextConfidenceUri"),
+                    ocr_page_data_uri=page_data.get("OcrPageDataUri") or None,
                     classification=page_data.get("Class"),
                 )
 
