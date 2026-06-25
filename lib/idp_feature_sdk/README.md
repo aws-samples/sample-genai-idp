@@ -87,7 +87,7 @@ idp-feature-cli show-schema
 |---------------|------------------------------------------------------------------------------|
 | `publish`     | Uploads artifacts to S3; prints a Launch Stack URL. Does **not** touch CFN.  |
 | `deploy`      | Create-or-update **this feature's** stack into an existing host — either `--from-code` (publish first) or `--template-url` (already published). |
-| `deploy-pack` | Deploys a self-contained *pack* that stands up its **own** host stack.       |
+| `deploy-pack` | Create-or-update a self-contained *pack* that stands up its **own** host stack — re-running against an existing wrapper stack updates it in place. |
 
 A **pack** (`publish-pack` / `deploy-pack`) publishes its feature artifacts
 exactly like `publish` — shared publisher, so the same `extensions/<id>/`
@@ -109,6 +109,16 @@ pack:
 
 (The pre-`#375` `artifactSourceParam` / seller-bucket model is gone; wrappers
 that still declare it must migrate to `featureBucketParam` + `prefixParam`.)
+
+`deploy-pack` is **create-or-update** (like `deploy`, `idp-cli deploy`, and
+`idp-mp-sim deploy`): it creates the wrapper stack if absent and **updates** it
+if it already exists, so re-running pushes pack changes to a deployed wrapper
+instead of failing with `AlreadyExistsException`. A no-op update (nothing
+changed) exits 0 with an "already up to date" message. For a pack whose feature
+install is a nested `AWS::CloudFormation::Stack`, an in-place wrapper update with
+a bumped `FeatureVersion` cascades into the nested stack and picks up the
+republished version-pinned artifacts; the wrapper's host custom resource treats
+`Update` as a no-op, so the running host is left undisturbed.
 
 `deploy` is the fast inner loop for iterating one extension from source against
 a live IDP deployment. The feature stack is named
