@@ -765,6 +765,13 @@ How it works:
 schema extension → global `validation.escalation_model` → the extraction model
 itself (escalation becomes a plain second attempt).
 
+**Configuration UI.** The global `validation` block (enabled / check_formats /
+fail_action / escalation_model) is editable under **Extraction → Agentic
+Extraction → Schema Validation & Escalation** in the Configuration editor. The
+per-class `x-aws-idp-extraction-escalation-model` override is editable as
+"Escalation Model Override" in the **Document Schema** editor, next to the
+per-class extraction-model override.
+
 **Null = absent.** Extraction follows the convention "return `null` if a field is
 not found", and the generated Pydantic model makes every non-required property
 `Optional[...] = None`. Validation therefore treats a `null` property as

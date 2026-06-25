@@ -1080,6 +1080,33 @@ Resources:
                         type: boolean
                         description: "Whether to load and provide OCR confidence data to the parse_table tool for quality assessment. Requires text_confidence_uri from Textract OCR."
                         default: true
+                  validation:
+                    type: object
+                    sectionLabel: Schema Validation & Escalation
+                    description: "Validate the agent's output against the full class JSON Schema (notably 'format' keywords like date/email/uuid that the model's type validation does not enforce) and optionally escalate failing fields to a stronger model. Off by default."
+                    order: 5
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Enable full JSON-Schema validation of the extraction result. Violations are fed back to the agent for self-correction; remaining failures are handled per Fail Action below."
+                        order: 0
+                        default: false
+                      check_formats:
+                        type: boolean
+                        description: "Enforce JSON-Schema 'format' keywords (date, date-time, email, uri, uuid, ...). Note: 'format: date' means ISO-8601 (YYYY-MM-DD); disable this if your schema uses 'format: date' for non-ISO values such as MM/DD/YYYY (or use a 'pattern' instead)."
+                        order: 1
+                        default: true
+                      fail_action:
+                        type: string
+                        description: "What to do when validation still fails after the agent's own retries. 'warn': record the outcome in metadata and proceed. 'escalate': re-extract only the failing fields with the Escalation Model, then warn if still invalid. 'reject': mark the section as failed so downstream/HITL can act."
+                        enum: ["warn", "escalate", "reject"]
+                        order: 2
+                        default: "escalate"
+                      escalation_model:
+                        type: string
+                        description: "Stronger Bedrock model used to re-extract failing fields when Fail Action is 'escalate'. Leave blank to retry with the extraction model. Can be overridden per document class via the 'x-aws-idp-extraction-escalation-model' schema extension in the Document Schema editor."
+                        order: 3
+                        default: ""
               image:
                 type: object
                 sectionLabel: Image Processing Settings

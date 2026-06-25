@@ -77,6 +77,74 @@ export const X_AWS_IDP_PAGE_CONTENT_REGEX = 'x-aws-idp-document-page-content-reg
 // Per-class extraction model override (overrides extraction.model)
 export const X_AWS_IDP_EXTRACTION_MODEL = 'x-aws-idp-extraction-model';
 
+// Per-class escalation model override. When extraction.agentic.validation
+// fail_action is "escalate", failing fields for this class are re-extracted
+// with this model (overrides extraction.agentic.validation.escalation_model).
+export const X_AWS_IDP_EXTRACTION_ESCALATION_MODEL = 'x-aws-idp-extraction-escalation-model';
+
+/**
+ * Bedrock model options for per-class model-override dropdowns in the schema
+ * editor (extraction model and escalation model). The leading empty option
+ * means "use the global default". Keep in sync with the model enum in
+ * patterns/unified/template.yaml.
+ */
+export const EXTRACTION_MODEL_OVERRIDE_OPTIONS = [
+  { label: '(Use global default)', value: '' },
+  { label: 'us.amazon.nova-lite-v1:0', value: 'us.amazon.nova-lite-v1:0' },
+  { label: 'us.amazon.nova-pro-v1:0', value: 'us.amazon.nova-pro-v1:0' },
+  { label: 'us.amazon.nova-premier-v1:0', value: 'us.amazon.nova-premier-v1:0' },
+  { label: 'us.amazon.nova-2-lite-v1:0', value: 'us.amazon.nova-2-lite-v1:0' },
+  { label: 'us.anthropic.claude-haiku-4-5-20251001-v1:0', value: 'us.anthropic.claude-haiku-4-5-20251001-v1:0' },
+  { label: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0', value: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0' },
+  { label: 'us.anthropic.claude-sonnet-4-6', value: 'us.anthropic.claude-sonnet-4-6' },
+  { label: 'us.anthropic.claude-sonnet-4-6:1m', value: 'us.anthropic.claude-sonnet-4-6:1m' },
+  { label: 'us.anthropic.claude-opus-4-5-20251101-v1:0', value: 'us.anthropic.claude-opus-4-5-20251101-v1:0' },
+  { label: 'us.anthropic.claude-opus-4-6-v1', value: 'us.anthropic.claude-opus-4-6-v1' },
+  { label: 'us.anthropic.claude-opus-4-6-v1:1m', value: 'us.anthropic.claude-opus-4-6-v1:1m' },
+  { label: 'us.anthropic.claude-opus-4-7', value: 'us.anthropic.claude-opus-4-7' },
+  { label: 'us.anthropic.claude-opus-4-7:1m', value: 'us.anthropic.claude-opus-4-7:1m' },
+  { label: 'us.anthropic.claude-opus-4-8', value: 'us.anthropic.claude-opus-4-8' },
+  { label: 'us.anthropic.claude-opus-4-8:1m', value: 'us.anthropic.claude-opus-4-8:1m' },
+  // OpenAI GPT-5.x (bedrock-mantle Responses API) - US regions only
+  { label: 'openai.gpt-5.4', value: 'openai.gpt-5.4' },
+  { label: 'openai.gpt-5.5', value: 'openai.gpt-5.5' },
+  { label: 'eu.amazon.nova-lite-v1:0', value: 'eu.amazon.nova-lite-v1:0' },
+  { label: 'eu.amazon.nova-pro-v1:0', value: 'eu.amazon.nova-pro-v1:0' },
+  { label: 'eu.amazon.nova-2-lite-v1:0', value: 'eu.amazon.nova-2-lite-v1:0' },
+  { label: 'eu.anthropic.claude-haiku-4-5-20251001-v1:0', value: 'eu.anthropic.claude-haiku-4-5-20251001-v1:0' },
+  { label: 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0', value: 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0' },
+  { label: 'eu.anthropic.claude-sonnet-4-6', value: 'eu.anthropic.claude-sonnet-4-6' },
+  { label: 'eu.anthropic.claude-sonnet-4-6:1m', value: 'eu.anthropic.claude-sonnet-4-6:1m' },
+  { label: 'eu.anthropic.claude-opus-4-5-20251101-v1:0', value: 'eu.anthropic.claude-opus-4-5-20251101-v1:0' },
+  { label: 'eu.anthropic.claude-opus-4-6-v1', value: 'eu.anthropic.claude-opus-4-6-v1' },
+  { label: 'eu.anthropic.claude-opus-4-6-v1:1m', value: 'eu.anthropic.claude-opus-4-6-v1:1m' },
+  { label: 'eu.anthropic.claude-opus-4-7', value: 'eu.anthropic.claude-opus-4-7' },
+  { label: 'eu.anthropic.claude-opus-4-7:1m', value: 'eu.anthropic.claude-opus-4-7:1m' },
+  { label: 'eu.anthropic.claude-opus-4-8', value: 'eu.anthropic.claude-opus-4-8' },
+  { label: 'eu.anthropic.claude-opus-4-8:1m', value: 'eu.anthropic.claude-opus-4-8:1m' },
+  { label: 'global.amazon.nova-2-lite-v1:0', value: 'global.amazon.nova-2-lite-v1:0' },
+  {
+    label: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+    value: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+  },
+  {
+    label: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
+    value: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
+  },
+  { label: 'global.anthropic.claude-sonnet-4-6', value: 'global.anthropic.claude-sonnet-4-6' },
+  { label: 'global.anthropic.claude-sonnet-4-6:1m', value: 'global.anthropic.claude-sonnet-4-6:1m' },
+  {
+    label: 'global.anthropic.claude-opus-4-5-20251101-v1:0',
+    value: 'global.anthropic.claude-opus-4-5-20251101-v1:0',
+  },
+  { label: 'global.anthropic.claude-opus-4-6-v1', value: 'global.anthropic.claude-opus-4-6-v1' },
+  { label: 'global.anthropic.claude-opus-4-6-v1:1m', value: 'global.anthropic.claude-opus-4-6-v1:1m' },
+  { label: 'global.anthropic.claude-opus-4-7', value: 'global.anthropic.claude-opus-4-7' },
+  { label: 'global.anthropic.claude-opus-4-7:1m', value: 'global.anthropic.claude-opus-4-7:1m' },
+  { label: 'global.anthropic.claude-opus-4-8', value: 'global.anthropic.claude-opus-4-8' },
+  { label: 'global.anthropic.claude-opus-4-8:1m', value: 'global.anthropic.claude-opus-4-8:1m' },
+];
+
 // Per-class extraction prompt overrides (override extraction.system_prompt /
 // extraction.task_prompt for this class). Absent => use the global prompts.
 export const X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT = 'x-aws-idp-extraction-system-prompt';
