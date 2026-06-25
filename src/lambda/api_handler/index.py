@@ -243,6 +243,7 @@ def get_job(job_id: str) -> GetJobResponse:
         return GetJobResponse(
             jobId=job_id,
             status=job_status,
+            configurationVersion=job_record.get("ConfigurationVersion"),
             timestamps=Timestamps(
                 createdAt=job_record.get("CreatedAt", ""),
                 updatedAt=job_record.get("UpdatedAt", ""),

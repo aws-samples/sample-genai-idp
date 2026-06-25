@@ -28,7 +28,7 @@ import logging
 import os
 import tempfile
 import zipfile
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import boto3
 from idp_common.job_service import create_job_service
@@ -128,7 +128,7 @@ def handler(event, context):
 
 
 def extract_and_upload(
-    staging_bucket: str, zip_key: str, job_id: str, config_version: str = None
+    staging_bucket: str, zip_key: str, job_id: str, config_version: Optional[str] = None
 ) -> Tuple[List[str], List[str]]:
     """
     Extract ZIP and upload individual files to the input bucket.
@@ -197,15 +197,17 @@ def extract_and_upload(
                 # Lambda memory. ZipExtFile is file-like and supports the
                 # read(size) interface that upload_fileobj expects.
                 try:
-                    extra_args = {}
-                    if config_version:
-                        extra_args["Metadata"] = {"config-version": config_version}
+                    extra_args = (
+                        {"Metadata": {"config-version": config_version}}
+                        if config_version
+                        else None
+                    )
                     with zip_ref.open(file_info, "r") as entry_stream:
                         s3.upload_fileobj(
                             entry_stream,
                             INPUT_BUCKET,
                             dest_key,
-                            ExtraArgs=extra_args if extra_args else None,
+                            ExtraArgs=extra_args,
                         )
                     logger.info(f"Uploaded {filename} to {dest_key}")
                     succeeded.append(filename)
