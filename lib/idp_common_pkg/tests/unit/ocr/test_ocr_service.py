@@ -595,6 +595,68 @@ class TestOcrService:
         # Verify S3 writes
         assert mock_write_content.call_count == 4  # image, raw, confidence, parsed
 
+    def test_extract_bedrock_ocr_artifacts_text_only(self, mock_bedrock_config):
+        """A plain text LambdaHook/Bedrock response -> placeholder confidence."""
+        with patch("boto3.client"):
+            service = OcrService(backend="bedrock", bedrock_config=mock_bedrock_config)
+        response_payload = {
+            "output": {"message": {"content": [{"text": "Some OCR text"}]}}
+        }
+        raw, confidence = service._extract_bedrock_ocr_artifacts(response_payload)
+
+        # Raw response stored as-is
+        assert raw == response_payload
+        # Placeholder confidence table (no real scores)
+        assert "No confidence data available from LLM OCR" in confidence["text"]
+
+    def test_extract_bedrock_ocr_artifacts_structured(self, mock_bedrock_config):
+        """A LambdaHook returning textractBlocks -> real confidence table."""
+        with patch("boto3.client"):
+            service = OcrService(backend="bedrock", bedrock_config=mock_bedrock_config)
+        textract_blocks = {
+            "DocumentMetadata": {"Pages": 1},
+            "Blocks": [
+                {"BlockType": "PAGE", "Id": "p1"},
+                {
+                    "BlockType": "LINE",
+                    "Id": "l1",
+                    "Text": "Account: 12345",
+                    "Confidence": 97.5,
+                },
+                {
+                    "BlockType": "WORD",
+                    "Id": "w1",
+                    "Text": "Account",
+                    "Confidence": 99.0,
+                },
+            ],
+        }
+        response_payload = {
+            "output": {"message": {"content": [{"text": "Account: 12345"}]}},
+            "textractBlocks": textract_blocks,
+        }
+        raw, confidence = service._extract_bedrock_ocr_artifacts(response_payload)
+
+        # Textract blocks persisted as the raw OCR result (not the wrapper)
+        assert raw == textract_blocks
+        # Real confidence table generated from LINE blocks
+        assert "Account: 12345" in confidence["text"]
+        assert "97.5" in confidence["text"]
+        assert "No confidence data available" not in confidence["text"]
+
+    def test_extract_bedrock_ocr_artifacts_empty_blocks(self, mock_bedrock_config):
+        """textractBlocks present but empty -> fall back to placeholder."""
+        with patch("boto3.client"):
+            service = OcrService(backend="bedrock", bedrock_config=mock_bedrock_config)
+        response_payload = {
+            "output": {"message": {"content": [{"text": "text"}]}},
+            "textractBlocks": {"DocumentMetadata": {"Pages": 1}, "Blocks": []},
+        }
+        raw, confidence = service._extract_bedrock_ocr_artifacts(response_payload)
+
+        assert raw == response_payload
+        assert "No confidence data available from LLM OCR" in confidence["text"]
+
     @patch("boto3.client")
     @patch("idp_common.s3.write_content")
     def test_process_single_page_none(self, mock_write_content, mock_boto_client):

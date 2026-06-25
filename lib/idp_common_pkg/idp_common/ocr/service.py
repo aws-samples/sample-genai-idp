@@ -884,19 +884,20 @@ class OcrService:
             extracted_text = bedrock.extract_text_from_response(response_with_metering)
             metering = response_with_metering.get("metering", {})
 
-            # Store raw Bedrock response
+            # Persist structured OCR (Textract blocks with confidence + geometry)
+            # if the LambdaHook returned it; otherwise store raw text + placeholder.
+            raw_ocr_content, text_confidence_data = self._extract_bedrock_ocr_artifacts(
+                response_with_metering["response"]
+            )
+
+            # Store raw Bedrock response (or Textract blocks)
             raw_text_key = f"{prefix}/pages/{page_id}/rawText.json"
             s3.write_content(
-                response_with_metering["response"],
+                raw_ocr_content,
                 output_bucket,
                 raw_text_key,
                 content_type="application/json",
             )
-
-            # Generate text confidence data
-            text_confidence_data = {
-                "text": "| Text | Confidence |\n|:-----|:------------|\n| *No confidence data available from LLM OCR* | N/A |"
-            }
 
             text_confidence_key = f"{prefix}/pages/{page_id}/textConfidence.json"
             s3.write_content(
@@ -1088,17 +1089,20 @@ class OcrService:
             extracted_text = bedrock.extract_text_from_response(response_with_metering)
             metering = response_with_metering.get("metering", {})
 
+            # Persist structured OCR (Textract blocks with confidence + geometry)
+            # if the LambdaHook returned it; otherwise store raw text + placeholder.
+            raw_ocr_content, text_confidence_data = self._extract_bedrock_ocr_artifacts(
+                response_with_metering["response"]
+            )
+
             raw_text_key = f"{prefix}/pages/{page_id}/rawText.json"
             s3.write_content(
-                response_with_metering["response"],
+                raw_ocr_content,
                 output_bucket,
                 raw_text_key,
                 content_type="application/json",
             )
 
-            text_confidence_data = {
-                "text": "| Text | Confidence |\n|:-----|:------------|\n| *No confidence data available from LLM OCR* | N/A |"
-            }
             text_confidence_key = f"{prefix}/pages/{page_id}/textConfidence.json"
             s3.write_content(
                 text_confidence_data,
@@ -1531,20 +1535,21 @@ class OcrService:
         t2 = time.time()
         logger.debug(f"Time for Bedrock OCR (page {page_id}): {t2 - t1:.6f} seconds")
 
-        # Store raw Bedrock response
+        # Persist structured OCR (Textract blocks with confidence + geometry) if
+        # the LambdaHook returned it; otherwise store raw text + placeholder.
+        # LLM OCR via plain Bedrock models doesn't provide real confidence scores.
+        raw_ocr_content, text_confidence_data = self._extract_bedrock_ocr_artifacts(
+            response_with_metering["response"]
+        )
+
+        # Store raw Bedrock response (or Textract blocks)
         raw_text_key = f"{prefix}/pages/{page_id}/rawText.json"
         s3.write_content(
-            response_with_metering["response"],
+            raw_ocr_content,
             output_bucket,
             raw_text_key,
             content_type="application/json",
         )
-
-        # Generate and store text confidence data
-        # For Bedrock, we use empty markdown table since LLM OCR doesn't provide real confidence scores
-        text_confidence_data = {
-            "text": "| Text | Confidence |\n|:-----|:------------|\n| *No confidence data available from LLM OCR* | N/A |"
-        }
 
         text_confidence_key = f"{prefix}/pages/{page_id}/textConfidence.json"
         s3.write_content(
@@ -1720,6 +1725,45 @@ class OcrService:
             if isinstance(self.enhanced_features, list) and self.enhanced_features
             else "detect_document_text"
         )
+
+    def _extract_bedrock_ocr_artifacts(
+        self, response_payload: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """
+        Determine what to persist as rawText.json and textConfidence.json for a
+        Bedrock/LambdaHook OCR response.
+
+        A LambdaHook OCR function may optionally return structured OCR results in
+        Amazon Textract response format under a top-level "textractBlocks" key
+        (an object with a "Blocks" list). When present, this carries per-line/word
+        OCR confidence scores and bounding-box geometry, so we persist the
+        Textract blocks as the raw OCR result and generate a real text-confidence
+        table from them. This lets downstream assessment (the
+        {OCR_TEXT_CONFIDENCE} placeholder) and the UI (geometry highlighting) use
+        the same data as the native Textract backend.
+
+        Hooks (or Bedrock models) that return only text fall back to the previous
+        behavior: the raw response is stored as-is and a placeholder confidence
+        table is written.
+
+        Args:
+            response_payload: The "response" object from invoke_model
+
+        Returns:
+            Tuple of (raw_ocr_content_to_store, text_confidence_data)
+        """
+        textract_blocks = (
+            response_payload.get("textractBlocks")
+            if isinstance(response_payload, dict)
+            else None
+        )
+        if textract_blocks and textract_blocks.get("Blocks"):
+            return textract_blocks, self._generate_text_confidence_data(textract_blocks)
+
+        placeholder = {
+            "text": "| Text | Confidence |\n|:-----|:------------|\n| *No confidence data available from LLM OCR* | N/A |"
+        }
+        return response_payload, placeholder
 
     def _generate_text_confidence_data(
         self, raw_ocr_data: Dict[str, Any]
