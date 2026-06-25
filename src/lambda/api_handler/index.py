@@ -145,17 +145,26 @@ def create_job(job: PostJobRequest) -> PostJobResponse:
             expires_after=expires_after,
             metadata=metadata_dict,
             created_by=created_by or None,
+            configuration_version=job.configurationVersion,
         )
 
-        # Generate presigned POST URL
+        # Generate presigned POST URL with optional config-version metadata
+        fields = {"Content-Type": content_type}
+        conditions = [
+            {"Content-Type": content_type},
+            ["content-length-range", 1, MAX_FILE_SIZE_BYTES],
+        ]
+        if job.configurationVersion:
+            fields["x-amz-meta-config-version"] = job.configurationVersion
+            conditions.append(
+                {"x-amz-meta-config-version": job.configurationVersion}
+            )
+
         presigned_post = s3_client.generate_presigned_post(
             Bucket=STAGING_BUCKET,
             Key=object_key,
-            Fields={"Content-Type": content_type},
-            Conditions=[
-                {"Content-Type": content_type},
-                ["content-length-range", 1, MAX_FILE_SIZE_BYTES],
-            ],
+            Fields=fields,
+            Conditions=conditions,
             ExpiresIn=PRESIGNED_URL_EXPIRY_SECONDS,
         )
 

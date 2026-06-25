@@ -11,6 +11,7 @@ class Metadata(BaseModel):
 
 class PostJobRequest(BaseModel):
     fileName: str  # Filename with extension (.zip)
+    configurationVersion: Optional[str] = None  # Config version to use for processing
     metadata: Optional[Metadata] = None
 
 

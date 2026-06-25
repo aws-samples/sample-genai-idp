@@ -79,8 +79,19 @@ def handler(event, context):
     job_id = parts[1]  # uuid
     logger.info(f"Processing ZIP for job: {job_id}")
 
+    # Read configuration version from job record (if set by POST /jobs)
+    config_version = None
     try:
-        succeeded, failed = extract_and_upload(bucket, key, job_id)
+        job_record = job_service.get_job_record(job_id) if job_service else None
+        if job_record:
+            config_version = job_record.get("ConfigurationVersion")
+            if config_version:
+                logger.info(f"Job {job_id} uses config version: {config_version}")
+    except Exception as e:
+        logger.warning(f"Could not read job record for config version: {e}")
+
+    try:
+        succeeded, failed = extract_and_upload(bucket, key, job_id, config_version)
     except ZipBoundsExceeded as e:
         # Bound violation is a terminal outcome for the whole job; write a
         # FAILED marker so the API's GET /jobs/{id} surfaces a human-readable
@@ -117,10 +128,18 @@ def handler(event, context):
 
 
 def extract_and_upload(
-    staging_bucket: str, zip_key: str, job_id: str
+    staging_bucket: str, zip_key: str, job_id: str, config_version: str = None
 ) -> Tuple[List[str], List[str]]:
     """
     Extract ZIP and upload individual files to the input bucket.
+
+    Args:
+        staging_bucket: S3 bucket containing the uploaded zip
+        zip_key: S3 key of the zip file
+        job_id: Job identifier
+        config_version: Optional configuration version to set as S3 metadata
+            on each extracted file. The pipeline reads this to select the
+            processing configuration.
 
     Returns:
         (succeeded_filenames, failed_filenames) — per-entry outcomes suitable
@@ -178,11 +197,15 @@ def extract_and_upload(
                 # Lambda memory. ZipExtFile is file-like and supports the
                 # read(size) interface that upload_fileobj expects.
                 try:
+                    extra_args = {}
+                    if config_version:
+                        extra_args["Metadata"] = {"config-version": config_version}
                     with zip_ref.open(file_info, "r") as entry_stream:
                         s3.upload_fileobj(
                             entry_stream,
                             INPUT_BUCKET,
                             dest_key,
+                            ExtraArgs=extra_args if extra_args else None,
                         )
                     logger.info(f"Uploaded {filename} to {dest_key}")
                     succeeded.append(filename)
