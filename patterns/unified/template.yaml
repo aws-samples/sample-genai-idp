@@ -1049,11 +1049,19 @@ Resources:
                     default: false
                   max_concurrent_batches:
                     type: number
-                    description: "Only used when Agentic Extraction is enabled. Number of concurrent page-batch agents. 1 = sequential (default). Higher values (2-5) split pages into batches and run agents concurrently for faster extraction of long documents, at the cost of higher Bedrock requests-per-minute. Tune to your Bedrock quota."
+                    description: "Only used when Agentic Extraction is enabled. Max concurrent extraction agents. 1 = single pass (default). >1 SHARDS the section's pages into token-budgeted ranges (each agent sees ONLY its pages, not the whole document) and runs them concurrently - this both speeds up long documents AND prevents context-window overflow. Acts as an upper bound on parallelism and shard count. Higher values increase Bedrock requests-per-minute; tune to your quota."
                     minimum: 1
                     maximum: 10
                     default: 1
                     order: 1
+                    dependsOn: { field: "enabled", value: true }
+                  shard_token_budget:
+                    type: number
+                    description: "Only used when concurrent extraction is active (max_concurrent_batches > 1). Target maximum input tokens (estimated ~chars/4) of OCR text per shard. Pages are grouped so each shard stays under this budget, creating as many shards as needed (capped by max_concurrent_batches). Lower this if shards still overflow the model context; raise it for large-context models (e.g. 1M-context Claude)."
+                    minimum: 1000
+                    maximum: 900000
+                    default: 40000
+                    order: 2
                     dependsOn: { field: "enabled", value: true }
                   table_parsing:
                     type: object

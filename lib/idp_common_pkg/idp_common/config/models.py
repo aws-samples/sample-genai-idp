@@ -246,9 +246,21 @@ class AgenticConfig(BaseModel):
         ge=1,
         le=10,
         description="Max concurrent page-batch agents for parallel extraction. "
-        "1 = sequential (default). >1 splits pages into N batches and runs N agents "
-        "concurrently. Reduces wall-clock time but increases Bedrock RPM. "
-        "Tune based on your Bedrock quota.",
+        "1 = sequential (default). >1 shards the section's pages into "
+        "token-budgeted ranges (each agent sees ONLY its pages' OCR text/images, "
+        "not the whole document) and runs them concurrently. This both reduces "
+        "wall-clock time AND prevents context-window overflow on long documents. "
+        "Acts as an upper bound on parallelism and shard count. Increases Bedrock "
+        "RPM — tune to your quota.",
+    )
+    shard_token_budget: int = Field(
+        default=40000,
+        gt=0,
+        description="Target maximum input tokens (estimated, ~chars/4) of OCR "
+        "text per shard when max_concurrent_batches > 1. Pages are grouped so "
+        "each shard stays under this budget, creating as many shards as needed "
+        "(capped by max_concurrent_batches). Raise for large-context models "
+        "(e.g. 1M-context Claude); lower if shards still overflow.",
     )
     table_parsing: TableParsingConfig = Field(
         default_factory=TableParsingConfig,
