@@ -679,14 +679,45 @@ Statement Period: January 2025
 
 The table parser transparently skips page markers inside tables — they do not break table continuity or appear in parsed rows.
 
-**Batch extraction** (`max_concurrent_batches > 1`): The document is split into N page ranges, and N agents run in parallel. Each batch agent receives the full document text but extracts only its assigned page range, using page markers to identify boundaries. Results are merged: list fields are concatenated, scalar fields take the last non-None value.
+**Sharded concurrent extraction** (`max_concurrent_batches > 1`): the section's
+pages are split into **token-budgeted page ranges**, and each shard's prompt
+contains **only that shard's OCR text and images** — not the whole document. The
+shards run concurrently (up to `max_concurrent_batches` at a time) and their
+results are merged. This serves two purposes:
+
+1. **Bounds the context window.** Because each agent sees only its pages, a long
+   or dense section that would overflow a single agent's context (the failure
+   mode behind `ContextWindowOverflowException`) is split until each shard fits.
+2. **Reduces wall-clock time** via parallelism.
+
+Key behaviors:
+- **Size-bounded, not count-bounded.** Pages are grouped so each shard's
+  estimated input stays under `shard_token_budget` (default 40,000;
+  `≈ chars/4`). `max_concurrent_batches` is an **upper bound on parallelism and
+  shard count** — a very large section is split into as many shards as needed to
+  fit (capped at `max_concurrent_batches`), not exactly N equal pieces.
+- **Page-aligned splits keep table rows intact.** A table spans pages but each
+  row lives on one page, so splits fall between rows; list fields are
+  concatenated in page order on merge (no row loss/duplication).
+- **Header context propagation.** The section's first-page text is prepended to
+  every later shard (clearly marked "for context only") so column headers and
+  page-1 scalar context survive the split.
+- **Scalar merge.** Each shard extracts what it can see; scalars take the
+  **first non-null** value across shards. If two shards disagree on a scalar, the
+  first is kept and the conflict is recorded in `metadata.shard_scalar_conflicts`.
+
+> If a single shard's input *still* exceeds the model context window, extraction
+> raises a clear, actionable error (enable table parsing / lower
+> `shard_token_budget` / use a larger-context `:1m` model) rather than the
+> opaque Strands "insufficient messages for summarization" message.
 
 ```yaml
-# Enable batch extraction with 4 concurrent agents
+# Enable sharded concurrent extraction (up to 4 shards in parallel)
 extraction:
   agentic:
     enabled: true
     max_concurrent_batches: 4
+    shard_token_budget: 40000   # lower if shards still overflow; raise for 1M-context models
     table_parsing:
       enabled: true
 ```

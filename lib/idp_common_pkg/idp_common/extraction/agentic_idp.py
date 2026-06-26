@@ -804,6 +804,31 @@ async def invoke_agent_with_retry(input: AgentInput, agent: Agent):
     return await agent.invoke_async(input)
 
 
+def _is_context_overflow_error(exc: Exception) -> bool:
+    """Heuristically detect a model context-window overflow.
+
+    Strands raises ``ContextWindowOverflowException`` and, when its
+    SummarizingConversationManager can't recover (e.g. the very first turn
+    already overflows), surfaces "Cannot summarize: insufficient messages for
+    summarization". Bedrock may also report validation errors mentioning the
+    input/context length. Match on type name and message text rather than
+    importing Strands' exception type (keeps this module import-light).
+    """
+    name = type(exc).__name__
+    msg = str(exc).lower()
+    if "contextwindowoverflow" in name.lower():
+        return True
+    needles = (
+        "insufficient messages for summarization",
+        "context window",
+        "input is too long",
+        "too many tokens",
+        "exceeds the maximum",
+        "input length",
+    )
+    return any(n in msg for n in needles)
+
+
 def _initialize_token_usage() -> dict[str, int]:
     """Initialize token usage tracking dictionary."""
     return {
@@ -1200,7 +1225,22 @@ async def _invoke_agent_for_extraction(
 
     for attempt in range(max_extraction_retries):
         # invoke_agent_with_retry already handles network errors and throttling
-        response = await invoke_agent_with_retry(agent=agent, input=prompt_content)
+        try:
+            response = await invoke_agent_with_retry(agent=agent, input=prompt_content)
+        except Exception as e:  # noqa: BLE001 - translate one specific failure mode
+            if _is_context_overflow_error(e):
+                raise ValueError(
+                    "Extraction input exceeds the model's context window. The "
+                    "document/section is too large to process in one agent pass. "
+                    "Remedies: enable concurrent sharding "
+                    "(extraction.agentic.max_concurrent_batches > 1) and/or lower "
+                    "extraction.agentic.shard_token_budget; enable table parsing "
+                    "(requires Textract TABLES so OCR emits Markdown tables); "
+                    "reduce attached page images; or use a larger-context model "
+                    "(e.g. a ':1m' Claude variant). "
+                    f"(underlying error: {e})"
+                ) from e
+            raise
         logger.debug("Agent response received")
 
         # Try to get extraction from state
@@ -1285,16 +1325,15 @@ async def _invoke_agent_for_extraction(
     return response, None
 
 
-async def _run_batch_agent(
-    batch_index: int,
-    total_batches: int,
+async def _run_shard_agent(
+    shard_index: int,
+    total_shards: int,
     page_start: int,
     page_end: int,
     total_pages: int,
     model_id: str,
     data_format: type[TargetModel],
-    prompt: str | Message | Image.Image,
-    page_images: list[bytes] | None,
+    shard_prompt: str | Message | Image.Image,
     config: IDPConfig,
     context: str,
     max_retries: int,
@@ -1304,25 +1343,29 @@ async def _run_batch_agent(
     checkpoint_callback: Any | None,
     base_custom_instruction: str | None = None,
 ) -> tuple[TargetModel, BedrockInvokeModelResponse]:
-    """Run a single batch agent for a page range, with instructions to extract only its assigned pages."""
-    # Build a custom instruction telling this agent its page assignment
-    batch_instruction = (
-        f"You are batch {batch_index + 1} of {total_batches}. "
-        f"Extract data ONLY from pages {page_start + 1} to {page_end} "
-        f"(out of {total_pages} total pages). "
-        f"Ignore content from other pages."
-    )
+    """Run one extraction agent over a single shard.
 
-    # Combine base custom instruction with batch instruction
-    combined_instruction = batch_instruction
+    ``shard_prompt`` already contains ONLY this shard's page text/images (the
+    service slices the input before calling). The instruction reinforces that
+    the agent should extract everything visible in its pages; fields that live
+    on other pages are simply absent (resolved at merge).
+    """
+    shard_instruction = (
+        f"You are processing shard {shard_index + 1} of {total_shards}, covering "
+        f"pages {page_start + 1}-{page_end} of {total_pages}. The document text "
+        f"and images you have been given contain ONLY these pages. Extract every "
+        f"requested field that appears in your pages. If a field does not appear "
+        f"in your pages, leave it null — another shard will provide it."
+    )
+    combined_instruction = shard_instruction
     if base_custom_instruction:
-        combined_instruction = f"{base_custom_instruction}\n\n{batch_instruction}"
+        combined_instruction = f"{base_custom_instruction}\n\n{shard_instruction}"
 
     return await structured_output_async(
         model_id=model_id,
         data_format=data_format,
-        prompt=prompt,
-        page_images=page_images,
+        prompt=shard_prompt,
+        page_images=None,  # images already embedded in shard_prompt content
         config=config,
         context=context,
         max_retries=max_retries,
@@ -1352,12 +1395,54 @@ def _accumulate_metering(
                 merged_metering[mk][tk] = (merged_metering[mk].get(tk) or 0) + (tv or 0)
 
 
+def _merge_shard_results(
+    results: list[tuple[Any, dict[str, Any]]],
+    data_format: type[TargetModel],
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    """Merge per-shard extraction dicts into one.
+
+    - **List fields** are concatenated in shard order (rows live on single pages,
+      so page-aligned shards keep them intact and ordered).
+    - **Scalar fields** take the FIRST non-null value across shards; if a later
+      shard provides a *different* non-null value, that is recorded as a conflict
+      (the first value wins, the conflict is surfaced in metadata for audit).
+
+    Returns ``(merged_dict, merged_metering, conflicts)``.
+    """
+    merged_dict: dict[str, Any] = {}
+    merged_metering: dict[str, Any] = {}
+    conflicts: list[dict[str, Any]] = []
+
+    for result_data, result_response in results:
+        result_dict = result_data.model_dump(mode="json")
+        for key, value in result_dict.items():
+            if isinstance(value, list):
+                merged_dict.setdefault(key, []).extend(value)
+            elif value is not None:
+                if key not in merged_dict or merged_dict[key] is None:
+                    merged_dict[key] = value
+                elif merged_dict[key] != value:
+                    # Two shards disagree on a scalar. Keep the first; record it.
+                    conflicts.append(
+                        {
+                            "field": key,
+                            "kept": merged_dict[key],
+                            "discarded": value,
+                        }
+                    )
+            else:
+                # Preserve the key as null if no shard has filled it yet.
+                merged_dict.setdefault(key, None)
+        _accumulate_metering(merged_metering, result_response.get("metering", {}))
+
+    return merged_dict, merged_metering, conflicts
+
+
 async def concurrent_structured_output_async(
     model_id: str,
     data_format: type[TargetModel],
-    prompt: str | Message | Image.Image,
-    page_images: list[bytes],
-    num_batches: int,
+    shard_payloads: list[dict[str, Any]],
+    max_parallelism: int,
     config: IDPConfig = IDPConfig(),
     context: str = "Extraction",
     max_retries: int = 7,
@@ -1366,92 +1451,83 @@ async def concurrent_structured_output_async(
     max_tokens: int | None = None,
     checkpoint_callback: Any | None = None,
     custom_instruction: str | None = None,
-    total_pages: int | None = None,
 ) -> tuple[TargetModel, BedrockInvokeModelResponse]:
     """
-    Run multiple extraction agents concurrently on different page ranges.
+    Run one extraction agent per input shard, concurrently, and merge results.
 
-    Splits the document's pages into N batches, runs N agents in parallel
-    (each seeing ALL images but instructed to extract only its assigned pages),
-    then merges results by concatenating list fields and taking the last
-    non-None value for scalar fields.
+    Unlike the previous implementation, each shard's prompt contains ONLY that
+    shard's page text/images (the service slices the input before calling), so
+    no agent loads the whole document — this is what bounds the context window
+    and prevents overflow on long documents. At most ``max_parallelism`` shards
+    run at once (Bedrock RPM control).
 
     Args:
-        num_batches: Number of concurrent agents to run (2-10)
-        total_pages: Override for page count (used when images not provided)
-        Other args: Same as structured_output_async
+        shard_payloads: List of dicts with keys ``content`` (pre-rendered prompt
+            content blocks for the shard), ``page_start``, ``page_end``,
+            ``total_pages``.
+        max_parallelism: Max number of shards to run concurrently.
+        Other args: Same as structured_output_async.
 
     Returns:
-        Merged (data_format instance, metering response)
+        Merged (data_format instance, metering response). The response metering
+        includes a ``_shard_scalar_conflicts`` marker when shards disagreed on a
+        scalar field, so the service can record it in metadata.
     """
-    total_pages = total_pages or len(page_images)
-    # Calculate page ranges for each batch
-    pages_per_batch = max(1, total_pages // num_batches)
-    batch_ranges = []
-    for i in range(num_batches):
-        start = i * pages_per_batch
-        end = (
-            min((i + 1) * pages_per_batch, total_pages)
-            if i < num_batches - 1
-            else total_pages
-        )
-        if start < total_pages:
-            batch_ranges.append((start, end))
-
+    total_shards = len(shard_payloads)
     logger.info(
-        "Starting concurrent batch extraction",
+        "Starting sharded concurrent extraction",
         extra={
-            "num_batches": len(batch_ranges),
-            "total_pages": total_pages,
-            "batch_ranges": [(s, e) for s, e in batch_ranges],
+            "num_shards": total_shards,
+            "max_parallelism": max_parallelism,
+            "ranges": [(p["page_start"], p["page_end"]) for p in shard_payloads],
         },
     )
 
-    # Run all batches concurrently
-    tasks = [
-        _run_batch_agent(
-            batch_index=i,
-            total_batches=len(batch_ranges),
-            page_start=start,
-            page_end=end,
-            total_pages=total_pages,
-            model_id=model_id,
-            data_format=data_format,
-            prompt=prompt,
-            page_images=page_images,
-            config=config,
-            context=context,
-            max_retries=max_retries,
-            connect_timeout=connect_timeout,
-            read_timeout=read_timeout,
-            max_tokens=max_tokens,
-            checkpoint_callback=checkpoint_callback,
-            base_custom_instruction=custom_instruction,
-        )
-        for i, (start, end) in enumerate(batch_ranges)
-    ]
+    semaphore = asyncio.Semaphore(max(1, max_parallelism))
+
+    async def _run_one(i: int, payload: dict[str, Any]):
+        async with semaphore:
+            return await _run_shard_agent(
+                shard_index=i,
+                total_shards=total_shards,
+                page_start=payload["page_start"],
+                page_end=payload["page_end"],
+                total_pages=payload["total_pages"],
+                model_id=model_id,
+                data_format=data_format,
+                shard_prompt={"role": "user", "content": payload["content"]},
+                config=config,
+                context=context,
+                max_retries=max_retries,
+                connect_timeout=connect_timeout,
+                read_timeout=read_timeout,
+                max_tokens=max_tokens,
+                checkpoint_callback=checkpoint_callback,
+                base_custom_instruction=custom_instruction,
+            )
+
+    tasks = [_run_one(i, p) for i, p in enumerate(shard_payloads)]
     results = await asyncio.gather(*tasks)
 
-    # Merge results: concatenate list fields, take last non-None for scalars
-    merged_dict: dict[str, Any] = {}
-    merged_metering: dict[str, Any] = {}
-    for result_data, result_response in results:
-        result_dict = result_data.model_dump(mode="json")
-        for key, value in result_dict.items():
-            if isinstance(value, list):
-                merged_dict.setdefault(key, []).extend(value)
-            elif value is not None:
-                merged_dict[key] = value
-        # Accumulate metering
-        _accumulate_metering(merged_metering, result_response.get("metering", {}))
-
+    merged_dict, merged_metering, conflicts = _merge_shard_results(results, data_format)
     merged_result = data_format(**merged_dict)
-    # Count merged items for logging
+
     total_items = sum(len(v) for v in merged_dict.values() if isinstance(v, list))
     logger.info(
-        "Concurrent batch extraction complete",
-        extra={"total_items": total_items, "batches_completed": len(results)},
+        "Sharded concurrent extraction complete",
+        extra={
+            "total_items": total_items,
+            "shards_completed": len(results),
+            "scalar_conflicts": len(conflicts),
+        },
     )
+    if conflicts:
+        logger.warning(
+            "Scalar field conflicts across shards (kept first value)",
+            extra={"conflicts": conflicts[:20]},
+        )
+        # Surface via metering dict so the service can record it in metadata.
+        merged_metering["_shard_scalar_conflicts"] = conflicts
 
     return merged_result, BedrockInvokeModelResponse(
         response=BedrockResponse(

@@ -37,6 +37,10 @@ from idp_common.extraction.page_type_resolver import (
     PageTypePresence,
     resolve_page_types,
 )
+from idp_common.extraction.sharding import (
+    DEFAULT_SHARD_TOKEN_BUDGET,
+    plan_shards,
+)
 from idp_common.extraction.validation import (
     ValidationReport,
     build_subset_schema,
@@ -143,6 +147,9 @@ class ExtractionService:
         self._class_schema: dict[str, Any] = {}
         self._page_images: list[bytes] = []
         self._image_uris: list[str] = []
+        # Per-page OCR text in section order, populated per section. Used to
+        # shard the input by page range for concurrent agentic extraction.
+        self._page_texts: list[str] = []
         # Optional checkpoint callback for incremental saves during agentic extraction.
         # When set, called after each successful extraction_tool or apply_json_patches
         # invocation with the current extraction dict, enabling resume on Lambda timeout.
@@ -417,6 +424,105 @@ class ExtractionService:
             attachments.append(image.prepare_bedrock_image_attachment(image_content))
 
         return attachments
+
+    def _build_shard_payloads(
+        self,
+        prompt_template: str,
+        send_images: bool,
+        max_shards: int,
+        table_boundary_pages: frozenset[int] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Split the section into token-budgeted page shards and render each
+        shard's prompt content independently.
+
+        Each shard's content is built with the SAME prompt path as the single
+        pass (``_build_prompt_content``) by temporarily scoping
+        ``self._document_text`` and ``self._page_images`` to the shard's page
+        slice — so few-shot / {DOCUMENT_IMAGE} / placeholder handling is
+        identical. The section's first-page text is prepended as shared header
+        context to every shard but the first, so column headers and page-1
+        scalar context survive the split.
+
+        Returns a list of payload dicts: ``{"content", "page_start", "page_end",
+        "total_pages"}``. Falls back to a single whole-section payload when
+        per-page text isn't available.
+        """
+        page_texts = self._page_texts
+        num_pages = len(page_texts)
+        if num_pages <= 1:
+            # Nothing to shard; let the caller use the single-pass path.
+            return []
+
+        budget = self._shard_token_budget()
+        shards = plan_shards(
+            page_texts,
+            token_budget=budget,
+            max_shards=max_shards,
+            table_boundary_pages=table_boundary_pages,
+        )
+        if len(shards) <= 1:
+            return []
+
+        # Header context = the first page's text, prepended to later shards so
+        # they retain column headers / account-level context. Kept small.
+        header_context = page_texts[0] if page_texts else ""
+
+        # Save the full-section context to restore afterwards.
+        saved_text = self._document_text
+        saved_images = self._page_images
+        payloads: list[dict[str, Any]] = []
+        try:
+            for shard in shards:
+                shard_page_texts = page_texts[shard.start : shard.end]
+                # Build this shard's document text with PAGE markers preserved.
+                parts: list[str] = []
+                if shard.start > 0 and header_context.strip():
+                    parts.append(
+                        "--- DOCUMENT HEADER (page 1, for context only) ---\n"
+                        f"{header_context}"
+                    )
+                for offset, text in enumerate(shard_page_texts):
+                    page_num = shard.start + offset + 1
+                    parts.append(f"--- PAGE {page_num} ---\n{text}")
+                self._document_text = "\n".join(parts)
+                self._page_images = (
+                    self._slice_images(saved_images, shard.start, shard.end)
+                    if send_images
+                    else []
+                )
+                shard_images = self._page_images if send_images else None
+                content = self._build_prompt_content(prompt_template, shard_images)
+                payloads.append(
+                    {
+                        "content": content,
+                        "page_start": shard.start,
+                        "page_end": shard.end,
+                        "total_pages": num_pages,
+                    }
+                )
+        finally:
+            self._document_text = saved_text
+            self._page_images = saved_images
+
+        logger.info(
+            "Built %d input shards for concurrent extraction (budget=%d tokens)",
+            len(payloads),
+            budget,
+        )
+        return payloads
+
+    @staticmethod
+    def _slice_images(images: list[bytes], start: int, end: int) -> list[bytes]:
+        """Slice page images to a page range, tolerating an empty/short list."""
+        if not images:
+            return []
+        return images[start:end]
+
+    def _shard_token_budget(self) -> int:
+        """Per-shard input-token budget (config override or default)."""
+        agentic = self.config.extraction.agentic
+        budget = getattr(agentic, "shard_token_budget", None)
+        return int(budget) if budget else DEFAULT_SHARD_TOKEN_BUDGET
 
     def _build_few_shot_examples_content(self) -> list[dict[str, Any]]:
         """
@@ -2071,33 +2177,42 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             # output is validated once after merge below.
             schema_validator = self._build_schema_validator()
 
-            # Use concurrent batch extraction if configured and enough pages
+            # Use concurrent SHARDED extraction if configured and enough pages.
+            # Each shard's prompt contains only its pages' text/images (built by
+            # _build_shard_payloads), so no agent loads the whole document —
+            # this bounds the context window in addition to parallelizing.
             num_batches = self.config.extraction.agentic.max_concurrent_batches
-
+            shard_payloads: list[dict[str, Any]] = []
             if (
                 num_batches > 1
-                and num_pages >= num_batches
+                and num_pages > 1
+                and len(self._page_texts) > 1
                 and not existing_data_model  # Don't use concurrent mode for resume
                 and not checkpoint_buffer
             ):
+                shard_payloads = self._build_shard_payloads(
+                    prompt_template=prompt_template,
+                    send_images=send_images,
+                    max_shards=num_batches,
+                )
+
+            if shard_payloads:
                 import asyncio as _asyncio
 
                 logger.info(
-                    f"Using concurrent batch extraction with {num_batches} batches "
-                    f"for {num_pages} pages"
+                    f"Using sharded concurrent extraction: {len(shard_payloads)} "
+                    f"shard(s), parallelism {num_batches}, for {num_pages} pages"
                 )
                 structured_data, response_with_metering = _asyncio.run(
                     concurrent_structured_output_async(
                         model_id=model_id,
                         data_format=dynamic_model,
-                        prompt=message_prompt,
-                        page_images=agentic_images,
-                        num_batches=num_batches,
+                        shard_payloads=shard_payloads,
+                        max_parallelism=num_batches,
                         config=self.config,
                         context="Extraction",
                         checkpoint_callback=self._checkpoint_callback,
                         custom_instruction=custom_instruction,
-                        total_pages=num_pages,
                     )
                 )
             else:
@@ -2373,9 +2488,12 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         # Check if table parsing tool was used (extract from metering before building metadata)
         tool_used = False
         table_stats = None
+        shard_conflicts = None
         if extraction_method == "agentic" and result.metering:
             table_stats = result.metering.pop("_table_parsing_stats", None)
             tool_used = table_stats is not None
+            # Scalar conflicts surfaced by sharded concurrent extraction.
+            shard_conflicts = result.metering.pop("_shard_scalar_conflicts", None)
 
         # Build base metadata
         metadata: dict[str, Any] = {
@@ -2460,6 +2578,11 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         # when extraction.agentic.validation.enabled).
         if self._pending_validation_metadata is not None:
             metadata["validation"] = self._pending_validation_metadata
+
+        # Record scalar-field conflicts detected when merging sharded concurrent
+        # extraction (two shards disagreed on a scalar; first value kept).
+        if shard_conflicts:
+            metadata["shard_scalar_conflicts"] = shard_conflicts
 
         # Apply BLANK vs MISSING field handling (no-op unless configured + declared).
         fields_for_output, missing_fields_report = self._apply_missing_field_handling(
@@ -2604,6 +2727,12 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             page_images = self._load_document_images(
                 document, section_info.sorted_page_ids
             )
+            # Stash the per-page OCR text (in section page order) so the agentic
+            # path can shard the input by page range when concurrent batches are
+            # configured. Pages missing from page_id_to_text contribute "".
+            self._page_texts = [
+                page_id_to_text.get(pid, "") for pid in section_info.sorted_page_ids
+            ]
 
             # Initialize extraction context
             class_schema, attribute_descriptions = self._initialize_extraction_context(
