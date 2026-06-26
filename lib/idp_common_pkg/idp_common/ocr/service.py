@@ -367,6 +367,7 @@ class OcrService:
                             raw_text_uri=ocr_result["raw_text_uri"],
                             parsed_text_uri=ocr_result["parsed_text_uri"],
                             text_confidence_uri=ocr_result["text_confidence_uri"],
+                            ocr_page_data_uri=ocr_result.get("ocr_page_data_uri"),
                         )
 
                         # Merge metering data
@@ -474,6 +475,9 @@ class OcrService:
                                         text_confidence_uri=ocr_result[
                                             "text_confidence_uri"
                                         ],
+                                        ocr_page_data_uri=ocr_result.get(
+                                            "ocr_page_data_uri"
+                                        ),
                                     )
 
                                     document.metering = utils.merge_metering_data(
@@ -512,6 +516,7 @@ class OcrService:
                         raw_text_uri=ocr_result["raw_text_uri"],
                         parsed_text_uri=ocr_result["parsed_text_uri"],
                         text_confidence_uri=ocr_result["text_confidence_uri"],
+                        ocr_page_data_uri=ocr_result.get("ocr_page_data_uri"),
                     )
                     document.metering = utils.merge_metering_data(
                         document.metering, page_metering
@@ -842,6 +847,10 @@ class OcrService:
                 content_type="application/json",
             )
 
+            page_data_raw = empty_ocr_response
+            page_data_text = ""
+            page_data_provider = "none"
+
         elif self.backend == "bedrock":
             # Process with Bedrock
             # Apply preprocessing if enabled
@@ -917,6 +926,10 @@ class OcrService:
                 content_type="application/json",
             )
 
+            page_data_raw = raw_ocr_content
+            page_data_text = extracted_text
+            page_data_provider = "bedrock"
+
         else:
             # Process with Textract (default)
             # Apply preprocessing if enabled
@@ -972,6 +985,20 @@ class OcrService:
                 content_type="application/json",
             )
 
+            page_data_raw = textract_result
+            page_data_text = parsed_result.get("text", "")
+            page_data_provider = "textract"
+
+        # Persist consolidated OCR page data (text + confidence + geometry)
+        page_data_uri = self._write_page_data(
+            page_id,
+            output_bucket,
+            prefix,
+            page_data_raw,
+            page_data_text,
+            page_data_provider,
+        )
+
         t2 = time.time()
         logger.debug(f"Total processing time for image file: {t2 - t0:.6f} seconds")
 
@@ -980,6 +1007,7 @@ class OcrService:
             "raw_text_uri": f"s3://{output_bucket}/{raw_text_key}",
             "parsed_text_uri": f"s3://{output_bucket}/{parsed_text_key}",
             "text_confidence_uri": f"s3://{output_bucket}/{text_confidence_key}",
+            "ocr_page_data_uri": page_data_uri,
             "image_uri": f"s3://{output_bucket}/{image_key}",
         }
 
@@ -1062,6 +1090,10 @@ class OcrService:
                 content_type="application/json",
             )
 
+            page_data_raw = empty_ocr_response
+            page_data_text = ""
+            page_data_provider = "none"
+
         elif self.backend == "bedrock":
             # Process with Bedrock
             image_content = image.prepare_bedrock_image_attachment(ocr_img_bytes)
@@ -1120,6 +1152,10 @@ class OcrService:
                 content_type="application/json",
             )
 
+            page_data_raw = raw_ocr_content
+            page_data_text = extracted_text
+            page_data_provider = "bedrock"
+
         else:
             # Process with Textract (default)
             if isinstance(self.enhanced_features, list) and self.enhanced_features:
@@ -1162,6 +1198,20 @@ class OcrService:
                 content_type="application/json",
             )
 
+            page_data_raw = textract_result
+            page_data_text = parsed_result.get("text", "")
+            page_data_provider = "textract"
+
+        # Persist consolidated OCR page data (text + confidence + geometry)
+        page_data_uri = self._write_page_data(
+            page_id,
+            output_bucket,
+            prefix,
+            page_data_raw,
+            page_data_text,
+            page_data_provider,
+        )
+
         # Memory cleanup - delete references to free large image buffers
         del img_bytes
         del ocr_img_bytes
@@ -1175,6 +1225,7 @@ class OcrService:
             "raw_text_uri": f"s3://{output_bucket}/{raw_text_key}",
             "parsed_text_uri": f"s3://{output_bucket}/{parsed_text_key}",
             "text_confidence_uri": f"s3://{output_bucket}/{text_confidence_key}",
+            "ocr_page_data_uri": page_data_uri,
             "image_uri": f"s3://{output_bucket}/{image_key}",
         }
 
@@ -1326,6 +1377,16 @@ class OcrService:
             content_type="application/json",
         )
 
+        # Persist consolidated OCR page data (text + confidence + geometry)
+        page_data_uri = self._write_page_data(
+            page_id,
+            output_bucket,
+            prefix,
+            textract_result,
+            parsed_result.get("text", ""),
+            "textract",
+        )
+
         t2 = time.time()
         logger.debug(f"Time for Textract (page {page_id}): {t2 - t1:.6f} seconds")
 
@@ -1334,6 +1395,7 @@ class OcrService:
             "raw_text_uri": f"s3://{output_bucket}/{raw_text_key}",
             "parsed_text_uri": f"s3://{output_bucket}/{parsed_text_key}",
             "text_confidence_uri": f"s3://{output_bucket}/{text_confidence_key}",
+            "ocr_page_data_uri": page_data_uri,
             "image_uri": f"s3://{output_bucket}/{image_key}",
         }
 
@@ -1569,11 +1631,22 @@ class OcrService:
             content_type="application/json",
         )
 
+        # Persist consolidated OCR page data (text + confidence + geometry)
+        page_data_uri = self._write_page_data(
+            page_id,
+            output_bucket,
+            prefix,
+            raw_ocr_content,
+            extracted_text,
+            "bedrock",
+        )
+
         # Create and return page result
         result = {
             "raw_text_uri": f"s3://{output_bucket}/{raw_text_key}",
             "parsed_text_uri": f"s3://{output_bucket}/{parsed_text_key}",
             "text_confidence_uri": f"s3://{output_bucket}/{text_confidence_key}",
+            "ocr_page_data_uri": page_data_uri,
             "image_uri": f"s3://{output_bucket}/{image_key}",
         }
 
@@ -1649,6 +1722,16 @@ class OcrService:
             content_type="application/json",
         )
 
+        # Persist consolidated OCR page data (empty - no OCR performed)
+        page_data_uri = self._write_page_data(
+            page_id,
+            output_bucket,
+            prefix,
+            empty_ocr_response,
+            "",
+            "none",
+        )
+
         t2 = time.time()
         logger.debug(
             f"Time for image-only processing (page {page_id}): {t2 - t1:.6f} seconds"
@@ -1662,6 +1745,7 @@ class OcrService:
             "raw_text_uri": f"s3://{output_bucket}/{raw_text_key}",
             "parsed_text_uri": f"s3://{output_bucket}/{parsed_text_key}",
             "text_confidence_uri": f"s3://{output_bucket}/{text_confidence_key}",
+            "ocr_page_data_uri": page_data_uri,
             "image_uri": f"s3://{output_bucket}/{image_key}",
         }
 
@@ -1806,6 +1890,227 @@ class OcrService:
         markdown_table = "\n".join(markdown_lines)
 
         return {"text": markdown_table}
+
+    # Current consolidated OCR page-data schema version. Bump when the shape of
+    # pageData.json changes in a backward-incompatible way.
+    PAGE_DATA_SCHEMA_VERSION = 1
+
+    @staticmethod
+    def _extract_geometry(block: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Extract normalized (0-1) geometry from a Textract-format block.
+
+        Returns a dict with a ``boundingBox`` ({left, top, width, height}) and an
+        optional ``polygon`` ([{x, y}, ...]), or None when the block carries no
+        geometry (e.g. Mistral WORD blocks, LLM OCR).
+        """
+        geom = block.get("Geometry")
+        if not isinstance(geom, dict):
+            return None
+
+        bbox = geom.get("BoundingBox")
+        if not isinstance(bbox, dict):
+            return None
+
+        result: Dict[str, Any] = {
+            "boundingBox": {
+                "left": bbox.get("Left", 0.0),
+                "top": bbox.get("Top", 0.0),
+                "width": bbox.get("Width", 0.0),
+                "height": bbox.get("Height", 0.0),
+            }
+        }
+
+        polygon = geom.get("Polygon")
+        if isinstance(polygon, list) and polygon:
+            result["polygon"] = [
+                {"x": pt.get("X", 0.0), "y": pt.get("Y", 0.0)}
+                for pt in polygon
+                if isinstance(pt, dict)
+            ]
+
+        return result
+
+    def _build_page_data(
+        self,
+        raw_ocr_content: Dict[str, Any],
+        parsed_text: str,
+        provider_hint: str,
+    ) -> Dict[str, Any]:
+        """
+        Build a consolidated, backend-agnostic per-page OCR data structure.
+
+        Consolidates text + confidence + geometry (which today live in three
+        separate artifacts at backend-dependent granularities) into a single
+        LINE-primary schema with optional WORD children. ``confidence`` and
+        ``geometry`` are *independently optional* on every unit, so each backend
+        contributes whatever it has:
+
+        - Textract: per-LINE and per-WORD confidence + geometry (box + polygon).
+        - Mistral LambdaHook: per-LINE/WORD confidence; geometry is paragraph-level
+          (sibling lines share a box, flagged via ``geometrySource: "paragraph"``);
+          WORD blocks have no geometry.
+        - Chandra / plain Bedrock LLM / none: text only (lines synthesized from
+          the parsed markdown), no confidence or geometry.
+
+        Geometry is normalized 0-1 (Textract convention), matching what the UI
+        bounding-box renderer already consumes.
+
+        Args:
+            raw_ocr_content: Textract-format dict ({"Blocks": [...]}) when the
+                backend produced structured OCR, otherwise the raw response.
+            parsed_text: The parsed markdown/plain text for this page (used to
+                synthesize lines when no structured blocks are available).
+            provider_hint: One of "textract", "bedrock", "none", "converted".
+
+        Returns:
+            The consolidated pageData dict.
+        """
+        blocks = (
+            raw_ocr_content.get("Blocks", [])
+            if isinstance(raw_ocr_content, dict)
+            else []
+        )
+        has_blocks = isinstance(blocks, list) and len(blocks) > 0
+
+        # Resolve the provenance tag. Bedrock splits into LambdaHook (structured
+        # blocks present) vs. plain LLM OCR (text only).
+        if provider_hint == "bedrock":
+            provider = "bedrock-lambdahook" if has_blocks else "bedrock-llm"
+        else:
+            provider = provider_hint
+
+        lines: List[Dict[str, Any]] = []
+        confidence_available = False
+        geometry_available = False
+        words_available = False
+
+        if has_blocks:
+            # Index blocks by Id so LINE -> WORD CHILD relationships resolve.
+            blocks_by_id = {b.get("Id"): b for b in blocks if b.get("Id")}
+
+            # Detect paragraph-shared geometry: a bounding box reused by more than
+            # one LINE indicates the backend (e.g. Mistral) only has paragraph-level
+            # geometry, so we flag those lines as geometrySource="paragraph".
+            box_counts: Dict[tuple, int] = {}
+            for b in blocks:
+                if b.get("BlockType") == "LINE":
+                    g = self._extract_geometry(b)
+                    if g:
+                        bb = g["boundingBox"]
+                        key = (bb["left"], bb["top"], bb["width"], bb["height"])
+                        box_counts[key] = box_counts.get(key, 0) + 1
+
+            line_idx = 0
+            for block in blocks:
+                if block.get("BlockType") != "LINE" or not block.get("Text"):
+                    continue
+                line_idx += 1
+
+                geometry = self._extract_geometry(block)
+                confidence = block.get("Confidence")
+                if confidence is not None:
+                    confidence = round(confidence, 1)
+                    confidence_available = True
+
+                if geometry:
+                    geometry_available = True
+                    bb = geometry["boundingBox"]
+                    key = (bb["left"], bb["top"], bb["width"], bb["height"])
+                    geometry_source = (
+                        "paragraph" if box_counts.get(key, 0) > 1 else "line"
+                    )
+                else:
+                    geometry_source = "none"
+
+                # Resolve WORD children via CHILD relationships.
+                words: List[Dict[str, Any]] = []
+                for rel in block.get("Relationships", []) or []:
+                    if rel.get("Type") != "CHILD":
+                        continue
+                    for child_id in rel.get("Ids", []) or []:
+                        child = blocks_by_id.get(child_id)
+                        if not child or child.get("BlockType") != "WORD":
+                            continue
+                        word_geom = self._extract_geometry(child)
+                        word_conf = child.get("Confidence")
+                        if word_conf is not None:
+                            word_conf = round(word_conf, 1)
+                        if word_geom:
+                            geometry_available = True
+                        words.append(
+                            {
+                                "text": child.get("Text", ""),
+                                "confidence": word_conf,
+                                "geometry": word_geom,
+                            }
+                        )
+                if words:
+                    words_available = True
+
+                lines.append(
+                    {
+                        "id": block.get("Id") or f"l{line_idx}",
+                        "text": block.get("Text", ""),
+                        "confidence": confidence,
+                        "geometry": geometry,
+                        "geometrySource": geometry_source,
+                        "textType": block.get("TextType"),
+                        "words": words or None,
+                    }
+                )
+        else:
+            # No structured blocks (LLM/Chandra/none): synthesize text-only lines
+            # from the parsed markdown so the viewer can still list page text.
+            for idx, raw_line in enumerate((parsed_text or "").split("\n"), start=1):
+                if not raw_line.strip():
+                    continue
+                lines.append(
+                    {
+                        "id": f"l{idx}",
+                        "text": raw_line,
+                        "confidence": None,
+                        "geometry": None,
+                        "geometrySource": "none",
+                        "textType": None,
+                        "words": None,
+                    }
+                )
+
+        return {
+            "schemaVersion": self.PAGE_DATA_SCHEMA_VERSION,
+            "provider": provider,
+            "page": None,
+            "geometryAvailable": geometry_available,
+            "confidenceAvailable": confidence_available,
+            "wordsAvailable": words_available,
+            "lines": lines,
+        }
+
+    def _write_page_data(
+        self,
+        page_id: int,
+        output_bucket: str,
+        prefix: str,
+        raw_ocr_content: Dict[str, Any],
+        parsed_text: str,
+        provider_hint: str,
+    ) -> str:
+        """
+        Build and persist the consolidated pageData.json artifact for a page.
+
+        Returns the s3:// URI of the written artifact. Page processors add this to
+        their result dict as ``ocr_page_data_uri``.
+        """
+        page_data = self._build_page_data(raw_ocr_content, parsed_text, provider_hint)
+        page_data_key = f"{prefix}/pages/{page_id}/pageData.json"
+        s3.write_content(
+            page_data,
+            output_bucket,
+            page_data_key,
+            content_type="application/json",
+        )
+        return f"s3://{output_bucket}/{page_data_key}"
 
     def _parse_textract_response(
         self, response: Dict[str, Any], page_id: int = None
@@ -2119,6 +2424,17 @@ class OcrService:
             content_type="application/json",
         )
 
+        # Persist consolidated OCR page data (per-line placeholder confidence,
+        # no geometry — built from the synthetic Textract-format blocks above)
+        page_data_uri = self._write_page_data(
+            page_id,
+            output_bucket,
+            prefix,
+            ocr_response,
+            page_text,
+            "converted",
+        )
+
         t1 = time.time()
         logger.debug(
             f"Time for converted page processing (page {page_id}): {t1 - t0:.6f} seconds"
@@ -2132,6 +2448,7 @@ class OcrService:
             "raw_text_uri": f"s3://{output_bucket}/{raw_text_key}",
             "parsed_text_uri": f"s3://{output_bucket}/{parsed_text_key}",
             "text_confidence_uri": f"s3://{output_bucket}/{text_confidence_key}",
+            "ocr_page_data_uri": page_data_uri,
             "image_uri": f"s3://{output_bucket}/{image_key}",
         }
 

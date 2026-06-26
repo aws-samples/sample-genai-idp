@@ -164,10 +164,15 @@ object in **Amazon Textract response format** (a `DocumentMetadata` object plus 
 `Blocks` list of `PAGE`/`LINE`/`WORD` blocks with `Confidence` and normalized
 `Geometry.BoundingBox`). When present and non-empty, the OCR service persists it as
 the page's `rawText.json` and `textConfidence.json` instead of the default "no
-confidence data" placeholder. This carries real per-line/word OCR confidence into
+confidence data" placeholder, and folds it into the consolidated per-page
+`pageData.json` (so the confidence/geometry surfaces in the Web UI page Visual
+Editor). This carries real per-line/word OCR confidence into
 **Assessment** (the `{OCR_TEXT_CONFIDENCE}` prompt placeholder used for extraction
 confidence) and makes bounding-box **geometry** available for UI highlighting — the
-same data the native Textract backend produces. Text-only hooks are unaffected.
+same data the native Textract backend produces. Text-only hooks are unaffected
+(they still get a text-only `pageData.json`). See the
+[consolidated OCR page data](../lib/idp_common_pkg/idp_common/ocr/README.md#consolidated-ocr-page-data-pagedatajson)
+docs for the `pageData.json` schema.
 
 A hook may also return `usage.pages` (in addition to / instead of token counts) to
 enable per-page cost metering. See **GENAIIDP-mistral-ocr-hook** for a worked example.

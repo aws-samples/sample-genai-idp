@@ -104,6 +104,7 @@ The Edit Pages feature provides an intelligent interface for modifying individua
 ### Key Capabilities
 
 - **View Page Text**: Access clean, readable page text without JSON formatting in a modal editor
+- **Visual Editor**: Default view — the page image on the left and OCR text lines on the right; click a line to highlight its bounding box on the image (when the OCR backend provides geometry). Supports mouse-wheel zoom, click-drag pan, and Next/Previous page navigation across the document
 - **Classification Reset**: Reset page classifications to force reclassification during reprocessing
 - **Text Editing**: Modify page OCR text with immediate S3 saves to prevent data loss
 - **Confidence Editing**: Edit OCR confidence data displayed as markdown tables
@@ -122,8 +123,9 @@ The Edit Pages feature provides an intelligent interface for modifying individua
 
 ##### View Mode (Default)
 - Click "View Page Text" button to view page content in read-only mode
-- Modal displays text with live markdown preview
-- Switch to "Text + Confidence" view to see OCR confidence table
+- The modal opens on the **Visual Editor** view: the page image on the left and the OCR text lines (with per-line confidence) on the right. Click a text line to draw its bounding box on the image; zoom with the mouse wheel, pan by dragging, and move between pages with the Next/Previous arrows. (Bounding boxes require an OCR backend that provides geometry, e.g. Textract or the Mistral hook; otherwise the lines are shown without overlays.)
+- Switch to "Text + Markdown" to read the page text with live markdown preview
+- Switch to "Text + Confidence" view to see the OCR confidence table
 
 ##### Edit Mode
 1. **Click "Edit Pages"**: Activates edit mode for all pages
@@ -304,7 +306,7 @@ A self-describing `manifest.json` is written at the ZIP root capturing the expor
 
 ### Scope options
 
-- **Download All (ZIP)** — every output artifact for the document (summary, evaluation & rule-validation reports, per-section predictions, baselines when available, per-page text and confidence). The options dialog offers two checkboxes:
+- **Download All (ZIP)** — every output artifact for the document (summary, evaluation & rule-validation reports, per-section predictions, baselines when available, per-page text, confidence, and consolidated OCR page data). The options dialog offers two checkboxes:
   - **Include page images** (off by default) — includes the rendered page image for each page (can significantly increase archive size).
   - **Include source document** (off by default) — includes the original uploaded file from the **InputBucket** under `input/<key>`.
 - **Download Predictions (ZIP)** — only the per-section `sections/<id>/result.json` files (under `output/`) plus the `manifest.json` and `document-attributes.json`.

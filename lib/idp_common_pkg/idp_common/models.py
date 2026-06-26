@@ -47,6 +47,7 @@ class Page:
     raw_text_uri: Optional[str] = None
     parsed_text_uri: Optional[str] = None
     text_confidence_uri: Optional[str] = None
+    ocr_page_data_uri: Optional[str] = None
     classification: Optional[str] = None
     confidence: float = 0.0
     tables: List[Dict[str, Any]] = field(default_factory=list)
@@ -340,6 +341,7 @@ class Document:
                 "raw_text_uri": page.raw_text_uri,
                 "parsed_text_uri": page.parsed_text_uri,
                 "text_confidence_uri": page.text_confidence_uri,
+                "ocr_page_data_uri": page.ocr_page_data_uri,
                 "classification": page.classification,
                 "confidence": page.confidence,
                 "tables": page.tables,
@@ -439,6 +441,7 @@ class Document:
                 raw_text_uri=page_data.get("raw_text_uri"),
                 parsed_text_uri=page_data.get("parsed_text_uri"),
                 text_confidence_uri=page_data.get("text_confidence_uri"),
+                ocr_page_data_uri=page_data.get("ocr_page_data_uri"),
                 classification=page_data.get("classification"),
                 confidence=page_data.get("confidence", 0.0),
                 tables=page_data.get("tables", []),
