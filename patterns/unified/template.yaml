@@ -1381,6 +1381,12 @@ Resources:
                 default: false
                 order: 3
                 dependsOn: { field: "use_bda", value: false }
+              ground_geometry_in_ocr:
+                type: boolean
+                description: Replace LLM-estimated bounding boxes with real OCR geometry from pageData.json when the extracted value matches an OCR line. Falls back to the LLM-estimated box when OCR geometry is unavailable or no match is found.
+                default: true
+                order: 4
+                dependsOn: { field: "use_bda", value: false }
               image:
                 type: object
                 sectionLabel: Image Processing Settings

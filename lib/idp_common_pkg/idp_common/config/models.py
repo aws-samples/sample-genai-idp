@@ -638,6 +638,16 @@ class AssessmentConfig(BaseModel):
         description="Confidence threshold for assessment and HITL triggering",
     )
     validation_enabled: bool = Field(default=False, description="Enable validation")
+    ground_geometry_in_ocr: bool = Field(
+        default=True,
+        description=(
+            "After assessment, replace LLM-estimated field bounding boxes with real "
+            "OCR geometry from pageData.json when the extracted value matches an OCR "
+            "line. Falls back to the LLM-estimated box when OCR geometry is "
+            "unavailable (e.g. plain LLM OCR, older documents) or no value match is "
+            "found, so the worst case is identical to LLM-only behavior."
+        ),
+    )
     image: ImageConfig = Field(default_factory=ImageConfig)
     granular: GranularAssessmentConfig = Field(default_factory=GranularAssessmentConfig)
 
