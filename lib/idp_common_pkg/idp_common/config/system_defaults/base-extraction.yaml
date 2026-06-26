@@ -16,6 +16,11 @@ extraction:
       min_confidence_threshold: "95.0"      # OCR confidence target (Textract)
       min_parse_success_rate: "0.90"        # Parse quality threshold
       use_confidence_data: true             # Use Textract confidence data
+    validation:
+      enabled: false                        # Full JSON-Schema validation of result (off by default)
+      check_formats: true                   # Enforce 'format' keywords (date/email/uuid). ISO-8601 dates.
+      fail_action: escalate                 # warn | escalate | reject
+      escalation_model: ""                  # Stronger model for re-extraction (empty = retry with same model)
   image:
     target_width: ""
     target_height: ""

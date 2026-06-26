@@ -23,6 +23,7 @@ from idp_common.config.schema_constants import (
     ID_FIELD,
     SCHEMA_PROPERTIES,
     X_AWS_IDP_DOCUMENT_TYPE,
+    X_AWS_IDP_EXTRACTION_ESCALATION_MODEL,
     X_AWS_IDP_EXTRACTION_MODEL,
     X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT,
     X_AWS_IDP_EXTRACTION_TASK_PROMPT,
@@ -31,6 +32,11 @@ from idp_common.config.schema_constants import (
 from idp_common.extraction.page_type_resolver import (
     PageTypePresence,
     resolve_page_types,
+)
+from idp_common.extraction.validation import (
+    ValidationReport,
+    build_subset_schema,
+    validate_extraction,
 )
 from idp_common.models import Document
 from idp_common.utils.few_shot_example_builder import (
@@ -137,6 +143,14 @@ class ExtractionService:
         # When set, called after each successful extraction_tool or apply_json_patches
         # invocation with the current extraction dict, enabling resume on Lambda timeout.
         self._checkpoint_callback: Any | None = None
+        # Validation outcome from the most recent _invoke_extraction_model call,
+        # consumed by _save_results when building the metadata block. Reset per
+        # section so a prior section's result can never leak into the next.
+        self._pending_validation_metadata: dict[str, Any] | None = None
+        # Model actually used for the most recent section's extraction (after
+        # per-class override resolution), recorded in metadata for audit. Reset
+        # per section.
+        self._pending_extraction_model: str | None = None
 
         # Get model_id from config for logging (type-safe access with fallback)
         model_id = (
@@ -1361,6 +1375,273 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
 
         return "\n".join(report_lines)
 
+    def _resolve_escalation_model(self) -> str | None:
+        """Pick the model used to re-extract on validation failure.
+
+        Precedence: per-class ``x-aws-idp-extraction-escalation-model`` >
+        global ``validation.escalation_model``. Returns None when neither is
+        set, in which case escalation falls back to the extraction model and is
+        effectively a plain retry (still useful as a second attempt).
+        """
+        return (
+            self._class_schema.get(X_AWS_IDP_EXTRACTION_ESCALATION_MODEL)
+            or self.config.extraction.agentic.validation.escalation_model
+        )
+
+    def _build_schema_validator(self):
+        """Return an in-loop schema-validation callback, or None when disabled.
+
+        The callback validates an extracted dict against the full class JSON
+        Schema (notably ``format`` keywords the Pydantic model does not enforce)
+        and returns ``(is_valid, agent_feedback)`` for the agent to self-correct.
+        """
+        vcfg = self.config.extraction.agentic.validation
+        if not vcfg.enabled:
+            return None
+
+        class_schema = self._class_schema
+        check_formats = vcfg.check_formats
+
+        def _validate(data: dict[str, Any]) -> tuple[bool, str]:
+            report = validate_extraction(
+                data, class_schema, check_formats=check_formats
+            )
+            return report.valid, report.agent_feedback()
+
+        return _validate
+
+    def _validate_and_maybe_escalate(
+        self,
+        extracted_fields: dict[str, Any],
+        structured_data: Any,
+        data_model: Any,
+        model_id: str,
+        message_prompt: Any,
+        agentic_images: list[bytes],
+        custom_instruction: str | None,
+        section_info: SectionInfo,
+        parsing_succeeded: bool,
+    ) -> tuple[dict[str, Any], Any, dict[str, Any] | None, dict[str, Any], bool]:
+        """Validate the final extraction and optionally escalate to a stronger model.
+
+        Returns ``(extracted_fields, structured_data, validation_metadata,
+        escalation_metering, parsing_succeeded)``. A no-op (returns inputs
+        unchanged with ``validation_metadata=None``) unless
+        ``extraction.agentic.validation.enabled``.
+        """
+        vcfg = self.config.extraction.agentic.validation
+        escalation_metering: dict[str, Any] = {}
+        if not vcfg.enabled:
+            return (
+                extracted_fields,
+                structured_data,
+                None,
+                escalation_metering,
+                parsing_succeeded,
+            )
+
+        report: ValidationReport = validate_extraction(
+            extracted_fields, self._class_schema, check_formats=vcfg.check_formats
+        )
+        initial_error_count = len(report.errors)
+        initial_failed_fields = sorted(report.failed_top_level_fields)
+
+        escalated = False
+        escalation_model: str | None = None
+        escalation_scope: str | None = None
+        escalation_fields: list[str] = []
+        if not report.valid:
+            logger.warning(
+                "Extraction failed full-schema validation for "
+                f"'{section_info.class_label}'",
+                extra={
+                    "error_count": initial_error_count,
+                    "failed_fields": initial_failed_fields,
+                    "fail_action": vcfg.fail_action,
+                },
+            )
+
+        # Escalate: re-extract ONLY the failing top-level fields with a stronger
+        # model, then merge the corrected fields back into the full result. This
+        # is cheaper/faster than re-running the whole section and preserves the
+        # fields that already validated.
+        if not report.valid and vcfg.fail_action == "escalate":
+            escalation_model = self._resolve_escalation_model() or model_id
+            escalated = True
+            escalation_fields = initial_failed_fields
+            (
+                extracted_fields,
+                structured_data,
+                report,
+                escalation_metering,
+                escalation_scope,
+            ) = self._escalate_failing_fields(
+                extracted_fields=extracted_fields,
+                structured_data=structured_data,
+                data_model=data_model,
+                full_report=report,
+                escalation_model=escalation_model,
+                message_prompt=message_prompt,
+                agentic_images=agentic_images,
+                custom_instruction=custom_instruction,
+                section_info=section_info,
+            )
+
+        # reject: surface the failure so downstream/HITL can act on it.
+        if not report.valid and vcfg.fail_action == "reject":
+            parsing_succeeded = False
+
+        # Rich audit trail: what was enforced, what failed, what we did about it.
+        validation_metadata: dict[str, Any] = {
+            **report.to_metadata(),
+            "check_formats": vcfg.check_formats,
+            "fail_action": vcfg.fail_action,
+            "escalated": escalated,
+            "initial_error_count": initial_error_count,
+            "initial_failed_fields": initial_failed_fields,
+        }
+        if escalated:
+            validation_metadata["escalation_model"] = escalation_model
+            validation_metadata["escalation_scope"] = escalation_scope
+            validation_metadata["escalation_fields"] = escalation_fields
+            validation_metadata["resolved_by_escalation"] = report.valid
+
+        return (
+            extracted_fields,
+            structured_data,
+            validation_metadata,
+            escalation_metering,
+            parsing_succeeded,
+        )
+
+    def _escalate_failing_fields(
+        self,
+        extracted_fields: dict[str, Any],
+        structured_data: Any,
+        data_model: Any,
+        full_report: ValidationReport,
+        escalation_model: str,
+        message_prompt: Any,
+        agentic_images: list[bytes],
+        custom_instruction: str | None,
+        section_info: SectionInfo,
+    ) -> tuple[dict[str, Any], Any, ValidationReport, dict[str, Any], str]:
+        """Re-extract only the failing top-level fields with a stronger model.
+
+        Builds a reduced schema containing just ``full_report.failed_top_level_fields``,
+        runs a scoped extraction, merges the corrected fields back into the full
+        result and re-validates. Falls back to a whole-section re-extraction when
+        a usable subset schema can't be built (e.g. failures are root-level only).
+
+        Returns ``(extracted_fields, structured_data, report, metering, scope)``
+        where ``scope`` is ``"field-subset"`` or ``"full-section"``. On any error
+        the original inputs are returned unchanged with an empty metering dict.
+        """
+        failed_fields = sorted(full_report.failed_top_level_fields)
+        subset_schema = build_subset_schema(self._class_schema, failed_fields)
+        scope = (
+            "field-subset"
+            if subset_schema is not self._class_schema
+            else "full-section"
+        )
+
+        logger.info(
+            f"Escalating extraction for '{section_info.class_label}' to model "
+            f"{escalation_model} (scope={scope}, fields={failed_fields})",
+        )
+
+        check_formats = self.config.extraction.agentic.validation.check_formats
+        instruction = (
+            (custom_instruction + "\n\n" if custom_instruction else "")
+            + "A previous extraction attempt produced data that violated the "
+            "schema. Carefully re-extract and correct these issues:\n"
+            + full_report.agent_feedback()
+        )
+
+        try:
+            if scope == "field-subset":
+                subset_model = create_pydantic_model_from_json_schema(
+                    schema=subset_schema,
+                    class_label=f"{section_info.class_label}__escalation",
+                    clean_schema=False,
+                )
+                # Seed with current values for the failing fields only.
+                seed = {k: extracted_fields.get(k) for k in failed_fields}
+                try:
+                    existing_model = subset_model(
+                        **{k: v for k, v in seed.items() if v is not None}
+                    )
+                except Exception:
+                    existing_model = None
+
+                esc_data, esc_response = structured_output(
+                    model_id=escalation_model,
+                    data_format=subset_model,
+                    prompt=message_prompt,
+                    existing_data=existing_model,
+                    page_images=agentic_images,
+                    config=self.config,
+                    context="ExtractionEscalation",
+                    custom_instruction=instruction,
+                    schema_validator=None,  # validated against the full schema below
+                )
+                metering = esc_response.get("metering", {}) or {}
+                metering.pop("_table_parsing_stats", None)
+
+                # Merge corrected subset fields back into the full result.
+                merged = dict(extracted_fields)
+                merged.update(esc_data.model_dump(mode="json"))
+            else:
+                # Fallback: whole-section re-extraction with the full model.
+                try:
+                    existing_model = data_model(**extracted_fields)
+                except Exception:
+                    existing_model = None
+                esc_data, esc_response = structured_output(
+                    model_id=escalation_model,
+                    data_format=data_model,
+                    prompt=message_prompt,
+                    existing_data=existing_model,
+                    page_images=agentic_images,
+                    config=self.config,
+                    context="ExtractionEscalation",
+                    custom_instruction=instruction,
+                    schema_validator=self._build_schema_validator(),
+                )
+                metering = esc_response.get("metering", {}) or {}
+                metering.pop("_table_parsing_stats", None)
+                merged = esc_data.model_dump(mode="json")
+
+            esc_report = validate_extraction(
+                merged, self._class_schema, check_formats=check_formats
+            )
+
+            # Keep the escalated result only if it's valid or strictly improves.
+            if esc_report.valid or len(esc_report.errors) < len(full_report.errors):
+                # Re-validate the merged dict through the full Pydantic model so
+                # the returned structured_data stays consistent with the fields.
+                try:
+                    structured_data = data_model(**merged)
+                except Exception:
+                    pass  # keep prior structured_data; fields dict is source of truth
+                return merged, structured_data, esc_report, metering, scope
+
+            logger.info(
+                "Escalation did not improve validation; keeping original result",
+                extra={
+                    "original_errors": len(full_report.errors),
+                    "escalated_errors": len(esc_report.errors),
+                },
+            )
+            return extracted_fields, structured_data, full_report, metering, scope
+        except Exception as e:
+            logger.error(
+                "Escalation re-extraction failed; keeping original result",
+                extra={"error": str(e)},
+                exc_info=True,
+            )
+            return extracted_fields, structured_data, full_report, {}, scope
+
     def _check_extraction_completeness(
         self,
         extracted_data: Any,
@@ -1439,10 +1720,17 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             f"Extracting fields for {section_info.class_label} document, section"
         )
 
+        # Clear any per-section audit state from a previously processed section.
+        self._pending_validation_metadata = None
+        self._pending_extraction_model = None
+
         # Get extraction config — use per-class model override if specified,
         # otherwise fall back to the global extraction model.
         class_model_override = self._class_schema.get(X_AWS_IDP_EXTRACTION_MODEL)
         model_id = class_model_override or self.config.extraction.model
+        # Record the resolved model for audit metadata (set here so it is
+        # captured even on the non-agentic/standard path).
+        self._pending_extraction_model = model_id
         if class_model_override:
             logger.info(
                 f"Using per-class extraction model override for "
@@ -1651,6 +1939,12 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     extra={"page_count": num_pages},
                 )
 
+            # Build the in-loop schema validator (None unless validation enabled).
+            # Used only on the single-agent path: per-batch validation would
+            # falsely fail minItems before the batches are merged, so batch
+            # output is validated once after merge below.
+            schema_validator = self._build_schema_validator()
+
             # Use concurrent batch extraction if configured and enough pages
             num_batches = self.config.extraction.agentic.max_concurrent_batches
 
@@ -1692,11 +1986,41 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     checkpoint_callback=self._checkpoint_callback,
                     checkpoint_buffer_data=checkpoint_buffer,
                     custom_instruction=custom_instruction,
+                    schema_validator=schema_validator,
                 )
 
             extracted_fields = structured_data.model_dump(mode="json")
             metering = response_with_metering["metering"]
             parsing_succeeded = True
+
+            # Full JSON-Schema validation of the final result, with optional
+            # bounded escalation to a stronger model. No-op unless
+            # extraction.agentic.validation.enabled. Updates extracted_fields,
+            # may flip parsing_succeeded (fail_action="reject"), and records the
+            # outcome under metadata["validation"].
+            (
+                extracted_fields,
+                structured_data,
+                validation_metadata,
+                escalation_metering,
+                parsing_succeeded,
+            ) = self._validate_and_maybe_escalate(
+                extracted_fields=extracted_fields,
+                structured_data=structured_data,
+                data_model=dynamic_model,
+                model_id=model_id,
+                message_prompt=message_prompt,
+                agentic_images=agentic_images,
+                custom_instruction=custom_instruction,
+                section_info=section_info,
+                parsing_succeeded=parsing_succeeded,
+            )
+            if validation_metadata is not None:
+                self._pending_validation_metadata = validation_metadata
+            if escalation_metering:
+                from idp_common.extraction.agentic_idp import _accumulate_metering
+
+                _accumulate_metering(metering, escalation_metering)
 
             # Check extraction completeness (warns if schema constraints not met)
             self._check_extraction_completeness(
@@ -1934,6 +2258,14 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             "extraction_method": extraction_method,
         }
 
+        # Audit: which model actually ran this section, and whether it came from
+        # a per-class override vs the global extraction model.
+        if self._pending_extraction_model is not None:
+            metadata["extraction_model"] = self._pending_extraction_model
+            metadata["extraction_model_overridden"] = (
+                self._class_schema.get(X_AWS_IDP_EXTRACTION_MODEL) is not None
+            )
+
         # Add pre-flight analysis results (if agentic)
         if extraction_method == "agentic":
             if result.schema_analysis:
@@ -1990,6 +2322,11 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         if result.output_repaired:
             metadata["output_repaired"] = True
             metadata["repair_method"] = result.repair_method
+
+        # Add full-schema validation outcome (set by _validate_and_maybe_escalate
+        # when extraction.agentic.validation.enabled).
+        if self._pending_validation_metadata is not None:
+            metadata["validation"] = self._pending_validation_metadata
 
         # Apply BLANK vs MISSING field handling (no-op unless configured + declared).
         fields_for_output, missing_fields_report = self._apply_missing_field_handling(
