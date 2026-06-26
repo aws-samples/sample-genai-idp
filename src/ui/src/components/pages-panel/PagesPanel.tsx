@@ -32,6 +32,7 @@ interface PageItem {
   ImageUri?: string;
   TextUri?: string;
   TextConfidenceUri?: string;
+  OcrPageDataUri?: string;
   classReset?: boolean;
   textModified?: boolean;
   newTextUri?: string | null;
@@ -547,9 +548,8 @@ const PagesPanel = ({ pages, documentItem }: PagesPanelProps): React.JSX.Element
       {/* Page Text Editor Modal */}
       <PageTextEditorModal
         visible={showModalEditor}
-        pageId={selectedPage?.Id}
-        textUri={selectedPage?.TextUri}
-        confidenceUri={selectedPage?.TextConfidenceUri}
+        pages={tableItems}
+        initialPageId={selectedPage?.Id}
         isReadOnly={!isEditMode}
         onSave={handleModalSave}
         onClose={() => {

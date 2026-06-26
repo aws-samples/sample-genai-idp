@@ -1073,6 +1073,7 @@ export type Page = {
   Class?: Maybe<Scalars['String']['output']>;
   Id?: Maybe<Scalars['Int']['output']>;
   ImageUri?: Maybe<Scalars['String']['output']>;
+  OcrPageDataUri?: Maybe<Scalars['String']['output']>;
   TextConfidenceUri?: Maybe<Scalars['String']['output']>;
   TextUri?: Maybe<Scalars['String']['output']>;
 };
@@ -1081,6 +1082,7 @@ export type PageInput = {
   Class?: InputMaybe<Scalars['String']['input']>;
   Id?: InputMaybe<Scalars['Int']['input']>;
   ImageUri?: InputMaybe<Scalars['String']['input']>;
+  OcrPageDataUri?: InputMaybe<Scalars['String']['input']>;
   TextConfidenceUri?: InputMaybe<Scalars['String']['input']>;
   TextUri?: InputMaybe<Scalars['String']['input']>;
 };

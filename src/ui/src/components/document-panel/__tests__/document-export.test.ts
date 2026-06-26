@@ -42,6 +42,7 @@ const DOC: ExportableDocument = {
       Id: 1,
       TextUri: 's3://output-bkt/tenant/one/lending.pdf/pages/1/result.json',
       TextConfidenceUri: 's3://output-bkt/tenant/one/lending.pdf/pages/1/textConfidence.json',
+      OcrPageDataUri: 's3://output-bkt/tenant/one/lending.pdf/pages/1/pageData.json',
       ImageUri: 's3://output-bkt/tenant/one/lending.pdf/pages/1/image.jpg',
     },
     { Id: 2, TextUri: 's3://output-bkt/tenant/one/lending.pdf/pages/2/result.json' },
@@ -248,6 +249,7 @@ describe('exportDocument', () => {
       's3://baseline-bkt/tenant/one/lending.pdf/sections/s2/result.json': ok(textBody('{}')),
       's3://output-bkt/tenant/one/lending.pdf/pages/1/result.json': ok(textBody('page1')),
       's3://output-bkt/tenant/one/lending.pdf/pages/1/textConfidence.json': ok(textBody('conf1')),
+      's3://output-bkt/tenant/one/lending.pdf/pages/1/pageData.json': ok(textBody('{"lines":[]}')),
       's3://output-bkt/tenant/one/lending.pdf/pages/2/result.json': ok(textBody('page2')),
     });
 
@@ -271,6 +273,7 @@ describe('exportDocument', () => {
     expect(paths).toContain('tenant_one_lending.pdf/baseline/tenant/one/lending.pdf/sections/s1/result.json');
     expect(paths).toContain('tenant_one_lending.pdf/output/tenant/one/lending.pdf/pages/1/result.json');
     expect(paths).toContain('tenant_one_lending.pdf/output/tenant/one/lending.pdf/pages/1/textConfidence.json');
+    expect(paths).toContain('tenant_one_lending.pdf/output/tenant/one/lending.pdf/pages/1/pageData.json');
     expect(paths).toContain('tenant_one_lending.pdf/output/tenant/one/lending.pdf/pages/2/result.json');
     // page images and source doc should NOT be included
     expect(paths.some((p) => p.includes('/image'))).toBe(false);
@@ -293,6 +296,7 @@ describe('exportDocument', () => {
       's3://baseline-bkt/tenant/one/lending.pdf/sections/s2/result.json': ok(textBody('{}')),
       's3://output-bkt/tenant/one/lending.pdf/pages/1/result.json': ok(textBody('t1')),
       's3://output-bkt/tenant/one/lending.pdf/pages/1/textConfidence.json': ok(textBody('c1')),
+      's3://output-bkt/tenant/one/lending.pdf/pages/1/pageData.json': ok(textBody('{"lines":[]}')),
       's3://output-bkt/tenant/one/lending.pdf/pages/2/result.json': ok(textBody('t2')),
       's3://output-bkt/tenant/one/lending.pdf/pages/1/image.jpg': ok(bytesBody(pngBytes)),
     });
@@ -324,6 +328,7 @@ describe('exportDocument', () => {
       's3://baseline-bkt/tenant/one/lending.pdf/sections/s2/result.json': ok(textBody('{}')),
       's3://output-bkt/tenant/one/lending.pdf/pages/1/result.json': ok(textBody('t1')),
       's3://output-bkt/tenant/one/lending.pdf/pages/1/textConfidence.json': ok(textBody('c1')),
+      's3://output-bkt/tenant/one/lending.pdf/pages/1/pageData.json': ok(textBody('{"lines":[]}')),
       's3://output-bkt/tenant/one/lending.pdf/pages/2/result.json': ok(textBody('t2')),
       's3://input-bkt/tenant/one/lending.pdf': ok(bytesBody(pdfBytes)),
     });
