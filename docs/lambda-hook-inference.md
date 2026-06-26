@@ -157,6 +157,26 @@ Your Lambda function must return a **Converse API-compatible** response:
 
 If `usage` is not provided, zeros will be recorded for metering.
 
+### Optional: structured OCR output (confidence + geometry)
+
+For the **OCR** step, a hook may additionally return a top-level `textractBlocks`
+object in **Amazon Textract response format** (a `DocumentMetadata` object plus a
+`Blocks` list of `PAGE`/`LINE`/`WORD` blocks with `Confidence` and normalized
+`Geometry.BoundingBox`). When present and non-empty, the OCR service persists it as
+the page's `rawText.json` and `textConfidence.json` instead of the default "no
+confidence data" placeholder, and folds it into the consolidated per-page
+`pageData.json` (so the confidence/geometry surfaces in the Web UI page Visual
+Editor). This carries real per-line/word OCR confidence into
+**Assessment** (the `{OCR_TEXT_CONFIDENCE}` prompt placeholder used for extraction
+confidence) and makes bounding-box **geometry** available for UI highlighting — the
+same data the native Textract backend produces. Text-only hooks are unaffected
+(they still get a text-only `pageData.json`). See the
+[consolidated OCR page data](../lib/idp_common_pkg/idp_common/ocr/README.md#consolidated-ocr-page-data-pagedatajson)
+docs for the `pageData.json` schema.
+
+A hook may also return `usage.pages` (in addition to / instead of token counts) to
+enable per-page cost metering. See **GENAIIDP-mistral-ocr-hook** for a worked example.
+
 ## Sample Lambda Functions
 
 Ready-to-deploy sample Lambda hook functions are provided in [`samples/lambda-hook-inference/`](../samples/lambda-hook-inference/):
@@ -166,6 +186,7 @@ Ready-to-deploy sample Lambda hook functions are provided in [`samples/lambda-ho
 | **GENAIIDP-bedrock-proxy** | Forwards to Bedrock Converse API — use as a starting template for custom hooks with pre/post processing |
 | **GENAIIDP-sagemaker-hook** | Calls a SageMaker real-time inference endpoint — shows format conversion between Converse API and SageMaker |
 | **GENAIIDP-chandra-ocr-hook** | Calls the [Datalab Chandra OCR 2](https://github.com/datalab-to/chandra) hosted API for high-quality OCR — converts page images to structured Markdown, JSON, or HTML |
+| **GENAIIDP-mistral-ocr-hook** | Calls the hosted [Mistral OCR](https://mistral.ai/news/ocr-4/) API for high-quality OCR — returns Markdown **plus per-word confidence and bounding-box geometry** (Textract format) for explainability, with per-page cost metering. Fully serverless |
 
 Each sample includes:
 - Well-commented Python code with clearly marked customization points
@@ -233,6 +254,66 @@ cd samples/lambda-hook-inference/GENAIIDP-chandra-ocr-hook
 pip install pdf2image Pillow
 export CHANDRA_API_KEY="your-api-key"
 python test_local.py ../../insurance_package.pdf --pages 1,2
+```
+
+## Mistral OCR Integration
+
+[Mistral OCR 4](https://mistral.ai/news/ocr-4/) is a document-understanding model
+that returns markdown-structured text together with paragraph-level bounding boxes,
+typed-block classification, and per-page / per-word confidence scores across 170
+languages. The **GENAIIDP-mistral-ocr-hook** sample calls the hosted Mistral OCR
+API (`POST https://api.mistral.ai/v1/ocr`, Bearer-key auth) — fully serverless, no
+SageMaker endpoint or GPU required.
+
+This hook is the reference implementation of the [structured OCR output](#optional-structured-ocr-output-confidence--geometry)
+pattern: it requests `include_blocks=true` and `confidence_scores_granularity=word`,
+then translates Mistral's response into Amazon Textract block format (normalizing
+the pixel bounding boxes against page dimensions to Textract's 0–1 scale) and returns
+it under `textractBlocks`. The result: OCR confidence flows into Assessment and bounding-box
+geometry is available to the UI, just like the native Textract backend.
+
+### Configuration
+
+```yaml
+ocr:
+  backend: bedrock
+  model_id: "LambdaHook"
+  model_lambda_hook_arn: "arn:aws:lambda:us-east-1:123456789012:function:GENAIIDP-mistral-ocr-hook"
+```
+
+**Getting an API key**: Sign up at [console.mistral.ai](https://console.mistral.ai) to get your API key, provided as `MistralApiKey` at deploy time.
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MISTRAL_API_KEY` | (required) | Mistral API key (Bearer token) |
+| `MISTRAL_API_URL` | `https://api.mistral.ai/v1/ocr` | Mistral OCR endpoint |
+| `MISTRAL_OCR_MODEL` | `mistral-ocr-latest` | OCR model id |
+| `INCLUDE_BLOCKS` | `true` | Request paragraph bounding boxes (geometry) |
+| `CONFIDENCE_GRANULARITY` | `word` | Confidence granularity: `word` or `page` |
+| `REQUEST_TIMEOUT` | `120` | Per-request timeout (seconds) |
+
+### Cost metering
+
+The hook returns `usage.pages` (from Mistral's `usage_info.pages_processed`). Add a
+pricing entry keyed on the function name (Mistral OCR list price is $4 / 1,000 pages):
+
+```yaml
+  - name: GENAIIDP-mistral-ocr-hook
+    units:
+      - name: pages
+        price: "0.004"
+```
+
+### Local Testing
+
+```bash
+cd samples/lambda-hook-inference/GENAIIDP-mistral-ocr-hook
+pip install pdf2image Pillow
+export MISTRAL_API_KEY="your-api-key"
+python test_local.py ../../insurance_package.pdf --pages 1,2   # markdown + confidence + geometry
+python test_translation.py                                     # offline unit tests (no API/AWS)
 ```
 
 ## Example Implementations

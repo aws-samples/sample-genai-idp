@@ -28,6 +28,7 @@ subscription OnUpdateDocument {
       ImageUri
       TextUri
       TextConfidenceUri
+      OcrPageDataUri
     }
     Metering
     EvaluationReportUri

@@ -31,6 +31,7 @@ query ListDocumentsByDateRange($startDateTime: AWSDateTime!, $endDateTime: AWSDa
         ImageUri
         TextUri
         TextConfidenceUri
+        OcrPageDataUri
       }
       EvaluationReportUri
       EvaluationStatus

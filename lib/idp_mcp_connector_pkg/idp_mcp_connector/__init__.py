@@ -8,7 +8,7 @@ A lightweight local MCP server that bridges IDE tools (Cline, Kiro) to the
 IDP Accelerator's remote MCP Server on Amazon Bedrock AgentCore Gateway.
 """
 
-__version__ = "0.5.15"
+__version__ = "0.5.16"
 __all__ = ["CognitoAuth", "IDPMCPConnector", "run_connector"]
 
 from .auth import CognitoAuth

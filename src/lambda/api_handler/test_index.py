@@ -585,3 +585,139 @@ class TestS3ClientEndpointConfig:
             idx.s3_client.meta.endpoint_url
             == "https://bucket.vpce-api.s3.us-east-1.vpce.amazonaws.com"
         )
+
+
+class TestConfigurationVersion:
+    """Tests for per-job configurationVersion feature."""
+
+    def test_create_job_with_configuration_version(self, mock_s3, job_svc, lambda_context):
+        """POST /jobs with configurationVersion stores it on the job record.
+
+        The version is persisted on the DynamoDB job record (the single source
+        of truth) and re-applied to the extracted files by the batch
+        pre-processor — it is intentionally NOT carried on the staging zip's
+        presigned-POST metadata.
+        """
+        from index import handler
+
+        mock_s3.generate_presigned_post.return_value = {
+            "url": "https://test-bucket.s3.amazonaws.com",
+            "fields": {"key": "jobs/test-uuid/archive.zip"},
+        }
+
+        event = {
+            "httpMethod": "POST",
+            "path": "/jobs",
+            "body": json.dumps({
+                "fileName": "archive.zip",
+                "configurationVersion": "v2",
+            }),
+        }
+
+        with patch("index.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value = MagicMock(__str__=lambda s: "test-uuid")
+            response = handler(event, lambda_context)
+
+        assert response["statusCode"] == 200
+
+        # Verify job record includes configuration_version
+        call_kwargs = job_svc.create_job_record.call_args[1]
+        assert call_kwargs["configuration_version"] == "v2"
+
+        # The presigned POST must NOT carry config-version metadata; the job
+        # record drives propagation, not the staging zip's S3 metadata.
+        presigned_call = mock_s3.generate_presigned_post.call_args
+        fields = presigned_call[1]["Fields"]
+        conditions = presigned_call[1]["Conditions"]
+        assert "x-amz-meta-config-version" not in fields
+        assert not any(
+            isinstance(c, dict) and "x-amz-meta-config-version" in c
+            for c in conditions
+        )
+
+    def test_create_job_without_configuration_version(self, mock_s3, job_svc, lambda_context):
+        """POST /jobs without configurationVersion does not set metadata (regression guard)."""
+        from index import handler
+
+        mock_s3.generate_presigned_post.return_value = {
+            "url": "https://test-bucket.s3.amazonaws.com",
+            "fields": {"key": "jobs/test-uuid/archive.zip"},
+        }
+
+        event = {
+            "httpMethod": "POST",
+            "path": "/jobs",
+            "body": json.dumps({"fileName": "archive.zip"}),
+        }
+
+        with patch("index.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value = MagicMock(__str__=lambda s: "test-uuid")
+            response = handler(event, lambda_context)
+
+        assert response["statusCode"] == 200
+
+        call_kwargs = job_svc.create_job_record.call_args[1]
+        assert call_kwargs["configuration_version"] is None
+
+        presigned_call = mock_s3.generate_presigned_post.call_args
+        fields = presigned_call[1]["Fields"]
+        assert "x-amz-meta-config-version" not in fields
+
+    def test_create_job_invalid_configuration_version(self, mock_s3, job_svc, lambda_context):
+        """POST /jobs with invalid configurationVersion returns 422."""
+        from index import handler
+
+        event = {
+            "httpMethod": "POST",
+            "path": "/jobs",
+            "body": json.dumps({
+                "fileName": "archive.zip",
+                "configurationVersion": "invalid version with spaces!",
+            }),
+        }
+
+        response = handler(event, lambda_context)
+        assert response["statusCode"] == 422
+
+    def test_get_job_returns_configuration_version(self, mock_s3, job_svc, lambda_context):
+        """GET /jobs/{id} surfaces configurationVersion from the job record."""
+        from index import handler
+
+        job_svc.get_job_record.return_value = {
+            "Files": {"a.pdf": Status.IN_PROGRESS},
+            "CreatedAt": "2026-01-23T10:00:00Z",
+            "UpdatedAt": "2026-01-23T10:05:00Z",
+            "ConfigurationVersion": "lending-v3",
+        }
+
+        event = {
+            "httpMethod": "GET",
+            "path": "/jobs/test-uuid",
+            "pathParameters": {"job_id": "test-uuid"},
+        }
+
+        response = handler(event, lambda_context)
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert body["configurationVersion"] == "lending-v3"
+
+    def test_get_job_without_configuration_version(self, mock_s3, job_svc, lambda_context):
+        """GET /jobs/{id} returns null configurationVersion when not set."""
+        from index import handler
+
+        job_svc.get_job_record.return_value = {
+            "Files": {"a.pdf": Status.IN_PROGRESS},
+            "CreatedAt": "2026-01-23T10:00:00Z",
+            "UpdatedAt": "2026-01-23T10:05:00Z",
+        }
+
+        event = {
+            "httpMethod": "GET",
+            "path": "/jobs/test-uuid",
+            "pathParameters": {"job_id": "test-uuid"},
+        }
+
+        response = handler(event, lambda_context)
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert body["configurationVersion"] is None

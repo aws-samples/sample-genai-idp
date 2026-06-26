@@ -8,6 +8,7 @@
 assessment:
   enabled: true
   validation_enabled: false
+  ground_geometry_in_ocr: true
   hitl_enabled: false
   default_confidence_threshold: '0.8'
   image:

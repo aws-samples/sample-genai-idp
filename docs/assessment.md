@@ -308,6 +308,17 @@ The bounding box feature requires no additional configuration:
 - **Backward compatibility**: Existing configurations continue to work unchanged
 - **Optional enhancement**: Bounding boxes enhance existing assessment without breaking changes
 
+### Grounding Boxes in Real OCR Geometry
+
+The boxes above are **LLM-estimated**. When the OCR backend provides real geometry (Amazon
+Textract or the Mistral OCR LambdaHook), the Assessment service grounds each field's box in
+the actual OCR coordinates from the consolidated `pageData.json` artifact — replacing the
+LLM estimate with the real box where the extracted value matches an OCR line. This is enabled
+by default (`assessment.ground_geometry_in_ocr: true`) and falls back to the LLM-estimated box
+when OCR geometry is unavailable or no match is found. It is a post-LLM, S3-side step with
+**zero impact on the assessment prompt or token budget**. See
+[Bounding Box Integration → Grounding in Real OCR Geometry](./assessment-bounding-boxes.md#grounding-in-real-ocr-geometry-pagedatajson).
+
 ## Output Format
 
 Assessment results are appended to extraction results in the `explainability_info` format expected by the UI. The format varies based on the attribute type defined in your document class configuration.

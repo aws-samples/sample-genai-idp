@@ -49,6 +49,7 @@ mutation UpdateDocument($input: UpdateDocumentInput!) {
             ImageUri
             TextUri
             TextConfidenceUri
+            OcrPageDataUri
         }
         Metering
         EvaluationReportUri
@@ -99,6 +100,7 @@ query GetDocument($objectKey: ID!) {
             ImageUri
             TextUri
             TextConfidenceUri
+            OcrPageDataUri
         }
         Metering
         EvaluationReportUri

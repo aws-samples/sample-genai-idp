@@ -1557,80 +1557,137 @@ class ClassificationService:
 
         # Invoke Bedrock model
         try:
-            response_with_metering = self._invoke_bedrock_model(
-                content=content, config=config
+            # Validation/retry loop: re-prompt the model when it returns a class
+            # that is not in the configured vocabulary. When enforcement is
+            # disabled, the loop runs exactly once and preserves legacy
+            # "warn and use anyway" behavior.
+            enforce = self.config.classification.enforceValidClasses
+            max_retries = (
+                self.config.classification.maxValidationRetries if enforce else 0
             )
+            attempt_content = content
+            metering: Dict[str, Any] = {}
+            doc_type = ""
+            document_boundary = "continue"
+            validation_error: Optional[str] = None
+
+            for attempt in range(max_retries + 1):
+                response_with_metering = self._invoke_bedrock_model(
+                    content=attempt_content, config=config
+                )
+
+                response = response_with_metering["response"]
+                # Accumulate metering across all attempts so token usage from
+                # retries is not lost. Assign the first attempt's metering
+                # directly (preserving its exact shape) and merge subsequent
+                # attempts.
+                attempt_metering = response_with_metering.get("metering", {})
+                if not metering:
+                    metering = attempt_metering
+                else:
+                    metering = utils.merge_metering_data(metering, attempt_metering)
+
+                # Extract classification result
+                # Defensive: Handle case where LLM returns empty content array
+                content_array = response["output"]["message"].get("content", [])
+                if not content_array or len(content_array) == 0:
+                    logger.error(
+                        "LLM returned empty content array in classification response",
+                        extra={"page_id": page_id, "response": response},
+                    )
+                    raise ValueError(
+                        f"Classification failed for page {page_id}: LLM returned empty response"
+                    )
+
+                classification_text = content_array[0].get("text", "")
+
+                # Try to extract structured data (JSON or YAML) from the response
+                try:
+                    classification_data, detected_format = (
+                        extract_structured_data_from_text(classification_text)
+                    )
+                    if isinstance(classification_data, dict):
+                        doc_type = classification_data.get("class", "")
+                        document_boundary = classification_data.get(
+                            "document_boundary", "continue"
+                        )
+                        logger.info(
+                            f"Parsed classification response as {detected_format}: {classification_data}"
+                        )
+                    else:
+                        # If parsing failed, try to extract classification directly from text
+                        doc_type = self._extract_class_from_text(classification_text)
+                        document_boundary = "continue"
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to parse structured data from response: {e}"
+                    )
+                    # Try to extract classification directly from text
+                    doc_type = self._extract_class_from_text(classification_text)
+                    document_boundary = "continue"
+
+                # Validate the predicted class against the configured vocabulary
+                if doc_type and doc_type in self.valid_doc_types:
+                    break  # Valid prediction - done
+
+                if not enforce:
+                    # Legacy behavior: warn and use the prediction as-is.
+                    if not doc_type:
+                        doc_type = "unclassified"
+                        logger.warning(
+                            f"Empty classification for page {page_id}, using 'unclassified'"
+                        )
+                    else:
+                        logger.warning(
+                            f"Unknown document type '{doc_type}' for page {page_id}, "
+                            f"valid types are: {', '.join(self.valid_doc_types)}"
+                        )
+                        # Still use the classification, it might be a new valid type
+                    break
+
+                # Enforcement is on and the prediction is invalid.
+                invalid_value = doc_type or "(empty)"
+                if attempt < max_retries:
+                    logger.warning(
+                        f"Invalid class '{invalid_value}' for page {page_id} "
+                        f"(attempt {attempt + 1}/{max_retries + 1}); re-prompting "
+                        f"with valid classes."
+                    )
+                    attempt_content = self._build_validation_retry_content(
+                        content, invalid_value
+                    )
+                else:
+                    # Retries exhausted - assign configured fallback class.
+                    fallback = self.config.classification.invalidClassFallback
+                    validation_error = (
+                        f"Model returned invalid class '{invalid_value}' after "
+                        f"{max_retries + 1} attempt(s); assigned fallback "
+                        f"'{fallback}'."
+                    )
+                    logger.error(f"Page {page_id}: {validation_error}")
+                    doc_type = fallback
 
             t1 = time.time()
             logger.info(
                 f"Time taken for classification of page {page_id}: {t1 - t0:.2f} seconds"
             )
 
-            response = response_with_metering["response"]
-            metering = response_with_metering["metering"]
-
-            # Extract classification result
-            # Defensive: Handle case where LLM returns empty content array
-            content_array = response["output"]["message"].get("content", [])
-            if not content_array or len(content_array) == 0:
-                logger.error(
-                    "LLM returned empty content array in classification response",
-                    extra={"page_id": page_id, "response": response},
-                )
-                raise ValueError(
-                    f"Classification failed for page {page_id}: LLM returned empty response"
-                )
-
-            classification_text = content_array[0].get("text", "")
-
-            # Try to extract structured data (JSON or YAML) from the response
-            try:
-                classification_data, detected_format = (
-                    extract_structured_data_from_text(classification_text)
-                )
-                if isinstance(classification_data, dict):
-                    doc_type = classification_data.get("class", "")
-                    document_boundary = classification_data.get(
-                        "document_boundary", "continue"
-                    )
-                    logger.info(
-                        f"Parsed classification response as {detected_format}: {classification_data}"
-                    )
-                else:
-                    # If parsing failed, try to extract classification directly from text
-                    doc_type = self._extract_class_from_text(classification_text)
-                    document_boundary = "continue"
-            except Exception as e:
-                logger.warning(f"Failed to parse structured data from response: {e}")
-                # Try to extract classification directly from text
-                doc_type = self._extract_class_from_text(classification_text)
-                document_boundary = "continue"
-
-            # Validate classification against known document types
-            if not doc_type:
-                doc_type = "unclassified"
-                logger.warning(
-                    f"Empty classification for page {page_id}, using 'unclassified'"
-                )
-            elif doc_type not in self.valid_doc_types:
-                logger.warning(
-                    f"Unknown document type '{doc_type}' for page {page_id}, "
-                    f"valid types are: {', '.join(self.valid_doc_types)}"
-                )
-                # Still use the classification, it might be a new valid type
-
             logger.info(f"Page {page_id} classified as {doc_type}")
 
             # Create and return classification result
+            metadata: Dict[str, Any] = {
+                "metering": metering,
+                "document_boundary": str(document_boundary).lower(),
+            }
+            if validation_error:
+                metadata["validation_error"] = validation_error
+
             return PageClassification(
                 page_id=page_id,
                 classification=DocumentClassification(
                     doc_type=doc_type,
                     confidence=1.0,  # Default confidence
-                    metadata={
-                        "metering": metering,
-                        "document_boundary": str(document_boundary).lower(),
-                    },
+                    metadata=metadata,
                 ),
                 image_uri=image_uri,
                 text_uri=text_uri,
@@ -1833,6 +1890,40 @@ class ClassificationService:
                 raw_text_uri=raw_text_uri,
                 text_uri=text_uri,
             )
+
+    def _build_validation_retry_content(
+        self, original_content: List[Dict[str, Any]], invalid_class: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Build the content for a validation retry by appending a correction
+        instruction to the original content.
+
+        Because classification typically runs at temperature 0.0, re-sending
+        the identical request would return the identical (invalid) answer. The
+        appended correction message changes the input so the model is steered
+        back to the allowed vocabulary. This is a single-turn re-prompt: we
+        re-send the original content plus the correction, rather than threading
+        a multi-turn conversation history.
+
+        Args:
+            original_content: The content list from the initial invocation.
+            invalid_class: The out-of-vocabulary class the model returned.
+
+        Returns:
+            A new content list (the original is not mutated) with the
+            correction instruction appended.
+        """
+        valid_classes = ", ".join(sorted(self.valid_doc_types))
+        correction = (
+            f"\n\nYour previous response classified the document as "
+            f"'{invalid_class}', which is NOT a valid class. You MUST choose "
+            f"exactly one class from this list: [{valid_classes}]. "
+            f"Respond again using the required output format and select only "
+            f"from the allowed classes."
+        )
+        # Shallow-copy the list and append a new text item. The original
+        # content dicts are not mutated.
+        return list(original_content) + [{"text": correction}]
 
     def _invoke_bedrock_model(
         self, content: List[Dict[str, Any]], config: Dict[str, Any]

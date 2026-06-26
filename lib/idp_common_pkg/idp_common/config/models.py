@@ -157,6 +157,77 @@ class TableParsingConfig(BaseModel):
         return int(v)
 
 
+class ValidationConfig(BaseModel):
+    """Schema-constraint validation + model-escalation for agentic extraction.
+
+    The dynamic Pydantic model already enforces ``enum``/``pattern``/numeric
+    bounds/``minItems`` at the ``extraction_tool`` boundary. This adds full
+    JSON-Schema validation (notably ``format`` keywords) on the final result
+    and, when it still fails, an optional bounded re-extraction with a stronger
+    model. See ``idp_common.extraction.validation``.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable full JSON-Schema constraint validation of the "
+        "extraction result (in addition to the Pydantic type validation that "
+        "always runs).",
+    )
+    check_formats: bool = Field(
+        default=True,
+        description="Enforce JSON-Schema 'format' keywords (date, email, uuid, "
+        "...). 'format: date' expects ISO-8601 (YYYY-MM-DD); disable if a config "
+        "uses 'format: date' for non-ISO values such as MM/DD/YYYY.",
+    )
+    fail_action: str = Field(
+        default="escalate",
+        description="What to do when validation fails after the agent's own "
+        "retries: 'warn' (record alert only), 'escalate' (re-extract with "
+        "escalation_model, then warn if still invalid), or 'reject' (mark "
+        "parsing_succeeded=false).",
+    )
+    escalation_model: str | None = Field(
+        default=None,
+        description="Stronger Bedrock model used to re-extract when validation "
+        "fails and fail_action='escalate'. Falls back to the per-class "
+        "'x-aws-idp-extraction-escalation-model' override, then to the extraction "
+        "model itself (escalation becomes a plain retry).",
+    )
+    min_population_ratio: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Advisory completeness threshold. After extraction, the "
+        "fraction of schema-defined leaf fields that came back populated is "
+        "computed; if it falls below this ratio a warning is logged and the "
+        "result metadata is flagged (catches silent loss such as nested fields "
+        "returning null). Advisory only — never fails extraction. Set to 0 to "
+        "disable the warning.",
+    )
+
+    @field_validator("min_population_ratio", mode="before")
+    @classmethod
+    def parse_min_population_ratio(cls, v: Any) -> float:
+        """Parse ratio from string or number; empty/None -> default 0.5."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return 0.5
+        return float(v)
+
+    @field_validator("fail_action", mode="before")
+    @classmethod
+    def validate_fail_action(cls, v: Any) -> str:
+        """Reject unknown actions early so misconfiguration fails fast."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return "escalate"
+        v_str = str(v).lower()
+        if v_str not in ("warn", "escalate", "reject"):
+            raise ValueError(
+                "validation.fail_action must be 'warn', 'escalate' or 'reject', "
+                f"got {v!r}"
+            )
+        return v_str
+
+
 class AgenticConfig(BaseModel):
     """Agentic extraction configuration"""
 
@@ -166,14 +237,30 @@ class AgenticConfig(BaseModel):
         default=None,
         description="Model used for reviewing and correcting extraction work",
     )
+    validation: ValidationConfig = Field(
+        default_factory=ValidationConfig,
+        description="Schema-constraint validation and model-escalation settings.",
+    )
     max_concurrent_batches: int = Field(
         default=1,
         ge=1,
         le=10,
         description="Max concurrent page-batch agents for parallel extraction. "
-        "1 = sequential (default). >1 splits pages into N batches and runs N agents "
-        "concurrently. Reduces wall-clock time but increases Bedrock RPM. "
-        "Tune based on your Bedrock quota.",
+        "1 = sequential (default). >1 shards the section's pages into "
+        "token-budgeted ranges (each agent sees ONLY its pages' OCR text/images, "
+        "not the whole document) and runs them concurrently. This both reduces "
+        "wall-clock time AND prevents context-window overflow on long documents. "
+        "Acts as an upper bound on parallelism and shard count. Increases Bedrock "
+        "RPM — tune to your quota.",
+    )
+    shard_token_budget: int = Field(
+        default=40000,
+        gt=0,
+        description="Target maximum input tokens (estimated, ~chars/4) of OCR "
+        "text per shard when max_concurrent_batches > 1. Pages are grouped so "
+        "each shard stays under this budget, creating as many shards as needed "
+        "(capped by max_concurrent_batches). Raise for large-context models "
+        "(e.g. 1M-context Claude); lower if shards still overflow.",
     )
     table_parsing: TableParsingConfig = Field(
         default_factory=TableParsingConfig,
@@ -246,9 +333,7 @@ class PipelineHook(BaseModel):
         description="Owner feature id, for traceability and replace-on-reregister"
     )
     arn: str = Field(description="Lambda ARN the dispatcher invokes")
-    order: int = Field(
-        default=100, description="Lower runs first within a hook point"
-    )
+    order: int = Field(default=100, description="Lower runs first within a hook point")
     onError: str = Field(  # noqa: N815 — matches stored config key
         default="continue",
         description="continue | skip-remaining | fail",
@@ -384,6 +469,26 @@ class ClassificationConfig(BaseModel):
         description="Number of pages before/after target page to include as context for multimodalPageLevelClassification. "
         "0=no context (default), 1=include 1 page on each side, 2=include 2 pages on each side.",
     )
+    enforceValidClasses: bool = Field(
+        default=True,
+        description="When True, validate the predicted class against the configured "
+        "class vocabulary and retry (re-prompting the model) on out-of-vocabulary "
+        "predictions. When False, an out-of-vocabulary prediction is logged and used "
+        "as-is (legacy behavior). Applies to multimodalPageLevelClassification.",
+    )
+    maxValidationRetries: int = Field(
+        default=2,
+        ge=0,
+        description="Maximum number of re-prompt retries when the predicted class is "
+        "not in the configured class vocabulary. Only used when enforceValidClasses "
+        "is True.",
+    )
+    invalidClassFallback: str = Field(
+        default="unclassified",
+        description="Class label assigned when all validation retries are exhausted. "
+        "Should be one of the configured classes or the built-in 'unclassified'. "
+        "Only used when enforceValidClasses is True.",
+    )
     image: ImageConfig = Field(default_factory=ImageConfig)
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
@@ -456,6 +561,25 @@ class ClassificationConfig(BaseModel):
             return 0
         return result
 
+    @field_validator("maxValidationRetries", mode="before")
+    @classmethod
+    def parse_max_validation_retries(cls, v: Any) -> int:
+        """Parse maxValidationRetries from string or number, ensuring non-negative value"""
+        if isinstance(v, str):
+            v = int(v) if v.strip() else 2
+        result = int(v)
+        if result < 0:
+            return 0
+        return result
+
+    @field_validator("enforceValidClasses", mode="before")
+    @classmethod
+    def parse_enforce_valid_classes(cls, v: Any) -> bool:
+        """Parse enforceValidClasses from string or bool (config may store as string)"""
+        if isinstance(v, str):
+            return v.strip().lower() in ("true", "1", "yes", "on")
+        return bool(v)
+
 
 class GranularAssessmentConfig(BaseModel):
     """Granular assessment configuration"""
@@ -526,6 +650,16 @@ class AssessmentConfig(BaseModel):
         description="Confidence threshold for assessment and HITL triggering",
     )
     validation_enabled: bool = Field(default=False, description="Enable validation")
+    ground_geometry_in_ocr: bool = Field(
+        default=True,
+        description=(
+            "After assessment, replace LLM-estimated field bounding boxes with real "
+            "OCR geometry from pageData.json when the extracted value matches an OCR "
+            "line. Falls back to the LLM-estimated box when OCR geometry is "
+            "unavailable (e.g. plain LLM OCR, older documents) or no value match is "
+            "found, so the worst case is identical to LLM-only behavior."
+        ),
+    )
     image: ImageConfig = Field(default_factory=ImageConfig)
     granular: GranularAssessmentConfig = Field(default_factory=GranularAssessmentConfig)
 
@@ -740,7 +874,9 @@ class ErrorAnalyzerParameters(BaseModel):
     )
 
     max_log_message_length: int = Field(
-        default=400, gt=0, description="Maximum length for log messages before truncation"
+        default=400,
+        gt=0,
+        description="Maximum length for log messages before truncation",
     )
     max_events_per_log_group: int = Field(
         default=5, gt=0, description="Maximum events to collect per log group"
@@ -1299,7 +1435,9 @@ class FactExtractionConfig(BaseModel):
         default="us.anthropic.claude-3-5-sonnet-20240620-v1:0",
         description="Bedrock model ID for fact extraction",
     )
-    system_prompt: str = Field(default="", description="System prompt for fact extraction")
+    system_prompt: str = Field(
+        default="", description="System prompt for fact extraction"
+    )
     task_prompt: str = Field(default="", description="Task prompt for fact extraction")
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.01, ge=0.0, le=1.0)
@@ -1332,7 +1470,9 @@ class RuleValidationOrchestratorConfig(BaseModel):
         default="us.anthropic.claude-3-5-sonnet-20240620-v1:0",
         description="Bedrock model ID for rule validation summarization",
     )
-    system_prompt: str = Field(default="", description="System prompt for summarization")
+    system_prompt: str = Field(
+        default="", description="System prompt for summarization"
+    )
     task_prompt: str = Field(default="", description="Task prompt for summarization")
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.01, ge=0.0, le=1.0)
@@ -1379,7 +1519,8 @@ class RuleValidationConfig(BaseModel):
         default=None, description="Available recommendation options"
     )
     extraction_results: Optional[Dict[str, Any]] = Field(
-        default=None, description="Extraction results to include in rule validation prompts"
+        default=None,
+        description="Extraction results to include in rule validation prompts",
     )
     fact_extraction: Optional[FactExtractionConfig] = Field(
         default=None, description="Configuration for fact extraction step"
@@ -1521,7 +1662,6 @@ class DiscoveryModelConfig(BaseModel):
         if isinstance(v, str):
             return int(v) if v else 0
         return int(v)
-
 
 
 class MultiDocumentDiscoveryConfig(BaseModel):
@@ -1825,7 +1965,8 @@ class IDPConfig(BaseModel):
         default_factory=list, description="Document class definitions (JSON Schema)"
     )
     policy_classes: List[Dict[str, Any]] = Field(
-        default_factory=list, description="Policy class definitions for rule validation (JSON Schema). Also receives rule classes extracted by Policy Discovery."
+        default_factory=list,
+        description="Policy class definitions for rule validation (JSON Schema). Also receives rule classes extracted by Policy Discovery.",
     )
     discovery: DiscoveryConfig = Field(
         default_factory=DiscoveryConfig, description="Discovery configuration"
@@ -1844,7 +1985,6 @@ class IDPConfig(BaseModel):
     summary: Optional[Dict[str, Any]] = Field(
         default=None, description="Summary configuration for rule validation"
     )
-
 
     model_config = ConfigDict(
         # Allow extra fields to be ignored - supports backward compatibility
@@ -1947,9 +2087,13 @@ class ConfigurationRecord(BaseModel):
         idp_config = record.config
     """
 
-    configuration_type: str = Field(description="Configuration type (Config, Schema, Pricing)")
+    configuration_type: str = Field(
+        description="Configuration type (Config, Schema, Pricing)"
+    )
     version: Optional[str] = Field(default=None, description="Version Name")
-    is_active: Optional[bool] = Field(default=None, description="Whether this version is active")
+    is_active: Optional[bool] = Field(
+        default=None, description="Whether this version is active"
+    )
 
     @field_validator("version", mode="before")
     @classmethod
@@ -1958,6 +2102,7 @@ class ConfigurationRecord(BaseModel):
         if v is None:
             return None
         return str(v) if v else None
+
     description: Optional[str] = Field(default=None, description="Version description")
     config: Annotated[
         Union[SchemaConfig, IDPConfig, PricingConfig], Discriminator("config_type")
@@ -1996,7 +2141,11 @@ class ConfigurationRecord(BaseModel):
         # Map managed field to PascalCase DynamoDB convention (before spreading into item)
         managed_value = stringified.pop("managed", None)
 
-        configuration_type = f"{self.configuration_type}#{self.version}" if self.version else self.configuration_type
+        configuration_type = (
+            f"{self.configuration_type}#{self.version}"
+            if self.version
+            else self.configuration_type
+        )
 
         # Build DynamoDB item
         item = {"Configuration": configuration_type, **stringified}
@@ -2009,7 +2158,7 @@ class ConfigurationRecord(BaseModel):
             item["IsActive"] = self.is_active
         if self.description is not None:
             item["Description"] = self.description
-        
+
         # Add metadata fields as separate DynamoDB columns
         if self.metadata:
             metadata_dict = self.metadata.model_dump(mode="python", exclude_none=True)
@@ -2047,7 +2196,7 @@ class ConfigurationRecord(BaseModel):
         config_key = item.get("Configuration")
         if not config_key:
             raise ValueError("DynamoDB item missing 'Configuration' key")
-        
+
         # Parse configuration type and version from single key
         if "#" in config_key:
             # Versioned format: Config#v0, Config#v1, etc.
@@ -2061,11 +2210,21 @@ class ConfigurationRecord(BaseModel):
         # Remove DynamoDB partition key, record metadata, and storage metadata fields
         # These are not part of the config data model
         _DYNAMODB_NON_CONFIG_FIELDS = {
-            "Configuration", "IsActive", "CreatedAt", "UpdatedAt", "Description",
-            "BdaProjectArn", "BdaSyncStatus", "BdaLastSyncedAt", "Managed",
-            "_config_format", "_config_storage",
+            "Configuration",
+            "IsActive",
+            "CreatedAt",
+            "UpdatedAt",
+            "Description",
+            "BdaProjectArn",
+            "BdaSyncStatus",
+            "BdaLastSyncedAt",
+            "Managed",
+            "_config_format",
+            "_config_storage",
         }
-        config_data = {k: v for k, v in item.items() if k not in _DYNAMODB_NON_CONFIG_FIELDS}
+        config_data = {
+            k: v for k, v in item.items() if k not in _DYNAMODB_NON_CONFIG_FIELDS
+        }
 
         # Map PascalCase DynamoDB field back to lowercase Pydantic field
         if "Managed" in item:
@@ -2108,7 +2267,11 @@ class ConfigurationRecord(BaseModel):
 
         # Remove legacy pricing field (now stored separately as DefaultPricing/CustomPricing)
         # This handles migration for existing stacks with old embedded pricing
-        if config_data.get("pricing") is not None and config_type in ("Config", "Default", "Custom"):
+        if config_data.get("pricing") is not None and config_type in (
+            "Config",
+            "Default",
+            "Custom",
+        ):
             logger.info(
                 f"Removing legacy pricing field from {config_type} configuration"
             )
@@ -2126,9 +2289,8 @@ class ConfigurationRecord(BaseModel):
             description=item.get("Description"),
             config=config,
             metadata=ConfigMetadata(
-                created_at=item.get("CreatedAt"),
-                updated_at=item.get("UpdatedAt")
-            )
+                created_at=item.get("CreatedAt"), updated_at=item.get("UpdatedAt")
+            ),
         )
 
     @staticmethod

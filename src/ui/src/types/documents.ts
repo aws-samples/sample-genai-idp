@@ -21,6 +21,7 @@ export interface Page {
   ImageUri: string;
   TextUri: string;
   TextConfidenceUri: string;
+  OcrPageDataUri?: string;
 }
 
 /**

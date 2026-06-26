@@ -21,14 +21,31 @@ from idp_common.bedrock import format_prompt, is_openai_responses_model
 from idp_common.config.models import IDPConfig
 from idp_common.config.schema_constants import (
     ID_FIELD,
+    SCHEMA_ITEMS,
     SCHEMA_PROPERTIES,
+    SCHEMA_TYPE,
+    TYPE_ARRAY,
+    TYPE_OBJECT,
     X_AWS_IDP_DOCUMENT_TYPE,
+    X_AWS_IDP_EXTRACTION_ESCALATION_MODEL,
     X_AWS_IDP_EXTRACTION_MODEL,
+    X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT,
+    X_AWS_IDP_EXTRACTION_TASK_PROMPT,
     X_AWS_IDP_SOURCE_PAGE_TYPES,
 )
 from idp_common.extraction.page_type_resolver import (
     PageTypePresence,
     resolve_page_types,
+)
+from idp_common.extraction.sharding import (
+    DEFAULT_SHARD_TOKEN_BUDGET,
+    estimate_tokens,
+    plan_shards,
+)
+from idp_common.extraction.validation import (
+    ValidationReport,
+    build_subset_schema,
+    validate_extraction,
 )
 from idp_common.models import Document
 from idp_common.utils.few_shot_example_builder import (
@@ -131,10 +148,21 @@ class ExtractionService:
         self._class_schema: dict[str, Any] = {}
         self._page_images: list[bytes] = []
         self._image_uris: list[str] = []
+        # Per-page OCR text in section order, populated per section. Used to
+        # shard the input by page range for concurrent agentic extraction.
+        self._page_texts: list[str] = []
         # Optional checkpoint callback for incremental saves during agentic extraction.
         # When set, called after each successful extraction_tool or apply_json_patches
         # invocation with the current extraction dict, enabling resume on Lambda timeout.
         self._checkpoint_callback: Any | None = None
+        # Validation outcome from the most recent _invoke_extraction_model call,
+        # consumed by _save_results when building the metadata block. Reset per
+        # section so a prior section's result can never leak into the next.
+        self._pending_validation_metadata: dict[str, Any] | None = None
+        # Model actually used for the most recent section's extraction (after
+        # per-class override resolution), recorded in metadata for audit. Reset
+        # per section.
+        self._pending_extraction_model: str | None = None
 
         # Get model_id from config for logging (type-safe access with fallback)
         model_id = (
@@ -397,6 +425,116 @@ class ExtractionService:
             attachments.append(image.prepare_bedrock_image_attachment(image_content))
 
         return attachments
+
+    def _build_shard_payloads(
+        self,
+        prompt_template: str,
+        send_images: bool,
+        max_shards: int,
+        table_boundary_pages: frozenset[int] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Split the section into token-budgeted page shards and render each
+        shard's prompt content independently.
+
+        Each shard's content is built with the SAME prompt path as the single
+        pass (``_build_prompt_content``) by temporarily scoping
+        ``self._document_text`` and ``self._page_images`` to the shard's page
+        slice — so few-shot / {DOCUMENT_IMAGE} / placeholder handling is
+        identical. The section's first-page text is prepended as shared header
+        context to every shard but the first, so column headers and page-1
+        scalar context survive the split.
+
+        Returns a list of payload dicts: ``{"content", "page_start", "page_end",
+        "total_pages"}``. Falls back to a single whole-section payload when
+        per-page text isn't available.
+        """
+        page_texts = self._page_texts
+        num_pages = len(page_texts)
+        if num_pages <= 1:
+            # Nothing to shard; let the caller use the single-pass path.
+            return []
+
+        # Header context = the first page's text, prepended to later shards so
+        # they retain column headers / account-level context. Kept small.
+        header_context = page_texts[0] if page_texts else ""
+
+        # Reserve the header-context tokens from the per-shard budget so the
+        # *rendered* shard (own pages + prepended header) still respects the
+        # configured budget — otherwise a shard packed to the budget would
+        # exceed it once the header is added. Page 0's own shard carries no
+        # added header, but using the reduced budget for all shards is the safe
+        # (conservative) choice. Never reduce below a small floor.
+        full_budget = self._shard_token_budget()
+        header_tokens = estimate_tokens(header_context)
+        effective_budget = max(1000, full_budget - header_tokens)
+
+        shards = plan_shards(
+            page_texts,
+            token_budget=effective_budget,
+            max_shards=max_shards,
+            table_boundary_pages=table_boundary_pages,
+        )
+        if len(shards) <= 1:
+            return []
+
+        # Save the full-section context to restore afterwards.
+        saved_text = self._document_text
+        saved_images = self._page_images
+        payloads: list[dict[str, Any]] = []
+        try:
+            for shard in shards:
+                shard_page_texts = page_texts[shard.start : shard.end]
+                # Build this shard's document text with PAGE markers preserved.
+                parts: list[str] = []
+                if shard.start > 0 and header_context.strip():
+                    parts.append(
+                        "--- DOCUMENT HEADER (page 1, for context only) ---\n"
+                        f"{header_context}"
+                    )
+                for offset, text in enumerate(shard_page_texts):
+                    page_num = shard.start + offset + 1
+                    parts.append(f"--- PAGE {page_num} ---\n{text}")
+                self._document_text = "\n".join(parts)
+                self._page_images = (
+                    self._slice_images(saved_images, shard.start, shard.end)
+                    if send_images
+                    else []
+                )
+                shard_images = self._page_images if send_images else None
+                content = self._build_prompt_content(prompt_template, shard_images)
+                payloads.append(
+                    {
+                        "content": content,
+                        "page_start": shard.start,
+                        "page_end": shard.end,
+                        "total_pages": num_pages,
+                    }
+                )
+        finally:
+            self._document_text = saved_text
+            self._page_images = saved_images
+
+        logger.info(
+            "Built %d input shards for concurrent extraction "
+            "(budget=%d tokens, header-reserved=%d)",
+            len(payloads),
+            effective_budget,
+            header_tokens,
+        )
+        return payloads
+
+    @staticmethod
+    def _slice_images(images: list[bytes], start: int, end: int) -> list[bytes]:
+        """Slice page images to a page range, tolerating an empty/short list."""
+        if not images:
+            return []
+        return images[start:end]
+
+    def _shard_token_budget(self) -> int:
+        """Per-shard input-token budget (config override or default)."""
+        agentic = self.config.extraction.agentic
+        budget = getattr(agentic, "shard_token_budget", None)
+        return int(budget) if budget else DEFAULT_SHARD_TOKEN_BUDGET
 
     def _build_few_shot_examples_content(self) -> list[dict[str, Any]]:
         """
@@ -889,7 +1027,32 @@ class ExtractionService:
         Returns:
             Tuple of (content, system_prompt)
         """
-        system_prompt = self.config.extraction.system_prompt
+        # Resolve prompts — use per-class system/task prompt overrides if
+        # specified on the class schema, otherwise fall back to the global
+        # extraction prompts. Backward compatible: classes without overrides
+        # use the global prompts unchanged.
+        class_system_prompt_override = self._class_schema.get(
+            X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT
+        )
+        system_prompt = (
+            class_system_prompt_override or self.config.extraction.system_prompt
+        )
+        if class_system_prompt_override:
+            logger.info(
+                f"Using per-class extraction system prompt override for "
+                f"'{self._class_label}'"
+            )
+
+        class_task_prompt_override = self._class_schema.get(
+            X_AWS_IDP_EXTRACTION_TASK_PROMPT
+        )
+        task_prompt = class_task_prompt_override or self.config.extraction.task_prompt
+        if class_task_prompt_override:
+            logger.info(
+                f"Using per-class extraction task prompt override for "
+                f"'{self._class_label}'"
+            )
+
         custom_lambda_arn = self.config.extraction.custom_prompt_lambda_arn
 
         if custom_lambda_arn and custom_lambda_arn.strip():
@@ -907,7 +1070,7 @@ class ExtractionService:
             )
 
             # Build default content for Lambda input
-            prompt_template = self.config.extraction.task_prompt
+            prompt_template = task_prompt
             if prompt_template:
                 default_content = self._build_prompt_content(
                     prompt_template, page_images
@@ -946,7 +1109,7 @@ class ExtractionService:
             logger.info(
                 "No custom prompt Lambda configured - using default prompt generation"
             )
-            prompt_template = self.config.extraction.task_prompt
+            prompt_template = task_prompt
 
             if not prompt_template:
                 content = self._get_default_prompt_content()
@@ -1236,6 +1399,128 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             ),
         }
 
+    @staticmethod
+    def _count_schema_leaf_fields(
+        schema_node: dict[str, Any], value: Any
+    ) -> tuple[int, int, list[str]]:
+        """Recursively count schema-defined leaf fields vs. populated ones.
+
+        Walks the schema's ``properties`` (descending into nested ``object``
+        properties and the ``items`` of ``array`` properties) and, in parallel,
+        the extracted ``value``. Returns ``(defined, populated, empty_paths)``:
+
+        - ``defined``  — number of leaf (scalar) fields the schema declares.
+        - ``populated`` — how many of those have a non-empty value
+          (not None, not "" / [] / {}).
+        - ``empty_paths`` — dotted paths of the leaf fields that came back empty.
+
+        For arrays of objects, the item schema's leaves are counted once per
+        present row (so a 0-row array contributes its leaves as "defined but
+        empty", surfacing tables that extracted nothing). This is the signal
+        that catches silent nested-field loss (all-null nested objects).
+        """
+        defined = 0
+        populated = 0
+        empty: list[str] = []
+
+        node_type = schema_node.get(SCHEMA_TYPE)
+        properties = schema_node.get(SCHEMA_PROPERTIES) or {}
+
+        if node_type == TYPE_OBJECT or properties:
+            value_dict = value if isinstance(value, dict) else {}
+            for prop_name, prop_schema in properties.items():
+                if not isinstance(prop_schema, dict):
+                    continue
+                prop_type = prop_schema.get(SCHEMA_TYPE)
+                child_value = value_dict.get(prop_name)
+                path = prop_name
+
+                if prop_type == TYPE_OBJECT or (prop_schema.get(SCHEMA_PROPERTIES)):
+                    d, p, e = ExtractionService._count_schema_leaf_fields(
+                        prop_schema, child_value
+                    )
+                    defined += d
+                    populated += p
+                    empty.extend(f"{path}.{sub}" for sub in e)
+                elif prop_type == TYPE_ARRAY:
+                    item_schema = prop_schema.get(SCHEMA_ITEMS) or {}
+                    rows = child_value if isinstance(child_value, list) else []
+                    if isinstance(item_schema, dict) and item_schema.get(
+                        SCHEMA_PROPERTIES
+                    ):
+                        if rows:
+                            for idx, row in enumerate(rows):
+                                d, p, e = ExtractionService._count_schema_leaf_fields(
+                                    item_schema, row
+                                )
+                                defined += d
+                                populated += p
+                                empty.extend(f"{path}[{idx}].{sub}" for sub in e)
+                        else:
+                            # Empty array: count the item leaves once as "missing".
+                            d, _p, _e = ExtractionService._count_schema_leaf_fields(
+                                item_schema, {}
+                            )
+                            defined += d
+                            empty.append(path)
+                    else:
+                        # Array of scalars.
+                        defined += 1
+                        if rows:
+                            populated += 1
+                        else:
+                            empty.append(path)
+                else:
+                    # Scalar leaf.
+                    defined += 1
+                    if child_value not in (None, "", [], {}):
+                        populated += 1
+                    else:
+                        empty.append(path)
+
+        return defined, populated, empty
+
+    def _check_population_completeness(
+        self, extracted_fields: dict[str, Any], schema: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Heuristic: how much of the schema actually got populated.
+
+        Unlike ``_check_completeness_detailed`` (which only flags hard
+        ``minItems`` constraint violations), this flags *suspiciously sparse*
+        extractions — e.g. an agentic run that returned a correct top-level
+        object but null for nearly every nested field. It cannot know a field
+        *should* have had a value, so it is advisory (a warning signal), not a
+        hard failure: a genuinely sparse document will also score low.
+        """
+        defined, populated, empty_paths = self._count_schema_leaf_fields(
+            schema, extracted_fields
+        )
+        ratio = (populated / defined) if defined else 1.0
+        threshold = self.config.extraction.agentic.validation.min_population_ratio
+        below = defined > 0 and ratio < threshold
+
+        if below:
+            logger.warning(
+                "Extraction populated only %d/%d schema fields (%.0f%%), below the "
+                "%.0f%% completeness threshold — possible silent extraction loss "
+                "(e.g. nested fields not captured).",
+                populated,
+                defined,
+                ratio * 100,
+                threshold * 100,
+                extra={"empty_fields": empty_paths[:50]},
+            )
+
+        return {
+            "fields_defined": defined,
+            "fields_populated": populated,
+            "population_ratio": round(ratio, 3),
+            "threshold": threshold,
+            "below_threshold": below,
+            # Cap the echoed list so a huge sparse schema can't bloat metadata.
+            "empty_fields": empty_paths[:50],
+        }
+
     def _generate_processing_report(self, metadata: dict[str, Any]) -> str:
         """Generate user-friendly processing report."""
 
@@ -1334,6 +1619,273 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
 
         return "\n".join(report_lines)
 
+    def _resolve_escalation_model(self) -> str | None:
+        """Pick the model used to re-extract on validation failure.
+
+        Precedence: per-class ``x-aws-idp-extraction-escalation-model`` >
+        global ``validation.escalation_model``. Returns None when neither is
+        set, in which case escalation falls back to the extraction model and is
+        effectively a plain retry (still useful as a second attempt).
+        """
+        return (
+            self._class_schema.get(X_AWS_IDP_EXTRACTION_ESCALATION_MODEL)
+            or self.config.extraction.agentic.validation.escalation_model
+        )
+
+    def _build_schema_validator(self):
+        """Return an in-loop schema-validation callback, or None when disabled.
+
+        The callback validates an extracted dict against the full class JSON
+        Schema (notably ``format`` keywords the Pydantic model does not enforce)
+        and returns ``(is_valid, agent_feedback)`` for the agent to self-correct.
+        """
+        vcfg = self.config.extraction.agentic.validation
+        if not vcfg.enabled:
+            return None
+
+        class_schema = self._class_schema
+        check_formats = vcfg.check_formats
+
+        def _validate(data: dict[str, Any]) -> tuple[bool, str]:
+            report = validate_extraction(
+                data, class_schema, check_formats=check_formats
+            )
+            return report.valid, report.agent_feedback()
+
+        return _validate
+
+    def _validate_and_maybe_escalate(
+        self,
+        extracted_fields: dict[str, Any],
+        structured_data: Any,
+        data_model: Any,
+        model_id: str,
+        message_prompt: Any,
+        agentic_images: list[bytes],
+        custom_instruction: str | None,
+        section_info: SectionInfo,
+        parsing_succeeded: bool,
+    ) -> tuple[dict[str, Any], Any, dict[str, Any] | None, dict[str, Any], bool]:
+        """Validate the final extraction and optionally escalate to a stronger model.
+
+        Returns ``(extracted_fields, structured_data, validation_metadata,
+        escalation_metering, parsing_succeeded)``. A no-op (returns inputs
+        unchanged with ``validation_metadata=None``) unless
+        ``extraction.agentic.validation.enabled``.
+        """
+        vcfg = self.config.extraction.agentic.validation
+        escalation_metering: dict[str, Any] = {}
+        if not vcfg.enabled:
+            return (
+                extracted_fields,
+                structured_data,
+                None,
+                escalation_metering,
+                parsing_succeeded,
+            )
+
+        report: ValidationReport = validate_extraction(
+            extracted_fields, self._class_schema, check_formats=vcfg.check_formats
+        )
+        initial_error_count = len(report.errors)
+        initial_failed_fields = sorted(report.failed_top_level_fields)
+
+        escalated = False
+        escalation_model: str | None = None
+        escalation_scope: str | None = None
+        escalation_fields: list[str] = []
+        if not report.valid:
+            logger.warning(
+                "Extraction failed full-schema validation for "
+                f"'{section_info.class_label}'",
+                extra={
+                    "error_count": initial_error_count,
+                    "failed_fields": initial_failed_fields,
+                    "fail_action": vcfg.fail_action,
+                },
+            )
+
+        # Escalate: re-extract ONLY the failing top-level fields with a stronger
+        # model, then merge the corrected fields back into the full result. This
+        # is cheaper/faster than re-running the whole section and preserves the
+        # fields that already validated.
+        if not report.valid and vcfg.fail_action == "escalate":
+            escalation_model = self._resolve_escalation_model() or model_id
+            escalated = True
+            escalation_fields = initial_failed_fields
+            (
+                extracted_fields,
+                structured_data,
+                report,
+                escalation_metering,
+                escalation_scope,
+            ) = self._escalate_failing_fields(
+                extracted_fields=extracted_fields,
+                structured_data=structured_data,
+                data_model=data_model,
+                full_report=report,
+                escalation_model=escalation_model,
+                message_prompt=message_prompt,
+                agentic_images=agentic_images,
+                custom_instruction=custom_instruction,
+                section_info=section_info,
+            )
+
+        # reject: surface the failure so downstream/HITL can act on it.
+        if not report.valid and vcfg.fail_action == "reject":
+            parsing_succeeded = False
+
+        # Rich audit trail: what was enforced, what failed, what we did about it.
+        validation_metadata: dict[str, Any] = {
+            **report.to_metadata(),
+            "check_formats": vcfg.check_formats,
+            "fail_action": vcfg.fail_action,
+            "escalated": escalated,
+            "initial_error_count": initial_error_count,
+            "initial_failed_fields": initial_failed_fields,
+        }
+        if escalated:
+            validation_metadata["escalation_model"] = escalation_model
+            validation_metadata["escalation_scope"] = escalation_scope
+            validation_metadata["escalation_fields"] = escalation_fields
+            validation_metadata["resolved_by_escalation"] = report.valid
+
+        return (
+            extracted_fields,
+            structured_data,
+            validation_metadata,
+            escalation_metering,
+            parsing_succeeded,
+        )
+
+    def _escalate_failing_fields(
+        self,
+        extracted_fields: dict[str, Any],
+        structured_data: Any,
+        data_model: Any,
+        full_report: ValidationReport,
+        escalation_model: str,
+        message_prompt: Any,
+        agentic_images: list[bytes],
+        custom_instruction: str | None,
+        section_info: SectionInfo,
+    ) -> tuple[dict[str, Any], Any, ValidationReport, dict[str, Any], str]:
+        """Re-extract only the failing top-level fields with a stronger model.
+
+        Builds a reduced schema containing just ``full_report.failed_top_level_fields``,
+        runs a scoped extraction, merges the corrected fields back into the full
+        result and re-validates. Falls back to a whole-section re-extraction when
+        a usable subset schema can't be built (e.g. failures are root-level only).
+
+        Returns ``(extracted_fields, structured_data, report, metering, scope)``
+        where ``scope`` is ``"field-subset"`` or ``"full-section"``. On any error
+        the original inputs are returned unchanged with an empty metering dict.
+        """
+        failed_fields = sorted(full_report.failed_top_level_fields)
+        subset_schema = build_subset_schema(self._class_schema, failed_fields)
+        scope = (
+            "field-subset"
+            if subset_schema is not self._class_schema
+            else "full-section"
+        )
+
+        logger.info(
+            f"Escalating extraction for '{section_info.class_label}' to model "
+            f"{escalation_model} (scope={scope}, fields={failed_fields})",
+        )
+
+        check_formats = self.config.extraction.agentic.validation.check_formats
+        instruction = (
+            (custom_instruction + "\n\n" if custom_instruction else "")
+            + "A previous extraction attempt produced data that violated the "
+            "schema. Carefully re-extract and correct these issues:\n"
+            + full_report.agent_feedback()
+        )
+
+        try:
+            if scope == "field-subset":
+                subset_model = create_pydantic_model_from_json_schema(
+                    schema=subset_schema,
+                    class_label=f"{section_info.class_label}__escalation",
+                    clean_schema=False,
+                )
+                # Seed with current values for the failing fields only.
+                seed = {k: extracted_fields.get(k) for k in failed_fields}
+                try:
+                    existing_model = subset_model(
+                        **{k: v for k, v in seed.items() if v is not None}
+                    )
+                except Exception:
+                    existing_model = None
+
+                esc_data, esc_response = structured_output(
+                    model_id=escalation_model,
+                    data_format=subset_model,
+                    prompt=message_prompt,
+                    existing_data=existing_model,
+                    page_images=agentic_images,
+                    config=self.config,
+                    context="ExtractionEscalation",
+                    custom_instruction=instruction,
+                    schema_validator=None,  # validated against the full schema below
+                )
+                metering = esc_response.get("metering", {}) or {}
+                metering.pop("_table_parsing_stats", None)
+
+                # Merge corrected subset fields back into the full result.
+                merged = dict(extracted_fields)
+                merged.update(esc_data.model_dump(mode="json"))
+            else:
+                # Fallback: whole-section re-extraction with the full model.
+                try:
+                    existing_model = data_model(**extracted_fields)
+                except Exception:
+                    existing_model = None
+                esc_data, esc_response = structured_output(
+                    model_id=escalation_model,
+                    data_format=data_model,
+                    prompt=message_prompt,
+                    existing_data=existing_model,
+                    page_images=agentic_images,
+                    config=self.config,
+                    context="ExtractionEscalation",
+                    custom_instruction=instruction,
+                    schema_validator=self._build_schema_validator(),
+                )
+                metering = esc_response.get("metering", {}) or {}
+                metering.pop("_table_parsing_stats", None)
+                merged = esc_data.model_dump(mode="json")
+
+            esc_report = validate_extraction(
+                merged, self._class_schema, check_formats=check_formats
+            )
+
+            # Keep the escalated result only if it's valid or strictly improves.
+            if esc_report.valid or len(esc_report.errors) < len(full_report.errors):
+                # Re-validate the merged dict through the full Pydantic model so
+                # the returned structured_data stays consistent with the fields.
+                try:
+                    structured_data = data_model(**merged)
+                except Exception:
+                    pass  # keep prior structured_data; fields dict is source of truth
+                return merged, structured_data, esc_report, metering, scope
+
+            logger.info(
+                "Escalation did not improve validation; keeping original result",
+                extra={
+                    "original_errors": len(full_report.errors),
+                    "escalated_errors": len(esc_report.errors),
+                },
+            )
+            return extracted_fields, structured_data, full_report, metering, scope
+        except Exception as e:
+            logger.error(
+                "Escalation re-extraction failed; keeping original result",
+                extra={"error": str(e)},
+                exc_info=True,
+            )
+            return extracted_fields, structured_data, full_report, {}, scope
+
     def _check_extraction_completeness(
         self,
         extracted_data: Any,
@@ -1412,10 +1964,17 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             f"Extracting fields for {section_info.class_label} document, section"
         )
 
+        # Clear any per-section audit state from a previously processed section.
+        self._pending_validation_metadata = None
+        self._pending_extraction_model = None
+
         # Get extraction config — use per-class model override if specified,
         # otherwise fall back to the global extraction model.
         class_model_override = self._class_schema.get(X_AWS_IDP_EXTRACTION_MODEL)
         model_id = class_model_override or self.config.extraction.model
+        # Record the resolved model for audit metadata (set here so it is
+        # captured even on the non-agentic/standard path).
+        self._pending_extraction_model = model_id
         if class_model_override:
             logger.info(
                 f"Using per-class extraction model override for "
@@ -1624,33 +2183,48 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     extra={"page_count": num_pages},
                 )
 
-            # Use concurrent batch extraction if configured and enough pages
-            num_batches = self.config.extraction.agentic.max_concurrent_batches
+            # Build the in-loop schema validator (None unless validation enabled).
+            # Used only on the single-agent path: per-batch validation would
+            # falsely fail minItems before the batches are merged, so batch
+            # output is validated once after merge below.
+            schema_validator = self._build_schema_validator()
 
+            # Use concurrent SHARDED extraction if configured and enough pages.
+            # Each shard's prompt contains only its pages' text/images (built by
+            # _build_shard_payloads), so no agent loads the whole document —
+            # this bounds the context window in addition to parallelizing.
+            num_batches = self.config.extraction.agentic.max_concurrent_batches
+            shard_payloads: list[dict[str, Any]] = []
             if (
                 num_batches > 1
-                and num_pages >= num_batches
+                and num_pages > 1
+                and len(self._page_texts) > 1
                 and not existing_data_model  # Don't use concurrent mode for resume
                 and not checkpoint_buffer
             ):
+                shard_payloads = self._build_shard_payloads(
+                    prompt_template=prompt_template,
+                    send_images=send_images,
+                    max_shards=num_batches,
+                )
+
+            if shard_payloads:
                 import asyncio as _asyncio
 
                 logger.info(
-                    f"Using concurrent batch extraction with {num_batches} batches "
-                    f"for {num_pages} pages"
+                    f"Using sharded concurrent extraction: {len(shard_payloads)} "
+                    f"shard(s), parallelism {num_batches}, for {num_pages} pages"
                 )
                 structured_data, response_with_metering = _asyncio.run(
                     concurrent_structured_output_async(
                         model_id=model_id,
                         data_format=dynamic_model,
-                        prompt=message_prompt,
-                        page_images=agentic_images,
-                        num_batches=num_batches,
+                        shard_payloads=shard_payloads,
+                        max_parallelism=num_batches,
                         config=self.config,
                         context="Extraction",
                         checkpoint_callback=self._checkpoint_callback,
                         custom_instruction=custom_instruction,
-                        total_pages=num_pages,
                     )
                 )
             else:
@@ -1665,11 +2239,41 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     checkpoint_callback=self._checkpoint_callback,
                     checkpoint_buffer_data=checkpoint_buffer,
                     custom_instruction=custom_instruction,
+                    schema_validator=schema_validator,
                 )
 
             extracted_fields = structured_data.model_dump(mode="json")
             metering = response_with_metering["metering"]
             parsing_succeeded = True
+
+            # Full JSON-Schema validation of the final result, with optional
+            # bounded escalation to a stronger model. No-op unless
+            # extraction.agentic.validation.enabled. Updates extracted_fields,
+            # may flip parsing_succeeded (fail_action="reject"), and records the
+            # outcome under metadata["validation"].
+            (
+                extracted_fields,
+                structured_data,
+                validation_metadata,
+                escalation_metering,
+                parsing_succeeded,
+            ) = self._validate_and_maybe_escalate(
+                extracted_fields=extracted_fields,
+                structured_data=structured_data,
+                data_model=dynamic_model,
+                model_id=model_id,
+                message_prompt=message_prompt,
+                agentic_images=agentic_images,
+                custom_instruction=custom_instruction,
+                section_info=section_info,
+                parsing_succeeded=parsing_succeeded,
+            )
+            if validation_metadata is not None:
+                self._pending_validation_metadata = validation_metadata
+            if escalation_metering:
+                from idp_common.extraction.agentic_idp import _accumulate_metering
+
+                _accumulate_metering(metering, escalation_metering)
 
             # Check extraction completeness (warns if schema constraints not met)
             self._check_extraction_completeness(
@@ -1896,9 +2500,12 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         # Check if table parsing tool was used (extract from metering before building metadata)
         tool_used = False
         table_stats = None
+        shard_conflicts = None
         if extraction_method == "agentic" and result.metering:
             table_stats = result.metering.pop("_table_parsing_stats", None)
             tool_used = table_stats is not None
+            # Scalar conflicts surfaced by sharded concurrent extraction.
+            shard_conflicts = result.metering.pop("_shard_scalar_conflicts", None)
 
         # Build base metadata
         metadata: dict[str, Any] = {
@@ -1906,6 +2513,14 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             "extraction_time_seconds": result.total_duration,
             "extraction_method": extraction_method,
         }
+
+        # Audit: which model actually ran this section, and whether it came from
+        # a per-class override vs the global extraction model.
+        if self._pending_extraction_model is not None:
+            metadata["extraction_model"] = self._pending_extraction_model
+            metadata["extraction_model_overridden"] = (
+                self._class_schema.get(X_AWS_IDP_EXTRACTION_MODEL) is not None
+            )
 
         # Add pre-flight analysis results (if agentic)
         if extraction_method == "agentic":
@@ -1947,6 +2562,13 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     tool_used=tool_used,
                 )
 
+            # Population heuristic: flag suspiciously sparse extractions (e.g.
+            # nested fields silently returning null). Advisory only.
+            metadata["population_check"] = self._check_population_completeness(
+                extracted_fields=result.extracted_fields,
+                schema=self._class_schema,
+            )
+
         # Add table parsing stats if tool was used
         if tool_used and table_stats:
             metadata["table_parsing_tool_used"] = True
@@ -1963,6 +2585,16 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         if result.output_repaired:
             metadata["output_repaired"] = True
             metadata["repair_method"] = result.repair_method
+
+        # Add full-schema validation outcome (set by _validate_and_maybe_escalate
+        # when extraction.agentic.validation.enabled).
+        if self._pending_validation_metadata is not None:
+            metadata["validation"] = self._pending_validation_metadata
+
+        # Record scalar-field conflicts detected when merging sharded concurrent
+        # extraction (two shards disagreed on a scalar; first value kept).
+        if shard_conflicts:
+            metadata["shard_scalar_conflicts"] = shard_conflicts
 
         # Apply BLANK vs MISSING field handling (no-op unless configured + declared).
         fields_for_output, missing_fields_report = self._apply_missing_field_handling(
@@ -2107,6 +2739,12 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             page_images = self._load_document_images(
                 document, section_info.sorted_page_ids
             )
+            # Stash the per-page OCR text (in section page order) so the agentic
+            # path can shard the input by page range when concurrent batches are
+            # configured. Pages missing from page_id_to_text contribute "".
+            self._page_texts = [
+                page_id_to_text.get(pid, "") for pid in section_info.sorted_page_ids
+            ]
 
             # Initialize extraction context
             class_schema, attribute_descriptions = self._initialize_extraction_context(

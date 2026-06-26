@@ -563,11 +563,9 @@ Configure agentic extraction in your configuration file:
 
 ```yaml
 extraction:
-  model: "us.anthropic.claude-sonnet-4-20250514-v1:0"  # or Nova models
+  model: "us.anthropic.claude-sonnet-4-6"  # Anthropic Claude recommended for agentic
   agentic:
     enabled: true
-    review_agent: false  # Optional second-pass review
-    review_agent_model: null  # or specify a model for review
     max_concurrent_batches: 1  # Parallel processing (2-10 for very large docs)
     table_parsing:
       enabled: true  # Enable deterministic table parser tool
@@ -576,7 +574,17 @@ extraction:
       use_confidence_data: true  # Cross-reference with OCR confidence
       max_empty_line_gap: 3  # Tolerate up to N empty lines in tables
       auto_merge_adjacent_tables: true  # Merge table fragments
+    validation:                # see "Schema-Constraint Validation" below
+      enabled: false
 ```
+
+> **Every `agentic.*` sub-option only takes effect when `agentic.enabled: true`**
+> — `table_parsing`, `validation`, and `max_concurrent_batches` are all ignored
+> for non-agentic extraction. In the **Configuration UI** these options are
+> progressively disclosed: they appear only after you enable Agentic Extraction,
+> the table-parsing thresholds appear only after you enable the parse_table tool,
+> and the escalation model appears only when validation `fail_action` is
+> `escalate` — so you only see the knobs that currently matter.
 
 ### Table Parsing Tool
 
@@ -671,14 +679,45 @@ Statement Period: January 2025
 
 The table parser transparently skips page markers inside tables — they do not break table continuity or appear in parsed rows.
 
-**Batch extraction** (`max_concurrent_batches > 1`): The document is split into N page ranges, and N agents run in parallel. Each batch agent receives the full document text but extracts only its assigned page range, using page markers to identify boundaries. Results are merged: list fields are concatenated, scalar fields take the last non-None value.
+**Sharded concurrent extraction** (`max_concurrent_batches > 1`): the section's
+pages are split into **token-budgeted page ranges**, and each shard's prompt
+contains **only that shard's OCR text and images** — not the whole document. The
+shards run concurrently (up to `max_concurrent_batches` at a time) and their
+results are merged. This serves two purposes:
+
+1. **Bounds the context window.** Because each agent sees only its pages, a long
+   or dense section that would overflow a single agent's context (the failure
+   mode behind `ContextWindowOverflowException`) is split until each shard fits.
+2. **Reduces wall-clock time** via parallelism.
+
+Key behaviors:
+- **Size-bounded, not count-bounded.** Pages are grouped so each shard's
+  estimated input stays under `shard_token_budget` (default 40,000;
+  `≈ chars/4`). `max_concurrent_batches` is an **upper bound on parallelism and
+  shard count** — a very large section is split into as many shards as needed to
+  fit (capped at `max_concurrent_batches`), not exactly N equal pieces.
+- **Page-aligned splits keep table rows intact.** A table spans pages but each
+  row lives on one page, so splits fall between rows; list fields are
+  concatenated in page order on merge (no row loss/duplication).
+- **Header context propagation.** The section's first-page text is prepended to
+  every later shard (clearly marked "for context only") so column headers and
+  page-1 scalar context survive the split.
+- **Scalar merge.** Each shard extracts what it can see; scalars take the
+  **first non-null** value across shards. If two shards disagree on a scalar, the
+  first is kept and the conflict is recorded in `metadata.shard_scalar_conflicts`.
+
+> If a single shard's input *still* exceeds the model context window, extraction
+> raises a clear, actionable error (enable table parsing / lower
+> `shard_token_budget` / use a larger-context `:1m` model) rather than the
+> opaque Strands "insufficient messages for summarization" message.
 
 ```yaml
-# Enable batch extraction with 4 concurrent agents
+# Enable sharded concurrent extraction (up to 4 shards in parallel)
 extraction:
   agentic:
     enabled: true
     max_concurrent_batches: 4
+    shard_token_budget: 40000   # lower if shards still overflow; raise for 1M-context models
     table_parsing:
       enabled: true
 ```
@@ -706,6 +745,93 @@ Minimum average OCR confidence (Textract scale) for agent to prefer table parsin
 
 #### `min_parse_success_rate` (float, 0-1, default: 0.90)
 Minimum parse success rate for agent to trust parsed results. Below this threshold, agent should fall back to LLM extraction.
+
+### Schema-Constraint Validation and Model Escalation
+
+Agentic extraction always validates the agent's output against the **Pydantic
+model** generated from the class JSON Schema (`field_constraints=True`), so
+`enum`, `pattern`, numeric bounds and `minItems`/`maxItems` violations are fed
+back to the agent for self-correction during extraction.
+
+The optional `extraction.agentic.validation` block adds **full JSON-Schema
+validation** of the final result — most importantly the `format` keyword
+(`date`, `date-time`, `email`, `uri`, `uuid`, ...), which the generated Pydantic
+model does **not** enforce — and an optional **bounded model escalation** when
+validation still fails.
+
+```yaml
+extraction:
+  agentic:
+    enabled: true
+    validation:
+      enabled: false          # Off by default (no behavior change on upgrade)
+      check_formats: true     # Enforce JSON-Schema 'format' keywords
+      fail_action: escalate   # warn | escalate | reject
+      escalation_model: "us.anthropic.claude-opus-4-8"  # stronger tier; "" = retry same model
+```
+
+How it works:
+
+1. After extraction, the merged result is validated against the full class
+   schema. All violations are collected at once (not one-at-a-time) with
+   human-readable field paths.
+2. `fail_action` controls the response when validation fails:
+   - **`warn`** — record a `validation` block in the result metadata and proceed.
+   - **`escalate`** — re-extract **only the failing top-level fields** with a
+     stronger model (`escalation_model`), then merge the corrected fields back
+     into the result. Scoping to the failing fields keeps the schema, prompt and
+     output small — far cheaper and faster than re-running the whole section —
+     and the fields that already validated are preserved untouched. The merged
+     result is kept only if it is valid or has strictly fewer violations; then
+     warn if it still fails. (When the failures can't be expressed as a field
+     subset — e.g. they're root-level only — it falls back to a whole-section
+     re-extraction.)
+   - **`reject`** — mark `parsing_succeeded=false` so downstream/HITL can act.
+3. The outcome is recorded under `metadata.validation` (see *Audit metadata*
+   below).
+
+**Audit metadata.** Each section's extraction result records, under `metadata`:
+- `extraction_model` and `extraction_model_overridden` — the model that actually
+  ran the section and whether it came from a per-class override.
+- `metadata.validation` — `valid`, `error_count`, `failed_fields`, `errors`
+  (path + validator + message), `check_formats`, `fail_action`,
+  `initial_error_count` / `initial_failed_fields` (before any escalation), and —
+  when escalation ran — `escalated`, `escalation_model`, `escalation_scope`
+  (`field-subset` | `full-section`), `escalation_fields`, and
+  `resolved_by_escalation`.
+- `metadata.population_check` — completeness heuristic (advisory). Reports
+  `fields_defined`, `fields_populated`, `population_ratio`, `below_threshold`,
+  and `empty_fields` (dotted paths of unpopulated leaves). A warning is logged
+  when the ratio falls below `validation.min_population_ratio` (default `0.5`).
+  This catches *silent* extraction loss — e.g. nested fields returning null, or
+  a table that extracted zero rows — that schema validation alone cannot, since
+  sparse-but-valid output is still schema-valid. It never fails extraction (a
+  genuinely sparse document scores low too); set `min_population_ratio: 0` to
+  silence the warning.
+
+**Escalation model precedence:** per-class `x-aws-idp-extraction-escalation-model`
+schema extension → global `validation.escalation_model` → the extraction model
+itself (escalation becomes a plain second attempt).
+
+**Configuration UI.** The global `validation` block (enabled / check_formats /
+fail_action / escalation_model) is editable under **Extraction → Agentic
+Extraction → Schema Validation & Escalation** in the Configuration editor. The
+per-class `x-aws-idp-extraction-escalation-model` override is editable as
+"Escalation Model Override" in the **Document Schema** editor, next to the
+per-class extraction-model override.
+
+**Null = absent.** Extraction follows the convention "return `null` if a field is
+not found", and the generated Pydantic model makes every non-required property
+`Optional[...] = None`. Validation therefore treats a `null` property as
+**absent**: an optional field left null passes, while a *required* field left
+null surfaces as a `required` violation (not a confusing type error). Enum /
+pattern / format / numeric / `minItems` checks on present values are unaffected.
+
+> **`format: date` caveat.** JSON-Schema `format: date` means ISO-8601
+> (`YYYY-MM-DD`). The default extraction prompt asks the model for `MM/DD/YYYY`,
+> which is **not** a valid `date` format and will fail format validation. If
+> your schema uses `format: date` for non-ISO dates, either set
+> `check_formats: false` or use a `pattern` instead of `format`.
 
 ### Benefits
 

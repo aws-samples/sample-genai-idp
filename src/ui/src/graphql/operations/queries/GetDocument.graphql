@@ -28,6 +28,7 @@ query GetDocument($objectKey: ID!) {
       ImageUri
       TextUri
       TextConfidenceUri
+      OcrPageDataUri
     }
     Metering
     EvaluationReportUri

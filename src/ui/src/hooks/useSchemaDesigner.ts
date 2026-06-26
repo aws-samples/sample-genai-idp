@@ -7,6 +7,9 @@ import {
   X_AWS_IDP_DOCUMENT_NAME_REGEX,
   X_AWS_IDP_PAGE_CONTENT_REGEX,
   X_AWS_IDP_EXTRACTION_MODEL,
+  X_AWS_IDP_EXTRACTION_ESCALATION_MODEL,
+  X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT,
+  X_AWS_IDP_EXTRACTION_TASK_PROMPT,
   X_AWS_IDP_EXCLUDE_FROM_PROCESSING,
   X_AWS_IDP_EXCLUSION_REASON,
 } from '../constants/schemaConstants';
@@ -233,6 +236,17 @@ const convertJsonSchemaToClasses = (jsonSchema: JsonSchemaProperty | JsonSchemaP
         ...(schema[X_AWS_IDP_PAGE_CONTENT_REGEX] ? { [X_AWS_IDP_PAGE_CONTENT_REGEX]: schema[X_AWS_IDP_PAGE_CONTENT_REGEX] } : {}),
         // Preserve extraction model override if it exists in the schema
         ...(schema[X_AWS_IDP_EXTRACTION_MODEL] ? { [X_AWS_IDP_EXTRACTION_MODEL]: schema[X_AWS_IDP_EXTRACTION_MODEL] } : {}),
+        // Preserve escalation model override if it exists in the schema
+        ...(schema[X_AWS_IDP_EXTRACTION_ESCALATION_MODEL]
+          ? { [X_AWS_IDP_EXTRACTION_ESCALATION_MODEL]: schema[X_AWS_IDP_EXTRACTION_ESCALATION_MODEL] }
+          : {}),
+        // Preserve extraction prompt overrides if they exist in the schema
+        ...(schema[X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT]
+          ? { [X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT]: schema[X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT] }
+          : {}),
+        ...(schema[X_AWS_IDP_EXTRACTION_TASK_PROMPT]
+          ? { [X_AWS_IDP_EXTRACTION_TASK_PROMPT]: schema[X_AWS_IDP_EXTRACTION_TASK_PROMPT] }
+          : {}),
         // Preserve excluded-class flags if they exist in the schema
         ...(schema[X_AWS_IDP_EXCLUDE_FROM_PROCESSING]
           ? { [X_AWS_IDP_EXCLUDE_FROM_PROCESSING]: schema[X_AWS_IDP_EXCLUDE_FROM_PROCESSING] }
@@ -308,6 +322,17 @@ const convertJsonSchemaToClasses = (jsonSchema: JsonSchemaProperty | JsonSchemaP
     ...(jsonSchema[X_AWS_IDP_PAGE_CONTENT_REGEX] ? { [X_AWS_IDP_PAGE_CONTENT_REGEX]: jsonSchema[X_AWS_IDP_PAGE_CONTENT_REGEX] } : {}),
     // Preserve extraction model override if it exists in the schema
     ...(jsonSchema[X_AWS_IDP_EXTRACTION_MODEL] ? { [X_AWS_IDP_EXTRACTION_MODEL]: jsonSchema[X_AWS_IDP_EXTRACTION_MODEL] } : {}),
+    // Preserve escalation model override if it exists in the schema
+    ...(jsonSchema[X_AWS_IDP_EXTRACTION_ESCALATION_MODEL]
+      ? { [X_AWS_IDP_EXTRACTION_ESCALATION_MODEL]: jsonSchema[X_AWS_IDP_EXTRACTION_ESCALATION_MODEL] }
+      : {}),
+    // Preserve extraction prompt overrides if they exist in the schema
+    ...(jsonSchema[X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT]
+      ? { [X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT]: jsonSchema[X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT] }
+      : {}),
+    ...(jsonSchema[X_AWS_IDP_EXTRACTION_TASK_PROMPT]
+      ? { [X_AWS_IDP_EXTRACTION_TASK_PROMPT]: jsonSchema[X_AWS_IDP_EXTRACTION_TASK_PROMPT] }
+      : {}),
     // Preserve excluded-class flags if they exist in the schema
     ...(jsonSchema[X_AWS_IDP_EXCLUDE_FROM_PROCESSING]
       ? { [X_AWS_IDP_EXCLUDE_FROM_PROCESSING]: jsonSchema[X_AWS_IDP_EXCLUDE_FROM_PROCESSING] }
@@ -779,6 +804,15 @@ export const useSchemaDesigner = (
           ? { [X_AWS_IDP_PAGE_CONTENT_REGEX]: docTypeClass[X_AWS_IDP_PAGE_CONTENT_REGEX] }
           : {}),
         ...(docTypeClass[X_AWS_IDP_EXTRACTION_MODEL] ? { [X_AWS_IDP_EXTRACTION_MODEL]: docTypeClass[X_AWS_IDP_EXTRACTION_MODEL] } : {}),
+        ...(docTypeClass[X_AWS_IDP_EXTRACTION_ESCALATION_MODEL]
+          ? { [X_AWS_IDP_EXTRACTION_ESCALATION_MODEL]: docTypeClass[X_AWS_IDP_EXTRACTION_ESCALATION_MODEL] }
+          : {}),
+        ...(docTypeClass[X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT]
+          ? { [X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT]: docTypeClass[X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT] }
+          : {}),
+        ...(docTypeClass[X_AWS_IDP_EXTRACTION_TASK_PROMPT]
+          ? { [X_AWS_IDP_EXTRACTION_TASK_PROMPT]: docTypeClass[X_AWS_IDP_EXTRACTION_TASK_PROMPT] }
+          : {}),
         ...(docTypeClass[X_AWS_IDP_EXCLUDE_FROM_PROCESSING]
           ? { [X_AWS_IDP_EXCLUDE_FROM_PROCESSING]: docTypeClass[X_AWS_IDP_EXCLUDE_FROM_PROCESSING] }
           : {}),

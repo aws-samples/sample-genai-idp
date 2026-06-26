@@ -145,9 +145,15 @@ def create_job(job: PostJobRequest) -> PostJobResponse:
             expires_after=expires_after,
             metadata=metadata_dict,
             created_by=created_by or None,
+            configuration_version=job.configurationVersion,
         )
 
-        # Generate presigned POST URL
+        # Generate presigned POST URL. The configuration version is NOT carried
+        # on the staging zip's S3 metadata here — it is persisted on the job
+        # record above and re-applied by the batch pre-processor as
+        # `config-version` metadata on each extracted file (the form the
+        # pipeline's Document.from_s3_event actually reads). The DynamoDB job
+        # record is the single source of truth for the per-job config version.
         presigned_post = s3_client.generate_presigned_post(
             Bucket=STAGING_BUCKET,
             Key=object_key,
@@ -234,6 +240,7 @@ def get_job(job_id: str) -> GetJobResponse:
         return GetJobResponse(
             jobId=job_id,
             status=job_status,
+            configurationVersion=job_record.get("ConfigurationVersion"),
             timestamps=Timestamps(
                 createdAt=job_record.get("CreatedAt", ""),
                 updatedAt=job_record.get("UpdatedAt", ""),

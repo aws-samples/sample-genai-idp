@@ -137,6 +137,15 @@ Parameters:
     Type: String
     Description: "Content-based version for Lambda container images"
 
+  LambdaArchitecture:
+    Type: String
+    Default: "arm64"
+    AllowedValues: ["arm64", "x86_64"]
+    Description: >-
+      CPU architecture for Lambda container images. Must match the base image
+      used in the Docker build. Use arm64 (Graviton) for best price-performance
+      or x86_64 when using custom base images that only support AMD64.
+
   ArtifactBucket:
     Type: String
     Description: "S3 bucket containing deployment artifacts"
@@ -902,6 +911,26 @@ Resources:
                 default: 0
                 order: 3.6
                 dependsOn: { field: "classificationMethod", value: "multimodalPageLevelClassification" }
+              enforceValidClasses:
+                type: boolean
+                description: "When enabled, the predicted class is validated against the defined class vocabulary. If the model returns a class that is not in the list, it is re-prompted with the valid choices and retried (see Max Validation Retries). If retries are exhausted, the page is assigned the Invalid Class Fallback and flagged with a validation error. When disabled, an out-of-vocabulary prediction is used as-is (legacy behavior). Only applies to multimodalPageLevelClassification."
+                default: true
+                order: 3.7
+                dependsOn: { field: "classificationMethod", value: "multimodalPageLevelClassification" }
+              maxValidationRetries:
+                type: integer
+                description: "Maximum number of times to re-prompt the model when it returns a class outside the defined vocabulary. Only used when Enforce Valid Classes is enabled. 0 disables retries (a single invalid prediction goes straight to the fallback)."
+                minimum: 0
+                maximum: 5
+                default: 2
+                order: 3.8
+                dependsOn: { field: "enforceValidClasses", value: true }
+              invalidClassFallback:
+                type: string
+                description: "Class label assigned to a page when all validation retries are exhausted. Should be one of your defined classes, or the built-in 'unclassified'. Only used when Enforce Valid Classes is enabled."
+                default: "unclassified"
+                order: 3.9
+                dependsOn: { field: "enforceValidClasses", value: true }
               temperature:
                 type: number
                 minimum: 0
@@ -1009,53 +1038,179 @@ Resources:
             properties:
               agentic:
                 type: object
-                sectionLabel: Agentic Extraction configuration
-                description: If enabled the extraction will happen inside a Strands Agent Loop, that allows the model to retry. Recommnded with Anthropic models, small models likely to fail.
+                sectionLabel: Agentic Extraction
+                description: "Runs extraction inside a Strands agent loop so the model can use tools and self-correct. Recommended with Anthropic Claude models; small models are likely to fail. Turn on 'Enable Agentic Extraction' to reveal the agentic options (table parsing, schema validation, escalation)."
                 order: 0
                 properties:
                   enabled:
                     type: boolean
-                    description: Enable Agentic Extraction
+                    description: "Enable Agentic Extraction. When off, extraction uses a single standard model call and the options below are ignored."
                     order: 0
                     default: false
                   max_concurrent_batches:
                     type: number
-                    description: "Number of concurrent page-batch agents for parallel extraction. 1=sequential (default). Higher values (2-5) split pages into batches and run agents concurrently for faster extraction. Increases Bedrock RPM usage. Tune based on your Bedrock quota."
+                    description: "Only used when Agentic Extraction is enabled. Max concurrent extraction agents. 1 = single pass (default). >1 SHARDS the section's pages into token-budgeted ranges (each agent sees ONLY its pages, not the whole document) and runs them concurrently - this both speeds up long documents AND prevents context-window overflow. Acts as an upper bound on parallelism and shard count. Higher values increase Bedrock requests-per-minute; tune to your quota."
                     minimum: 1
                     maximum: 10
                     default: 1
+                    order: 1
+                    dependsOn: { field: "enabled", value: true }
+                  shard_token_budget:
+                    type: number
+                    description: "Only used when concurrent extraction is active (max_concurrent_batches > 1). Target maximum input tokens (estimated ~chars/4) of OCR text per shard. Pages are grouped so each shard stays under this budget, creating as many shards as needed (capped by max_concurrent_batches). Lower this if shards still overflow the model context; raise it for large-context models (e.g. 1M-context Claude)."
+                    minimum: 1000
+                    maximum: 900000
+                    default: 40000
+                    order: 2
+                    dependsOn: { field: "enabled", value: true }
                   table_parsing:
                     type: object
                     sectionLabel: Table Parsing Tool
-                    description: "When enabled, the extraction agent gains a deterministic parse_table tool for efficiently extracting well-formatted Markdown tables from OCR output without LLM inference. The agent decides when to use this tool based on table quality and OCR confidence metrics."
-                    order: 4
+                    description: "Only used when Agentic Extraction is enabled. Gives the agent a deterministic parse_table tool that extracts well-formatted Markdown tables from OCR output without LLM inference - faster and more reliable for large/dense tables (bank statements, transaction logs). The agent decides when to use it based on table quality."
+                    order: 3
+                    dependsOn: { field: "enabled", value: true }
                     properties:
                       enabled:
                         type: boolean
-                        description: "Enable the parse_table tool for the extraction agent. When enabled, the agent can use deterministic table parsing for well-formatted OCR tabular data instead of LLM inference."
+                        description: "Enable the parse_table tool. When enabled, the agent can use deterministic table parsing for well-formatted OCR tabular data instead of generating table rows with the LLM."
                         order: 0
                         default: false
                       min_confidence_threshold:
                         type: number
-                        description: "Minimum average OCR text confidence (Textract 0-100 scale) for the agent to prefer table parsing over LLM extraction. Included in the agent system prompt as guidance."
+                        description: "Only used when this tool is enabled. Minimum average OCR text confidence (Textract 0-100 scale) for the agent to prefer table parsing over LLM extraction. Included in the agent system prompt as guidance. Default: 95."
                         minimum: 0
                         maximum: 100
                         default: 95
+                        order: 1
+                        dependsOn: { field: "enabled", value: true }
                       min_parse_success_rate:
                         type: number
-                        description: "Minimum parse_success_rate from the parse_table tool for the agent to trust parsed results. Below this threshold, the agent falls back to LLM extraction."
+                        description: "Only used when this tool is enabled. Minimum parse_success_rate from the parse_table tool for the agent to trust parsed results. Below this threshold, the agent falls back to LLM extraction. Default: 0.9."
                         minimum: 0
                         maximum: 1
                         default: 0.9
+                        order: 2
+                        dependsOn: { field: "enabled", value: true }
                       use_confidence_data:
                         type: boolean
-                        description: "Whether to load and provide OCR confidence data to the parse_table tool for quality assessment. Requires text_confidence_uri from Textract OCR."
+                        description: "Only used when this tool is enabled. Load and provide OCR confidence data to the parse_table tool for quality assessment. Requires text_confidence_uri from Textract OCR (no effect with other OCR backends). Default: on."
                         default: true
+                        order: 3
+                        dependsOn: { field: "enabled", value: true }
+                      max_empty_line_gap:
+                        type: number
+                        description: "Only used when this tool is enabled. Maximum consecutive empty lines tolerated inside a table before treating it as a boundary - helps recover tables split by OCR page breaks. Higher = more tolerant but may merge unrelated tables. Tuning: 2 for high-quality OCR, 3 standard, 5-7 for noisy documents. Default: 3."
+                        minimum: 0
+                        maximum: 10
+                        default: 3
+                        order: 4
+                        dependsOn: { field: "enabled", value: true }
+                      auto_merge_adjacent_tables:
+                        type: boolean
+                        description: "Only used when this tool is enabled. Automatically merge consecutive tables with identical columns (recovers tables split by page breaks). Disable if a document legitimately contains multiple separate tables with the same columns. Default: on."
+                        default: true
+                        order: 5
+                        dependsOn: { field: "enabled", value: true }
+                  validation:
+                    type: object
+                    sectionLabel: Schema Validation & Escalation
+                    description: "Only used when Agentic Extraction is enabled. Validates the agent's output against the full class JSON Schema (notably 'format' keywords like date/email/uuid that the model's type validation does not enforce) and optionally escalates failing fields to a stronger model. Off by default."
+                    order: 4
+                    dependsOn: { field: "enabled", value: true }
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Enable full JSON-Schema validation of the extraction result. Violations are fed back to the agent for self-correction; remaining failures are handled per Fail Action below."
+                        order: 0
+                        default: false
+                      check_formats:
+                        type: boolean
+                        description: "Only used when validation is enabled. Enforce JSON-Schema 'format' keywords (date, date-time, email, uri, uuid, ...). Note: 'format: date' means ISO-8601 (YYYY-MM-DD); disable this if your schema uses 'format: date' for non-ISO values such as MM/DD/YYYY (or use a 'pattern' instead). Default: on."
+                        order: 1
+                        default: true
+                        dependsOn: { field: "enabled", value: true }
+                      fail_action:
+                        type: string
+                        description: "Only used when validation is enabled. What to do when validation still fails after the agent's own retries. 'warn': record the outcome in metadata and proceed. 'escalate': re-extract only the failing fields with the Escalation Model (roughly doubles that section's cost, still far cheaper than human review), then warn if still invalid. 'reject': mark the section as failed so downstream/HITL can act. Default: escalate."
+                        enum: ["warn", "escalate", "reject"]
+                        order: 2
+                        default: "escalate"
+                        dependsOn: { field: "enabled", value: true }
+                      escalation_model:
+                        type: string
+                        description: "Only used when Fail Action is 'escalate'. Stronger Bedrock model used to re-extract failing fields. Select blank to retry with the extraction model. Can be overridden per document class via the 'x-aws-idp-extraction-escalation-model' schema extension in the Document Schema editor."
+                        order: 3
+                        dependsOn: { field: "fail_action", value: "escalate" }
+                        enum:
+                          - ""
+                          - "us.amazon.nova-lite-v1:0"
+                          - "us.amazon.nova-pro-v1:0"
+                          - "us.amazon.nova-premier-v1:0"
+                          - "us.amazon.nova-2-lite-v1:0"
+                          - "us.amazon.nova-2-lite-v1:0:priority"
+                          - "us.amazon.nova-2-lite-v1:0:flex"
+                          - "global.amazon.nova-2-lite-v1:0"
+                          - "global.amazon.nova-2-lite-v1:0:priority"
+                          - "global.amazon.nova-2-lite-v1:0:flex"
+                          - "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+                          - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+                          - "us.anthropic.claude-sonnet-4-6"
+                          - "us.anthropic.claude-sonnet-4-6:1m"
+                          - "us.anthropic.claude-opus-4-5-20251101-v1:0"
+                          - "us.anthropic.claude-opus-4-6-v1"
+                          - "us.anthropic.claude-opus-4-6-v1:1m"
+                          - "us.anthropic.claude-opus-4-7"
+                          - "us.anthropic.claude-opus-4-7:1m"
+                          - "us.anthropic.claude-opus-4-8"
+                          - "us.anthropic.claude-opus-4-8:1m"
+                          - "openai.gpt-5.4"
+                          - "openai.gpt-5.5"
+                          - "eu.amazon.nova-lite-v1:0"
+                          - "eu.amazon.nova-pro-v1:0"
+                          - "eu.amazon.nova-2-lite-v1:0"
+                          - "eu.amazon.nova-2-lite-v1:0:priority"
+                          - "eu.amazon.nova-2-lite-v1:0:flex"
+                          - "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
+                          - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
+                          - "eu.anthropic.claude-sonnet-4-6"
+                          - "eu.anthropic.claude-sonnet-4-6:1m"
+                          - "eu.anthropic.claude-opus-4-5-20251101-v1:0"
+                          - "eu.anthropic.claude-opus-4-6-v1"
+                          - "eu.anthropic.claude-opus-4-6-v1:1m"
+                          - "eu.anthropic.claude-opus-4-7"
+                          - "eu.anthropic.claude-opus-4-7:1m"
+                          - "eu.anthropic.claude-opus-4-8"
+                          - "eu.anthropic.claude-opus-4-8:1m"
+                          - "qwen.qwen3-vl-235b-a22b"
+                          - "us.meta.llama4-maverick-17b-instruct-v1:0"
+                          - "us.meta.llama4-scout-17b-instruct-v1:0"
+                          - "google.gemma-3-27b-it"
+                          - "nvidia.nemotron-nano-12b-v2"
+                          - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+                          - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+                          - "global.anthropic.claude-sonnet-4-6"
+                          - "global.anthropic.claude-sonnet-4-6:1m"
+                          - "global.anthropic.claude-opus-4-5-20251101-v1:0"
+                          - "global.anthropic.claude-opus-4-6-v1"
+                          - "global.anthropic.claude-opus-4-6-v1:1m"
+                          - "global.anthropic.claude-opus-4-7"
+                          - "global.anthropic.claude-opus-4-7:1m"
+                          - "global.anthropic.claude-opus-4-8"
+                          - "global.anthropic.claude-opus-4-8:1m"
+                        default: ""
+                      min_population_ratio:
+                        type: number
+                        description: "Only used when validation is enabled. Advisory completeness threshold (0-1). After extraction, the fraction of schema-defined fields that came back populated is computed; if it falls below this value a warning is logged and metadata.population_check is flagged (catches silent loss such as nested fields returning null or a table extracting zero rows). Advisory only - never fails extraction. Set to 0 to disable. Default: 0.5."
+                        minimum: 0
+                        maximum: 1
+                        order: 4
+                        default: 0.5
+                        dependsOn: { field: "enabled", value: true }
               image:
                 type: object
                 sectionLabel: Image Processing Settings
                 description: Configure image resolution and processing options for for image attachments in extraction
-                order: 0
+                order: 6.6
                 properties:
                   target_width:
                     type: number
@@ -1069,6 +1224,24 @@ Resources:
                     minimum: 100
                     maximum: 3500
                     order: 1
+              missing_field_handling:
+                type: object
+                sectionLabel: Missing vs Blank Fields
+                description: "Distinguish a BLANK field (its source page is present but the value is empty) from a MISSING field (its source page is absent from the section). Requires class schemas to declare 'x-aws-idp-page-types' and properties to declare 'x-aws-idp-source-page-types'. Off by default."
+                order: 6.7
+                properties:
+                  enabled:
+                    type: boolean
+                    description: "Enable BLANK vs MISSING field handling. When off (default), all unfound fields are treated the same."
+                    order: 0
+                    default: false
+                  representation:
+                    type: string
+                    description: "Only used when enabled. How to represent a MISSING field in the output. 'omit': drop the key entirely. 'null_with_metadata': keep the key as null and list it under a sibling 'missing_fields' array. Default: omit."
+                    enum: ["omit", "null_with_metadata"]
+                    default: "omit"
+                    order: 1
+                    dependsOn: { field: "enabled", value: true }
               model:
                 type: string
                 description: "Model identifier. Select 'LambdaHook' to use a custom Lambda function for inference. NOTE: OpenAI GPT-5.x models (openai.gpt-5.*) run via the bedrock-mantle Responses API and are NOT compatible with agentic extraction (agentic.enabled=true); that combination is rejected by config validation."
@@ -1261,6 +1434,12 @@ Resources:
                 description: Enable or disable assessment validation checks
                 default: false
                 order: 3
+                dependsOn: { field: "use_bda", value: false }
+              ground_geometry_in_ocr:
+                type: boolean
+                description: Replace LLM-estimated bounding boxes with real OCR geometry from pageData.json when the extracted value matches an OCR line. Falls back to the LLM-estimated box when OCR geometry is unavailable or no match is found.
+                default: true
+                order: 4
                 dependsOn: { field: "use_bda", value: false }
               image:
                 type: object
@@ -2893,6 +3072,8 @@ Resources:
             Value: !Ref ImageVersion
           - Name: AWS_REGION
             Value: !Ref AWS::Region
+          - Name: LAMBDA_ARCHITECTURE
+            Value: !Ref LambdaArchitecture
       TimeoutInMinutes: 90
 
   CodeBuildExecutionRole:
@@ -3021,6 +3202,7 @@ Resources:
       # Force rebuild when source changes (filename includes content hash)
       CodeLocation: !Sub "arn:${AWS::Partition}:s3:::${ArtifactBucket}/${ArtifactPrefix}/${SourceZipfile}"
       ImageVersion: !Ref ImageVersion
+      LambdaArchitecture: !Ref LambdaArchitecture
       ExpectedImages:
         - "bda-invoke-function"
         - "bda-completion-function"
@@ -3086,7 +3268,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:bda-invoke-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       Timeout: 900
       MemorySize: 4096
       Tracing: Active
@@ -3155,7 +3337,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:bda-processresults-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       Timeout: 900
       MemorySize: 4096
       Tracing: Active
@@ -3288,7 +3470,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:bda-completion-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       Timeout: 900
       MemorySize: 4096
       Tracing: Active
@@ -3415,7 +3597,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:ocr-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -3572,7 +3754,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:classification-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -3741,7 +3923,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:extraction-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -3908,7 +4090,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:assessment-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -4066,7 +4248,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:processresults-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -4165,7 +4347,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:summarization-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -4412,7 +4594,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:evaluation-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -4553,7 +4735,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:test-execution-aggregation-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       Timeout: 900
       MemorySize: 4096
       Tracing: Active
@@ -4614,7 +4796,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:rule-validation-policy-classification-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -4710,7 +4892,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:rule-validation-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -4857,7 +5039,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:rule-validation-orchestration-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -5026,7 +5208,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:mlflow-logger-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"

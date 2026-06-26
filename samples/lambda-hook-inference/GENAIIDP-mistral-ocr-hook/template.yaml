@@ -1,0 +1,116 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  GENAIIDP-mistral-ocr-hook: Lambda Hook that calls the hosted Mistral OCR API
+  for high-quality OCR. Returns markdown text plus Amazon Textract-format blocks
+  (per-word confidence scores and bounding-box geometry) for downstream
+  assessment and UI highlighting. Fully serverless — no SageMaker endpoint
+  required.
+
+Parameters:
+  IDPWorkingBucket:
+    Type: String
+    Description: >
+      Name of the IDP stack's working S3 bucket. Required for reading images
+      that are uploaded as S3 references in the LambdaHook payload.
+
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Default: ""
+    Description: >
+      (Optional) ARN of the KMS key used to encrypt the IDP working bucket.
+      Required if the working bucket uses customer-managed KMS encryption.
+
+  MistralApiKey:
+    Type: String
+    NoEcho: true
+    Description: >
+      Mistral API key (Bearer token) for authenticating with the hosted
+      Mistral OCR API. Get your API key from https://console.mistral.ai
+
+  MistralApiUrl:
+    Type: String
+    Default: "https://api.mistral.ai/v1/ocr"
+    Description: >
+      Mistral OCR endpoint URL. Defaults to the hosted API.
+
+  MistralOcrModel:
+    Type: String
+    Default: "mistral-ocr-latest"
+    Description: >
+      Mistral OCR model id. 'mistral-ocr-latest' tracks the newest model
+      (currently Mistral OCR 4).
+
+  IncludeBlocks:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >
+      Request paragraph-level bounding boxes (blocks). Required to capture
+      geometry for UI highlighting. Available on mistral-ocr-4-0 or newer.
+
+  ConfidenceGranularity:
+    Type: String
+    Default: "word"
+    AllowedValues:
+      - word
+      - page
+    Description: >
+      Confidence score granularity. 'word' captures per-word confidence;
+      'page' captures only page-level aggregate confidence.
+
+Conditions:
+  HasKMSKey: !Not [!Equals [!Ref CustomerManagedEncryptionKeyArn, ""]]
+
+Resources:
+  MistralOcrHookFunction:
+    Type: AWS::Serverless::Function
+    # checkov:skip=CKV_AWS_173: "API key is passed via NoEcho parameter, encrypted at rest by Lambda service"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for sample Lambda hook function - errors handled by IDP pipeline"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it calls an external HTTPS API"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency - sample function for demonstration purposes"
+    Properties:
+      FunctionName: GENAIIDP-mistral-ocr-hook
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      CodeUri: .
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          MISTRAL_API_KEY: !Ref MistralApiKey
+          MISTRAL_API_URL: !Ref MistralApiUrl
+          MISTRAL_OCR_MODEL: !Ref MistralOcrModel
+          INCLUDE_BLOCKS: !Ref IncludeBlocks
+          CONFIDENCE_GRANULARITY: !Ref ConfidenceGranularity
+          REQUEST_TIMEOUT: "120"
+          LOG_LEVEL: INFO
+      Policies:
+        - Statement:
+            # Read images from IDP working bucket
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource:
+                - !Sub "arn:${AWS::Partition}:s3:::${IDPWorkingBucket}/temp/lambdahook/*"
+            # KMS decrypt if working bucket uses customer-managed encryption
+            - !If
+              - HasKMSKey
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+              - !Ref AWS::NoValue
+
+Outputs:
+  FunctionArn:
+    Description: ARN of the Mistral OCR Lambda hook function
+    Value: !GetAtt MistralOcrHookFunction.Arn
+
+  Usage:
+    Description: How to use in IDP configuration
+    Value: !Sub |
+      Set OCR backend to "bedrock", model_id to "LambdaHook", and model_lambda_hook_arn to "${MistralOcrHookFunction.Arn}"

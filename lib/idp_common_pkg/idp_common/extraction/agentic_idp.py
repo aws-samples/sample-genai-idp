@@ -17,6 +17,7 @@ import threading
 from pathlib import Path
 from typing import (
     Any,
+    Callable,
     TypedDict,
     TypeVar,
 )
@@ -803,6 +804,36 @@ async def invoke_agent_with_retry(input: AgentInput, agent: Agent):
     return await agent.invoke_async(input)
 
 
+def _is_context_overflow_error(exc: Exception) -> bool:
+    """Heuristically detect a model context-window overflow.
+
+    Strands raises ``ContextWindowOverflowException`` and, when its
+    SummarizingConversationManager can't recover (e.g. the very first turn
+    already overflows), surfaces "Cannot summarize: insufficient messages for
+    summarization". Bedrock may also report validation errors mentioning the
+    input/context length. Match on type name and message text rather than
+    importing Strands' exception type (keeps this module import-light).
+    """
+    name = type(exc).__name__
+    msg = str(exc).lower()
+    if "contextwindowoverflow" in name.lower():
+        return True
+    # Keep these specific to context-window/token-budget overflow so an
+    # unrelated validation error is not mis-tagged (the message is advisory,
+    # but a wrong remediation is still noise).
+    needles = (
+        "insufficient messages for summarization",
+        "context window",
+        "context length",
+        "input is too long",
+        "too many input tokens",
+        "too many tokens",
+        "maximum context length",
+        "exceeds the context",
+    )
+    return any(n in msg for n in needles)
+
+
 def _initialize_token_usage() -> dict[str, int]:
     """Initialize token usage tracking dictionary."""
     return {
@@ -1173,6 +1204,7 @@ async def _invoke_agent_for_extraction(
     prompt_content: list[ContentBlock],
     data_format: type[TargetModel],
     max_extraction_retries: int = 3,
+    schema_validator: Callable[[dict[str, Any]], tuple[bool, str]] | None = None,
 ) -> tuple[Any, TargetModel | None]:
     """
     Invoke agent and retry if extraction fails.
@@ -1185,6 +1217,11 @@ async def _invoke_agent_for_extraction(
         prompt_content: List of ContentBlocks to send to the agent
         data_format: Pydantic model class for validation
         max_extraction_retries: Maximum retry attempts for failed extractions (default: 3)
+        schema_validator: Optional callback that takes the extracted dict and
+            returns ``(is_valid, feedback)``. Used to enforce full JSON-Schema
+            constraints (e.g. ``format`` keywords) that the Pydantic model does
+            not, and to give the agent one more self-correction round with the
+            list of violations. When None, only Pydantic type validation runs.
 
     Returns:
         Tuple of (response, validated_result or None)
@@ -1193,7 +1230,22 @@ async def _invoke_agent_for_extraction(
 
     for attempt in range(max_extraction_retries):
         # invoke_agent_with_retry already handles network errors and throttling
-        response = await invoke_agent_with_retry(agent=agent, input=prompt_content)
+        try:
+            response = await invoke_agent_with_retry(agent=agent, input=prompt_content)
+        except Exception as e:  # noqa: BLE001 - translate one specific failure mode
+            if _is_context_overflow_error(e):
+                raise ValueError(
+                    "Extraction input exceeds the model's context window. The "
+                    "document/section is too large to process in one agent pass. "
+                    "Remedies: enable concurrent sharding "
+                    "(extraction.agentic.max_concurrent_batches > 1) and/or lower "
+                    "extraction.agentic.shard_token_budget; enable table parsing "
+                    "(requires Textract TABLES so OCR emits Markdown tables); "
+                    "reduce attached page images; or use a larger-context model "
+                    "(e.g. a ':1m' Claude variant). "
+                    f"(underlying error: {e})"
+                ) from e
+            raise
         logger.debug("Agent response received")
 
         # Try to get extraction from state
@@ -1202,6 +1254,27 @@ async def _invoke_agent_for_extraction(
         if current_extraction:
             try:
                 result = data_format(**current_extraction)
+                # Pydantic type validation passed. Optionally enforce the full
+                # JSON Schema (format keywords, etc.) and feed any violations
+                # back for one more self-correction round.
+                if schema_validator is not None:
+                    is_valid, feedback = schema_validator(current_extraction)
+                    if not is_valid and attempt < max_extraction_retries - 1:
+                        logger.info(
+                            "Schema-constraint validation failed, asking agent to fix",
+                            extra={
+                                "attempt": attempt + 1,
+                                "data_format": data_format.__name__,
+                            },
+                        )
+                        prompt_content = [ContentBlock(text=feedback)]
+                        continue
+                    if not is_valid:
+                        logger.warning(
+                            "Schema-constraint validation still failing after retries; "
+                            "returning best-effort result for escalation/alerting",
+                            extra={"data_format": data_format.__name__},
+                        )
                 logger.debug(
                     "Successfully validated extraction",
                     extra={"data_format": data_format.__name__, "attempt": attempt + 1},
@@ -1257,16 +1330,15 @@ async def _invoke_agent_for_extraction(
     return response, None
 
 
-async def _run_batch_agent(
-    batch_index: int,
-    total_batches: int,
+async def _run_shard_agent(
+    shard_index: int,
+    total_shards: int,
     page_start: int,
     page_end: int,
     total_pages: int,
     model_id: str,
     data_format: type[TargetModel],
-    prompt: str | Message | Image.Image,
-    page_images: list[bytes] | None,
+    shard_prompt: str | Message | Image.Image,
     config: IDPConfig,
     context: str,
     max_retries: int,
@@ -1276,25 +1348,29 @@ async def _run_batch_agent(
     checkpoint_callback: Any | None,
     base_custom_instruction: str | None = None,
 ) -> tuple[TargetModel, BedrockInvokeModelResponse]:
-    """Run a single batch agent for a page range, with instructions to extract only its assigned pages."""
-    # Build a custom instruction telling this agent its page assignment
-    batch_instruction = (
-        f"You are batch {batch_index + 1} of {total_batches}. "
-        f"Extract data ONLY from pages {page_start + 1} to {page_end} "
-        f"(out of {total_pages} total pages). "
-        f"Ignore content from other pages."
-    )
+    """Run one extraction agent over a single shard.
 
-    # Combine base custom instruction with batch instruction
-    combined_instruction = batch_instruction
+    ``shard_prompt`` already contains ONLY this shard's page text/images (the
+    service slices the input before calling). The instruction reinforces that
+    the agent should extract everything visible in its pages; fields that live
+    on other pages are simply absent (resolved at merge).
+    """
+    shard_instruction = (
+        f"You are processing shard {shard_index + 1} of {total_shards}, covering "
+        f"pages {page_start + 1}-{page_end} of {total_pages}. The document text "
+        f"and images you have been given contain ONLY these pages. Extract every "
+        f"requested field that appears in your pages. If a field does not appear "
+        f"in your pages, leave it null — another shard will provide it."
+    )
+    combined_instruction = shard_instruction
     if base_custom_instruction:
-        combined_instruction = f"{base_custom_instruction}\n\n{batch_instruction}"
+        combined_instruction = f"{base_custom_instruction}\n\n{shard_instruction}"
 
     return await structured_output_async(
         model_id=model_id,
         data_format=data_format,
-        prompt=prompt,
-        page_images=page_images,
+        prompt=shard_prompt,
+        page_images=None,  # images already embedded in shard_prompt content
         config=config,
         context=context,
         max_retries=max_retries,
@@ -1324,12 +1400,102 @@ def _accumulate_metering(
                 merged_metering[mk][tk] = (merged_metering[mk].get(tk) or 0) + (tv or 0)
 
 
+def _list_valued_fields(data_format: type[BaseModel]) -> set[str]:
+    """Return the names of ``data_format`` fields that are list-typed.
+
+    Used so the shard merge treats a field consistently as a list even when an
+    individual shard returns it as ``None`` (an optional ``list | None`` left
+    empty by, e.g., a cover-page shard). Falls back to an empty set if the model
+    has no introspectable fields.
+    """
+    fields = getattr(data_format, "model_fields", None)
+    if not fields:
+        return set()
+    list_fields: set[str] = set()
+    for name, info in fields.items():
+        annotation = getattr(info, "annotation", None)
+        if _annotation_is_list(annotation):
+            list_fields.add(name)
+    return list_fields
+
+
+def _annotation_is_list(annotation: Any) -> bool:
+    """True if a type annotation is ``list`` / ``list[...]`` / ``Optional[list]``."""
+    import typing
+
+    if annotation is list:
+        return True
+    origin = typing.get_origin(annotation)
+    if origin in (list, __import__("builtins").list):
+        return True
+    # Unwrap Optional/Union and check members.
+    if origin is not None:
+        return any(_annotation_is_list(arg) for arg in typing.get_args(annotation))
+    return False
+
+
+def _merge_shard_results(
+    results: list[tuple[Any, dict[str, Any]]],
+    data_format: type[TargetModel],
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    """Merge per-shard extraction dicts into one.
+
+    - **List fields** (by the schema's field types) are concatenated in shard
+      order; a shard that returns the field as ``None`` contributes nothing.
+      Rows live on single pages, so page-aligned shards keep them intact/ordered.
+    - **Scalar fields** take the FIRST non-null value across shards; if a later
+      shard provides a *different* non-null value, that is recorded as a conflict
+      (the first value wins, the conflict is surfaced in metadata for audit).
+
+    List membership is decided by ``data_format`` field types (not the runtime
+    value) so an optional ``list | None`` field returned as ``None`` by one shard
+    and a list by another merges correctly rather than crashing.
+
+    Returns ``(merged_dict, merged_metering, conflicts)``.
+    """
+    list_fields = _list_valued_fields(data_format)
+    merged_dict: dict[str, Any] = {}
+    merged_metering: dict[str, Any] = {}
+    conflicts: list[dict[str, Any]] = []
+
+    for result_data, result_response in results:
+        result_dict = result_data.model_dump(mode="json")
+        for key, value in result_dict.items():
+            # Treat as a list field if the schema says so, or (defensively) if
+            # any shard actually produced a list for it.
+            is_list_field = key in list_fields or isinstance(value, list)
+            if is_list_field:
+                existing = merged_dict.get(key)
+                if not isinstance(existing, list):
+                    # Replaces a prior None/absent with a fresh list before extend.
+                    merged_dict[key] = []
+                if isinstance(value, list):
+                    merged_dict[key].extend(value)
+            elif value is not None:
+                if key not in merged_dict or merged_dict[key] is None:
+                    merged_dict[key] = value
+                elif merged_dict[key] != value:
+                    # Two shards disagree on a scalar. Keep the first; record it.
+                    conflicts.append(
+                        {
+                            "field": key,
+                            "kept": merged_dict[key],
+                            "discarded": value,
+                        }
+                    )
+            else:
+                # Preserve the key as null if no shard has filled it yet.
+                merged_dict.setdefault(key, None)
+        _accumulate_metering(merged_metering, result_response.get("metering", {}))
+
+    return merged_dict, merged_metering, conflicts
+
+
 async def concurrent_structured_output_async(
     model_id: str,
     data_format: type[TargetModel],
-    prompt: str | Message | Image.Image,
-    page_images: list[bytes],
-    num_batches: int,
+    shard_payloads: list[dict[str, Any]],
+    max_parallelism: int,
     config: IDPConfig = IDPConfig(),
     context: str = "Extraction",
     max_retries: int = 7,
@@ -1338,92 +1504,83 @@ async def concurrent_structured_output_async(
     max_tokens: int | None = None,
     checkpoint_callback: Any | None = None,
     custom_instruction: str | None = None,
-    total_pages: int | None = None,
 ) -> tuple[TargetModel, BedrockInvokeModelResponse]:
     """
-    Run multiple extraction agents concurrently on different page ranges.
+    Run one extraction agent per input shard, concurrently, and merge results.
 
-    Splits the document's pages into N batches, runs N agents in parallel
-    (each seeing ALL images but instructed to extract only its assigned pages),
-    then merges results by concatenating list fields and taking the last
-    non-None value for scalar fields.
+    Unlike the previous implementation, each shard's prompt contains ONLY that
+    shard's page text/images (the service slices the input before calling), so
+    no agent loads the whole document — this is what bounds the context window
+    and prevents overflow on long documents. At most ``max_parallelism`` shards
+    run at once (Bedrock RPM control).
 
     Args:
-        num_batches: Number of concurrent agents to run (2-10)
-        total_pages: Override for page count (used when images not provided)
-        Other args: Same as structured_output_async
+        shard_payloads: List of dicts with keys ``content`` (pre-rendered prompt
+            content blocks for the shard), ``page_start``, ``page_end``,
+            ``total_pages``.
+        max_parallelism: Max number of shards to run concurrently.
+        Other args: Same as structured_output_async.
 
     Returns:
-        Merged (data_format instance, metering response)
+        Merged (data_format instance, metering response). The response metering
+        includes a ``_shard_scalar_conflicts`` marker when shards disagreed on a
+        scalar field, so the service can record it in metadata.
     """
-    total_pages = total_pages or len(page_images)
-    # Calculate page ranges for each batch
-    pages_per_batch = max(1, total_pages // num_batches)
-    batch_ranges = []
-    for i in range(num_batches):
-        start = i * pages_per_batch
-        end = (
-            min((i + 1) * pages_per_batch, total_pages)
-            if i < num_batches - 1
-            else total_pages
-        )
-        if start < total_pages:
-            batch_ranges.append((start, end))
-
+    total_shards = len(shard_payloads)
     logger.info(
-        "Starting concurrent batch extraction",
+        "Starting sharded concurrent extraction",
         extra={
-            "num_batches": len(batch_ranges),
-            "total_pages": total_pages,
-            "batch_ranges": [(s, e) for s, e in batch_ranges],
+            "num_shards": total_shards,
+            "max_parallelism": max_parallelism,
+            "ranges": [(p["page_start"], p["page_end"]) for p in shard_payloads],
         },
     )
 
-    # Run all batches concurrently
-    tasks = [
-        _run_batch_agent(
-            batch_index=i,
-            total_batches=len(batch_ranges),
-            page_start=start,
-            page_end=end,
-            total_pages=total_pages,
-            model_id=model_id,
-            data_format=data_format,
-            prompt=prompt,
-            page_images=page_images,
-            config=config,
-            context=context,
-            max_retries=max_retries,
-            connect_timeout=connect_timeout,
-            read_timeout=read_timeout,
-            max_tokens=max_tokens,
-            checkpoint_callback=checkpoint_callback,
-            base_custom_instruction=custom_instruction,
-        )
-        for i, (start, end) in enumerate(batch_ranges)
-    ]
+    semaphore = asyncio.Semaphore(max(1, max_parallelism))
+
+    async def _run_one(i: int, payload: dict[str, Any]):
+        async with semaphore:
+            return await _run_shard_agent(
+                shard_index=i,
+                total_shards=total_shards,
+                page_start=payload["page_start"],
+                page_end=payload["page_end"],
+                total_pages=payload["total_pages"],
+                model_id=model_id,
+                data_format=data_format,
+                shard_prompt={"role": "user", "content": payload["content"]},
+                config=config,
+                context=context,
+                max_retries=max_retries,
+                connect_timeout=connect_timeout,
+                read_timeout=read_timeout,
+                max_tokens=max_tokens,
+                checkpoint_callback=checkpoint_callback,
+                base_custom_instruction=custom_instruction,
+            )
+
+    tasks = [_run_one(i, p) for i, p in enumerate(shard_payloads)]
     results = await asyncio.gather(*tasks)
 
-    # Merge results: concatenate list fields, take last non-None for scalars
-    merged_dict: dict[str, Any] = {}
-    merged_metering: dict[str, Any] = {}
-    for result_data, result_response in results:
-        result_dict = result_data.model_dump(mode="json")
-        for key, value in result_dict.items():
-            if isinstance(value, list):
-                merged_dict.setdefault(key, []).extend(value)
-            elif value is not None:
-                merged_dict[key] = value
-        # Accumulate metering
-        _accumulate_metering(merged_metering, result_response.get("metering", {}))
-
+    merged_dict, merged_metering, conflicts = _merge_shard_results(results, data_format)
     merged_result = data_format(**merged_dict)
-    # Count merged items for logging
+
     total_items = sum(len(v) for v in merged_dict.values() if isinstance(v, list))
     logger.info(
-        "Concurrent batch extraction complete",
-        extra={"total_items": total_items, "batches_completed": len(results)},
+        "Sharded concurrent extraction complete",
+        extra={
+            "total_items": total_items,
+            "shards_completed": len(results),
+            "scalar_conflicts": len(conflicts),
+        },
     )
+    if conflicts:
+        logger.warning(
+            "Scalar field conflicts across shards (kept first value)",
+            extra={"conflicts": conflicts[:20]},
+        )
+        # Surface via metering dict so the service can record it in metadata.
+        merged_metering["_shard_scalar_conflicts"] = conflicts
 
     return merged_result, BedrockInvokeModelResponse(
         response=BedrockResponse(
@@ -1453,6 +1610,7 @@ async def structured_output_async(
     max_tokens: int | None = None,
     checkpoint_callback: Any | None = None,
     checkpoint_buffer_data: dict[str, Any] | None = None,
+    schema_validator: Callable[[dict[str, Any]], tuple[bool, str]] | None = None,
 ) -> tuple[TargetModel, BedrockInvokeModelResponse]:
     """
     Extract structured data using Strands agents with tool-based validation.
@@ -1698,6 +1856,7 @@ async def structured_output_async(
         prompt_content=prompt_content,
         data_format=data_format,
         max_extraction_retries=3,
+        schema_validator=schema_validator,
     )
 
     # Accumulate token usage
@@ -1768,6 +1927,7 @@ def structured_output(
     read_timeout: float = 600.0,
     checkpoint_callback: Any | None = None,
     checkpoint_buffer_data: dict[str, Any] | None = None,
+    schema_validator: Callable[[dict[str, Any]], tuple[bool, str]] | None = None,
 ) -> tuple[BaseModel, BedrockInvokeModelResponse]:
     """
     Synchronous version of structured_output_async.
@@ -1856,6 +2016,7 @@ def structured_output(
                         page_images=page_images,
                         checkpoint_callback=checkpoint_callback,
                         checkpoint_buffer_data=checkpoint_buffer_data,
+                        schema_validator=schema_validator,
                     )
                 )
             except Exception as e:
@@ -1890,6 +2051,7 @@ def structured_output(
                 page_images=page_images,
                 checkpoint_callback=checkpoint_callback,
                 checkpoint_buffer_data=checkpoint_buffer_data,
+                schema_validator=schema_validator,
             )
         )
 

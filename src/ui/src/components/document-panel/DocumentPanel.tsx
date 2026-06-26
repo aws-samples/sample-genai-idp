@@ -175,6 +175,42 @@ const parseServiceApiKey = (serviceApiKey: string): { context: string; serviceAp
   return { context: '', serviceApi: serviceApiKey };
 };
 
+// Look up a unit price for a service/unit, mirroring the backend's
+// _get_unit_cost matching (idp_common/reporting/save_reporting_data.py):
+//   1. exact match on serviceApi
+//   2. bidirectional substring match on the service key, then a flexible
+//      substring match on the unit name.
+// This lets a generic pricing entry (e.g. "GENAIIDP-mistral-ocr-hook") match a
+// metering key that embeds the full Lambda ARN
+// (e.g. "lambda_hook/arn:aws:lambda:...:function:GENAIIDP-mistral-ocr-hook").
+const lookupUnitPrice = (pricingData: PricingLookup, serviceApi: string, unit: string): number | null => {
+  // 1. Exact match
+  if (pricingData[serviceApi] && pricingData[serviceApi][unit] !== undefined) {
+    return Number(pricingData[serviceApi][unit]);
+  }
+
+  // 2. Partial match (case-insensitive, bidirectional on the service key)
+  const serviceApiLower = serviceApi.toLowerCase();
+  const unitLower = unit.toLowerCase();
+  const serviceKeys = Object.keys(pricingData);
+  for (let i = 0; i < serviceKeys.length; i += 1) {
+    const serviceKey = serviceKeys[i];
+    const serviceKeyLower = serviceKey.toLowerCase();
+    if (serviceKeyLower.includes(serviceApiLower) || serviceApiLower.includes(serviceKeyLower)) {
+      const unitKeys = Object.keys(pricingData[serviceKey]);
+      for (let j = 0; j < unitKeys.length; j += 1) {
+        const unitKey = unitKeys[j];
+        const unitKeyLower = unitKey.toLowerCase();
+        if (unitKeyLower === unitLower || unitKeyLower.includes(unitLower) || unitLower.includes(unitKeyLower)) {
+          return Number(pricingData[serviceKey][unitKey]);
+        }
+      }
+    }
+  }
+
+  return null;
+};
+
 // Helper function to format cost cells
 const formatCostCell = (rowItem: MeteringRowItem): React.JSX.Element | string => {
   if (rowItem.isTotal) {
@@ -232,28 +268,26 @@ const MeteringTable = ({ meteringData, preCalculatedTotals }: MeteringTableProps
     Object.entries(metrics as Record<string, unknown>).forEach(([unit, value]) => {
       const numericValue = Number(value);
 
-      // Look up the unit price from the pricing data using the parsed serviceApi
-      let unitPrice: number | null = null;
+      // Look up the unit price from the pricing data using the parsed serviceApi.
+      // Uses exact-then-partial matching (mirrors the backend) so generic
+      // pricing entries match metering keys that embed a full Lambda ARN.
+      let unitPrice: number | null = lookupUnitPrice(pricingData, serviceApi, unit);
       let unitPriceDisplayValue = 'None';
       let cost = 0;
-      if (pricingData[serviceApi] && pricingData[serviceApi][unit] !== undefined) {
-        unitPrice = Number(pricingData[serviceApi][unit]);
-        if (!Number.isNaN(unitPrice)) {
-          unitPriceDisplayValue = `$${unitPrice}`;
-          cost = numericValue * unitPrice;
-          totalCost += cost;
+      if (unitPrice !== null && !Number.isNaN(unitPrice)) {
+        unitPriceDisplayValue = `$${unitPrice}`;
+        cost = numericValue * unitPrice;
+        totalCost += cost;
 
-          // Track context totals
-          if (!contextTotals[context]) {
-            contextTotals[context] = 0;
-          }
-          contextTotals[context] += cost;
-
-          logger.debug(`Found price for ${serviceApi}/${unit}: ${unitPriceDisplayValue}`);
-        } else {
-          logger.warn(`Invalid price for ${serviceApi}/${unit}, using None`);
+        // Track context totals
+        if (!contextTotals[context]) {
+          contextTotals[context] = 0;
         }
+        contextTotals[context] += cost;
+
+        logger.debug(`Found price for ${serviceApi}/${unit}: ${unitPriceDisplayValue}`);
       } else {
+        unitPrice = null;
         logger.debug(`No price found for ${serviceApi}/${unit}, using None`);
       }
 
@@ -407,11 +441,9 @@ const calculateTotalCosts = (
 
       Object.entries(metrics).forEach(([unit, value]) => {
         const numericValue = Number(value);
-        if (pricingData[serviceApi] && pricingData[serviceApi][unit] !== undefined) {
-          const unitPrice = Number(pricingData[serviceApi][unit]);
-          if (!Number.isNaN(unitPrice)) {
-            totalCost += numericValue * unitPrice;
-          }
+        const unitPrice = lookupUnitPrice(pricingData, serviceApi, unit);
+        if (unitPrice !== null && !Number.isNaN(unitPrice)) {
+          totalCost += numericValue * unitPrice;
         }
       });
     });

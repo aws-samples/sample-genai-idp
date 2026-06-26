@@ -20,12 +20,14 @@ The service supports three OCR backends, each with different capabilities and us
 - **Assessment Quality**: ⭐⭐⭐ Optimal - Real OCR confidence enables accurate assessment
 - **Use Cases**: Standard document processing, when assessment is enabled, production workflows
 
-### 2. Bedrock Backend (LLM-based OCR)
-- **Technology**: Amazon Bedrock LLMs (Claude, Nova) for text extraction
-- **Confidence Data**: ❌ No confidence data (displays "No confidence data available from LLM OCR")
-- **Features**: Advanced text understanding, better handling of challenging/degraded documents
-- **Assessment Quality**: ❌ No confidence data for assessment
-- **Use Cases**: Challenging documents where traditional OCR fails, specialized text extraction needs
+### 2. Bedrock Backend (LLM-based OCR, incl. LambdaHook)
+- **Technology**: Amazon Bedrock LLMs (Claude, Nova) for text extraction, or a custom `LambdaHook` (`model_id: "LambdaHook"`) that proxies to any inference provider.
+- **Confidence Data**:
+  - Plain Bedrock LLM OCR: ❌ No confidence data (displays "No confidence data available from LLM OCR").
+  - LambdaHook returning **structured OCR**: ✅ Real confidence + geometry — if the hook returns a top-level `textractBlocks` object (Amazon Textract response format with a `Blocks` list), the service persists it as `rawText.json` and generates a real `textConfidence.json` from it.
+- **Features**: Advanced text understanding, better handling of challenging/degraded documents; with a LambdaHook, any third-party OCR (e.g. Mistral OCR, Chandra OCR).
+- **Assessment Quality**: ❌ for plain LLM OCR; ⭐⭐⭐ when a LambdaHook supplies `textractBlocks` confidence.
+- **Use Cases**: Challenging documents where traditional OCR fails; integrating external OCR providers via the LambdaHook feature.
 
 ### 3. None Backend (Image-only)
 - **Technology**: No OCR processing
@@ -34,7 +36,29 @@ The service supports three OCR backends, each with different capabilities and us
 - **Assessment Quality**: ❌ No text confidence for assessment
 - **Use Cases**: Image-only workflows, custom OCR integration
 
-> ⚠️ **CRITICAL for Assessment**: When assessment functionality is enabled, use `backend="textract"` (default) to preserve granular confidence data. Using `backend="bedrock"` results in empty confidence data that eliminates assessment capability.
+> ⚠️ **CRITICAL for Assessment**: When assessment functionality is enabled, use `backend="textract"` (default) to preserve granular confidence data. Plain `backend="bedrock"` LLM OCR produces empty confidence data that eliminates assessment capability — **unless** the configured LambdaHook returns structured `textractBlocks` (see below), in which case confidence/geometry are preserved.
+
+### Structured OCR from a LambdaHook (`textractBlocks`)
+
+When `backend="bedrock"` and `model_id="LambdaHook"`, the hook receives a Converse-API payload and may return — in addition to the markdown text — a top-level `textractBlocks` object in **Amazon Textract response format**:
+
+```json
+{
+  "output": {"message": {"content": [{"text": "# Page markdown..."}]}},
+  "textractBlocks": {
+    "DocumentMetadata": {"Pages": 1},
+    "Blocks": [
+      {"BlockType": "PAGE", "Id": "..."},
+      {"BlockType": "LINE", "Id": "...", "Text": "Account: 12345", "Confidence": 97.5,
+       "Geometry": {"BoundingBox": {"Left": 0.1, "Top": 0.02, "Width": 0.4, "Height": 0.03}}},
+      {"BlockType": "WORD", "Id": "...", "Text": "12345", "Confidence": 92.0}
+    ]
+  },
+  "usage": {"pages": 1}
+}
+```
+
+`OcrService._extract_bedrock_ocr_artifacts()` detects a non-empty `textractBlocks` and persists it as the page's `rawText.json`, then builds a real `textConfidence.json` from its LINE blocks (same path as the Textract backend). Geometry uses Textract's normalized 0–1 `BoundingBox`. Hooks returning only text keep the previous placeholder behavior. See `samples/lambda-hook-inference/GENAIIDP-mistral-ocr-hook/` for a reference implementation (Mistral OCR) and [docs/lambda-hook-inference.md](../../../../docs/lambda-hook-inference.md).
 
 ## Features
 
@@ -212,7 +236,9 @@ For each page, the OCR service creates:
 - **`image.jpg`** - Page image in JPEG format
 - **`rawText.json`** - Complete Textract response (full metadata, geometric data, relationships)
 - **`result.json`** - Parsed markdown text content for human readability
-- **`textConfidence.json`** - **NEW** - Condensed text confidence data for assessment prompts
+- **`textConfidence.json`** - Condensed text confidence data for assessment prompts
+- **`pageData.json`** - **NEW** - Consolidated, backend-agnostic OCR page data
+  (text + confidence + geometry) — see [Consolidated OCR Page Data](#consolidated-ocr-page-data-pagedatajson)
 
 ### Text Confidence Data Format
 
@@ -269,6 +295,70 @@ Extraction Results:
 {EXTRACTION_RESULTS}
 """
 ```
+
+## Consolidated OCR Page Data (`pageData.json`)
+
+`textConfidence.json` is intentionally token-reduced (LINE text + confidence, no
+geometry) for assessment prompts, and `rawText.json` holds geometry only for
+backends that produce Textract-format blocks. To give consumers (the UI page
+viewer, and — in a future phase — assessment grounding) a single,
+**backend-agnostic** view of text **+ confidence + geometry**, the OCR service
+also writes `pageData.json` per page.
+
+The `Page` model carries its URI as `ocr_page_data_uri`; AppSync/DynamoDB expose
+it as `OcrPageDataUri`. The artifact is **additive** — existing files and the
+`{OCR_TEXT_CONFIDENCE}` assessment prompt are unchanged, so there is **zero
+token-budget impact** and documents processed before this change simply have no
+`pageData.json` (consumers degrade gracefully).
+
+### Schema
+
+The primary text unit is the **LINE**, with optional **WORD** children.
+`confidence` and `geometry` are *independently optional* on every unit, since
+backends differ in what they provide. Geometry is normalized **0–1** (Textract
+convention), matching what the UI bounding-box renderer consumes.
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "provider": "textract",        // textract | bedrock-lambdahook | bedrock-llm | none | converted
+  "page": null,                  // reserved for native page dimensions
+  "geometryAvailable": true,     // any unit has geometry
+  "confidenceAvailable": true,   // any unit has confidence
+  "wordsAvailable": true,        // any line has word children
+  "lines": [
+    {
+      "id": "line-1",
+      "text": "Account: 12345",
+      "confidence": 97.5,                       // 0–100, optional
+      "geometry": {                              // optional; normalized 0–1
+        "boundingBox": { "left": 0.10, "top": 0.02, "width": 0.40, "height": 0.03 },
+        "polygon": [ { "x": 0.10, "y": 0.02 } ]  // optional (Textract only)
+      },
+      "geometrySource": "line",                  // line | paragraph | none
+      "textType": "PRINTED",                     // PRINTED | HANDWRITING | null
+      "words": [                                  // optional (Textract)
+        { "text": "Account:", "confidence": 99.0, "geometry": { "boundingBox": {} } },
+        { "text": "12345",    "confidence": 92.0, "geometry": null }
+      ]
+    }
+  ]
+}
+```
+
+### Cross-backend matrix
+
+| Backend | text | confidence | geometry | `geometrySource` |
+|---|---|---|---|---|
+| **Textract** | LINE + WORD | per-LINE & per-WORD | per-LINE & per-WORD (box + polygon) | `line` |
+| **Mistral LambdaHook** | LINE + WORD | per-LINE & per-WORD | paragraph-level box shared by sibling lines; WORDs none | `paragraph` |
+| **Chandra / plain Bedrock LLM** | lines synthesized from markdown | none | none | `none` |
+| **`none`** | none | none | none | — |
+| **Converted (non-PDF)** | per-line | per-line `99.0` placeholder | none | `none` |
+
+The producer derives `pageData.json` in-process from the same OCR result already
+used for `rawText.json`/`textConfidence.json` (`OcrService._build_page_data`),
+so it adds **no extra OCR calls**.
 
 ## Lambda Integration Example
 

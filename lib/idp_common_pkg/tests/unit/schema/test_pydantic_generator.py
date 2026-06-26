@@ -1317,6 +1317,95 @@ class TestNestedObjectAliases:
         assert TestModel.model_config.get("populate_by_name") is True
         assert TestModel.model_config.get("serialize_by_alias") is True
 
+    def test_nested_spaced_field_names_round_trip(self):
+        """Regression: nested object/array properties whose names contain spaces
+        must validate from and serialize back to their spaced aliases — not the
+        underscore-sanitized field names.
+
+        Previously the alias config was applied only to the top-level model, so
+        nested fields like "Date of Birth" round-tripped as "Date_of_Birth" and
+        agentic extraction silently lost nested values (real-world Homeowners
+        Insurance Application regression).
+        """
+        schema = {
+            "type": "object",
+            "title": "HomeApp",
+            "properties": {
+                "Policy Number": {"type": "string"},
+                "Primary Applicant Information": {
+                    "type": "object",
+                    "properties": {
+                        "Name": {"type": "string"},
+                        "Date of Birth": {"type": "string"},
+                        "Marital Status": {"type": "string"},
+                        "Drivers License Number": {"type": "string"},
+                    },
+                },
+                "Auto Claims": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {"Number of Accidents": {"type": "string"}},
+                    },
+                },
+            },
+        }
+
+        Model = create_pydantic_model_from_json_schema(
+            schema, "HomeApp", clean_schema=False
+        )
+
+        # The LLM/document produces the spaced (alias) keys.
+        data = {
+            "Policy Number": "123456",
+            "Primary Applicant Information": {
+                "Name": "Ziggy Starpixel",
+                "Date of Birth": "02/20/2000",
+                "Marital Status": "S",
+                "Drivers License Number": "1234567A",
+            },
+            "Auto Claims": [{"Number of Accidents": "2"}],
+        }
+
+        out = Model.model_validate(data).model_dump(mode="json")
+
+        # Nested values survive (the core regression: these were dropped to null).
+        pai = out["Primary Applicant Information"]
+        assert pai["Date of Birth"] == "02/20/2000"
+        assert pai["Marital Status"] == "S"
+        assert pai["Drivers License Number"] == "1234567A"
+        # Keys are the spaced aliases, NOT the underscore field names.
+        assert "Date_of_Birth" not in pai
+        assert "Marital_Status" not in pai
+        # Array-of-object nested fields round-trip too.
+        assert out["Auto Claims"][0]["Number of Accidents"] == "2"
+        assert "Number_of_Accidents" not in out["Auto Claims"][0]
+
+    def test_deeply_nested_spaced_names_round_trip(self):
+        """Three-level nesting with spaced names must also round-trip by alias."""
+        schema = {
+            "type": "object",
+            "title": "Deep",
+            "properties": {
+                "Outer Group": {
+                    "type": "object",
+                    "properties": {
+                        "Inner Group": {
+                            "type": "object",
+                            "properties": {"Deep Field": {"type": "string"}},
+                        }
+                    },
+                }
+            },
+        }
+        Model = create_pydantic_model_from_json_schema(
+            schema, "Deep", clean_schema=False
+        )
+        out = Model.model_validate(
+            {"Outer Group": {"Inner Group": {"Deep Field": "hello"}}}
+        ).model_dump(mode="json")
+        assert out["Outer Group"]["Inner Group"]["Deep Field"] == "hello"
+
     def test_array_contains_constraints(self):
         """Test that array contains, minContains, and maxContains constraints are supported."""
         schema = {
