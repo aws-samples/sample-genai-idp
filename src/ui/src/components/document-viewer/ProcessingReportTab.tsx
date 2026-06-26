@@ -54,16 +54,51 @@ interface TableParsingStats {
   warnings?: string[];
 }
 
+interface ValidationError {
+  path?: string;
+  validator?: string;
+  message?: string;
+}
+
+interface ValidationInfo {
+  valid?: boolean;
+  error_count?: number;
+  failed_fields?: string[];
+  errors?: ValidationError[];
+  check_formats?: boolean;
+  fail_action?: string;
+  escalated?: boolean;
+  initial_error_count?: number;
+  initial_failed_fields?: string[];
+  escalation_model?: string;
+  escalation_scope?: string;
+  escalation_fields?: string[];
+  resolved_by_escalation?: boolean;
+}
+
+interface PopulationCheck {
+  fields_defined?: number;
+  fields_populated?: number;
+  population_ratio?: number;
+  threshold?: number;
+  below_threshold?: boolean;
+  empty_fields?: string[];
+}
+
 interface ProcessingMetadata {
   extraction_method?: string;
   extraction_time_seconds?: number;
   parsing_succeeded?: boolean;
+  extraction_model?: string;
+  extraction_model_overridden?: boolean;
   schema_analysis?: SchemaAnalysis;
   ocr_analysis?: OcrAnalysis;
   tool_usage_decision?: ToolUsageDecision;
   completeness_check?: CompletenessCheck;
   table_parsing_tool_used?: boolean;
   table_parsing_stats?: TableParsingStats;
+  validation?: ValidationInfo;
+  population_check?: PopulationCheck;
 }
 
 interface ProcessingReportTabProps {
@@ -84,7 +119,11 @@ const ProcessingReportTab: React.FC<ProcessingReportTabProps> = ({ metadata, pro
   const toolUsed = metadata.table_parsing_tool_used;
   const toolDecision = metadata.tool_usage_decision || {};
   const completenessCheck = metadata.completeness_check || {};
-  const hasIssues = toolDecision.mismatch || !completenessCheck.schema_constraints_met;
+  const validation = metadata.validation;
+  const populationCheck = metadata.population_check;
+  const validationFailed = validation !== undefined && validation.valid === false;
+  const populationLow = populationCheck?.below_threshold === true;
+  const hasIssues = toolDecision.mismatch || !completenessCheck.schema_constraints_met || validationFailed || populationLow;
 
   return (
     <SpaceBetween size="l">
@@ -100,6 +139,19 @@ const ProcessingReportTab: React.FC<ProcessingReportTabProps> = ({ metadata, pro
             {!completenessCheck.schema_constraints_met && (
               <Box>
                 <strong>Completeness Issue:</strong> {completenessCheck.summary}
+              </Box>
+            )}
+            {validationFailed && (
+              <Box>
+                <strong>Schema Validation:</strong> {validation?.error_count || 0} constraint violation(s)
+                {validation?.escalated ? ' (escalation attempted)' : ''} —{' '}
+                {(validation?.failed_fields || []).join(', ') || 'see details below'}
+              </Box>
+            )}
+            {populationLow && (
+              <Box>
+                <strong>Low Field Population:</strong> only {populationCheck?.fields_populated}/{populationCheck?.fields_defined} schema
+                fields populated ({Math.round((populationCheck?.population_ratio || 0) * 100)}%) — possible silent extraction loss.
               </Box>
             )}
           </SpaceBetween>
@@ -127,6 +179,15 @@ const ProcessingReportTab: React.FC<ProcessingReportTabProps> = ({ metadata, pro
               </StatusIndicator>
             </Box>
           </div>
+          {metadata.extraction_model && (
+            <div>
+              <Box variant="awsui-key-label">Model</Box>
+              <Box>
+                {metadata.extraction_model}
+                {metadata.extraction_model_overridden ? ' (per-class override)' : ''}
+              </Box>
+            </div>
+          )}
         </ColumnLayout>
       </Container>
 
@@ -253,6 +314,129 @@ const ProcessingReportTab: React.FC<ProcessingReportTabProps> = ({ metadata, pro
           <Alert type="success" header={completenessCheck.summary}>
             All required data was extracted successfully.
           </Alert>
+        </Container>
+      )}
+
+      {/* Schema Validation & Escalation */}
+      {validation !== undefined && (
+        <Container
+          header={
+            <Header variant="h3" description="Full JSON-Schema validation of the extraction result">
+              Schema Validation &amp; Escalation
+            </Header>
+          }
+        >
+          <ColumnLayout columns={3} variant="text-grid">
+            <div>
+              <Box variant="awsui-key-label">Result</Box>
+              <Box>
+                <StatusIndicator type={validation.valid ? 'success' : 'warning'}>
+                  {validation.valid ? 'VALID' : `${validation.error_count || 0} VIOLATION(S)`}
+                </StatusIndicator>
+              </Box>
+            </div>
+            <div>
+              <Box variant="awsui-key-label">Fail Action</Box>
+              <Box>{(validation.fail_action || 'N/A').toUpperCase()}</Box>
+            </div>
+            <div>
+              <Box variant="awsui-key-label">Format Checks</Box>
+              <Box>{validation.check_formats ? 'Enabled' : 'Disabled'}</Box>
+            </div>
+            {validation.escalated && (
+              <>
+                <div>
+                  <Box variant="awsui-key-label">Escalation</Box>
+                  <Box>
+                    <StatusIndicator type={validation.resolved_by_escalation ? 'success' : 'warning'}>
+                      {validation.resolved_by_escalation ? 'RESOLVED' : 'ATTEMPTED'}
+                    </StatusIndicator>
+                  </Box>
+                </div>
+                <div>
+                  <Box variant="awsui-key-label">Escalation Model</Box>
+                  <Box>{validation.escalation_model || 'N/A'}</Box>
+                </div>
+                <div>
+                  <Box variant="awsui-key-label">Re-extracted Fields</Box>
+                  <Box>
+                    {validation.escalation_scope === 'field-subset'
+                      ? (validation.escalation_fields || []).join(', ') || 'none'
+                      : 'full section'}
+                  </Box>
+                </div>
+              </>
+            )}
+          </ColumnLayout>
+
+          {validation.escalated && validation.initial_error_count !== undefined && (
+            <Box padding={{ top: 's' }} fontSize="body-s" color="text-status-inactive">
+              Errors before escalation: {validation.initial_error_count} → after: {validation.error_count || 0}
+            </Box>
+          )}
+
+          {!validation.valid && validation.errors && validation.errors.length > 0 && (
+            <Box padding={{ top: 's' }}>
+              <ExpandableSection headerText={`Violations (${validation.error_count || validation.errors.length})`}>
+                <SpaceBetween size="xs">
+                  {validation.errors.map((e) => (
+                    <Box key={`verr-${e.path}-${e.validator}-${e.message}`} fontSize="body-s">
+                      <strong>{e.path || '(root)'}</strong> [{e.validator}]: {e.message}
+                    </Box>
+                  ))}
+                </SpaceBetween>
+              </ExpandableSection>
+            </Box>
+          )}
+        </Container>
+      )}
+
+      {/* Field Population (completeness heuristic) */}
+      {populationCheck !== undefined && populationCheck.fields_defined !== undefined && (
+        <Container
+          header={
+            <Header
+              variant="h3"
+              description="Fraction of schema-defined fields that came back populated (advisory — flags possible silent loss)"
+            >
+              Field Population
+            </Header>
+          }
+        >
+          <ColumnLayout columns={3} variant="text-grid">
+            <div>
+              <Box variant="awsui-key-label">Populated</Box>
+              <Box>
+                {populationCheck.fields_populated}/{populationCheck.fields_defined} (
+                {Math.round((populationCheck.population_ratio || 0) * 100)}%)
+              </Box>
+            </div>
+            <div>
+              <Box variant="awsui-key-label">Threshold</Box>
+              <Box>{Math.round((populationCheck.threshold || 0) * 100)}%</Box>
+            </div>
+            <div>
+              <Box variant="awsui-key-label">Status</Box>
+              <Box>
+                <StatusIndicator type={populationCheck.below_threshold ? 'warning' : 'success'}>
+                  {populationCheck.below_threshold ? 'BELOW THRESHOLD' : 'OK'}
+                </StatusIndicator>
+              </Box>
+            </div>
+          </ColumnLayout>
+          {populationCheck.empty_fields && populationCheck.empty_fields.length > 0 && (
+            <Box padding={{ top: 's' }}>
+              <ExpandableSection headerText={`Empty fields (${populationCheck.empty_fields.length})`}>
+                <SpaceBetween size="xs">
+                  {populationCheck.empty_fields.map((f) => (
+                    <Box key={`empty-${f}`} fontSize="body-s">
+                      • {f}
+                    </Box>
+                  ))}
+                </SpaceBetween>
+              </ExpandableSection>
+            </Box>
+          )}
         </Container>
       )}
 
