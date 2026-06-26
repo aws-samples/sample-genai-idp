@@ -563,11 +563,9 @@ Configure agentic extraction in your configuration file:
 
 ```yaml
 extraction:
-  model: "us.anthropic.claude-sonnet-4-20250514-v1:0"  # or Nova models
+  model: "us.anthropic.claude-sonnet-4-6"  # Anthropic Claude recommended for agentic
   agentic:
     enabled: true
-    review_agent: false  # Optional second-pass review
-    review_agent_model: null  # or specify a model for review
     max_concurrent_batches: 1  # Parallel processing (2-10 for very large docs)
     table_parsing:
       enabled: true  # Enable deterministic table parser tool
@@ -576,7 +574,17 @@ extraction:
       use_confidence_data: true  # Cross-reference with OCR confidence
       max_empty_line_gap: 3  # Tolerate up to N empty lines in tables
       auto_merge_adjacent_tables: true  # Merge table fragments
+    validation:                # see "Schema-Constraint Validation" below
+      enabled: false
 ```
+
+> **Every `agentic.*` sub-option only takes effect when `agentic.enabled: true`**
+> — `table_parsing`, `validation`, and `max_concurrent_batches` are all ignored
+> for non-agentic extraction. In the **Configuration UI** these options are
+> progressively disclosed: they appear only after you enable Agentic Extraction,
+> the table-parsing thresholds appear only after you enable the parse_table tool,
+> and the escalation model appears only when validation `fail_action` is
+> `escalate` — so you only see the knobs that currently matter.
 
 ### Table Parsing Tool
 
