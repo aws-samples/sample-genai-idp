@@ -391,11 +391,26 @@ def deploy_pack(
     wait: bool = True,
     console: Optional[Console] = None,
 ) -> str:
-    """Deploy the published wrapper. Returns the wrapper stack ARN.
+    """Deploy the published wrapper, **create-or-update**. Returns the stack ARN.
 
     Reads the wrapper template's parameter list and submits values for
     AdminEmail + a sensible default HostStackName. All other parameters
     inherit their (publish-time-baked) defaults.
+
+    Create-if-absent, update-if-present — delegating to
+    ``create_or_update_stack`` so ``deploy-pack`` matches the rest of the
+    tooling (``deploy``, ``idp-cli deploy``, ``idp-mp-sim deploy``). Re-running
+    against an existing wrapper stack performs a CloudFormation **update**
+    rather than failing with ``AlreadyExistsException``; a no-op update (no
+    changes) is treated as success.
+
+    For pack wrappers whose feature install is a nested
+    ``AWS::CloudFormation::Stack`` (e.g. claims-pack's ``CLAIMSFEATUREPACK``),
+    an in-place wrapper update with a bumped ``FeatureVersion`` cascades into
+    the nested stack and picks up the republished version-pinned artifacts —
+    the desired way to push pack changes to an already-deployed wrapper. The
+    wrapper's ``HostStack`` custom resource treats ``Update`` as a no-op, so a
+    wrapper update won't disturb the running host.
     """
     cons = console or Console()
     cfn = boto3.client("cloudformation", region_name=region)
@@ -423,66 +438,17 @@ def deploy_pack(
     for k, v in (extra_parameters or {}).items():
         _maybe_submit(k, v)
 
-    caps = capabilities or [
-        "CAPABILITY_IAM",
-        "CAPABILITY_NAMED_IAM",
-        "CAPABILITY_AUTO_EXPAND",
-    ]
+    caps = capabilities or _CAPABILITIES
 
-    cons.log(f"▸ Creating stack {stack_name} from {wrapper_url}")
-    resp = cfn.create_stack(
-        StackName=stack_name,
-        TemplateURL=wrapper_url,
-        Parameters=submitted,
-        Capabilities=caps,
-        OnFailure="DELETE",
+    return create_or_update_stack(
+        cfn=cfn,
+        stack_name=stack_name,
+        template_url=wrapper_url,
+        parameters=submitted,
+        capabilities=caps,
+        wait=wait,
+        console=cons,
     )
-    stack_arn = resp["StackId"]
-
-    if wait:
-        cons.log("▸ Waiting for CREATE_COMPLETE (this can take 15–25 minutes)…")
-        deadline = time.time() + 60 * 60
-        last_status: Optional[str] = None
-        while time.time() < deadline:
-            try:
-                # Use the StackId (full ARN) — it stays valid even after
-                # OnFailure=DELETE wipes the stack. `stack_name` would 404
-                # the moment the failed-stack delete completes.
-                desc = cfn.describe_stacks(StackName=stack_arn)["Stacks"][0]
-            except Exception as exc:
-                msg = str(exc)
-                if "does not exist" in msg or "ValidationError" in msg:
-                    raise RuntimeError(
-                        f"Stack {stack_name} no longer exists. It was likely "
-                        f"created with OnFailure=DELETE and a CREATE_FAILED "
-                        f"event tore it down. Check the stack events in the "
-                        f"CloudFormation Console (look for the deleted stack "
-                        f"under 'Deleted') — last observed status was "
-                        f"{last_status!r}."
-                    ) from exc
-                raise
-            status = desc["StackStatus"]
-            last_status = status
-            if status == "CREATE_COMPLETE":
-                cons.log("[green]✓[/green] Stack CREATE_COMPLETE")
-                outputs = {
-                    o["OutputKey"]: o["OutputValue"]
-                    for o in (desc.get("Outputs") or [])
-                }
-                if outputs.get("ApplicationWebURL"):
-                    cons.log(f"  Web UI: [bold]{outputs['ApplicationWebURL']}[/bold]")
-                return stack_arn
-            if status.endswith(("FAILED", "ROLLBACK_COMPLETE")):
-                # Surface the most recent CREATE_FAILED event reason so the
-                # operator gets actionable diagnostics instead of just
-                # "settled in ROLLBACK_COMPLETE".
-                reason = _first_failure_reason(cfn, stack_arn)
-                detail = f": {reason}" if reason else ""
-                raise RuntimeError(f"Stack {stack_name} settled in {status}{detail}")
-            time.sleep(20)
-        raise RuntimeError(f"Timed out waiting for stack {stack_name}")
-
-    return stack_arn
 
 
 def _first_failure_reason(cfn: Any, stack_arn: str) -> Optional[str]:

@@ -13,6 +13,7 @@ See [docs/lambda-hook-inference.md](../../docs/lambda-hook-inference.md) for ful
 | **GENAIIDP-bedrock-proxy** | Forwards to Bedrock Converse API. Use as a starting template for custom hooks with pre/post processing. |
 | **GENAIIDP-sagemaker-hook** | Calls a SageMaker real-time inference endpoint. Shows format conversion between Converse API and SageMaker. |
 | **GENAIIDP-chandra-ocr-hook** | Calls the [Chandra OCR 2](https://github.com/datalab-to/chandra) hosted API for high-quality OCR. Converts page images to structured Markdown, JSON, or HTML. |
+| **GENAIIDP-mistral-ocr-hook** | Calls the hosted [Mistral OCR](https://mistral.ai/news/ocr-4/) API for high-quality OCR. Returns Markdown **plus per-word confidence scores and bounding-box geometry** (in Amazon Textract format) so extraction confidence and spatial localization work in Assessment and the UI. Fully serverless — no SageMaker/GPU. |
 
 ## Naming Convention
 
@@ -62,11 +63,23 @@ sam deploy --guided \
     ChandraApiKey=<your-datalab-api-key>
 ```
 
+```bash
+# Deploy the Mistral OCR hook sample
+cd samples/lambda-hook-inference/GENAIIDP-mistral-ocr-hook
+sam build
+sam deploy --guided \
+  --stack-name GENAIIDP-mistral-ocr-hook \
+  --parameter-overrides \
+    IDPWorkingBucket=<your-idp-working-bucket-name> \
+    CustomerManagedEncryptionKeyArn=<your-kms-key-arn> \
+    MistralApiKey=<your-mistral-api-key>
+```
+
 > **Note:** The `CustomerManagedEncryptionKeyArn` is optional but required if the IDP stack's working bucket uses KMS encryption (which it does by default). You can find the KMS key ARN in the IDP stack's CloudFormation **Outputs** tab → `CustomerManagedEncryptionKeyArn`.
 
 ### Deploy All Samples Together
 
-The root `template.yaml` deploys both samples in a single stack:
+The root `template.yaml` deploys all samples in a single stack:
 
 ```bash
 cd samples/lambda-hook-inference
@@ -76,7 +89,9 @@ sam deploy --guided \
   --parameter-overrides \
     IDPWorkingBucket=<your-idp-working-bucket-name> \
     TargetModelId=us.amazon.nova-pro-v1:0 \
-    SageMakerEndpointName=<your-endpoint-name>
+    SageMakerEndpointName=<your-endpoint-name> \
+    ChandraApiKey=<your-datalab-api-key> \
+    MistralApiKey=<your-mistral-api-key>
 ```
 
 ## Configuration in IDP
@@ -117,6 +132,52 @@ cd samples/lambda-hook-inference/GENAIIDP-chandra-ocr-hook
 pip install pdf2image Pillow
 export CHANDRA_API_KEY="your-api-key"
 python test_local.py ../../insurance_package.pdf
+```
+
+### Mistral OCR Configuration
+
+To use [Mistral OCR](https://mistral.ai/news/ocr-4/) as the OCR engine, set the OCR backend to `bedrock` with `LambdaHook` as the model:
+
+```yaml
+ocr:
+  backend: bedrock
+  model_id: "LambdaHook"
+  model_lambda_hook_arn: "arn:aws:lambda:us-east-1:123456789012:function:GENAIIDP-mistral-ocr-hook"
+```
+
+Mistral OCR 4 is a document-understanding model that returns markdown-structured text together with **paragraph-level bounding boxes**, typed-block classification, and **per-page / per-word confidence scores**, across 170 languages.
+
+**Confidence scores and geometry (explainability):** Unlike a plain text-only OCR hook, this hook requests structured output (`include_blocks=true`, `confidence_scores_granularity=word`) and translates the Mistral response into **Amazon Textract response format** (a `Blocks` list with `LINE`/`WORD` blocks carrying `Confidence` and `Geometry.BoundingBox`). It returns this under a top-level `textractBlocks` key. The IDP OCR service detects `textractBlocks` and persists it as the page's `rawText.json` and `textConfidence.json`, so the OCR confidence flows into Assessment (the `{OCR_TEXT_CONFIDENCE}` prompt placeholder), and the geometry is available for UI bounding-box highlighting — exactly like the native Textract backend. Hooks that return only text keep the previous behavior unchanged.
+
+**Cost metering:** The hook returns `usage.pages` (from Mistral's `usage_info.pages_processed`), so per-page cost is tracked. Add a pricing entry to `config_library/pricing.yaml` keyed on the function name with a `pages` unit (Mistral OCR list price is $4 / 1,000 pages = `0.004`):
+
+```yaml
+  - name: GENAIIDP-mistral-ocr-hook
+    units:
+      - name: pages
+        price: "0.004"
+```
+
+**Getting an API key:** Sign up at [console.mistral.ai](https://console.mistral.ai) to get your API key, then provide it as `MistralApiKey` when deploying the Lambda function.
+
+**Testing:** Three test scripts are provided in the sample folder:
+```bash
+cd samples/lambda-hook-inference/GENAIIDP-mistral-ocr-hook
+
+# 1. Offline unit tests for the Mistral->Textract translation (no API/AWS needed)
+python test_translation.py
+
+# 2. Live API test against the hosted Mistral OCR API (single image works without poppler)
+export MISTRAL_API_KEY="your-api-key"
+python test_local.py ../../old_cal_license.png            # single image
+pip install pdf2image Pillow                              # (PDFs need poppler installed)
+python test_local.py ../../insurance_package.pdf --pages 1,2
+
+# 3. End-to-end test of the DEPLOYED Lambda (uploads an image to temp/lambdahook/,
+#    invokes the function, validates blocks + confidence + geometry + metering, cleans up)
+AWS_PROFILE=default python test_deployed.py \
+  --bucket <your-idp-working-bucket-name> \
+  --image ../../old_cal_license.png
 ```
 
 ## Request/Response Format
@@ -167,6 +228,34 @@ python test_local.py ../../insurance_package.pdf
   }
 }
 ```
+
+#### Optional: structured OCR output (confidence + geometry)
+
+For the **OCR** context, a hook may optionally return a top-level `textractBlocks`
+object in **Amazon Textract response format**. When present (and non-empty), the IDP
+OCR service persists it as the page's `rawText.json` / `textConfidence.json` instead
+of writing the "no confidence data" placeholder — carrying per-line/word confidence
+and bounding-box geometry into Assessment and the UI. See the
+**GENAIIDP-mistral-ocr-hook** sample for a full implementation.
+
+```json
+{
+  "output": {"message": {"role": "assistant", "content": [{"text": "# Invoice\n..."}]}},
+  "textractBlocks": {
+    "DocumentMetadata": {"Pages": 1},
+    "Blocks": [
+      {"BlockType": "PAGE", "Id": "..."},
+      {"BlockType": "LINE", "Id": "...", "Text": "Account: 12345", "Confidence": 97.5,
+       "Geometry": {"BoundingBox": {"Left": 0.1, "Top": 0.02, "Width": 0.4, "Height": 0.03}}},
+      {"BlockType": "WORD", "Id": "...", "Text": "12345", "Confidence": 92.0}
+    ]
+  },
+  "usage": {"pages": 1, "inputTokens": 0, "outputTokens": 0, "totalTokens": 0}
+}
+```
+
+> Geometry uses Textract's normalized 0–1 `BoundingBox` (`Left`, `Top`, `Width`, `Height`).
+> `usage.pages` enables per-page cost metering (add a pricing entry keyed on the function name with a `pages` unit).
 
 ## IAM Permissions
 

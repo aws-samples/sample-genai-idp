@@ -20,12 +20,14 @@ The service supports three OCR backends, each with different capabilities and us
 - **Assessment Quality**: ⭐⭐⭐ Optimal - Real OCR confidence enables accurate assessment
 - **Use Cases**: Standard document processing, when assessment is enabled, production workflows
 
-### 2. Bedrock Backend (LLM-based OCR)
-- **Technology**: Amazon Bedrock LLMs (Claude, Nova) for text extraction
-- **Confidence Data**: ❌ No confidence data (displays "No confidence data available from LLM OCR")
-- **Features**: Advanced text understanding, better handling of challenging/degraded documents
-- **Assessment Quality**: ❌ No confidence data for assessment
-- **Use Cases**: Challenging documents where traditional OCR fails, specialized text extraction needs
+### 2. Bedrock Backend (LLM-based OCR, incl. LambdaHook)
+- **Technology**: Amazon Bedrock LLMs (Claude, Nova) for text extraction, or a custom `LambdaHook` (`model_id: "LambdaHook"`) that proxies to any inference provider.
+- **Confidence Data**:
+  - Plain Bedrock LLM OCR: ❌ No confidence data (displays "No confidence data available from LLM OCR").
+  - LambdaHook returning **structured OCR**: ✅ Real confidence + geometry — if the hook returns a top-level `textractBlocks` object (Amazon Textract response format with a `Blocks` list), the service persists it as `rawText.json` and generates a real `textConfidence.json` from it.
+- **Features**: Advanced text understanding, better handling of challenging/degraded documents; with a LambdaHook, any third-party OCR (e.g. Mistral OCR, Chandra OCR).
+- **Assessment Quality**: ❌ for plain LLM OCR; ⭐⭐⭐ when a LambdaHook supplies `textractBlocks` confidence.
+- **Use Cases**: Challenging documents where traditional OCR fails; integrating external OCR providers via the LambdaHook feature.
 
 ### 3. None Backend (Image-only)
 - **Technology**: No OCR processing
@@ -34,7 +36,29 @@ The service supports three OCR backends, each with different capabilities and us
 - **Assessment Quality**: ❌ No text confidence for assessment
 - **Use Cases**: Image-only workflows, custom OCR integration
 
-> ⚠️ **CRITICAL for Assessment**: When assessment functionality is enabled, use `backend="textract"` (default) to preserve granular confidence data. Using `backend="bedrock"` results in empty confidence data that eliminates assessment capability.
+> ⚠️ **CRITICAL for Assessment**: When assessment functionality is enabled, use `backend="textract"` (default) to preserve granular confidence data. Plain `backend="bedrock"` LLM OCR produces empty confidence data that eliminates assessment capability — **unless** the configured LambdaHook returns structured `textractBlocks` (see below), in which case confidence/geometry are preserved.
+
+### Structured OCR from a LambdaHook (`textractBlocks`)
+
+When `backend="bedrock"` and `model_id="LambdaHook"`, the hook receives a Converse-API payload and may return — in addition to the markdown text — a top-level `textractBlocks` object in **Amazon Textract response format**:
+
+```json
+{
+  "output": {"message": {"content": [{"text": "# Page markdown..."}]}},
+  "textractBlocks": {
+    "DocumentMetadata": {"Pages": 1},
+    "Blocks": [
+      {"BlockType": "PAGE", "Id": "..."},
+      {"BlockType": "LINE", "Id": "...", "Text": "Account: 12345", "Confidence": 97.5,
+       "Geometry": {"BoundingBox": {"Left": 0.1, "Top": 0.02, "Width": 0.4, "Height": 0.03}}},
+      {"BlockType": "WORD", "Id": "...", "Text": "12345", "Confidence": 92.0}
+    ]
+  },
+  "usage": {"pages": 1}
+}
+```
+
+`OcrService._extract_bedrock_ocr_artifacts()` detects a non-empty `textractBlocks` and persists it as the page's `rawText.json`, then builds a real `textConfidence.json` from its LINE blocks (same path as the Textract backend). Geometry uses Textract's normalized 0–1 `BoundingBox`. Hooks returning only text keep the previous placeholder behavior. See `samples/lambda-hook-inference/GENAIIDP-mistral-ocr-hook/` for a reference implementation (Mistral OCR) and [docs/lambda-hook-inference.md](../../../../docs/lambda-hook-inference.md).
 
 ## Features
 
