@@ -327,6 +327,7 @@ class TestServiceEscalationGate:
             section_info=_FakeSection(),
             parsing_succeeded=True,
         )
+        assert meta is not None
         assert meta["check_formats"] is True
         assert meta["initial_error_count"] >= 1
         assert "status" in meta["initial_failed_fields"]
