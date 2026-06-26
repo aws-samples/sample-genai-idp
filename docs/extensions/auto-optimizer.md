@@ -42,11 +42,9 @@ Throughout the process, the agent produces:
 
 The Auto Optimizer system is scientifically validated. In controlled experiments it surpassed human expert accuracy on multiple real-world document datasets, and those improvements generalize to unseen documents with no overfitting.
 
-## Installing
+## Availability
 
-The Auto Optimizer is available as an extension via the [Feature Platform](../feature-platform.md). It will be accessible through the **AWS Marketplace** soon.
-
-Once installed, it appears under **Extensions** in the IDP web UI navigation.
+The Auto Optimizer is an extension to the IDP Accelerator, currently available in **private beta**. Once installed, it appears under **Extensions** in the IDP web UI navigation.
 
 ## Starting an optimization run
 
@@ -61,8 +59,6 @@ From the Auto Optimizer page in the UI:
 
 Once started, the agent streams its progress live to the UI. You are free to log out — the agent continues running autonomously.
 
-## Source & availability
+## Getting access
 
-The Auto Optimizer source code is not open-source. It will be available via the **AWS Marketplace** soon.
-
-**For early access**, reach out to your AWS account manager and ask them to contact David Kaleko or Bob Strahan at the AWS Generative AI Innovation Center.
+The Auto Optimizer is in private beta. To request access, reach out to your AWS account team and ask them to contact David Kaleko or Bob Strahan at the AWS Generative AI Innovation Center.
