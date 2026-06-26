@@ -11,7 +11,6 @@ import { Document } from '../../types/documents';
 
 import useNotifications from '../../hooks/use-notifications';
 import { mapNotificationsToFlashbar } from '../common/notification-flashbar';
-import useSplitPanel from '../../hooks/use-split-panel';
 import useGraphQlApi from '../../hooks/use-graphql-api';
 import useAppContext from '../../contexts/app';
 
