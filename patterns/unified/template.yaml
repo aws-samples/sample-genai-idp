@@ -137,6 +137,15 @@ Parameters:
     Type: String
     Description: "Content-based version for Lambda container images"
 
+  LambdaArchitecture:
+    Type: String
+    Default: "arm64"
+    AllowedValues: ["arm64", "x86_64"]
+    Description: >-
+      CPU architecture for Lambda container images. Must match the base image
+      used in the Docker build. Use arm64 (Graviton) for best price-performance
+      or x86_64 when using custom base images that only support AMD64.
+
   ArtifactBucket:
     Type: String
     Description: "S3 bucket containing deployment artifacts"
@@ -902,6 +911,26 @@ Resources:
                 default: 0
                 order: 3.6
                 dependsOn: { field: "classificationMethod", value: "multimodalPageLevelClassification" }
+              enforceValidClasses:
+                type: boolean
+                description: "When enabled, the predicted class is validated against the defined class vocabulary. If the model returns a class that is not in the list, it is re-prompted with the valid choices and retried (see Max Validation Retries). If retries are exhausted, the page is assigned the Invalid Class Fallback and flagged with a validation error. When disabled, an out-of-vocabulary prediction is used as-is (legacy behavior). Only applies to multimodalPageLevelClassification."
+                default: true
+                order: 3.7
+                dependsOn: { field: "classificationMethod", value: "multimodalPageLevelClassification" }
+              maxValidationRetries:
+                type: integer
+                description: "Maximum number of times to re-prompt the model when it returns a class outside the defined vocabulary. Only used when Enforce Valid Classes is enabled. 0 disables retries (a single invalid prediction goes straight to the fallback)."
+                minimum: 0
+                maximum: 5
+                default: 2
+                order: 3.8
+                dependsOn: { field: "enforceValidClasses", value: true }
+              invalidClassFallback:
+                type: string
+                description: "Class label assigned to a page when all validation retries are exhausted. Should be one of your defined classes, or the built-in 'unclassified'. Only used when Enforce Valid Classes is enabled."
+                default: "unclassified"
+                order: 3.9
+                dependsOn: { field: "enforceValidClasses", value: true }
               temperature:
                 type: number
                 minimum: 0
@@ -2893,6 +2922,8 @@ Resources:
             Value: !Ref ImageVersion
           - Name: AWS_REGION
             Value: !Ref AWS::Region
+          - Name: LAMBDA_ARCHITECTURE
+            Value: !Ref LambdaArchitecture
       TimeoutInMinutes: 90
 
   CodeBuildExecutionRole:
@@ -3021,6 +3052,7 @@ Resources:
       # Force rebuild when source changes (filename includes content hash)
       CodeLocation: !Sub "arn:${AWS::Partition}:s3:::${ArtifactBucket}/${ArtifactPrefix}/${SourceZipfile}"
       ImageVersion: !Ref ImageVersion
+      LambdaArchitecture: !Ref LambdaArchitecture
       ExpectedImages:
         - "bda-invoke-function"
         - "bda-completion-function"
@@ -3086,7 +3118,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:bda-invoke-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       Timeout: 900
       MemorySize: 4096
       Tracing: Active
@@ -3155,7 +3187,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:bda-processresults-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       Timeout: 900
       MemorySize: 4096
       Tracing: Active
@@ -3288,7 +3320,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:bda-completion-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       Timeout: 900
       MemorySize: 4096
       Tracing: Active
@@ -3415,7 +3447,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:ocr-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -3572,7 +3604,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:classification-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -3741,7 +3773,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:extraction-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -3908,7 +3940,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:assessment-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -4066,7 +4098,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:processresults-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -4165,7 +4197,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:summarization-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -4412,7 +4444,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:evaluation-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -4553,7 +4585,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:test-execution-aggregation-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       Timeout: 900
       MemorySize: 4096
       Tracing: Active
@@ -4614,7 +4646,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:rule-validation-policy-classification-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -4710,7 +4742,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:rule-validation-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -4857,7 +4889,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:rule-validation-orchestration-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"
@@ -5026,7 +5058,7 @@ Resources:
       PackageType: Image
       ImageUri: !Sub "${ECRRepository.RepositoryUri}:mlflow-logger-function-${ImageVersion}"
       Architectures:
-        - arm64
+        - !Ref LambdaArchitecture
       ImageConfig:
         Command:
           - "index.handler"

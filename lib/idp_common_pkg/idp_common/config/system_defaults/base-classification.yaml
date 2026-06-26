@@ -10,6 +10,12 @@ classification:
   maxPagesForClassification: "ALL"
   contextPagesCount: "0"
   sectionSplitting: llm_determined
+  # Validate the predicted class against the configured class vocabulary and
+  # re-prompt the model on out-of-vocabulary predictions
+  # (multimodalPageLevelClassification only).
+  enforceValidClasses: true
+  maxValidationRetries: "2"
+  invalidClassFallback: unclassified
   image:
     target_height: ""
     target_width: ""

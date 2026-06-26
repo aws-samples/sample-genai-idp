@@ -50,7 +50,7 @@ class HeadlessTemplateTransformer:
 
         self.ui_resources: Set[str] = {
             "CloudFrontDistribution",
-            "CloudFrontOriginAccessIdentity",
+            "CloudFrontOriginAccessControl",
             "SecurityHeadersPolicy",
             "WebUIBucket",
             "WebUIBucketPolicy",

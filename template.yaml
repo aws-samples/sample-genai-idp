@@ -405,9 +405,20 @@ Parameters:
       - "true"
       - "false"
     Description: >-
-      Enable automatic vulnerability scanning for Lambda container images in ECR (applies to Pattern-1 and Pattern-2). 
-      Disabling may improve deployment reliability but reduces security posture. 
+      Enable automatic vulnerability scanning for Lambda container images in ECR (applies to Pattern-1 and Pattern-2).
+      Disabling may improve deployment reliability but reduces security posture.
       Recommended: true for production, false only if experiencing deployment issues.
+
+  LambdaArchitecture:
+    Type: String
+    Default: "arm64"
+    AllowedValues:
+      - "arm64"
+      - "x86_64"
+    Description: >-
+      CPU architecture for Lambda container images in the unified pattern.
+      Use arm64 (Graviton) for best price-performance, or x86_64 when using
+      custom base images that only support AMD64.
 
   # Logging configuration
   LogLevel:
@@ -1308,6 +1319,11 @@ Metadata:
           default: "Advanced - Artifact Bucket"
         Parameters:
           - ArtifactsBucketKmsKeyArn
+      - Label:
+          default: "Advanced - Container Images"
+        Parameters:
+          - LambdaArchitecture
+          - EnableECRImageScanning
       - Label:
           default: "Feature Platform (optional)"
         Parameters:
@@ -2561,6 +2577,7 @@ Resources:
           - !Ref EvaluationBaselineBucketName
         SaveReportingFunctionName: !Ref SaveReportingDataFunctionV2
         ImageVersion: "<UNIFIED_IMAGE_VERSION>"
+        LambdaArchitecture: !Ref LambdaArchitecture
         ArtifactBucket: "<ARTIFACT_BUCKET_TOKEN>"
         ArtifactPrefix: "<ARTIFACT_PREFIX_TOKEN>"
         ArtifactsBucketKmsKeyArn: !Ref ArtifactsBucketKmsKeyArn
@@ -4597,9 +4614,12 @@ Resources:
             - UseCloudFrontHosting
             - Effect: Allow
               Principal:
-                CanonicalUser: !GetAtt CloudFrontOriginAccessIdentity.S3CanonicalUserId
+                Service: !Sub "cloudfront.${AWS::URLSuffix}"
               Action: s3:GetObject
               Resource: !Sub "${WebUIBucket.Arn}/*"
+              Condition:
+                StringEquals:
+                  "AWS:SourceArn": !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
             - !Ref AWS::NoValue
           - !If
             - UseALBHosting
@@ -9530,12 +9550,16 @@ Resources:
   # Knowledge Base Query Resolver
   ##########################################################################
 
-  CloudFrontOriginAccessIdentity:
-    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+  CloudFrontOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
     Condition: UseCloudFrontHosting
     Properties:
-      CloudFrontOriginAccessIdentityConfig:
-        Comment: !Sub "${AWS::StackName} CloudFront OAI for ${WebUIBucket}"
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-webui-oac"
+        Description: !Sub "${AWS::StackName} CloudFront OAC for ${WebUIBucket}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
 
   # Define a custom response headers policy for security headers
   SecurityHeadersPolicy:
@@ -9631,8 +9655,9 @@ Resources:
         Origins:
           - Id: webapp-s3-bucket
             DomainName: !GetAtt WebUIBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt CloudFrontOriginAccessControl.Id
             S3OriginConfig:
-              OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}"
+              OriginAccessIdentity: ""
         PriceClass: !Ref CloudFrontPriceClass
         Restrictions: !If
           - ShouldEnableGeoRestriction

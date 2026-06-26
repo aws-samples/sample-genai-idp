@@ -16,7 +16,7 @@ import json
 
 import boto3
 import pytest
-from idp_feature_sdk.pack import ensure_artifacts_bucket
+from idp_feature_sdk.pack import apply_public_artifacts_policy, ensure_artifacts_bucket
 from moto import mock_aws
 
 REGION = "us-west-2"
@@ -88,7 +88,7 @@ def test_preexisting_bucket_bpa_left_untouched(aws_credentials):
 
 def test_make_public_opt_in_relaxes_bpa_and_sets_policy(aws_credentials):
     """With make_public=True, BlockPublicPolicy/RestrictPublicBuckets are
-    relaxed and the packs/host public-read bucket policy is applied."""
+    relaxed and the extensions/host public-read bucket policy is applied."""
     with mock_aws():
         bucket = ensure_artifacts_bucket(region=REGION, make_public=True)
         s3 = boto3.client("s3", region_name=REGION)
@@ -107,5 +107,28 @@ def test_make_public_opt_in_relaxes_bpa_and_sets_policy(aws_credentials):
         )
         assert stmt["Principal"] == "*"
         assert stmt["Action"] == "s3:GetObject"
-        assert any(f"{bucket}/packs/" in r for r in stmt["Resource"])
+        assert any(f"{bucket}/extensions/" in r for r in stmt["Resource"])
         assert any(f"{bucket}/host/" in r for r in stmt["Resource"])
+
+
+def test_apply_public_artifacts_policy_on_explicit_bucket(aws_credentials):
+    """`apply_public_artifacts_policy` (used by publish-pack --public on an
+    explicit --bucket-basename) relaxes BPA and applies the public-read
+    policy on a bucket it didn't create."""
+    with mock_aws():
+        s3 = boto3.client("s3", region_name=REGION)
+        bucket = "my-explicit-artifacts-us-west-2"
+        s3.create_bucket(
+            Bucket=bucket,
+            CreateBucketConfiguration={"LocationConstraint": REGION},
+        )
+
+        apply_public_artifacts_policy(s3, bucket)
+
+        pab = _get_pab(s3, bucket)
+        assert pab["BlockPublicPolicy"] is False
+        assert pab["RestrictPublicBuckets"] is False
+
+        policy = json.loads(s3.get_bucket_policy(Bucket=bucket)["Policy"])
+        sids = {s.get("Sid") for s in policy["Statement"]}
+        assert "PackPublicArtifactsRead" in sids

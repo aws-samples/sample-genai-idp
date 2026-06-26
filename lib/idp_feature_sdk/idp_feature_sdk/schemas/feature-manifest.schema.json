@@ -190,9 +190,13 @@
               "default": "IdpAcceleratorTemplateUrl",
               "description": "Name of the wrapper parameter that takes the host accelerator template URL."
             },
-            "artifactSourceParam": {
+            "featureBucketParam": {
               "type": "string",
-              "description": "Name of the wrapper parameter that takes the public artifact source URL prefix. Defaults to '<FeatureIdCamel>ArtifactSource'."
+              "description": "Name of the wrapper parameter that takes the S3 bucket holding the published feature artifacts. publish-pack bakes the publish bucket as this parameter's default; the wrapper passes it straight to the feature stack's FeatureBucket parameter (the feature stack reads artifacts in place via IAM — no seller-bucket copy)."
+            },
+            "prefixParam": {
+              "type": "string",
+              "description": "Name of the wrapper parameter that takes the version-free artifact key prefix (e.g. 'extensions/<id>'). publish-pack bakes this as the parameter's default so the wrapper/feature stack can locate the published artifacts."
             },
             "versionParam": {
               "type": "string",
