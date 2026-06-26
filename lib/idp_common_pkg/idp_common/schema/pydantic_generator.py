@@ -239,6 +239,65 @@ def _find_model_in_module(
     return all_models[0][1], all_models
 
 
+def _iter_nested_model_classes(annotation: Any):
+    """Yield every Pydantic ``BaseModel`` subclass referenced by a type annotation.
+
+    Walks into containers and unions (``Optional[X]``, ``list[X]``,
+    ``dict[str, X]``, ``Union[...]``) so nested object/array-of-object fields are
+    reached, not just direct ``BaseModel`` annotations.
+    """
+    import typing
+
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        yield annotation
+        return
+    # typing.get_args handles Optional/Union/list/dict/tuple parameterizations.
+    for arg in typing.get_args(annotation):
+        yield from _iter_nested_model_classes(arg)
+
+
+def _apply_alias_config_recursively(
+    model: Type[BaseModel],
+    config: ConfigDict,
+    _seen: Optional[set] = None,
+) -> None:
+    """Apply ``config`` to ``model`` and every nested generated model in place.
+
+    datamodel-code-generator sanitizes JSON-Schema property names with spaces
+    (e.g. ``"Date of Birth"``) into Python identifiers (``Date_of_Birth``) and
+    records the original name as the field alias. The alias round-trip
+    (``populate_by_name`` / ``serialize_by_alias`` / ``validate_by_*``) is only
+    set on the top-level model by the caller, so **nested** sub-models would
+    otherwise validate/serialize by field name and silently drop or mis-key
+    nested values (see fix for agentic extraction nested-field loss). This walks
+    the whole model graph and applies the same config to every nested model,
+    then rebuilds each so Pydantic's cached core schema picks up the change.
+
+    ``_seen`` guards against recursive/self-referential schemas.
+    """
+    if _seen is None:
+        _seen = set()
+    if model in _seen:
+        return
+    _seen.add(model)
+
+    # Merge (not replace) so we don't clobber any config the model already has.
+    model.model_config.update(config)
+
+    for field in model.model_fields.values():
+        for nested in _iter_nested_model_classes(field.annotation):
+            _apply_alias_config_recursively(nested, config, _seen)
+
+    # Force a rebuild so the updated config takes effect on the cached schema.
+    try:
+        model.model_rebuild(force=True)
+    except Exception as exc:  # pragma: no cover - defensive; rebuild rarely fails
+        logger.warning(
+            f"model_rebuild failed for '{model.__name__}' after alias-config "
+            f"propagation; nested alias serialization may be incomplete: {exc}"
+        )
+
+
 def create_pydantic_model_from_json_schema(
     schema: Dict[str, Any],
     class_label: str,
@@ -395,6 +454,21 @@ def create_pydantic_model_from_json_schema(
                         populate_by_name=True, serialize_by_alias=True
                     ),
                 )
+
+            # Propagate the alias config to ALL nested models. The caller above
+            # only sets it on the top-level model, so without this, nested object
+            # properties whose names contain spaces (aliased to identifiers like
+            # "Date_of_Birth") validate/serialize by field name and silently drop
+            # or mis-key values. This makes nested behavior match the top level.
+            _apply_alias_config_recursively(
+                final_model,
+                ConfigDict(
+                    populate_by_name=True,
+                    serialize_by_alias=True,
+                    validate_by_name=True,
+                    validate_by_alias=True,
+                ),
+            )
 
             # Log the final model with its fields and aliases
             field_count = len(final_model.model_fields)

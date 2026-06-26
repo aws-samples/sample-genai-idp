@@ -159,6 +159,71 @@ When a per-class model override is active, it is logged at INFO level:
 Using per-class extraction model override for 'complex-financial-form': us.anthropic.claude-sonnet-4-20250514-v1:0
 ```
 
+### Per-Class Extraction Prompt Overrides
+
+By default, every document class uses the global `extraction.system_prompt` and `extraction.task_prompt`. You can override either (or both) on a per-class basis using two class-schema extensions:
+
+- **`x-aws-idp-extraction-system-prompt`** — overrides the extraction system prompt for that class.
+- **`x-aws-idp-extraction-task-prompt`** — overrides the extraction task prompt for that class.
+
+This is useful when individual classes have been independently optimized (for example, via separate AutoTune runs) and you want to preserve their specialized prompts when merging several single-class configs into one multi-class classification + extraction config. Because the pipeline classifies first and then extracts per-class, the extraction step always knows which class it is processing and can apply the class-specific prompts.
+
+Classes without these extensions continue to use the global prompts, so existing configs are unaffected. The override task prompt supports the same placeholders as the global task prompt:
+
+- `{DOCUMENT_CLASS}`
+- `{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}`
+- `{FEW_SHOT_EXAMPLES}`
+- `{DOCUMENT_TEXT}`
+- `{DOCUMENT_IMAGE}`
+- `<<CACHEPOINT>>`
+
+Because the prompts live in `config.yaml` (rather than in a `custom_prompts_lambda_arn` Lambda), they remain easy to version, share, and optimize with AutoTune.
+
+```yaml
+extraction:
+  model: us.amazon.nova-pro-v1:0
+  system_prompt: "You are a document extraction assistant."
+  task_prompt: |
+    Extract fields from this {DOCUMENT_CLASS} document:
+    {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+    Document text: {DOCUMENT_TEXT}
+
+classes:
+  # Uses the global system_prompt / task_prompt
+  - $schema: "https://json-schema.org/draft/2020-12/schema"
+    $id: simple-receipt
+    x-aws-idp-document-type: simple-receipt
+    type: object
+    properties:
+      total:
+        type: string
+        description: "Total amount"
+
+  # Overrides both prompts for this class only
+  - $schema: "https://json-schema.org/draft/2020-12/schema"
+    $id: W2
+    x-aws-idp-document-type: W2
+    x-aws-idp-extraction-system-prompt: "You are an expert W2 tax form data extractor."
+    x-aws-idp-extraction-task-prompt: |
+      Extract the following attributes from this {DOCUMENT_CLASS} form:
+      {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+      Document text: {DOCUMENT_TEXT}
+    type: object
+    properties:
+      employee_name:
+        type: string
+        description: "Employee name"
+```
+
+When a per-class prompt override is active, it is logged at INFO level:
+
+```
+Using per-class extraction system prompt override for 'W2'
+Using per-class extraction task prompt override for 'W2'
+```
+
+> **Note:** These overrides also compose with `extraction.custom_prompt_lambda_arn`. When a custom prompt Lambda is configured, the per-class prompts are resolved first and passed to the Lambda as the defaults; any prompts the Lambda returns still take final precedence.
+
 ### Extraction Instructions
 
 ### Model and Prompt Configuration

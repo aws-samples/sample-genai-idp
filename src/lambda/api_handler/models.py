@@ -2,7 +2,7 @@
 
 from typing import Dict, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # Request Models
@@ -11,6 +11,12 @@ class Metadata(BaseModel):
 
 class PostJobRequest(BaseModel):
     fileName: str  # Filename with extension (.zip)
+    configurationVersion: Optional[str] = Field(
+        default=None,
+        max_length=128,
+        pattern=r"^[a-zA-Z0-9._-]+$",
+        description="Configuration version to use for processing (e.g. 'v1', 'lending-v2')",
+    )
     metadata: Optional[Metadata] = None
 
 
@@ -39,6 +45,7 @@ class Result(BaseModel):
 class GetJobResponse(BaseModel):
     jobId: str
     status: str
+    configurationVersion: Optional[str] = None
     timestamps: Timestamps
     files: Optional[Dict[str, str]] = None
     result: Optional[Result] = None

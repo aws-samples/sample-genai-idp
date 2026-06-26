@@ -531,6 +531,7 @@ class TestOcrService:
         assert "raw_text_uri" in result
         assert "parsed_text_uri" in result
         assert "text_confidence_uri" in result
+        assert "ocr_page_data_uri" in result
         assert "image_uri" in result
         assert "OCR/textract/detect_document_text" in metering
 
@@ -538,7 +539,9 @@ class TestOcrService:
         mock_textract_client.detect_document_text.assert_called_once()
 
         # Verify S3 writes
-        assert mock_write_content.call_count == 4  # image, raw, confidence, parsed
+        assert (
+            mock_write_content.call_count == 5
+        )  # image, raw, confidence, parsed, pageData
 
     @patch("boto3.client")
     @patch("idp_common.s3.write_content")
@@ -585,6 +588,7 @@ class TestOcrService:
         assert "raw_text_uri" in result
         assert "parsed_text_uri" in result
         assert "text_confidence_uri" in result
+        assert "ocr_page_data_uri" in result
         assert "image_uri" in result
         assert metering == {"input_tokens": 100, "output_tokens": 50}
 
@@ -593,7 +597,71 @@ class TestOcrService:
         mock_extract_text.assert_called_once()
 
         # Verify S3 writes
-        assert mock_write_content.call_count == 4  # image, raw, confidence, parsed
+        assert (
+            mock_write_content.call_count == 5
+        )  # image, raw, confidence, parsed, pageData
+
+    def test_extract_bedrock_ocr_artifacts_text_only(self, mock_bedrock_config):
+        """A plain text LambdaHook/Bedrock response -> placeholder confidence."""
+        with patch("boto3.client"):
+            service = OcrService(backend="bedrock", bedrock_config=mock_bedrock_config)
+        response_payload = {
+            "output": {"message": {"content": [{"text": "Some OCR text"}]}}
+        }
+        raw, confidence = service._extract_bedrock_ocr_artifacts(response_payload)
+
+        # Raw response stored as-is
+        assert raw == response_payload
+        # Placeholder confidence table (no real scores)
+        assert "No confidence data available from LLM OCR" in confidence["text"]
+
+    def test_extract_bedrock_ocr_artifacts_structured(self, mock_bedrock_config):
+        """A LambdaHook returning textractBlocks -> real confidence table."""
+        with patch("boto3.client"):
+            service = OcrService(backend="bedrock", bedrock_config=mock_bedrock_config)
+        textract_blocks = {
+            "DocumentMetadata": {"Pages": 1},
+            "Blocks": [
+                {"BlockType": "PAGE", "Id": "p1"},
+                {
+                    "BlockType": "LINE",
+                    "Id": "l1",
+                    "Text": "Account: 12345",
+                    "Confidence": 97.5,
+                },
+                {
+                    "BlockType": "WORD",
+                    "Id": "w1",
+                    "Text": "Account",
+                    "Confidence": 99.0,
+                },
+            ],
+        }
+        response_payload = {
+            "output": {"message": {"content": [{"text": "Account: 12345"}]}},
+            "textractBlocks": textract_blocks,
+        }
+        raw, confidence = service._extract_bedrock_ocr_artifacts(response_payload)
+
+        # Textract blocks persisted as the raw OCR result (not the wrapper)
+        assert raw == textract_blocks
+        # Real confidence table generated from LINE blocks
+        assert "Account: 12345" in confidence["text"]
+        assert "97.5" in confidence["text"]
+        assert "No confidence data available" not in confidence["text"]
+
+    def test_extract_bedrock_ocr_artifacts_empty_blocks(self, mock_bedrock_config):
+        """textractBlocks present but empty -> fall back to placeholder."""
+        with patch("boto3.client"):
+            service = OcrService(backend="bedrock", bedrock_config=mock_bedrock_config)
+        response_payload = {
+            "output": {"message": {"content": [{"text": "text"}]}},
+            "textractBlocks": {"DocumentMetadata": {"Pages": 1}, "Blocks": []},
+        }
+        raw, confidence = service._extract_bedrock_ocr_artifacts(response_payload)
+
+        assert raw == response_payload
+        assert "No confidence data available from LLM OCR" in confidence["text"]
 
     @patch("boto3.client")
     @patch("idp_common.s3.write_content")
@@ -623,11 +691,14 @@ class TestOcrService:
         assert "raw_text_uri" in result
         assert "parsed_text_uri" in result
         assert "text_confidence_uri" in result
+        assert "ocr_page_data_uri" in result
         assert "image_uri" in result
         assert metering == {}  # No metering data for 'none' backend
 
         # Verify S3 writes (empty content)
-        assert mock_write_content.call_count == 4  # image, raw, confidence, parsed
+        assert (
+            mock_write_content.call_count == 5
+        )  # image, raw, confidence, parsed, pageData
 
     def test_extract_page_image_pdf(self):
         """Test page image extraction from PDF."""
@@ -1064,3 +1135,184 @@ class TestOcrService:
                     b"fake-docx", ocr_image_callback=service._ocr_image_bytes
                 )
                 assert result == [(b"page-img", "page-text")]
+
+
+@pytest.mark.unit
+class TestBuildPageData:
+    """Tests for the consolidated OCR pageData.json schema (_build_page_data)."""
+
+    @pytest.fixture
+    def service(self):
+        with patch("boto3.client"):
+            return OcrService(region="us-east-1")
+
+    def test_textract_line_and_word_geometry(self, service):
+        """Textract blocks -> per-LINE + per-WORD confidence and geometry."""
+        raw = {
+            "DocumentMetadata": {"Pages": 1},
+            "Blocks": [
+                {"BlockType": "PAGE", "Id": "p1"},
+                {
+                    "BlockType": "LINE",
+                    "Id": "line-1",
+                    "Text": "Account: 12345",
+                    "Confidence": 97.53,
+                    "TextType": "PRINTED",
+                    "Geometry": {
+                        "BoundingBox": {
+                            "Left": 0.1,
+                            "Top": 0.02,
+                            "Width": 0.4,
+                            "Height": 0.03,
+                        },
+                        "Polygon": [{"X": 0.1, "Y": 0.02}, {"X": 0.5, "Y": 0.02}],
+                    },
+                    "Relationships": [{"Type": "CHILD", "Ids": ["w1", "w2"]}],
+                },
+                {
+                    "BlockType": "WORD",
+                    "Id": "w1",
+                    "Text": "Account:",
+                    "Confidence": 99.0,
+                    "Geometry": {
+                        "BoundingBox": {
+                            "Left": 0.1,
+                            "Top": 0.02,
+                            "Width": 0.15,
+                            "Height": 0.03,
+                        }
+                    },
+                },
+                {
+                    "BlockType": "WORD",
+                    "Id": "w2",
+                    "Text": "12345",
+                    "Confidence": 92.0,
+                    "Geometry": {
+                        "BoundingBox": {
+                            "Left": 0.26,
+                            "Top": 0.02,
+                            "Width": 0.1,
+                            "Height": 0.03,
+                        }
+                    },
+                },
+            ],
+        }
+
+        page_data = service._build_page_data(raw, "Account: 12345", "textract")
+
+        assert page_data["schemaVersion"] == OcrService.PAGE_DATA_SCHEMA_VERSION
+        assert page_data["provider"] == "textract"
+        assert page_data["geometryAvailable"] is True
+        assert page_data["confidenceAvailable"] is True
+        assert page_data["wordsAvailable"] is True
+        assert len(page_data["lines"]) == 1
+
+        line = page_data["lines"][0]
+        assert line["text"] == "Account: 12345"
+        assert line["confidence"] == 97.5  # rounded to 1 decimal
+        assert line["geometrySource"] == "line"
+        assert line["geometry"]["boundingBox"] == {
+            "left": 0.1,
+            "top": 0.02,
+            "width": 0.4,
+            "height": 0.03,
+        }
+        assert line["geometry"]["polygon"][0] == {"x": 0.1, "y": 0.02}
+        assert len(line["words"]) == 2
+        assert line["words"][0]["text"] == "Account:"
+        assert line["words"][1]["confidence"] == 92.0
+
+    def test_mistral_hook_paragraph_shared_geometry(self, service):
+        """Mistral-style blocks: lines sharing a box -> geometrySource=paragraph."""
+        shared_box = {"Left": 0.1, "Top": 0.1, "Width": 0.5, "Height": 0.08}
+        raw = {
+            "DocumentMetadata": {"Pages": 1},
+            "Blocks": [
+                {
+                    "BlockType": "LINE",
+                    "Id": "l1",
+                    "Text": "First line of paragraph",
+                    "Confidence": 95.0,
+                    "Geometry": {"BoundingBox": dict(shared_box)},
+                },
+                {
+                    "BlockType": "LINE",
+                    "Id": "l2",
+                    "Text": "Second line of paragraph",
+                    "Confidence": 94.0,
+                    "Geometry": {"BoundingBox": dict(shared_box)},
+                },
+            ],
+        }
+
+        page_data = service._build_page_data(raw, "text", "bedrock")
+
+        # Structured blocks present -> LambdaHook provenance
+        assert page_data["provider"] == "bedrock-lambdahook"
+        assert page_data["geometryAvailable"] is True
+        assert page_data["confidenceAvailable"] is True
+        assert page_data["wordsAvailable"] is False
+        for line in page_data["lines"]:
+            assert line["geometrySource"] == "paragraph"
+            assert line["words"] is None
+
+    def test_plain_llm_text_only(self, service):
+        """Plain Bedrock LLM OCR (no blocks) -> synthesized text-only lines."""
+        raw = {"output": {"message": {"content": [{"text": "irrelevant"}]}}}
+        parsed = "# Heading\n\nFirst paragraph line\nSecond line"
+
+        page_data = service._build_page_data(raw, parsed, "bedrock")
+
+        assert page_data["provider"] == "bedrock-llm"
+        assert page_data["geometryAvailable"] is False
+        assert page_data["confidenceAvailable"] is False
+        assert page_data["wordsAvailable"] is False
+        # Blank lines skipped
+        texts = [ln["text"] for ln in page_data["lines"]]
+        assert texts == ["# Heading", "First paragraph line", "Second line"]
+        for line in page_data["lines"]:
+            assert line["confidence"] is None
+            assert line["geometry"] is None
+            assert line["geometrySource"] == "none"
+
+    def test_none_backend_empty(self, service):
+        """'none' backend -> no lines, all flags false."""
+        raw = {"DocumentMetadata": {"Pages": 1}, "Blocks": []}
+
+        page_data = service._build_page_data(raw, "", "none")
+
+        assert page_data["provider"] == "none"
+        assert page_data["lines"] == []
+        assert page_data["geometryAvailable"] is False
+        assert page_data["confidenceAvailable"] is False
+
+    def test_converted_placeholder_confidence(self, service):
+        """Converted non-PDF docs -> per-line placeholder confidence, no geometry."""
+        raw = {
+            "DocumentMetadata": {"Pages": 1},
+            "Blocks": [
+                {
+                    "BlockType": "LINE",
+                    "Text": "line one",
+                    "Confidence": 99.0,
+                    "TextType": "PRINTED",
+                },
+                {
+                    "BlockType": "LINE",
+                    "Text": "line two",
+                    "Confidence": 99.0,
+                    "TextType": "PRINTED",
+                },
+            ],
+        }
+
+        page_data = service._build_page_data(raw, "line one\nline two", "converted")
+
+        assert page_data["provider"] == "converted"
+        assert page_data["confidenceAvailable"] is True
+        assert page_data["geometryAvailable"] is False
+        assert len(page_data["lines"]) == 2
+        assert page_data["lines"][0]["confidence"] == 99.0
+        assert page_data["lines"][0]["geometry"] is None

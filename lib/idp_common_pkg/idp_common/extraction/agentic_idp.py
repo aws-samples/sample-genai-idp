@@ -17,6 +17,7 @@ import threading
 from pathlib import Path
 from typing import (
     Any,
+    Callable,
     TypedDict,
     TypeVar,
 )
@@ -1173,6 +1174,7 @@ async def _invoke_agent_for_extraction(
     prompt_content: list[ContentBlock],
     data_format: type[TargetModel],
     max_extraction_retries: int = 3,
+    schema_validator: Callable[[dict[str, Any]], tuple[bool, str]] | None = None,
 ) -> tuple[Any, TargetModel | None]:
     """
     Invoke agent and retry if extraction fails.
@@ -1185,6 +1187,11 @@ async def _invoke_agent_for_extraction(
         prompt_content: List of ContentBlocks to send to the agent
         data_format: Pydantic model class for validation
         max_extraction_retries: Maximum retry attempts for failed extractions (default: 3)
+        schema_validator: Optional callback that takes the extracted dict and
+            returns ``(is_valid, feedback)``. Used to enforce full JSON-Schema
+            constraints (e.g. ``format`` keywords) that the Pydantic model does
+            not, and to give the agent one more self-correction round with the
+            list of violations. When None, only Pydantic type validation runs.
 
     Returns:
         Tuple of (response, validated_result or None)
@@ -1202,6 +1209,27 @@ async def _invoke_agent_for_extraction(
         if current_extraction:
             try:
                 result = data_format(**current_extraction)
+                # Pydantic type validation passed. Optionally enforce the full
+                # JSON Schema (format keywords, etc.) and feed any violations
+                # back for one more self-correction round.
+                if schema_validator is not None:
+                    is_valid, feedback = schema_validator(current_extraction)
+                    if not is_valid and attempt < max_extraction_retries - 1:
+                        logger.info(
+                            "Schema-constraint validation failed, asking agent to fix",
+                            extra={
+                                "attempt": attempt + 1,
+                                "data_format": data_format.__name__,
+                            },
+                        )
+                        prompt_content = [ContentBlock(text=feedback)]
+                        continue
+                    if not is_valid:
+                        logger.warning(
+                            "Schema-constraint validation still failing after retries; "
+                            "returning best-effort result for escalation/alerting",
+                            extra={"data_format": data_format.__name__},
+                        )
                 logger.debug(
                     "Successfully validated extraction",
                     extra={"data_format": data_format.__name__, "attempt": attempt + 1},
@@ -1453,6 +1481,7 @@ async def structured_output_async(
     max_tokens: int | None = None,
     checkpoint_callback: Any | None = None,
     checkpoint_buffer_data: dict[str, Any] | None = None,
+    schema_validator: Callable[[dict[str, Any]], tuple[bool, str]] | None = None,
 ) -> tuple[TargetModel, BedrockInvokeModelResponse]:
     """
     Extract structured data using Strands agents with tool-based validation.
@@ -1698,6 +1727,7 @@ async def structured_output_async(
         prompt_content=prompt_content,
         data_format=data_format,
         max_extraction_retries=3,
+        schema_validator=schema_validator,
     )
 
     # Accumulate token usage
@@ -1768,6 +1798,7 @@ def structured_output(
     read_timeout: float = 600.0,
     checkpoint_callback: Any | None = None,
     checkpoint_buffer_data: dict[str, Any] | None = None,
+    schema_validator: Callable[[dict[str, Any]], tuple[bool, str]] | None = None,
 ) -> tuple[BaseModel, BedrockInvokeModelResponse]:
     """
     Synchronous version of structured_output_async.
@@ -1856,6 +1887,7 @@ def structured_output(
                         page_images=page_images,
                         checkpoint_callback=checkpoint_callback,
                         checkpoint_buffer_data=checkpoint_buffer_data,
+                        schema_validator=schema_validator,
                     )
                 )
             except Exception as e:
@@ -1890,6 +1922,7 @@ def structured_output(
                 page_images=page_images,
                 checkpoint_callback=checkpoint_callback,
                 checkpoint_buffer_data=checkpoint_buffer_data,
+                schema_validator=schema_validator,
             )
         )
 

@@ -62,7 +62,7 @@ if not result["valid"]:
 | `configuration_manager.py` | `ConfigurationManager` — CRUD against the DynamoDB Configuration Table (Default + Custom records), compression, versioning. |
 | `migration.py` | Migration of legacy configuration formats to the current JSON-Schema-based format. |
 | `constants.py` | Configuration constants. |
-| `schema_constants.py` | JSON Schema extension keys (e.g. `x-aws-idp-document-type`, `x-aws-idp-extraction-model`). |
+| `schema_constants.py` | JSON Schema extension keys (e.g. `x-aws-idp-document-type`, `x-aws-idp-extraction-model`, `x-aws-idp-extraction-system-prompt`, `x-aws-idp-extraction-task-prompt`). |
 | `system_defaults/` | Packaged default configuration YAML used as the merge base. |
 
 ## Configuration records

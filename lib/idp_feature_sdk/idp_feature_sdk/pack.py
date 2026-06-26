@@ -7,10 +7,16 @@ A "pack" is a vertical-product feature (e.g. claims-pack, loans-pack)
 shipped with a single-template CFN wrapper that creates a host stack
 plus auto-installs the feature stack.
 
-`publish-pack` builds the feature, uploads all artifacts to a public
-artifacts bucket, then *bakes* the resulting URLs as parameter defaults
-into the wrapper template and uploads the baked wrapper alongside the
-artifacts. The published wrapper URL is shareable as a Quick-Create URL.
+`publish-pack` publishes the feature artifacts by delegating to
+``FeaturePublisher`` — the SAME publisher (and therefore the same
+``extensions/<id>/`` version-free layout, the same five baked publish-time
+tokens, and the same private/`--public` semantics) used by ``publish``.
+It then *bakes* the publish bucket + version-free prefix + version into the
+wrapper template's parameter defaults and uploads the baked wrapper. The
+feature stack reads its artifacts IN PLACE from the publish bucket at deploy
+time (via IAM), exactly like a normal ``deploy`` — there is no seller bucket
+and no pre-stage copy. The published wrapper URL is shareable as a
+Quick-Create URL (which requires ``--public``).
 
 `deploy-pack` reads the published wrapper URL, calls
 cloudformation:CreateStack with only the minimum operator inputs
@@ -21,7 +27,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 import sys
 import time
@@ -33,6 +38,7 @@ import boto3
 from rich.console import Console
 
 from .manifest import FeatureManifest, load_manifest
+from .publisher import FeaturePublisher
 
 
 @dataclass(frozen=True)
@@ -41,7 +47,6 @@ class PackPublishResult:
     version: str
     artifact_bucket: str
     artifact_prefix: str
-    artifact_source_url: str
     feature_template_url: str
     host_template_url: str
     wrapper_template_url: str
@@ -49,24 +54,31 @@ class PackPublishResult:
     deploy_command: str
 
 
-_PARAMETERS_BLOCK_RE = re.compile(r"^Parameters:\s*$", re.MULTILINE)
-
-
-def _content_type_for(path: Path) -> str:
-    suffix = path.suffix.lower()
-    if suffix in (".yaml", ".yml"):
-        return "application/x-yaml"
-    if suffix == ".js":
-        return "application/javascript"
-    if suffix == ".json":
-        return "application/json"
-    if suffix == ".zip":
-        return "application/zip"
-    return "application/octet-stream"
-
-
 def _public_https_url(bucket: str, region: str, key: str) -> str:
     return f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
+
+
+def _bake_wrapper_tokens(
+    wrapper_yaml: str,
+    *,
+    manifest: FeatureManifest,
+    artifact_bucket: str,
+    artifact_prefix: str,
+) -> str:
+    """Substitute the publish-time ``<FEATURE_*_TOKEN>`` placeholders in the
+    wrapper text, mirroring how FeaturePublisher bakes the SAME tokens into the
+    feature template (publisher.py). Lets the wrapper use the version (etc.) in
+    places CloudFormation forbids intrinsics — most notably the top-level
+    ``Description``. All tokens are OPTIONAL: a placeholder that isn't present
+    is simply a no-op, so wrappers that don't use them are unaffected.
+    """
+    return (
+        wrapper_yaml.replace("<FEATURE_VERSION_TOKEN>", manifest.version)
+        .replace("<FEATURE_ARTIFACT_PREFIX_TOKEN>", artifact_prefix)
+        .replace("<FEATURE_BUCKET_TOKEN>", artifact_bucket)
+        .replace("<FEATURE_PRODUCT_CODE_TOKEN>", manifest.marketplace.productCode or "")
+        .replace("<FEATURE_LISTING_URL_TOKEN>", manifest.marketplace.listingUrl or "")
+    )
 
 
 def _bake_wrapper_defaults(
@@ -172,7 +184,7 @@ def _bake_wrapper_defaults(
             new_result, n = pattern.subn(_replace, result, count=1)
             if n == 0:
                 # Parameter not found in wrapper — caller likely passed
-                # the wrong artifactSourceParam name.
+                # the wrong featureBucketParam/prefixParam/versionParam name.
                 raise ValueError(
                     f"Wrapper template has no parameter named {param_name!r}; "
                     "check feature.yaml `pack.wrapperParameters` keys."
@@ -200,7 +212,7 @@ class PackPublisher:
         artifacts_prefix: str,
         host_template_url: str,
         region: str,
-        skip_feature_build: bool = False,
+        make_public: bool = False,
     ) -> PackPublishResult:
         manifest = load_manifest(self.project_dir)
         if manifest.pack is None:
@@ -219,143 +231,103 @@ class PackPublisher:
         s3 = boto3.client("s3", region_name=region)
         feature_id = manifest.featureId
         version = manifest.version
-        # All feature artifacts live under <prefix>/<feature-id>/v<version>/
-        feat_prefix = f"{artifacts_prefix.rstrip('/')}/{feature_id}/v{version}"
 
-        # 1. Build the UI bundle (unless caller has already done it).
-        if not skip_feature_build:
-            self._build_ui(manifest)
-
-        # 2. SAM build + package the feature template.
-        self._sam_build_and_package(
-            manifest=manifest,
-            artifact_bucket=artifacts_bucket,
-            artifact_prefix=f"{artifacts_prefix.rstrip('/')}/{feature_id}/sam-objects",
+        # 1-3. Publish the feature artifacts by DELEGATING to FeaturePublisher.
+        #
+        # A pack's feature artifacts are published exactly like any other
+        # feature: same `extensions/<id>/` version-free layout, the SAME five
+        # publish-time tokens baked into the template (VERSION, ARTIFACT_PREFIX,
+        # BUCKET, PRODUCT_CODE, LISTING_URL), the same SAM build/package (with
+        # captured stderr surfaced on failure), and the same public-ACL pass
+        # when --public is set. Sharing one publisher is what keeps pack and
+        # feature publishing from drifting apart (issue #375). The pack then
+        # reads these artifacts IN PLACE from this bucket at deploy time — there
+        # is no seller bucket and no pre-stage copy.
+        feature_publisher = FeaturePublisher(
+            self.project_dir, console=self.console, s3_client=s3
+        )
+        # validate → build (ui.buildCommand) → upload, identical to `publish`.
+        feat_result = feature_publisher.publish(
+            feature_bucket=artifacts_bucket,
             region=region,
+            s3_prefix=artifacts_prefix,
+            make_public=make_public,
         )
 
-        # 3. Upload feature artifacts (template, ui-bundle, manifest, configs)
-        #    and make them publicly readable so the wrapper's pre-stager (which
-        #    runs in the *deploying* account, not the publisher's) can fetch
-        #    them via plain HTTPS.
-        feat_template_local = self.project_dir / ".aws-sam" / "packaged.yaml"
-        # Bake the version token in the SAM-packaged template before upload.
-        baked_text = feat_template_local.read_text(encoding="utf-8").replace(
-            "<FEATURE_VERSION_TOKEN>", version
+        # Version-free artifact base the feature stack reads from (matches
+        # FeaturePublisher's `extension_base`): [<prefix>/]extensions/<id>.
+        clean_prefix = artifacts_prefix.strip("/")
+        feat_prefix = (
+            f"{clean_prefix}/extensions/{feature_id}"
+            if clean_prefix
+            else f"extensions/{feature_id}"
         )
-        baked_path = self.project_dir / ".aws-sam" / "packaged-baked.yaml"
-        baked_path.write_text(baked_text, encoding="utf-8")
+        feature_template_url = feat_result.template_url
 
-        self._upload_public(
-            s3,
-            baked_path,
-            artifacts_bucket,
-            f"{feat_prefix}/template.yaml",
-            "application/x-yaml",
-        )
-        ui_bundle = self.project_dir / manifest.ui.bundlePath
-        self._upload_public(
-            s3,
-            ui_bundle,
-            artifacts_bucket,
-            f"{feat_prefix}/ui-bundle.js",
-            "application/javascript",
-        )
-
-        # manifest.json — public form of feature.yaml the host reads.
-        manifest_json = json.dumps(
-            {
-                "featureId": feature_id,
-                "version": version,
-                "displayName": manifest.displayName,
-                "description": manifest.description,
-                "iconUrl": manifest.iconUrl,
-                "capabilities": list(manifest.capabilities),
-            }
-        ).encode("utf-8")
-        # Public read is granted by the bucket policy (`packs/*` prefix)
-        # established by ensure_artifacts_bucket — no per-object ACL.
-        s3.put_object(
-            Bucket=artifacts_bucket,
-            Key=f"{feat_prefix}/manifest.json",
-            Body=manifest_json,
-            ContentType="application/json",
-        )
-        self._log(
-            f"[green]✓[/green] uploaded s3://{artifacts_bucket}/{feat_prefix}/manifest.json"
-        )
-
-        # configPreset (if defined).
-        if manifest.configPreset:
-            preset_path = self.project_dir / manifest.configPreset.path
-            if preset_path.is_file():
-                self._upload_public(
-                    s3,
-                    preset_path,
-                    artifacts_bucket,
-                    f"{feat_prefix}/{manifest.configPreset.path}",
-                    _content_type_for(preset_path),
-                )
-
-        # SAM-packaged Lambda zips are already public-readable via the
-        # bucket policy `packs/*` prefix (ensure_artifacts_bucket sets it).
-        sam_prefix = f"{artifacts_prefix.rstrip('/')}/{feature_id}/sam-objects/"
-        self._log(
-            f"[green]✓[/green] published SAM objects under s3://{artifacts_bucket}/{sam_prefix}"
-        )
-
-        # 4. Bake artifact defaults into the wrapper template.
-        artifact_source_url = (
-            _public_https_url(artifacts_bucket, region, feat_prefix) + "/"
-        )
+        # 4. Bake artifact-locating defaults into the wrapper template. The
+        # wrapper passes these straight to the feature stack (FeatureBucket +
+        # version-free prefix + version); the feature stack reads its artifacts
+        # in place via IAM — no seller bucket, no anonymous fetch.
         wrapper_yaml = wrapper_path.read_text(encoding="utf-8")
         wp = manifest.pack.wrapperParameters
         defaults = {wp.hostTemplateUrlParam: host_template_url}
-        if wp.artifactSourceParam:
-            defaults[wp.artifactSourceParam] = artifact_source_url
+        if wp.featureBucketParam:
+            defaults[wp.featureBucketParam] = artifacts_bucket
+        if wp.prefixParam:
+            defaults[wp.prefixParam] = feat_prefix
         if wp.versionParam:
             defaults[wp.versionParam] = version
-        baked_wrapper = _bake_wrapper_defaults(wrapper_yaml, param_defaults=defaults)
+        # Also bake the publish-time tokens into the wrapper text, the SAME way
+        # FeaturePublisher bakes them into the feature template. The wrapper
+        # parameter Defaults above cover values referenced via !Ref/!Sub, but
+        # CloudFormation forbids intrinsics in a few places (e.g. the top-level
+        # `Description`), so a wrapper that wants the version in such a field
+        # uses `<FEATURE_VERSION_TOKEN>` and relies on this substitution. Tokens
+        # are optional — absent placeholders are simply left untouched.
+        baked_wrapper = _bake_wrapper_tokens(
+            wrapper_yaml,
+            manifest=manifest,
+            artifact_bucket=artifacts_bucket,
+            artifact_prefix=feat_prefix,
+        )
+        baked_wrapper = _bake_wrapper_defaults(baked_wrapper, param_defaults=defaults)
         wrapper_key = f"{feat_prefix}/deploy.yaml"
+        # Mirror FeaturePublisher's per-object publicness: with --public, tag
+        # the wrapper public-read just like every feature artifact (the bucket
+        # policy from _resolve_bucket's auto-bucket path covers it too, but the
+        # ACL keeps an explicit-basename public bucket working identically to
+        # `publish`). Without --public the wrapper stays private (same-account).
+        wrapper_extra: Dict[str, str] = {"ContentType": "application/x-yaml"}
+        if make_public:
+            wrapper_extra["ACL"] = "public-read"
         s3.put_object(
             Bucket=artifacts_bucket,
             Key=wrapper_key,
             Body=baked_wrapper.encode("utf-8"),
-            ContentType="application/x-yaml",
+            **wrapper_extra,
         )
         wrapper_url = _public_https_url(artifacts_bucket, region, wrapper_key)
         self._log(
             f"[green]✓[/green] uploaded wrapper s3://{artifacts_bucket}/{wrapper_key}"
         )
 
-        # 4b. Sanity-check the wrapper is publicly readable. The wrapper's
-        # FeatureBucketPrestager Lambda fetches it via plain HTTPS during
-        # deploy — if the bucket policy didn't take effect (e.g. account-
-        # level S3 Block Public Access overrides) the deploy fails late
-        # with HTTP 403. Catch that here, before CFN starts spinning up.
-        import urllib.error
-        import urllib.request
-
-        try:
-            req = urllib.request.Request(wrapper_url, method="HEAD")
-            with urllib.request.urlopen(req, timeout=15) as r:
-                if r.status != 200:
-                    raise RuntimeError(f"HTTP {r.status}")
-        except urllib.error.HTTPError as exc:
-            raise RuntimeError(
-                f"Published wrapper at {wrapper_url} is not publicly "
-                f"reachable (HTTP {exc.code}). The bucket policy did not "
-                f"take effect — most likely cause is account-level S3 "
-                f"Block Public Access. Disable BlockPublicPolicy + "
-                f"RestrictPublicBuckets at the account level, or pass "
-                f"--bucket-basename pointing at a bucket where you "
-                f"control BPA."
-            ) from exc
-        except Exception as exc:
-            raise RuntimeError(
-                f"Couldn't HEAD the published wrapper at {wrapper_url}: {exc}. "
-                f"Cross-account pack deploys won't work until this is fixed."
-            ) from exc
+        # 4b. When publishing public (opt-in, cross-account), sanity-check the
+        # wrapper is publicly readable. A Quick-Create / cross-account deploy
+        # fetches the wrapper template via plain HTTPS — if the object isn't
+        # public (per-object ACL blocked, or account-level S3 Block Public
+        # Access overriding the policy) the deploy fails late with HTTP 403.
+        # Catch that here, before CFN starts spinning up.
+        #
+        # Without `--public` the artifacts are private (same-account flow):
+        # an anonymous HEAD would legitimately 403, so the check is skipped.
+        if make_public:
+            self._assert_publicly_readable(wrapper_url)
+        else:
+            self._log(
+                "[dim]Artifacts published privately (same-account). Pass "
+                "--public to grant anonymous read for cross-account / "
+                "Quick-Create pack deploys.[/dim]"
+            )
 
         # 5. Quick-Create URL for one-click deploy via the AWS Console.
         quick_create = (
@@ -373,87 +345,39 @@ class PackPublisher:
             version=version,
             artifact_bucket=artifacts_bucket,
             artifact_prefix=feat_prefix,
-            artifact_source_url=artifact_source_url,
-            feature_template_url=_public_https_url(
-                artifacts_bucket, region, f"{feat_prefix}/template.yaml"
-            ),
+            feature_template_url=feature_template_url,
             host_template_url=host_template_url,
             wrapper_template_url=wrapper_url,
             quick_create_url=quick_create,
             deploy_command=deploy_cmd,
         )
 
-    def _build_ui(self, manifest: FeatureManifest) -> None:
-        if not manifest.ui.buildCommand:
-            self._log(
-                "[yellow]![/yellow] feature.yaml has no ui.buildCommand — skipping UI build"
-            )
-            return
-        self._log(f"▸ Building UI bundle: {manifest.ui.buildCommand}")
-        subprocess.run(
-            manifest.ui.buildCommand, cwd=self.project_dir, shell=True, check=True
-        )
-        bundle = self.project_dir / manifest.ui.bundlePath
-        if not bundle.is_file():
-            raise RuntimeError(f"UI bundle not produced at {bundle}")
-        self._log("[green]✓[/green] UI build finished")
+    def _assert_publicly_readable(self, url: str) -> None:
+        """Anonymous HEAD the published wrapper to confirm `--public` actually
+        made it world-readable, failing fast (before CFN spins up) if not."""
+        import urllib.error
+        import urllib.request
 
-    def _sam_build_and_package(
-        self,
-        *,
-        manifest: FeatureManifest,
-        artifact_bucket: str,
-        artifact_prefix: str,
-        region: str,
-    ) -> None:
-        if not shutil.which("sam"):
+        try:
+            req = urllib.request.Request(url, method="HEAD")
+            with urllib.request.urlopen(req, timeout=15) as r:
+                if r.status != 200:
+                    raise RuntimeError(f"HTTP {r.status}")
+        except urllib.error.HTTPError as exc:
             raise RuntimeError(
-                "`sam` (AWS SAM CLI) not found in PATH; install it to publish packs."
-            )
-        self._log("▸ Running sam build…")
-        subprocess.run(
-            ["sam", "build"], cwd=self.project_dir, check=True, capture_output=True
-        )
-        self._log("▸ Running sam package…")
-        out = self.project_dir / ".aws-sam" / "packaged.yaml"
-        subprocess.run(
-            [
-                "sam",
-                "package",
-                "--s3-bucket",
-                artifact_bucket,
-                "--s3-prefix",
-                artifact_prefix,
-                "--output-template-file",
-                str(out),
-                "--region",
-                region,
-            ],
-            cwd=self.project_dir,
-            check=True,
-            capture_output=True,
-        )
-        self._log(f"[green]✓[/green] SAM package complete -> {out}")
-
-    def _upload_public(
-        self,
-        s3: Any,
-        local_path: Path,
-        bucket: str,
-        key: str,
-        content_type: str,
-    ) -> None:
-        # Public-read is granted at bucket-policy level for the
-        # `packs/*` and `host/*` prefixes (see ensure_artifacts_bucket).
-        # Object ACLs are deprecated and unsupported on modern
-        # BucketOwnerEnforced buckets.
-        s3.upload_file(
-            str(local_path),
-            bucket,
-            key,
-            ExtraArgs={"ContentType": content_type},
-        )
-        self._log(f"[green]✓[/green] uploaded s3://{bucket}/{key}")
+                f"Published wrapper at {url} is not publicly reachable "
+                f"(HTTP {exc.code}). The object did not become public — either "
+                f"the per-object public-read ACL was rejected or account-level "
+                f"S3 Block Public Access is overriding the bucket policy. "
+                f"Disable BlockPublicPolicy + RestrictPublicBuckets at the "
+                f"account level, or pass --bucket-basename pointing at a bucket "
+                f"where you control BPA."
+            ) from exc
+        except Exception as exc:
+            raise RuntimeError(
+                f"Couldn't HEAD the published wrapper at {url}: {exc}. "
+                f"Cross-account pack deploys won't work until this is fixed."
+            ) from exc
 
 
 def deploy_pack(
@@ -467,11 +391,26 @@ def deploy_pack(
     wait: bool = True,
     console: Optional[Console] = None,
 ) -> str:
-    """Deploy the published wrapper. Returns the wrapper stack ARN.
+    """Deploy the published wrapper, **create-or-update**. Returns the stack ARN.
 
     Reads the wrapper template's parameter list and submits values for
     AdminEmail + a sensible default HostStackName. All other parameters
     inherit their (publish-time-baked) defaults.
+
+    Create-if-absent, update-if-present — delegating to
+    ``create_or_update_stack`` so ``deploy-pack`` matches the rest of the
+    tooling (``deploy``, ``idp-cli deploy``, ``idp-mp-sim deploy``). Re-running
+    against an existing wrapper stack performs a CloudFormation **update**
+    rather than failing with ``AlreadyExistsException``; a no-op update (no
+    changes) is treated as success.
+
+    For pack wrappers whose feature install is a nested
+    ``AWS::CloudFormation::Stack`` (e.g. claims-pack's ``CLAIMSFEATUREPACK``),
+    an in-place wrapper update with a bumped ``FeatureVersion`` cascades into
+    the nested stack and picks up the republished version-pinned artifacts —
+    the desired way to push pack changes to an already-deployed wrapper. The
+    wrapper's ``HostStack`` custom resource treats ``Update`` as a no-op, so a
+    wrapper update won't disturb the running host.
     """
     cons = console or Console()
     cfn = boto3.client("cloudformation", region_name=region)
@@ -499,66 +438,17 @@ def deploy_pack(
     for k, v in (extra_parameters or {}).items():
         _maybe_submit(k, v)
 
-    caps = capabilities or [
-        "CAPABILITY_IAM",
-        "CAPABILITY_NAMED_IAM",
-        "CAPABILITY_AUTO_EXPAND",
-    ]
+    caps = capabilities or _CAPABILITIES
 
-    cons.log(f"▸ Creating stack {stack_name} from {wrapper_url}")
-    resp = cfn.create_stack(
-        StackName=stack_name,
-        TemplateURL=wrapper_url,
-        Parameters=submitted,
-        Capabilities=caps,
-        OnFailure="DELETE",
+    return create_or_update_stack(
+        cfn=cfn,
+        stack_name=stack_name,
+        template_url=wrapper_url,
+        parameters=submitted,
+        capabilities=caps,
+        wait=wait,
+        console=cons,
     )
-    stack_arn = resp["StackId"]
-
-    if wait:
-        cons.log("▸ Waiting for CREATE_COMPLETE (this can take 15–25 minutes)…")
-        deadline = time.time() + 60 * 60
-        last_status: Optional[str] = None
-        while time.time() < deadline:
-            try:
-                # Use the StackId (full ARN) — it stays valid even after
-                # OnFailure=DELETE wipes the stack. `stack_name` would 404
-                # the moment the failed-stack delete completes.
-                desc = cfn.describe_stacks(StackName=stack_arn)["Stacks"][0]
-            except Exception as exc:
-                msg = str(exc)
-                if "does not exist" in msg or "ValidationError" in msg:
-                    raise RuntimeError(
-                        f"Stack {stack_name} no longer exists. It was likely "
-                        f"created with OnFailure=DELETE and a CREATE_FAILED "
-                        f"event tore it down. Check the stack events in the "
-                        f"CloudFormation Console (look for the deleted stack "
-                        f"under 'Deleted') — last observed status was "
-                        f"{last_status!r}."
-                    ) from exc
-                raise
-            status = desc["StackStatus"]
-            last_status = status
-            if status == "CREATE_COMPLETE":
-                cons.log("[green]✓[/green] Stack CREATE_COMPLETE")
-                outputs = {
-                    o["OutputKey"]: o["OutputValue"]
-                    for o in (desc.get("Outputs") or [])
-                }
-                if outputs.get("ApplicationWebURL"):
-                    cons.log(f"  Web UI: [bold]{outputs['ApplicationWebURL']}[/bold]")
-                return stack_arn
-            if status.endswith(("FAILED", "ROLLBACK_COMPLETE")):
-                # Surface the most recent CREATE_FAILED event reason so the
-                # operator gets actionable diagnostics instead of just
-                # "settled in ROLLBACK_COMPLETE".
-                reason = _first_failure_reason(cfn, stack_arn)
-                detail = f": {reason}" if reason else ""
-                raise RuntimeError(f"Stack {stack_name} settled in {status}{detail}")
-            time.sleep(20)
-        raise RuntimeError(f"Timed out waiting for stack {stack_name}")
-
-    return stack_arn
 
 
 def _first_failure_reason(cfn: Any, stack_arn: str) -> Optional[str]:
@@ -706,7 +596,16 @@ def create_or_update_stack(
     raise RuntimeError(f"Timed out waiting for stack {stack_name}")
 
 
-_PACK_PUBLIC_PREFIXES = ("packs/", "host/")
+# Public-read bucket-policy prefixes for the AUTO-CREATED artifacts bucket
+# (applied by ensure_artifacts_bucket on --public). These match the real
+# published layout: feature/pack artifacts + the baked wrapper live under
+# `extensions/<id>/...` (the same version-free layout `publish` uses), and the
+# host accelerator (publish_host_accelerator / `idp-cli publish`) under
+# `host/...`. Objects are ALSO tagged public-read per-object (mirroring
+# `publish`), which covers any custom `--prefix` that nests the layout under
+# `<prefix>/extensions/...`; this policy is the convenience layer for the
+# default (unprefixed) auto-bucket case.
+_PACK_PUBLIC_PREFIXES = ("extensions/", "host/")
 
 
 def _pack_public_bucket_policy(bucket: str) -> Dict[str, Any]:
@@ -714,10 +613,11 @@ def _pack_public_bucket_policy(bucket: str) -> Dict[str, Any]:
     pack publishing uses. Required so cross-account CFN deploys can
     download the wrapper / host / feature templates and Lambda zips.
 
-    Why a bucket policy and not object ACLs:
-      Modern S3 buckets default to Object Ownership = BucketOwnerEnforced,
-      which disables ACLs entirely. PutObjectAcl returns
-      AccessControlListNotSupported. A bucket policy works regardless.
+    This is the auto-bucket convenience layer (applied by
+    ``ensure_artifacts_bucket`` when ``--public`` creates/owns the bucket).
+    Publicness of the individual objects is ALSO set per-object via
+    ``ACL=public-read`` (mirroring ``publish``), so an explicit-basename
+    public bucket works the same way without relying on this policy.
     """
     return {
         "Version": "2012-10-17",
@@ -757,13 +657,14 @@ def ensure_artifacts_bucket(
         publish run.
       * With ``make_public=True`` (opt-in, e.g. ``--make-public``), the
         bucket's ``BlockPublicPolicy``/``RestrictPublicBuckets`` flags are
-        relaxed and a bucket policy granting public read on the ``packs/*``
-        and ``host/*`` prefixes is applied/merged. This is only needed for
-        sharing published artifacts for *cross-account* pack deploys,
-        where the deploying account's pre-stager Lambda fetches the
-        wrapper/host/feature templates via plain HTTPS (object ACLs don't
-        work — modern buckets default to BucketOwnerEnforced, which
-        rejects ACLs entirely).
+        relaxed and a bucket policy granting public read on the
+        ``extensions/*`` and ``host/*`` prefixes is applied/merged. This is
+        only needed for sharing published artifacts for *cross-account* pack
+        deploys,
+        where the deploying account's CloudFormation + feature stack fetch
+        the wrapper/host/feature templates and Lambda code zips via plain
+        HTTPS (object ACLs don't work — modern buckets default to
+        BucketOwnerEnforced, which rejects ACLs entirely).
     """
     cons = console or Console()
     sts = boto3.client("sts", region_name=region)
@@ -831,6 +732,28 @@ def ensure_artifacts_bucket(
         return bucket
 
     # ---- make_public=True: opt-in public artifacts (cross-account) ----
+    apply_public_artifacts_policy(s3, bucket, console=cons)
+    return bucket
+
+
+def apply_public_artifacts_policy(
+    s3: Any, bucket: str, *, console: Optional[Console] = None
+) -> None:
+    """Relax BlockPublicPolicy/RestrictPublicBuckets and apply (or merge) the
+    ``extensions/*`` + ``host/*`` public-read bucket policy on ``bucket``.
+
+    Opt-in only — callers invoke this when the operator passed ``--public``.
+    It grants anonymous HTTPS read on the published-artifact prefixes so a
+    *deploying* account's CloudFormation + feature stack (which fetch the
+    wrapper/host/feature templates and Lambda code zips over plain HTTPS, not
+    SigV4) can read them during cross-account pack deploys. Same-account/
+    private flows never call this, so a bucket's Block Public Access settings
+    are left untouched.
+
+    Raises ``RuntimeError`` with an actionable message if the public policy
+    cannot be applied (e.g. account-level S3 Block Public Access).
+    """
+    cons = console or Console()
     # Allow bucket-level public policy (it stays blocked by default on
     # newly-created buckets; pre-existing buckets may also have block-all).
     # We loudly check the result rather than ignoring failures — a bucket
@@ -899,7 +822,6 @@ def ensure_artifacts_bucket(
         raise RuntimeError(
             f"Failed to set public-read policy on {bucket!r}: {exc}"
         ) from exc
-    return bucket
 
 
 def publish_host_accelerator(

@@ -142,6 +142,7 @@ class TestDocumentAppSyncService:
             page_id="1",
             image_uri="s3://bucket/test-document.pdf/pages/1/image.jpg",
             raw_text_uri="s3://bucket/test-document.pdf/pages/1/rawText.json",
+            ocr_page_data_uri="s3://bucket/test-document.pdf/pages/1/pageData.json",
             classification="Invoice",
         )
 
@@ -165,12 +166,17 @@ class TestDocumentAppSyncService:
         assert page1["Class"] == "Invoice"
         assert page1["ImageUri"] == "s3://bucket/test-document.pdf/pages/1/image.jpg"
         assert page1["TextUri"] == "s3://bucket/test-document.pdf/pages/1/rawText.json"
+        assert (
+            page1["OcrPageDataUri"]
+            == "s3://bucket/test-document.pdf/pages/1/pageData.json"
+        )
 
-        # Check page 2
+        # Check page 2 (no pageData -> empty string for back-compat)
         page2 = next(p for p in input_data["Pages"] if p["Id"] == 2)
         assert page2["Class"] == "Receipt"
         assert page2["ImageUri"] == "s3://bucket/test-document.pdf/pages/2/image.jpg"
         assert page2["TextUri"] == "s3://bucket/test-document.pdf/pages/2/rawText.json"
+        assert page2["OcrPageDataUri"] == ""
 
     def test_document_to_update_input_with_sections(self):
         """Test conversion of Document to UpdateDocumentInput with sections."""
@@ -347,6 +353,7 @@ class TestDocumentAppSyncService:
                     "Class": "Invoice",
                     "ImageUri": "s3://bucket/test-document.pdf/pages/1/image.jpg",
                     "TextUri": "s3://bucket/test-document.pdf/pages/1/rawText.json",
+                    "OcrPageDataUri": "s3://bucket/test-document.pdf/pages/1/pageData.json",
                 },
                 {
                     "Id": 2,
@@ -376,8 +383,12 @@ class TestDocumentAppSyncService:
             doc.pages["1"].raw_text_uri
             == "s3://bucket/test-document.pdf/pages/1/rawText.json"
         )
+        assert (
+            doc.pages["1"].ocr_page_data_uri
+            == "s3://bucket/test-document.pdf/pages/1/pageData.json"
+        )
 
-        # Check page 2
+        # Check page 2 (no OcrPageDataUri in input -> None)
         assert "2" in doc.pages
         assert doc.pages["2"].page_id == "2"
         assert doc.pages["2"].classification == "Receipt"
@@ -389,6 +400,7 @@ class TestDocumentAppSyncService:
             doc.pages["2"].raw_text_uri
             == "s3://bucket/test-document.pdf/pages/2/rawText.json"
         )
+        assert doc.pages["2"].ocr_page_data_uri is None
 
     def test_appsync_to_document_with_sections(self):
         """Test conversion from AppSync data to Document with sections."""

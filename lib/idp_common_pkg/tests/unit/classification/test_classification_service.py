@@ -295,6 +295,158 @@ class TestClassificationService:
         mock_prepare_bedrock_image.assert_called_once_with(b"image_data")
         mock_invoke.assert_called_once()
 
+    @staticmethod
+    def _bedrock_response(class_value):
+        """Helper to build a mocked _invoke_bedrock_model return value."""
+        return {
+            "response": {
+                "output": {
+                    "message": {
+                        "content": [{"text": json.dumps({"class": class_value})}]
+                    }
+                }
+            },
+            "metering": {"bedrock": {"inputTokens": 100, "outputTokens": 10}},
+        }
+
+    @patch("idp_common.s3.get_text_content")
+    @patch("idp_common.image.prepare_image")
+    @patch(
+        "idp_common.classification.service.ClassificationService._invoke_bedrock_model"
+    )
+    @patch("idp_common.image.prepare_bedrock_image_attachment")
+    def test_enforce_valid_classes_retry_then_valid(
+        self,
+        mock_prepare_bedrock_image,
+        mock_invoke,
+        mock_prepare_image,
+        mock_get_text,
+        service,
+    ):
+        """Out-of-vocabulary prediction is corrected on retry."""
+        mock_get_text.return_value = "This is an invoice for $100"
+        mock_prepare_image.return_value = b"image_data"
+        mock_prepare_bedrock_image.return_value = {"image": "base64_encoded_image"}
+
+        # First call returns an invalid class, second returns a valid one.
+        mock_invoke.side_effect = [
+            self._bedrock_response("not_a_real_class"),
+            self._bedrock_response("invoice"),
+        ]
+
+        result = service.classify_page_bedrock(
+            page_id="1",
+            text_uri="s3://bucket/text.txt",
+            image_uri="s3://bucket/image.jpg",
+        )
+
+        assert result.classification.doc_type == "invoice"
+        assert "validation_error" not in result.classification.metadata
+        assert mock_invoke.call_count == 2
+        # Metering aggregated across both attempts.
+        assert (
+            result.classification.metadata["metering"]["bedrock"]["inputTokens"] == 200
+        )
+
+    @patch("idp_common.s3.get_text_content")
+    @patch("idp_common.image.prepare_image")
+    @patch(
+        "idp_common.classification.service.ClassificationService._invoke_bedrock_model"
+    )
+    @patch("idp_common.image.prepare_bedrock_image_attachment")
+    def test_enforce_valid_classes_exhausted_uses_fallback(
+        self,
+        mock_prepare_bedrock_image,
+        mock_invoke,
+        mock_prepare_image,
+        mock_get_text,
+        service,
+    ):
+        """When all retries fail, the fallback class and error metadata are set."""
+        mock_get_text.return_value = "Some ambiguous content"
+        mock_prepare_image.return_value = b"image_data"
+        mock_prepare_bedrock_image.return_value = {"image": "base64_encoded_image"}
+
+        # Always returns an invalid class. Default maxValidationRetries=2 -> 3 calls.
+        mock_invoke.return_value = self._bedrock_response("bogus_class")
+
+        result = service.classify_page_bedrock(
+            page_id="1",
+            text_uri="s3://bucket/text.txt",
+            image_uri="s3://bucket/image.jpg",
+        )
+
+        assert result.classification.doc_type == "unclassified"
+        assert "validation_error" in result.classification.metadata
+        assert "bogus_class" in result.classification.metadata["validation_error"]
+        assert mock_invoke.call_count == 3  # initial + 2 retries
+
+    @patch("idp_common.s3.get_text_content")
+    @patch("idp_common.image.prepare_image")
+    @patch(
+        "idp_common.classification.service.ClassificationService._invoke_bedrock_model"
+    )
+    @patch("idp_common.image.prepare_bedrock_image_attachment")
+    def test_enforce_valid_classes_valid_first_attempt_no_retry(
+        self,
+        mock_prepare_bedrock_image,
+        mock_invoke,
+        mock_prepare_image,
+        mock_get_text,
+        service,
+    ):
+        """A valid first prediction triggers no extra invocations."""
+        mock_get_text.return_value = "This is an invoice for $100"
+        mock_prepare_image.return_value = b"image_data"
+        mock_prepare_bedrock_image.return_value = {"image": "base64_encoded_image"}
+        mock_invoke.return_value = self._bedrock_response("invoice")
+
+        result = service.classify_page_bedrock(
+            page_id="1",
+            text_uri="s3://bucket/text.txt",
+            image_uri="s3://bucket/image.jpg",
+        )
+
+        assert result.classification.doc_type == "invoice"
+        mock_invoke.assert_called_once()
+
+    @patch("idp_common.s3.get_text_content")
+    @patch("idp_common.image.prepare_image")
+    @patch(
+        "idp_common.classification.service.ClassificationService._invoke_bedrock_model"
+    )
+    @patch("idp_common.image.prepare_bedrock_image_attachment")
+    def test_enforcement_disabled_uses_invalid_class_as_is(
+        self,
+        mock_prepare_bedrock_image,
+        mock_invoke,
+        mock_prepare_image,
+        mock_get_text,
+        mock_config,
+    ):
+        """Legacy behavior: with enforcement off, invalid class is used as-is."""
+        mock_config["classification"]["enforceValidClasses"] = False
+        with patch("boto3.Session"):
+            service = ClassificationService(
+                region="us-west-2", config=mock_config, backend="bedrock"
+            )
+
+        mock_get_text.return_value = "This is an invoice for $100"
+        mock_prepare_image.return_value = b"image_data"
+        mock_prepare_bedrock_image.return_value = {"image": "base64_encoded_image"}
+        mock_invoke.return_value = self._bedrock_response("not_a_real_class")
+
+        result = service.classify_page_bedrock(
+            page_id="1",
+            text_uri="s3://bucket/text.txt",
+            image_uri="s3://bucket/image.jpg",
+        )
+
+        # Invalid class is used as-is, no retry, no validation_error.
+        assert result.classification.doc_type == "not_a_real_class"
+        assert "validation_error" not in result.classification.metadata
+        mock_invoke.assert_called_once()
+
     @patch("idp_common.s3.get_text_content")
     @patch(
         "idp_common.classification.service.ClassificationService._invoke_bedrock_model"

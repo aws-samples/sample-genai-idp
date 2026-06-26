@@ -360,3 +360,72 @@ class TestPerEntryFailureIsolation:
         assert set(succeeded) == {"ok1.pdf", "ok2.pdf"}
         assert failed == ["bomb.pdf"]
         assert mock_s3.upload_fileobj.call_count == 3
+
+
+class TestConfigurationVersionPropagation:
+    """Tests for per-job configurationVersion propagation to S3 metadata."""
+
+    def test_config_version_propagated_to_uploads(self, mock_s3, mock_job_service):
+        """When job has ConfigurationVersion, upload_fileobj gets config-version metadata."""
+        from index import extract_and_upload
+
+        zip_content = create_test_zip({"doc.pdf": b"content"})
+        mock_s3.download_fileobj.side_effect = lambda b, k, f: f.write(zip_content.read())
+
+        succeeded, failed = extract_and_upload(
+            "staging", "jobs/uuid/test.zip", "uuid", config_version="v2"
+        )
+
+        assert succeeded == ["doc.pdf"]
+        call_kwargs = mock_s3.upload_fileobj.call_args[1]
+        assert call_kwargs["ExtraArgs"] == {"Metadata": {"config-version": "v2"}}
+
+    def test_no_config_version_no_extra_args(self, mock_s3, mock_job_service):
+        """When no config version, upload_fileobj gets ExtraArgs=None."""
+        from index import extract_and_upload
+
+        zip_content = create_test_zip({"doc.pdf": b"content"})
+        mock_s3.download_fileobj.side_effect = lambda b, k, f: f.write(zip_content.read())
+
+        succeeded, failed = extract_and_upload(
+            "staging", "jobs/uuid/test.zip", "uuid", config_version=None
+        )
+
+        assert succeeded == ["doc.pdf"]
+        call_kwargs = mock_s3.upload_fileobj.call_args[1]
+        assert call_kwargs["ExtraArgs"] is None
+
+    def test_handler_reads_config_version_from_job_record(self, mock_s3, mock_job_service):
+        """Handler reads ConfigurationVersion from job record and passes to extract_and_upload."""
+        from index import handler
+
+        mock_job_service.get_job_record.return_value = {
+            "Files": {},
+            "ConfigurationVersion": "lending-v3",
+        }
+
+        zip_content = create_test_zip({"doc.pdf": b"content"})
+        mock_s3.download_fileobj.side_effect = lambda b, k, f: f.write(zip_content.read())
+
+        event = make_event("staging-bucket", "jobs/test-uuid/archive.zip")
+        response = handler(event, None)
+
+        assert response["statusCode"] == 200
+        call_kwargs = mock_s3.upload_fileobj.call_args[1]
+        assert call_kwargs["ExtraArgs"] == {"Metadata": {"config-version": "lending-v3"}}
+
+    def test_handler_graceful_when_job_record_lookup_fails(self, mock_s3, mock_job_service):
+        """Handler proceeds without config version when get_job_record raises."""
+        from index import handler
+
+        mock_job_service.get_job_record.side_effect = RuntimeError("DynamoDB timeout")
+
+        zip_content = create_test_zip({"doc.pdf": b"content"})
+        mock_s3.download_fileobj.side_effect = lambda b, k, f: f.write(zip_content.read())
+
+        event = make_event("staging-bucket", "jobs/test-uuid/archive.zip")
+        response = handler(event, None)
+
+        assert response["statusCode"] == 200
+        call_kwargs = mock_s3.upload_fileobj.call_args[1]
+        assert call_kwargs["ExtraArgs"] is None

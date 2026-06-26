@@ -139,6 +139,7 @@ class DocumentAppSyncService:
                     "ImageUri": page.image_uri or "",
                     "TextUri": page.parsed_text_uri or page.raw_text_uri or "",
                     "TextConfidenceUri": page.text_confidence_uri or "",
+                    "OcrPageDataUri": page.ocr_page_data_uri or "",
                 }
                 pages_data.append(page_data)
 
@@ -406,6 +407,7 @@ class DocumentAppSyncService:
                 text_uri = page_data.get("TextUri") or None
                 text_conf_uri = page_data.get("TextConfidenceUri") or None
                 image_uri = page_data.get("ImageUri") or None
+                ocr_page_data_uri = page_data.get("OcrPageDataUri") or None
 
                 doc.pages[page_id] = Page(
                     page_id=page_id,
@@ -413,6 +415,7 @@ class DocumentAppSyncService:
                     raw_text_uri=text_uri,  # TextUri maps to both for backward compatibility
                     parsed_text_uri=text_uri,  # Fix: TextUri contains parsed text URI
                     text_confidence_uri=text_conf_uri,  # Fix: Convert empty strings to None
+                    ocr_page_data_uri=ocr_page_data_uri,
                     classification=page_data.get("Class"),
                 )
 

@@ -407,6 +407,7 @@ export const getDocument = /* GraphQL */ `
         ImageUri
         TextUri
         TextConfidenceUri
+        OcrPageDataUri
       }
       Metering
       EvaluationReportUri
@@ -781,6 +782,7 @@ export const listDocumentsByDateRange = /* GraphQL */ `
           ImageUri
           TextUri
           TextConfidenceUri
+          OcrPageDataUri
         }
         EvaluationReportUri
         EvaluationStatus
@@ -983,6 +985,7 @@ export const onUpdateDocument = /* GraphQL */ `
         ImageUri
         TextUri
         TextConfidenceUri
+        OcrPageDataUri
       }
       Metering
       EvaluationReportUri

@@ -46,6 +46,19 @@ X_AWS_IDP_EXCLUSION_REASON = "x-aws-idp-exclusion-reason"
 # Per-class model override for extraction (overrides extraction.model)
 X_AWS_IDP_EXTRACTION_MODEL = "x-aws-idp-extraction-model"
 
+# Per-class stronger model used to re-extract when full-schema validation fails
+# and extraction.agentic.validation.fail_action == "escalate". Overrides the
+# global extraction.agentic.validation.escalation_model for that class.
+X_AWS_IDP_EXTRACTION_ESCALATION_MODEL = "x-aws-idp-extraction-escalation-model"
+
+# Per-class prompt overrides for extraction. When present on a class, these
+# override the global extraction.system_prompt / extraction.task_prompt for
+# that class. The task prompt supports the same placeholders as the global
+# task prompt ({DOCUMENT_CLASS}, {ATTRIBUTE_NAMES_AND_DESCRIPTIONS},
+# {FEW_SHOT_EXAMPLES}, {DOCUMENT_TEXT}, {DOCUMENT_IMAGE}, <<CACHEPOINT>>).
+X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT = "x-aws-idp-extraction-system-prompt"
+X_AWS_IDP_EXTRACTION_TASK_PROMPT = "x-aws-idp-extraction-task-prompt"
+
 # Declares the named page sub-types a class can include. Each entry has a
 # `name`, optional `description`, and a regex (`x-aws-idp-document-page-content-regex`)
 # used to detect the page type from per-page OCR text.

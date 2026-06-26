@@ -40,10 +40,16 @@ phases:
           if [ "$func_var" = "FUNCTION_mlflow_logger" ]; then
             EXTRA_ARGS="--build-arg INSTALL_GIT=true"
           fi
+          DOCKER_PLATFORM="linux/${LAMBDA_ARCHITECTURE:-arm64}"
+          # Map Lambda architecture names to Docker platform names
+          if [ "$LAMBDA_ARCHITECTURE" = "x86_64" ]; then
+            DOCKER_PLATFORM="linux/amd64"
+          fi
           docker buildx build \
-            --platform linux/arm64 \
+            --platform "$DOCKER_PLATFORM" \
             -f Dockerfile.optimized \
             --build-arg FUNCTION_PATH="${func_path}" \
+            --build-arg BASE_IMAGE_SUFFIX="${LAMBDA_ARCHITECTURE:-arm64}" \
             ${EXTRA_ARGS} \
             --tag "${ECR_URI}:${func_name}-${IMAGE_VERSION}" \
             --provenance=false \

@@ -214,6 +214,51 @@ def test_build_config_comparison():
 
 
 @pytest.mark.unit
+def test_get_test_results_missing_metrics_returns_partial_not_raises():
+    """When processing reached a terminal state but the evaluation aggregation
+    never cached testRunResult (timed out / failed silently on a large run),
+    get_test_results returns a structured partial TestRun instead of raising an
+    opaque ValueError that leaves the UI spinning on "Loading..." (issue #358)."""
+    test_run_id = "TEST-SET-ID"
+    metadata = {
+        "PK": f"testrun#{test_run_id}",
+        "SK": "metadata",
+        # Already terminal, so the status-refresh branch is skipped and we fall
+        # straight through to the "no cached metrics" else branch.
+        "Status": "COMPLETE",
+        "TestSetId": "set-1",
+        "TestSetName": "big-classification-set",
+        "FilesCount": 3463,
+        "CompletedFiles": 3460,
+        "FailedFiles": 3,
+        "CreatedAt": "2025-01-01T00:00:00Z",
+        "Context": "ctx",
+        "ConfigVersion": "v7",
+        # No "testRunResult" key -> aggregation hasn't written metrics yet.
+    }
+
+    mock_table = Mock()
+    mock_table.get_item.return_value = {"Item": metadata}
+
+    with (
+        patch.dict(os.environ, {"TRACKING_TABLE": "tracking"}),
+        patch.object(index.dynamodb, "Table", return_value=mock_table),
+    ):
+        result = index.get_test_results(test_run_id)
+
+    assert result["testRunId"] == test_run_id
+    # Reports the true terminal status rather than fabricating one.
+    assert result["status"] == "COMPLETE"
+    assert result["filesCount"] == 3463
+    assert result["completedFiles"] == 3460
+    assert result["failedFiles"] == 3
+    assert result["testSetId"] == "set-1"
+    assert result["configVersion"] == "v7"
+    # Metric fields are absent (not yet computed) but must not be required.
+    assert "overallAccuracy" not in result or result["overallAccuracy"] is None
+
+
+@pytest.mark.unit
 def test_handler_field_routing():
     """Test GraphQL field routing"""
 

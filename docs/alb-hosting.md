@@ -160,15 +160,15 @@ You can switch an existing CloudFront-hosted stack to ALB hosting (or vice versa
 
 When `WebUIHosting=ALB`:
 
-- CloudFront distribution, Origin Access Identity, and security headers policy are **not created**
+- CloudFront distribution, Origin Access Control (OAC), and security headers policy are **not created**
 - ALB nested stack is created with all ALB infrastructure
 - S3 WebUI bucket omits `WebsiteConfiguration` (ALB handles routing)
-- S3 bucket policy grants access via `aws:sourceVpce` condition instead of CloudFront OAI
+- S3 bucket policy grants access via `aws:sourceVpce` condition instead of CloudFront OAC
 
 When `WebUIHosting=CloudFront` (default):
 
 - ALB nested stack is **not created**
-- Standard CloudFront distribution with OAI is created
+- Standard CloudFront distribution with Origin Access Control (OAC) is created
 
 ### Request Flow (ALB Mode)
 

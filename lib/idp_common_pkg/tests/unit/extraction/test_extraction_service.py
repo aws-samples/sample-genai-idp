@@ -656,3 +656,173 @@ class TestPerClassExtractionModelOverride:
 
         cleaned = service_with_override._clean_schema_for_prompt(schema_with_override)
         assert "x-aws-idp-extraction-model" not in cleaned
+
+
+@pytest.mark.unit
+class TestPerClassExtractionPromptOverride:
+    """Tests for per-class extraction prompt overrides.
+
+    Covers x-aws-idp-extraction-system-prompt and
+    x-aws-idp-extraction-task-prompt.
+    """
+
+    @pytest.fixture
+    def config_with_prompt_override(self):
+        """Config where one class overrides prompts and another does not."""
+        return {
+            "classes": [
+                {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "$id": "simple-receipt",
+                    "x-aws-idp-document-type": "simple-receipt",
+                    "type": "object",
+                    "description": "A simple receipt",
+                    "properties": {
+                        "total": {
+                            "type": "string",
+                            "description": "Total amount",
+                        },
+                    },
+                },
+                {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "$id": "w2",
+                    "x-aws-idp-document-type": "w2",
+                    "x-aws-idp-extraction-system-prompt": "You are an expert W2 extractor.",
+                    "x-aws-idp-extraction-task-prompt": dedent("""
+                        Extract these attributes from this {DOCUMENT_CLASS}:
+                        {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+                        Text: {DOCUMENT_TEXT}
+                    """),
+                    "type": "object",
+                    "description": "A W2 tax form",
+                    "properties": {
+                        "employee_name": {
+                            "type": "string",
+                            "description": "Employee name",
+                        },
+                    },
+                },
+            ],
+            "extraction": {
+                "model": "us.amazon.nova-pro-v1:0",
+                "temperature": 0.0,
+                "top_k": 5,
+                "system_prompt": "You are a generic document extraction assistant.",
+                "task_prompt": dedent("""
+                    Extract fields from this {DOCUMENT_CLASS} document:
+                    {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+                    Document text: {DOCUMENT_TEXT}
+                """),
+            },
+        }
+
+    @pytest.fixture
+    def service_with_prompt_override(self, config_with_prompt_override):
+        """ExtractionService with per-class prompt override config."""
+        return ExtractionService(region="us-west-2", config=config_with_prompt_override)
+
+    def _set_context(self, service, class_label):
+        """Populate the instance prompt-context for a given class."""
+        service._class_schema = service._get_class_schema(class_label)
+        service._class_label = class_label
+        service._document_text = "Some document text"
+        service._attribute_descriptions = "field: description"
+        service._page_images = []
+        service._image_uris = []
+
+    def test_uses_global_prompts_when_no_override(self, service_with_prompt_override):
+        """A class without prompt overrides uses the global prompts."""
+        self._set_context(service_with_prompt_override, "simple-receipt")
+
+        content, system_prompt = service_with_prompt_override._build_extraction_content(
+            document=Document(id="doc-1"),
+            page_images=[],
+        )
+
+        assert system_prompt == "You are a generic document extraction assistant."
+        combined = " ".join(item.get("text", "") for item in content)
+        assert "Extract fields from this simple-receipt document" in combined
+
+    def test_uses_override_system_prompt_when_specified(
+        self, service_with_prompt_override
+    ):
+        """A class with a system prompt override uses it instead of the global."""
+        self._set_context(service_with_prompt_override, "w2")
+
+        _content, system_prompt = (
+            service_with_prompt_override._build_extraction_content(
+                document=Document(id="doc-1"),
+                page_images=[],
+            )
+        )
+
+        assert system_prompt == "You are an expert W2 extractor."
+
+    def test_uses_override_task_prompt_with_substitution(
+        self, service_with_prompt_override
+    ):
+        """The override task prompt is used and placeholders are substituted."""
+        self._set_context(service_with_prompt_override, "w2")
+
+        content, _system_prompt = (
+            service_with_prompt_override._build_extraction_content(
+                document=Document(id="doc-1"),
+                page_images=[],
+            )
+        )
+
+        combined = " ".join(item.get("text", "") for item in content)
+        # Override-specific wording present, global wording absent
+        assert "Extract these attributes from this w2" in combined
+        assert "Extract fields from this" not in combined
+        # Placeholders substituted, not left literal
+        assert "{DOCUMENT_CLASS}" not in combined
+        assert "{DOCUMENT_TEXT}" not in combined
+        assert "Some document text" in combined
+        assert "field: description" in combined
+
+    def test_override_is_logged(self, service_with_prompt_override, caplog):
+        """Using prompt overrides produces info log messages."""
+        import logging
+
+        self._set_context(service_with_prompt_override, "w2")
+
+        with caplog.at_level(logging.INFO, logger="idp_common.extraction.service"):
+            service_with_prompt_override._build_extraction_content(
+                document=Document(id="doc-1"),
+                page_images=[],
+            )
+
+        assert any(
+            "per-class extraction system prompt override" in record.message
+            and "w2" in record.message
+            for record in caplog.records
+        )
+        assert any(
+            "per-class extraction task prompt override" in record.message
+            and "w2" in record.message
+            for record in caplog.records
+        )
+
+    def test_schema_constants_exist(self):
+        """Verify the prompt override constants are defined."""
+        from idp_common.config.schema_constants import (
+            X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT,
+            X_AWS_IDP_EXTRACTION_TASK_PROMPT,
+        )
+
+        assert (
+            X_AWS_IDP_EXTRACTION_SYSTEM_PROMPT == "x-aws-idp-extraction-system-prompt"
+        )
+        assert X_AWS_IDP_EXTRACTION_TASK_PROMPT == "x-aws-idp-extraction-task-prompt"
+
+    def test_clean_schema_removes_prompt_overrides(self, service_with_prompt_override):
+        """Verify the prompt override keys are stripped from prompts."""
+        schema = service_with_prompt_override._get_class_schema("w2")
+        assert "x-aws-idp-extraction-system-prompt" in schema
+        assert "x-aws-idp-extraction-task-prompt" in schema
+
+        cleaned = service_with_prompt_override._clean_schema_for_prompt(schema)
+        assert "x-aws-idp-extraction-system-prompt" not in cleaned
+        assert "x-aws-idp-extraction-task-prompt" not in cleaned

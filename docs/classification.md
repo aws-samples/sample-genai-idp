@@ -166,6 +166,60 @@ The boundary detection is automatically included in the classification results. 
   }
 }
 ```
+
+##### Enforcing a Valid Class Vocabulary (Validation + Retry)
+
+With a fixed set of classes, a language model can occasionally return a label
+that is **not** in your configured list (for example predicting `receipt` when
+only `invoice`, `w2`, and `check` are valid). Smaller / cheaper models are
+especially prone to this. `multimodalPageLevelClassification` includes a
+deterministic validation + retry guardrail to prevent out-of-vocabulary
+classifications:
+
+1. After the model returns a class, it is validated against the configured
+   class vocabulary.
+2. If the class is **not** valid, the model is **re-prompted** — the original
+   request content is re-sent with an appended correction message that lists
+   the allowed classes. (This matters: classification runs at `temperature=0`,
+   so re-sending an identical request would return the identical invalid
+   answer. The correction changes the input and steers the model back to the
+   allowed set.)
+3. The retry repeats up to `maxValidationRetries` times.
+4. If all retries are exhausted, the page is assigned `invalidClassFallback`
+   (default `unclassified`) and flagged with a `validation_error` entry in its
+   classification metadata. The document continues processing — there is no
+   hard failure.
+
+```yaml
+classification:
+  classificationMethod: multimodalPageLevelClassification
+  enforceValidClasses: true       # Validate + retry on invalid class (default: true)
+  maxValidationRetries: 2         # Re-prompt up to N times (default: 2)
+  invalidClassFallback: unclassified  # Class used when retries are exhausted (default: unclassified)
+```
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `enforceValidClasses` | `true` | When `true`, validate the predicted class and re-prompt on out-of-vocabulary results. When `false`, an invalid class is logged and used as-is (legacy behavior). |
+| `maxValidationRetries` | `2` | Maximum number of re-prompts. `0` disables retries (a single invalid prediction goes straight to the fallback). |
+| `invalidClassFallback` | `unclassified` | Class assigned when retries are exhausted. Set to one of your defined classes, or the built-in `unclassified`. |
+
+> **Behavior change on upgrade:** enforcement is **on by default**. An
+> out-of-vocabulary prediction that previously passed through unchanged is now
+> corrected or coerced to the fallback class. Set `enforceValidClasses: false`
+> to restore the prior "warn and use as-is" behavior.
+>
+> **Catch-all class:** if you want an explicit "other"/"unknown" bucket, define
+> it as one of your classes — the model will then be able to select it
+> legitimately, and it counts as a valid prediction.
+>
+> **Scope:** this loop applies to `multimodalPageLevelClassification`.
+> Text-based holistic classification has similar needs but is not covered yet.
+
+A runnable demonstration (forcing an out-of-vocabulary prediction and showing
+the retry correct it) is available in
+`notebooks/misc/classification-valid-class-enforcement.ipynb`.
+
 #### Text-Based Holistic Classification
 
 - Analyzes entire document packets to identify logical boundaries

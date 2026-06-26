@@ -99,6 +99,7 @@ export interface ExportablePage {
   ImageUri?: string;
   TextUri?: string;
   TextConfidenceUri?: string;
+  OcrPageDataUri?: string;
   [key: string]: unknown;
 }
 
@@ -261,6 +262,9 @@ const buildPlan = (doc: ExportableDocument, settings: ExportSettings | undefined
       }
       if (page.TextConfidenceUri) {
         fetchTasks.push({ zipPath: uriToZipPath(page.TextConfidenceUri, settings), uri: page.TextConfidenceUri });
+      }
+      if (page.OcrPageDataUri) {
+        fetchTasks.push({ zipPath: uriToZipPath(page.OcrPageDataUri, settings), uri: page.OcrPageDataUri });
       }
       if (wantPageImages && page.ImageUri) {
         fetchTasks.push({ zipPath: uriToZipPath(page.ImageUri, settings), uri: page.ImageUri });

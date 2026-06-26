@@ -56,6 +56,41 @@ Parameters:
     Description: >
       Conversion quality mode. 'fast' for lowest latency, 'accurate' for highest quality.
 
+  MistralApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: >
+      Mistral API key (Bearer token) for the Mistral OCR hook sample function.
+      Get your key from https://console.mistral.ai
+      Leave empty if not using the Mistral sample.
+
+  MistralApiUrl:
+    Type: String
+    Default: "https://api.mistral.ai/v1/ocr"
+    Description: Mistral OCR endpoint URL.
+
+  MistralOcrModel:
+    Type: String
+    Default: "mistral-ocr-latest"
+    Description: Mistral OCR model id (e.g. mistral-ocr-latest).
+
+  MistralIncludeBlocks:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Request paragraph bounding boxes (geometry) from Mistral OCR.
+
+  MistralConfidenceGranularity:
+    Type: String
+    Default: "word"
+    AllowedValues:
+      - word
+      - page
+    Description: Confidence score granularity for Mistral OCR.
+
 Resources:
   # =========================================================================
   # GENAIIDP-bedrock-proxy
@@ -168,6 +203,41 @@ Resources:
               Resource:
                 - !Sub "arn:${AWS::Partition}:s3:::${IDPWorkingBucket}/temp/lambdahook/*"
 
+  # =========================================================================
+  # GENAIIDP-mistral-ocr-hook
+  # Calls the hosted Mistral OCR API for high-quality OCR with confidence + geometry
+  # =========================================================================
+  MistralOcrHookFunction:
+    Type: AWS::Serverless::Function
+    # checkov:skip=CKV_AWS_173: "API key is passed via NoEcho parameter, encrypted at rest by Lambda service"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for sample Lambda hook function - errors handled by IDP pipeline"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it calls an external HTTPS API"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency - sample function for demonstration purposes"
+    Properties:
+      FunctionName: GENAIIDP-mistral-ocr-hook
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      CodeUri: GENAIIDP-mistral-ocr-hook/
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          MISTRAL_API_KEY: !Ref MistralApiKey
+          MISTRAL_API_URL: !Ref MistralApiUrl
+          MISTRAL_OCR_MODEL: !Ref MistralOcrModel
+          INCLUDE_BLOCKS: !Ref MistralIncludeBlocks
+          CONFIDENCE_GRANULARITY: !Ref MistralConfidenceGranularity
+          REQUEST_TIMEOUT: "120"
+          LOG_LEVEL: INFO
+      Policies:
+        - Statement:
+            # Read images from IDP working bucket
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource:
+                - !Sub "arn:${AWS::Partition}:s3:::${IDPWorkingBucket}/temp/lambdahook/*"
+
 Outputs:
   BedrockProxyFunctionArn:
     Description: ARN of the Bedrock proxy Lambda hook function
@@ -180,6 +250,10 @@ Outputs:
   ChandraOcrHookFunctionArn:
     Description: ARN of the Chandra OCR Lambda hook function
     Value: !GetAtt ChandraOcrHookFunction.Arn
+
+  MistralOcrHookFunctionArn:
+    Description: ARN of the Mistral OCR Lambda hook function
+    Value: !GetAtt MistralOcrHookFunction.Arn
 
   BedrockProxyUsage:
     Description: How to use the Bedrock proxy in IDP configuration
@@ -195,3 +269,8 @@ Outputs:
     Description: How to use the Chandra OCR hook in IDP configuration
     Value: !Sub |
       Set OCR backend to "bedrock", model_id to "LambdaHook", and model_lambda_hook_arn to "${ChandraOcrHookFunction.Arn}"
+
+  MistralOcrHookUsage:
+    Description: How to use the Mistral OCR hook in IDP configuration
+    Value: !Sub |
+      Set OCR backend to "bedrock", model_id to "LambdaHook", and model_lambda_hook_arn to "${MistralOcrHookFunction.Arn}"

@@ -138,6 +138,7 @@ type Page @aws_cognito_user_pools @aws_iam {
   ImageUri: String
   TextUri: String
   TextConfidenceUri: String
+  OcrPageDataUri: String
 }
 
 type DocumentList @aws_cognito_user_pools @aws_iam {
@@ -388,6 +389,7 @@ input PageInput {
   ImageUri: String
   TextUri: String
   TextConfidenceUri: String
+  OcrPageDataUri: String
 }
 
 type CopyToBaselineResponse @aws_cognito_user_pools {
