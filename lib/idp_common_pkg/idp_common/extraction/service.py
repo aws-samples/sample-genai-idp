@@ -21,7 +21,11 @@ from idp_common.bedrock import format_prompt, is_openai_responses_model
 from idp_common.config.models import IDPConfig
 from idp_common.config.schema_constants import (
     ID_FIELD,
+    SCHEMA_ITEMS,
     SCHEMA_PROPERTIES,
+    SCHEMA_TYPE,
+    TYPE_ARRAY,
+    TYPE_OBJECT,
     X_AWS_IDP_DOCUMENT_TYPE,
     X_AWS_IDP_EXTRACTION_ESCALATION_MODEL,
     X_AWS_IDP_EXTRACTION_MODEL,
@@ -1277,6 +1281,128 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             ),
         }
 
+    @staticmethod
+    def _count_schema_leaf_fields(
+        schema_node: dict[str, Any], value: Any
+    ) -> tuple[int, int, list[str]]:
+        """Recursively count schema-defined leaf fields vs. populated ones.
+
+        Walks the schema's ``properties`` (descending into nested ``object``
+        properties and the ``items`` of ``array`` properties) and, in parallel,
+        the extracted ``value``. Returns ``(defined, populated, empty_paths)``:
+
+        - ``defined``  — number of leaf (scalar) fields the schema declares.
+        - ``populated`` — how many of those have a non-empty value
+          (not None, not "" / [] / {}).
+        - ``empty_paths`` — dotted paths of the leaf fields that came back empty.
+
+        For arrays of objects, the item schema's leaves are counted once per
+        present row (so a 0-row array contributes its leaves as "defined but
+        empty", surfacing tables that extracted nothing). This is the signal
+        that catches silent nested-field loss (all-null nested objects).
+        """
+        defined = 0
+        populated = 0
+        empty: list[str] = []
+
+        node_type = schema_node.get(SCHEMA_TYPE)
+        properties = schema_node.get(SCHEMA_PROPERTIES) or {}
+
+        if node_type == TYPE_OBJECT or properties:
+            value_dict = value if isinstance(value, dict) else {}
+            for prop_name, prop_schema in properties.items():
+                if not isinstance(prop_schema, dict):
+                    continue
+                prop_type = prop_schema.get(SCHEMA_TYPE)
+                child_value = value_dict.get(prop_name)
+                path = prop_name
+
+                if prop_type == TYPE_OBJECT or (prop_schema.get(SCHEMA_PROPERTIES)):
+                    d, p, e = ExtractionService._count_schema_leaf_fields(
+                        prop_schema, child_value
+                    )
+                    defined += d
+                    populated += p
+                    empty.extend(f"{path}.{sub}" for sub in e)
+                elif prop_type == TYPE_ARRAY:
+                    item_schema = prop_schema.get(SCHEMA_ITEMS) or {}
+                    rows = child_value if isinstance(child_value, list) else []
+                    if isinstance(item_schema, dict) and item_schema.get(
+                        SCHEMA_PROPERTIES
+                    ):
+                        if rows:
+                            for idx, row in enumerate(rows):
+                                d, p, e = ExtractionService._count_schema_leaf_fields(
+                                    item_schema, row
+                                )
+                                defined += d
+                                populated += p
+                                empty.extend(f"{path}[{idx}].{sub}" for sub in e)
+                        else:
+                            # Empty array: count the item leaves once as "missing".
+                            d, _p, _e = ExtractionService._count_schema_leaf_fields(
+                                item_schema, {}
+                            )
+                            defined += d
+                            empty.append(path)
+                    else:
+                        # Array of scalars.
+                        defined += 1
+                        if rows:
+                            populated += 1
+                        else:
+                            empty.append(path)
+                else:
+                    # Scalar leaf.
+                    defined += 1
+                    if child_value not in (None, "", [], {}):
+                        populated += 1
+                    else:
+                        empty.append(path)
+
+        return defined, populated, empty
+
+    def _check_population_completeness(
+        self, extracted_fields: dict[str, Any], schema: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Heuristic: how much of the schema actually got populated.
+
+        Unlike ``_check_completeness_detailed`` (which only flags hard
+        ``minItems`` constraint violations), this flags *suspiciously sparse*
+        extractions — e.g. an agentic run that returned a correct top-level
+        object but null for nearly every nested field. It cannot know a field
+        *should* have had a value, so it is advisory (a warning signal), not a
+        hard failure: a genuinely sparse document will also score low.
+        """
+        defined, populated, empty_paths = self._count_schema_leaf_fields(
+            schema, extracted_fields
+        )
+        ratio = (populated / defined) if defined else 1.0
+        threshold = self.config.extraction.agentic.validation.min_population_ratio
+        below = defined > 0 and ratio < threshold
+
+        if below:
+            logger.warning(
+                "Extraction populated only %d/%d schema fields (%.0f%%), below the "
+                "%.0f%% completeness threshold — possible silent extraction loss "
+                "(e.g. nested fields not captured).",
+                populated,
+                defined,
+                ratio * 100,
+                threshold * 100,
+                extra={"empty_fields": empty_paths[:50]},
+            )
+
+        return {
+            "fields_defined": defined,
+            "fields_populated": populated,
+            "population_ratio": round(ratio, 3),
+            "threshold": threshold,
+            "below_threshold": below,
+            # Cap the echoed list so a huge sparse schema can't bloat metadata.
+            "empty_fields": empty_paths[:50],
+        }
+
     def _generate_processing_report(self, metadata: dict[str, Any]) -> str:
         """Generate user-friendly processing report."""
 
@@ -2305,6 +2431,13 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     schema=self._class_schema,
                     tool_used=tool_used,
                 )
+
+            # Population heuristic: flag suspiciously sparse extractions (e.g.
+            # nested fields silently returning null). Advisory only.
+            metadata["population_check"] = self._check_population_completeness(
+                extracted_fields=result.extracted_fields,
+                schema=self._class_schema,
+            )
 
         # Add table parsing stats if tool was used
         if tool_used and table_stats:

@@ -760,6 +760,15 @@ How it works:
   when escalation ran — `escalated`, `escalation_model`, `escalation_scope`
   (`field-subset` | `full-section`), `escalation_fields`, and
   `resolved_by_escalation`.
+- `metadata.population_check` — completeness heuristic (advisory). Reports
+  `fields_defined`, `fields_populated`, `population_ratio`, `below_threshold`,
+  and `empty_fields` (dotted paths of unpopulated leaves). A warning is logged
+  when the ratio falls below `validation.min_population_ratio` (default `0.5`).
+  This catches *silent* extraction loss — e.g. nested fields returning null, or
+  a table that extracted zero rows — that schema validation alone cannot, since
+  sparse-but-valid output is still schema-valid. It never fails extraction (a
+  genuinely sparse document scores low too); set `min_population_ratio: 0` to
+  silence the warning.
 
 **Escalation model precedence:** per-class `x-aws-idp-extraction-escalation-model`
 schema extension → global `validation.escalation_model` → the extraction model

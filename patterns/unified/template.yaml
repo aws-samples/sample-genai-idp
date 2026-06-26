@@ -1163,6 +1163,13 @@ Resources:
                           - "global.anthropic.claude-opus-4-8:1m"
                         order: 3
                         default: ""
+                      min_population_ratio:
+                        type: number
+                        description: "Advisory completeness threshold (0-1). After extraction, the fraction of schema-defined fields that came back populated is computed; if it falls below this value a warning is logged and metadata.population_check is flagged (catches silent loss such as nested fields returning null or a table extracting zero rows). Advisory only - never fails extraction. Set to 0 to disable."
+                        minimum: 0
+                        maximum: 1
+                        order: 4
+                        default: 0.5
               image:
                 type: object
                 sectionLabel: Image Processing Settings

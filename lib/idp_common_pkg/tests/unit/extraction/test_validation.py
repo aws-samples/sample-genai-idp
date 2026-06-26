@@ -334,6 +334,118 @@ class TestServiceEscalationGate:
         assert "escalation_model" not in meta
 
 
+POPULATION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "$id": "HomeApp",
+    "properties": {
+        "Policy Number": {"type": "string"},
+        "Primary Applicant Information": {
+            "type": "object",
+            "properties": {
+                "Name": {"type": "string"},
+                "Date of Birth": {"type": "string"},
+                "Marital Status": {"type": "string"},
+                "DL State": {"type": "string"},
+            },
+        },
+        "Auto Claims": {
+            "type": "array",
+            "items": {"type": "object", "properties": {"Num": {"type": "string"}}},
+        },
+    },
+}
+
+
+class TestPopulationCompleteness:
+    """_check_population_completeness: the silent-loss completeness heuristic."""
+
+    def _service(self, min_population_ratio: float = 0.5) -> ExtractionService:
+        config = {
+            "extraction": {
+                "model": "us.amazon.nova-pro-v1:0",
+                "agentic": {
+                    "enabled": True,
+                    "validation": {
+                        "enabled": True,
+                        "min_population_ratio": min_population_ratio,
+                    },
+                },
+            },
+            "classes": [POPULATION_SCHEMA],
+        }
+        return ExtractionService(region="us-west-2", config=config)
+
+    def test_sparse_nested_extraction_flagged(self):
+        # Mirrors the real bug: top-level ok, nested all null, empty array.
+        svc = self._service()
+        sparse = {
+            "Policy Number": "123",
+            "Primary Applicant Information": {
+                "Name": "Ziggy",
+                "Date of Birth": None,
+                "Marital Status": None,
+                "DL State": None,
+            },
+            "Auto Claims": [],
+        }
+        result = svc._check_population_completeness(sparse, POPULATION_SCHEMA)
+        assert result["fields_defined"] == 6  # 1 + 4 nested + 1 array-leaf
+        assert result["fields_populated"] == 2  # Policy Number + Name
+        assert result["below_threshold"] is True
+        assert result["population_ratio"] < 0.5
+        # Empty paths name the offending nested fields (dotted) + the empty array.
+        assert "Primary Applicant Information.Date of Birth" in result["empty_fields"]
+        assert "Auto Claims" in result["empty_fields"]
+
+    def test_full_extraction_not_flagged(self):
+        svc = self._service()
+        full = {
+            "Policy Number": "123",
+            "Primary Applicant Information": {
+                "Name": "Ziggy",
+                "Date of Birth": "02/20/2000",
+                "Marital Status": "S",
+                "DL State": "NV",
+            },
+            "Auto Claims": [{"Num": "2"}],
+        }
+        result = svc._check_population_completeness(full, POPULATION_SCHEMA)
+        assert result["fields_populated"] == result["fields_defined"]
+        assert result["population_ratio"] == 1.0
+        assert result["below_threshold"] is False
+        assert result["empty_fields"] == []
+
+    def test_threshold_zero_disables_warning(self):
+        svc = self._service(min_population_ratio=0.0)
+        empty = {
+            "Policy Number": None,
+            "Primary Applicant Information": {},
+            "Auto Claims": [],
+        }
+        result = svc._check_population_completeness(empty, POPULATION_SCHEMA)
+        # Even an almost-empty result is not flagged when threshold is 0.
+        assert result["below_threshold"] is False
+
+    def test_empty_array_counts_item_leaves_as_missing(self):
+        svc = self._service()
+        # An empty table contributes its item leaves to 'defined' and flags the array.
+        result = svc._check_population_completeness(
+            {
+                "Policy Number": "p",
+                "Primary Applicant Information": {
+                    "Name": "n",
+                    "Date of Birth": "d",
+                    "Marital Status": "m",
+                    "DL State": "s",
+                },
+                "Auto Claims": [],
+            },
+            POPULATION_SCHEMA,
+        )
+        assert "Auto Claims" in result["empty_fields"]
+        assert result["below_threshold"] is False  # 5/6 populated
+
+
 class _FakeSection:
     """Minimal stand-in for SectionInfo (only class_label is read)."""
 
