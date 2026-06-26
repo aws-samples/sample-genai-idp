@@ -193,6 +193,25 @@ class ValidationConfig(BaseModel):
         "'x-aws-idp-extraction-escalation-model' override, then to the extraction "
         "model itself (escalation becomes a plain retry).",
     )
+    min_population_ratio: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Advisory completeness threshold. After extraction, the "
+        "fraction of schema-defined leaf fields that came back populated is "
+        "computed; if it falls below this ratio a warning is logged and the "
+        "result metadata is flagged (catches silent loss such as nested fields "
+        "returning null). Advisory only — never fails extraction. Set to 0 to "
+        "disable the warning.",
+    )
+
+    @field_validator("min_population_ratio", mode="before")
+    @classmethod
+    def parse_min_population_ratio(cls, v: Any) -> float:
+        """Parse ratio from string or number; empty/None -> default 0.5."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return 0.5
+        return float(v)
 
     @field_validator("fail_action", mode="before")
     @classmethod
