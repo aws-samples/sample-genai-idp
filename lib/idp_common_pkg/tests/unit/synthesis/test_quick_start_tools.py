@@ -169,3 +169,60 @@ class TestGenerateFromExistingConfig:
             )
         assert out["enqueued"] is False
         assert "Paystub" in out["availableClasses"]
+
+
+class TestListSampleDocuments:
+    def test_unavailable_when_bucket_env_missing(self, monkeypatch):
+        from idp_common.agents.quick_start.tools import bootstrap_tools as bt
+
+        monkeypatch.delenv("CONFIGURATION_BUCKET", raising=False)
+        out = json.loads(bt.list_sample_documents_impl())
+        assert out["available"] is False
+        assert out["samples"] == []
+
+    def test_reads_manifest_from_configuration_bucket(self, monkeypatch):
+        from idp_common.agents.quick_start.tools import bootstrap_tools as bt
+
+        monkeypatch.setenv("CONFIGURATION_BUCKET", "cfg-bucket")
+        manifest = {
+            "schemaVersion": "1.0",
+            "samples": [
+                {
+                    "id": "lending_package",
+                    "name": "Lending Package",
+                    "kind": "document",
+                },
+                {"id": "w2", "name": "W-2 Forms", "kind": "batch", "fileCount": 20},
+            ],
+        }
+
+        class _Body:
+            def read(self):
+                return json.dumps(manifest).encode("utf-8")
+
+        class _S3:
+            def get_object(self, Bucket, Key):
+                assert Bucket == "cfg-bucket"
+                assert Key == "config_library/samples-manifest.json"
+                return {"Body": _Body()}
+
+        with patch("boto3.client", return_value=_S3()):
+            out = json.loads(bt.list_sample_documents_impl())
+
+        assert out["available"] is True
+        assert [s["id"] for s in out["samples"]] == ["lending_package", "w2"]
+
+    def test_missing_manifest_degrades_gracefully(self, monkeypatch):
+        from idp_common.agents.quick_start.tools import bootstrap_tools as bt
+
+        monkeypatch.setenv("CONFIGURATION_BUCKET", "cfg-bucket")
+
+        class _S3:
+            def get_object(self, Bucket, Key):
+                raise Exception("NoSuchKey")
+
+        with patch("boto3.client", return_value=_S3()):
+            out = json.loads(bt.list_sample_documents_impl())
+
+        assert out["available"] is False
+        assert out["samples"] == []

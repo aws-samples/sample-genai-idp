@@ -6997,6 +6997,7 @@ Resources:
           CLOUDWATCH_LOG_GROUP_PREFIX: !Sub "/aws/lambda/${AWS::StackName}"
           SETTINGS_PARAMETER_NAME: !Ref SettingsParameter
           BOOTSTRAP_QUEUE_URL: !Ref BootstrapQueue
+          CONFIGURATION_BUCKET: !Ref ConfigurationBucket
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
           BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
@@ -7022,6 +7023,12 @@ Resources:
             TableName: !Ref IdHelperChatMemoryTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ConfigurationTable
+        # Read the samples manifest (config_library/samples-manifest.json) the
+        # list_sample_documents tool surfaces to the Quick Start agent.
+        - Statement:
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${ConfigurationBucket}/config_library/*"
         - S3CrudPolicy:
             BucketName: !If
               - ShouldCreateReportingBucket

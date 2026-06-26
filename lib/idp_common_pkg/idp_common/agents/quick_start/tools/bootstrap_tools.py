@@ -43,6 +43,45 @@ def check_generator_availability_impl() -> str:
     )
 
 
+def list_sample_documents_impl() -> str:
+    """List the bundled sample documents available to start from.
+
+    Reads config_library/samples-manifest.json from the stack's
+    ConfigurationBucket (CONFIGURATION_BUCKET) — the manifest is generated at
+    publish time by scanning samples/ and copied into the bucket at deploy time
+    (same mechanism as catalog.json). Degrades gracefully if the env var or the
+    manifest is absent.
+    """
+    bucket = os.environ.get("CONFIGURATION_BUCKET")
+    if not bucket:
+        return json.dumps(
+            {
+                "available": False,
+                "reason": "Sample documents are not available in this deployment.",
+                "samples": [],
+            }
+        )
+
+    import boto3
+
+    key = os.environ.get("SAMPLES_MANIFEST_KEY", "config_library/samples-manifest.json")
+    try:
+        body = boto3.client("s3").get_object(Bucket=bucket, Key=key)["Body"].read()
+        manifest = json.loads(body)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning("Could not read samples manifest: %s", e)
+        return json.dumps(
+            {
+                "available": False,
+                "reason": "No sample documents found.",
+                "samples": [],
+            }
+        )
+
+    samples = manifest.get("samples", []) if isinstance(manifest, dict) else []
+    return json.dumps({"available": True, "samples": samples})
+
+
 def search_catalog_impl(description: str) -> str:
     schemas_root = os.environ.get("GENERATOR_SCHEMAS_ROOT")
     entries = catalog_mod.build_catalog(generator_schemas_root=schemas_root)
@@ -283,6 +322,19 @@ def check_generator_availability() -> str:
     Use this before offering to generate documents.
     """
     return check_generator_availability_impl()
+
+
+@strands.tool
+def list_sample_documents() -> str:
+    """List the bundled example/sample documents the user can start from.
+
+    Use this when the user asks what example or sample documents are available
+    (e.g. "what examples do you have?"). Returns each sample's id, name,
+    description, kind ("document" or "batch"), and fileCount. Tell the user they
+    can either upload their own documents or start from one of these samples;
+    describe the relevant ones rather than dumping the whole list.
+    """
+    return list_sample_documents_impl()
 
 
 @strands.tool

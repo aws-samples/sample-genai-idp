@@ -17,6 +17,7 @@ from .tools import (
     estimate_generation_cost,
     generate_from_existing_config,
     list_config_versions,
+    list_sample_documents,
     refine_schema,
     request_document_generation,
     search_catalog,
@@ -66,6 +67,15 @@ Generating from an existing configuration:
   call generate_from_existing_config(version_name, class_name, ...). Do NOT
   re-author a schema in this case - the existing class schema is used as-is.
 
+Example / sample documents:
+- If the user asks what example or sample documents are available, call
+  list_sample_documents and describe the relevant ones. These are bundled
+  documents (single docs and multi-doc batches) they can start from instead of
+  uploading their own. If none are available, say so and offer the upload path.
+- Starting from a sample feeds the same Discovery flow as an upload (infers a
+  schema/config from the real document). Today, point the user to upload the
+  sample or pick it in the UI; do not claim you can launch it directly.
+
 Uploaded documents (highest-fidelity path):
 - The chat UI lets the user attach their own example documents. When they do,
   the documents are run through multi-document Discovery, which infers schema(s)
@@ -114,6 +124,7 @@ def create_quick_start_agent(
         request_document_generation,
         list_config_versions,
         generate_from_existing_config,
+        list_sample_documents,
     ]
 
     bedrock_model = create_strands_bedrock_model(
