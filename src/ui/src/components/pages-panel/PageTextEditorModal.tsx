@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT-0
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Modal, Box, SpaceBetween, Button, SegmentedControl, Alert, Spinner } from '@cloudscape-design/components';
+import { Modal, Box, SpaceBetween, Button, SegmentedControl, Alert, Spinner, Badge } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { Editor } from '@monaco-editor/react';
@@ -95,36 +95,43 @@ const PageTextEditorModal = ({
   onSave,
   onClose,
 }: PageTextEditorModalProps): React.JSX.Element => {
-  const [viewMode, setViewMode] = useState('text-markdown');
+  // Whether the visual (image) view is available for this page.
+  const hasVisualView = Boolean(imageUri);
+
+  const [viewMode, setViewMode] = useState(hasVisualView ? 'visual-editor' : 'text-markdown');
   const [textContent, setTextContent] = useState('');
   const [confidenceContent, setConfidenceContent] = useState('');
   const [originalTextContent, setOriginalTextContent] = useState('');
   const [originalConfidenceContent, setOriginalConfidenceContent] = useState('');
   const [pageData, setPageData] = useState<OcrPageData | null>(null);
+  const [selectedLineIndex, setSelectedLineIndex] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showCloseWarning, setShowCloseWarning] = useState(false);
 
-  // Whether the visual (image + bounding boxes) view is available for this page.
-  const hasVisualView = Boolean(imageUri);
   const geometryAvailable = Boolean(pageData?.geometryAvailable);
+  const lines = useMemo(() => pageData?.lines ?? [], [pageData]);
 
-  // Build bounding-box overlays from the consolidated pageData lines. Only lines
-  // that actually carry geometry are drawn; color encodes OCR confidence.
-  const boundingBoxes = useMemo(() => {
-    if (!pageData?.lines) return [];
-    return pageData.lines
-      .filter((line) => line.geometry?.boundingBox)
-      .map((line) => ({
-        geometry: { boundingBox: line.geometry!.boundingBox, page: 1 },
-        color: confidenceColor(line.confidence),
-        label: line.confidence != null ? `${line.text ?? ''} (${line.confidence})` : (line.text ?? ''),
-      }));
-  }, [pageData]);
+  // Only the currently-selected line's box is drawn on the image (the section
+  // Visual Editor pattern). Drawing every line at once is unreadable.
+  const activeFieldGeometry = useMemo(() => {
+    if (selectedLineIndex === null) return null;
+    const line = lines[selectedLineIndex];
+    if (!line?.geometry?.boundingBox) return null;
+    return { boundingBox: line.geometry.boundingBox, page: 1 };
+  }, [selectedLineIndex, lines]);
 
   const documentPages = useMemo(() => (imageUri ? [{ Id: String(pageId), ImageUri: imageUri }] : []), [imageUri, pageId]);
+
+  // Reset selection / default view whenever the modal (re)opens for a page.
+  useEffect(() => {
+    if (visible) {
+      setSelectedLineIndex(null);
+      setViewMode(hasVisualView ? 'visual-editor' : 'text-markdown');
+    }
+  }, [visible, pageId, hasVisualView]);
 
   // Fetch content when modal opens
   useEffect(() => {
@@ -331,6 +338,7 @@ const PageTextEditorModal = ({
     setOriginalTextContent('');
     setOriginalConfidenceContent('');
     setPageData(null);
+    setSelectedLineIndex(null);
     setError(null);
     setHasUnsavedChanges(false);
     if (onClose) {
@@ -387,34 +395,99 @@ const PageTextEditorModal = ({
                   selectedId={viewMode}
                   onChange={({ detail }) => setViewMode(detail.selectedId)}
                   options={[
+                    { id: 'visual-editor', text: 'Visual Editor', disabled: !hasVisualView },
                     { id: 'text-markdown', text: 'Text + Markdown' },
                     { id: 'text-confidence', text: 'Text + Confidence', disabled: !confidenceUri },
-                    { id: 'page-image', text: 'Page Image', disabled: !hasVisualView },
                   ]}
                 />
               </Box>
 
-              {viewMode === 'page-image' ? (
-                <div style={{ minHeight: EDITOR_HEIGHT }}>
-                  {geometryAvailable ? (
-                    <Box fontSize="body-s" color="text-body-secondary" margin={{ bottom: 'xs' }}>
-                      Bounding boxes show OCR text lines, colored by confidence (green ≥ {CONFIDENCE_HIGH}, orange ≥ {CONFIDENCE_MEDIUM},
-                      red below). Hover a box to see its text and score.
+              {viewMode === 'visual-editor' ? (
+                <div style={{ display: 'flex', gap: '12px', minHeight: EDITOR_HEIGHT, alignItems: 'stretch' }}>
+                  {/* Left pane: page image with the selected line's bounding box */}
+                  <div style={{ flex: '0 0 55%', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                    <PageImageViewer
+                      pageIds={[String(pageId)]}
+                      documentPages={documentPages}
+                      initialPage={String(pageId)}
+                      height={EDITOR_HEIGHT}
+                      activeFieldGeometry={activeFieldGeometry}
+                    />
+                  </div>
+
+                  {/* Right pane: clickable OCR text lines */}
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                    <Box fontSize="body-s" color="text-label" margin={{ bottom: 'xxxs' }}>
+                      OCR Text Lines {geometryAvailable ? '(click a line to highlight it on the image)' : ''}
                     </Box>
-                  ) : (
-                    <Box margin={{ bottom: 'xs' }}>
-                      <Alert type="info">
-                        This OCR backend did not provide bounding-box geometry for this page; the image is shown without overlays.
-                      </Alert>
-                    </Box>
-                  )}
-                  <PageImageViewer
-                    pageIds={[String(pageId)]}
-                    documentPages={documentPages}
-                    initialPage={String(pageId)}
-                    height={EDITOR_HEIGHT}
-                    boundingBoxes={boundingBoxes}
-                  />
+                    {!geometryAvailable && (
+                      <Box margin={{ bottom: 'xs' }}>
+                        <Alert type="info">
+                          This OCR backend did not provide bounding-box geometry for this page, so lines cannot be highlighted on the image.
+                        </Alert>
+                      </Box>
+                    )}
+                    <div
+                      style={{
+                        border: '1px solid #e9ebed',
+                        height: EDITOR_HEIGHT,
+                        overflow: 'auto',
+                        backgroundColor: '#fff',
+                      }}
+                    >
+                      {lines.length === 0 ? (
+                        <Box padding="m" color="text-body-secondary">
+                          No OCR text lines available for this page.
+                        </Box>
+                      ) : (
+                        lines.map((line, index) => {
+                          const hasGeometry = Boolean(line.geometry?.boundingBox);
+                          const isSelected = selectedLineIndex === index;
+                          return (
+                            <div
+                              // eslint-disable-next-line react/no-array-index-key -- lines are a stable ordered OCR list
+                              key={`ocr-line-${index}`}
+                              onClick={() => hasGeometry && setSelectedLineIndex(isSelected ? null : index)}
+                              role={hasGeometry ? 'button' : undefined}
+                              tabIndex={hasGeometry ? 0 : undefined}
+                              onKeyDown={(e) => {
+                                if (hasGeometry && (e.key === 'Enter' || e.key === ' ')) {
+                                  e.preventDefault();
+                                  setSelectedLineIndex(isSelected ? null : index);
+                                }
+                              }}
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                gap: '8px',
+                                padding: '4px 8px',
+                                borderBottom: '1px solid #f2f3f3',
+                                cursor: hasGeometry ? 'pointer' : 'default',
+                                backgroundColor: isSelected ? '#f0f7ff' : 'transparent',
+                                borderLeft: isSelected ? '3px solid #0972d3' : '3px solid transparent',
+                              }}
+                            >
+                              <span style={{ fontSize: '13px', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
+                                {line.text || <em style={{ color: '#888' }}>(empty)</em>}
+                              </span>
+                              {line.confidence != null && (
+                                <span style={{ flexShrink: 0, color: confidenceColor(line.confidence), fontSize: '12px', fontWeight: 600 }}>
+                                  {line.confidence}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                    {geometryAvailable && (
+                      <Box fontSize="body-s" color="text-body-secondary" margin={{ top: 'xxs' }}>
+                        Confidence color: <Badge color="green">≥ {CONFIDENCE_HIGH}</Badge>{' '}
+                        <Badge color="severity-medium">≥ {CONFIDENCE_MEDIUM}</Badge> <Badge color="red">below</Badge>
+                      </Box>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div style={{ display: 'flex', gap: '4px', minHeight: EDITOR_HEIGHT }}>
