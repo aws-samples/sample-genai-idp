@@ -21,10 +21,12 @@ Design (see PR discussion):
 - **Page-aligned splits never cut a table row.** A table spans pages but each
   *row* lives on one page, so splitting between pages keeps rows intact; the
   merge re-concatenates list fields in order.
-- **Opportunistic table-boundary preference.** Within the budget, a split point
-  is nudged to fall between tables when the OCR analysis flags large tables —
-  but never grown past budget to keep a table whole (that would defeat the
-  point for single huge tables).
+- **Opportunistic table-boundary preference (forward hook).** ``plan_shards``
+  accepts ``table_boundary_pages`` and, when given, prefers to close a shard
+  just before such a page (within budget — never grown past it). This parameter
+  is implemented and tested but the service does not yet feed it real OCR
+  boundaries (it passes ``None``); page-aligned splitting is already row-safe
+  on its own, so this is a refinement to wire up later, not a correctness need.
 
 This module is pure (no PIL/Strands/boto3) so it is cheap to import and unit-test.
 """

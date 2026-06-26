@@ -818,13 +818,18 @@ def _is_context_overflow_error(exc: Exception) -> bool:
     msg = str(exc).lower()
     if "contextwindowoverflow" in name.lower():
         return True
+    # Keep these specific to context-window/token-budget overflow so an
+    # unrelated validation error is not mis-tagged (the message is advisory,
+    # but a wrong remediation is still noise).
     needles = (
         "insufficient messages for summarization",
         "context window",
+        "context length",
         "input is too long",
+        "too many input tokens",
         "too many tokens",
-        "exceeds the maximum",
-        "input length",
+        "maximum context length",
+        "exceeds the context",
     )
     return any(n in msg for n in needles)
 
@@ -1395,20 +1400,60 @@ def _accumulate_metering(
                 merged_metering[mk][tk] = (merged_metering[mk].get(tk) or 0) + (tv or 0)
 
 
+def _list_valued_fields(data_format: type[BaseModel]) -> set[str]:
+    """Return the names of ``data_format`` fields that are list-typed.
+
+    Used so the shard merge treats a field consistently as a list even when an
+    individual shard returns it as ``None`` (an optional ``list | None`` left
+    empty by, e.g., a cover-page shard). Falls back to an empty set if the model
+    has no introspectable fields.
+    """
+    fields = getattr(data_format, "model_fields", None)
+    if not fields:
+        return set()
+    list_fields: set[str] = set()
+    for name, info in fields.items():
+        annotation = getattr(info, "annotation", None)
+        if _annotation_is_list(annotation):
+            list_fields.add(name)
+    return list_fields
+
+
+def _annotation_is_list(annotation: Any) -> bool:
+    """True if a type annotation is ``list`` / ``list[...]`` / ``Optional[list]``."""
+    import typing
+
+    if annotation is list:
+        return True
+    origin = typing.get_origin(annotation)
+    if origin in (list, __import__("builtins").list):
+        return True
+    # Unwrap Optional/Union and check members.
+    if origin is not None:
+        return any(_annotation_is_list(arg) for arg in typing.get_args(annotation))
+    return False
+
+
 def _merge_shard_results(
     results: list[tuple[Any, dict[str, Any]]],
     data_format: type[TargetModel],
 ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     """Merge per-shard extraction dicts into one.
 
-    - **List fields** are concatenated in shard order (rows live on single pages,
-      so page-aligned shards keep them intact and ordered).
+    - **List fields** (by the schema's field types) are concatenated in shard
+      order; a shard that returns the field as ``None`` contributes nothing.
+      Rows live on single pages, so page-aligned shards keep them intact/ordered.
     - **Scalar fields** take the FIRST non-null value across shards; if a later
       shard provides a *different* non-null value, that is recorded as a conflict
       (the first value wins, the conflict is surfaced in metadata for audit).
 
+    List membership is decided by ``data_format`` field types (not the runtime
+    value) so an optional ``list | None`` field returned as ``None`` by one shard
+    and a list by another merges correctly rather than crashing.
+
     Returns ``(merged_dict, merged_metering, conflicts)``.
     """
+    list_fields = _list_valued_fields(data_format)
     merged_dict: dict[str, Any] = {}
     merged_metering: dict[str, Any] = {}
     conflicts: list[dict[str, Any]] = []
@@ -1416,8 +1461,16 @@ def _merge_shard_results(
     for result_data, result_response in results:
         result_dict = result_data.model_dump(mode="json")
         for key, value in result_dict.items():
-            if isinstance(value, list):
-                merged_dict.setdefault(key, []).extend(value)
+            # Treat as a list field if the schema says so, or (defensively) if
+            # any shard actually produced a list for it.
+            is_list_field = key in list_fields or isinstance(value, list)
+            if is_list_field:
+                existing = merged_dict.get(key)
+                if not isinstance(existing, list):
+                    # Replaces a prior None/absent with a fresh list before extend.
+                    merged_dict[key] = []
+                if isinstance(value, list):
+                    merged_dict[key].extend(value)
             elif value is not None:
                 if key not in merged_dict or merged_dict[key] is None:
                     merged_dict[key] = value

@@ -40,6 +40,34 @@ class TestMergeShardResults:
         assert [t["r"] for t in merged["transactions"]] == [1, 2, 3, 4, 5]
         assert conflicts == []
 
+    def test_optional_list_none_then_list(self):
+        # Regression: a cover-page shard returns the list field as None, a later
+        # shard returns the actual table. Must not crash (was AttributeError:
+        # 'NoneType' has no attribute 'extend') and must keep the rows.
+        results = [
+            _result({"transactions": None}),
+            _result({"transactions": [{"r": 1}, {"r": 2}]}),
+        ]
+        merged, _m, conflicts = _merge_shard_results(results, _Model)
+        assert [t["r"] for t in merged["transactions"]] == [1, 2]
+        assert conflicts == []
+
+    def test_optional_list_list_then_none(self):
+        results = [
+            _result({"transactions": [{"r": 1}]}),
+            _result({"transactions": None}),
+        ]
+        merged, _m, _c = _merge_shard_results(results, _Model)
+        assert [t["r"] for t in merged["transactions"]] == [1]
+
+    def test_optional_list_all_none_is_empty_list(self):
+        # When no shard provides the list, it merges to [] (valid for list|None).
+        results = [_result({"transactions": None}), _result({"transactions": None})]
+        merged, _m, _c = _merge_shard_results(results, _Model)
+        assert merged["transactions"] == []
+        # And the merged dict still validates against the model.
+        assert _Model(**merged).transactions == []
+
     def test_scalar_first_non_null_wins(self):
         # Shard 1 has the account (page 1); later shards see it as null.
         results = [

@@ -39,6 +39,7 @@ from idp_common.extraction.page_type_resolver import (
 )
 from idp_common.extraction.sharding import (
     DEFAULT_SHARD_TOKEN_BUDGET,
+    estimate_tokens,
     plan_shards,
 )
 from idp_common.extraction.validation import (
@@ -453,19 +454,28 @@ class ExtractionService:
             # Nothing to shard; let the caller use the single-pass path.
             return []
 
-        budget = self._shard_token_budget()
+        # Header context = the first page's text, prepended to later shards so
+        # they retain column headers / account-level context. Kept small.
+        header_context = page_texts[0] if page_texts else ""
+
+        # Reserve the header-context tokens from the per-shard budget so the
+        # *rendered* shard (own pages + prepended header) still respects the
+        # configured budget — otherwise a shard packed to the budget would
+        # exceed it once the header is added. Page 0's own shard carries no
+        # added header, but using the reduced budget for all shards is the safe
+        # (conservative) choice. Never reduce below a small floor.
+        full_budget = self._shard_token_budget()
+        header_tokens = estimate_tokens(header_context)
+        effective_budget = max(1000, full_budget - header_tokens)
+
         shards = plan_shards(
             page_texts,
-            token_budget=budget,
+            token_budget=effective_budget,
             max_shards=max_shards,
             table_boundary_pages=table_boundary_pages,
         )
         if len(shards) <= 1:
             return []
-
-        # Header context = the first page's text, prepended to later shards so
-        # they retain column headers / account-level context. Kept small.
-        header_context = page_texts[0] if page_texts else ""
 
         # Save the full-section context to restore afterwards.
         saved_text = self._document_text
@@ -505,9 +515,11 @@ class ExtractionService:
             self._page_images = saved_images
 
         logger.info(
-            "Built %d input shards for concurrent extraction (budget=%d tokens)",
+            "Built %d input shards for concurrent extraction "
+            "(budget=%d tokens, header-reserved=%d)",
             len(payloads),
-            budget,
+            effective_budget,
+            header_tokens,
         )
         return payloads
 
