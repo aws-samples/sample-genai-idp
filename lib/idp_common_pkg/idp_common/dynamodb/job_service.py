@@ -30,6 +30,7 @@ class JobDynamoDBService:
         expires_after: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None,
         created_by: Optional[str] = None,
+        configuration_version: Optional[str] = None,
     ) -> str:
         """
         Create a job metadata record.
@@ -42,6 +43,9 @@ class JobDynamoDBService:
             created_by: Optional principal identifier (Cognito client_id / sub
                 of the caller that created the job). Used by the API's GET
                 handler to scope reads to the creating principal.
+            configuration_version: Optional config version to use for processing.
+                When set, the batch pre-processor propagates this as S3 metadata
+                on each extracted file so the pipeline uses this version.
 
         Returns:
             The job_id
@@ -63,6 +67,9 @@ class JobDynamoDBService:
 
         if created_by:
             item["CreatedBy"] = created_by
+
+        if configuration_version:
+            item["ConfigurationVersion"] = configuration_version
 
         self.client.put_item(item)
         logger.info(f"Created job record: {job_id}")

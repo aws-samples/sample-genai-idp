@@ -59,6 +59,22 @@ curl -X POST ${API_GATEWAY_ENDPOINT}/jobs \
   -d '{"fileName": "documents.zip"}'
 ```
 
+**Request fields:**
+
+| Field | Required | Description |
+|---|---|---|
+| `fileName` | yes | Name of the ZIP to upload (must end in `.zip`). |
+| `configurationVersion` | no | Configuration version to use for processing this job (e.g. `"v2"`, `"lending-v2"`). Validated as ≤128 characters matching `^[a-zA-Z0-9._-]+$`; an invalid value returns `422`. When omitted, the job uses the stack's active/default configuration (unchanged behavior). The version must already exist in the configuration table — an unknown version falls back to pipeline mode downstream. |
+
+Example pinning a specific configuration version:
+
+```bash
+curl -X POST ${API_GATEWAY_ENDPOINT}/jobs \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"fileName": "documents.zip", "configurationVersion": "lending-v2"}'
+```
+
 **Response:**
 
 ```json
@@ -111,6 +127,7 @@ curl ${API_GATEWAY_ENDPOINT}/jobs/{job_id} \
 {
   "jobId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "status": "IN_PROGRESS",
+  "configurationVersion": "lending-v2",
   "timestamps": {
     "createdAt": "2026-01-23T10:00:00Z",
     "updatedAt": "2026-01-23T10:05:00Z"
@@ -121,6 +138,9 @@ curl ${API_GATEWAY_ENDPOINT}/jobs/{job_id} \
   }
 }
 ```
+
+> `configurationVersion` is present only when the job was created with one;
+> it is `null` (or omitted) for jobs that use the stack default.
 
 **Response (succeeded):**
 
