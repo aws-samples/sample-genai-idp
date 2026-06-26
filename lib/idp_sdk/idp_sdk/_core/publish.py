@@ -774,7 +774,6 @@ STDERR:
             if directory in [
                 "patterns/unified",
                 "nested/multi-doc-discovery",
-                "nested/synthesis-runtime",
             ]:
                 placeholder_ecr = (
                     f"{self.account_id}.dkr.ecr.{self.region}.amazonaws.com/placeholder"
@@ -1366,107 +1365,6 @@ STDERR:
                 sys.exit(1)
 
         return zipfile_name
-
-    def package_synthesis_runtime_source(self):
-        """Package synthesis runtime source for CodeBuild to build the Docker image.
-
-        Includes lib/idp_common_pkg, the vendored generator (lib/doc-gen-agent),
-        src/lambda/synthesis_runtime, and the nested stack's Dockerfile/requirements.
-
-        The zip is content-addressed (``synthesis-runtime-source-{hash}.zip``,
-        mirroring the unified pattern) so any change to the Dockerfile,
-        requirements, handler, or generator yields a new S3 key — the
-        skip-if-exists upload then re-uploads it and CodeBuild rebuilds with the
-        new content. The content hash is returned so the caller can drive both
-        the SourceZipfile and BuildHash template tokens off the same value.
-        """
-        self.console.print(
-            "[bold cyan]📦 Packaging synthesis runtime source for Docker builds[/bold cyan]"
-        )
-
-        os.makedirs(".aws-sam", exist_ok=True)
-
-        include_dirs = [
-            "lib/idp_common_pkg",
-            "lib/doc-gen-agent",
-            "src/lambda/synthesis_runtime",
-            "nested/synthesis-runtime",
-        ]
-        skip_dirs = {
-            "__pycache__",
-            ".pytest_cache",
-            "dist",
-            "build",
-            "*.egg-info",
-            ".git",
-            ".venv",
-            "output",
-        }
-
-        # Content hash over every directory baked into the image. This makes the
-        # zip key (and thus the rebuild) sensitive to Dockerfile/requirements
-        # changes, which the prior fixed name + BuildHash-on-handler-only missed.
-        combined_hash = hashlib.sha256()
-        for include_dir in include_dirs:
-            if os.path.isdir(include_dir):
-                dir_hash = self.get_component_checksum(include_dir)
-                if dir_hash:
-                    combined_hash.update(dir_hash.encode())
-        content_hash = combined_hash.hexdigest()[:16]
-
-        zipfile_name = f"synthesis-runtime-source-{content_hash}.zip"
-        zipfile_path = os.path.join(".aws-sam", zipfile_name)
-
-        if not os.path.exists(zipfile_path):
-            self.console.print(
-                f"[cyan]Creating synthesis runtime source zip: {zipfile_name}[/cyan]"
-            )
-            with zipfile.ZipFile(zipfile_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-                for include_dir in include_dirs:
-                    if not os.path.isdir(include_dir):
-                        continue
-                    for root, dirs, files in os.walk(include_dir):
-                        dirs[:] = [d for d in dirs if d not in skip_dirs]
-                        for file in files:
-                            if file.endswith((".pyc", ".pyo")):
-                                continue
-                            file_path = os.path.join(root, file)
-                            arcname = os.path.relpath(file_path, ".")
-                            zipf.write(file_path, arcname)
-
-            self.console.print(
-                f"[green]✅ Created synthesis runtime source zip "
-                f"({os.path.getsize(zipfile_path) / 1024 / 1024:.2f} MB)[/green]"
-            )
-
-        s3_key = f"{self.prefix_and_version}/{zipfile_name}"
-        try:
-            self.s3_client.head_object(Bucket=self.bucket, Key=s3_key)
-            self.console.print(
-                f"[green]Synthesis runtime source already in S3: {zipfile_name}[/green]"
-            )
-        except ClientError as e:
-            if e.response["Error"]["Code"] == "404":
-                self.console.print(
-                    f"[cyan]Uploading synthesis runtime source to S3: {s3_key}[/cyan]"
-                )
-                try:
-                    self.s3_client.upload_file(zipfile_path, self.bucket, s3_key)
-                    self.console.print(
-                        "[green]✅ Uploaded synthesis runtime source to S3[/green]"
-                    )
-                except ClientError as upload_error:
-                    self.console.print(
-                        f"[red]❌ Error uploading synthesis runtime source: {upload_error}[/red]"
-                    )
-                    sys.exit(1)
-            else:
-                self.console.print(
-                    f"[red]❌ Error checking S3 for synthesis runtime source: {e}[/red]"
-                )
-                sys.exit(1)
-
-        return zipfile_name, content_hash
 
     def _upload_template_to_s3(self, template_path, s3_key, description):
         """Helper method to upload template to S3 with error handling"""
@@ -2419,8 +2317,6 @@ STDERR:
                     "<MULTI_DOC_DISCOVERY_BUILD_HASH_TOKEN>": self.get_directory_checksum(
                         "src/lambda/multi_doc_discovery"
                     )[:16],
-                    "<SYNTHESIS_RUNTIME_BUILD_HASH_TOKEN>": self._synthesis_content_hash,
-                    "<SYNTHESIS_RUNTIME_SOURCE_ZIPFILE_TOKEN>": self._synthesis_source_zipfile,
                     "<SAMPLE_FEATURES_HASH_TOKEN>": sample_features_hash,
                     "<SAMPLE_FEATURES_LIST_TOKEN>": json.dumps(
                         sample_features_list or []
@@ -2743,16 +2639,6 @@ STDERR:
                 "nested/multi-doc-discovery/docker_build_lambda",
                 "nested/multi-doc-discovery/template.yaml",
                 "src/lambda/multi_doc_discovery",
-            ],
-            "nested/synthesis-runtime": [
-                LIB_DEPENDENCY,
-                "nested/synthesis-runtime/docker_build_lambda",
-                "nested/synthesis-runtime/agentcore_runtime_lambda",
-                "nested/synthesis-runtime/template.yaml",
-                "nested/synthesis-runtime/Dockerfile",
-                "nested/synthesis-runtime/requirements.txt",
-                "src/lambda/synthesis_runtime",
-                "lib/doc-gen-agent/src",
             ],
             # Unified pattern (combines BDA + Pipeline)
             "patterns/unified": [
@@ -3925,16 +3811,6 @@ STDERR:
             step_start = time.time()
             self.package_multi_doc_discovery_source()
             timing_breakdown["Package multi-doc discovery source"] = (
-                time.time() - step_start
-            )
-
-            # Package synthesis runtime source for CodeBuild Docker builds
-            step_start = time.time()
-            (
-                self._synthesis_source_zipfile,
-                self._synthesis_content_hash,
-            ) = self.package_synthesis_runtime_source()
-            timing_breakdown["Package synthesis runtime source"] = (
                 time.time() - step_start
             )
 

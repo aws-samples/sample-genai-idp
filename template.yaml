@@ -5013,23 +5013,6 @@ Resources:
         SSEType: KMS
         KMSMasterKeyId: !Ref CustomerManagedEncryptionKey
 
-  BootstrapQueue:
-    Type: AWS::SQS::Queue
-    Properties:
-      VisibilityTimeout: 900
-      MessageRetentionPeriod: 86400 # 1 day
-      KmsMasterKeyId: !Ref CustomerManagedEncryptionKey
-      RedrivePolicy:
-        deadLetterTargetArn: !GetAtt BootstrapDLQ.Arn
-        maxReceiveCount: 1000
-
-  BootstrapDLQ:
-    Type: AWS::SQS::Queue
-    Properties:
-      VisibilityTimeout: 900
-      MessageRetentionPeriod: 345600 # 4 days
-      KmsMasterKeyId: !Ref CustomerManagedEncryptionKey
-
   UpdateConfigurationFunction:
     Type: AWS::Serverless::Function
     Metadata:
@@ -6996,7 +6979,6 @@ Resources:
             ]
           CLOUDWATCH_LOG_GROUP_PREFIX: !Sub "/aws/lambda/${AWS::StackName}"
           SETTINGS_PARAMETER_NAME: !Ref SettingsParameter
-          BOOTSTRAP_QUEUE_URL: !Ref BootstrapQueue
           CONFIGURATION_BUCKET: !Ref ConfigurationBucket
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
@@ -7007,12 +6989,6 @@ Resources:
       LoggingConfig:
         LogGroup: !Ref AgentChatProcessorLogGroup
       Policies:
-        - Statement:
-            Effect: Allow
-            Action: bedrock-agentcore:InvokeAgentRuntime
-            Resource: "*"
-        - SQSSendMessagePolicy:
-            QueueName: !GetAtt BootstrapQueue.QueueName
         - Statement:
             Effect: Allow
             Action: appsync:GraphQL
@@ -9353,129 +9329,6 @@ Resources:
       RetentionInDays: !Ref LogRetentionDays
 
   ##########################################################################
-  # Config Bootstrap processor (Quick Start) - SQS consumer
-  ##########################################################################
-
-  BootstrapProcessorFunction:
-    Type: AWS::Serverless::Function
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
-          - id: W92
-            reason: "Function does not require reserved concurrency as it scales based on demand"
-          - id: W12
-            reason: "Lambda requires CloudWatch logs permissions"
-          - id: W11
-            reason: "Role requires * resource access for CloudWatch Metrics and Bedrock"
-    # checkov:skip=CKV_AWS_116: "DLQ configured on the SQS queue"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
-    Properties:
-      PermissionsBoundary:
-        !If [
-          HasPermissionsBoundary,
-          !Ref PermissionsBoundaryArn,
-          !Ref AWS::NoValue,
-        ]
-      Handler: index.handler
-      Runtime: python3.12
-      CodeUri: ./src/lambda/bootstrap_processor
-      Description: Lambda function to process config-bootstrap jobs from SQS queue
-      MemorySize: 1024
-      Timeout: 900
-      Layers:
-        - !Ref IDPCommonBaseLayer
-        - !Ref IDPCommonSynthesisLayer
-      VpcConfig: !If
-        - DeployInVPC
-        - SubnetIds: !Ref PrivateSubnetIds
-          SecurityGroupIds:
-            - !Ref LambdaSecurityGroupId
-        - !If
-          - UsePrivateAppSync
-          - SubnetIds: !Ref LambdaSubnetIds
-            SecurityGroupIds:
-              - !Ref LambdaVpcSecurityGroup
-          - !Ref AWS::NoValue
-      Environment:
-        Variables:
-          LOG_LEVEL: !Ref LogLevel
-          BOOTSTRAP_TRACKING_TABLE: !Ref BootstrapTrackingTable
-          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
-          TEST_SET_BUCKET: !Ref TestSetBucket
-          WORKING_BUCKET: !Ref WorkingBucket
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
-          SYNTHESIS_RUNTIME_ARN: !GetAtt SYNTHESISRUNTIMESTACK.Outputs.SynthesisRuntimeArn
-      LoggingConfig:
-        LogGroup: !Ref BootstrapProcessorFunctionLogGroup
-      Events:
-        SQSEvent:
-          Type: SQS
-          Properties:
-            Queue: !GetAtt BootstrapQueue.Arn
-            BatchSize: 1
-            FunctionResponseTypes:
-              - ReportBatchItemFailures
-      Policies:
-        - S3CrudPolicy:
-            BucketName: !Ref WorkingBucket
-        - S3CrudPolicy:
-            BucketName: !Ref TestSetBucket
-        - DynamoDBCrudPolicy:
-            TableName: !Ref BootstrapTrackingTable
-        - DynamoDBCrudPolicy:
-            TableName: !Ref ConfigurationTable
-        - Statement:
-            - Effect: Allow
-              Action:
-                - cloudwatch:PutMetricData
-              Resource: "*"
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
-            - Effect: Allow
-              Action:
-                - kms:Encrypt
-                - kms:Decrypt
-                - kms:ReEncrypt*
-                - kms:GenerateDataKey*
-                - kms:DescribeKey
-              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
-            - Effect: Allow
-              Action:
-                - bedrock-mantle:CreateInference
-                - bedrock-mantle:GetProject
-                - bedrock-mantle:ListProjects
-                - bedrock-mantle:ListTagsForResources
-              Resource: "*"
-            - Effect: Allow
-              Action:
-                - bedrock:InvokeModel
-                - bedrock:InvokeModelWithResponseStream
-                - bedrock:GetInferenceProfile
-              Resource:
-                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
-                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
-                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
-            - Effect: Allow
-              Action:
-                - bedrock-agentcore:InvokeAgentRuntime
-              Resource:
-                - !GetAtt SYNTHESISRUNTIMESTACK.Outputs.SynthesisRuntimeArn
-                - !Sub "${SYNTHESISRUNTIMESTACK.Outputs.SynthesisRuntimeArn}/*"
-
-  BootstrapProcessorFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
-      RetentionInDays: !Ref LogRetentionDays
-
-  ##########################################################################
   # Multi-Document Discovery (Clustering + Agentic Analysis)
   ##########################################################################
 
@@ -9568,31 +9421,6 @@ Resources:
         VpcId: !If [DeployInVPC, !Ref VpcId, ""]
         PrivateSubnetIds: !If [DeployInVPC, !Join [",", !Ref PrivateSubnetIds], ""]
         LambdaSecurityGroupId: !If [DeployInVPC, !Ref LambdaSecurityGroupId, ""]
-
-  ##########################################################################
-  # Synthesis Runtime (container-based SEED document generator for bootstrap)
-  ##########################################################################
-
-  SYNTHESISRUNTIMESTACK:
-    DependsOn:
-      - IsStacknameLengthOK
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      TemplateURL: ./nested/synthesis-runtime/.aws-sam/packaged.yaml
-      Parameters:
-        StackName: !Ref AWS::StackName
-        TestSetBucketName: !Ref TestSetBucket
-        WorkingBucketName: !Ref WorkingBucket
-        ConfigurationTableName: !Ref ConfigurationTable
-        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
-        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
-        LogLevel: !Ref LogLevel
-        LogRetentionDays: !Ref LogRetentionDays
-        BuildHash: <SYNTHESIS_RUNTIME_BUILD_HASH_TOKEN>
-        ArtifactBucket: "<ARTIFACT_BUCKET_TOKEN>"
-        SourceZipfile: "<ARTIFACT_PREFIX_TOKEN>/<SYNTHESIS_RUNTIME_SOURCE_ZIPFILE_TOKEN>"
-        AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
-        AppSyncApiArn: !GetAtt GraphQLApi.Arn
 
   # --- Step Functions State Machine ---
 
