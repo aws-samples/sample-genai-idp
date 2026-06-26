@@ -133,6 +133,89 @@ When bounding boxes are enabled, the assessment output includes `geometry` array
 }
 ```
 
+## Grounding in Real OCR Geometry (`pageData.json`)
+
+The bounding boxes described above are **LLM-estimated** — the model infers where each
+field sits on the page. When the OCR backend provides real geometry (Amazon Textract, or
+the Mistral OCR LambdaHook), the Assessment service can **ground** each field's box in the
+actual OCR coordinates instead of trusting the LLM estimate.
+
+This is a **post-LLM, server-side enrichment** step (it does *not* change the assessment
+prompt or its token budget): after the LLM returns its assessment, the service reads the
+consolidated per-page [`pageData.json`](../lib/idp_common_pkg/idp_common/ocr/README.md)
+artifact directly from S3, matches each extracted *value* to an OCR line, and replaces the
+LLM-estimated box with the real OCR box.
+
+### How grounding works
+
+For each assessed leaf field, the service:
+
+1. Loads `pageData.json` for the section's pages via `Page.ocr_page_data_uri` (older
+   documents without this artifact are skipped — see fallback below).
+2. Matches the field's extracted value against the page's OCR `lines[]`, in precision order:
+   **exact** line → **value contained in a line** → **multi-line span** (value reconstructed
+   from consecutive lines; their boxes are unioned) → **single-line fragment** of a longer
+   value → **token-overlap fuzzy** match (Jaccard ≥ 0.6).
+3. **Disambiguates repeated values spatially.** When the same value appears on multiple lines
+   (e.g. an identical transaction amount on several rows), all candidates are collected and the
+   one whose box center is **nearest the LLM-estimated box** is chosen — the LLM placed each
+   row's box at a roughly-correct, distinct position, so proximity selects the right occurrence.
+   If there is no usable LLM reference box to disambiguate, the match is treated as ambiguous and
+   the field **keeps its LLM-estimated box** rather than risk attaching the wrong row's geometry.
+4. On a confident match, **replaces** the field's `geometry` with the real OCR box (same
+   `[{boundingBox, page}]` shape, 0–1 normalized, 1-indexed page) and adds provenance keys.
+
+### Output additions
+
+Grounded fields carry two additive keys alongside the existing assessment fields:
+
+```json
+{
+  "account_number": {
+    "confidence": 0.95,
+    "confidence_reason": "Clear text with high OCR confidence",
+    "confidence_threshold": 0.9,
+    "geometry": [
+      { "boundingBox": { "top": 0.052, "left": 0.447, "width": 0.061, "height": 0.011 }, "page": 1 }
+    ],
+    "geometry_source": "ocr",
+    "ocr_confidence": 0.992
+  }
+}
+```
+
+- **`geometry_source`** — `"ocr"` (grounded in a real OCR line), `"ocr-paragraph"` (grounded
+  in a paragraph-level box shared by sibling lines, as the Mistral hook produces), or `"llm"`
+  (kept the LLM-estimated box because no OCR match was found).
+- **`ocr_confidence`** — the matched OCR line's confidence (0–1), when available. This is
+  **informational only**; the LLM `confidence`/`confidence_reason` are never overwritten, so
+  HITL triggering and confidence-threshold alerts are unaffected.
+
+### Configuration
+
+Grounding is controlled by a single flag, **enabled by default**:
+
+```yaml
+assessment:
+  ground_geometry_in_ocr: true   # default
+```
+
+It is editable in the Configuration UI under **Assessment & HITL Configuration**.
+
+### Safe fallback (backward compatibility)
+
+Grounding degrades to exactly the prior LLM-only behavior — the worst case is no change:
+
+- No `pageData.json` (documents processed before this feature, or a missing URI) → keep the
+  LLM box.
+- The OCR backend provides no geometry (plain Bedrock LLM OCR, Chandra hook, `none` backend;
+  `geometryAvailable: false`) → keep the LLM box.
+- The extracted value doesn't confidently match any OCR line, or repeated values can't be
+  disambiguated → keep the LLM box.
+
+Because grounding reads `pageData.json` from S3 (not the prompt), it adds **zero tokens** to
+the assessment request.
+
 ## Configuration
 
 ### Basic Configuration

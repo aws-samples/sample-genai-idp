@@ -282,6 +282,48 @@ assessment:
 - **UI Ready**: Geometry format works immediately with existing visualizations
 - **All Services Supported**: Both regular and granular assessment include this capability
 
+## Grounding Geometry in Real OCR Data
+
+The bounding boxes produced above are **LLM-estimated**. When the OCR backend supplies real
+geometry (Textract or the Mistral OCR LambdaHook), a post-LLM enrichment pass grounds each
+field's box in the actual OCR coordinates from the consolidated per-page `pageData.json`
+artifact (see `idp_common/ocr/README.md`). Implemented in `idp_common.assessment.ocr_grounding`
+and shared by both the standard (`service.py`) and granular (`granular_service.py`) paths.
+
+```python
+from idp_common.assessment.ocr_grounding import (
+    load_page_ocr_data,
+    ground_assessment_geometry,
+)
+
+# Read pageData.json for the section's pages (keyed by 1-indexed page number).
+page_data = load_page_ocr_data(document.pages, sorted_page_ids)
+
+# Replace LLM-estimated boxes with real OCR boxes where the extracted value matches a line.
+enhanced_assessment = ground_assessment_geometry(
+    enhanced_assessment, extraction_results, page_data
+)
+```
+
+Key behaviors:
+
+- **Tiered matching** of each extracted value to OCR `lines[]`: exact → value-in-line →
+  multi-line span (boxes unioned) → line fragment → token-overlap fuzzy (≥ 0.6).
+- **Spatial disambiguation** of repeated values: when a value matches multiple lines, the
+  candidate nearest the LLM-estimated box wins; with no usable reference box the field keeps
+  its LLM box (so identical amounts across table rows don't collapse onto one line).
+- **Coordinates stay 0–1**: `pageData` geometry is already normalized, so grounded boxes skip
+  the 0–1000 → 0–1 rescale that LLM boxes go through. No mixed scales in `explainability_info`.
+- **Additive output**: a matched field gets `geometry_source` (`"ocr"`/`"ocr-paragraph"`/
+  `"llm"`) and, when available, `ocr_confidence` (0–1). The LLM `confidence`/`confidence_reason`
+  are never modified, so HITL and confidence alerts are unaffected.
+- **Config gate**: `assessment.ground_geometry_in_ocr` (default `True`).
+- **Safe fallback**: absent `pageData.json`, `geometryAvailable: false`, or no value match →
+  keep the LLM-estimated box (identical to prior behavior). `pageData.json` is read from S3, so
+  the `{OCR_TEXT_CONFIDENCE}` prompt and token budget are unchanged.
+
+See `docs/assessment-bounding-boxes.md` for the user-facing description.
+
 ## Multimodal Assessment
 
 The service supports sophisticated multimodal prompts with precise image positioning:

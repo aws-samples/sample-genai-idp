@@ -106,6 +106,15 @@ const PageTextEditorModal = ({
   const pageIds = useMemo(() => pages.map((p) => String(p.Id)), [pages]);
   const currentPage = useMemo(() => pages.find((p) => String(p.Id) === String(currentPageId)), [pages, currentPageId]);
 
+  // 1-based position of the shown page within the document (for bounding-box geometry
+  // and footer navigation). PageImageViewer keys page switching off geometry.page, so
+  // the selected line's geometry must carry the *current* page number — otherwise
+  // selecting a line would snap the viewer back to page 1.
+  const currentPageNumber = useMemo(() => {
+    const idx = pageIds.indexOf(String(currentPageId));
+    return idx >= 0 ? idx + 1 : 1;
+  }, [pageIds, currentPageId]);
+
   const pageId = currentPage?.Id ?? currentPageId;
   const textUri = currentPage?.TextUri;
   const confidenceUri = currentPage?.TextConfidenceUri;
@@ -137,8 +146,10 @@ const PageTextEditorModal = ({
     if (selectedLineIndex === null) return null;
     const line = lines[selectedLineIndex];
     if (!line?.geometry?.boundingBox) return null;
-    return { boundingBox: line.geometry.boundingBox, page: 1 };
-  }, [selectedLineIndex, lines]);
+    // Carry the current page number so PageImageViewer keeps the box on the page
+    // being viewed (not page 1). pageData lines are scoped to the current page.
+    return { boundingBox: line.geometry.boundingBox, page: currentPageNumber };
+  }, [selectedLineIndex, lines, currentPageNumber]);
 
   // All pages with an image, so PageImageViewer can navigate across them.
   const documentPages = useMemo(() => pages.filter((p) => p.ImageUri).map((p) => ({ Id: String(p.Id), ImageUri: p.ImageUri })), [pages]);
@@ -373,6 +384,21 @@ const PageTextEditorModal = ({
     handleCloseModal();
   };
 
+  // Footer page navigation (mirrors the section Visual Editor's Previous/Next Section).
+  const currentPageIndex = pageIds.indexOf(String(currentPageId));
+  const canGoPrevious = currentPageIndex > 0;
+  const canGoNext = currentPageIndex >= 0 && currentPageIndex < pageIds.length - 1;
+
+  const goToPage = (targetIndex: number) => {
+    if (hasUnsavedChanges && !isReadOnly) {
+      alert('Please save or discard your changes before navigating to another page.');
+      return;
+    }
+    if (targetIndex >= 0 && targetIndex < pageIds.length) {
+      setCurrentPageId(pageIds[targetIndex]);
+    }
+  };
+
   return (
     <>
       <Modal
@@ -383,6 +409,28 @@ const PageTextEditorModal = ({
         footer={
           <Box float="right">
             <SpaceBetween direction="horizontal" size="xs">
+              {/* Page navigation (mirrors the section Visual Editor's Previous/Next Section) */}
+              {pageIds.length > 1 && (
+                <>
+                  <Button
+                    iconName="angle-left"
+                    variant="normal"
+                    onClick={() => goToPage(currentPageIndex - 1)}
+                    disabled={!canGoPrevious || isSaving}
+                  >
+                    Previous Page
+                  </Button>
+                  <Button
+                    iconAlign="right"
+                    iconName="angle-right"
+                    variant="normal"
+                    onClick={() => goToPage(currentPageIndex + 1)}
+                    disabled={!canGoNext || isSaving}
+                  >
+                    Next Page
+                  </Button>
+                </>
+              )}
               <Button onClick={handleCloseClick} disabled={isSaving}>
                 {hasUnsavedChanges ? 'Cancel' : 'Close'}
               </Button>

@@ -2023,6 +2023,32 @@ class GranularAssessmentService:
                             f"Document will be marked as failed without retry."
                         )
 
+            # Ground field geometry in real OCR data when enabled (see
+            # AssessmentService for rationale). Applied once on the fully-aggregated
+            # assessment so list/group structure is whole. Safe fallback to LLM boxes
+            # when OCR geometry is unavailable or no value match is found.
+            if self.config.assessment.ground_geometry_in_ocr:
+                try:
+                    from idp_common.assessment.ocr_grounding import (
+                        ground_assessment_geometry,
+                        load_page_ocr_data,
+                    )
+
+                    page_data_by_page = load_page_ocr_data(
+                        document.pages, sorted_page_ids
+                    )
+                    if page_data_by_page:
+                        enhanced_assessment_data = ground_assessment_geometry(
+                            enhanced_assessment_data,
+                            extraction_results,
+                            page_data_by_page,
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"OCR geometry grounding failed for section {section_id}; "
+                        f"keeping LLM-estimated boxes: {e}"
+                    )
+
             # Update the existing extraction result with enhanced assessment data
             extraction_data["explainability_info"] = [enhanced_assessment_data]
             extraction_data["metadata"] = extraction_data.get("metadata", {})
