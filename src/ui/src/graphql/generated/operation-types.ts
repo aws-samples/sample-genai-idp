@@ -176,6 +176,15 @@ export type ConfidenceThresholdAlertInput = {
   confidenceThreshold?: InputMaybe<Scalars['Float']['input']>;
 };
 
+export type ConfigBootstrapJob = {
+  configVersion?: Maybe<Scalars['String']['output']>;
+  errorMessage?: Maybe<Scalars['String']['output']>;
+  jobId: Scalars['ID']['output'];
+  status: Scalars['String']['output'];
+  statusMessage?: Maybe<Scalars['String']['output']>;
+  testSetId?: Maybe<Scalars['String']['output']>;
+};
+
 export type ConfigSetting = {
   setting: Scalars['String']['output'];
   values: Scalars['AWSJSON']['output'];
@@ -683,6 +692,7 @@ export type Mutation = {
   updateAgentChatMessage?: Maybe<AgentChatMessage>;
   updateAgentJobStatus?: Maybe<Scalars['Boolean']['output']>;
   updateChatSessionTitle?: Maybe<ChatSession>;
+  updateConfigBootstrapJobStatus?: Maybe<ConfigBootstrapJob>;
   updateConfiguration?: Maybe<UpdateConfigurationResponse>;
   updateDiscoveryJobStatus?: Maybe<DiscoveryJob>;
   updateDocument?: Maybe<Document>;
@@ -977,6 +987,16 @@ export type MutationUpdateAgentJobStatusArgs = {
 export type MutationUpdateChatSessionTitleArgs = {
   sessionId: Scalars['ID']['input'];
   title: Scalars['String']['input'];
+};
+
+
+export type MutationUpdateConfigBootstrapJobStatusArgs = {
+  configVersion?: InputMaybe<Scalars['String']['input']>;
+  errorMessage?: InputMaybe<Scalars['String']['input']>;
+  jobId: Scalars['ID']['input'];
+  status: Scalars['String']['input'];
+  statusMessage?: InputMaybe<Scalars['String']['input']>;
+  testSetId?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -1445,6 +1465,7 @@ export type Subscription = {
   onAgentJobComplete?: Maybe<Scalars['Boolean']['output']>;
   onChatDocumentMessageUpdate?: Maybe<ChatDocumentMessage>;
   onCircuitBreakerStatusChange?: Maybe<CircuitBreakerStatus>;
+  onConfigBootstrapJobStatusChange?: Maybe<ConfigBootstrapJob>;
   onCreateDocument?: Maybe<CreateDocumentOutput>;
   onDiscoveryJobStatusChange?: Maybe<DiscoveryJob>;
   onUpdateDocument?: Maybe<Document>;
@@ -1463,6 +1484,11 @@ export type SubscriptionOnAgentJobCompleteArgs = {
 
 export type SubscriptionOnChatDocumentMessageUpdateArgs = {
   sessionId: Scalars['String']['input'];
+};
+
+
+export type SubscriptionOnConfigBootstrapJobStatusChangeArgs = {
+  jobId: Scalars['ID']['input'];
 };
 
 
