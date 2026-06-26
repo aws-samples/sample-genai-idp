@@ -148,23 +148,20 @@ def create_job(job: PostJobRequest) -> PostJobResponse:
             configuration_version=job.configurationVersion,
         )
 
-        # Generate presigned POST URL with optional config-version metadata
-        fields = {"Content-Type": content_type}
-        conditions = [
-            {"Content-Type": content_type},
-            ["content-length-range", 1, MAX_FILE_SIZE_BYTES],
-        ]
-        if job.configurationVersion:
-            fields["x-amz-meta-config-version"] = job.configurationVersion
-            conditions.append(
-                {"x-amz-meta-config-version": job.configurationVersion}
-            )
-
+        # Generate presigned POST URL. The configuration version is NOT carried
+        # on the staging zip's S3 metadata here — it is persisted on the job
+        # record above and re-applied by the batch pre-processor as
+        # `config-version` metadata on each extracted file (the form the
+        # pipeline's Document.from_s3_event actually reads). The DynamoDB job
+        # record is the single source of truth for the per-job config version.
         presigned_post = s3_client.generate_presigned_post(
             Bucket=STAGING_BUCKET,
             Key=object_key,
-            Fields=fields,
-            Conditions=conditions,
+            Fields={"Content-Type": content_type},
+            Conditions=[
+                {"Content-Type": content_type},
+                ["content-length-range", 1, MAX_FILE_SIZE_BYTES],
+            ],
             ExpiresIn=PRESIGNED_URL_EXPIRY_SECONDS,
         )
 

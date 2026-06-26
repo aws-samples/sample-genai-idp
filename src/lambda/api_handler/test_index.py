@@ -591,7 +591,13 @@ class TestConfigurationVersion:
     """Tests for per-job configurationVersion feature."""
 
     def test_create_job_with_configuration_version(self, mock_s3, job_svc, lambda_context):
-        """POST /jobs with configurationVersion sets S3 metadata and stores on job record."""
+        """POST /jobs with configurationVersion stores it on the job record.
+
+        The version is persisted on the DynamoDB job record (the single source
+        of truth) and re-applied to the extracted files by the batch
+        pre-processor — it is intentionally NOT carried on the staging zip's
+        presigned-POST metadata.
+        """
         from index import handler
 
         mock_s3.generate_presigned_post.return_value = {
@@ -618,12 +624,16 @@ class TestConfigurationVersion:
         call_kwargs = job_svc.create_job_record.call_args[1]
         assert call_kwargs["configuration_version"] == "v2"
 
-        # Verify presigned POST includes config-version metadata
+        # The presigned POST must NOT carry config-version metadata; the job
+        # record drives propagation, not the staging zip's S3 metadata.
         presigned_call = mock_s3.generate_presigned_post.call_args
         fields = presigned_call[1]["Fields"]
         conditions = presigned_call[1]["Conditions"]
-        assert fields["x-amz-meta-config-version"] == "v2"
-        assert {"x-amz-meta-config-version": "v2"} in conditions
+        assert "x-amz-meta-config-version" not in fields
+        assert not any(
+            isinstance(c, dict) and "x-amz-meta-config-version" in c
+            for c in conditions
+        )
 
     def test_create_job_without_configuration_version(self, mock_s3, job_svc, lambda_context):
         """POST /jobs without configurationVersion does not set metadata (regression guard)."""
