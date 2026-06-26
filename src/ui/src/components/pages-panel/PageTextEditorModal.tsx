@@ -38,13 +38,21 @@ interface OcrPageData {
   lines?: OcrPageDataLine[];
 }
 
+/** One page's artifact URIs, as supplied by PagesPanel. */
+interface PageNavItem {
+  Id: string | number;
+  ImageUri?: string;
+  TextUri?: string;
+  TextConfidenceUri?: string;
+  OcrPageDataUri?: string;
+}
+
 interface PageTextEditorModalProps {
   visible: boolean;
-  pageId?: string | number;
-  textUri?: string;
-  confidenceUri?: string;
-  imageUri?: string;
-  ocrPageDataUri?: string;
+  /** Full ordered list of the document's pages (enables Next/Previous navigation). */
+  pages?: PageNavItem[];
+  /** The page the modal was opened on. */
+  initialPageId?: string | number;
   isReadOnly?: boolean;
   onSave?: (pageId: string | number | undefined, newTextUri: string | null, newConfidenceUri: string | null) => void;
   onClose?: () => void;
@@ -86,15 +94,24 @@ const wrapInJson = (text: string): string => {
 
 const PageTextEditorModal = ({
   visible,
-  pageId,
-  textUri,
-  confidenceUri,
-  imageUri,
-  ocrPageDataUri,
+  pages = [],
+  initialPageId,
   isReadOnly = true,
   onSave,
   onClose,
 }: PageTextEditorModalProps): React.JSX.Element => {
+  // Which page is currently shown; navigation (arrows / Next-Previous) moves it.
+  const [currentPageId, setCurrentPageId] = useState<string | number | undefined>(initialPageId);
+
+  const pageIds = useMemo(() => pages.map((p) => String(p.Id)), [pages]);
+  const currentPage = useMemo(() => pages.find((p) => String(p.Id) === String(currentPageId)), [pages, currentPageId]);
+
+  const pageId = currentPage?.Id ?? currentPageId;
+  const textUri = currentPage?.TextUri;
+  const confidenceUri = currentPage?.TextConfidenceUri;
+  const imageUri = currentPage?.ImageUri;
+  const ocrPageDataUri = currentPage?.OcrPageDataUri;
+
   // Whether the visual (image) view is available for this page.
   const hasVisualView = Boolean(imageUri);
 
@@ -123,15 +140,21 @@ const PageTextEditorModal = ({
     return { boundingBox: line.geometry.boundingBox, page: 1 };
   }, [selectedLineIndex, lines]);
 
-  const documentPages = useMemo(() => (imageUri ? [{ Id: String(pageId), ImageUri: imageUri }] : []), [imageUri, pageId]);
+  // All pages with an image, so PageImageViewer can navigate across them.
+  const documentPages = useMemo(() => pages.filter((p) => p.ImageUri).map((p) => ({ Id: String(p.Id), ImageUri: p.ImageUri })), [pages]);
 
-  // Reset selection / default view whenever the modal (re)opens for a page.
+  // When the modal opens, start on the page it was launched from.
   useEffect(() => {
     if (visible) {
-      setSelectedLineIndex(null);
-      setViewMode(hasVisualView ? 'visual-editor' : 'text-markdown');
+      setCurrentPageId(initialPageId);
     }
-  }, [visible, pageId, hasVisualView]);
+  }, [visible, initialPageId]);
+
+  // Reset line selection / default view whenever the shown page changes.
+  useEffect(() => {
+    setSelectedLineIndex(null);
+    setViewMode(hasVisualView ? 'visual-editor' : 'text-markdown');
+  }, [currentPageId, hasVisualView]);
 
   // Fetch content when modal opens
   useEffect(() => {
@@ -407,9 +430,11 @@ const PageTextEditorModal = ({
                   {/* Left pane: page image with the selected line's bounding box */}
                   <div style={{ flex: '0 0 55%', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                     <PageImageViewer
-                      pageIds={[String(pageId)]}
+                      key={String(pageId)}
+                      pageIds={pageIds}
                       documentPages={documentPages}
                       initialPage={String(pageId)}
+                      onPageChange={(newPageId) => setCurrentPageId(newPageId)}
                       height={EDITOR_HEIGHT}
                       activeFieldGeometry={activeFieldGeometry}
                     />

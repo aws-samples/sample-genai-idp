@@ -235,6 +235,8 @@ const PageImageViewer = ({
   const [currentPage, setCurrentPage] = useState<string | null>(initialPage || (pageIds.length > 0 ? pageIds[0] : null));
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const imageRef = useRef<HTMLImageElement | null>(null);
   const imageContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -320,14 +322,35 @@ const PageImageViewer = ({
     setPanOffset({ x: 0, y: 0 });
   }, []);
 
-  // Handle mouse wheel for zoom
+  // Handle mouse wheel for zoom (matches the section Visual Editor: plain wheel zooms)
   const handleWheel = useCallback((e: React.WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      const delta = e.deltaY < 0 ? 1.1 : 0.9;
-      setZoomLevel((prev) => Math.min(Math.max(prev * delta, 0.25), 4));
-    }
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 1.1 : 0.9;
+    setZoomLevel((prev) => Math.min(Math.max(prev * delta, 0.25), 4));
   }, []);
+
+  // Drag-to-pan (only meaningful when zoomed in), mirroring the section editor.
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (zoomLevel <= 1) return;
+      e.preventDefault();
+      setIsDragging(true);
+      setDragStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+    },
+    [zoomLevel, panOffset],
+  );
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isDragging) return;
+      e.preventDefault();
+      setPanOffset({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
+    },
+    [isDragging, dragStart],
+  );
+
+  const handleMouseUp = useCallback(() => setIsDragging(false), []);
+  const handleMouseLeave = useCallback(() => setIsDragging(false), []);
 
   // Handle page navigation
   const goToPreviousPage = useCallback(() => {
@@ -436,6 +459,7 @@ const PageImageViewer = ({
     <div style={{ position: 'relative', height, overflow: 'hidden' }}>
       {/* Image container - must exactly match VisualEditorModal structure for bounding box positioning
           The BoundingBox calculates position relative to this container */}
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
       <div
         ref={imageContainerRef}
         style={{
@@ -445,9 +469,14 @@ const PageImageViewer = ({
           display: 'flex',
           justifyContent: 'center',
           overflow: 'hidden',
-          cursor: zoomLevel > 1 ? 'grab' : 'default',
+          cursor: isDragging ? 'grabbing' : zoomLevel > 1 ? 'grab' : 'default',
+          userSelect: 'none',
         }}
         onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseLeave}
       >
         {currentPage !== null && pageImages[currentPage] ? (
           <>

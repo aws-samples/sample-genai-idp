@@ -548,11 +548,8 @@ const PagesPanel = ({ pages, documentItem }: PagesPanelProps): React.JSX.Element
       {/* Page Text Editor Modal */}
       <PageTextEditorModal
         visible={showModalEditor}
-        pageId={selectedPage?.Id}
-        textUri={selectedPage?.TextUri}
-        confidenceUri={selectedPage?.TextConfidenceUri}
-        imageUri={selectedPage?.ImageUri}
-        ocrPageDataUri={selectedPage?.OcrPageDataUri}
+        pages={tableItems}
+        initialPageId={selectedPage?.Id}
         isReadOnly={!isEditMode}
         onSave={handleModalSave}
         onClose={() => {
