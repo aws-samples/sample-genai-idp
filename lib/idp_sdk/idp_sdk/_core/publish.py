@@ -1529,7 +1529,7 @@ STDERR:
                 "No bundled feature directories found — skipping sample-feature "
                 "publish (feature bucket will start empty)."
             )
-            return "", []
+            return "", [], []
 
         self.log_phase("Building Sample Features", "🧩")
 
