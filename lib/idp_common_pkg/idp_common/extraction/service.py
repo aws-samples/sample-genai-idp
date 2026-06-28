@@ -155,6 +155,13 @@ class ExtractionService:
         # When set, called after each successful extraction_tool or apply_json_patches
         # invocation with the current extraction dict, enabling resume on Lambda timeout.
         self._checkpoint_callback: Any | None = None
+        # Optional per-shard persistence backend (idp_common.extraction.runtime.
+        # ShardPersistence). When set (e.g. an S3ShardPersistence wired by the
+        # extraction Lambda), the concurrent/sharded path persists each shard's
+        # result to a deterministic key and skips shards whose complete result is
+        # already present — so an SFN retry of a timed-out section re-runs ONLY
+        # the incomplete shards. None => in-memory only (standalone/notebook).
+        self._shard_persistence: Any | None = None
         # Validation outcome from the most recent _invoke_extraction_model call,
         # consumed by _save_results when building the metadata block. Reset per
         # section so a prior section's result can never leak into the next.
@@ -2215,6 +2222,9 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     f"Using sharded concurrent extraction: {len(shard_payloads)} "
                     f"shard(s), parallelism {num_batches}, for {num_pages} pages"
                 )
+                from idp_common.extraction.runtime import select_runtime
+
+                runtime = select_runtime(self.config, num_batches)
                 structured_data, response_with_metering = _asyncio.run(
                     concurrent_structured_output_async(
                         model_id=model_id,
@@ -2229,6 +2239,8 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                             f"{section_info.class_label}_"
                             f"{section_info.start_page}_{section_info.end_page}"
                         ),
+                        persistence=self._shard_persistence,
+                        runtime=runtime,
                     )
                 )
             else:

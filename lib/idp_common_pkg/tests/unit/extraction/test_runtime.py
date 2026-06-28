@@ -297,6 +297,63 @@ class TestSelectRuntime:
         rt = select_runtime(IDPConfig(), 2)
         assert isinstance(rt, StepFunctionsRuntime)
 
+class TestForcedFailResume:
+    """Phase 3 proof at the unit level: a forced shard failure fails the section
+    once; the completed shards persist; a retry skips them and the previously
+    failed shard succeeds. Mirrors what SFN's ExtractionStep retry does live."""
+
+    def test_force_fail_then_resume(self, monkeypatch):
+        monkeypatch.setenv("EXTRACTION_FORCE_FAIL_SHARDS", "2")  # fail shard @page 2
+        s3 = _FakeS3()
+        p = S3ShardPersistence("bucket", "arn:exec", s3_client=s3)
+        runs: list[int] = []
+        runner = _make_runner(
+            {
+                0: {"transactions": [{"r": 1}]},
+                2: {"transactions": [{"r": 2}]},
+                4: {"transactions": [{"r": 3}]},
+            },
+            runs,
+        )
+        payloads = [_payload(0, 2), _payload(2, 4), _payload(4, 6)]
+
+        # Attempt 1: shard@2 raises (after writing a fail marker); others complete.
+        with pytest.raises(Exception):
+            asyncio.run(
+                InProcessRuntime(max_parallelism=1).run(
+                    shard_payloads=payloads,
+                    model_id="m",
+                    data_format=_Model,
+                    config=IDPConfig(),
+                    section_id="sec",
+                    persistence=p,
+                    shard_runner=runner,
+                )
+            )
+        # Shards 0 and 4 ran and persisted; shard 2 failed (marker written, no result).
+        assert p.load("sec", 0, 2) is not None
+        assert p.load("sec", 4, 6) is not None
+        assert p.load("sec", 2, 4) is None  # no completed result yet
+
+        # Attempt 2 (the "SFN retry"): completed shards skipped, only shard@2 runs.
+        runs.clear()
+        merged, _r = asyncio.run(
+            InProcessRuntime(max_parallelism=1).run(
+                shard_payloads=payloads,
+                model_id="m",
+                data_format=_Model,
+                config=IDPConfig(),
+                section_id="sec",
+                persistence=p,
+                shard_runner=runner,
+            )
+        )
+        # Only the previously-failed shard's page_start re-ran.
+        assert runs == [2]
+        assert [t["r"] for t in merged.transactions] == [1, 2, 3]
+
+
+class TestSelectRuntimeExtra:
     def test_step_functions_run_delegates_in_process(self):
         # Calling .run() standalone must still work (delegates to in-process)
         runner = _make_runner({0: {"transactions": [{"r": 1}]}})

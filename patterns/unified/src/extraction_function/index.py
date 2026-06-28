@@ -106,6 +106,28 @@ def delete_extraction_checkpoint(bucket: str, execution_arn: str, section_id: st
         logger.warning(f"Failed to delete extraction checkpoint: {e}")
 
 
+def delete_shard_results(bucket: str, execution_arn: str, section_id: str) -> None:
+    """Delete all per-shard result objects for a section after it completes.
+
+    Per-shard results live under
+    ``checkpoints/{safe_arn}/{section_id}/shards/`` (see
+    ``idp_common.extraction.runtime.shard_result_key``). They must survive across
+    SFN retries (to skip completed shards) but are removed once the whole section
+    succeeds so a later re-process of the same execution+section starts clean.
+    """
+    safe_arn = execution_arn.replace(":", "_").replace("/", "_")
+    prefix = f"checkpoints/{safe_arn}/{section_id}/shards/"
+    s3 = _get_s3_client()
+    try:
+        resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+        keys = [{"Key": o["Key"]} for o in resp.get("Contents", [])]
+        if keys:
+            s3.delete_objects(Bucket=bucket, Delete={"Objects": keys})
+            logger.info(f"Deleted {len(keys)} per-shard result(s) under {prefix}")
+    except Exception as e:
+        logger.warning(f"Failed to delete per-shard results: {e}")
+
+
 def _count_extraction_items(extraction_data: dict) -> int:
     """Count total items across all list fields in extraction data for logging."""
     count = 0
@@ -261,8 +283,35 @@ def handler(event, context):
         # Set up incremental checkpoint callback on the extraction service
         def _checkpoint_cb(extraction_data: dict) -> None:
             save_extraction_checkpoint(working_bucket, execution_arn, section_id, extraction_data)
-        
+
         extraction_service._checkpoint_callback = _checkpoint_cb
+
+        # Wire per-shard persistence so the concurrent/sharded path can resume
+        # only the incomplete shards if this Lambda times out and Step Functions
+        # retries the section (ExtractionStep Retry on Sandbox.Timedout). Completed
+        # shards are loaded from S3; only incomplete shards re-infer. Keyed by
+        # (execution_arn, section_id) so retries of the SAME section find them and
+        # a fresh document never collides. Cleaned up on success below.
+        max_concurrent = (
+            config.extraction.agentic.max_concurrent_batches
+            if config.extraction and config.extraction.agentic
+            else 1
+        )
+        if max_concurrent and max_concurrent > 1:
+            try:
+                from idp_common.extraction.runtime import S3ShardPersistence
+
+                extraction_service._shard_persistence = S3ShardPersistence(
+                    bucket=working_bucket,
+                    execution_arn=execution_arn,
+                    s3_client=_get_s3_client(),
+                )
+                logger.info(
+                    "Per-shard S3 persistence enabled for section %s "
+                    "(skip-completed on retry)", section_id
+                )
+            except Exception as e:
+                logger.warning(f"Could not enable per-shard persistence: {e}")
     
     # Track metrics
     metrics.put_metric('InputDocuments', 1)
@@ -281,6 +330,8 @@ def handler(event, context):
     # --- Checkpoint: cleanup on successful completion ---
     if agentic_enabled and working_bucket and execution_arn:
         delete_extraction_checkpoint(working_bucket, execution_arn, section_id)
+        # Remove per-shard results now the section is fully merged & saved.
+        delete_shard_results(working_bucket, execution_arn, section_id)
     
     # Check if document processing failed
     if section_document.status == Status.FAILED:

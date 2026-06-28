@@ -303,6 +303,42 @@ async def extract_one_shard(
                 "metering": cached.get("metering", {})
             }
 
+    # Deterministic fault-injection hook (Phase 3 resume proof). When
+    # EXTRACTION_FORCE_FAIL_SHARDS lists a 0-based page_start (comma-separated)
+    # the chosen shard fails ONCE: on its first attempt it writes a "fail marker"
+    # to persistence and raises; on a later SFN retry the marker is present so it
+    # proceeds normally. This makes the *whole section's* first attempt fail
+    # (some other shards complete + persist), and the SFN retry then loads those
+    # completed shards from S3 and re-runs only the previously-failed one —
+    # proving per-shard resume. Safe no-op unless the env var is set.
+    _force = os.environ.get("EXTRACTION_FORCE_FAIL_SHARDS", "").strip()
+    if _force and persistence is not None:
+        fail_starts = {int(x) for x in _force.split(",") if x.strip().isdigit()}
+        if page_start in fail_starts:
+            marker = persistence.load(section_id, page_start, -page_end - 1)
+            if marker is None:
+                logger.warning(
+                    "FORCED shard failure (test hook) for pages %d-%d — writing "
+                    "fail marker so the SFN retry can resume it",
+                    page_start,
+                    page_end,
+                )
+                persistence.save(
+                    section_id,
+                    page_start,
+                    -page_end - 1,
+                    {"forced_fail": True, "extracted_fields": None},
+                )
+                raise RuntimeError(
+                    f"Injected shard failure for pages {page_start}-{page_end} "
+                    "(EXTRACTION_FORCE_FAIL_SHARDS)"
+                )
+            logger.warning(
+                "Forced-fail shard pages %d-%d retrying after marker — proceeding",
+                page_start,
+                page_end,
+            )
+
     if shard_runner is None:
         raise ValueError(
             "extract_one_shard requires a shard_runner (the strands-backed agent "
