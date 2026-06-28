@@ -2225,6 +2225,10 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                         context="Extraction",
                         checkpoint_callback=self._checkpoint_callback,
                         custom_instruction=custom_instruction,
+                        section_id=(
+                            f"{section_info.class_label}_"
+                            f"{section_info.start_page}_{section_info.end_page}"
+                        ),
                     )
                 )
             else:

@@ -268,6 +268,14 @@ class AgenticConfig(BaseModel):
         "When enabled, the extraction agent can parse well-formatted "
         "Markdown tables from OCR output without LLM inference.",
     )
+    runtime: str | None = Field(
+        default=None,
+        description="Sharded-extraction orchestration backend. None/'in_process' "
+        "(default) runs shards via asyncio in the single section Lambda — the "
+        "standalone/notebook path. 'step_functions' selects the nested SFN "
+        "Distributed Map (one Lambda per shard, native per-shard retry/resume). "
+        "Selection only affects orchestration; shard/merge logic is shared.",
+    )
 
 
 class MissingFieldHandlingConfig(BaseModel):
