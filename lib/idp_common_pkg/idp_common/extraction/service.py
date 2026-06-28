@@ -503,7 +503,9 @@ class ExtractionService:
                     parts.append(f"--- PAGE {page_num} ---\n{text}")
                 self._document_text = "\n".join(parts)
                 self._page_images = (
-                    self._slice_images(saved_images, shard.start, shard.end)
+                    self._cap_agent_images(
+                        self._slice_images(saved_images, shard.start, shard.end)
+                    )
                     if send_images
                     else []
                 )
@@ -536,6 +538,28 @@ class ExtractionService:
         if not images:
             return []
         return images[start:end]
+
+    def _cap_agent_images(self, images: list[bytes]) -> list[bytes]:
+        """Cap how many page images are attached to one agent invocation.
+
+        Sending many large page images in a single Bedrock request can cause an
+        oversized first turn and a read timeout (a 25-page doc with
+        ``{DOCUMENT_IMAGE}`` is the classic failure). Beyond
+        ``agentic.max_images_per_agent`` (0 = unlimited), attach only the first N
+        and log a warning — the agent still has the full OCR text and can pull
+        specific pages on demand via the view_image tool.
+        """
+        cap = getattr(self.config.extraction.agentic, "max_images_per_agent", 0) or 0
+        if cap <= 0 or not images or len(images) <= cap:
+            return images
+        logger.warning(
+            "Capping agent page-images from %d to %d (agentic.max_images_per_agent) "
+            "to avoid oversized-request read timeouts; OCR text is still complete "
+            "and the agent can fetch other pages via the view_image tool.",
+            len(images),
+            cap,
+        )
+        return images[:cap]
 
     def _shard_token_budget(self) -> int:
         """Per-shard input-token budget (config override or default)."""
@@ -2180,7 +2204,9 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             # on large documents.
             prompt_template = self.config.extraction.task_prompt or ""
             send_images = "{DOCUMENT_IMAGE}" in prompt_template
-            agentic_images = self._page_images if send_images else []
+            agentic_images = (
+                self._cap_agent_images(self._page_images) if send_images else []
+            )
             num_pages = len(self._page_images) or len(section_info.sorted_page_ids)
 
             if not send_images and self._page_images:
