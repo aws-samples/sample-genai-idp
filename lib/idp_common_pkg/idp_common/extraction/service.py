@@ -47,7 +47,7 @@ from idp_common.extraction.validation import (
     build_subset_schema,
     validate_extraction,
 )
-from idp_common.models import Document
+from idp_common.models import Document, Section
 from idp_common.utils.few_shot_example_builder import (
     build_few_shot_extraction_examples_content,
 )
@@ -2731,89 +2731,13 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         try:
             t0 = time.time()
 
-            # Load per-page text first so the page-type resolver and the
-            # prompt-formatter can both consume it without re-reading S3.
-            page_id_to_text = self._load_page_texts(
-                document, section_info.sorted_page_ids
-            )
-            class_schema_for_resolver = self._get_class_schema(section_info.class_label)
-            section_info.page_type_presence = resolve_page_types(
-                class_schema_for_resolver, page_id_to_text
-            )
-            if section_info.page_type_presence.declared:
-                logger.info(
-                    "Page-type resolution for section %s: present=%s missing=%s",
-                    section.section_id,
-                    sorted(section_info.page_type_presence.present_page_types),
-                    sorted(section_info.page_type_presence.missing_page_types),
-                )
-            document_text = self._format_document_text(
-                section_info.sorted_page_ids,
-                page_id_to_text,
-                section_info.page_type_presence,
-            )
-            page_images = self._load_document_images(
-                document, section_info.sorted_page_ids
-            )
-            # Stash the per-page OCR text (in section page order) so the agentic
-            # path can shard the input by page range when concurrent batches are
-            # configured. Pages missing from page_id_to_text contribute "".
-            self._page_texts = [
-                page_id_to_text.get(pid, "") for pid in section_info.sorted_page_ids
-            ]
-
-            # Initialize extraction context
-            class_schema, attribute_descriptions = self._initialize_extraction_context(
-                section_info.class_label,
-                document_text,
-                page_images,
-                section_info.sorted_page_ids,
-                document,
-            )
-
-            # Handle empty schema case (early return)
-            if (
-                not class_schema.get(SCHEMA_PROPERTIES)
-                or not attribute_descriptions.strip()
-            ):
+            prepared = self._prepare_section_context(document, section, section_info)
+            if prepared is None:
+                # Empty schema — already handled (stub written).
                 return self._handle_empty_schema(
                     document, section, section_info, section_id, t0
                 )
-
-            # Build prompt content
-            content, system_prompt = self._build_extraction_content(
-                document, page_images
-            )
-
-            # Load OCR confidence data for table parsing tool (if enabled)
-            # Confidence data is only available from Textract OCR backend.
-            # For Bedrock OCR or other backends, skip loading — the tool
-            # handles missing confidence gracefully (confidence_available=false).
-            if (
-                AGENTIC_AVAILABLE
-                and self.config.extraction.agentic.enabled
-                and self.config.extraction.agentic.table_parsing.enabled
-                and self.config.extraction.agentic.table_parsing.use_confidence_data
-                and self.config.ocr.backend == "textract"
-            ):
-                confidence_data_by_page = self._load_confidence_data(
-                    document, section_info.sorted_page_ids
-                )
-                set_confidence_data(confidence_data_by_page)
-                logger.info(
-                    f"Loaded OCR confidence data for table parsing tool: "
-                    f"{len(confidence_data_by_page)} pages"
-                )
-            elif AGENTIC_AVAILABLE and self.config.extraction.agentic.enabled:
-                set_confidence_data(None)
-                if (
-                    self.config.extraction.agentic.table_parsing.enabled
-                    and self.config.ocr.backend != "textract"
-                ):
-                    logger.info(
-                        "Table parsing tool enabled without confidence data "
-                        f"(OCR backend: {self.config.ocr.backend})"
-                    )
+            content, system_prompt = prepared
 
             # Invoke model (pass checkpoint_data for agentic resume-on-timeout)
             result = self._invoke_extraction_model(
@@ -2829,4 +2753,354 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             document.errors.append(error_msg)
             raise
 
+        return document
+
+    def _prepare_section_context(
+        self,
+        document: Document,
+        section: Section,
+        section_info: SectionInfo,
+    ) -> tuple[list[dict[str, Any]], str] | None:
+        """Load page text/images, resolve page types, init context, build prompt.
+
+        Populates the per-section instance state (``self._page_texts``,
+        ``self._document_text``, ``self._page_images``, ``self._class_schema`` …)
+        and returns ``(content, system_prompt)``. Returns ``None`` when the class
+        schema is empty (caller writes the skip stub). Extracted from
+        ``process_document_section`` so the SFN shard/merge entry points can reuse
+        the identical preparation without duplicating it (single source of truth).
+        """
+        # Load per-page text first so the page-type resolver and the
+        # prompt-formatter can both consume it without re-reading S3.
+        page_id_to_text = self._load_page_texts(document, section_info.sorted_page_ids)
+        class_schema_for_resolver = self._get_class_schema(section_info.class_label)
+        section_info.page_type_presence = resolve_page_types(
+            class_schema_for_resolver, page_id_to_text
+        )
+        if section_info.page_type_presence.declared:
+            logger.info(
+                "Page-type resolution for section %s: present=%s missing=%s",
+                section.section_id,
+                sorted(section_info.page_type_presence.present_page_types),
+                sorted(section_info.page_type_presence.missing_page_types),
+            )
+        document_text = self._format_document_text(
+            section_info.sorted_page_ids,
+            page_id_to_text,
+            section_info.page_type_presence,
+        )
+        page_images = self._load_document_images(document, section_info.sorted_page_ids)
+        # Stash the per-page OCR text (in section page order) so the agentic
+        # path can shard the input by page range when concurrent batches are
+        # configured. Pages missing from page_id_to_text contribute "".
+        self._page_texts = [
+            page_id_to_text.get(pid, "") for pid in section_info.sorted_page_ids
+        ]
+
+        # Initialize extraction context
+        class_schema, attribute_descriptions = self._initialize_extraction_context(
+            section_info.class_label,
+            document_text,
+            page_images,
+            section_info.sorted_page_ids,
+            document,
+        )
+
+        # Handle empty schema case (signal to caller).
+        if (
+            not class_schema.get(SCHEMA_PROPERTIES)
+            or not attribute_descriptions.strip()
+        ):
+            return None
+
+        # Build prompt content
+        content, system_prompt = self._build_extraction_content(document, page_images)
+
+        # Load OCR confidence data for table parsing tool (if enabled)
+        # Confidence data is only available from Textract OCR backend.
+        # For Bedrock OCR or other backends, skip loading — the tool
+        # handles missing confidence gracefully (confidence_available=false).
+        if (
+            AGENTIC_AVAILABLE
+            and self.config.extraction.agentic.enabled
+            and self.config.extraction.agentic.table_parsing.enabled
+            and self.config.extraction.agentic.table_parsing.use_confidence_data
+            and self.config.ocr.backend == "textract"
+        ):
+            confidence_data_by_page = self._load_confidence_data(
+                document, section_info.sorted_page_ids
+            )
+            set_confidence_data(confidence_data_by_page)
+            logger.info(
+                f"Loaded OCR confidence data for table parsing tool: "
+                f"{len(confidence_data_by_page)} pages"
+            )
+        elif AGENTIC_AVAILABLE and self.config.extraction.agentic.enabled:
+            set_confidence_data(None)
+            if (
+                self.config.extraction.agentic.table_parsing.enabled
+                and self.config.ocr.backend != "textract"
+            ):
+                logger.info(
+                    "Table parsing tool enabled without confidence data "
+                    f"(OCR backend: {self.config.ocr.backend})"
+                )
+
+        return content, system_prompt
+
+    def _build_agentic_shard_plan(
+        self, section_info: SectionInfo
+    ) -> tuple[str, type, list[dict[str, Any]], str | None]:
+        """Build the agentic shard plan for the SFN runtime.
+
+        Returns ``(model_id, dynamic_model, shard_payloads, custom_instruction)``
+        mirroring the construction in ``_invoke_extraction_model``'s agentic
+        branch, but standalone so the per-shard SFN Lambda (and the merge step)
+        can each rebuild the identical plan deterministically. Requires
+        ``_prepare_section_context`` to have populated the per-section state.
+        """
+        class_model_override = self._class_schema.get(X_AWS_IDP_EXTRACTION_MODEL)
+        model_id = class_model_override or self.config.extraction.model
+
+        dynamic_model = create_pydantic_model_from_json_schema(
+            schema=self._class_schema,
+            class_label=section_info.class_label,
+            clean_schema=False,
+        )
+
+        schema_analysis = self._analyze_schema_for_table_requirements(
+            self._class_schema
+        )
+        ocr_analysis = self._analyze_ocr_for_tables(self._document_text)
+        custom_instruction = self._build_table_parsing_guidance(
+            schema_analysis=schema_analysis, ocr_analysis=ocr_analysis
+        )
+
+        prompt_template = self.config.extraction.task_prompt or ""
+        send_images = "{DOCUMENT_IMAGE}" in prompt_template
+        shard_payloads = self._build_shard_payloads(
+            prompt_template=prompt_template,
+            send_images=send_images,
+            max_shards=self.config.extraction.agentic.max_concurrent_batches,
+        )
+        return model_id, dynamic_model, shard_payloads, custom_instruction
+
+    def _persist_section_id(self, section_info: SectionInfo) -> str:
+        """Deterministic per-section id used for shard persistence keys."""
+        return (
+            f"{section_info.class_label}_"
+            f"{section_info.start_page}_{section_info.end_page}"
+        )
+
+    def run_one_section_shard(
+        self,
+        document: Document,
+        section_id: str,
+        shard_index: int,
+        persistence: Any,
+    ) -> dict[str, Any]:
+        """Run ONE shard of a section — the nested-SFN Distributed Map body.
+
+        Reuses ``extract_one_shard`` (idempotent skip-if-complete) over the SAME
+        shard plan the in-process runtime builds. The shard's full result is
+        persisted to S3 via ``persistence``; this returns a small descriptor so
+        the Map collects only pointers. This is the SFN counterpart to one
+        asyncio task in ``InProcessRuntime`` — same primitive, different scheduler.
+        """
+        import asyncio as _asyncio
+
+        from idp_common.extraction.agentic_idp import default_shard_runner
+        from idp_common.extraction.runtime import extract_one_shard
+
+        self._reset_context()
+        section = self._validate_and_find_section(document, section_id)
+        if not section:
+            raise ValueError(f"Section {section_id} not found")
+        section_info = self._prepare_section_info(document, section)
+        if self._prepare_section_context(document, section, section_info) is None:
+            return {"status": "empty_schema", "shard_index": shard_index}
+
+        model_id, dynamic_model, shard_payloads, custom_instruction = (
+            self._build_agentic_shard_plan(section_info)
+        )
+        if not shard_payloads or shard_index >= len(shard_payloads):
+            raise ValueError(
+                f"Shard index {shard_index} out of range "
+                f"(planned {len(shard_payloads)} shards)"
+            )
+        payload = shard_payloads[shard_index]
+
+        fields, response = _asyncio.run(
+            extract_one_shard(
+                shard_index=shard_index,
+                total_shards=len(shard_payloads),
+                payload=payload,
+                model_id=model_id,
+                data_format=dynamic_model,
+                config=self.config,
+                section_id=self._persist_section_id(section_info),
+                custom_instruction=custom_instruction,
+                persistence=persistence,
+                shard_runner=default_shard_runner,
+            )
+        )
+        return {
+            "status": "complete",
+            "shard_index": shard_index,
+            "page_start": payload["page_start"],
+            "page_end": payload["page_end"],
+        }
+
+    def plan_section_shards(
+        self, document: Document, section_id: str
+    ) -> dict[str, Any]:
+        """Plan the shards for a section (the SFN runtime's planning step).
+
+        Returns ``{shard_mode, num_shards, shards:[{shard_index,page_start,
+        page_end}]}``. ``shard_mode`` is False when sharding does not apply
+        (single-pass, in-process runtime, or <=1 shard) — the caller then runs
+        the normal whole-section path instead of the Distributed Map.
+        """
+        self._reset_context()
+        section = self._validate_and_find_section(document, section_id)
+        if not section:
+            raise ValueError(f"Section {section_id} not found")
+        section_info = self._prepare_section_info(document, section)
+
+        agentic = self.config.extraction.agentic
+        runtime_choice = (getattr(agentic, "runtime", None) or "in_process").lower()
+        num_batches = agentic.max_concurrent_batches
+        if (
+            not agentic.enabled
+            or runtime_choice not in ("step_functions", "stepfunctions", "sfn")
+            or num_batches <= 1
+        ):
+            return {"shard_mode": False, "num_shards": 0, "shards": []}
+
+        if self._prepare_section_context(document, section, section_info) is None:
+            return {"shard_mode": False, "num_shards": 0, "shards": []}
+
+        _model_id, _dyn, shard_payloads, _ci = self._build_agentic_shard_plan(
+            section_info
+        )
+        if len(shard_payloads) <= 1:
+            return {
+                "shard_mode": False,
+                "num_shards": len(shard_payloads),
+                "shards": [],
+            }
+
+        shards = [
+            {
+                "shard_index": i,
+                "page_start": p["page_start"],
+                "page_end": p["page_end"],
+            }
+            for i, p in enumerate(shard_payloads)
+        ]
+        return {
+            "shard_mode": True,
+            "num_shards": len(shards),
+            "shards": shards,
+            "persist_section_id": self._persist_section_id(section_info),
+        }
+
+    def merge_section_shards(
+        self,
+        document: Document,
+        section_id: str,
+        persistence: Any,
+    ) -> Document:
+        """Merge per-shard results from S3 into the final section result.
+
+        The SFN merge state calls this after the Distributed Map completes. It
+        reloads every shard's persisted result, merges them with
+        ``merge_shard_dicts`` (page-ordered), runs the same validation/escalation
+        + completeness checks as the in-process path, and saves results — so the
+        SFN path and in-process path produce identical output.
+        """
+        from idp_common.extraction.runtime import merge_shard_dicts
+
+        t0 = time.time()
+        self._reset_context()
+        section = self._validate_and_find_section(document, section_id)
+        if not section:
+            raise ValueError(f"Section {section_id} not found")
+        section_info = self._prepare_section_info(document, section)
+        if self._prepare_section_context(document, section, section_info) is None:
+            return self._handle_empty_schema(
+                document, section, section_info, section_id, t0
+            )
+
+        model_id, dynamic_model, shard_payloads, _ci = self._build_agentic_shard_plan(
+            section_info
+        )
+        persist_section_id = self._persist_section_id(section_info)
+
+        # Load each shard's persisted result.
+        shard_dicts: list[dict[str, Any]] = []
+        missing: list[int] = []
+        for i, p in enumerate(shard_payloads):
+            cached = persistence.load(
+                persist_section_id, p["page_start"], p["page_end"]
+            )
+            if not cached or cached.get("extracted_fields") is None:
+                missing.append(i)
+            else:
+                shard_dicts.append(cached)
+        if missing:
+            raise RuntimeError(
+                f"Cannot merge section {section_id}: shard(s) {missing} have no "
+                "persisted result (Distributed Map should have completed them)."
+            )
+
+        merged_dict, merged_metering, conflicts = merge_shard_dicts(
+            shard_dicts, dynamic_model
+        )
+        structured_data = dynamic_model(**merged_dict)
+        extracted_fields = structured_data.model_dump(mode="json")
+        if conflicts:
+            merged_metering["_shard_scalar_conflicts"] = conflicts
+        parsing_succeeded = True
+
+        # Same validation/escalation + completeness as the in-process path.
+        self._pending_validation_metadata = None
+        self._pending_extraction_model = model_id
+        message_prompt: Any = ""
+        (
+            extracted_fields,
+            structured_data,
+            validation_metadata,
+            escalation_metering,
+            parsing_succeeded,
+        ) = self._validate_and_maybe_escalate(
+            extracted_fields=extracted_fields,
+            structured_data=structured_data,
+            data_model=dynamic_model,
+            model_id=model_id,
+            message_prompt=message_prompt,
+            agentic_images=[],
+            custom_instruction=None,
+            section_info=section_info,
+            parsing_succeeded=parsing_succeeded,
+        )
+        if validation_metadata is not None:
+            self._pending_validation_metadata = validation_metadata
+        if escalation_metering:
+            from idp_common.extraction.agentic_idp import _accumulate_metering
+
+            _accumulate_metering(merged_metering, escalation_metering)
+        self._check_extraction_completeness(
+            extracted_data=structured_data,
+            data_model=dynamic_model,
+            section_label=section_info.class_label,
+        )
+
+        result = ExtractionResult(
+            extracted_fields=extracted_fields,
+            metering=merged_metering,
+            parsing_succeeded=parsing_succeeded,
+            total_duration=time.time() - t0,
+        )
+        self._save_results(document, section, result, section_info, section_id, t0)
         return document

@@ -4063,6 +4063,166 @@ Resources:
       LogGroupName: !Sub "/${AWS::StackName}/lambda/ExtractionFunction"
       RetentionInDays: !Ref LogRetentionDays
 
+  # Nested SFN Distributed Map shard-runtime function (Phase 3). Reuses the SAME
+  # extraction container image (no extra Docker build), selected via a different
+  # ImageConfig.Command. A single handler dispatches plan/shard/merge modes, each
+  # reusing idp_common.extraction primitives (extract_one_shard, merge_shard_dicts)
+  # — the single source of truth shared with the in-process runtime. One fresh
+  # 15-min Lambda runs per shard, so SFN's native per-iteration retry re-runs only
+  # failed/incomplete shards (completed shards load idempotently from S3).
+  ShardRuntimeFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: DockerBuildRun
+    Metadata:
+      SkipBuild: True
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+          - id: W92
+            reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
+          - id: W11
+            reason: "Cloudwatch does not support resource-level permissions, and Bedrock should support any enabled Bedrock model_id or inference profile"
+          - id: W76
+            reason: "Suppressing W76: SPCM for IAM policy document is higher than 25"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      PackageType: Image
+      ImageUri: !Sub "${ECRRepository.RepositoryUri}:extraction-function-${ImageVersion}"
+      Architectures:
+        - !Ref LambdaArchitecture
+      ImageConfig:
+        Command:
+          - "sfn_runtime_handler.handler"
+      Timeout: 900
+      MemorySize: 4096
+      Tracing: Active
+      VpcConfig: !If
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
+          SecurityGroupIds:
+            - !Ref LambdaSecurityGroupId
+        - !If
+          - IsPrivateAppSync
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+          - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          METRIC_NAMESPACE: !Ref StackName
+          CONFIGURATION_BUCKET: !Ref ConfigurationBucket
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          GUARDRAIL_ID_AND_VERSION:
+            !If [
+              HasGuardrailConfig,
+              !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}",
+              "",
+            ]
+          LOG_LEVEL: !Ref LogLevel
+          APPSYNC_API_URL: !Ref AppSyncApiUrl
+          TRACKING_TABLE: !Ref TrackingTable
+          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          WORKING_BUCKET: !Ref WorkingBucket
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
+      LoggingConfig:
+        LogGroup: !Ref ShardRuntimeFunctionLogGroup
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - !Ref LambdaECRAccessPolicy
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - S3CrudPolicy:
+            BucketName: !Ref WorkingBucket
+        - S3ReadPolicy:
+            BucketName: !Ref InputBucket
+        - S3ReadPolicy:
+            BucketName: !Ref ConfigurationBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConfigurationTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - Statement:
+            - Effect: Allow
+              Action: cloudwatch:PutMetricData
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+            - !If
+              - HasAppSyncApi
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
+              - !Ref AWS::NoValue
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+                - bedrock:GetInferenceProfile
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model-deployment/*"
+                - !If
+                  - HasCustomExtractionModelARN
+                  - !Ref CustomExtractionModelARN
+                  - !Ref AWS::NoValue
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
+            - Effect: Allow
+              Action:
+                - aws-marketplace:Subscribe
+                - aws-marketplace:Unsubscribe
+                - aws-marketplace:ViewSubscriptions
+              Resource: "*"
+            - !If
+              - HasGuardrailConfig
+              - Effect: Allow
+                Action: bedrock:ApplyGuardrail
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+
+  ShardRuntimeFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/ShardRuntimeFunction"
+      RetentionInDays: !Ref LogRetentionDays
+
   AssessmentFunction:
     Type: AWS::Serverless::Function
     DependsOn: DockerBuildRun
@@ -5268,6 +5428,7 @@ Resources:
         OCRFunctionArn: !GetAtt OCRFunction.Arn
         ClassificationFunctionArn: !GetAtt ClassificationFunction.Arn
         ExtractionFunctionArn: !GetAtt ExtractionFunction.Arn
+        ShardRuntimeFunctionArn: !GetAtt ShardRuntimeFunction.Arn
         AssessmentFunctionArn: !GetAtt AssessmentFunction.Arn
         PipelineProcessResultsLambdaArn: !GetAtt ProcessResultsFunction.Arn
         RuleValidationPolicyClassificationLambdaArn: !GetAtt RuleValidationPolicyClassificationFunction.Arn
@@ -5301,6 +5462,8 @@ Resources:
         - LambdaInvokePolicy:
             FunctionName: !Ref ExtractionFunction
         - LambdaInvokePolicy:
+            FunctionName: !Ref ShardRuntimeFunction
+        - LambdaInvokePolicy:
             FunctionName: !Ref AssessmentFunction
         - LambdaInvokePolicy:
             FunctionName: !Ref ProcessResultsFunction
@@ -5319,6 +5482,26 @@ Resources:
         - LambdaInvokePolicy:
             FunctionName: !Ref PipelineHooksDispatcherFunction
         - CloudWatchLogsFullAccess
+        # Nested Distributed Map (Phase 3 sharded extraction): the state machine
+        # starts/manages its own child executions for the inline Distributed Map
+        # and reads/writes map item batches in the working bucket.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+                - states:DescribeExecution
+                - states:StopExecution
+              Resource:
+                - !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-DocumentProcessingWorkflow"
+                - !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${AWS::StackName}-DocumentProcessingWorkflow/*"
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:ListBucket
+              Resource:
+                - !Sub "arn:${AWS::Partition}:s3:::${WorkingBucket}"
+                - !Sub "arn:${AWS::Partition}:s3:::${WorkingBucket}/*"
 
   StateMachineLogGroup:
     Type: AWS::Logs::LogGroup

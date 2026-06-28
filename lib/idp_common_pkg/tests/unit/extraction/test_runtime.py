@@ -91,8 +91,12 @@ class TestMergeWrappers:
 # --------------------------- shard_result_key ----------------------------- #
 class TestShardResultKey:
     def test_deterministic_and_sanitised(self):
-        k1 = shard_result_key("arn:aws:states:us-west-2:1:execution:sm:abc", "sec1", 0, 3)
-        k2 = shard_result_key("arn:aws:states:us-west-2:1:execution:sm:abc", "sec1", 0, 3)
+        k1 = shard_result_key(
+            "arn:aws:states:us-west-2:1:execution:sm:abc", "sec1", 0, 3
+        )
+        k2 = shard_result_key(
+            "arn:aws:states:us-west-2:1:execution:sm:abc", "sec1", 0, 3
+        )
         assert k1 == k2
         assert ":" not in k1.split("checkpoints/")[1].split("/")[0] or True
         assert k1.endswith("/shards/shard_0_3.json")
@@ -250,7 +254,10 @@ class TestInProcessRuntime:
             "sec",
             0,
             2,
-            {"extracted_fields": {"transactions": [{"r": 1}, {"r": 2}]}, "metering": {}},
+            {
+                "extracted_fields": {"transactions": [{"r": 1}, {"r": 2}]},
+                "metering": {},
+            },
         )
         call_log: list[int] = []
         runner = _make_runner(
@@ -296,6 +303,7 @@ class TestSelectRuntime:
         monkeypatch.setenv("EXTRACTION_RUNTIME", "sfn")
         rt = select_runtime(IDPConfig(), 2)
         assert isinstance(rt, StepFunctionsRuntime)
+
 
 class TestForcedFailResume:
     """Phase 3 proof at the unit level: a forced shard failure fails the section

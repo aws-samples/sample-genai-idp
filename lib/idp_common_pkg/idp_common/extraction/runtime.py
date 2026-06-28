@@ -136,6 +136,7 @@ def _merge_shard_results(
 
     return merged_dict, merged_metering, conflicts
 
+
 # A shard payload is the dict produced by ExtractionService._build_shard_payloads:
 #   {"content": <prompt content blocks>, "page_start": int, "page_end": int,
 #    "total_pages": int}
@@ -179,8 +180,7 @@ def shard_result_key(
     """
     safe_arn = (execution_arn or "local").replace(":", "_").replace("/", "_")
     return (
-        f"checkpoints/{safe_arn}/{section_id}/shards/"
-        f"shard_{page_start}_{page_end}.json"
+        f"checkpoints/{safe_arn}/{section_id}/shards/shard_{page_start}_{page_end}.json"
     )
 
 
@@ -299,9 +299,7 @@ async def extract_one_shard(
                 page_start,
                 page_end,
             )
-            return cached["extracted_fields"], {
-                "metering": cached.get("metering", {})
-            }
+            return cached["extracted_fields"], {"metering": cached.get("metering", {})}
 
     # Deterministic fault-injection hook (Phase 3 resume proof). When
     # EXTRACTION_FORCE_FAIL_SHARDS lists a 0-based page_start (comma-separated)
