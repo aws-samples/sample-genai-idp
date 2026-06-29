@@ -91,6 +91,23 @@ def _accumulate_metering(
                 merged_metering[mk][tk] = (merged_metering[mk].get(tk) or 0) + (tv or 0)
 
 
+def _is_phantom_row(item: Any) -> bool:
+    """True if a list item is a phantom row carrying no real data.
+
+    A model (or OCR gap-recovery) sometimes appends rows that have at most one
+    populated field — e.g. a lone sequential ``RowID`` with every other column
+    null — when "continuing" a table past its real end. A genuine tabular row
+    populates several columns, so a multi-field row object with fewer than two
+    non-empty values is an artifact and is dropped on merge. Only applies to
+    dict items with >= 3 declared fields, so sparse 1-2 field row schemas (and
+    scalar list elements) are never affected.
+    """
+    if not isinstance(item, dict) or len(item) < 3:
+        return False
+    non_empty = sum(1 for v in item.values() if v not in (None, "") and str(v).strip())
+    return non_empty < 2
+
+
 def _merge_shard_results(
     results: list[tuple[Any, dict[str, Any]]],
     data_format: type[BaseModel],
@@ -99,6 +116,9 @@ def _merge_shard_results(
 
     - **List fields** (by the schema's field types) are concatenated in shard
       order; a shard that returns the field as ``None`` contributes nothing.
+      Phantom rows (multi-column row objects with <2 populated fields, e.g. a
+      hallucinated trailing ``RowID``-only row) are dropped — see
+      :func:`_is_phantom_row`.
     - **Scalar fields** take the FIRST non-null value across shards; a later,
       *different* non-null value is recorded as a conflict (first value wins).
 
@@ -122,7 +142,7 @@ def _merge_shard_results(
                 if not isinstance(existing, list):
                     merged_dict[key] = []
                 if isinstance(value, list):
-                    merged_dict[key].extend(value)
+                    merged_dict[key].extend(v for v in value if not _is_phantom_row(v))
             elif value is not None:
                 if key not in merged_dict or merged_dict[key] is None:
                     merged_dict[key] = value
