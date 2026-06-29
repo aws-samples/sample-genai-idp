@@ -725,27 +725,26 @@ See `notebooks/examples/demo-lambda/` for:
 
 For more details, see [extraction.md](extraction.md).
 
-### Review Agent Model (Agentic Extraction)
+### Tiered Models for Agentic Extraction (Validation + Escalation)
 
-For agentic extraction workflows, you can specify a separate model for reviewing extraction work:
+Agentic extraction supports a **cost-tiered** strategy: extract with a fast/cheap model, then automatically re-extract only the fields that fail schema validation with a stronger model. This is configured under `extraction.agentic.validation`:
 
 ```yaml
 extraction:
-  model: us.amazon.nova-pro-v1:0
-  review_agent_model: us.anthropic.claude-3-7-sonnet-20250219-v1:0  # Optional
+  model: us.amazon.nova-pro-v1:0          # fast/cheap primary extractor
+  agentic:
+    enabled: true
+    validation:
+      enabled: true
+      fail_action: escalate
+      escalation_model: us.anthropic.claude-opus-4-8   # stronger tier, used only on failure
 ```
 
-If not specified, defaults to the main extraction model. This allows using a more powerful model for validation while using a cost-effective model for initial extraction.
+When validation fails, only the failing top-level fields are re-extracted with `escalation_model` (a per-class `x-aws-idp-extraction-escalation-model` override takes precedence) and merged back — typically a small fraction of documents, so the stronger model's cost is incurred only where it's needed. See [Schema Validation and Model Escalation](extraction.md#schema-validation-and-model-escalation) for the full feature, including the deterministic table-parsing tool, the completeness heuristic, and sharding for large documents.
 
-**Benefits:**
-- Cost optimization by using different models for different tasks
-- Enhanced accuracy with specialized review model
-- Flexibility in model selection for extraction vs. validation
+> The agentic options (validation, table parsing, sharding, escalation) are editable in the Web UI under **Configuration → Extraction → Agentic Extraction**, where sub-options are progressively revealed as you enable each feature.
 
-**Use Cases:**
-- Use Nova Pro for extraction, Claude Sonnet for review
-- Balance between cost and accuracy requirements
-- Experimentation with different model combinations
+> **Deprecated:** the older `extraction.agentic.review_agent` / `review_agent_model` fields are no-ops retained only for backward compatibility — use `validation` + `escalation_model` above instead.
 
 ## Cost Tracking and Optimization
 
