@@ -105,6 +105,10 @@ Parameters:
     Default: ""
 
 Conditions:
+  # When empty (HTTP API transport), the appsync:GraphQL IAM statement is
+  # omitted — discovery status is written straight to DynamoDB instead, and
+  # "${AppSyncApiArn}/*" would otherwise resolve to the invalid resource "/*".
+  HasAppSyncApi: !Not [!Equals [!Ref AppSyncApiArn, ""]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   DeployInVPC: !Not [!Equals [!Ref VpcId, ""]]
   HasBedrockHubRole: !Not [!Equals [!Ref BedrockHubRoleArn, ""]]
@@ -481,9 +485,12 @@ Resources:
             - Effect: Allow
               Action: [cloudwatch:PutMetricData]
               Resource: "*"
-            - Effect: Allow
-              Action: [appsync:GraphQL]
-              Resource: !Sub "${AppSyncApiArn}/*"
+            - !If
+              - HasAppSyncApi
+              - Effect: Allow
+                Action: [appsync:GraphQL]
+                Resource: !Sub "${AppSyncApiArn}/*"
+              - !Ref AWS::NoValue
             # HTTP API transport: write discovery job status straight to DynamoDB
             # (appsync_status._update_status_dynamodb) when AppSync is absent.
             - Effect: Allow
@@ -550,9 +557,12 @@ Resources:
                 Action: sts:AssumeRole
                 Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
-            - Effect: Allow
-              Action: [appsync:GraphQL]
-              Resource: !Sub "${AppSyncApiArn}/*"
+            - !If
+              - HasAppSyncApi
+              - Effect: Allow
+                Action: [appsync:GraphQL]
+                Resource: !Sub "${AppSyncApiArn}/*"
+              - !Ref AWS::NoValue
             # HTTP API transport: write discovery job status straight to DynamoDB
             # (appsync_status._update_status_dynamodb) when AppSync is absent.
             - Effect: Allow
@@ -712,9 +722,12 @@ Resources:
             - Effect: Allow
               Action: [cloudwatch:PutMetricData]
               Resource: "*"
-            - Effect: Allow
-              Action: [appsync:GraphQL]
-              Resource: !Sub "${AppSyncApiArn}/*"
+            - !If
+              - HasAppSyncApi
+              - Effect: Allow
+                Action: [appsync:GraphQL]
+                Resource: !Sub "${AppSyncApiArn}/*"
+              - !Ref AWS::NoValue
             # HTTP API transport: write discovery job status straight to DynamoDB
             # (appsync_status._update_status_dynamodb) when AppSync is absent.
             - Effect: Allow
