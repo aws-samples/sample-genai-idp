@@ -75,6 +75,61 @@ def _list_valued_fields(data_format: type[BaseModel]) -> set[str]:
     return list_fields
 
 
+# Special metering keys that are NOT additive token counters and must not be
+# summed across shards. ``_table_parsing_stats`` carries quality metrics (rates,
+# averages) merged with their own semantics in ``_merge_table_parsing_stats``.
+_NON_ADDITIVE_METERING_KEYS = frozenset({"_table_parsing_stats"})
+
+
+def _merge_table_parsing_stats(
+    acc: dict[str, Any], incoming: dict[str, Any]
+) -> dict[str, Any]:
+    """Merge per-shard table-parsing stats with CORRECT semantics.
+
+    Summing these like token counts produced nonsense (5 shards each at
+    ``parse_success_rate``≈1.0 → 5.0 / "500%"; ``avg_confidence``≈99 → "496%").
+    Counts (``tables_parsed``, ``rows_parsed``, ``rows_mapped``,
+    ``invocation_count``) are summed; ``parse_success_rate`` and
+    ``avg_confidence`` are combined as **row-weighted averages** (weighted by
+    each shard's ``rows_parsed``) so the merged value stays a real 0-1 rate /
+    0-100 confidence. ``mapping_used`` / ``confidence_available`` OR together.
+    """
+    if not acc:
+        out = dict(incoming)
+        out["_rate_weight"] = incoming.get("rows_parsed", 0) or 0
+        return out
+
+    a_rows = acc.get("_rate_weight", acc.get("rows_parsed", 0)) or 0
+    b_rows = incoming.get("rows_parsed", 0) or 0
+    total_w = a_rows + b_rows
+
+    def wavg(key: str) -> Any:
+        av, bv = acc.get(key), incoming.get(key)
+        if av is None and bv is None:
+            return None
+        if total_w == 0:  # no row weights — simple mean of present values
+            present = [v for v in (av, bv) if v is not None]
+            return sum(present) / len(present) if present else None
+        return ((av or 0) * a_rows + (bv or 0) * b_rows) / total_w
+
+    return {
+        "tables_parsed": (acc.get("tables_parsed", 0) or 0)
+        + (incoming.get("tables_parsed", 0) or 0),
+        "rows_parsed": total_w,
+        "rows_mapped": (acc.get("rows_mapped", 0) or 0)
+        + (incoming.get("rows_mapped", 0) or 0),
+        "invocation_count": (acc.get("invocation_count", 0) or 0)
+        + (incoming.get("invocation_count", 0) or 0),
+        "parse_success_rate": wavg("parse_success_rate"),
+        "avg_confidence": wavg("avg_confidence"),
+        "confidence_available": bool(acc.get("confidence_available"))
+        or bool(incoming.get("confidence_available")),
+        "mapping_used": bool(acc.get("mapping_used"))
+        or bool(incoming.get("mapping_used")),
+        "_rate_weight": total_w,
+    }
+
+
 def _accumulate_metering(
     merged_metering: dict[str, Any], metering: dict[str, Any]
 ) -> None:
@@ -82,8 +137,18 @@ def _accumulate_metering(
 
     Token values from Bedrock responses may be ``None``; both operands are
     coerced to ``0`` so addition never raises on a ``None`` operand (issue #337).
+
+    The ``_table_parsing_stats`` key is NOT a token counter — summing its rates /
+    averages produces impossible values (500% success rate, 496% confidence), so
+    it is merged with quality-aware semantics instead.
     """
     for mk, mv in metering.items():
+        if mk in _NON_ADDITIVE_METERING_KEYS:
+            if mk == "_table_parsing_stats" and isinstance(mv, dict):
+                merged_metering[mk] = _merge_table_parsing_stats(
+                    merged_metering.get(mk) or {}, mv
+                )
+            continue
         if mk not in merged_metering:
             merged_metering[mk] = dict(mv)
         else:

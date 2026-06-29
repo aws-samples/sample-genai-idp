@@ -3530,6 +3530,11 @@ const VisualEditorModal = ({
               <ProcessingReportTab
                 metadata={localJsonData?.metadata as Record<string, unknown> | undefined}
                 processingReport={localJsonData?.processing_report as string | undefined}
+                inferenceResult={
+                  (localJsonData?.inference_result || localJsonData?.inferenceResult) as
+                    | Record<string, unknown>
+                    | undefined
+                }
               />
             ),
           },
