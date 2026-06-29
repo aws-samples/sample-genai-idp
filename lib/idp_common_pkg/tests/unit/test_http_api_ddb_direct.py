@@ -19,6 +19,7 @@ from moto import mock_aws
 
 pytestmark = pytest.mark.unit
 
+
 def _find_repo_root() -> Path:
     """Walk up until we find the repo root (contains nested/appsync)."""
     p = Path(__file__).resolve()
@@ -133,7 +134,9 @@ def test_list_documents_date_shard(ddb_env):
     ddb.Table("TrackingTable").put_item(
         Item={"PK": "list#2026-06-29#s#02", "SK": "ts#x", "ObjectKey": "d2"}
     )
-    out = mod.dispatch("listDocumentsDateShard", _ev({"date": "2026-06-29", "shard": 2}))
+    out = mod.dispatch(
+        "listDocumentsDateShard", _ev({"date": "2026-06-29", "shard": 2})
+    )
     assert [d["ObjectKey"] for d in out["Documents"]] == ["d2"]
 
 
@@ -146,7 +149,9 @@ def test_list_documents_invalid_hour(ddb_env):
 # --------------------------- discovery jobs --------------------------------- #
 def test_discovery_update_and_list(ddb_env):
     mod, _ = ddb_env
-    mod.dispatch("updateDiscoveryJobStatus", _ev({"jobId": "j1", "status": "IN_PROGRESS"}))
+    mod.dispatch(
+        "updateDiscoveryJobStatus", _ev({"jobId": "j1", "status": "IN_PROGRESS"})
+    )
     out = mod.dispatch("listDiscoveryJobs", _ev({}))
     jobs = out["DiscoveryJobs"]
     assert len(jobs) == 1
@@ -170,7 +175,9 @@ def test_discovery_terminal_sets_completedat(ddb_env):
 def test_discovery_invalid_status_raises(ddb_env):
     mod, _ = ddb_env
     with pytest.raises(ValueError):
-        mod.dispatch("updateDiscoveryJobStatus", _ev({"jobId": "j3", "status": "BOGUS"}))
+        mod.dispatch(
+            "updateDiscoveryJobStatus", _ev({"jobId": "j3", "status": "BOGUS"})
+        )
 
 
 def test_discovery_delete(ddb_env):
@@ -186,7 +193,9 @@ def test_agent_job_user_scoping(ddb_env):
     """A user must only see their own agent jobs (PK = agent#<email>)."""
     mod, ddb = ddb_env
     table = ddb.Table("AgentTable")
-    table.put_item(Item={"PK": "agent#alice@x.com", "SK": "jobA", "status": "COMPLETED"})
+    table.put_item(
+        Item={"PK": "agent#alice@x.com", "SK": "jobA", "status": "COMPLETED"}
+    )
     table.put_item(Item={"PK": "agent#bob@x.com", "SK": "jobB", "status": "RUNNING"})
 
     # Alice sees only her job
@@ -194,10 +203,14 @@ def test_agent_job_user_scoping(ddb_env):
     assert [j["jobId"] for j in alice["items"]] == ["jobA"]
 
     # Bob's getAgentJobStatus for Alice's job returns None (scoped out)
-    miss = mod.dispatch("getAgentJobStatus", _ev({"jobId": "jobA"}, username="bob@x.com"))
+    miss = mod.dispatch(
+        "getAgentJobStatus", _ev({"jobId": "jobA"}, username="bob@x.com")
+    )
     assert miss is None
 
-    hit = mod.dispatch("getAgentJobStatus", _ev({"jobId": "jobB"}, username="bob@x.com"))
+    hit = mod.dispatch(
+        "getAgentJobStatus", _ev({"jobId": "jobB"}, username="bob@x.com")
+    )
     assert hit["status"] == "RUNNING"
 
 
@@ -208,10 +221,19 @@ def test_agent_update_status_terminal(ddb_env):
     )
     ok = mod.dispatch(
         "updateAgentJobStatus",
-        _ev({"jobId": "jC", "userId": "carol@x.com", "status": "COMPLETED", "result": "{}"}),
+        _ev(
+            {
+                "jobId": "jC",
+                "userId": "carol@x.com",
+                "status": "COMPLETED",
+                "result": "{}",
+            }
+        ),
     )
     assert ok is True
-    got = mod.dispatch("getAgentJobStatus", _ev({"jobId": "jC"}, username="carol@x.com"))
+    got = mod.dispatch(
+        "getAgentJobStatus", _ev({"jobId": "jC"}, username="carol@x.com")
+    )
     assert got["status"] == "COMPLETED"
     assert got["completedAt"]
 
@@ -221,8 +243,14 @@ def test_agent_delete(ddb_env):
     ddb.Table("AgentTable").put_item(
         Item={"PK": "agent#dave@x.com", "SK": "jD", "status": "RUNNING"}
     )
-    assert mod.dispatch("deleteAgentJob", _ev({"jobId": "jD"}, username="dave@x.com")) is True
-    assert mod.dispatch("getAgentJobStatus", _ev({"jobId": "jD"}, username="dave@x.com")) is None
+    assert (
+        mod.dispatch("deleteAgentJob", _ev({"jobId": "jD"}, username="dave@x.com"))
+        is True
+    )
+    assert (
+        mod.dispatch("getAgentJobStatus", _ev({"jobId": "jD"}, username="dave@x.com"))
+        is None
+    )
 
 
 def test_handles_known_and_unknown():

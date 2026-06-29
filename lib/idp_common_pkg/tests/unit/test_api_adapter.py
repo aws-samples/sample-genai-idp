@@ -13,7 +13,6 @@ restored to a list so resolver RBAC keeps working identically to AppSync.
 import json
 
 import pytest
-
 from idp_common.api_adapter import (
     _coerce_groups,
     api_resolver,
