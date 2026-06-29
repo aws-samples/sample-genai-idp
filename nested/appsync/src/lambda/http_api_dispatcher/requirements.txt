@@ -1,0 +1,2 @@
+# idp_common (api_adapter) provided by Lambda Layer 1 (base).
+# boto3 provided by the Lambda runtime.

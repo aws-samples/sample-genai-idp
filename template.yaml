@@ -2572,8 +2572,14 @@ Resources:
         BedrockHubRoleSessionName: !Ref BedrockHubRoleSessionName
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         ConfigurationTable: !Ref ConfigurationTable
-        AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
-        AppSyncApiArn: !GetAtt GraphQLApi.Arn
+        # When ApiTransport=httpapi, pass empty AppSync identifiers so the
+        # pattern stack's HasAppSyncApi condition is false and every processing
+        # Lambda runs with DOCUMENT_TRACKING_MODE=dynamodb (writes the
+        # TrackingTable directly, no AppSync). This is the backend half of the
+        # AppSync removal and keeps the document pipeline fully functional
+        # without AppSync.
+        AppSyncApiUrl: !If [UseHttpApi, "", !GetAtt GraphQLApi.GraphQLUrl]
+        AppSyncApiArn: !If [UseHttpApi, "", !GetAtt GraphQLApi.Arn]
         ConfigurationDefaultS3Uri: !If
           - HasCustomConfigPath
           - !Ref CustomConfigPath
