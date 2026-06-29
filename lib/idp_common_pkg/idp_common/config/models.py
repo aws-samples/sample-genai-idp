@@ -288,19 +288,6 @@ class AgenticConfig(BaseModel):
         "(legacy behavior). Per-shard sharding already bounds this; the cap is the "
         "backstop for the single-agent path.",
     )
-    max_images_per_agent: int = Field(
-        default=20,
-        ge=0,
-        description="Safety cap on how many page images are attached to a single "
-        "agent invocation when the task prompt uses {DOCUMENT_IMAGE}. Sending many "
-        "large images in one request can cause Bedrock read timeouts / oversized "
-        "first turns (a long doc with 25+ page images is the classic case). When "
-        "the section (or a shard) has more images than this, only the first N are "
-        "attached and a warning is logged; the agent still has the full OCR text "
-        "and can fetch specific pages with the view_image tool. 0 = unlimited "
-        "(legacy behavior). Per-shard sharding already bounds this; the cap is the "
-        "backstop for the single-agent path.",
-    )
     table_parsing: TableParsingConfig = Field(
         default_factory=TableParsingConfig,
         description="Configuration for deterministic table parsing tool. "
