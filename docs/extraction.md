@@ -97,6 +97,65 @@ Agentic extraction automatically handles throttling and transient errors:
 
 This ensures reliable extraction even in accounts with low service quotas, with no manual configuration required.
 
+#### Deterministic Table Parsing
+
+For documents with large tables (bank statements, brokerage holdings, transaction logs), enable the deterministic **table parsing tool** so the agent extracts tabular data by parsing Markdown tables directly from OCR — instead of having the LLM regenerate every row (which is slow, costly, and error-prone for hundreds of rows):
+
+```yaml
+extraction:
+  agentic:
+    enabled: true
+    table_parsing:
+      enabled: true                 # give the agent a deterministic parse_table tool
+      min_confidence_threshold: 95.0 # OCR-confidence target (Textract only)
+      min_parse_success_rate: 0.90   # below this, fall back to LLM extraction
+      max_empty_line_gap: 3          # tolerate page-break gaps inside a table
+      auto_merge_adjacent_tables: true
+```
+
+> **Requires Markdown tables in the OCR output.** Table parsing only engages when OCR emits Markdown pipe-tables — i.e. **Amazon Textract with the `TABLES` feature enabled** (keep `LAYOUT` + `TABLES` in `ocr.features`), or another OCR backend that produces Markdown tables. With plain-text OCR the agent falls back to LLM extraction (use sharding, below, for large tables in that case).
+
+#### Schema Validation and Model Escalation
+
+Agentic extraction can validate its output against the **full class JSON Schema** — including `format` keywords (`date`, `email`, `uuid`, …) that type-checking alone misses — and, on failure, **escalate the failing fields to a stronger model**:
+
+```yaml
+extraction:
+  agentic:
+    enabled: true
+    validation:
+      enabled: true
+      check_formats: true        # enforce JSON-Schema 'format' (ISO-8601 dates, etc.)
+      fail_action: escalate      # warn | escalate | reject
+      escalation_model: "us.anthropic.claude-opus-4-8"  # stronger tier; blank = retry same model
+      min_population_ratio: 0.5  # advisory: warn if <50% of fields populated (silent-loss guard)
+```
+
+- **`fail_action: escalate`** re-extracts only the failing top-level fields with `escalation_model` and merges them back (kept only if valid or fewer errors) — far cheaper than human review. `warn` records the outcome and proceeds; `reject` marks the section failed for HITL.
+- A per-class override `x-aws-idp-extraction-escalation-model` takes precedence over the global `escalation_model`.
+- **`min_population_ratio`** is an advisory completeness heuristic: it flags suspiciously sparse results (e.g. a table that returned zero rows, or nested fields that silently came back null) without failing extraction.
+- Outcomes are recorded per section under `metadata.validation` (valid, error_count, failed_fields, escalated, escalation_model, …) and `metadata.population_check`, and surfaced in the Web UI **Processing Report** tab.
+
+> **`format: date` caveat.** JSON-Schema `format: date` means ISO-8601 (`YYYY-MM-DD`). The default extraction prompt asks the model for `MM/DD/YYYY`, which will fail format validation — set `check_formats: false` or use a `pattern` for non-ISO dates.
+
+#### Scalable Extraction for Large Documents (Sharding)
+
+For long or dense documents, agentic extraction **shards** a section's pages into token- and page-budgeted ranges and extracts them concurrently, then merges the results (list rows are concatenated in page order; scalars resolved first-non-null). This bounds each agent's context — preventing the read-timeout / context-overflow failures a single huge request would hit — and runs shards in parallel.
+
+```yaml
+extraction:
+  agentic:
+    enabled: true
+    max_concurrent_batches: 5     # >1 enables sharding (upper bound on parallelism & shard count)
+    shard_token_budget: 8000      # max OCR tokens per shard (default)
+    max_pages_per_shard: 5        # page ceiling per shard (default; 0 disables)
+    runtime: step_functions       # 'in_process' (default) | 'step_functions'
+```
+
+- **Works by default.** With `max_concurrent_batches > 1`, a shard closes when *either* the token budget *or* the page ceiling is reached — so large documents shard reliably without per-document tuning, even when the OCR text is unusually compact. Single-pass extraction (`max_concurrent_batches: 1`, the default) is unchanged.
+- **Two runtimes, same logic.** `in_process` (default) runs shards with asyncio inside one Lambda — also how a notebook/CLI runs it. `step_functions` runs each shard as its own Lambda iteration in a nested Step Functions **Distributed Map**, so a very large section is not bound by the single-Lambda 15-minute limit and Step Functions natively **retries only the incomplete shards** (completed shards are reused from S3).
+- **Large-document guidance.** For 100+ page documents prefer `runtime: step_functions`, and raise `max_concurrent_batches` (e.g. 10) so shards stay small enough to finish well under the per-Lambda timeout. Validated at scale on 100- and 200-page single- and multi-table documents in both table-parsing and pure-sharded-LLM modes (exact row counts, no loss/duplication, no timeouts).
+
 ### Document Classes and Attributes
 
 Specify document classes and the fields to extract from each using JSON Schema format:
