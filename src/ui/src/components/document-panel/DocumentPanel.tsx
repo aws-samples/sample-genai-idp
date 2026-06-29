@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   ButtonDropdown,
@@ -35,6 +35,8 @@ import { renderHitlStatus } from '../common/hitl-status-renderer';
 import StepFunctionFlowViewer from '../step-function-flow/StepFunctionFlowViewer';
 import TroubleshootModal from './TroubleshootModal';
 import { claimReview } from '../../graphql/generated';
+import { apiTransport } from '../../aws-exports';
+import usePolling from '../../hooks/use-polling';
 import { exportDocument, triggerBrowserDownload } from './document-export';
 import type { ExportErrorEntry, ExportProgress, ExportScope } from './document-export';
 import { DownloadOptionsModal, DownloadProgressModal } from './DocumentDownloadModals';
@@ -144,6 +146,10 @@ interface TroubleshootJobData {
 
 const client = generateClient();
 const logger = new ConsoleLogger('DocumentPanel');
+
+// Detail-view polling cadence under the HTTP API transport (no subscriptions).
+const USE_POLLING = apiTransport === 'httpapi';
+const DOCUMENT_DETAIL_POLL_INTERVAL_MS = 4000;
 
 // Component to display confidence alerts count only
 const ConfidenceAlertsSection = ({ sections, mergedConfig }: ConfidenceAlertsSectionProps): React.JSX.Element => {
@@ -675,6 +681,25 @@ export const DocumentPanel = ({
   useEffect(() => {
     setLocalItem(item);
   }, [item]);
+
+  // Detail-view polling (httpapi transport). Under AppSync the onUpdateDocument
+  // subscription pushed live Sections/Pages updates into the open document.
+  // With the HTTP API there are no subscriptions, so while the open document is
+  // still processing we re-fetch its rich detail (getDocument via the parent's
+  // getDocumentDetailsFromIds, which merges into list state and flows back as
+  // the `item` prop). Stops once the document reaches a terminal status.
+  const detailStatus = (localItem?.objectStatus || '').toUpperCase();
+  const isTerminalStatus = ['COMPLETED', 'FAILED', 'ABORTED'].includes(detailStatus);
+  const pollDetail = useCallback(() => {
+    if (!localItem?.objectKey || !getDocumentDetailsFromIds) return;
+    if (isTerminalStatus) return;
+    void getDocumentDetailsFromIds([localItem.objectKey]);
+  }, [localItem?.objectKey, isTerminalStatus, getDocumentDetailsFromIds]);
+
+  usePolling(pollDetail, {
+    enabled: USE_POLLING && !!localItem?.objectKey && !isTerminalStatus,
+    intervalMs: DOCUMENT_DETAIL_POLL_INTERVAL_MS,
+  });
 
   // Fetch active configuration for dynamic confidence threshold (used by sections panel, etc.)
   const { mergedConfig } = useConfiguration();

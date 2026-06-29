@@ -5,6 +5,8 @@ import { generateClient } from '../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
 import useAppContext from '../contexts/app';
+import { apiTransport } from '../aws-exports';
+import usePolling from './use-polling';
 import {
   listDocuments,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -18,6 +20,12 @@ import {
 } from '../graphql/generated';
 import { DOCUMENT_LIST_SHARDS_PER_DAY } from '../components/document-list/documents-table-config';
 import { Document } from '../types/documents';
+
+// Under the HTTP API transport there are no GraphQL subscriptions; the document
+// list is kept fresh by polling instead. AppSync deployments keep using
+// subscriptions (real-time) unchanged.
+const USE_POLLING = apiTransport === 'httpapi';
+const DOCUMENT_LIST_POLL_INTERVAL_MS = 5000;
 
 const client = generateClient();
 
@@ -198,6 +206,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
   // placeholder that will be updated by the next onUpdateDocument event.
 
   useEffect(() => {
+    if (USE_POLLING) return undefined; // polling replaces subscriptions under httpapi
     if (subscriptionsRef.current.onCreate) return undefined;
 
     logger.debug('onCreateDocument subscription');
@@ -237,6 +246,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
   }, [setDocumentsDeduped, setErrorMessage, isDocumentInActiveRange]);
 
   useEffect(() => {
+    if (USE_POLLING) return undefined; // polling replaces subscriptions under httpapi
     if (subscriptionsRef.current.onUpdate) return undefined;
 
     logger.debug('onUpdateDocument subscription setup');
@@ -368,6 +378,23 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       setIsDocumentsListLoading(true);
     }
   }, [customDateRange]);
+
+  // ── Polling (httpapi transport — replaces onCreate/onUpdate subscriptions) ──
+  // Silently re-fetch the active date range on an interval. sendSetDocumentsForDateRange
+  // feeds setDocumentsDeduped, whose merge logic preserves rich detail already
+  // loaded — so list rows update (status, new docs) without wiping open-document
+  // detail. Only runs once the list has actually been requested, and the shared
+  // usePolling hook pauses while the tab is hidden.
+  const pollDocuments = useCallback(() => {
+    if (!hasListBeenRequestedRef.current) return;
+    const dateRange = customDateRangeRef.current || getDateRangeForPeriod(periodsToLoad);
+    void sendSetDocumentsForDateRange(dateRange);
+  }, [periodsToLoad]);
+
+  usePolling(pollDocuments, {
+    enabled: USE_POLLING,
+    intervalMs: DOCUMENT_LIST_POLL_INTERVAL_MS,
+  });
 
   // ── Mutations ──────────────────────────────────────────────────────────
 
