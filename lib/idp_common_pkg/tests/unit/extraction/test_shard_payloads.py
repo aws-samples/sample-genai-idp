@@ -107,3 +107,30 @@ class TestBuildShardPayloads:
         # Each shard's text uses 1-based PAGE markers for its own pages.
         first = _shard_text(payloads[0])
         assert "--- PAGE 1 ---" in first
+
+
+class TestAnalyzeSchemaMinItems:
+    """minItems can arrive as a string after a config round-trip; the schema
+    analysis must coerce it instead of raising TypeError on `min_items > 50`."""
+
+    def test_string_min_items_does_not_raise(self):
+        svc = _service()
+        schema = {
+            "properties": {
+                "rows": {"type": "array", "minItems": "100", "description": "t"}
+            }
+        }
+        result = svc._analyze_schema_for_table_requirements(schema)
+        assert result["tool_usage_recommended"] is True
+
+    def test_string_min_items_below_threshold(self):
+        svc = _service()
+        schema = {"properties": {"rows": {"type": "array", "minItems": "5"}}}
+        result = svc._analyze_schema_for_table_requirements(schema)
+        assert result["tool_usage_recommended"] is False
+
+    def test_invalid_min_items_treated_as_zero(self):
+        svc = _service()
+        schema = {"properties": {"rows": {"type": "array", "minItems": "abc"}}}
+        result = svc._analyze_schema_for_table_requirements(schema)
+        assert result["tool_usage_recommended"] is False
