@@ -32,8 +32,12 @@ interface SchemaProperty {
   default?: unknown;
   order?: string | number;
   description?: string;
-  dependsOn?: { field: string; values?: unknown[]; value?: unknown };
+  dependsOn?: { field: string; values?: unknown[]; value?: unknown; valuePrefix?: string };
   sectionLabel?: string;
+  // For nested sectionLabel objects: auto-expand the collapsible section when a
+  // sibling field matches (e.g. expand "Agentic Extraction" when enabled=true).
+  expandWhen?: { field: string; value?: unknown };
+  defaultExpanded?: boolean | string;
   nestLevel?: number;
   columns?: string | number;
   listLabel?: string;
@@ -788,8 +792,15 @@ const ConfigBuilder = ({
         });
       }
 
-      // If dependency value doesn't match any required values, hide this field
-      if (normalizedDependencyValue === undefined || !normalizedDependencyValues.includes(normalizedDependencyValue)) {
+      // Prefix-based dependency: show only when the dependency value starts with
+      // a given string (e.g. show reasoning_effort only for "openai.*" models).
+      const valuePrefix = property.dependsOn.valuePrefix;
+      if (typeof valuePrefix === 'string') {
+        if (typeof dependencyValue !== 'string' || !dependencyValue.startsWith(valuePrefix)) {
+          return null; // Don't render this field
+        }
+      } else if (normalizedDependencyValue === undefined || !normalizedDependencyValues.includes(normalizedDependencyValue)) {
+        // If dependency value doesn't match any required values, hide this field
         console.log(`Hiding field ${key} due to dependency mismatch:`, {
           // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Data from trusted internal source only
           normalizedDependencyValue,
@@ -865,8 +876,20 @@ const ConfigBuilder = ({
         }));
       };
 
-      // Check if expanded - default to collapsed
-      const isExpanded = expandedItems[objectKey] === true;
+      // Determine the default expanded state. `defaultExpanded: true` starts open;
+      // `expandWhen: {field, value}` opens the section when a sibling field matches
+      // (e.g. open "Agentic Extraction" when its `enabled` toggle is true) so the
+      // active configuration isn't hidden behind a collapsed header.
+      let defaultExpanded = property.defaultExpanded === true || property.defaultExpanded === 'true';
+      if (property.expandWhen) {
+        const siblingValue = getValueAtPath(formValues, `${fullPath}.${property.expandWhen.field}`);
+        if (areValuesEqual(siblingValue, property.expandWhen.value)) {
+          defaultExpanded = true;
+        }
+      }
+
+      // User's explicit toggle (if any) wins; otherwise fall back to the default.
+      const isExpanded = expandedItems[objectKey] !== undefined ? expandedItems[objectKey] === true : defaultExpanded;
 
       // Object header similar to list header
       const objectHeader = (
