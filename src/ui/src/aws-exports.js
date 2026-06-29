@@ -10,12 +10,26 @@ const {
   VITE_USER_POOL_CLIENT_ID,
   VITE_IDENTITY_POOL_ID,
   VITE_APPSYNC_GRAPHQL_URL,
+  // API transport selection ('appsync' | 'httpapi') and the HTTP API / Lambda
+  // streaming endpoints. Populated when ApiTransport=httpapi; the thin REST
+  // client (src/api/) reads these. Empty/undefined when using AppSync.
+  VITE_API_TRANSPORT,
+  VITE_API_BASE_URL,
+  VITE_STREAM_URL,
   VITE_AWS_REGION,
   VITE_COGNITO_DOMAIN,
   VITE_EXTERNAL_IDP_NAME,
   VITE_EXTERNAL_IDP_AUTO_LOGIN,
   VITE_CLOUDFRONT_DOMAIN,
 } = import.meta.env;
+
+// Transport mode for UI<->backend communication. 'httpapi' routes
+// queries/mutations through the thin REST client and uses polling + Lambda
+// streaming; anything else (default) uses AppSync GraphQL via Amplify.
+export const apiTransport = VITE_API_TRANSPORT || 'appsync';
+export const apiBaseUrl = VITE_API_BASE_URL || '';
+export const streamUrl = VITE_STREAM_URL || '';
+export const awsRegion = VITE_AWS_REGION;
 
 // Build OAuth config only when an external IdP is configured.
 // Cognito matches redirect_uri case-sensitively against its registered

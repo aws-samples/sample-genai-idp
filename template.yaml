@@ -49,6 +49,22 @@ Mappings:
       ConfigPath: "lending-package-sample-govcloud"
 
 Parameters:
+  # API transport selection: AppSync (legacy) or API Gateway HTTP API (+ polling
+  # + Lambda response streaming). HTTP API is GovCloud/FedRAMP-deployable and is
+  # the long-term replacement for AppSync. During migration both paths can be
+  # built; this flag selects which the UI uses and which the backend writes to.
+  ApiTransport:
+    Type: String
+    Default: appsync
+    AllowedValues:
+      - appsync
+      - httpapi
+    Description: >-
+      Communication transport between the web UI and backend. 'appsync' uses the
+      legacy AppSync GraphQL API. 'httpapi' uses API Gateway HTTP API for
+      queries/mutations, polling for status updates, and Lambda response
+      streaming for chat (required for GovCloud / FedRAMP).
+
   # Authorization params
   AdminEmail:
     Type: String
@@ -1065,6 +1081,11 @@ Rules:
           (which auto-provisions an endpoint).
 
 Conditions:
+  # API transport conditions. UseHttpApi builds the API Gateway HTTP API + Lambda
+  # streaming path; UseAppSync keeps the legacy AppSync API. They are mutually
+  # exclusive via the ApiTransport parameter.
+  UseHttpApi: !Equals [!Ref ApiTransport, 'httpapi']
+  UseAppSync: !Equals [!Ref ApiTransport, 'appsync']
   # Headless/VPC/Bastion feature conditions
   DeployInVPC: !Equals [!Ref DeployInVPC, 'true']
   DeployApiGateway: !Equals [!Ref EnableHeadless, 'true']
@@ -9878,6 +9899,11 @@ Resources:
             Value: !Ref IdentityPool
           - Name: VITE_APPSYNC_GRAPHQL_URL
             Value: !GetAtt GraphQLApi.GraphQLUrl
+          # API transport selection + HTTP API / streaming endpoints. The URL
+          # values are populated in Phase 1 (nested/restapi stack); empty while
+          # ApiTransport=appsync so the UI keeps using AppSync.
+          - Name: VITE_API_TRANSPORT
+            Value: !Ref ApiTransport
           - Name: VITE_AWS_REGION
             Value: !Ref AWS::Region
           - Name: VITE_SHOULD_HIDE_SIGN_UP
@@ -11177,6 +11203,7 @@ Outputs:
         - !Sub "VITE_USER_POOL_CLIENT_ID=${UserPoolClient}"
         - !Sub "VITE_IDENTITY_POOL_ID=${IdentityPool}"
         - !Sub "VITE_APPSYNC_GRAPHQL_URL=${GraphQLApi.GraphQLUrl}"
+        - !Sub "VITE_API_TRANSPORT=${ApiTransport}"
         - !Sub "VITE_AWS_REGION=${AWS::Region}"
         - !Sub "VITE_SETTINGS_PARAMETER=${SettingsParameter}"
         - !If
