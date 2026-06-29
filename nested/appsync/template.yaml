@@ -251,6 +251,47 @@ Parameters:
       addressing so browser uploads target the VPC interface endpoint.
       Empty in public mode.
 
+  # ------------------------------------------------------------------ #
+  # API Gateway HTTP API transport (AppSync replacement). When
+  # ApiTransport=httpapi the parent stack creates the HTTP API + JWT
+  # authorizer + dispatcher Lambda here, reusing the resolver Lambdas.
+  # ------------------------------------------------------------------ #
+  ApiTransport:
+    Type: String
+    Default: appsync
+    AllowedValues: [appsync, httpapi]
+    Description: Selects AppSync (legacy) or API Gateway HTTP API transport.
+  UserPoolId:
+    Type: String
+    Default: ""
+    Description: Cognito User Pool id — JWT authorizer issuer for the HTTP API.
+  UserPoolClientId:
+    Type: String
+    Default: ""
+    Description: Cognito User Pool Client id — JWT authorizer audience.
+  # Main-template resolver function ARNs the dispatcher must invoke (the rest
+  # are defined in this nested stack and referenced via GetAtt).
+  CompleteSectionReviewFunctionArn:
+    Type: String
+    Default: ""
+    Description: ARN of CompleteSectionReviewFunction (HITL) from main template.
+  UserManagementFunctionArn:
+    Type: String
+    Default: ""
+    Description: ARN of UserManagementFunction from main template.
+  FinetuningJobsResolverFunctionArn:
+    Type: String
+    Default: ""
+    Description: ARN of FinetuningJobsResolverFunction from main template.
+  CalculateCapacityResolverFunctionArn:
+    Type: String
+    Default: ""
+    Description: ARN of CalculateCapacityResolverFunction from main template.
+  VersionCheckResolverFunctionArn:
+    Type: String
+    Default: ""
+    Description: ARN of VersionCheckResolverFunction from main template.
+
 Metadata:
   cfn-lint:
     config:
@@ -259,6 +300,9 @@ Metadata:
         - W1031  # ARN pattern matching when Fn::Sub resolves to empty string (UsersTableArn default)
 
 Conditions:
+  # Create the API Gateway HTTP API transport (dispatcher + routes) instead of
+  # relying on AppSync for UI<->backend queries/mutations.
+  UseHttpApi: !Equals [!Ref ApiTransport, "httpapi"]
   HasS3EndpointUrl: !Not [!Equals [!Ref S3EndpointUrl, ""]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   HasGuardrail: !Equals [!Ref HasGuardrailConfig, "true"]
@@ -4583,7 +4627,218 @@ Resources:
       FieldName: publishCircuitBreakerStatus
 
 
+  ##########################################################################
+  # API Gateway HTTP API transport (AppSync replacement)
+  #
+  # When ApiTransport=httpapi the parent stack creates:
+  #   - HttpApi (API Gateway HTTP API) with a Cognito JWT authorizer
+  #   - HttpApiDispatcherFunction: one Lambda behind POST /op/{field} that
+  #     normalizes the request (idp_common.api_adapter), then either invokes the
+  #     existing resolver Lambda for that field or serves DynamoDB-direct fields
+  #     locally (ddb_direct.py).
+  # All resources are gated on UseHttpApi so AppSync deployments are unaffected.
+  ##########################################################################
+  HttpApiDispatcherLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: UseHttpApi
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StackName}-http-api-dispatcher"
+      RetentionInDays: 30
+
+  HttpApiDispatcherFunction:
+    Type: AWS::Serverless::Function
+    Condition: UseHttpApi
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function interacts only with AWS APIs; no VPC access required"
+          - id: W92
+            reason: "Reserved concurrency not required; scales on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous API dispatcher"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Reserved concurrency not required"
+    # checkov:skip=CKV_AWS_173: "Env vars are non-sensitive (table names, ARNs)"
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ./src/lambda/http_api_dispatcher
+      Description: HTTP API dispatcher — replaces AppSync for UI queries/mutations
+      MemorySize: 512
+      Timeout: 60
+      Layers:
+        - !Ref IDPCommonBaseLayerArn
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TRACKING_TABLE_NAME: !Ref TrackingTableName
+          DISCOVERY_TABLE_NAME: !Ref DiscoveryTrackingTableName
+          AGENT_TABLE_NAME: !Ref AgentTableName
+          # field -> resolver function ARN. Fields absent here are served by
+          # ddb_direct.py (discovery/agent jobs, getDocument, date queries).
+          FIELD_FUNCTION_MAP: !Sub
+            - |
+              {
+                "abortTestRuns": "${AbortTestRunsResolverFunction.Arn}",
+                "abortWorkflow": "${AbortWorkflowResolverFunction.Arn}",
+                "addDocumentsToTestSet": "${TestSetResolverFunction.Arn}",
+                "addDocumentsToTestSetFromUpload": "${TestSetResolverFunction.Arn}",
+                "addTestSet": "${TestSetResolverFunction.Arn}",
+                "addTestSetFromUpload": "${TestSetResolverFunction.Arn}",
+                "autoDetectSections": "${DiscoveryUploadResolverFunction.Arn}",
+                "compareTestRuns": "${TestResultsResolverFunction.Arn}",
+                "copyToBaseline": "${CopyToBaselineResolverFunction.Arn}",
+                "deleteChatSession": "${DeleteAgentChatSessionFunction.Arn}",
+                "deleteConfigVersion": "${ConfigurationResolverFunction.Arn}",
+                "deleteDocument": "${DeleteDocumentResolverFunction.Arn}",
+                "deleteTestSets": "${TestSetResolverFunction.Arn}",
+                "deleteTests": "${DeleteTestsResolverFunction.Arn}",
+                "getChatMessages": "${GetAgentChatMessagesFunction.Arn}",
+                "getConfigVersion": "${ConfigurationResolverFunction.Arn}",
+                "getConfigVersions": "${ConfigurationResolverFunction.Arn}",
+                "getConfigurationLibraryFile": "${ConfigurationResolverFunction.Arn}",
+                "getDocumentCount": "${ListDocumentsGSIResolverFunction.Arn}",
+                "getFileContents": "${GetFileContentsResolverFunction.Arn}",
+                "getPricing": "${ConfigurationResolverFunction.Arn}",
+                "getStepFunctionExecution": "${GetStepFunctionExecutionResolverFunction.Arn}",
+                "getTestRun": "${TestResultsResolverFunction.Arn}",
+                "getTestRunStatus": "${TestResultsResolverFunction.Arn}",
+                "getTestRuns": "${TestResultsResolverFunction.Arn}",
+                "getTestSets": "${TestSetResolverFunction.Arn}",
+                "listAvailableAgents": "${ListAvailableAgentsFunction.Arn}",
+                "listBucketFiles": "${TestSetResolverFunction.Arn}",
+                "listChatSessions": "${ListAgentChatSessionsFunction.Arn}",
+                "listConfigurationLibrary": "${ConfigurationResolverFunction.Arn}",
+                "listDocuments": "${ListDocumentsGSIResolverFunction.Arn}",
+                "listDocumentsByDateRange": "${ListDocumentsByDateRangeResolverFunction.Arn}",
+                "pauseCircuitBreaker": "${CircuitBreakerResolverFunction.Arn}",
+                "probeCircuitBreaker": "${CircuitBreakerResolverFunction.Arn}",
+                "processChanges": "${ProcessChangesResolverFunction.Arn}",
+                "queryKnowledgeBase": "${QueryKnowledgeBaseResolverFunction.Arn}",
+                "reprocessDocument": "${ReprocessDocumentResolverFunction.Arn}",
+                "restoreDefaultPricing": "${ConfigurationResolverFunction.Arn}",
+                "resumeCircuitBreaker": "${CircuitBreakerResolverFunction.Arn}",
+                "sendAgentChatMessage": "${AgentChatResolverFunction.Arn}",
+                "sendChatDocumentMessage": "${SendChatDocumentMessageResolverFunction.Arn}",
+                "setActiveVersion": "${ConfigurationResolverFunction.Arn}",
+                "startMultiDocDiscovery": "${DiscoveryUploadResolverFunction.Arn}",
+                "startTestRun": "${TestRunnerFunction.Arn}",
+                "submitAgentQuery": "${AgentRequestHandlerFunction.Arn}",
+                "syncBdaIdp": "${SyncBdaIdpResolverFunction.Arn}",
+                "updateConfiguration": "${ConfigurationResolverFunction.Arn}",
+                "updatePricing": "${ConfigurationResolverFunction.Arn}",
+                "updateTestSet": "${TestSetResolverFunction.Arn}",
+                "uploadDiscoveryDocument": "${DiscoveryUploadResolverFunction.Arn}",
+                "uploadDocument": "${UploadResolverFunction.Arn}",
+                "uploadMultiDocDiscoveryZip": "${DiscoveryUploadResolverFunction.Arn}",
+                "claimReview": "${CompleteSectionReviewFunctionArn}",
+                "completeSectionReview": "${CompleteSectionReviewFunctionArn}",
+                "releaseReview": "${CompleteSectionReviewFunctionArn}",
+                "skipAllSectionsReview": "${CompleteSectionReviewFunctionArn}",
+                "createUser": "${UserManagementFunctionArn}",
+                "updateUser": "${UserManagementFunctionArn}",
+                "deleteUser": "${UserManagementFunctionArn}",
+                "listUsers": "${UserManagementFunctionArn}",
+                "getMyProfile": "${UserManagementFunctionArn}",
+                "createFinetuningJob": "${FinetuningJobsResolverFunctionArn}",
+                "deleteFinetuningJob": "${FinetuningJobsResolverFunctionArn}",
+                "getFinetuningJob": "${FinetuningJobsResolverFunctionArn}",
+                "listFinetuningJobs": "${FinetuningJobsResolverFunctionArn}",
+                "calculateCapacity": "${CalculateCapacityResolverFunctionArn}",
+                "getLatestPublishedVersion": "${VersionCheckResolverFunctionArn}"
+              }
+            - {}
+      LoggingConfig:
+        LogGroup: !Ref HttpApiDispatcherLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTableName
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DiscoveryTrackingTableName
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AgentTableName
+        # Invoke any resolver Lambda in this stack (scoped to the stack's
+        # function name prefix) plus the named main-template resolver ARNs.
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource:
+                - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${StackName}-*"
+                - !Ref CompleteSectionReviewFunctionArn
+                - !Ref UserManagementFunctionArn
+                - !Ref FinetuningJobsResolverFunctionArn
+                - !Ref CalculateCapacityResolverFunctionArn
+                - !Ref VersionCheckResolverFunctionArn
+
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Condition: UseHttpApi
+    Properties:
+      Name: !Sub "${StackName}-http-api"
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins: ["*"]
+        AllowMethods: ["POST", "OPTIONS"]
+        AllowHeaders: ["Authorization", "Content-Type"]
+
+  HttpApiAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Condition: UseHttpApi
+    Properties:
+      ApiId: !Ref HttpApi
+      AuthorizerType: JWT
+      IdentitySource: ["$request.header.Authorization"]
+      Name: CognitoJwtAuthorizer
+      JwtConfiguration:
+        Audience: [!Ref UserPoolClientId]
+        Issuer: !Sub "https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${UserPoolId}"
+
+  HttpApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Condition: UseHttpApi
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt HttpApiDispatcherFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  HttpApiRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Condition: UseHttpApi
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "POST /op/{field}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref HttpApiAuthorizer
+      Target: !Sub "integrations/${HttpApiIntegration}"
+
+  HttpApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Condition: UseHttpApi
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: "$default"
+      AutoDeploy: true
+
+  HttpApiDispatcherPermission:
+    Type: AWS::Lambda::Permission
+    Condition: UseHttpApi
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref HttpApiDispatcherFunction
+      Principal: !Sub "apigateway.${AWS::URLSuffix}"
+      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*/op/{field}"
+
+
 Outputs:
+  HttpApiEndpoint:
+    Description: Base URL of the HTTP API transport (empty unless ApiTransport=httpapi)
+    Condition: UseHttpApi
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}"
+
   AppSyncServiceRoleArn:
     Description: ARN of the AppSync service role
     Value: !GetAtt AppSyncServiceRole.Arn

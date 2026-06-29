@@ -32,10 +32,8 @@ import os
 from typing import Any, Dict
 
 import boto3
-
-from idp_common.api_adapter import _http_response, normalize_event
-
 import ddb_direct
+from idp_common.api_adapter import _http_response, normalize_event
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
