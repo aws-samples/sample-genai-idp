@@ -1,0 +1,10 @@
+# Thin ASGI web stack for the Lambda Web Adapter streaming endpoint.
+# idp_common (bedrock client, appsync client, agents, config) is provided by the
+# attached Lambda layers (base + agents), matching the two processor functions.
+fastapi>=0.115.0
+uvicorn>=0.30.0
+
+# Match the processor functions' boto3 pin so converse_stream accepts the
+# serviceTier parameter (see chat_with_document_processor/requirements.txt).
+boto3>=1.42.0
+botocore>=1.42.0

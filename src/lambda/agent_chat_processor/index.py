@@ -100,6 +100,31 @@ mutation SendAgentChatMessage($prompt: String!, $sessionId: String, $method: Str
 """
 
 
+# --- Emission sink -------------------------------------------------------
+#
+# Streaming events normally fan out via AppSync mutations (see
+# ``publish_stream_update``). To support the Lambda Function URL streaming
+# endpoint (``chat_stream_processor``) — which replaces AppSync for GovCloud /
+# FedRAMP — an alternative sink can be injected via ``set_sink``. When a sink
+# is installed, ``publish_stream_update`` routes events to it (writing SSE
+# ``data: {json}`` chunks to the HTTP response stream) instead of calling
+# AppSync. The default (no sink) preserves the original AppSync behavior so the
+# ``ApiTransport=appsync`` path is completely unchanged.
+#
+# A sink is a callable: sink(session_id, content, method, is_processing,
+# tool_metadata) -> None (it may be sync; it is invoked from async code).
+_active_sink = None
+
+
+def set_sink(sink) -> None:
+    """Install an alternative emission sink (used by the streaming endpoint).
+
+    Pass ``None`` to restore the default AppSync-publish behavior.
+    """
+    global _active_sink
+    _active_sink = sink
+
+
 def clean_content_for_display(content):
     """
     Remove thinking tags from content for display.
@@ -143,18 +168,32 @@ async def publish_stream_update(
         cleaned_content = str(content).replace('\r', ' ')
         if len(cleaned_content) > 10000:
             cleaned_content = cleaned_content[:10000] + "..."
-        
+
+        # When a streaming sink is installed (Lambda Function URL transport),
+        # route the event to it instead of AppSync. The sink mirrors the same
+        # payload shape the AppSync subscription delivered to the UI.
+        if _active_sink is not None:
+            _active_sink(
+                session_id=str(session_id),
+                content=cleaned_content,
+                method=method,
+                is_processing=bool(is_processing),
+                tool_metadata=tool_metadata,
+            )
+            logger.info(f"Published message via stream sink: {method}")
+            return None
+
         # Prepare variables for the mutation
         variables = {
             "prompt": cleaned_content,
             "sessionId": str(session_id),
             "method": method
         }
-        
+
         # Add tool metadata if provided
         if tool_metadata:
             variables["toolMetadata"] = tool_metadata
-        
+
         # Execute the GraphQL mutation
         response = appsync_client.execute_mutation(
             STREAMING_MUTATION,
@@ -162,7 +201,7 @@ async def publish_stream_update(
         )
         logger.info(f"Published message via AppSync: {method}")
         return response
-        
+
     except Exception as e:
         logger.error(f"Error publishing stream update: {e}")
         return None
@@ -838,9 +877,15 @@ def handler(event, context):
         asyncio.set_event_loop(loop)
         
         try:
-            # Use cached AppSync client for warm Lambda containers
-            appsync_client = get_cached_appsync_client()
-            logger.info("AppSync client ready")
+            # When a streaming sink is installed (Function URL transport), we
+            # don't need an AppSync client at all — publish_stream_update routes
+            # to the sink. Otherwise use the cached AppSync client.
+            if _active_sink is not None:
+                appsync_client = None
+                logger.info("Streaming sink installed; skipping AppSync client")
+            else:
+                appsync_client = get_cached_appsync_client()
+                logger.info("AppSync client ready")
             
             # Stream the agent response
             result = loop.run_until_complete(
@@ -905,8 +950,10 @@ def handler(event, context):
         try:
             session_id = event.get("sessionId")
             if session_id:
-                # Create fresh AppSync client for error publishing
-                error_appsync_client = AppSyncClient()
+                # Create fresh AppSync client for error publishing — unless a
+                # streaming sink is installed, in which case publish_stream_update
+                # ignores the client arg and routes to the sink instead.
+                error_appsync_client = None if _active_sink is not None else AppSyncClient()
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:

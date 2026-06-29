@@ -9,8 +9,13 @@ import type { SelectProps } from '@cloudscape-design/components';
 
 import { sendChatDocumentMessage, onChatDocumentMessageUpdate } from '../../graphql/generated';
 import useConfiguration from '../../hooks/use-configuration';
+import useCurrentSessionCreds from '../../hooks/use-current-session-creds';
+import { streamChat, type StreamCredentials } from '../../api/stream-client';
+import { apiTransport } from '../../aws-exports';
 import SafeMarkdown from '../common/SafeMarkdown';
 import './ChatPanel.css';
+
+const useHttpApiTransport = apiTransport === 'httpapi';
 
 interface ChatMessage {
   role: string; // 'user' | 'ai' | 'loader'
@@ -143,6 +148,10 @@ const ChatPanel = ({ objectKey, configVersion = 'default' }: ChatPanelProps): Re
 
   const textareaRef = useRef<HTMLInputElement>(null);
   const rowIdRef = useRef(0);
+
+  // Cognito Identity Pool credentials for SigV4-signing the streaming request
+  // (httpapi transport only). Unused under the appsync transport.
+  const { currentCredentials } = useCurrentSessionCreds({});
 
   // One sessionId per panel instance (i.e. per opened document). Regenerate
   // when the document changes so we can't cross-contaminate sessions.
@@ -306,8 +315,11 @@ const ChatPanel = ({ objectKey, configVersion = 'default' }: ChatPanelProps): Re
     [sessionId],
   );
 
-  // Subscribe to streaming updates for this session.
+  // Subscribe to streaming updates for this session (appsync transport only).
+  // Under httpapi the response is streamed directly from the Function URL in
+  // handlePromptSubmit, so there is no subscription to set up.
   useEffect(() => {
+    if (useHttpApiTransport) return undefined;
     logger.info('Subscribing to chat-doc updates', { sessionId });
     const subscription = (
       client.graphql({
@@ -355,16 +367,38 @@ const ChatPanel = ({ objectKey, configVersion = 'default' }: ChatPanelProps): Re
     setCurrentStatus({ status: 'QUEUED', label: defaultStatusLabel('QUEUED') });
 
     try {
-      await client.graphql({
-        query: sendChatDocumentMessage,
-        variables: {
-          sessionId,
-          prompt,
-          method: 'chat',
-          s3Uri: objectKey,
-          modelId: effectiveModelId,
-        },
-      });
+      if (useHttpApiTransport) {
+        // Stream directly from the IAM-authed Lambda Function URL. Each SSE
+        // event has the same shape the AppSync subscription delivered, so we
+        // feed them straight into handleUpdate. streamChat resolves when the
+        // stream ends (final/error already applied via handleUpdate).
+        const creds = currentCredentials as StreamCredentials | undefined;
+        if (!creds?.accessKeyId) {
+          throw new Error('No AWS credentials available for streaming.');
+        }
+        await streamChat({
+          path: '/chat/document',
+          body: {
+            sessionId,
+            prompt,
+            s3Uri: objectKey,
+            modelId: effectiveModelId,
+          },
+          credentials: creds,
+          onEvent: (event) => handleUpdate(event as ChatDocumentUpdate),
+        });
+      } else {
+        await client.graphql({
+          query: sendChatDocumentMessage,
+          variables: {
+            sessionId,
+            prompt,
+            method: 'chat',
+            s3Uri: objectKey,
+            modelId: effectiveModelId,
+          },
+        });
+      }
     } catch (err) {
       // Extract a useful error message.
       const gqlErr = err as { errors?: { message: string; errorType?: string }[]; message?: string };

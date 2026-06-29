@@ -7,9 +7,13 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import { sendAgentChatMessage, onAgentChatMessageUpdate, getChatMessages } from '../graphql/generated';
 import { useAgentChatContext } from '../contexts/agentChat';
 import type { ChatMessage } from '../types/agent-chat';
+import { streamChat, type StreamCredentials, type StreamEvent } from '../api/stream-client';
+import { apiTransport } from '../aws-exports';
+import useCurrentSessionCreds from './use-current-session-creds';
 
 const logger = new ConsoleLogger('useAgentChat');
 const client = generateClient();
+const useHttpApiTransport = apiTransport === 'httpapi';
 
 interface AgentChatConfig {
   agentType: string;
@@ -60,6 +64,12 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
   const { messages, isLoading, waitingForResponse, error, sessionId } = agentChatState;
 
   const sentMessagesRef = useRef(new Set<string>());
+
+  // Cognito Identity Pool credentials for SigV4-signing the streaming request
+  // (httpapi transport only). Unused under the appsync transport.
+  const { currentCredentials } = useCurrentSessionCreds({});
+  const credentialsRef = useRef<unknown>(undefined);
+  credentialsRef.current = currentCredentials;
 
   // Handle tool execution start messages - creates standalone tool message chronologically
   const handleToolExecutionStart = (newMessage: ChatMessage): void => {
@@ -803,8 +813,11 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
     ]);
   };
 
-  // Subscribe to chat message updates
+  // Subscribe to chat message updates (appsync transport only). Under httpapi
+  // the agent response is streamed directly from the Function URL in
+  // sendMessage, so there is no subscription to set up.
   useEffect(() => {
+    if (useHttpApiTransport) return undefined;
     logger.info('Setting up GraphQL subscription for session:', sessionId);
     logger.info('Using agent config:', agentConfig);
 
@@ -863,6 +876,29 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
     updateMessages((prevMessages) => [...prevMessages, userMessage]);
 
     try {
+      if (useHttpApiTransport) {
+        // Stream directly from the IAM-authed Lambda Function URL. Each SSE
+        // event has the same shape onAgentChatMessageUpdate delivered, so we
+        // feed them straight into addMessage. streamChat resolves when the
+        // stream ends (final/error already applied via addMessage).
+        const creds = credentialsRef.current as StreamCredentials | undefined;
+        if (!creds?.accessKeyId) {
+          throw new Error('No AWS credentials available for streaming.');
+        }
+        await streamChat({
+          path: '/chat/agent',
+          body: {
+            prompt,
+            sessionId,
+            method: agentConfig.method,
+            enableCodeIntelligence: options.enableCodeIntelligence,
+          },
+          credentials: creds,
+          onEvent: (event: StreamEvent) => addMessage(event as unknown as ChatMessage),
+        });
+        return undefined;
+      }
+
       const response = await client.graphql({
         query: agentConfig.mutation,
         variables: {

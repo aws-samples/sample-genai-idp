@@ -114,6 +114,50 @@ def _get_appsync_client() -> AppSyncClient:
     return _appsync_client
 
 
+# --- Emission sink -------------------------------------------------------
+#
+# All status / delta / final / error events flow through ``_emit`` rather than
+# being hard-wired to AppSync. The default sink (``_publish``) preserves the
+# original AppSync-mutation behavior so the ``ApiTransport=appsync`` path is
+# completely unchanged. The Lambda Function URL streaming endpoint
+# (``chat_stream_processor``) injects an alternative sink via ``set_sink`` that
+# writes SSE ``data: {json}`` chunks to the HTTP response stream instead.
+#
+# A sink is any callable with the same keyword signature as ``_publish``.
+_active_sink = None  # type: ignore[var-annotated]
+
+
+def set_sink(sink) -> None:  # noqa: ANN001
+    """Install an alternative emission sink (used by the streaming endpoint).
+
+    Pass ``None`` to restore the default AppSync-publish behavior.
+    """
+    global _active_sink
+    _active_sink = sink
+
+
+def _emit(
+    session_id: str,
+    method: str,
+    status: str,
+    content: str,
+    role: str = "assistant",
+    model_id: str = "",
+    is_processing: bool = True,
+) -> None:
+    """Route an event to the active sink (AppSync publish by default)."""
+    sink = _active_sink or _publish
+    sink(
+        session_id=session_id,
+        method=method,
+        status=status,
+        content=content,
+        role=role,
+        model_id=model_id,
+        is_processing=is_processing,
+    )
+
+
 def _get_bedrock_runtime():
     global _bedrock_runtime
     if _bedrock_runtime is None:
@@ -298,7 +342,7 @@ def _resolve_chat_settings(config_version: str | None):
     }
 
 
-def _invoke_openai_responses_and_publish(
+def _invoke_openai_responses_and_emit(
     session_id: str,
     selected_model_id: str,
     system_prompt: str,
@@ -339,7 +383,7 @@ def _invoke_openai_responses_and_publish(
         buffer = []
         buffer_len = 0
         last_flush_ts = now
-        _publish(
+        _emit(
             session_id=session_id,
             method="assistant_stream",
             status="STREAMING",
@@ -363,7 +407,7 @@ def _invoke_openai_responses_and_publish(
                 continue
             if not first_delta_seen:
                 first_delta_seen = True
-                _publish(
+                _emit(
                     session_id=session_id,
                     method="assistant_status",
                     status="STREAMING",
@@ -380,7 +424,7 @@ def _invoke_openai_responses_and_publish(
     return "".join(full_text_parts)
 
 
-def _invoke_bedrock_stream_and_publish(
+def _invoke_bedrock_stream_and_emit(
     session_id: str,
     selected_model_id: str,
     system_prompt: str,
@@ -500,7 +544,7 @@ def _invoke_bedrock_stream_and_publish(
         buffer = []
         buffer_len = 0
         last_flush_ts = now
-        _publish(
+        _emit(
             session_id=session_id,
             method="assistant_stream",
             status="STREAMING",
@@ -518,7 +562,7 @@ def _invoke_bedrock_stream_and_publish(
                     continue
                 if not first_delta_seen:
                     first_delta_seen = True
-                    _publish(
+                    _emit(
                         session_id=session_id,
                         method="assistant_status",
                         status="STREAMING",
@@ -579,7 +623,7 @@ def handler(event, _context):  # noqa: ANN001
 
     if not (session_id and prompt and object_key):
         logger.error("Missing required fields in chat-doc event: %s", event)
-        _publish(
+        _emit(
             session_id=session_id or "unknown",
             method="assistant_error",
             status="ERROR",
@@ -590,7 +634,7 @@ def handler(event, _context):  # noqa: ANN001
 
     try:
         # --- 1. Look up the document record ---------------------------------
-        _publish(
+        _emit(
             session_id=session_id,
             method="assistant_status",
             status="LOADING_DOCUMENT",
@@ -619,7 +663,7 @@ def handler(event, _context):  # noqa: ANN001
                 allowed_versions,
                 config_version,
             )
-            _publish(
+            _emit(
                 session_id=session_id,
                 method="assistant_error",
                 status="ERROR",
@@ -639,7 +683,7 @@ def handler(event, _context):  # noqa: ANN001
         fulltext_key = object_key + "/summary/fulltext.txt"
         if not _s3_object_exists(output_bucket, fulltext_key):
             page_count = len(document.get("Pages") or [])
-            _publish(
+            _emit(
                 session_id=session_id,
                 method="assistant_status",
                 status="LOADING_DOCUMENT",
@@ -656,7 +700,7 @@ def handler(event, _context):  # noqa: ANN001
             content_str = resp["Body"].read().decode("utf-8")
 
         # --- 5. Invoke Bedrock (streaming) ---------------------------------
-        _publish(
+        _emit(
             session_id=session_id,
             method="assistant_status",
             status="CALLING_MODEL",
@@ -668,7 +712,7 @@ def handler(event, _context):  # noqa: ANN001
         t_start = time.time()
         if is_openai_responses_model(selected_model_id):
             # OpenAI GPT-5.x: bedrock-mantle Responses API (non-streaming).
-            full_text = _invoke_openai_responses_and_publish(
+            full_text = _invoke_openai_responses_and_emit(
                 session_id=session_id,
                 selected_model_id=selected_model_id,
                 system_prompt=chat_settings["system_prompt"],
@@ -677,7 +721,7 @@ def handler(event, _context):  # noqa: ANN001
                 reasoning_effort=chat_settings.get("reasoning_effort"),
             )
         else:
-            full_text = _invoke_bedrock_stream_and_publish(
+            full_text = _invoke_bedrock_stream_and_emit(
                 session_id=session_id,
                 selected_model_id=selected_model_id,
                 system_prompt=chat_settings["system_prompt"],
@@ -695,7 +739,7 @@ def handler(event, _context):  # noqa: ANN001
         )
 
         # --- 6. Publish final answer ---------------------------------------
-        _publish(
+        _emit(
             session_id=session_id,
             method="assistant_final",
             status="COMPLETE",
@@ -707,7 +751,7 @@ def handler(event, _context):  # noqa: ANN001
 
     except Exception as e:  # noqa: BLE001
         logger.exception("chat-doc processor failed: %s", e)
-        _publish(
+        _emit(
             session_id=session_id,
             method="assistant_error",
             status="ERROR",

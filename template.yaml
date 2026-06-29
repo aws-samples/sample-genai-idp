@@ -65,6 +65,19 @@ Parameters:
       queries/mutations, polling for status updates, and Lambda response
       streaming for chat (required for GovCloud / FedRAMP).
 
+  LambdaWebAdapterLayerArn:
+    Type: String
+    # Public AWS Lambda Web Adapter layer (x86_64). The account 753240598075 is
+    # the LWA publisher; the layer name/version are region-stable. Default is
+    # the us-west-2 ARN — override this parameter for other regions or GovCloud
+    # (GovCloud publishes LWA under a different account; see the LWA releases).
+    # Only consumed when ApiTransport=httpapi (the chat streaming Function URL).
+    Default: arn:aws:lambda:us-west-2:753240598075:layer:LambdaAdapterLayerX86:25
+    Description: >-
+      ARN of the AWS Lambda Web Adapter layer used by the chat streaming Function
+      URL (ApiTransport=httpapi only). Override for non-us-west-2 / GovCloud
+      regions.
+
   # Authorization params
   AdminEmail:
     Type: String
@@ -7174,6 +7187,260 @@ Resources:
       RetentionInDays: !Ref LogRetentionDays
 
   ##########################################################################
+  # Chat streaming endpoint (ApiTransport=httpapi only)
+  #
+  # Replaces the AppSync mutation->subscription fan-out for chat token deltas
+  # with Lambda response streaming via a direct Function URL
+  # (InvokeMode=RESPONSE_STREAM, AuthType=AWS_IAM). The browser SigV4-signs the
+  # request with the authenticated Cognito Identity Pool role and reads the SSE
+  # body incrementally. Works identically under CloudFront or ALB because the
+  # Function URL is addressed directly by the browser.
+  #
+  # The function runs a tiny FastAPI app under the AWS Lambda Web Adapter (LWA)
+  # and drives the SAME chat_with_document_processor / agent_chat_processor logic
+  # used by the async-invoke path, with the delta sink redirected to the HTTP
+  # response stream. All resources are gated on UseHttpApi so AppSync deployments
+  # are unaffected.
+  ##########################################################################
+  ChatStreamProcessorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: UseHttpApi
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  ChatStreamProcessorFunction:
+    Type: AWS::Serverless::Function
+    Condition: UseHttpApi
+    Metadata:
+      BuildMethod: makefile
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+          - id: W11
+            reason: "Role requires * for Bedrock marketplace and CloudWatch Metrics"
+    # checkov:skip=CKV_AWS_116: "DLQ not required — synchronous Function URL stream; errors are streamed to the UI as assistant_error"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain only non-sensitive configuration"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      CodeUri: src/lambda/chat_stream_processor/
+      # LWA boots run.sh (uvicorn) via the /opt/bootstrap exec wrapper.
+      Handler: run.sh
+      Runtime: python3.12
+      MemorySize: 4096
+      Timeout: 900
+      Layers:
+        # Base (bedrock/appsync/config) + agents (strands) — the streaming app
+        # imports both processor modules so it needs both layers. LWA layer last.
+        - !Ref IDPCommonBaseLayer
+        - !Ref IDPCommonAgentsLayer
+        - !Ref LambdaWebAdapterLayerArn
+      Environment:
+        Variables:
+          # LWA: run the app in response-streaming mode and wrap exec with LWA.
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
+          AWS_LWA_INVOKE_MODE: response_stream
+          PORT: "8080"
+          LOG_LEVEL: !Ref LogLevel
+          # --- Shared / doc-chat processor env (mirrors ChatWithDocumentProcessorFunction) ---
+          OUTPUT_BUCKET: !Ref OutputBucket
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          TRACKING_TABLE_NAME: !Ref TrackingTable
+          USERS_TABLE_NAME: !Ref UsersTable
+          GUARDRAIL_ID_AND_VERSION:
+            !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
+          # --- Agent-chat processor env (mirrors AgentChatProcessorFunction) ---
+          LOOKUP_FUNCTION_NAME: !Ref LookupFunction
+          STRANDS_LOG_LEVEL: !Ref LogLevel
+          BEDROCK_REGION: !Ref AWS::Region
+          CHAT_MESSAGES_TABLE: !Ref ChatMessagesTable
+          ID_HELPER_CHAT_MEMORY_TABLE: !Ref IdHelperChatMemoryTable
+          MEMORY_METHOD: dynamodb
+          STREAMING_ENABLED: true
+          MAX_CONVERSATION_TURNS: 20
+          MAX_MESSAGE_SIZE_KB: 8.5
+          DATA_RETENTION_DAYS: !Ref DataRetentionInDays
+          ATHENA_DATABASE: !Ref ReportingDatabase
+          ATHENA_OUTPUT_LOCATION: !Sub
+            - "s3://${Bucket}/athena-results/"
+            - Bucket: !If
+                - ShouldCreateReportingBucket
+                - !Ref ReportingBucket
+                - !Ref ReportingBucketName
+          AWS_STACK_NAME: !Ref AWS::StackName
+          CLOUDWATCH_LOG_GROUP_PREFIX: !Sub "/aws/lambda/${AWS::StackName}"
+          SETTINGS_PARAMETER_NAME: !Ref SettingsParameter
+          # No APPSYNC_API_URL — the sink writes to the HTTP stream instead of
+          # AppSync, so neither processor constructs an AppSyncClient here.
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
+      LoggingConfig:
+        LogGroup: !Ref ChatStreamProcessorLogGroup
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref OutputBucket
+        - S3WritePolicy:
+            BucketName: !Ref OutputBucket
+        - DynamoDBReadPolicy:
+            TableName: !Ref ConfigurationTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref TrackingTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ChatMessagesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IdHelperChatMemoryTable
+        - S3CrudPolicy:
+            BucketName: !If
+              - ShouldCreateReportingBucket
+              - !Ref ReportingBucket
+              - !Ref ReportingBucketName
+        - Statement:
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+                - bedrock:GetInferenceProfile
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+            - Effect: Allow
+              Action:
+                - bedrock-agentcore:InvokeAgentRuntime
+                - bedrock-agentcore:StartCodeInterpreterSession
+                - bedrock-agentcore:StopCodeInterpreterSession
+                - bedrock-agentcore:InvokeCodeInterpreter
+                - bedrock-agentcore:GetCodeInterpreterSession
+                - bedrock-agentcore:ListCodeInterpreterSessions
+              Resource:
+                - "*"
+            - Effect: Allow
+              Action:
+                - aws-marketplace:Subscribe
+                - aws-marketplace:Unsubscribe
+                - aws-marketplace:ViewSubscriptions
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - cloudwatch:PutMetricData
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - athena:StartQueryExecution
+                - athena:GetQueryExecution
+                - athena:GetQueryResults
+              Resource:
+                - !Sub "arn:${AWS::Partition}:athena:${AWS::Region}:${AWS::AccountId}:workgroup/primary"
+                - !Sub "arn:${AWS::Partition}:athena:${AWS::Region}:${AWS::AccountId}:datacatalog/*"
+            - Effect: Allow
+              Action:
+                - glue:GetTable
+                - glue:GetTables
+                - glue:GetDatabase
+                - glue:GetDatabases
+                - glue:GetPartitions
+              Resource:
+                - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:catalog"
+                - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:database/${ReportingDatabase}"
+                - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:table/${ReportingDatabase}/*"
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource:
+                - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}*"
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - !Ref ExternalMCPAgentsSecret
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${SettingsParameter}"
+            # RBAC scope enforcement — query UsersTable.SubIndex.
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+              Resource:
+                - !GetAtt UsersTable.Arn
+                - !Sub "${UsersTable.Arn}/index/*"
+            - !If
+              - HasGuardrailConfig
+              - Effect: Allow
+                Action: bedrock:ApplyGuardrail
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
+
+  # Direct Function URL (IAM-authed, response streaming). The browser POSTs
+  # SigV4-signed requests here; CORS allows the SPA origin.
+  ChatStreamProcessorUrl:
+    Type: AWS::Lambda::Url
+    Condition: UseHttpApi
+    Properties:
+      TargetFunctionArn: !Ref ChatStreamProcessorFunction
+      AuthType: AWS_IAM
+      InvokeMode: RESPONSE_STREAM
+      Cors:
+        AllowCredentials: false
+        AllowMethods:
+          - POST
+        AllowHeaders:
+          - content-type
+          - authorization
+          - x-amz-date
+          - x-amz-content-sha256
+          - x-amz-security-token
+        AllowOrigins:
+          - "*"
+        MaxAge: 600
+
+  # Allow the authenticated Cognito Identity Pool role to invoke the Function
+  # URL (FunctionUrlAuthType=AWS_IAM requires both the resource permission here
+  # and the lambda:InvokeFunctionUrl grant on the caller's role).
+  ChatStreamProcessorUrlPermission:
+    Type: AWS::Lambda::Permission
+    Condition: UseHttpApi
+    Properties:
+      FunctionName: !Ref ChatStreamProcessorFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: !GetAtt CognitoAuthorizedRole.Arn
+      FunctionUrlAuthType: AWS_IAM
+
+  ##########################################################################
   # DynamoDB Table for Agent Chat Session Metadata
   ##########################################################################
 
@@ -9928,6 +10195,15 @@ Resources:
               - UseHttpApi
               - !GetAtt APPSYNCSTACK.Outputs.HttpApiEndpoint
               - ""
+          # Chat streaming Function URL (IAM-authed, response streaming). Empty
+          # while ApiTransport=appsync so the UI keeps using AppSync chat
+          # subscriptions. The signed stream client (src/api/stream-client.ts)
+          # reads this.
+          - Name: VITE_STREAM_URL
+            Value: !If
+              - UseHttpApi
+              - !GetAtt ChatStreamProcessorUrl.FunctionUrl
+              - ""
           - Name: VITE_AWS_REGION
             Value: !Ref AWS::Region
           - Name: VITE_SHOULD_HIDE_SIGN_UP
@@ -11231,6 +11507,10 @@ Outputs:
         - !If
           - UseHttpApi
           - !Sub "VITE_API_BASE_URL=${APPSYNCSTACK.Outputs.HttpApiEndpoint}"
+          - ""
+        - !If
+          - UseHttpApi
+          - !Sub "VITE_STREAM_URL=${ChatStreamProcessorUrl.FunctionUrl}"
           - ""
         - !Sub "VITE_AWS_REGION=${AWS::Region}"
         - !Sub "VITE_SETTINGS_PARAMETER=${SettingsParameter}"
