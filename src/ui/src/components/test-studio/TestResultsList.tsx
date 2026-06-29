@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Table, Button, SpaceBetween, ButtonDropdown, Pagination, Box, TextFilter, Flashbar } from '@cloudscape-design/components';
 import type { IconProps } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { getTestRuns, deleteTests, abortTestRuns } from '../../graphql/generated';
 import DeleteTestModal from './DeleteTestModal';
 import AbortTestModal from './AbortTestModal';

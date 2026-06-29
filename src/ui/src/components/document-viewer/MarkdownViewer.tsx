@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Box, Button, SpaceBetween } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import SafeMarkdown from '../common/SafeMarkdown';
 import { getFileContents } from '../../graphql/generated';

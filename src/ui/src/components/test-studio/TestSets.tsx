@@ -20,7 +20,7 @@ import {
   DatePicker,
   TimeInput,
 } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import {
   addTestSet,
   addTestSetFromUpload,

@@ -25,7 +25,7 @@ import Editor, { type OnMount } from '@monaco-editor/react';
 import yaml from 'js-yaml';
 import ReactMarkdown from 'react-markdown';
 import { useLocation } from 'react-router-dom';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import useConfiguration from '../../hooks/use-configuration';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';

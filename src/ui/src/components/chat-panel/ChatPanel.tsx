@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT-0
 
 import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { Button, Container, SpaceBetween, FormField, Alert, Select, StatusIndicator } from '@cloudscape-design/components';
 import type { SelectProps } from '@cloudscape-design/components';

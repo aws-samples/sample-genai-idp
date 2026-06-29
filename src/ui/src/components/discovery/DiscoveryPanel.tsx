@@ -30,7 +30,7 @@ import {
   CollectionPreferences,
 } from '@cloudscape-design/components';
 import type { SelectProps } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 
 import { uploadDiscoveryDocument, listDiscoveryJobs, onDiscoveryJobStatusChange, deleteDiscoveryJob, autoDetectSections } from '../../graphql/generated';
 import useSettingsContext from '../../contexts/settings';

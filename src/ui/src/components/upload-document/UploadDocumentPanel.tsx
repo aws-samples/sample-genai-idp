@@ -16,7 +16,7 @@ import {
   Select,
 } from '@cloudscape-design/components';
 import type { SelectProps } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 
 import { uploadDocument } from '../../graphql/generated';
 

@@ -15,7 +15,7 @@ import {
   StatusIndicator,
 } from '@cloudscape-design/components';
 import type { ButtonDropdownProps } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import { formatConfigVersionLink } from '../test-studio/utils/configVersionUtils';
 import type { ConfigVersion } from '../test-studio/utils/configVersionUtils';

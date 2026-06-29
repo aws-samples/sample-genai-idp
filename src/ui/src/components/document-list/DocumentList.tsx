@@ -4,7 +4,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { Table, Pagination, TextFilter, Box, SpaceBetween } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 import { ConsoleLogger } from 'aws-amplify/utils';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { useNavigate } from 'react-router-dom';
 
