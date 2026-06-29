@@ -89,6 +89,37 @@ class TestValidateExtraction:
         }
         assert len(report.errors) >= 4
 
+    def test_stringified_minitems_is_coerced(self):
+        # The Configuration table stores numeric schema constraints as strings.
+        # A string minItems must not raise TypeError inside jsonschema and must
+        # still be enforced after coercion.
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                "rows": {
+                    "type": "array",
+                    "minItems": "2",  # string from config round-trip
+                    "items": {"type": "object"},
+                }
+            },
+        }
+        # Below the bound -> fails (proves the constraint is enforced, not skipped).
+        report = validate_extraction({"rows": [{}]}, schema)
+        assert not report.valid
+        assert "rows" in report.failed_top_level_fields
+        # Meets the bound -> passes.
+        assert validate_extraction({"rows": [{}, {}]}, schema).valid
+
+    def test_stringified_numeric_bounds_are_coerced(self):
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": {
+                "qty": {"type": "integer", "minimum": "10", "maximum": "20"},
+            },
+        }
+        assert validate_extraction({"qty": 15}, schema).valid
+        assert not validate_extraction({"qty": 5}, schema).valid
+
     def test_missing_required_field_attributed_to_field(self):
         doc = {"issue_date": "2024-01-02"}  # invoice_id missing
         report = validate_extraction(doc, SCHEMA)
