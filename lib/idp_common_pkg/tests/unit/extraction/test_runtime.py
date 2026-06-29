@@ -135,7 +135,9 @@ class TestTableParsingStatsMerge:
     def test_counts_sum_rates_average(self):
         a = self._shard(rows=300, rate=1.0, conf=99.0)
         out = _merge_table_parsing_stats({}, a)
-        out = _merge_table_parsing_stats(out, self._shard(rows=300, rate=1.0, conf=98.0))
+        out = _merge_table_parsing_stats(
+            out, self._shard(rows=300, rate=1.0, conf=98.0)
+        )
         assert out["tables_parsed"] == 4
         assert out["rows_parsed"] == 600
         assert out["rows_mapped"] == 600
@@ -157,10 +159,10 @@ class TestTableParsingStatsMerge:
 
     def test_row_weighted_not_simple_mean(self):
         # 900 rows @ 1.0 + 100 rows @ 0.0 → weighted 0.9, not simple-mean 0.5
-        out = _merge_table_parsing_stats({}, self._shard(rows=900, rate=1.0, conf=100.0))
         out = _merge_table_parsing_stats(
-            out, self._shard(rows=100, rate=0.0, conf=0.0)
+            {}, self._shard(rows=900, rate=1.0, conf=100.0)
         )
+        out = _merge_table_parsing_stats(out, self._shard(rows=100, rate=0.0, conf=0.0))
         assert out["parse_success_rate"] == pytest.approx(0.9)
         assert out["avg_confidence"] == pytest.approx(90.0)
 
