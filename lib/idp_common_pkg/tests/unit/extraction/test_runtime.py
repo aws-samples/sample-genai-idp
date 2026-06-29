@@ -87,6 +87,27 @@ class TestMergeWrappers:
         assert merged["account"] == "A"  # page 0 wins regardless of input order
         assert len(conflicts) == 1
 
+    def test_merge_drops_phantom_rows(self):
+        # A trailing row with only a sequential index populated (every other
+        # column null) is a hallucinated/OCR-gap artifact and must be dropped,
+        # while genuine multi-field rows survive.
+        real = {"RowID": 1, "Symbol": "AAPL", "Account": "X", "Qty": "5"}
+        phantom = {"RowID": 2, "Symbol": None, "Account": None, "Qty": None}
+        results = [
+            (_Model(transactions=[real]), {"metering": {}}),
+            (_Model(transactions=[phantom]), {"metering": {}}),
+        ]
+        merged, _m, _c = merge_shard_results(results, _Model)
+        assert merged["transactions"] == [real]
+
+    def test_merge_keeps_sparse_two_field_rows(self):
+        # A row with two populated fields is real data, not a phantom.
+        row = {"RowID": 9, "Symbol": "MSFT", "Account": None, "Qty": None}
+        merged, _m, _c = merge_shard_results(
+            [(_Model(transactions=[row]), {"metering": {}})], _Model
+        )
+        assert merged["transactions"] == [row]
+
 
 # --------------------------- shard_result_key ----------------------------- #
 class TestShardResultKey:

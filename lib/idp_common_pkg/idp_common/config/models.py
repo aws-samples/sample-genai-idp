@@ -254,13 +254,39 @@ class AgenticConfig(BaseModel):
         "RPM — tune to your quota.",
     )
     shard_token_budget: int = Field(
-        default=40000,
+        default=8000,
         gt=0,
         description="Target maximum input tokens (estimated, ~chars/4) of OCR "
         "text per shard when max_concurrent_batches > 1. Pages are grouped so "
         "each shard stays under this budget, creating as many shards as needed "
-        "(capped by max_concurrent_batches). Raise for large-context models "
-        "(e.g. 1M-context Claude); lower if shards still overflow.",
+        "(capped by max_concurrent_batches). The default (8000) reliably shards "
+        "large documents so a single agent never has to emit a giant table in "
+        "one Bedrock call (the read-timeout failure mode). Raise for "
+        "large-context models (e.g. 1M-context Claude); lower if shards still "
+        "overflow.",
+    )
+    max_pages_per_shard: int = Field(
+        default=5,
+        ge=0,
+        description="Page-count ceiling per shard when max_concurrent_batches "
+        "> 1. A shard is closed once it holds this many pages even if its OCR "
+        "text is still under shard_token_budget — so a document with unusually "
+        "compact pages still shards on page count (tokens AND pages both bound a "
+        "shard). This guarantees large docs shard regardless of text density. "
+        "0 = disabled (token budget alone bounds shards).",
+    )
+    max_images_per_agent: int = Field(
+        default=20,
+        ge=0,
+        description="Safety cap on how many page images are attached to a single "
+        "agent invocation when the task prompt uses {DOCUMENT_IMAGE}. Sending many "
+        "large images in one request can cause Bedrock read timeouts / oversized "
+        "first turns (a long doc with 25+ page images is the classic case). When "
+        "the section (or a shard) has more images than this, only the first N are "
+        "attached and a warning is logged; the agent still has the full OCR text "
+        "and can fetch specific pages with the view_image tool. 0 = unlimited "
+        "(legacy behavior). Per-shard sharding already bounds this; the cap is the "
+        "backstop for the single-agent path.",
     )
     max_images_per_agent: int = Field(
         default=20,

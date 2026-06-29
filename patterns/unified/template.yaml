@@ -1057,11 +1057,19 @@ Resources:
                     dependsOn: { field: "enabled", value: true }
                   shard_token_budget:
                     type: number
-                    description: "Only used when concurrent extraction is active (max_concurrent_batches > 1). Target maximum input tokens (estimated ~chars/4) of OCR text per shard. Pages are grouped so each shard stays under this budget, creating as many shards as needed (capped by max_concurrent_batches). Lower this if shards still overflow the model context; raise it for large-context models (e.g. 1M-context Claude)."
+                    description: "Only used when concurrent extraction is active (max_concurrent_batches > 1). Target maximum input tokens (estimated ~chars/4) of OCR text per shard. Pages are grouped so each shard stays under this budget, creating as many shards as needed (capped by max_concurrent_batches). The default (8000) reliably shards large documents so a single agent never has to emit a giant table in one Bedrock call (the read-timeout failure mode). Lower this if shards still overflow the model context; raise it for large-context models (e.g. 1M-context Claude)."
                     minimum: 1000
                     maximum: 900000
-                    default: 40000
+                    default: 8000
                     order: 2
+                    dependsOn: { field: "enabled", value: true }
+                  max_pages_per_shard:
+                    type: number
+                    description: "Only used when concurrent extraction is active (max_concurrent_batches > 1). Page-count ceiling per shard. A shard is closed once it holds this many pages even if its OCR text is still under shard_token_budget - so a document with unusually compact pages still shards on page count (tokens AND pages both bound a shard). This guarantees large docs shard regardless of text density. 0 = disabled (token budget alone bounds shards). Default: 5."
+                    minimum: 0
+                    maximum: 100
+                    default: 5
+                    order: 2.5
                     dependsOn: { field: "enabled", value: true }
                   table_parsing:
                     type: object
