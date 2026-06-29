@@ -826,3 +826,31 @@ class TestPerClassExtractionPromptOverride:
         cleaned = service_with_prompt_override._clean_schema_for_prompt(schema)
         assert "x-aws-idp-extraction-system-prompt" not in cleaned
         assert "x-aws-idp-extraction-task-prompt" not in cleaned
+
+
+@pytest.mark.unit
+class TestNormalizeTableParsingStats:
+    """The display-time guard that clamps merged table-parsing stats."""
+
+    def test_drops_internal_rate_weight(self):
+        out = ExtractionService._normalize_table_parsing_stats(
+            {"rows_parsed": 100, "_rate_weight": 100, "parse_success_rate": 0.9}
+        )
+        assert "_rate_weight" not in out
+        assert out["rows_parsed"] == 100
+
+    def test_clamps_out_of_range_rate_and_confidence(self):
+        # Defense in depth: even if a merge regression slips through, the report
+        # can never show a 500% rate / 496% confidence again.
+        out = ExtractionService._normalize_table_parsing_stats(
+            {"parse_success_rate": 5.0, "avg_confidence": 496.1}
+        )
+        assert out["parse_success_rate"] == 1.0
+        assert out["avg_confidence"] == 100.0
+
+    def test_leaves_valid_values_untouched(self):
+        out = ExtractionService._normalize_table_parsing_stats(
+            {"parse_success_rate": 0.98, "avg_confidence": 98.4}
+        )
+        assert out["parse_success_rate"] == pytest.approx(0.98)
+        assert out["avg_confidence"] == pytest.approx(98.4)

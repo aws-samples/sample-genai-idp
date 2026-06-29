@@ -1011,6 +1011,13 @@ Extraction results include table parsing metadata when the tool is used:
 }
 ```
 
+When a section is sharded across concurrent agents, each shard contributes its own
+`table_parsing_stats` and they are merged with quality-aware semantics (not summed):
+counts (`tables_parsed`, `rows_parsed`, `rows_mapped`, `invocation_count`) add up,
+while `parse_success_rate` and `avg_confidence` are combined as **row-weighted
+averages** so the reported values stay a real 0-1 rate / 0-100 confidence regardless
+of shard count.
+
 Use these metrics to:
 - Identify documents where table parsing is working well
 - Detect quality issues requiring configuration tuning

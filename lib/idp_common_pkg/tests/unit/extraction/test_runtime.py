@@ -19,6 +19,8 @@ from idp_common.extraction.runtime import (
     NoopShardPersistence,
     S3ShardPersistence,
     StepFunctionsRuntime,
+    _accumulate_metering,
+    _merge_table_parsing_stats,
     extract_one_shard,
     merge_shard_dicts,
     merge_shard_results,
@@ -107,6 +109,83 @@ class TestMergeWrappers:
             [(_Model(transactions=[row]), {"metering": {}})], _Model
         )
         assert merged["transactions"] == [row]
+
+
+# --------------------- table_parsing_stats metering ----------------------- #
+class TestTableParsingStatsMerge:
+    """Regression coverage for the 500%/496% Processing Report bug.
+
+    ``_table_parsing_stats`` rode the additive metering channel, so rates and
+    confidences were summed across shards (5 shards × ~1.0 rate → "500%").
+    Counts must sum; rate/confidence must stay within [0,1] / [0,100].
+    """
+
+    def _shard(self, rows, rate, conf, tables=2):
+        return {
+            "tables_parsed": tables,
+            "rows_parsed": rows,
+            "rows_mapped": rows,
+            "invocation_count": 1,
+            "parse_success_rate": rate,
+            "avg_confidence": conf,
+            "confidence_available": True,
+            "mapping_used": True,
+        }
+
+    def test_counts_sum_rates_average(self):
+        a = self._shard(rows=300, rate=1.0, conf=99.0)
+        out = _merge_table_parsing_stats({}, a)
+        out = _merge_table_parsing_stats(out, self._shard(rows=300, rate=1.0, conf=98.0))
+        assert out["tables_parsed"] == 4
+        assert out["rows_parsed"] == 600
+        assert out["rows_mapped"] == 600
+        assert out["invocation_count"] == 2
+        # row-weighted average stays a real rate / confidence
+        assert out["parse_success_rate"] == pytest.approx(1.0)
+        assert out["avg_confidence"] == pytest.approx(98.5)
+
+    def test_five_shards_never_exceed_bounds(self):
+        merged = {}
+        for _ in range(5):
+            merged = _merge_table_parsing_stats(
+                merged, self._shard(rows=300, rate=1.0, conf=99.0)
+            )
+        assert merged["parse_success_rate"] <= 1.0
+        assert merged["avg_confidence"] <= 100.0
+        assert merged["rows_parsed"] == 1500
+        assert merged["tables_parsed"] == 10
+
+    def test_row_weighted_not_simple_mean(self):
+        # 900 rows @ 1.0 + 100 rows @ 0.0 → weighted 0.9, not simple-mean 0.5
+        out = _merge_table_parsing_stats({}, self._shard(rows=900, rate=1.0, conf=100.0))
+        out = _merge_table_parsing_stats(
+            out, self._shard(rows=100, rate=0.0, conf=0.0)
+        )
+        assert out["parse_success_rate"] == pytest.approx(0.9)
+        assert out["avg_confidence"] == pytest.approx(90.0)
+
+    def test_zero_row_weight_falls_back_to_simple_mean(self):
+        out = _merge_table_parsing_stats({}, self._shard(rows=0, rate=0.8, conf=90.0))
+        out = _merge_table_parsing_stats(out, self._shard(rows=0, rate=0.6, conf=70.0))
+        assert out["parse_success_rate"] == pytest.approx(0.7)
+        assert out["avg_confidence"] == pytest.approx(80.0)
+
+    def test_accumulate_metering_routes_stats_not_summed(self):
+        merged: dict = {}
+        for _ in range(3):
+            _accumulate_metering(
+                merged,
+                {
+                    "OCR/textract": {"pages": 5},
+                    "_table_parsing_stats": self._shard(rows=300, rate=1.0, conf=95.0),
+                },
+            )
+        # ordinary token counters still sum
+        assert merged["OCR/textract"]["pages"] == 15
+        # stats merged with quality semantics, not summed
+        assert merged["_table_parsing_stats"]["rows_parsed"] == 900
+        assert merged["_table_parsing_stats"]["parse_success_rate"] <= 1.0
+        assert merged["_table_parsing_stats"]["avg_confidence"] <= 100.0
 
 
 # --------------------------- shard_result_key ----------------------------- #

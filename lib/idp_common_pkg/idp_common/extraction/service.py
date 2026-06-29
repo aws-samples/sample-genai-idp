@@ -2572,6 +2572,24 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
 
         return fields_out, report
 
+    @staticmethod
+    def _normalize_table_parsing_stats(stats: dict[str, Any]) -> dict[str, Any]:
+        """Sanitize merged table-parsing stats for display in metadata.
+
+        Drops the internal ``_rate_weight`` accumulator and defensively clamps
+        the quality metrics to their valid ranges (rate 0-1, confidence 0-100) so
+        a stats-merge regression can never again surface impossible values like
+        a 500% parse-success rate or 496% confidence in the Processing Report.
+        """
+        clean = {k: v for k, v in stats.items() if k != "_rate_weight"}
+        rate = clean.get("parse_success_rate")
+        if isinstance(rate, (int, float)):
+            clean["parse_success_rate"] = max(0.0, min(1.0, float(rate)))
+        conf = clean.get("avg_confidence")
+        if isinstance(conf, (int, float)):
+            clean["avg_confidence"] = max(0.0, min(100.0, float(conf)))
+        return clean
+
     def _save_results(
         self,
         document: Document,
@@ -2604,6 +2622,8 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         if extraction_method == "agentic" and result.metering:
             table_stats = result.metering.pop("_table_parsing_stats", None)
             tool_used = table_stats is not None
+            if table_stats:
+                table_stats = self._normalize_table_parsing_stats(table_stats)
             # Scalar conflicts surfaced by sharded concurrent extraction.
             shard_conflicts = result.metering.pop("_shard_scalar_conflicts", None)
 
