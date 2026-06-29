@@ -1382,113 +1382,59 @@ async def _run_shard_agent(
     )
 
 
-def _accumulate_metering(
-    merged_metering: dict[str, Any], metering: dict[str, Any]
-) -> None:
-    """Accumulate per-model token-metering counts into ``merged_metering``.
-
-    Token values from Bedrock responses may be ``None`` (e.g. when a model does
-    not report a particular counter). Both the accumulated value and the
-    incoming value are coerced to ``0`` so the addition never raises a
-    TypeError on a ``None`` operand (see issue #337).
-    """
-    for mk, mv in metering.items():
-        if mk not in merged_metering:
-            merged_metering[mk] = dict(mv)
-        else:
-            for tk, tv in mv.items():
-                merged_metering[mk][tk] = (merged_metering[mk].get(tk) or 0) + (tv or 0)
-
-
-def _list_valued_fields(data_format: type[BaseModel]) -> set[str]:
-    """Return the names of ``data_format`` fields that are list-typed.
-
-    Used so the shard merge treats a field consistently as a list even when an
-    individual shard returns it as ``None`` (an optional ``list | None`` left
-    empty by, e.g., a cover-page shard). Falls back to an empty set if the model
-    has no introspectable fields.
-    """
-    fields = getattr(data_format, "model_fields", None)
-    if not fields:
-        return set()
-    list_fields: set[str] = set()
-    for name, info in fields.items():
-        annotation = getattr(info, "annotation", None)
-        if _annotation_is_list(annotation):
-            list_fields.add(name)
-    return list_fields
-
-
-def _annotation_is_list(annotation: Any) -> bool:
-    """True if a type annotation is ``list`` / ``list[...]`` / ``Optional[list]``."""
-    import typing
-
-    if annotation is list:
-        return True
-    origin = typing.get_origin(annotation)
-    if origin in (list, __import__("builtins").list):
-        return True
-    # Unwrap Optional/Union and check members.
-    if origin is not None:
-        return any(_annotation_is_list(arg) for arg in typing.get_args(annotation))
-    return False
-
-
-def _merge_shard_results(
-    results: list[tuple[Any, dict[str, Any]]],
+async def default_shard_runner(
+    *,
+    shard_index: int,
+    total_shards: int,
+    payload: dict[str, Any],
+    model_id: str,
     data_format: type[TargetModel],
-) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
-    """Merge per-shard extraction dicts into one.
+    config: IDPConfig,
+    context: str,
+    max_retries: int,
+    connect_timeout: float,
+    read_timeout: float,
+    max_tokens: int | None,
+    checkpoint_callback: Any | None,
+    custom_instruction: str | None,
+) -> tuple[TargetModel, "BedrockInvokeModelResponse"]:
+    """Strands-backed shard runner used by the runtime backends.
 
-    - **List fields** (by the schema's field types) are concatenated in shard
-      order; a shard that returns the field as ``None`` contributes nothing.
-      Rows live on single pages, so page-aligned shards keep them intact/ordered.
-    - **Scalar fields** take the FIRST non-null value across shards; if a later
-      shard provides a *different* non-null value, that is recorded as a conflict
-      (the first value wins, the conflict is surfaced in metadata for audit).
-
-    List membership is decided by ``data_format`` field types (not the runtime
-    value) so an optional ``list | None`` field returned as ``None`` by one shard
-    and a list by another merges correctly rather than crashing.
-
-    Returns ``(merged_dict, merged_metering, conflicts)``.
+    Adapts the runtime's ``(shard_index, payload, ...)`` calling convention to
+    ``_run_shard_agent``. Defined here (not in ``runtime.py``) so ``runtime`` has
+    no dependency on the strands stack — the runtime stays import-light and the
+    import graph has no cycle.
     """
-    list_fields = _list_valued_fields(data_format)
-    merged_dict: dict[str, Any] = {}
-    merged_metering: dict[str, Any] = {}
-    conflicts: list[dict[str, Any]] = []
+    return await _run_shard_agent(
+        shard_index=shard_index,
+        total_shards=total_shards,
+        page_start=payload["page_start"],
+        page_end=payload["page_end"],
+        total_pages=payload["total_pages"],
+        model_id=model_id,
+        data_format=data_format,
+        shard_prompt={"role": "user", "content": payload["content"]},
+        config=config,
+        context=context,
+        max_retries=max_retries,
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+        max_tokens=max_tokens,
+        checkpoint_callback=checkpoint_callback,
+        base_custom_instruction=custom_instruction,
+    )
 
-    for result_data, result_response in results:
-        result_dict = result_data.model_dump(mode="json")
-        for key, value in result_dict.items():
-            # Treat as a list field if the schema says so, or (defensively) if
-            # any shard actually produced a list for it.
-            is_list_field = key in list_fields or isinstance(value, list)
-            if is_list_field:
-                existing = merged_dict.get(key)
-                if not isinstance(existing, list):
-                    # Replaces a prior None/absent with a fresh list before extend.
-                    merged_dict[key] = []
-                if isinstance(value, list):
-                    merged_dict[key].extend(value)
-            elif value is not None:
-                if key not in merged_dict or merged_dict[key] is None:
-                    merged_dict[key] = value
-                elif merged_dict[key] != value:
-                    # Two shards disagree on a scalar. Keep the first; record it.
-                    conflicts.append(
-                        {
-                            "field": key,
-                            "kept": merged_dict[key],
-                            "discarded": value,
-                        }
-                    )
-            else:
-                # Preserve the key as null if no shard has filled it yet.
-                merged_dict.setdefault(key, None)
-        _accumulate_metering(merged_metering, result_response.get("metering", {}))
 
-    return merged_dict, merged_metering, conflicts
+# Merge primitives live in idp_common.extraction.runtime (strands-free, the
+# single source of truth). Re-exported here for backward compatibility with
+# existing imports (`from idp_common.extraction.agentic_idp import
+# _merge_shard_results`, `_accumulate_metering`, ...).
+from idp_common.extraction.runtime import (  # noqa: E402,F401
+    _accumulate_metering,  # noqa: F401  (re-export for backward compat)
+    _annotation_is_list,  # noqa: F401
+    _list_valued_fields,  # noqa: F401
+    _merge_shard_results,  # noqa: F401
+)
 
 
 async def concurrent_structured_output_async(
@@ -1504,21 +1450,36 @@ async def concurrent_structured_output_async(
     max_tokens: int | None = None,
     checkpoint_callback: Any | None = None,
     custom_instruction: str | None = None,
+    section_id: str = "section",
+    persistence: Any | None = None,
+    runtime: Any | None = None,
 ) -> tuple[TargetModel, BedrockInvokeModelResponse]:
     """
     Run one extraction agent per input shard, concurrently, and merge results.
 
-    Unlike the previous implementation, each shard's prompt contains ONLY that
-    shard's page text/images (the service slices the input before calling), so
-    no agent loads the whole document — this is what bounds the context window
-    and prevents overflow on long documents. At most ``max_parallelism`` shards
-    run at once (Bedrock RPM control).
+    Each shard's prompt contains ONLY that shard's page text/images (the service
+    slices the input before calling), so no agent loads the whole document — this
+    bounds the context window and prevents overflow on long documents. At most
+    ``max_parallelism`` shards run at once (Bedrock RPM control).
+
+    This is now a thin shim over the runtime-agnostic primitives in
+    :mod:`idp_common.extraction.runtime`: it delegates to an
+    :class:`~idp_common.extraction.runtime.ExtractionRuntime` (default
+    :class:`~idp_common.extraction.runtime.InProcessRuntime`), which schedules
+    :func:`~idp_common.extraction.runtime.extract_one_shard` per shard and merges
+    via :func:`~idp_common.extraction.runtime.merge_shard_results`. Observable
+    behaviour is unchanged; existing callers keep working.
 
     Args:
         shard_payloads: List of dicts with keys ``content`` (pre-rendered prompt
             content blocks for the shard), ``page_start``, ``page_end``,
             ``total_pages``.
         max_parallelism: Max number of shards to run concurrently.
+        section_id: Section identifier used to derive deterministic per-shard
+            persistence keys (when ``persistence`` is supplied).
+        persistence: Optional per-shard persistence backend (idempotent
+            skip-if-complete). ``None`` => in-memory only (today's behaviour).
+        runtime: Optional explicit ExtractionRuntime; defaults to InProcessRuntime.
         Other args: Same as structured_output_async.
 
     Returns:
@@ -1526,63 +1487,32 @@ async def concurrent_structured_output_async(
         includes a ``_shard_scalar_conflicts`` marker when shards disagreed on a
         scalar field, so the service can record it in metadata.
     """
-    total_shards = len(shard_payloads)
-    logger.info(
-        "Starting sharded concurrent extraction",
-        extra={
-            "num_shards": total_shards,
-            "max_parallelism": max_parallelism,
-            "ranges": [(p["page_start"], p["page_end"]) for p in shard_payloads],
-        },
+    from idp_common.extraction.runtime import InProcessRuntime
+
+    rt = runtime or InProcessRuntime(max_parallelism)
+    merged_result, response = await rt.run(
+        shard_payloads=shard_payloads,
+        model_id=model_id,
+        data_format=data_format,
+        config=config,
+        section_id=section_id,
+        context=context,
+        max_retries=max_retries,
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+        max_tokens=max_tokens,
+        checkpoint_callback=checkpoint_callback,
+        custom_instruction=custom_instruction,
+        persistence=persistence,
+        shard_runner=default_shard_runner,
     )
+    # Normalise the runtime's plain-dict response into the typed envelope that
+    # existing callers expect. The runtime returns a BaseModel; it is an instance
+    # of ``data_format`` (TargetModel) by construction.
+    import typing as _typing
 
-    semaphore = asyncio.Semaphore(max(1, max_parallelism))
-
-    async def _run_one(i: int, payload: dict[str, Any]):
-        async with semaphore:
-            return await _run_shard_agent(
-                shard_index=i,
-                total_shards=total_shards,
-                page_start=payload["page_start"],
-                page_end=payload["page_end"],
-                total_pages=payload["total_pages"],
-                model_id=model_id,
-                data_format=data_format,
-                shard_prompt={"role": "user", "content": payload["content"]},
-                config=config,
-                context=context,
-                max_retries=max_retries,
-                connect_timeout=connect_timeout,
-                read_timeout=read_timeout,
-                max_tokens=max_tokens,
-                checkpoint_callback=checkpoint_callback,
-                base_custom_instruction=custom_instruction,
-            )
-
-    tasks = [_run_one(i, p) for i, p in enumerate(shard_payloads)]
-    results = await asyncio.gather(*tasks)
-
-    merged_dict, merged_metering, conflicts = _merge_shard_results(results, data_format)
-    merged_result = data_format(**merged_dict)
-
-    total_items = sum(len(v) for v in merged_dict.values() if isinstance(v, list))
-    logger.info(
-        "Sharded concurrent extraction complete",
-        extra={
-            "total_items": total_items,
-            "shards_completed": len(results),
-            "scalar_conflicts": len(conflicts),
-        },
-    )
-    if conflicts:
-        logger.warning(
-            "Scalar field conflicts across shards (kept first value)",
-            extra={"conflicts": conflicts[:20]},
-        )
-        # Surface via metering dict so the service can record it in metadata.
-        merged_metering["_shard_scalar_conflicts"] = conflicts
-
-    return merged_result, BedrockInvokeModelResponse(
+    typed_result = _typing.cast(TargetModel, merged_result)
+    return typed_result, BedrockInvokeModelResponse(
         response=BedrockResponse(
             output=BedrockOutput(
                 message=BedrockMessage(
@@ -1590,7 +1520,7 @@ async def concurrent_structured_output_async(
                 )
             )
         ),
-        metering=merged_metering,
+        metering=response.get("metering", {}),
     )
 
 

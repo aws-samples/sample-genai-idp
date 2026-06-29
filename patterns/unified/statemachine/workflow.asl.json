@@ -258,8 +258,138 @@
             },
             "MaxConcurrency": 10,
             "Iterator": {
-                "StartAt": "ExtractionStep",
+                "StartAt": "ExtractionPlanStep",
                 "States": {
+                    "ExtractionPlanStep": {
+                        "Type": "Task",
+                        "Resource": "${ShardRuntimeFunctionArn}",
+                        "Parameters": {
+                            "mode": "plan",
+                            "execution_arn.$": "$.execution_arn",
+                            "document.$": "$.document",
+                            "section_id.$": "$.section_id"
+                        },
+                        "ResultPath": "$.ShardPlan",
+                        "Retry": [
+                            {
+                                "ErrorEquals": [
+                                    "Sandbox.Timedout",
+                                    "Lambda.ServiceException",
+                                    "Lambda.AWSLambdaException",
+                                    "Lambda.SdkClientException",
+                                    "Lambda.TooManyRequestsException",
+                                    "ThrottlingException",
+                                    "ServiceUnavailableException",
+                                    "InternalServerException",
+                                    "InternalServerError"
+                                ],
+                                "IntervalSeconds": 5,
+                                "MaxAttempts": 6,
+                                "BackoffRate": 2.0
+                            }
+                        ],
+                        "Next": "ShardModeChoice"
+                    },
+                    "ShardModeChoice": {
+                        "Type": "Choice",
+                        "Choices": [
+                            {
+                                "Variable": "$.ShardPlan.shard_mode",
+                                "BooleanEquals": true,
+                                "Next": "ExtractionShardMap"
+                            }
+                        ],
+                        "Default": "ExtractionStep"
+                    },
+                    "ExtractionShardMap": {
+                        "Type": "Map",
+                        "ItemProcessor": {
+                            "ProcessorConfig": {
+                                "Mode": "DISTRIBUTED",
+                                "ExecutionType": "STANDARD"
+                            },
+                            "StartAt": "ShardExtractionStep",
+                            "States": {
+                                "ShardExtractionStep": {
+                                    "Type": "Task",
+                                    "Resource": "arn:aws:states:::lambda:invoke",
+                                    "Parameters": {
+                                        "FunctionName": "${ShardRuntimeFunctionArn}",
+                                        "Payload": {
+                                            "mode": "shard",
+                                            "execution_arn.$": "$.execution_arn",
+                                            "document.$": "$.document",
+                                            "section_id.$": "$.section_id",
+                                            "shard_index.$": "$.shard_index"
+                                        }
+                                    },
+                                    "OutputPath": "$.Payload",
+                                    "Retry": [
+                                        {
+                                            "ErrorEquals": [
+                                                "Sandbox.Timedout",
+                                                "Lambda.ServiceException",
+                                                "Lambda.AWSLambdaException",
+                                                "Lambda.SdkClientException",
+                                                "Lambda.TooManyRequestsException",
+                                                "ServiceQuotaExceededException",
+                                                "ThrottlingException",
+                                                "ProvisionedThroughputExceededException",
+                                                "RequestLimitExceeded",
+                                                "ServiceUnavailableException",
+                                                "InternalServerException",
+                                                "InternalServerError",
+                                                "States.TaskFailed"
+                                            ],
+                                            "IntervalSeconds": 10,
+                                            "MaxAttempts": 8,
+                                            "BackoffRate": 2.0
+                                        }
+                                    ],
+                                    "End": true
+                                }
+                            }
+                        },
+                        "ItemsPath": "$.ShardPlan.shards",
+                        "ItemSelector": {
+                            "execution_arn.$": "$.execution_arn",
+                            "document.$": "$.document",
+                            "section_id.$": "$.section_id",
+                            "shard_index.$": "$$.Map.Item.Value.shard_index"
+                        },
+                        "MaxConcurrency": 5,
+                        "ResultPath": "$.ShardResults",
+                        "Next": "ExtractionMergeStep"
+                    },
+                    "ExtractionMergeStep": {
+                        "Type": "Task",
+                        "Resource": "${ShardRuntimeFunctionArn}",
+                        "Parameters": {
+                            "mode": "merge",
+                            "execution_arn.$": "$.execution_arn",
+                            "document.$": "$.document",
+                            "section_id.$": "$.section_id"
+                        },
+                        "Retry": [
+                            {
+                                "ErrorEquals": [
+                                    "Sandbox.Timedout",
+                                    "Lambda.ServiceException",
+                                    "Lambda.AWSLambdaException",
+                                    "Lambda.SdkClientException",
+                                    "Lambda.TooManyRequestsException",
+                                    "ThrottlingException",
+                                    "ServiceUnavailableException",
+                                    "InternalServerException",
+                                    "InternalServerError"
+                                ],
+                                "IntervalSeconds": 10,
+                                "MaxAttempts": 8,
+                                "BackoffRate": 2.5
+                            }
+                        ],
+                        "Next": "PostExtractionHook"
+                    },
                     "ExtractionStep": {
                         "Type": "Task",
                         "Resource": "${ExtractionFunctionArn}",

@@ -722,6 +722,57 @@ extraction:
       enabled: true
 ```
 
+### ExtractionRuntime: pluggable orchestration over shared primitives
+
+Sharding is factored into runtime-agnostic primitives in
+`idp_common.extraction.runtime` so the **same** shard/merge logic runs whether
+you call the library from a notebook, a CLI, a single Lambda, or a production
+Step Functions Distributed Map — one implementation, no behaviour divergence.
+
+**Primitives (the single source of truth):**
+
+- `extract_one_shard(...)` — runs ONE shard's agent (via an injected
+  `shard_runner`; `agentic_idp.default_shard_runner` in production) and is
+  **idempotent**: if a `ShardPersistence` backend already holds a complete
+  result for the shard's page range, it is loaded and returned instead of
+  re-inferring. This is the asyncio task body AND the SFN Map iteration body.
+- `merge_shard_results(...)` / `merge_shard_dicts(...)` — concatenate list fields
+  in page order and take first-non-null scalars (recording conflicts).
+- `ShardPersistence` protocol + `S3ShardPersistence`, keyed at
+  `checkpoints/{execution_arn}/{section_id}/shards/shard_{start}_{end}.json`.
+
+**Two backends behind the `ExtractionRuntime` interface:**
+
+- **`InProcessRuntime`** (default) — plans shards, runs them via `asyncio.gather`
+  + a semaphore, then merges. This is what a notebook / CLI / single Lambda uses;
+  **sharding works fully here with no Step Functions dependency.**
+  `ExtractionService.process_document_section()` routes its concurrent path
+  through this runtime, so standalone usage is unchanged.
+- **`StepFunctionsRuntime`** (production) — a nested SFN **Distributed Map** where
+  each iteration is a thin shard Lambda calling `extract_one_shard` (one fresh
+  15-minute Lambda per shard) and a following merge state calls
+  `merge_shard_results`. Because each shard persists its result idempotently to
+  S3, SFN's **native per-iteration retry re-runs only the failed/incomplete
+  shards** — completed shards load from S3, with no custom near-timeout/reentry
+  code and no 15-minute ceiling for the section as a whole.
+
+Select the backend with `extraction.agentic.runtime` (`in_process` default, or
+`step_functions`); the `EXTRACTION_RUNTIME` env var and an explicit `override`
+argument also work. The in-process section Lambda additionally wires
+`S3ShardPersistence`, so even on the in-process path an SFN `ExtractionStep`
+retry of a timed-out section resumes only the incomplete shards.
+
+**Standalone usage (plain Python, no SFN):**
+
+```python
+from idp_common.extraction import ExtractionService
+service = ExtractionService(config=config)            # config.extraction.agentic.max_concurrent_batches > 1
+doc = service.process_document_section(document, section_id)   # shards + merges in-process
+```
+
+See `notebooks/misc/standalone_sharded_extraction_demo.py` for a runnable
+demonstration (offline with a fake agent; live with real Bedrock).
+
 ### Configuration Options
 
 #### `max_empty_line_gap` (integer, 0-10, default: 3)
