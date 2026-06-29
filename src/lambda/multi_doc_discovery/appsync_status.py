@@ -2,13 +2,20 @@
 # SPDX-License-Identifier: MIT-0
 
 """
-Shared utility for updating discovery job status via AppSync.
+Shared utility for updating discovery job status.
 
-Calls the updateDiscoveryJobStatus GraphQL mutation using IAM auth,
-which triggers the onDiscoveryJobStatusChange subscription for real-time
-UI updates. Uses only stdlib + botocore (no extra dependencies needed).
+Default (AppSync) transport: calls the updateDiscoveryJobStatus GraphQL mutation
+using IAM auth, which triggers the onDiscoveryJobStatusChange subscription for
+real-time UI updates.
+
+HTTP API transport (APPSYNC_API_URL empty): writes the same fields directly to
+the DiscoveryTrackingTable — a faithful port of the AppSync VTL UpdateItem
+resolver — since there is no AppSync to call. The UI polls listDiscoveryJobs.
+
+Uses only stdlib + botocore/boto3 (no extra dependencies needed).
 """
 
+import datetime
 import json
 import logging
 import os
@@ -22,6 +29,76 @@ from botocore.awsrequest import AWSRequest
 logger = logging.getLogger(__name__)
 
 APPSYNC_API_URL = os.environ.get("APPSYNC_API_URL", "")
+# Discovery table for the direct-write fallback under the HTTP API transport.
+DISCOVERY_TABLE_NAME = os.environ.get("DISCOVERY_TRACKING_TABLE", "") or os.environ.get(
+    "DISCOVERY_TABLE_NAME", ""
+)
+
+_DISCOVERY_TERMINAL_STATUSES = {
+    "COMPLETED",
+    "FAILED",
+    "OPTIMIZATION_COMPLETED",
+    "OPTIMIZATION_FAILED",
+}
+
+
+def _update_status_dynamodb(job_id: str, variables: dict) -> bool:
+    """Write discovery job status straight to DynamoDB (HTTP API transport).
+
+    Ports the AppSync VTL UpdateItem resolver: SET each provided field, always
+    set updatedAt, and set completedAt on terminal statuses.
+    """
+    if not DISCOVERY_TABLE_NAME:
+        logger.warning(
+            "No DISCOVERY_TRACKING_TABLE configured; cannot persist job %s status",
+            job_id,
+        )
+        return False
+
+    now_iso = (
+        datetime.datetime.now(datetime.timezone.utc)
+        .strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
+        + "Z"
+    )
+    names = {"#status": "status", "#updatedAt": "updatedAt"}
+    values = {":status": variables["status"], ":updatedAt": now_iso}
+    expr = "SET #status = :status, #updatedAt = :updatedAt"
+
+    for key in (
+        "errorMessage",
+        "statusMessage",
+        "jobType",
+        "currentStep",
+        "totalDocuments",
+        "clustersFound",
+        "discoveredClasses",
+        "reflectionReport",
+    ):
+        if key in variables and variables[key] is not None:
+            names[f"#{key}"] = key
+            values[f":{key}"] = variables[key]
+            expr += f", #{key} = :{key}"
+
+    if variables["status"] in _DISCOVERY_TERMINAL_STATUSES:
+        names["#completedAt"] = "completedAt"
+        values[":completedAt"] = now_iso
+        expr += ", #completedAt = :completedAt"
+
+    try:
+        table = boto3.resource("dynamodb").Table(DISCOVERY_TABLE_NAME)
+        table.update_item(
+            Key={"jobId": job_id},
+            UpdateExpression=expr,
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+        )
+        logger.info(
+            "DynamoDB status update: job=%s, status=%s", job_id, variables["status"]
+        )
+        return True
+    except Exception as e:  # noqa: BLE001
+        logger.error("Failed to write job %s status to DynamoDB: %s", job_id, e)
+        return False
 
 # GraphQL mutation with all multi-doc discovery fields
 _MUTATION = """
@@ -96,10 +173,6 @@ def update_status(
     Returns:
         True if the update succeeded, False otherwise.
     """
-    if not APPSYNC_API_URL:
-        logger.warning("APPSYNC_API_URL not configured, skipping AppSync status update")
-        return False
-
     variables: dict = {
         "jobId": job_id,
         "status": status,
@@ -120,6 +193,10 @@ def update_status(
         variables["errorMessage"] = error_message
     if status_message is not None:
         variables["statusMessage"] = status_message
+
+    # HTTP API transport: no AppSync — write straight to DynamoDB instead.
+    if not APPSYNC_API_URL:
+        return _update_status_dynamodb(job_id, variables)
 
     payload = json.dumps({"query": _MUTATION, "variables": variables})
 

@@ -61,6 +61,12 @@ Parameters:
     Type: String
     Description: AppSync GraphQL API ARN for IAM permissions
     Default: ""
+  DiscoveryTrackingTableName:
+    Type: String
+    Description: >-
+      DiscoveryTrackingTable name. Used to write job status directly to DynamoDB
+      under the HTTP API transport (when AppSyncApiUrl is empty).
+    Default: ""
   BedrockHubRoleArn:
     Type: String
     Default: ""
@@ -433,6 +439,7 @@ Resources:
           DISCOVERY_BUCKET: !Ref DiscoveryBucketName
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
           APPSYNC_API_URL: !Ref AppSyncApiUrl
+          DISCOVERY_TRACKING_TABLE: !Ref DiscoveryTrackingTableName
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
           BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
@@ -477,6 +484,13 @@ Resources:
             - Effect: Allow
               Action: [appsync:GraphQL]
               Resource: !Sub "${AppSyncApiArn}/*"
+            # HTTP API transport: write discovery job status straight to DynamoDB
+            # (appsync_status._update_status_dynamodb) when AppSync is absent.
+            - Effect: Allow
+              Action:
+                - dynamodb:UpdateItem
+                - dynamodb:GetItem
+              Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DiscoveryTrackingTableName}"
 
   MultiDocDiscoveryEmbedFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -513,6 +527,7 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           DISCOVERY_BUCKET: !Ref DiscoveryBucketName
           APPSYNC_API_URL: !Ref AppSyncApiUrl
+          DISCOVERY_TRACKING_TABLE: !Ref DiscoveryTrackingTableName
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
           BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
@@ -538,6 +553,13 @@ Resources:
             - Effect: Allow
               Action: [appsync:GraphQL]
               Resource: !Sub "${AppSyncApiArn}/*"
+            # HTTP API transport: write discovery job status straight to DynamoDB
+            # (appsync_status._update_status_dynamodb) when AppSync is absent.
+            - Effect: Allow
+              Action:
+                - dynamodb:UpdateItem
+                - dynamodb:GetItem
+              Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DiscoveryTrackingTableName}"
 
   MultiDocDiscoveryClusterFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -652,6 +674,7 @@ Resources:
           DISCOVERY_BUCKET: !Ref DiscoveryBucketName
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
           APPSYNC_API_URL: !Ref AppSyncApiUrl
+          DISCOVERY_TRACKING_TABLE: !Ref DiscoveryTrackingTableName
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
           BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
@@ -692,6 +715,13 @@ Resources:
             - Effect: Allow
               Action: [appsync:GraphQL]
               Resource: !Sub "${AppSyncApiArn}/*"
+            # HTTP API transport: write discovery job status straight to DynamoDB
+            # (appsync_status._update_status_dynamodb) when AppSync is absent.
+            - Effect: Allow
+              Action:
+                - dynamodb:UpdateItem
+                - dynamodb:GetItem
+              Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${DiscoveryTrackingTableName}"
 
   MultiDocDiscoverySaveFunctionLogGroup:
     Type: AWS::Logs::LogGroup
