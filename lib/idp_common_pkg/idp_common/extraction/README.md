@@ -691,11 +691,22 @@ results are merged. This serves two purposes:
 2. **Reduces wall-clock time** via parallelism.
 
 Key behaviors:
-- **Size-bounded, not count-bounded.** Pages are grouped so each shard's
-  estimated input stays under `shard_token_budget` (default 40,000;
-  `≈ chars/4`). `max_concurrent_batches` is an **upper bound on parallelism and
-  shard count** — a very large section is split into as many shards as needed to
-  fit (capped at `max_concurrent_batches`), not exactly N equal pieces.
+- **Bounded by tokens AND pages.** Pages are grouped so each shard's estimated
+  input stays under `shard_token_budget` (default **8,000**; `≈ chars/4`) **and**
+  holds at most `max_pages_per_shard` pages (default **5**, `0` disables the page
+  ceiling). A shard closes when *either* bound is hit. The page ceiling
+  guarantees a large document shards even when its OCR text is unusually compact
+  and would otherwise fit one token budget — so sharding engages **by default**
+  with no per-config tuning. `max_concurrent_batches` is an **upper bound on
+  parallelism and shard count** — a very large section is split into as many
+  shards as needed to fit (capped at `max_concurrent_batches`), not exactly N
+  equal pieces.
+  > **Why the low default budget?** A high budget (the old 40,000 default) let
+  > even a ~25-page dense table fit one shard, so sharding silently did *not*
+  > engage and a single agent had to emit the whole giant table in one Bedrock
+  > call → read timeout. 8,000 + a 5-page ceiling reliably shard large docs so
+  > each agent's work stays bounded. Raise `shard_token_budget` for
+  > large-context (`:1m`) models if you want fewer, larger shards.
 - **Page-aligned splits keep table rows intact.** A table spans pages but each
   row lives on one page, so splits fall between rows; list fields are
   concatenated in page order on merge (no row loss/duplication).
@@ -717,10 +728,19 @@ extraction:
   agentic:
     enabled: true
     max_concurrent_batches: 4
-    shard_token_budget: 40000   # lower if shards still overflow; raise for 1M-context models
+    shard_token_budget: 8000    # default; lower if shards still overflow, raise for 1M-context models
+    max_pages_per_shard: 5      # default; page ceiling so large docs always shard (0 = disable)
     table_parsing:
       enabled: true
 ```
+
+**Document-size guidance.** The defaults above are tuned to work without
+hand-tuning on large documents (validated at scale on 100- and 200-page
+single- and multi-table PDFs). For very large documents (100+ pages) prefer the
+Step Functions Distributed Map runtime (`runtime: step_functions`) so each shard
+runs in its own Lambda and the section is not bound by the single-Lambda 15-min
+ceiling; the in-process runtime still shards correctly but a 200-page section may
+approach that ceiling.
 
 ### ExtractionRuntime: pluggable orchestration over shared primitives
 

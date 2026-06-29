@@ -44,11 +44,21 @@ logger = logging.getLogger(__name__)
 # a conservative default budget).
 _CHARS_PER_TOKEN = 4.0
 
-# Default per-shard input-token budget. Chosen well under the smallest common
-# context window (Nova ~ small; Claude 200K) so a shard leaves ample room for
-# the system prompt, tool schemas, images, and the agent's own reasoning/turns.
-# Models with larger windows can raise this via config.
-DEFAULT_SHARD_TOKEN_BUDGET = 40_000
+# Default per-shard input-token budget. Chosen low enough that a large document
+# reliably shards into several agents *by default* (no per-config tuning). The
+# previous default (40K) was high enough that even a ~25-page dense table fit a
+# single shard, so sharding silently did NOT engage and one agent had to emit a
+# giant table in one Bedrock call -> read timeout. 8000 is proven in scale tests
+# to shard a 25-page doc into ~5 shards and complete in both modes. Models with
+# larger windows can raise this via ``extraction.agentic.shard_token_budget``.
+DEFAULT_SHARD_TOKEN_BUDGET = 8_000
+
+# Default per-shard page ceiling. Even when OCR text is unusually compact and a
+# big page range fits under the token budget, cap each shard at this many pages
+# so large documents ALWAYS shard on page count. This makes "tokens AND pages
+# both bound a shard" — guaranteeing parallelism (and bounded per-agent work)
+# regardless of text density. 0 disables the page ceiling (token budget only).
+DEFAULT_MAX_PAGES_PER_SHARD = 5
 
 
 @dataclass
@@ -78,6 +88,7 @@ def plan_shards(
     *,
     token_budget: int = DEFAULT_SHARD_TOKEN_BUDGET,
     max_shards: int | None = None,
+    max_pages_per_shard: int | None = DEFAULT_MAX_PAGES_PER_SHARD,
     table_boundary_pages: frozenset[int] | None = None,
 ) -> list[Shard]:
     """Group pages into token-budgeted contiguous shards.
@@ -92,6 +103,12 @@ def plan_shards(
             ``max_shards`` roughly-equal groups (the caller's parallelism cap
             doubles as a shard cap so we don't fan out unboundedly). ``None``
             means no cap.
+        max_pages_per_shard: Page-count ceiling per shard. A shard is closed
+            once it holds this many pages even if its text is still under the
+            token budget — so a document with unusually compact pages still
+            shards on page count. ``None`` or ``<= 0`` disables the page ceiling
+            (token budget alone bounds shards). Applied alongside the token
+            budget: a shard closes when EITHER bound is hit.
         table_boundary_pages: 0-based indices of pages that *start* a new table
             (from OCR analysis). When provided, the packer prefers to close a
             shard just before such a page rather than mid-table, as long as the
@@ -110,18 +127,22 @@ def plan_shards(
         )
 
     boundaries = table_boundary_pages or frozenset()
+    page_cap = max_pages_per_shard if (max_pages_per_shard or 0) > 0 else None
 
     # First pass: greedily pack pages until adding the next page would exceed
-    # the budget (but always keep at least one page per shard).
+    # the token budget OR the shard already holds ``max_pages_per_shard`` pages
+    # (but always keep at least one page per shard).
     ranges: list[tuple[int, int]] = []
     start = 0
     running = 0
     for i in range(n):
         page_tokens = estimate_tokens(page_texts[i])
         is_first_in_shard = i == start
+        pages_in_shard = i - start
         would_exceed = running + page_tokens > token_budget and not is_first_in_shard
+        hit_page_cap = page_cap is not None and pages_in_shard >= page_cap
         prefer_break_here = i in boundaries and not is_first_in_shard and running > 0
-        if would_exceed or prefer_break_here:
+        if would_exceed or hit_page_cap or prefer_break_here:
             ranges.append((start, i))
             start = i
             running = page_tokens

@@ -38,6 +38,7 @@ from idp_common.extraction.page_type_resolver import (
     resolve_page_types,
 )
 from idp_common.extraction.sharding import (
+    DEFAULT_MAX_PAGES_PER_SHARD,
     DEFAULT_SHARD_TOKEN_BUDGET,
     estimate_tokens,
     plan_shards,
@@ -479,6 +480,7 @@ class ExtractionService:
             page_texts,
             token_budget=effective_budget,
             max_shards=max_shards,
+            max_pages_per_shard=self._max_pages_per_shard(),
             table_boundary_pages=table_boundary_pages,
         )
         if len(shards) <= 1:
@@ -566,6 +568,20 @@ class ExtractionService:
         agentic = self.config.extraction.agentic
         budget = getattr(agentic, "shard_token_budget", None)
         return int(budget) if budget else DEFAULT_SHARD_TOKEN_BUDGET
+
+    def _max_pages_per_shard(self) -> int:
+        """Per-shard page ceiling (config override or default).
+
+        Returns the configured ``extraction.agentic.max_pages_per_shard``. A
+        configured ``0`` disables the page ceiling (token budget only); a
+        missing field (older configs) falls back to the default. Distinguishes
+        missing (``None``) from an explicit ``0``.
+        """
+        agentic = self.config.extraction.agentic
+        cap = getattr(agentic, "max_pages_per_shard", None)
+        if cap is None:
+            return DEFAULT_MAX_PAGES_PER_SHARD
+        return int(cap)
 
     def _build_few_shot_examples_content(self) -> list[dict[str, Any]]:
         """
