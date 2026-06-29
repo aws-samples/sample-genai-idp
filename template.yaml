@@ -7440,7 +7440,10 @@ Resources:
     Properties:
       FunctionName: !Ref ChatStreamProcessorFunction
       Action: lambda:InvokeFunctionUrl
-      Principal: !GetAtt CognitoAuthorizedRole.Arn
+      # Principal is the account: for AuthType=AWS_IAM the actual gate is the
+      # caller's IAM identity policy (CognitoAuthorizedRole's ChatStreamInvoke
+      # grant above). A role-ARN principal is not accepted here.
+      Principal: !Ref AWS::AccountId
       FunctionUrlAuthType: AWS_IAM
 
   ##########################################################################
@@ -8640,6 +8643,19 @@ Resources:
           !Ref AWS::NoValue,
         ]
       Policies:
+        # Allow the authenticated Cognito Identity Pool role to invoke the chat
+        # streaming Function URL (AuthType=AWS_IAM) under the httpapi transport.
+        # This is the identity-side grant the SigV4-signed browser request needs.
+        - !If
+          - UseHttpApi
+          - PolicyName: ChatStreamInvoke
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action: lambda:InvokeFunctionUrl
+                  Resource: !GetAtt ChatStreamProcessorFunction.Arn
+          - !Ref AWS::NoValue
         - PolicyName: S3
           PolicyDocument:
             Version: 2012-10-17
