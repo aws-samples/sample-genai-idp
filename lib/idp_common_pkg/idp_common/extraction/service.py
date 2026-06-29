@@ -462,9 +462,15 @@ class ExtractionService:
             # Nothing to shard; let the caller use the single-pass path.
             return []
 
-        # Header context = the first page's text, prepended to later shards so
-        # they retain column headers / account-level context. Kept small.
-        header_context = page_texts[0] if page_texts else ""
+        # Header context = the first page's *header region* (title / account
+        # context / table COLUMN HEADERS), prepended to later shards so they
+        # retain column meaning. We deliberately DROP page-1 data rows here: the
+        # full page 1 is already in shard 0, and re-including its data rows in
+        # later shards makes the deterministic table parser re-emit them ->
+        # duplicate rows after merge. Truncate at the Markdown table separator
+        # (the `|---|` line) so only the header survives; fall back to a small
+        # line cap for non-table documents.
+        header_context = self._table_header_context(page_texts[0] if page_texts else "")
 
         # Reserve the header-context tokens from the per-shard budget so the
         # *rendered* shard (own pages + prepended header) still respects the
@@ -582,6 +588,36 @@ class ExtractionService:
         if cap is None:
             return DEFAULT_MAX_PAGES_PER_SHARD
         return int(cap)
+
+    @staticmethod
+    def _table_header_context(page_one_text: str, max_lines: int = 30) -> str:
+        """Return the *header region* of page 1 for prepending to later shards.
+
+        Includes title/account context and the table's COLUMN HEADERS but DROPS
+        the page-1 data rows so the deterministic table parser doesn't re-emit
+        them in every later shard (which would duplicate rows after merge).
+
+        Strategy:
+        - If the text contains a Markdown table separator line (``|---|---|``),
+          keep everything up to and including that line and drop the rest (the
+          data rows that follow). This preserves the column header exactly once.
+        - Otherwise (no detectable table header) keep at most ``max_lines`` lines
+          so account-level context still propagates without dragging a full page
+          of data into every shard.
+        """
+        if not page_one_text:
+            return ""
+        lines = page_one_text.split("\n")
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            # Markdown separator row: pipes/dashes/colons/spaces and >=1 dash.
+            if (
+                "-" in stripped
+                and set(stripped) <= set("|-: ")
+                and stripped.count("-") >= 3
+            ):
+                return "\n".join(lines[: i + 1])
+        return "\n".join(lines[:max_lines])
 
     def _build_few_shot_examples_content(self) -> list[dict[str, Any]]:
         """

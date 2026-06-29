@@ -109,6 +109,32 @@ class TestBuildShardPayloads:
         assert "--- PAGE 1 ---" in first
 
 
+class TestTableHeaderContext:
+    """Header context prepended to later shards must include the table column
+    header but DROP page-1 data rows (else the parser re-emits them -> dup)."""
+
+    def test_truncates_at_markdown_separator(self):
+        txt = (
+            "# Statement\n\nAccount: X\n\n"
+            "| RowID | Symbol |\n|-------|--------|\n"
+            "| 1 | A |\n| 2 | B |\n| 3 | C |"
+        )
+        out = ExtractionService._table_header_context(txt)
+        assert "| RowID | Symbol |" in out  # column header kept
+        assert "|-------|--------|" in out  # separator kept
+        assert "| 1 | A |" not in out  # data rows dropped
+        assert "| 2 | B |" not in out
+
+    def test_non_table_falls_back_to_line_cap(self):
+        txt = "\n".join(f"line{i}" for i in range(50))
+        out = ExtractionService._table_header_context(txt, max_lines=10)
+        assert out.count("\n") == 9  # 10 lines
+        assert "line0" in out and "line49" not in out
+
+    def test_empty(self):
+        assert ExtractionService._table_header_context("") == ""
+
+
 class TestAnalyzeSchemaMinItems:
     """minItems can arrive as a string after a config round-trip; the schema
     analysis must coerce it instead of raising TypeError on `min_items > 50`."""
