@@ -699,17 +699,38 @@ class TestAssessmentReconciliation:
         out = svc._reconcile_assessment_to_data(assessment, data)
         assert len(out["txns"]) == 2
 
-    def test_pads_short_list_assessment(self):
+    def test_pads_short_list_assessment_with_per_subfield_leaves(self):
         svc = self._svc()
-        data = {"txns": [{"a": i} for i in range(5)]}
-        assessment = {"txns": [{"c": 0.9}, {"c": 0.8}]}
+        # data rows have sub-fields; padded rows must mirror them so each
+        # sub-field is groundable (confidence null, but a real value to match).
+        data = {"txns": [{"date": f"d{i}", "amt": f"{i}"} for i in range(5)]}
+        assessment = {"txns": [{"date": {"c": 0.9}}, {"date": {"c": 0.8}}]}
         out = svc._reconcile_assessment_to_data(assessment, data)
         assert len(out["txns"]) == 5
-        # padded entries are neutral "not assessed"
-        assert out["txns"][2]["confidence"] is None
-        assert "Not individually assessed" in out["txns"][4]["confidence_reason"]
+        # padded entries mirror the data row's sub-fields with null confidence
+        pad = out["txns"][4]
+        assert set(pad.keys()) == {"date", "amt"}
+        assert pad["date"]["confidence"] is None
+        assert "Not individually assessed" in pad["amt"]["confidence_reason"]
         # original entries preserved
-        assert out["txns"][0]["c"] == 0.9
+        assert out["txns"][0]["date"]["c"] == 0.9
+
+    def test_pads_omitted_list_field_entirely(self):
+        # The live bug: a shard extracted N rows but the assessment OMITTED the
+        # list field. Reconcile must still pad to N (structured), not drop it.
+        svc = self._svc()
+        data = {"txns": [{"date": f"d{i}", "amt": f"{i}"} for i in range(75)]}
+        out = svc._reconcile_assessment_to_data({}, data)
+        assert len(out["txns"]) == 75
+        assert set(out["txns"][0].keys()) == {"date", "amt"}
+        assert out["txns"][0]["date"]["confidence"] is None
+
+    def test_scalar_row_elements_get_neutral_leaf(self):
+        svc = self._svc()
+        data = {"tags": ["a", "b", "c"]}  # scalar list elements
+        out = svc._reconcile_assessment_to_data({"tags": [{"c": 0.9}]}, data)
+        assert len(out["tags"]) == 3
+        assert out["tags"][2]["confidence"] is None
 
     def test_scalar_and_group_untouched(self):
         svc = self._svc()
@@ -724,26 +745,23 @@ class TestAssessmentReconciliation:
         assert out["group"] == {"k": {"c": 0.8}}
         assert len(out["txns"]) == 1  # truncated to data length
 
-    def test_field_not_assessed_left_alone(self):
-        svc = self._svc()
-        data = {"txns": [{"a": 1}, {"a": 2}]}
-        assessment = {}  # model didn't assess txns at all
-        out = svc._reconcile_assessment_to_data(assessment, data)
-        assert "txns" not in out  # not fabricated
-
     def test_reconcile_fixes_large_merged_mismatch(self):
         # Reproduces the live e2e bug: merged data has 120 rows but the merged
-        # assessment only 45 (LLM under-count + phantom-row filtering on data
-        # merge diverging from assessment collation). Post-merge reconcile must
-        # align the assessment list to exactly the data length.
+        # assessment only 45. Post-merge reconcile aligns to 120, and the padded
+        # rows mirror the data sub-fields so they remain groundable.
         svc = self._svc()
-        data = {"transaction_details": [{"r": i} for i in range(120)]}
-        assessment = {"transaction_details": [{"amt": {"c": 0.9}} for _ in range(45)]}
+        data = {
+            "transaction_details": [
+                {"date": f"d{i}", "amt": f"{i}"} for i in range(120)
+            ]
+        }
+        assessment = {"transaction_details": [{"date": {"c": 0.9}} for _ in range(45)]}
         out = svc._reconcile_assessment_to_data(assessment, data)
         assert len(out["transaction_details"]) == 120
-        # first 45 preserved, remainder padded neutral
-        assert out["transaction_details"][0]["amt"]["c"] == 0.9
-        assert out["transaction_details"][119]["confidence"] is None
+        assert out["transaction_details"][0]["date"]["c"] == 0.9
+        # padded row mirrors data sub-fields with null confidence (groundable)
+        assert out["transaction_details"][119]["date"]["confidence"] is None
+        assert out["transaction_details"][119]["amt"]["confidence"] is None
 
 
 class TestIntegratedAssessment:
