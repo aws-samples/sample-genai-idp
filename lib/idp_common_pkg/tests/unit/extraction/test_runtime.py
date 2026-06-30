@@ -478,3 +478,269 @@ class TestSelectRuntimeExtra:
             )
         )
         assert [t["r"] for t in merged.transactions] == [1]
+
+
+def _make_assess_runner(per_shard_assessment):
+    """Fake assess_runner keyed by page_start, returning canned assessment."""
+
+    async def assess(*, extracted_fields, payload):
+        ps = payload["page_start"]
+        if ps not in per_shard_assessment:
+            return None
+        return per_shard_assessment[ps]
+
+    return assess
+
+
+class TestInShardAssessment:
+    """In-shard assessment: extract_one_shard runs assess_runner, persists it,
+    and merge collates it (page-ordered for lists, first-wins for scalars)."""
+
+    def test_extract_one_shard_runs_and_returns_assessment(self):
+        runner = _make_runner({0: {"account": "A", "transactions": [{"r": 1}]}})
+        assess = _make_assess_runner(
+            {
+                0: {
+                    "assessment": {
+                        "account": {"confidence": 0.9},
+                        "transactions": [{"r": {"confidence": 0.8}}],
+                    },
+                    "alerts": [{"attribute_name": "account", "confidence": 0.9}],
+                    "metering": {"assess": {"t": 1}},
+                }
+            }
+        )
+        fields, response = asyncio.run(
+            extract_one_shard(
+                shard_index=0,
+                total_shards=1,
+                payload=_payload(0, 1),
+                model_id="m",
+                data_format=_Model,
+                config=IDPConfig(),
+                section_id="sec",
+                shard_runner=runner,
+                assess_runner=assess,
+            )
+        )
+        assert fields["account"] == "A"
+        sa = response["_shard_assessment"]
+        assert sa["assessment"]["account"]["confidence"] == 0.9
+        assert sa["alerts"][0]["attribute_name"] == "account"
+        assert sa["page_start"] == 0
+        # assessment metering folded into the shard response metering
+        assert "assess" in response["metering"]
+
+    def test_no_assess_runner_leaves_response_unchanged(self):
+        runner = _make_runner({0: {"account": "A"}})
+        _fields, response = asyncio.run(
+            extract_one_shard(
+                shard_index=0,
+                total_shards=1,
+                payload=_payload(0, 1),
+                model_id="m",
+                data_format=_Model,
+                config=IDPConfig(),
+                section_id="sec",
+                shard_runner=runner,
+            )
+        )
+        assert "_shard_assessment" not in response
+
+    def test_persisted_assessment_survives_resume(self):
+        """A cache hit must carry the persisted assessment back, no re-inference."""
+        store = {}
+
+        class _Persist:
+            def load(self, sid, ps, pe):
+                return store.get((sid, ps, pe))
+
+            def save(self, sid, ps, pe, result):
+                store[(sid, ps, pe)] = result
+
+        runner = _make_runner({0: {"account": "A", "transactions": [{"r": 1}]}})
+        assess = _make_assess_runner(
+            {0: {"assessment": {"account": {"confidence": 0.7}}, "alerts": []}}
+        )
+        # First run persists extraction + assessment.
+        asyncio.run(
+            extract_one_shard(
+                shard_index=0,
+                total_shards=1,
+                payload=_payload(0, 1),
+                model_id="m",
+                data_format=_Model,
+                config=IDPConfig(),
+                section_id="sec",
+                shard_runner=runner,
+                assess_runner=assess,
+                persistence=_Persist(),
+            )
+        )
+
+        # Second run: assess_runner that would explode if called — proves skip.
+        async def _boom(**kwargs):
+            raise AssertionError("assess_runner must not run on cache hit")
+
+        _fields, response = asyncio.run(
+            extract_one_shard(
+                shard_index=0,
+                total_shards=1,
+                payload=_payload(0, 1),
+                model_id="m",
+                data_format=_Model,
+                config=IDPConfig(),
+                section_id="sec",
+                shard_runner=runner,
+                assess_runner=_boom,
+                persistence=_Persist(),
+            )
+        )
+        assert (
+            response["_shard_assessment"]["assessment"]["account"]["confidence"] == 0.7
+        )
+
+    def test_merge_collates_list_assessment_page_ordered(self):
+        from idp_common.extraction.runtime import merge_assessment_dicts
+
+        shard_assessments = [
+            {
+                "assessment": {"transactions": [{"r": {"c": 1}}]},
+                "alerts": [{"a": 1}],
+                "page_start": 0,
+            },
+            {
+                "assessment": {"transactions": [{"r": {"c": 2}}, {"r": {"c": 3}}]},
+                "alerts": [{"a": 2}],
+                "page_start": 1,
+            },
+        ]
+        merged, alerts = merge_assessment_dicts(shard_assessments, {"transactions"})
+        assert [t["r"]["c"] for t in merged["transactions"]] == [1, 2, 3]
+        assert alerts == [{"a": 1}, {"a": 2}]
+
+    def test_merge_collates_scalar_first_wins(self):
+        from idp_common.extraction.runtime import merge_assessment_dicts
+
+        shard_assessments = [
+            {
+                "assessment": {"account": {"confidence": 0.9}},
+                "alerts": [],
+                "page_start": 0,
+            },
+            {
+                "assessment": {"account": {"confidence": 0.1}},
+                "alerts": [],
+                "page_start": 1,
+            },
+        ]
+        merged, _ = merge_assessment_dicts(shard_assessments, set())
+        assert merged["account"]["confidence"] == 0.9
+
+    def test_merge_shard_dicts_surfaces_merged_assessment(self):
+        shard_dicts = [
+            {
+                "extracted_fields": {"transactions": [{"r": 1}]},
+                "page_start": 0,
+                "assessment": {"transactions": [{"r": {"c": 1}}]},
+                "alerts": [{"a": 1}],
+            },
+            {
+                "extracted_fields": {"transactions": [{"r": 2}]},
+                "page_start": 1,
+                "assessment": {"transactions": [{"r": {"c": 2}}]},
+                "alerts": [],
+            },
+        ]
+        _merged, metering, _c = merge_shard_dicts(shard_dicts, _Model)
+        assert [
+            t["r"]["c"] for t in metering["_merged_assessment"]["transactions"]
+        ] == [1, 2]
+        assert metering["_merged_assessment_alerts"] == [{"a": 1}]
+
+    def test_inprocess_runtime_surfaces_merged_assessment(self):
+        runner = _make_runner(
+            {0: {"transactions": [{"r": 1}]}, 1: {"transactions": [{"r": 2}]}}
+        )
+        assess = _make_assess_runner(
+            {
+                0: {"assessment": {"transactions": [{"r": {"c": 1}}]}, "alerts": []},
+                1: {"assessment": {"transactions": [{"r": {"c": 2}}]}, "alerts": []},
+            }
+        )
+        _merged, response = asyncio.run(
+            InProcessRuntime(max_parallelism=2).run(
+                shard_payloads=[_payload(0, 1), _payload(1, 2)],
+                model_id="m",
+                data_format=_Model,
+                config=IDPConfig(),
+                section_id="sec",
+                shard_runner=runner,
+                assess_runner=assess,
+            )
+        )
+        ma = response["metering"]["_merged_assessment"]
+        assert [t["r"]["c"] for t in ma["transactions"]] == [1, 2]
+
+
+class TestAssessmentReconciliation:
+    """ExtractionService._reconcile_assessment_to_data forces per-field list
+    assessments to index-align with the extracted data lists."""
+
+    def _svc(self):
+        from idp_common.extraction.service import ExtractionService
+
+        return ExtractionService(config=IDPConfig())
+
+    def test_truncates_overlong_list_assessment(self):
+        svc = self._svc()
+        data = {"txns": [{"a": 1}, {"a": 2}]}
+        assessment = {"txns": [{"c": 0.9}, {"c": 0.8}, {"c": 0.7}, {"c": 0.6}]}
+        out = svc._reconcile_assessment_to_data(assessment, data)
+        assert len(out["txns"]) == 2
+
+    def test_pads_short_list_assessment(self):
+        svc = self._svc()
+        data = {"txns": [{"a": i} for i in range(5)]}
+        assessment = {"txns": [{"c": 0.9}, {"c": 0.8}]}
+        out = svc._reconcile_assessment_to_data(assessment, data)
+        assert len(out["txns"]) == 5
+        # padded entries are neutral "not assessed"
+        assert out["txns"][2]["confidence"] is None
+        assert "Not individually assessed" in out["txns"][4]["confidence_reason"]
+        # original entries preserved
+        assert out["txns"][0]["c"] == 0.9
+
+    def test_scalar_and_group_untouched(self):
+        svc = self._svc()
+        data = {"name": "x", "group": {"k": "v"}, "txns": [{"a": 1}]}
+        assessment = {
+            "name": {"c": 0.9},
+            "group": {"k": {"c": 0.8}},
+            "txns": [{"c": 0.7}, {"c": 0.6}],
+        }
+        out = svc._reconcile_assessment_to_data(assessment, data)
+        assert out["name"] == {"c": 0.9}
+        assert out["group"] == {"k": {"c": 0.8}}
+        assert len(out["txns"]) == 1  # truncated to data length
+
+    def test_field_not_assessed_left_alone(self):
+        svc = self._svc()
+        data = {"txns": [{"a": 1}, {"a": 2}]}
+        assessment = {}  # model didn't assess txns at all
+        out = svc._reconcile_assessment_to_data(assessment, data)
+        assert "txns" not in out  # not fabricated
+
+    def test_reconcile_fixes_large_merged_mismatch(self):
+        # Reproduces the live e2e bug: merged data has 120 rows but the merged
+        # assessment only 45 (LLM under-count + phantom-row filtering on data
+        # merge diverging from assessment collation). Post-merge reconcile must
+        # align the assessment list to exactly the data length.
+        svc = self._svc()
+        data = {"transaction_details": [{"r": i} for i in range(120)]}
+        assessment = {"transaction_details": [{"amt": {"c": 0.9}} for _ in range(45)]}
+        out = svc._reconcile_assessment_to_data(assessment, data)
+        assert len(out["transaction_details"]) == 120
+        # first 45 preserved, remainder padded neutral
+        assert out["transaction_details"][0]["amt"]["c"] == 0.9
+        assert out["transaction_details"][119]["confidence"] is None

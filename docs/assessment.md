@@ -58,6 +58,37 @@ The assessment step is conditionally integrated into Pattern-2's ProcessSections
 }
 ```
 
+### Running Assessment Inside Extraction (in-shard / integrated)
+
+Assessment does not have to run as a separate downstream step. The
+`extraction.assessment_integration` setting controls *where* per-field confidence
+and bounding boxes are produced:
+
+| `extraction.assessment_integration` | Extraction mode | Where assessment runs | Standalone Assessment step |
+|---|---|---|---|
+| `separate` (default) | non-agentic | the standalone Assessment step (unchanged) | runs |
+| `separate` | agentic | a second inference **inside each extraction shard** | bypassed (skip) |
+| `integrated` | any | the extraction inference itself, in one pass | bypassed (skip) |
+| (any) | (any) with `assessment.enabled: false` | nowhere | bypassed |
+
+**Why in-shard for agentic.** Agentic extraction shards large sections into
+token-budgeted page ranges so no single inference sees the whole document. A
+single post-merge assessment would re-introduce exactly the context-window
+pressure sharding removes, so assessment runs **per shard** (over that shard's
+pages and extracted values) and is **collated on merge** — per-field, page-ordered
+for list items, first-shard-wins for scalars — then grounded once in OCR geometry
+over the whole section. This reuses the *same* `AssessmentService.assess_results`
+core and `ground_assessment_geometry` the standalone step uses, so the
+`explainability_info` output is identical; only the execution location differs.
+
+**Automatic bypass of the standalone step.** When extraction has already written
+`explainability_info` to the section result, the Assessment Lambda's
+*intelligent skip* detects it and returns immediately without a second LLM call —
+so there is no duplicate assessment cost and **no state-machine change is
+required**. This is what lets the standalone (non-agentic, ThreadPool-based)
+Assessment step wither as agentic adoption grows, without a hard cutover. The
+document status stays `EXTRACTING` while in-shard assessment runs.
+
 ## Configuration
 
 ### Configuration-Based Control

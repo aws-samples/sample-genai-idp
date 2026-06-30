@@ -37,6 +37,10 @@ interface SchemaProperty {
   // For nested sectionLabel objects: auto-expand the collapsible section when a
   // sibling field matches (e.g. expand "Agentic Extraction" when enabled=true).
   expandWhen?: { field: string; value?: unknown };
+  // Hide this field when an ABSOLUTE-path (form-root) field equals a value.
+  // Composes with dependsOn; resolves cross-section (e.g. hide unused Assessment
+  // inference fields when extraction.assessment_integration === "integrated").
+  hideWhen?: { field: string; value?: unknown };
   defaultExpanded?: boolean | string;
   nestLevel?: number;
   columns?: string | number;
@@ -698,6 +702,19 @@ const ConfigBuilder = ({
     // For objects with properties, ensure the object exists in formValues
     if (property.type === 'object' && property.properties && value === undefined) {
       return null;
+    }
+
+    // Generic cross-section hide: hide this field when an ABSOLUTE-path field
+    // matches a value (composes with dependsOn — both must pass to render).
+    // Unlike dependsOn (sibling-first), hideWhen.field is always resolved from
+    // the form root, so a field in one top-level section can be hidden based on
+    // a setting in another (e.g. hide unused Assessment inference fields when
+    // extraction.assessment_integration === "integrated").
+    if (property.hideWhen) {
+      const hideVal = getValueAtPath(formValues, property.hideWhen.field);
+      if (hideVal === property.hideWhen.value) {
+        return null;
+      }
     }
 
     // Check dependencies FIRST, before any rendering - applies to all field types

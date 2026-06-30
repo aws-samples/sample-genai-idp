@@ -415,6 +415,22 @@ class ExtractionConfig(BaseModel):
     )
     image: ImageConfig = Field(default_factory=ImageConfig)
     agentic: AgenticConfig = Field(default_factory=AgenticConfig)
+    assessment_integration: str = Field(
+        default="separate",
+        description=(
+            "Where confidence/bbox assessment runs relative to extraction. "
+            "'separate' (default) keeps extraction and assessment as distinct "
+            "inferences — for non-agentic extraction the workflow flows to the "
+            "standalone Assessment step as today; for agentic extraction a second "
+            "assessment inference runs inside each shard. 'integrated' folds "
+            "assessment into the extraction inference itself (one prompt emits the "
+            "value plus its confidence/bbox), saving a model pass; the standalone "
+            "Assessment step is then bypassed and the Assessment config's "
+            "model/prompt settings are unused. Either way, set assessment.enabled "
+            "to false to skip assessment entirely. Default 'separate' preserves "
+            "existing behavior on upgrade."
+        ),
+    )
     missing_field_handling: MissingFieldHandlingConfig = Field(
         default_factory=MissingFieldHandlingConfig,
         description=(
@@ -443,6 +459,20 @@ class ExtractionConfig(BaseModel):
         if isinstance(v, str):
             return int(v) if v else 0
         return int(v)
+
+    @field_validator("assessment_integration", mode="before")
+    @classmethod
+    def validate_assessment_integration(cls, v: Any) -> str:
+        """Normalize the integration mode; reject unknown values early."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return "separate"
+        v_str = str(v).strip().lower()
+        if v_str not in ("separate", "integrated"):
+            raise ValueError(
+                "extraction.assessment_integration must be 'separate' or "
+                f"'integrated', got {v!r}"
+            )
+        return v_str
 
     @model_validator(mode="after")
     def set_default_review_agent_model(self) -> Self:

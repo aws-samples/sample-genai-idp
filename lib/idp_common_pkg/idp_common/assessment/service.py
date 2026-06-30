@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import time
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Union
 
 from idp_common import bedrock, image, metrics, s3, utils
@@ -76,6 +77,29 @@ def _safe_float_conversion(value: Any, default: float = 0.0) -> float:
             f"Could not convert {type(value)} '{value}' to float, using default {default}"
         )
         return default
+
+
+@dataclass
+class AssessmentCoreResult:
+    """In-memory result of the pure assessment-inference core.
+
+    This is what ``AssessmentService.assess_results`` returns so callers other
+    than the S3/Document-bound ``process_document_section`` (notably the agentic
+    in-shard assessment path) can reuse the exact same inference + threshold +
+    alert logic without round-tripping S3. Geometry grounding is deliberately
+    NOT applied here — the caller grounds against whatever page-data scope it
+    owns (the standalone path grounds per section; the sharded path grounds once
+    post-merge over the whole section), so the core stays scope-agnostic.
+    """
+
+    # ``{field: {confidence, confidence_reason, confidence_threshold, ...}}`` —
+    # becomes ``explainability_info[0]`` once the caller has it.
+    enhanced_assessment: Dict[str, Any] = field(default_factory=dict)
+    # ``[{attribute_name, confidence, confidence_threshold}, ...]``
+    confidence_threshold_alerts: List[Dict[str, Any]] = field(default_factory=list)
+    metering: Dict[str, Any] = field(default_factory=dict)
+    parsing_succeeded: bool = True
+    duration_seconds: float = 0.0
 
 
 class AssessmentService:
@@ -666,6 +690,248 @@ class AssessmentService:
 
         return enhanced_assessment
 
+    def assess_results(
+        self,
+        *,
+        class_label: str,
+        extraction_results: Dict[str, Any],
+        document_text: str,
+        page_images: List[Any],
+        ocr_text_confidence: str = "",
+    ) -> AssessmentCoreResult:
+        """Run the pure assessment inference over in-memory inputs.
+
+        This is the S3-free, Document-free core shared by both
+        ``process_document_section`` (the standalone Assessment step) and the
+        agentic in-shard assessment path. Given a class label, the extracted
+        values, and the page text/images/OCR-confidence for the scope being
+        assessed, it builds the assessment prompt, invokes Bedrock, parses the
+        response, and enhances every field with its confidence threshold and
+        alerts — returning the result in memory.
+
+        Geometry grounding is NOT applied here; the caller grounds against the
+        page-data scope it owns (see ``AssessmentCoreResult``).
+
+        Args:
+            class_label: Document class for schema/threshold lookup.
+            extraction_results: The ``inference_result`` dict to assess.
+            document_text: Concatenated OCR text for the assessed pages.
+            page_images: Prepared page images (may be empty).
+            ocr_text_confidence: Optional condensed OCR text-confidence block.
+
+        Returns:
+            An ``AssessmentCoreResult`` with the enhanced per-field assessment,
+            confidence-threshold alerts, metering, parse-success flag, and the
+            model invocation duration.
+        """
+        if not extraction_results:
+            logger.warning("assess_results called with empty extraction_results")
+            return AssessmentCoreResult()
+
+        # Get assessment configuration (type-safe access)
+        model_id = self.config.assessment.model
+        temperature = self.config.assessment.temperature
+        top_k = self.config.assessment.top_k
+        top_p = self.config.assessment.top_p
+        reasoning_effort = self.config.assessment.reasoning_effort
+        max_tokens = self.config.assessment.max_tokens
+        system_prompt = self.config.assessment.system_prompt
+
+        # Get schema for this document class
+        class_schema = self._get_class_schema(class_label)
+        if not class_schema:
+            raise ValueError(f"No schema found for document class: {class_label}")
+
+        property_descriptions = self._format_property_descriptions(class_schema)
+
+        # Prepare prompt (type-safe access)
+        prompt_template = self.config.assessment.task_prompt
+        extraction_results_str = json.dumps(extraction_results, indent=2)
+
+        if not prompt_template:
+            raise ValueError(
+                "Assessment task_prompt is required in configuration but not found"
+            )
+        try:
+            content = self._build_content_with_or_without_image_placeholder(
+                prompt_template,
+                document_text,
+                class_label,
+                property_descriptions,
+                extraction_results_str,
+                ocr_text_confidence,
+                page_images,
+            )
+        except ValueError as e:
+            logger.error(f"Error formatting prompt template: {str(e)}")
+            raise ValueError(f"Assessment prompt template formatting failed: {str(e)}")
+
+        # Time the model invocation
+        request_start_time = time.time()
+
+        response_with_metering = bedrock.invoke_model(
+            model_id=model_id,
+            system_prompt=system_prompt,
+            content=content,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            context="Assessment",
+            model_lambda_hook_arn=self.config.assessment.model_lambda_hook_arn,
+            reasoning_effort=reasoning_effort,
+        )
+
+        total_duration = time.time() - request_start_time
+        logger.info(f"Time taken for assessment: {total_duration:.2f} seconds")
+
+        assessment_text = bedrock.extract_text_from_response(response_with_metering)
+        metering = response_with_metering.get("metering", {})
+
+        # Parse response into JSON
+        assessment_data: Dict[str, Any] = {}
+        parsing_succeeded = True
+
+        try:
+            assessment_data = json.loads(extract_json_from_text(assessment_text))
+
+            # Handle case where LLM returns a single-element array instead of dict
+            if isinstance(assessment_data, list):
+                if len(assessment_data) == 1:
+                    logger.warning(
+                        "LLM returned single-element array instead of object, unwrapping",
+                        extra={"original_type": "list", "element_count": 1},
+                    )
+                    assessment_data = assessment_data[0]
+                elif len(assessment_data) == 0:
+                    raise ValueError("Received empty array instead of single object")
+                else:
+                    raise ValueError(
+                        f"Received array with {len(assessment_data)} elements "
+                        "instead of single object"
+                    )
+        except Exception as e:
+            logger.error(
+                f"Error parsing assessment LLM output - invalid JSON?: "
+                f"{assessment_text} - {e}"
+            )
+            logger.info("Using default confidence scores.")
+            assessment_data = {}
+            for attr_name in extraction_results.keys():
+                assessment_data[attr_name] = {
+                    "confidence": 0.5,
+                    "confidence_reason": "Unable to parse assessment response - default score assigned",
+                }
+            parsing_succeeded = False
+
+        # Process bounding boxes automatically if bbox data is present
+        try:
+            assessment_data = self._extract_geometry_from_assessment(assessment_data)
+        except Exception as e:
+            logger.warning(f"Failed to extract geometry data: {str(e)}")
+
+        default_confidence_threshold = (
+            self.config.assessment.default_confidence_threshold
+        )
+
+        enhanced_assessment_data: Dict[str, Any] = {}
+        confidence_threshold_alerts: List[Dict[str, Any]] = []
+        properties = class_schema.get(SCHEMA_PROPERTIES, {})
+
+        for attr_name, attr_assessment in assessment_data.items():
+            prop_schema = properties.get(attr_name, {})
+            attr_threshold = _safe_float_conversion(
+                prop_schema.get(
+                    X_AWS_IDP_CONFIDENCE_THRESHOLD, default_confidence_threshold
+                ),
+                default_confidence_threshold,
+            )
+
+            prop_type_json = prop_schema.get(SCHEMA_TYPE, TYPE_STRING)
+            if prop_type_json == TYPE_OBJECT:
+                attr_type = "group"
+            elif prop_type_json == TYPE_ARRAY:
+                attr_type = "list"
+            else:
+                attr_type = "simple"
+
+            if isinstance(attr_assessment, dict):
+                enhanced_assessment_data[attr_name] = self._enhance_dict_assessment(
+                    attr_assessment, attr_threshold
+                )
+                self._check_confidence_alerts(
+                    attr_assessment,
+                    attr_name,
+                    attr_threshold,
+                    confidence_threshold_alerts,
+                )
+            elif isinstance(attr_assessment, list):
+                if attr_type == "list":
+                    enhanced_list = []
+                    for i, item_assessment in enumerate(attr_assessment):
+                        if isinstance(item_assessment, dict):
+                            enhanced_item = self._enhance_dict_assessment(
+                                item_assessment, attr_threshold
+                            )
+                            enhanced_list.append(enhanced_item)
+                            self._check_confidence_alerts(
+                                item_assessment,
+                                f"{attr_name}[{i}]",
+                                attr_threshold,
+                                confidence_threshold_alerts,
+                            )
+                        else:
+                            logger.warning(
+                                f"List item {i} in attribute '{attr_name}' is not a "
+                                f"dictionary. Expected dict, got {type(item_assessment)}. "
+                                "Using default confidence."
+                            )
+                            default_item = {
+                                "confidence": 0.5,
+                                "confidence_reason": f"List item {i} in '{attr_name}' has unexpected format. Using default confidence.",
+                                "confidence_threshold": attr_threshold,
+                            }
+                            enhanced_list.append(default_item)
+                            if 0.5 < attr_threshold:
+                                confidence_threshold_alerts.append(
+                                    {
+                                        "attribute_name": f"{attr_name}[{i}]",
+                                        "confidence": 0.5,
+                                        "confidence_threshold": attr_threshold,
+                                    }
+                                )
+                    enhanced_assessment_data[attr_name] = enhanced_list
+                else:
+                    logger.warning(
+                        f"Attribute '{attr_name}' (type: {attr_type}) assessment is a "
+                        "list but attribute is not configured as list type. Using "
+                        "default confidence."
+                    )
+                    enhanced_assessment_data[attr_name] = {
+                        "confidence": 0.5,
+                        "confidence_reason": f"LLM returned list format for non-list attribute '{attr_name}'. Using default confidence (0.5) and threshold ({attr_threshold}).",
+                        "confidence_threshold": attr_threshold,
+                    }
+            else:
+                logger.warning(
+                    f"Attribute '{attr_name}' assessment is of unexpected type "
+                    f"{type(attr_assessment)}. Expected dictionary or list (for list "
+                    "attributes). Using default confidence."
+                )
+                enhanced_assessment_data[attr_name] = {
+                    "confidence": 0.5,
+                    "confidence_reason": f"LLM returned unexpected type {type(attr_assessment)} for attribute '{attr_name}'. Using default confidence (0.5) and threshold ({attr_threshold}).",
+                    "confidence_threshold": attr_threshold,
+                }
+
+        return AssessmentCoreResult(
+            enhanced_assessment=enhanced_assessment_data,
+            confidence_threshold_alerts=confidence_threshold_alerts,
+            metering=metering or {},
+            parsing_succeeded=parsing_succeeded,
+            duration_seconds=total_duration,
+        )
+
     def process_document_section(self, document: Document, section_id: str) -> Document:
         """
         Process a single section from a Document object to assess extraction confidence.
@@ -818,259 +1084,26 @@ class AssessmentService:
             t4 = time.time()
             logger.info(f"Time taken to read raw OCR results: {t4 - t3:.2f} seconds")
 
-            # Get assessment configuration (type-safe access, Pydantic handles conversions)
-            model_id = self.config.assessment.model
-            temperature = self.config.assessment.temperature
-            top_k = self.config.assessment.top_k
-            top_p = self.config.assessment.top_p
-            reasoning_effort = self.config.assessment.reasoning_effort
-            max_tokens = self.config.assessment.max_tokens
-            system_prompt = self.config.assessment.system_prompt
-
-            # Get schema for this document class
-            class_schema = self._get_class_schema(class_label)
-            if not class_schema:
-                raise ValueError(f"No schema found for document class: {class_label}")
-
-            property_descriptions = self._format_property_descriptions(class_schema)
-
-            # Prepare prompt (type-safe access)
-            prompt_template = self.config.assessment.task_prompt
-            extraction_results_str = json.dumps(extraction_results, indent=2)
-
-            if not prompt_template:
-                raise ValueError(
-                    "Assessment task_prompt is required in configuration but not found"
-                )
-            else:
-                # Use the unified content builder for DOCUMENT_IMAGE placeholder support
-                try:
-                    content = self._build_content_with_or_without_image_placeholder(
-                        prompt_template,
-                        document_text,
-                        class_label,
-                        property_descriptions,
-                        extraction_results_str,
-                        ocr_text_confidence,
-                        page_images,  # Pass images to the content builder
-                    )
-                except ValueError as e:
-                    logger.error(f"Error formatting prompt template: {str(e)}")
-                    raise ValueError(
-                        f"Assessment prompt template formatting failed: {str(e)}"
-                    )
-
+            # Run the pure inference + enhancement core (shared with the agentic
+            # in-shard assessment path). This builds the prompt, invokes Bedrock,
+            # parses the response, and enhances each field with its confidence
+            # threshold + alerts — all from the in-memory inputs gathered above.
             logger.info(
-                f"Assessing extraction confidence for {class_label} document, section {section_id}"
+                f"Assessing extraction confidence for {class_label} document, "
+                f"section {section_id}"
             )
-
-            # Time the model invocation
-            request_start_time = time.time()
-
-            # Invoke Bedrock (or LambdaHook) with the common library
-            response_with_metering = bedrock.invoke_model(
-                model_id=model_id,
-                system_prompt=system_prompt,
-                content=content,
-                temperature=temperature,
-                top_k=top_k,
-                top_p=top_p,
-                max_tokens=max_tokens,
-                context="Assessment",
-                model_lambda_hook_arn=self.config.assessment.model_lambda_hook_arn,
-                reasoning_effort=reasoning_effort,
+            core = self.assess_results(
+                class_label=class_label,
+                extraction_results=extraction_results,
+                document_text=document_text,
+                page_images=page_images,
+                ocr_text_confidence=ocr_text_confidence,
             )
-
-            total_duration = time.time() - request_start_time
-            logger.info(f"Time taken for assessment: {total_duration:.2f} seconds")
-
-            # Extract text from response
-            assessment_text = bedrock.extract_text_from_response(response_with_metering)
-            metering = response_with_metering.get("metering", {})
-
-            # Parse response into JSON
-            assessment_data = {}
-            parsing_succeeded = True  # Flag to track if parsing was successful
-
-            try:
-                # Try to parse the assessment text as JSON
-                assessment_data = json.loads(extract_json_from_text(assessment_text))
-
-                # Handle case where LLM returns a single-element array instead of dict
-                # This happens when models mistakenly wrap the assessment in an array
-                if isinstance(assessment_data, list):
-                    if len(assessment_data) == 1:
-                        logger.warning(
-                            "LLM returned single-element array instead of object, unwrapping",
-                            extra={"original_type": "list", "element_count": 1},
-                        )
-                        assessment_data = assessment_data[0]
-                    elif len(assessment_data) == 0:
-                        logger.error(
-                            "LLM returned empty array when single object expected",
-                            extra={"element_count": 0},
-                        )
-                        # Fall through to error handling below
-                        raise ValueError(
-                            "Received empty array instead of single object"
-                        )
-                    else:  # len > 1
-                        logger.error(
-                            "LLM returned multi-element array when single object expected",
-                            extra={"element_count": len(assessment_data)},
-                        )
-                        # Fall through to error handling below
-                        raise ValueError(
-                            f"Received array with {len(assessment_data)} elements instead of single object"
-                        )
-
-            except Exception as e:
-                # Handle parsing error
-                logger.error(
-                    f"Error parsing assessment LLM output - invalid JSON?: {assessment_text} - {e}"
-                )
-                logger.info("Using default confidence scores.")
-                # Create default assessments for all extracted attributes
-                assessment_data = {}
-                for attr_name in extraction_results.keys():
-                    assessment_data[attr_name] = {
-                        "confidence": 0.5,
-                        "confidence_reason": "Unable to parse assessment response - default score assigned",
-                    }
-                parsing_succeeded = False  # Mark that parsing failed
-
-            # Process bounding boxes automatically if bbox data is present
-            try:
-                logger.debug("Checking for bounding box data in assessment response")
-                assessment_data = self._extract_geometry_from_assessment(
-                    assessment_data
-                )
-            except Exception as e:
-                logger.warning(f"Failed to extract geometry data: {str(e)}")
-                # Continue with assessment even if geometry extraction fails
-
-            # Get confidence thresholds (type-safe, already float from Pydantic)
-            default_confidence_threshold = (
-                self.config.assessment.default_confidence_threshold
-            )
-
-            # Enhance assessment data with confidence thresholds and create confidence threshold alerts
-            enhanced_assessment_data = {}
-            confidence_threshold_alerts = []
-
-            # Get properties dict once for efficient access
-            properties = class_schema.get(SCHEMA_PROPERTIES, {})
-
-            for attr_name, attr_assessment in assessment_data.items():
-                # Get property schema (if it exists in schema)
-                prop_schema = properties.get(attr_name, {})
-
-                # Get threshold for this property
-                attr_threshold = _safe_float_conversion(
-                    prop_schema.get(
-                        X_AWS_IDP_CONFIDENCE_THRESHOLD, default_confidence_threshold
-                    ),
-                    default_confidence_threshold,
-                )
-
-                # Get property type
-                prop_type_json = prop_schema.get(SCHEMA_TYPE, TYPE_STRING)
-
-                # Map JSON Schema type to legacy attribute type for existing logic
-                if prop_type_json == TYPE_OBJECT:
-                    attr_type = "group"
-                elif prop_type_json == TYPE_ARRAY:
-                    attr_type = "list"
-                else:
-                    attr_type = "simple"
-
-                # Check if attr_assessment is a dictionary (expected format for simple/group attributes)
-                if isinstance(attr_assessment, dict):
-                    # For simple attributes or group attributes - add confidence_threshold to each confidence assessment
-                    enhanced_assessment_data[attr_name] = self._enhance_dict_assessment(
-                        attr_assessment, attr_threshold
-                    )
-
-                    # Check for confidence threshold alerts in the assessment
-                    self._check_confidence_alerts(
-                        attr_assessment,
-                        attr_name,
-                        attr_threshold,
-                        confidence_threshold_alerts,
-                    )
-
-                elif isinstance(attr_assessment, list):
-                    # Handle list attributes (expected format for LIST attributes like transactions)
-                    if attr_type == "list":
-                        # This is expected for list attributes - process each item in the list
-                        enhanced_list = []
-                        for i, item_assessment in enumerate(attr_assessment):
-                            if isinstance(item_assessment, dict):
-                                enhanced_item = self._enhance_dict_assessment(
-                                    item_assessment, attr_threshold
-                                )
-                                enhanced_list.append(enhanced_item)
-
-                                # Check for confidence threshold alerts in list items
-                                self._check_confidence_alerts(
-                                    item_assessment,
-                                    f"{attr_name}[{i}]",
-                                    attr_threshold,
-                                    confidence_threshold_alerts,
-                                )
-                            else:
-                                # Handle unexpected format within list
-                                logger.warning(
-                                    f"List item {i} in attribute '{attr_name}' is not a dictionary. "
-                                    f"Expected dict, got {type(item_assessment)}. Using default confidence."
-                                )
-                                default_item = {
-                                    "confidence": 0.5,
-                                    "confidence_reason": f"List item {i} in '{attr_name}' has unexpected format. Using default confidence.",
-                                    "confidence_threshold": attr_threshold,
-                                }
-                                enhanced_list.append(default_item)
-
-                                # Add alert for default confidence
-                                if 0.5 < attr_threshold:
-                                    confidence_threshold_alerts.append(
-                                        {
-                                            "attribute_name": f"{attr_name}[{i}]",
-                                            "confidence": 0.5,
-                                            "confidence_threshold": attr_threshold,
-                                        }
-                                    )
-
-                        enhanced_assessment_data[attr_name] = enhanced_list
-                    else:
-                        # List format for non-list attribute is unexpected
-                        logger.warning(
-                            f"Attribute '{attr_name}' (type: {attr_type}) assessment is a list but attribute is not configured as list type. "
-                            f"Using default confidence."
-                        )
-
-                        # Create a default assessment structure
-                        default_assessment = {
-                            "confidence": 0.5,
-                            "confidence_reason": f"LLM returned list format for non-list attribute '{attr_name}'. Using default confidence (0.5) and threshold ({attr_threshold}).",
-                            "confidence_threshold": attr_threshold,
-                        }
-                        enhanced_assessment_data[attr_name] = default_assessment
-
-                else:
-                    # Handle other unexpected types
-                    logger.warning(
-                        f"Attribute '{attr_name}' assessment is of unexpected type {type(attr_assessment)}. "
-                        f"Expected dictionary or list (for list attributes). Using default confidence."
-                    )
-
-                    # Create a default assessment structure
-                    default_assessment = {
-                        "confidence": 0.5,
-                        "confidence_reason": f"LLM returned unexpected type {type(attr_assessment)} for attribute '{attr_name}'. Using default confidence (0.5) and threshold ({attr_threshold}).",
-                        "confidence_threshold": attr_threshold,
-                    }
-                    enhanced_assessment_data[attr_name] = default_assessment
+            enhanced_assessment_data = core.enhanced_assessment
+            confidence_threshold_alerts = core.confidence_threshold_alerts
+            metering = core.metering
+            parsing_succeeded = core.parsing_succeeded
+            total_duration = core.duration_seconds
 
             # Ground field geometry in real OCR data when enabled. This replaces the
             # LLM-estimated boxes with real OCR boxes from pageData.json where the
