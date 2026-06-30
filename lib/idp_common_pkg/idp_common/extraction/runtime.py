@@ -542,6 +542,22 @@ async def extract_one_shard(
                 page_end,
                 e,
             )
+    else:
+        # Integrated-assessment mode: the extraction agent emitted per-field
+        # confidence/bbox INLINE (one inference, no second pass). The shard
+        # runner surfaced it in the response metering; lift it into the same
+        # _shard_assessment slot so collation/reconcile/grounding are identical
+        # to separate mode. Pop it out of metering so it doesn't leak downstream.
+        inline = (response.get("metering") or {}).pop(
+            "_integrated_field_assessment", None
+        )
+        if inline:
+            shard_assessment = {
+                "assessment": inline,
+                "alerts": [],
+                "page_start": page_start,
+                "page_end": page_end,
+            }
 
     if persistence is not None:
         persisted: dict[str, Any] = {
