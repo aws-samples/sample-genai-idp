@@ -39,11 +39,28 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 _lambda = boto3.client("lambda")
+_ssm = boto3.client("ssm")
 
 # {fieldName: resolverFunctionArn} — fields routed to existing resolver Lambdas.
-FIELD_FUNCTION_MAP: Dict[str, str] = json.loads(
-    os.environ.get("FIELD_FUNCTION_MAP", "{}")
-)
+# The map can hold ~60 full ARNs (>4KB), exceeding the Lambda env-var limit, so
+# it is stored in an SSM parameter (FIELD_FUNCTION_MAP_PARAM) and loaded once at
+# cold start. A direct FIELD_FUNCTION_MAP env var is still honored as a fallback
+# (e.g. for tests).
+def _load_field_function_map() -> Dict[str, str]:
+    inline = os.environ.get("FIELD_FUNCTION_MAP")
+    if inline:
+        return json.loads(inline)
+    param = os.environ.get("FIELD_FUNCTION_MAP_PARAM")
+    if param:
+        try:
+            resp = _ssm.get_parameter(Name=param)
+            return json.loads(resp["Parameter"]["Value"])
+        except Exception as e:  # noqa: BLE001
+            logger.error("Failed to load FIELD_FUNCTION_MAP from SSM %s: %s", param, e)
+    return {}
+
+
+FIELD_FUNCTION_MAP: Dict[str, str] = _load_field_function_map()
 
 
 def _invoke_resolver(function_arn: str, appsync_event: Dict[str, Any]) -> Any:

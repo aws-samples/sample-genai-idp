@@ -4763,6 +4763,97 @@ Resources:
   #     locally (ddb_direct.py).
   # All resources are gated on UseHttpApi so AppSync deployments are unaffected.
   ##########################################################################
+  # Holds the dispatcher's field->resolver-ARN map (too large for a Lambda env
+  # var). Created in both transports is unnecessary, so gate on UseHttpApi.
+  HttpApiFieldFunctionMapParam:
+    Type: AWS::SSM::Parameter
+    Condition: UseHttpApi
+    Properties:
+      Name: !Sub "/${StackName}/http-api/field-function-map"
+      Type: String
+      Tier: Advanced
+      Value: !Sub
+        - |
+          {
+            "abortTestRuns": "${AbortTestRunsResolverFunction.Arn}",
+            "abortWorkflow": "${AbortWorkflowResolverFunction.Arn}",
+            "addDocumentsToTestSet": "${TestSetResolverFunction.Arn}",
+            "addDocumentsToTestSetFromUpload": "${TestSetResolverFunction.Arn}",
+            "addTestSet": "${TestSetResolverFunction.Arn}",
+            "addTestSetFromUpload": "${TestSetResolverFunction.Arn}",
+            "autoDetectSections": "${DiscoveryUploadResolverFunction.Arn}",
+            "compareTestRuns": "${TestResultsResolverFunction.Arn}",
+            "copyToBaseline": "${CopyToBaselineResolverFunction.Arn}",
+            "deleteChatSession": "${DeleteAgentChatSessionFunction.Arn}",
+            "deleteConfigVersion": "${ConfigurationResolverFunction.Arn}",
+            "deleteDocument": "${DeleteDocumentResolverFunction.Arn}",
+            "deleteTestSets": "${TestSetResolverFunction.Arn}",
+            "deleteTests": "${DeleteTestsResolverFunction.Arn}",
+            "getChatMessages": "${GetAgentChatMessagesFunction.Arn}",
+            "getConfigVersion": "${ConfigurationResolverFunction.Arn}",
+            "getConfigVersions": "${ConfigurationResolverFunction.Arn}",
+            "getConfigurationLibraryFile": "${ConfigurationResolverFunction.Arn}",
+            "getDocumentCount": "${ListDocumentsGSIResolverFunction.Arn}",
+            "getFileContents": "${GetFileContentsResolverFunction.Arn}",
+            "getPricing": "${ConfigurationResolverFunction.Arn}",
+            "getStepFunctionExecution": "${GetStepFunctionExecutionResolverFunction.Arn}",
+            "getTestRun": "${TestResultsResolverFunction.Arn}",
+            "getTestRunStatus": "${TestResultsResolverFunction.Arn}",
+            "getTestRuns": "${TestResultsResolverFunction.Arn}",
+            "getTestSets": "${TestSetResolverFunction.Arn}",
+            "listAvailableAgents": "${ListAvailableAgentsFunction.Arn}",
+            "listBucketFiles": "${TestSetResolverFunction.Arn}",
+            "listChatSessions": "${ListAgentChatSessionsFunction.Arn}",
+            "listConfigurationLibrary": "${ConfigurationResolverFunction.Arn}",
+            "listDocuments": "${ListDocumentsGSIResolverFunction.Arn}",
+            "listDocumentsByDateRange": "${ListDocumentsByDateRangeResolverFunction.Arn}",
+            "pauseCircuitBreaker": "${CircuitBreakerResolverFunctionArn}",
+            "probeCircuitBreaker": "${CircuitBreakerResolverFunctionArn}",
+            "processChanges": "${ProcessChangesResolverFunction.Arn}",
+            "queryKnowledgeBase": "${QueryKnowledgeBaseResolverFunction.Arn}",
+            "reprocessDocument": "${ReprocessDocumentResolverFunction.Arn}",
+            "restoreDefaultPricing": "${ConfigurationResolverFunction.Arn}",
+            "resumeCircuitBreaker": "${CircuitBreakerResolverFunctionArn}",
+            "sendAgentChatMessage": "${AgentChatResolverFunction.Arn}",
+            "sendChatDocumentMessage": "${SendChatDocumentMessageResolverFunction.Arn}",
+            "setActiveVersion": "${ConfigurationResolverFunction.Arn}",
+            "startMultiDocDiscovery": "${DiscoveryUploadResolverFunction.Arn}",
+            "startTestRun": "${TestRunnerFunction.Arn}",
+            "submitAgentQuery": "${AgentRequestHandlerFunction.Arn}",
+            "syncBdaIdp": "${SyncBdaIdpResolverFunction.Arn}",
+            "updateConfiguration": "${ConfigurationResolverFunction.Arn}",
+            "updatePricing": "${ConfigurationResolverFunction.Arn}",
+            "updateTestSet": "${TestSetResolverFunction.Arn}",
+            "uploadDiscoveryDocument": "${DiscoveryUploadResolverFunction.Arn}",
+            "uploadDocument": "${UploadResolverFunction.Arn}",
+            "uploadMultiDocDiscoveryZip": "${DiscoveryUploadResolverFunction.Arn}",
+            "claimReview": "${CompleteSectionReviewFunctionArn}",
+            "completeSectionReview": "${CompleteSectionReviewFunctionArn}",
+            "releaseReview": "${CompleteSectionReviewFunctionArn}",
+            "skipAllSectionsReview": "${CompleteSectionReviewFunctionArn}",
+            "createUser": "${UserManagementFunctionArn}",
+            "updateUser": "${UserManagementFunctionArn}",
+            "deleteUser": "${UserManagementFunctionArn}",
+            "listUsers": "${UserManagementFunctionArn}",
+            "getMyProfile": "${UserManagementFunctionArn}",
+            "createFinetuningJob": "${FinetuningJobsResolverFunctionArn}",
+            "deleteFinetuningJob": "${FinetuningJobsResolverFunctionArn}",
+            "getFinetuningJob": "${FinetuningJobsResolverFunctionArn}",
+            "listFinetuningJobs": "${FinetuningJobsResolverFunctionArn}",
+            "calculateCapacity": "${CalculateCapacityResolverFunctionArn}",
+            "getLatestPublishedVersion": "${VersionCheckResolverFunctionArn}"
+          }
+        # CircuitBreakerResolverFunction is conditional (only created when the
+        # circuit breaker is enabled). Resolve its ARN via a substitution
+        # variable so the !Sub above never references the resource directly
+        # (a direct ${CircuitBreakerResolverFunction.Arn} fails to resolve
+        # when the function is absent). Empty string when disabled — those
+        # circuit-breaker operations simply aren't routable then.
+        - CircuitBreakerResolverFunctionArn: !If
+            - CircuitBreakerEnabledCondition
+            - !GetAtt CircuitBreakerResolverFunction.Arn
+            - ""
+
   HttpApiDispatcherLogGroup:
     Type: AWS::Logs::LogGroup
     Condition: UseHttpApi
@@ -4804,87 +4895,9 @@ Resources:
           AGENT_TABLE_NAME: !Ref AgentTableName
           # field -> resolver function ARN. Fields absent here are served by
           # ddb_direct.py (discovery/agent jobs, getDocument, date queries).
-          FIELD_FUNCTION_MAP: !Sub
-            - |
-              {
-                "abortTestRuns": "${AbortTestRunsResolverFunction.Arn}",
-                "abortWorkflow": "${AbortWorkflowResolverFunction.Arn}",
-                "addDocumentsToTestSet": "${TestSetResolverFunction.Arn}",
-                "addDocumentsToTestSetFromUpload": "${TestSetResolverFunction.Arn}",
-                "addTestSet": "${TestSetResolverFunction.Arn}",
-                "addTestSetFromUpload": "${TestSetResolverFunction.Arn}",
-                "autoDetectSections": "${DiscoveryUploadResolverFunction.Arn}",
-                "compareTestRuns": "${TestResultsResolverFunction.Arn}",
-                "copyToBaseline": "${CopyToBaselineResolverFunction.Arn}",
-                "deleteChatSession": "${DeleteAgentChatSessionFunction.Arn}",
-                "deleteConfigVersion": "${ConfigurationResolverFunction.Arn}",
-                "deleteDocument": "${DeleteDocumentResolverFunction.Arn}",
-                "deleteTestSets": "${TestSetResolverFunction.Arn}",
-                "deleteTests": "${DeleteTestsResolverFunction.Arn}",
-                "getChatMessages": "${GetAgentChatMessagesFunction.Arn}",
-                "getConfigVersion": "${ConfigurationResolverFunction.Arn}",
-                "getConfigVersions": "${ConfigurationResolverFunction.Arn}",
-                "getConfigurationLibraryFile": "${ConfigurationResolverFunction.Arn}",
-                "getDocumentCount": "${ListDocumentsGSIResolverFunction.Arn}",
-                "getFileContents": "${GetFileContentsResolverFunction.Arn}",
-                "getPricing": "${ConfigurationResolverFunction.Arn}",
-                "getStepFunctionExecution": "${GetStepFunctionExecutionResolverFunction.Arn}",
-                "getTestRun": "${TestResultsResolverFunction.Arn}",
-                "getTestRunStatus": "${TestResultsResolverFunction.Arn}",
-                "getTestRuns": "${TestResultsResolverFunction.Arn}",
-                "getTestSets": "${TestSetResolverFunction.Arn}",
-                "listAvailableAgents": "${ListAvailableAgentsFunction.Arn}",
-                "listBucketFiles": "${TestSetResolverFunction.Arn}",
-                "listChatSessions": "${ListAgentChatSessionsFunction.Arn}",
-                "listConfigurationLibrary": "${ConfigurationResolverFunction.Arn}",
-                "listDocuments": "${ListDocumentsGSIResolverFunction.Arn}",
-                "listDocumentsByDateRange": "${ListDocumentsByDateRangeResolverFunction.Arn}",
-                "pauseCircuitBreaker": "${CircuitBreakerResolverFunctionArn}",
-                "probeCircuitBreaker": "${CircuitBreakerResolverFunctionArn}",
-                "processChanges": "${ProcessChangesResolverFunction.Arn}",
-                "queryKnowledgeBase": "${QueryKnowledgeBaseResolverFunction.Arn}",
-                "reprocessDocument": "${ReprocessDocumentResolverFunction.Arn}",
-                "restoreDefaultPricing": "${ConfigurationResolverFunction.Arn}",
-                "resumeCircuitBreaker": "${CircuitBreakerResolverFunctionArn}",
-                "sendAgentChatMessage": "${AgentChatResolverFunction.Arn}",
-                "sendChatDocumentMessage": "${SendChatDocumentMessageResolverFunction.Arn}",
-                "setActiveVersion": "${ConfigurationResolverFunction.Arn}",
-                "startMultiDocDiscovery": "${DiscoveryUploadResolverFunction.Arn}",
-                "startTestRun": "${TestRunnerFunction.Arn}",
-                "submitAgentQuery": "${AgentRequestHandlerFunction.Arn}",
-                "syncBdaIdp": "${SyncBdaIdpResolverFunction.Arn}",
-                "updateConfiguration": "${ConfigurationResolverFunction.Arn}",
-                "updatePricing": "${ConfigurationResolverFunction.Arn}",
-                "updateTestSet": "${TestSetResolverFunction.Arn}",
-                "uploadDiscoveryDocument": "${DiscoveryUploadResolverFunction.Arn}",
-                "uploadDocument": "${UploadResolverFunction.Arn}",
-                "uploadMultiDocDiscoveryZip": "${DiscoveryUploadResolverFunction.Arn}",
-                "claimReview": "${CompleteSectionReviewFunctionArn}",
-                "completeSectionReview": "${CompleteSectionReviewFunctionArn}",
-                "releaseReview": "${CompleteSectionReviewFunctionArn}",
-                "skipAllSectionsReview": "${CompleteSectionReviewFunctionArn}",
-                "createUser": "${UserManagementFunctionArn}",
-                "updateUser": "${UserManagementFunctionArn}",
-                "deleteUser": "${UserManagementFunctionArn}",
-                "listUsers": "${UserManagementFunctionArn}",
-                "getMyProfile": "${UserManagementFunctionArn}",
-                "createFinetuningJob": "${FinetuningJobsResolverFunctionArn}",
-                "deleteFinetuningJob": "${FinetuningJobsResolverFunctionArn}",
-                "getFinetuningJob": "${FinetuningJobsResolverFunctionArn}",
-                "listFinetuningJobs": "${FinetuningJobsResolverFunctionArn}",
-                "calculateCapacity": "${CalculateCapacityResolverFunctionArn}",
-                "getLatestPublishedVersion": "${VersionCheckResolverFunctionArn}"
-              }
-            # CircuitBreakerResolverFunction is conditional (only created when the
-            # circuit breaker is enabled). Resolve its ARN via a substitution
-            # variable so the !Sub above never references the resource directly
-            # (a direct ${CircuitBreakerResolverFunction.Arn} fails to resolve
-            # when the function is absent). Empty string when disabled — those
-            # circuit-breaker operations simply aren't routable then.
-            - CircuitBreakerResolverFunctionArn: !If
-                - CircuitBreakerEnabledCondition
-                - !GetAtt CircuitBreakerResolverFunction.Arn
-                - ""
+          # field -> resolver function ARN map is large (~60 ARNs > 4KB env
+          # limit), so it lives in an SSM parameter loaded once at cold start.
+          FIELD_FUNCTION_MAP_PARAM: !Ref HttpApiFieldFunctionMapParam
       LoggingConfig:
         LogGroup: !Ref HttpApiDispatcherLogGroup
       Policies:
@@ -4906,6 +4919,11 @@ Resources:
                 - !Ref FinetuningJobsResolverFunctionArn
                 - !Ref CalculateCapacityResolverFunctionArn
                 - !Ref VersionCheckResolverFunctionArn
+        # Read the field->ARN map from SSM at cold start.
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${StackName}/http-api/field-function-map"
 
   HttpApi:
     Type: AWS::ApiGatewayV2::Api
