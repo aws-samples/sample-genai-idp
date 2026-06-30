@@ -4924,6 +4924,15 @@ Resources:
             - Effect: Allow
               Action: ssm:GetParameter
               Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${StackName}/http-api/field-function-map"
+        # The TrackingTable/DiscoveryTable/AgentTable are KMS-encrypted; the
+        # DDB-direct operations (getDocument, date queries, discovery/agent jobs)
+        # need kms:Decrypt/GenerateDataKey on the customer-managed key.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
 
   HttpApi:
     Type: AWS::ApiGatewayV2::Api
