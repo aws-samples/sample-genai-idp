@@ -37,9 +37,9 @@ Mappings:
       ConfigPath: "lending-package-sample-govcloud"
 
 Parameters:
-  # NOTE: the legacy ApiTransport parameter (appsync|httpapi) has been removed.
-  # The UI/backend now always use API Gateway HTTP API + polling + Lambda
-  # response streaming (AppSync has been fully removed).
+  # NOTE: the legacy ApiTransport parameter has been removed. The UI/backend
+  # now always use the API Gateway REST API + polling + Lambda response
+  # streaming (the former GraphQL API has been fully removed).
 
   LambdaWebAdapterLayerArn:
     Type: String
@@ -476,12 +476,12 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      (Required when WebUIHosting=ALB or AppSyncVisibility=PRIVATE) VPC ID.
+      (Required when WebUIHosting=ALB or ApiGatewayVisibility=PRIVATE) VPC ID.
       When using ALB hosting, this is the VPC for the ALB and S3 VPC endpoint.
-      When using private AppSync (AppSyncVisibility=PRIVATE), this VPC ID is
-      also used for the Lambda security group - private AppSync requires all
-      Lambda functions to be in the same VPC as the AppSync VPC endpoint, so
-      ALB hosting and private AppSync always use the same VPC.
+      When using the private REST API (ApiGatewayVisibility=PRIVATE), this VPC ID is
+      also used for the Lambda security group - the private REST API requires all
+      Lambda functions to be in the same VPC as the API Gateway VPC endpoint, so
+      ALB hosting and the private REST API always use the same VPC.
 
   ALBSubnetIds:
     Type: CommaDelimitedList
@@ -579,24 +579,23 @@ Parameters:
       browser uploads transit the VPCE. Requires the browser's network to
       resolve and route VPCE hostnames.
 
-  AppSyncVisibility:
+  ApiGatewayVisibility:
     Type: String
     Default: GLOBAL
     AllowedValues:
       - GLOBAL
       - PRIVATE
     Description: >-
-      Controls AppSync API accessibility. GLOBAL (default) is the standard
-      internet-facing mode. Set to PRIVATE for private network deployments
-      where the API must only be accessible from within the VPC via VPC
-      endpoints. Requires WebUIHosting=ALB and LambdaSubnetIds to be set.
-      All Lambda functions will be deployed in VPC when PRIVATE.
+      GLOBAL = regional internet-facing REST API; PRIVATE = private REST API
+      reachable only via the VPC interface endpoint (requires WebUIHosting=ALB,
+      VpcId, ApiGatewayVpcEndpointId, LambdaSubnetIds) and all Lambdas deployed
+      in-VPC.
 
   LambdaSubnetIds:
     Type: CommaDelimitedList
     Default: ""
     Description: >-
-      (Required when AppSyncVisibility=PRIVATE) Comma-separated private subnet
+      (Required when ApiGatewayVisibility=PRIVATE) Comma-separated private subnet
       IDs for Lambda functions. Should be private subnets with no direct
       internet route - Lambda traffic reaches AWS services via VPC endpoints.
       Can be the same as ALBSubnetIds for simpler deployments, or different
@@ -791,7 +790,7 @@ Parameters:
   # These parameters control the optional "headless" deployment mode, where
   # the stack deploys a private Jobs REST API (API Gateway + Lambda) instead
   # of (or in addition to) the web UI. This mode is REQUIRED for GovCloud
-  # regions because the UI-layer services (AppSync, CloudFront, Cognito UI
+  # regions because some UI-layer services (e.g. CloudFront, Cognito UI
   # pool) aren't available there. In Commercial regions the mode is OPTIONAL
   # and useful for API-only / machine-to-machine integrations.
   #
@@ -937,7 +936,7 @@ Parameters:
     AllowedValues: ['true', 'false']
     Description: >-
       Set to 'true' (default) to enable the Feature Platform (catalog,
-      InstalledFeatures table, AppSync resolvers, install flow). When no
+      InstalledFeatures table, REST API resolvers, install flow). When no
       FeaturePlatformSimulatorEndpoint is configured, all features in the
       catalog are treated as automatically subscribed and the UI goes
       straight to the Install prompt. Set to 'false' to remove the platform
@@ -1070,9 +1069,9 @@ Rules:
           (which auto-provisions an endpoint).
 
 Conditions:
-  # API transport: API Gateway HTTP API + polling + Lambda response streaming is
-  # now the only path (AppSync has been fully removed). No transport conditions
-  # are needed — the HTTP API resources deploy unconditionally.
+  # API transport: API Gateway REST API + polling + Lambda response streaming is
+  # now the only path (the former GraphQL API has been fully removed). No transport
+  # conditions are needed — the REST API resources deploy unconditionally.
   # Headless/VPC/Bastion feature conditions
   DeployInVPC: !Equals [!Ref DeployInVPC, 'true']
   DeployApiGateway: !Equals [!Ref EnableHeadless, 'true']
@@ -1101,9 +1100,10 @@ Conditions:
   ShouldCreateEvaluationBaselineBucket:
     !Equals [ !Ref EvaluationBaselineBucketName, "" ]
   ShouldCreateReportingBucket: !Equals [ !Ref ReportingBucketName, "" ]
-  # NOTE: the WAF apparatus (IsWafEnabled / IsWafEnabledAndAppSync) and the
-  # private-AppSync DNS condition (IsPrivateAppSyncAndAppSync) existed solely to
-  # protect / expose the AppSync GraphQL API and were removed along with it.
+  # NOTE: the old WAF apparatus (IsWafEnabled / IsWafEnabledAndApi) and the
+  # private DNS condition (IsPrivateApiAndApi) existed solely to protect /
+  # expose the former GraphQL API and were removed along with it. The REST API
+  # WAF + private-endpoint wiring now lives in the nested/appsync stack.
   ShouldCreateDocumentKnowledgeBase:
     !Equals [ !Ref DocumentKnowledgeBase, "BEDROCK_KNOWLEDGE_BASE (Create)" ]
   ShouldUseDocumentKnowledgeBase: !Condition ShouldCreateDocumentKnowledgeBase
@@ -1171,7 +1171,7 @@ Conditions:
   # reach the VPCE hostname — setting endpoint_url would cause timeouts.
   HasS3VpcEndpointAndVpc: !And [!Condition HasS3VpcEndpoint, !Condition DeployInVPC]
   EnableXRayTracingCondition: !Equals [ !Ref EnableXRayTracing, "true" ]
-  UsePrivateAppSync: !Equals [ !Ref AppSyncVisibility, "PRIVATE" ]
+  UsePrivateApi: !Equals [ !Ref ApiGatewayVisibility, "PRIVATE" ]
   HasArtifactsBucketKmsKey: !Not [ !Equals [ !Ref ArtifactsBucketKmsKeyArn, "" ] ]
   CircuitBreakerEnabledCondition: !Equals [ !Ref CircuitBreakerEnabled, "true" ]
   HasCircuitBreakerErrorHandler: !Not [ !Equals [ !Ref CircuitBreakerErrorHandlerArn, "" ] ]
@@ -1304,9 +1304,9 @@ Metadata:
           - S3VpcEndpointDnsNameOverride
           - CustomDomainUrl
       - Label:
-          default: "Private Network (AppSync=PRIVATE requires ALB hosting)"
+          default: "Private Network (ApiGatewayVisibility=PRIVATE requires ALB hosting)"
         Parameters:
-          - AppSyncVisibility
+          - ApiGatewayVisibility
           - LambdaSubnetIds
       - Label:
           default: "Headless API Deployment (required for GovCloud)"
@@ -1436,10 +1436,10 @@ Metadata:
         default: "ALB - Allowed CIDR Ranges"
       S3PresignedUrlViaVpcEndpoint:
         default: "Route Browser S3 Uploads via VPC Endpoint"
-      AppSyncVisibility:
-        default: "AppSync API Visibility (GLOBAL or PRIVATE)"
+      ApiGatewayVisibility:
+        default: "REST API Visibility (GLOBAL or PRIVATE)"
       LambdaSubnetIds:
-        default: "Lambda Subnet IDs (required when AppSyncVisibility=PRIVATE)"
+        default: "Lambda Subnet IDs (required when ApiGatewayVisibility=PRIVATE)"
       S3VpcEndpointIdOverride:
         default: "ALB - S3 Interface VPC Endpoint ID (BYO endpoint, optional)"
       S3VpcEndpointDnsNameOverride:
@@ -2552,8 +2552,8 @@ Resources:
         BedrockHubRoleSessionName: !Ref BedrockHubRoleSessionName
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         ConfigurationTable: !Ref ConfigurationTable
-        # AppSync removed: every processing Lambda writes the TrackingTable
-        # directly (DOCUMENT_TRACKING_MODE=dynamodb). The AppSyncApiUrl/AppSyncApiArn
+        # GraphQL API removed: every processing Lambda writes the TrackingTable
+        # directly (DOCUMENT_TRACKING_MODE=dynamodb). The old ApiUrl/ApiArn
         # params are no longer passed (the pattern stack no longer declares them).
         ConfigurationDefaultS3Uri: !If
           - HasCustomConfigPath
@@ -2589,17 +2589,17 @@ Resources:
         EnableECRImageScanning: !Ref EnableECRImageScanning
         PreviousIDPPattern: !GetAtt PreviousIDPPatternValue.IDPPattern
 
-        # Private AppSync VPC config (req #2) — puts processing Lambdas in VPC
-        UsePrivateAppSync: !If [UsePrivateAppSync, "true", "false"]
+        # Private REST API VPC config (req #2) — puts processing Lambdas in VPC
+        UsePrivateApi: !If [UsePrivateApi, "true", "false"]
         LambdaSubnetIds: !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - !Join [",", !Ref LambdaSubnetIds]
           - ""
         LambdaSecurityGroupId: !If
           - DeployInVPC
           - !Ref LambdaSecurityGroupId
           - !If
-            - UsePrivateAppSync
+            - UsePrivateApi
             - !Ref LambdaVpcSecurityGroup
             - ""
 
@@ -2617,7 +2617,7 @@ Resources:
 
 
   ##########################################################################
-  # Nested stack for AppSync resolvers
+  # Nested stack for REST API resolvers
   ##########################################################################
 
   APPSYNCSTACK:
@@ -2627,7 +2627,7 @@ Resources:
     Properties:
       TemplateURL: ./nested/appsync/.aws-sam/packaged.yaml
       Parameters:
-        # AppSync removed: the nested stack now hosts only the HTTP API +
+        # GraphQL API removed: the nested stack now hosts only the REST API +
         # dispatcher. The GraphQLApiId/GraphQLApiArn/GraphQLApiUrl params are no
         # longer passed (the nested template no longer declares them).
 
@@ -2723,14 +2723,20 @@ Resources:
                 - !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointDnsName
           - ""
 
-        # Private AppSync VPC config (req #2) — passed to nested/appsync resolver Lambdas
-        UsePrivateAppSync: !If [UsePrivateAppSync, "true", "false"]
+        # Private REST API config — private endpoint + WAF + in-VPC resolver
+        # Lambdas. ApiGatewayVpcEndpointId (reused from the headless Jobs API)
+        # is only relevant in PRIVATE mode. WAFAllowedIPv4Ranges is a plain
+        # comma-joined string (the parent param is Type: String); the nested
+        # template declares it as CommaDelimitedList, which accepts that string.
+        UsePrivateApi: !If [UsePrivateApi, "true", "false"]
+        ApiGatewayVpcEndpointId: !If [UsePrivateApi, !Ref ApiGatewayVpcEndpointId, ""]
+        WAFAllowedIPv4Ranges: !Ref WAFAllowedIPv4Ranges
         LambdaSubnetIds: !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - !Join [",", !Ref LambdaSubnetIds]
           - ""
         LambdaSecurityGroupId: !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - !Ref LambdaVpcSecurityGroup
           - ""
 
@@ -2787,7 +2793,7 @@ Resources:
   ##########################################################################
   # === Feature Platform (optional) — BEGIN ===============================
   # Deployed only when EnableFeaturePlatform=true. Adds an InstalledFeatures
-  # DDB table + AppSync Lambdas for listing/registering/installing features
+  # DDB table + resolver Lambdas for listing/registering/installing features
   # and checking Marketplace entitlements. Feature stacks register themselves
   # with this host and have their UI bundles rendered inside the main IDP web
   # UI. With no FeaturePlatformSimulatorEndpoint set the platform runs in
@@ -2806,7 +2812,7 @@ Resources:
   # function ARNs (the 6 UI fields) via !GetAtt FeaturePlatformStack.Outputs.*,
   # which makes APPSYNCSTACK implicitly depend on FeaturePlatformStack. The old
   # explicit "FeaturePlatformStack DependsOn APPSYNCSTACK" was for attaching
-  # AppSync resolvers to the main schema; with AppSync gone it is removed (and
+  # GraphQL resolvers to the main schema; with the GraphQL API gone it is removed (and
   # keeping it would create a dependency cycle). The implicit GetAtt dependency
   # is conditional-safe: it only applies when IsFeaturePlatformEnabled is true.
   FeaturePlatformStack:
@@ -2816,8 +2822,8 @@ Resources:
       TemplateURL: ./feature-platform/main-stack-extensions/.aws-sam/packaged.yaml
       Parameters:
         MainStackName: !Ref AWS::StackName
-        # AppSync removed: the feature platform now uses the HTTP API only. The
-        # ApiTransport / GraphQLApiId / GraphQLApiArn / AppSyncApiUrl params are no
+        # GraphQL API removed: the feature platform now uses the REST API only. The
+        # ApiTransport / GraphQLApiId / GraphQLApiArn / ApiUrl params are no
         # longer passed (the feature-platform template no longer declares them).
         UserPoolId: !Ref UserPool
         # Feature stacks with HTTP APIs use these two as the JWT audience
@@ -5373,7 +5379,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaVpcSecurityGroup
@@ -5388,8 +5394,8 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           QUEUE_URL: !Ref DocumentQueue
           APPSYNC_API_URL: ""
-          # httpapi: write the TrackingTable directly (no AppSync). The factory
-          # defaults to 'appsync' otherwise, which requires APPSYNC_API_URL.
+          # dynamodb: write the TrackingTable directly (no GraphQL API). The
+          # factory uses this mode now that the GraphQL transport is removed.
           DOCUMENT_TRACKING_MODE: "dynamodb"
           TRACKING_TABLE: !Ref TrackingTable
           DATA_RETENTION_IN_DAYS: !Ref DataRetentionInDays
@@ -5468,7 +5474,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaVpcSecurityGroup
@@ -5480,8 +5486,8 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           STATE_MACHINE_ARN: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
           APPSYNC_API_URL: ""
-          # httpapi: write the TrackingTable directly (no AppSync). The factory
-          # defaults to 'appsync' otherwise, which requires APPSYNC_API_URL.
+          # dynamodb: write the TrackingTable directly (no GraphQL API). The
+          # factory uses this mode now that the GraphQL transport is removed.
           DOCUMENT_TRACKING_MODE: "dynamodb"
           TRACKING_TABLE: !Ref TrackingTable
           CONCURRENCY_TABLE: !Ref ConcurrencyTable
@@ -5599,7 +5605,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaVpcSecurityGroup
@@ -5615,8 +5621,8 @@ Resources:
           CONCURRENCY_TABLE: !Ref ConcurrencyTable
           METRIC_NAMESPACE: !Ref AWS::StackName
           APPSYNC_API_URL: ""
-          # httpapi: write the TrackingTable directly (no AppSync). The factory
-          # defaults to 'appsync' otherwise, which requires APPSYNC_API_URL.
+          # dynamodb: write the TrackingTable directly (no GraphQL API). The
+          # factory uses this mode now that the GraphQL transport is removed.
           DOCUMENT_TRACKING_MODE: "dynamodb"
           TRACKING_TABLE: !Ref TrackingTable
           OUTPUT_BUCKET: !Ref OutputBucket
@@ -5957,7 +5963,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaVpcSecurityGroup
@@ -6078,11 +6084,11 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "VPC attachment is conditional: required when AppSyncVisibility=PRIVATE (SigV4 mutation to the private AppSync endpoint only resolves inside the VPC) or DeployInVPC=true (DynamoDB reached via gateway endpoint). On the default/public path the function only talks to DynamoDB, SNS, CloudWatch, and AppSync over AWS-managed networking and VPC access is not required."
+            reason: "VPC attachment is conditional: required when ApiGatewayVisibility=PRIVATE (the private REST API and its callers only resolve inside the VPC) or DeployInVPC=true (DynamoDB reached via gateway endpoint). On the default/public path the function only talks to DynamoDB, SNS, and CloudWatch over AWS-managed networking and VPC access is not required."
           - id: W92
             reason: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_116: "DLQ not required - alarm-driven, idempotent state changes"
-    # checkov:skip=CKV_AWS_117: "VPC attachment is conditional on AppSyncVisibility=PRIVATE or DeployInVPC=true (see VpcConfig below); default path does not require VPC access"
+    # checkov:skip=CKV_AWS_117: "VPC attachment is conditional on ApiGatewayVisibility=PRIVATE or DeployInVPC=true (see VpcConfig below); default path does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
     Properties:
@@ -6093,12 +6099,12 @@ Resources:
       CodeUri: src/lambda/circuit_breaker_manager/
       Timeout: 30
       MemorySize: 256
-      # When AppSync is PRIVATE, the SigV4 mutation to the private GraphQL
-      # endpoint only resolves from inside the AppSync VPC. When the user opted
-      # into VPC-only Lambdas (DeployInVPC=true) but AppSync is still public,
+      # When the REST API is PRIVATE, the function must run inside the VPC so it
+      # can reach the private API and AWS service endpoints. When the user opted
+      # into VPC-only Lambdas (DeployInVPC=true) but the API is still public,
       # we honour that too so DynamoDB traffic can use a gateway endpoint.
       VpcConfig: !If
-        - UsePrivateAppSync
+        - UsePrivateApi
         - SecurityGroupIds:
             - !Ref LambdaVpcSecurityGroup
           SubnetIds: !Ref LambdaSubnetIds
@@ -6804,8 +6810,8 @@ Resources:
 
   # ChatWithDocumentProcessor — long-running Lambda invoked async by the
   # send_chat_document_message_resolver. Does the heavy lifting (load doc,
-  # call Bedrock, publish streaming status via AppSync) outside AppSync's
-  # 30-second synchronous budget. Mirrors AgentChatProcessorFunction.
+  # call Bedrock, publish streaming status) outside the REST API's
+  # synchronous request budget. Mirrors AgentChatProcessorFunction.
   ChatWithDocumentProcessorLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -6966,7 +6972,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaVpcSecurityGroup
@@ -7174,7 +7180,7 @@ Resources:
   ##########################################################################
   # Chat streaming endpoint (ApiTransport=httpapi only)
   #
-  # Replaces the AppSync mutation->subscription fan-out for chat token deltas
+  # Replaces the former GraphQL mutation->subscription fan-out for chat token deltas
   # with Lambda response streaming via a direct Function URL
   # (InvokeMode=RESPONSE_STREAM, AuthType=AWS_IAM). The browser SigV4-signs the
   # request with the authenticated Cognito Identity Pool role and reads the SSE
@@ -7184,7 +7190,7 @@ Resources:
   # The function runs a tiny FastAPI app under the AWS Lambda Web Adapter (LWA)
   # and drives the SAME chat_with_document_processor / agent_chat_processor logic
   # used by the async-invoke path, with the delta sink redirected to the HTTP
-  # response stream. The HTTP API is now the only transport (AppSync removed),
+  # response stream. The REST API is now the only transport (GraphQL API removed),
   # so these resources deploy unconditionally.
   ##########################################################################
   ChatStreamProcessorLogGroup:
@@ -7259,8 +7265,8 @@ Resources:
           AWS_STACK_NAME: !Ref AWS::StackName
           CLOUDWATCH_LOG_GROUP_PREFIX: !Sub "/aws/lambda/${AWS::StackName}"
           SETTINGS_PARAMETER_NAME: !Ref SettingsParameter
-          # No APPSYNC_API_URL — the sink writes to the HTTP stream instead of
-          # AppSync, so neither processor constructs an AppSyncClient here.
+          # No GraphQL API URL — the sink writes to the HTTP stream instead of
+          # a GraphQL endpoint, so neither processor constructs that client here.
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
           BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
@@ -7656,7 +7662,7 @@ Resources:
             reason: "Function does not require VPC access — only reads from public S3 bucket via unsigned requests"
           - id: W92
             reason: "Function does not require reserved concurrency"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous AppSync resolver"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous REST API resolver"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values (bucket name, prefix, log level)"
@@ -7753,7 +7759,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaVpcSecurityGroup
@@ -8018,7 +8024,7 @@ Resources:
         - COGNITO
 
   ##########################################################################
-  # Cognoito user authentication for AppSync API and WebUI
+  # Cognito user authentication for REST API and WebUI
   ##########################################################################
 
   UserPool:
@@ -8736,21 +8742,17 @@ Resources:
       SourceArn: !GetAtt UserPool.Arn
 
   ##########################################################################
-  # AppSync GraphQL API
-  ##########################################################################
-
-  ##########################################################################
-  # Lambda Security Group (conditional on UsePrivateAppSync)
-  # Used by Lambda functions in VPC to reach AppSync + AWS service endpoints
+  # Lambda Security Group (conditional on UsePrivateApi)
+  # Used by Lambda functions in VPC to reach the private REST API + AWS service endpoints
   ##########################################################################
 
   LambdaVpcSecurityGroup:
     Type: AWS::EC2::SecurityGroup
-    Condition: UsePrivateAppSync
+    Condition: UsePrivateApi
     Properties:
-      GroupDescription: !Sub "Security group for ${AWS::StackName} Lambda functions in VPC (private AppSync mode)"
-      # ALBVpcId is used here because AppSyncVisibility=PRIVATE always requires
-      # WebUIHosting=ALB — a private AppSync API is only accessible from inside
+      GroupDescription: !Sub "Security group for ${AWS::StackName} Lambda functions in VPC (private REST API mode)"
+      # ALBVpcId is used here because ApiGatewayVisibility=PRIVATE always requires
+      # WebUIHosting=ALB — a private REST API is only accessible from inside
       # the VPC, so the browser must also be inside the VPC via the internal ALB.
       VpcId: !Ref ALBVpcId
       SecurityGroupEgress:
@@ -8970,7 +8972,7 @@ Resources:
           - id: W92
             reason: "Lambda function does not need reserved concurrency"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous AppSync resolver"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous REST API resolver"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values"
     Properties:
@@ -9282,7 +9284,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaVpcSecurityGroup
@@ -9440,9 +9442,9 @@ Resources:
         ArtifactBucket: "<ARTIFACT_BUCKET_TOKEN>"
         ArtifactsBucketKmsKeyArn: !Ref ArtifactsBucketKmsKeyArn
         SourceZipfile: "<ARTIFACT_PREFIX_TOKEN>/multi-doc-discovery-source.zip"
-        # AppSync removed: discovery status updates write straight to the
-        # DiscoveryTrackingTable; the UI polls listDiscoveryJobs. The
-        # AppSyncApiUrl/AppSyncApiArn params are no longer passed (the nested
+        # GraphQL API removed: discovery status updates write straight to the
+        # DiscoveryTrackingTable; the UI polls listDiscoveryJobs. The old
+        # ApiUrl/ApiArn params are no longer passed (the nested
         # template no longer declares them).
         DiscoveryTrackingTableName: !Ref DiscoveryTrackingTable
         BedrockHubRoleArn: !Ref BedrockHubRoleArn
@@ -9928,9 +9930,9 @@ Resources:
             Value: !Ref UserPoolClient
           - Name: VITE_IDENTITY_POOL_ID
             Value: !Ref IdentityPool
-          # HTTP API endpoint. VITE_API_BASE_URL is the HTTP API base; the thin
-          # REST client posts to ${VITE_API_BASE_URL}/op/<field>. (AppSync removed,
-          # so VITE_APPSYNC_GRAPHQL_URL / VITE_API_TRANSPORT are no longer emitted.)
+          # REST API endpoint. VITE_API_BASE_URL is the REST API base; the thin
+          # REST client posts to ${VITE_API_BASE_URL}/op/<field>. (GraphQL API
+          # removed, so the old GraphQL URL / API_TRANSPORT vars are no longer emitted.)
           - Name: VITE_API_BASE_URL
             Value: !GetAtt APPSYNCSTACK.Outputs.HttpApiEndpoint
           # Chat streaming Function URL (IAM-authed, response streaming). The
@@ -10116,7 +10118,7 @@ Resources:
             reason: "Function does not require VPC access"
           - id: W92
             reason: "Function does not require reserved concurrency"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for REST API resolver"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values (Cognito pool and group IDs)"
@@ -10228,7 +10230,7 @@ Resources:
             reason: "Function does not require VPC access"
           - id: W92
             reason: "Function does not require reserved concurrency"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for REST API resolver"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values (DynamoDB table name)"
@@ -10267,40 +10269,6 @@ Resources:
                 - kms:Decrypt
                 - kms:GenerateDataKey
               Resource: !GetAtt CustomerManagedEncryptionKey.Arn
-
-  HITLAppSyncServiceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: !Sub "appsync.${AWS::URLSuffix}"
-            Action: sts:AssumeRole
-      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
-      Policies:
-        - PolicyName: HITLLambdaInvoke
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action: lambda:InvokeFunction
-                Resource:
-                  - !GetAtt UserManagementFunction.Arn
-                  - !GetAtt CompleteSectionReviewFunction.Arn
-                  - !GetAtt CalculateCapacityResolverFunction.Arn
-                  - !GetAtt FinetuningJobsResolverFunction.Arn
-                  # Public-template version-check resolver. Same shape as
-                  # CalculateCapacityResolverFunction above — the role is
-                  # shared with the AppSync data sources defined in the main
-                  # template (next to GraphQLApi), so we have to grant invoke
-                  # here. Without this, the AppSync data source returns
-                  # `Lambda:IllegalArgument` 403.
-                  - !GetAtt VersionCheckResolverFunction.Arn
-
-
-
 
 
 
@@ -10867,7 +10835,7 @@ Resources:
             reason: "Function does not require VPC access"
           - id: W92
             reason: "Function does not require reserved concurrency"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for REST API resolver"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration"
@@ -11149,9 +11117,9 @@ Outputs:
     Description: MCP server content bucket console URL
     Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${MCPContentBucket}
   LambdaVpcSecurityGroupId:
-    Condition: UsePrivateAppSync
+    Condition: UsePrivateApi
     Description: >-
-      Security Group ID for Lambda functions in private AppSync mode.
+      Security Group ID for Lambda functions in private REST API mode.
       The networking team must allow inbound HTTPS (port 443) from this
       security group on all VPC Interface Endpoints they create for this stack.
       See scripts/vpc-endpoints.yaml for the endpoint template.

@@ -189,22 +189,22 @@ Parameters:
     Type: String
     Default: ""
 
-  # Private AppSync VPC config (req #2)
-  UsePrivateAppSync:
+  # Private REST API VPC config (req #2)
+  UsePrivateApi:
     Type: String
     Default: "false"
     AllowedValues: ["true", "false"]
-    Description: Set to "true" when AppSyncVisibility=PRIVATE — puts processing Lambdas in VPC
+    Description: Set to "true" when ApiGatewayVisibility=PRIVATE — puts processing Lambdas in VPC
 
   LambdaSubnetIds:
     Type: CommaDelimitedList
     Default: ""
-    Description: Subnet IDs for Lambda VpcConfig (required when UsePrivateAppSync=true)
+    Description: Subnet IDs for Lambda VpcConfig (required when UsePrivateApi=true)
 
   LambdaSecurityGroupId:
     Type: String
     Default: ""
-    Description: Security group ID for Lambda VpcConfig (required when UsePrivateAppSync=true)
+    Description: Security group ID for Lambda VpcConfig (required when UsePrivateApi=true)
 
   VpcId:
     Type: String
@@ -246,7 +246,7 @@ Conditions:
     !Not [!Equals [!Ref CustomExtractionModelARN, ""]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   IsECRImageScanningEnabled: !Equals [!Ref EnableECRImageScanning, "true"]
-  IsPrivateAppSync: !Equals [!Ref UsePrivateAppSync, "true"]
+  IsPrivateApi: !Equals [!Ref UsePrivateApi, "true"]
   IsMLflowEnabled: !Equals [!Ref EnableMLflow, "true"]
   HasArtifactsBucketKmsKey: !Not [!Equals [!Ref ArtifactsBucketKmsKeyArn, ""]]
 
@@ -3324,7 +3324,7 @@ Resources:
           - id: W11
             reason: "Cloudwatch does not support resource-level permissions"
           - id: W89
-            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs — placed in VPC when AppSyncVisibility=PRIVATE"
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs — placed in VPC when ApiGatewayVisibility=PRIVATE"
           - id: W92
             reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
@@ -3346,7 +3346,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -3598,7 +3598,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -3745,7 +3745,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -3904,7 +3904,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -4070,7 +4070,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -4212,7 +4212,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -4359,7 +4359,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -4447,7 +4447,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -4685,7 +4685,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -4967,7 +4967,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -5104,7 +5104,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId

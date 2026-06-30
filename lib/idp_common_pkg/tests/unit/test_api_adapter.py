@@ -41,6 +41,10 @@ pytestmark = pytest.mark.unit
         # JSON-encoded list form:
         ('["Admin","Author"]', ["Admin", "Author"]),
         ('["Admin"]', ["Admin"]),
+        # REST API Cognito authorizer comma-joined form:
+        ("Admin,Author", ["Admin", "Author"]),
+        ("Admin, Author, Viewer", ["Admin", "Author", "Viewer"]),
+        ("Admin\nAuthor", ["Admin", "Author"]),
         # whitespace / empty string
         ("", []),
         ("   ", []),
@@ -109,6 +113,64 @@ def test_http_event_field_and_arguments():
     out = normalize_event(event)
     assert out["info"]["fieldName"] == "reprocessDocument"
     assert out["arguments"] == {"objectKeys": ["k1"]}
+
+
+def _rest_event(field, groups_claim, arguments=None, email="user@example.com"):
+    """API Gateway REST API (v1) proxy event with a Cognito User Pools authorizer.
+
+    Claims live at requestContext.authorizer.claims (flat, not .jwt.claims) and
+    cognito:groups is a comma-joined string.
+    """
+    return {
+        "resource": "/op/{field}",
+        "path": f"/op/{field}",
+        "httpMethod": "POST",
+        "pathParameters": {"field": field},
+        "isBase64Encoded": False,
+        "body": json.dumps({"arguments": arguments or {}}),
+        "requestContext": {
+            "resourcePath": "/op/{field}",
+            "httpMethod": "POST",
+            "identity": {"sourceIp": "1.2.3.4"},
+            "authorizer": {
+                "claims": {
+                    "cognito:groups": groups_claim,
+                    "cognito:username": "user-sub-123",
+                    "email": email,
+                    "sub": "user-sub-123",
+                }
+            },
+        },
+    }
+
+
+def test_rest_event_claims_and_groups():
+    """REST API authorizer claims (flat) + comma-joined groups normalize correctly."""
+    event = _rest_event("listDocuments", "Admin,Author", {"limit": 5})
+    out = normalize_event(event)
+    assert out["info"]["fieldName"] == "listDocuments"
+    assert out["arguments"] == {"limit": 5}
+    assert out["identity"]["claims"]["cognito:groups"] == ["Admin", "Author"]
+    assert out["identity"]["username"] == "user@example.com"
+
+
+def test_rest_event_single_group():
+    event = _rest_event("getPricing", "Viewer")
+    out = normalize_event(event)
+    assert out["identity"]["claims"]["cognito:groups"] == ["Viewer"]
+
+
+def test_rest_event_rbac_parity():
+    """An Admin-only handler behaves the same on REST API events."""
+
+    @api_resolver
+    def handler(event, context):
+        if "Admin" not in event["identity"]["claims"]["cognito:groups"]:
+            raise PermissionError("Admin only")
+        return {"ok": True}
+
+    assert handler(_rest_event("x", "Admin,Author"), None)["statusCode"] == 200
+    assert handler(_rest_event("x", "Viewer"), None)["statusCode"] == 403
 
 
 def test_http_event_identity_username_is_email():

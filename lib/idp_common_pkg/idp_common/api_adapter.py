@@ -33,6 +33,7 @@ the AppSync migration and is covered by unit tests.
 import base64
 import json
 import logging
+import re
 from decimal import Decimal
 from functools import wraps
 from typing import Any, Callable, Dict, List
@@ -52,13 +53,14 @@ class _DecimalEncoder(json.JSONEncoder):
 def _coerce_groups(groups: Any) -> List[str]:
     """Normalize a ``cognito:groups`` claim into a list of group names.
 
-    Handles every shape we have observed:
-    - ``None`` / missing                 -> ``[]``
-    - list (AppSync)                      -> unchanged (stringified entries)
-    - ``"Admin"`` (single group, HTTP)    -> ``["Admin"]``
-    - ``"[Admin Author]"`` (HTTP authorizer flattened array) -> ``["Admin", "Author"]``
-    - ``"[]"`` (HTTP, empty)              -> ``[]``
-    - ``'["Admin","Author"]'`` (JSON str) -> ``["Admin", "Author"]``
+    Handles every shape we have observed across authorizer types:
+    - ``None`` / missing                          -> ``[]``
+    - list (AppSync)                               -> unchanged (stringified)
+    - ``"Admin"`` (single group)                   -> ``["Admin"]``
+    - ``"Admin,Author"`` (REST API Cognito authorizer, comma-joined) -> ``["Admin", "Author"]``
+    - ``"[Admin Author]"`` (HTTP API JWT authorizer flattened array) -> ``["Admin", "Author"]``
+    - ``"[]"`` (empty bracketed)                   -> ``[]``
+    - ``'["Admin","Author"]'`` (JSON-encoded list) -> ``["Admin", "Author"]``
     """
     if groups is None:
         return []
@@ -82,6 +84,10 @@ def _coerce_groups(groups: Any) -> List[str]:
             except (ValueError, TypeError):
                 pass
             return [g.strip().strip('"') for g in inner.split() if g.strip()]
+        # REST API Cognito User Pools authorizer joins groups with commas (and
+        # may use newlines/spaces). Split on any of those.
+        if any(sep in s for sep in (",", "\n", " ")):
+            return [g.strip().strip('"') for g in re.split(r"[,\n ]+", s) if g.strip()]
         # Bare single group name.
         return [s]
     # Unknown type — best effort.

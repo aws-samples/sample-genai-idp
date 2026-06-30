@@ -196,22 +196,37 @@ Parameters:
     Type: String
     Description: ARN of IDP Common Agents Layer
 
-  # Private AppSync VPC config (req #2) — passed from main template
-  UsePrivateAppSync:
+  # Private-network config — passed from main template. When true, the REST API
+  # is PRIVATE (VPC-only via ApiGatewayVpcEndpointId) and resolver Lambdas run in
+  # the VPC.
+  UsePrivateApi:
     Type: String
     Default: "false"
     AllowedValues: ["true", "false"]
-    Description: Set to "true" when AppSyncVisibility=PRIVATE — puts resolver Lambdas in VPC
+    Description: Set to "true" when ApiGatewayVisibility=PRIVATE — private REST API + VPC-resident Lambdas
+
+  ApiGatewayVpcEndpointId:
+    Type: String
+    Default: ""
+    Description: VPC interface endpoint id for execute-api (required when UsePrivateApi=true)
+
+  WAFAllowedIPv4Ranges:
+    Type: CommaDelimitedList
+    Default: "0.0.0.0/0"
+    Description: >-
+      IPv4 CIDRs allowed to call the REST API. The allow-all default
+      (0.0.0.0/0) disables WAF; any other value attaches a REGIONAL WAFv2
+      WebACL that blocks non-listed IPs.
 
   LambdaSubnetIds:
     Type: CommaDelimitedList
     Default: ""
-    Description: Subnet IDs for Lambda VpcConfig (required when UsePrivateAppSync=true)
+    Description: Subnet IDs for Lambda VpcConfig (required when UsePrivateApi=true)
 
   LambdaSecurityGroupId:
     Type: String
     Default: ""
-    Description: Security group ID for Lambda VpcConfig (required when UsePrivateAppSync=true)
+    Description: Security group ID for Lambda VpcConfig (required when UsePrivateApi=true)
 
   # Circuit Breaker (feature-flagged — may be empty when disabled)
   ConcurrencyTableName:
@@ -314,7 +329,10 @@ Conditions:
   ShouldCreateEvaluationBaselineBucket: !Equals [!Ref ShouldCreateEvaluationBaselineBucket, "true"]
   ShouldCreateReportingBucket: !Equals [!Ref ShouldCreateReportingBucket, "true"]
   HasTestExecutionAggregationFunction: !Not [!Equals [!Ref TestExecutionAggregationFunctionArn, ""]]
-  IsPrivateAppSync: !Equals [!Ref UsePrivateAppSync, "true"]
+  IsPrivateApi: !Equals [!Ref UsePrivateApi, "true"]
+  # WAF is enabled unless the IP allow-list is the allow-all default. CFN can't
+  # compare a CommaDelimitedList directly, so compare its Fn::Join'd form.
+  IsWafEnabled: !Not [!Equals [!Join [",", !Ref WAFAllowedIPv4Ranges], "0.0.0.0/0"]]
   HasMLflowLoggerFunction: !Not [!Equals [!Ref MLflowLoggerFunctionArn, ""]]
   CircuitBreakerEnabledCondition: !Equals [!Ref CircuitBreakerEnabled, "true"]
 
@@ -358,7 +376,7 @@ Resources:
       MemorySize: 512
       Timeout: 60
       VpcConfig: !If
-        - IsPrivateAppSync
+        - IsPrivateApi
         - SubnetIds: !Ref LambdaSubnetIds
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
@@ -721,7 +739,7 @@ Resources:
       MemorySize: 512
       Timeout: 300
       VpcConfig: !If
-        - IsPrivateAppSync
+        - IsPrivateApi
         - SubnetIds: !Ref LambdaSubnetIds
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
@@ -1511,7 +1529,7 @@ Resources:
       MemorySize: 512
       Timeout: 60
       VpcConfig: !If
-        - IsPrivateAppSync
+        - IsPrivateApi
         - SubnetIds: !Ref LambdaSubnetIds
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
@@ -1693,7 +1711,7 @@ Resources:
       MemorySize: 512
       Timeout: 60
       VpcConfig: !If
-        - IsPrivateAppSync
+        - IsPrivateApi
         - SubnetIds: !Ref LambdaSubnetIds
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
@@ -2333,7 +2351,7 @@ Resources:
       # VPC so AppSync can invoke it and its DynamoDB reads traverse a
       # gateway endpoint rather than the public endpoint.
       VpcConfig: !If
-        - IsPrivateAppSync
+        - IsPrivateApi
         - SubnetIds: !Ref LambdaSubnetIds
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
@@ -2539,50 +2557,89 @@ Resources:
                 - kms:GenerateDataKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
 
+  # API Gateway REST API fronting the dispatcher. REST (not HTTP API) so it can
+  # be made PRIVATE (VPC-only via an interface endpoint + resource policy) and
+  # fronted by WAFv2 — neither of which HTTP APIs support. A Cognito User Pools
+  # authorizer validates the same JWT the UI sends.
   HttpApi:
-    Type: AWS::ApiGatewayV2::Api
+    Type: AWS::ApiGateway::RestApi
     Properties:
-      Name: !Sub "${StackName}-http-api"
-      ProtocolType: HTTP
-      CorsConfiguration:
-        AllowOrigins: ["*"]
-        AllowMethods: ["POST", "OPTIONS"]
-        AllowHeaders: ["Authorization", "Content-Type"]
+      Name: !Sub "${StackName}-api"
+      EndpointConfiguration: !If
+        - IsPrivateApi
+        - Types: [PRIVATE]
+          VpcEndpointIds: [!Ref ApiGatewayVpcEndpointId]
+        - Types: [REGIONAL]
+      # When PRIVATE, restrict invocation to the supplied VPC endpoint; when
+      # regional, allow normal invocation (auth is enforced by the authorizer).
+      Policy: !If
+        - IsPrivateApi
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal: "*"
+              Action: execute-api:Invoke
+              Resource: "execute-api:/*"
+              Condition:
+                StringEquals:
+                  aws:SourceVpce: !Ref ApiGatewayVpcEndpointId
+        - !Ref AWS::NoValue
 
   HttpApiAuthorizer:
-    Type: AWS::ApiGatewayV2::Authorizer
+    Type: AWS::ApiGateway::Authorizer
     Properties:
-      ApiId: !Ref HttpApi
-      AuthorizerType: JWT
-      IdentitySource: ["$request.header.Authorization"]
-      Name: CognitoJwtAuthorizer
-      JwtConfiguration:
-        Audience: [!Ref UserPoolClientId]
-        Issuer: !Sub "https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${UserPoolId}"
+      Name: CognitoUserPoolsAuthorizer
+      RestApiId: !Ref HttpApi
+      Type: COGNITO_USER_POOLS
+      IdentitySource: method.request.header.Authorization
+      ProviderARNs:
+        - !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
 
-  HttpApiIntegration:
-    Type: AWS::ApiGatewayV2::Integration
+  # /op resource + {field} path parameter
+  HttpApiOpResource:
+    Type: AWS::ApiGateway::Resource
     Properties:
-      ApiId: !Ref HttpApi
-      IntegrationType: AWS_PROXY
-      IntegrationUri: !GetAtt HttpApiDispatcherFunction.Arn
-      PayloadFormatVersion: "2.0"
+      RestApiId: !Ref HttpApi
+      ParentId: !GetAtt HttpApi.RootResourceId
+      PathPart: op
 
-  HttpApiRoute:
-    Type: AWS::ApiGatewayV2::Route
+  HttpApiFieldResource:
+    Type: AWS::ApiGateway::Resource
     Properties:
-      ApiId: !Ref HttpApi
-      RouteKey: "POST /op/{field}"
-      AuthorizationType: JWT
+      RestApiId: !Ref HttpApi
+      ParentId: !Ref HttpApiOpResource
+      PathPart: "{field}"
+
+  HttpApiMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref HttpApi
+      ResourceId: !Ref HttpApiFieldResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
       AuthorizerId: !Ref HttpApiAuthorizer
-      Target: !Sub "integrations/${HttpApiIntegration}"
+      RequestParameters:
+        method.request.path.field: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${HttpApiDispatcherFunction.Arn}/invocations"
+
+  HttpApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: HttpApiMethod
+    Properties:
+      RestApiId: !Ref HttpApi
+      # Stage created separately so redeploys pick up method changes; a stable
+      # description avoids "no changes" deploy errors across updates.
+      Description: !Sub "Dispatcher API deployment for ${StackName}"
 
   HttpApiStage:
-    Type: AWS::ApiGatewayV2::Stage
+    Type: AWS::ApiGateway::Stage
     Properties:
-      ApiId: !Ref HttpApi
-      StageName: "$default"
-      AutoDeploy: true
+      RestApiId: !Ref HttpApi
+      DeploymentId: !Ref HttpApiDeployment
+      StageName: api
 
   HttpApiDispatcherPermission:
     Type: AWS::Lambda::Permission
@@ -2590,13 +2647,57 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName: !Ref HttpApiDispatcherFunction
       Principal: !Sub "apigateway.${AWS::URLSuffix}"
-      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*/op/{field}"
+      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/POST/op/*"
+
+  # ---- Optional WAFv2 (REGIONAL) fronting the REST API stage ----
+  # Enabled when WAFAllowedIPv4Ranges is not the allow-all default. REST API
+  # stages support WAFv2 association (HTTP APIs do not).
+  ApiWafIPv4Set:
+    Type: AWS::WAFv2::IPSet
+    Condition: IsWafEnabled
+    Properties:
+      Name: !Sub "${StackName}-api-allow-ipv4"
+      Scope: REGIONAL
+      IPAddressVersion: IPV4
+      Addresses: !Ref WAFAllowedIPv4Ranges
+
+  ApiWafWebACL:
+    Type: AWS::WAFv2::WebACL
+    Condition: IsWafEnabled
+    Properties:
+      Name: !Sub "${StackName}-api-acl"
+      Scope: REGIONAL
+      DefaultAction:
+        Block: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub "${StackName}-api-acl"
+      Rules:
+        - Name: AllowListedIPv4
+          Priority: 0
+          Action:
+            Allow: {}
+          Statement:
+            IPSetReferenceStatement:
+              Arn: !GetAtt ApiWafIPv4Set.Arn
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AllowListedIPv4
+
+  ApiWafAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Condition: IsWafEnabled
+    Properties:
+      ResourceArn: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/restapis/${HttpApi}/stages/${HttpApiStage}"
+      WebACLArn: !GetAtt ApiWafWebACL.Arn
 
 
 Outputs:
   HttpApiEndpoint:
-    Description: Base URL of the HTTP API transport
-    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}"
+    Description: Base URL of the REST API transport (stage 'api')
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/api"
 
   TestResultsResolverFunctionArn:
     Description: ARN of the Test Results Resolver Lambda function
