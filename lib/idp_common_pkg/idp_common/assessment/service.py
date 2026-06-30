@@ -824,11 +824,17 @@ class AssessmentService:
                 }
             parsing_succeeded = False
 
-        # Process bounding boxes automatically if bbox data is present
-        try:
-            assessment_data = self._extract_geometry_from_assessment(assessment_data)
-        except Exception as e:
-            logger.warning(f"Failed to extract geometry data: {str(e)}")
+        # Convert any model-provided bbox into geometry — UNLESS geometry_mode is
+        # 'ocr_only', where we intentionally ignore model boxes (geometry comes
+        # solely from OCR value-matching during grounding). This keeps hallucinated
+        # LLM coordinates out of the result entirely in the default mode.
+        if self.config.assessment.resolved_geometry_mode() != "ocr_only":
+            try:
+                assessment_data = self._extract_geometry_from_assessment(
+                    assessment_data
+                )
+            except Exception as e:
+                logger.warning(f"Failed to extract geometry data: {str(e)}")
 
         default_confidence_threshold = (
             self.config.assessment.default_confidence_threshold
@@ -1105,12 +1111,12 @@ class AssessmentService:
             parsing_succeeded = core.parsing_succeeded
             total_duration = core.duration_seconds
 
-            # Ground field geometry in real OCR data when enabled. This replaces the
-            # LLM-estimated boxes with real OCR boxes from pageData.json where the
-            # extracted value matches an OCR line; it falls back to the LLM box when
-            # OCR geometry is unavailable or no value match is found (so the worst
-            # case is identical to LLM-only behavior).
-            if self.config.assessment.ground_geometry_in_ocr:
+            # Ground field geometry from OCR. In 'ocr_only' (default) geometry is
+            # derived purely from OCR value-matching (model boxes were never
+            # produced); in 'llm_with_ocr_grounding' real OCR boxes refine the
+            # model's estimates. Skipped only for 'llm_only'.
+            geometry_mode = self.config.assessment.resolved_geometry_mode()
+            if geometry_mode != "llm_only":
                 try:
                     from idp_common.assessment.ocr_grounding import (
                         ground_assessment_geometry,
@@ -1125,6 +1131,7 @@ class AssessmentService:
                             enhanced_assessment_data,
                             extraction_results,
                             page_data_by_page,
+                            geometry_mode,
                         )
                 except Exception as e:
                     logger.warning(

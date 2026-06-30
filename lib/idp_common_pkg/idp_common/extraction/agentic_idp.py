@@ -772,6 +772,9 @@ After successfully using the extraction tool, you MUST:
 """
 
 
+# Confidence-only addendum (geometry comes from OCR — no bbox asked of the model).
+# Used in the default ocr_only geometry mode: cheaper (no coordinate tokens) and
+# avoids hallucinated boxes.
 INTEGRATED_ASSESSMENT_ADDENDUM = """
 
 INTEGRATED CONFIDENCE ASSESSMENT (REQUIRED FINAL STEP):
@@ -779,13 +782,20 @@ After the extraction is complete and correct, you MUST call the
 provide_field_assessment tool exactly once to record your confidence in each
 extracted value. Mirror the extraction structure:
 - For each scalar or group field: an object
-  {"confidence": <0.0-1.0>, "confidence_reason": "<brief>"} (optionally add
-  "bbox": [x1,y1,x2,y2] and "page": <n> if you can localize the value on the page).
+  {"confidence": <0.0-1.0>, "confidence_reason": "<brief>"}.
 - For each list field (e.g. a table): a LIST with ONE assessment object per
   extracted row, in the SAME ORDER as the rows you extracted. Provide an entry
   for EVERY row — do not summarize or skip rows.
+Do NOT include bounding boxes — field locations are derived automatically from OCR.
 confidence = your calibrated certainty the value matches the source document
 (1.0 = certain, lower = ambiguous/illegible/inferred). This is your last action.
+"""
+
+# bbox suffix appended only when geometry_mode is not ocr_only (the model is asked
+# to localize values itself, and OCR grounding refines those boxes).
+INTEGRATED_ASSESSMENT_BBOX_SUFFIX = """
+Additionally, for each assessment object include "bbox": [x1,y1,x2,y2] (normalized
+0-1000 scale) and "page": <n> giving the value's location in the document.
 """
 
 
@@ -1713,9 +1723,13 @@ async def structured_output_async(
     # the result, riding the same downstream path as separate-mode assessment.
     if emit_field_assessment:
         tools.append(provide_field_assessment)
-        system_prompt = (
-            system_prompt or SYSTEM_PROMPT
-        ) + INTEGRATED_ASSESSMENT_ADDENDUM
+        addendum = INTEGRATED_ASSESSMENT_ADDENDUM
+        # Only ask the model for bounding boxes when geometry is NOT derived purely
+        # from OCR. In the default ocr_only mode we omit them (saves tokens, avoids
+        # hallucinated coordinates) — geometry is filled by OCR value-matching.
+        if config.assessment.resolved_geometry_mode() != "ocr_only":
+            addendum = addendum + INTEGRATED_ASSESSMENT_BBOX_SUFFIX
+        system_prompt = (system_prompt or SYSTEM_PROMPT) + addendum
 
     # Add table parsing tools if enabled
     if table_parsing_config.enabled:

@@ -721,7 +721,24 @@ class AssessmentConfig(BaseModel):
             "OCR geometry from pageData.json when the extracted value matches an OCR "
             "line. Falls back to the LLM-estimated box when OCR geometry is "
             "unavailable (e.g. plain LLM OCR, older documents) or no value match is "
-            "found, so the worst case is identical to LLM-only behavior."
+            "found, so the worst case is identical to LLM-only behavior. NOTE: "
+            "superseded by 'geometry_mode' — kept for backward compatibility; when "
+            "geometry_mode is set it takes precedence, and a legacy "
+            "ground_geometry_in_ocr=false maps to geometry_mode='llm_only'."
+        ),
+    )
+    geometry_mode: str = Field(
+        default="ocr_only",
+        description=(
+            "How field bounding boxes are produced. 'ocr_only' (default): DO NOT ask "
+            "the model for boxes — derive geometry purely by matching each extracted "
+            "value to real OCR lines (pageData.json), disambiguating repeated values "
+            "(e.g. the same amount on several table rows) by row order. Cheaper "
+            "(no bbox tokens) and more accurate than LLM-estimated boxes. "
+            "'llm_with_ocr_grounding': the model emits boxes and OCR grounding "
+            "refines them (the model box also disambiguates repeats). 'llm_only': "
+            "use the model's boxes as-is with no grounding. Fields with no OCR match "
+            "in ocr_only simply have no geometry (geometry is advisory)."
         ),
     )
     image: ImageConfig = Field(default_factory=ImageConfig)
@@ -748,6 +765,35 @@ class AssessmentConfig(BaseModel):
         if isinstance(v, str):
             return int(v) if v else 0
         return int(v)
+
+    @field_validator("geometry_mode", mode="before")
+    @classmethod
+    def validate_geometry_mode(cls, v: Any) -> str:
+        """Normalize geometry_mode; reject unknown values early."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return "ocr_only"
+        v_str = str(v).strip().lower()
+        if v_str not in ("ocr_only", "llm_with_ocr_grounding", "llm_only"):
+            raise ValueError(
+                "assessment.geometry_mode must be 'ocr_only', "
+                f"'llm_with_ocr_grounding' or 'llm_only', got {v!r}"
+            )
+        return v_str
+
+    def resolved_geometry_mode(self, *, explicit: bool = False) -> str:
+        """Effective geometry mode, honoring the legacy ``ground_geometry_in_ocr``.
+
+        ``geometry_mode`` takes precedence. For backward compatibility, a stored
+        config that predates ``geometry_mode`` and explicitly set
+        ``ground_geometry_in_ocr=false`` is treated as ``llm_only`` (its boxes were
+        used as-is). ``explicit`` is reserved for callers that have detected the key
+        was actually present in the raw config; by default we keep the simple rule
+        (legacy false -> llm_only) since the field default is true.
+        """
+        if not self.ground_geometry_in_ocr and self.geometry_mode == "ocr_only":
+            # Legacy opt-out of grounding; respect it rather than silently grounding.
+            return "llm_only"
+        return self.geometry_mode
 
 
 class SummarizationConfig(BaseModel):

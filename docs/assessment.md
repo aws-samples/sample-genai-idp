@@ -339,15 +339,26 @@ The bounding box feature requires no additional configuration:
 - **Backward compatibility**: Existing configurations continue to work unchanged
 - **Optional enhancement**: Bounding boxes enhance existing assessment without breaking changes
 
-### Grounding Boxes in Real OCR Geometry
+### Geometry source: OCR-only (default) vs LLM-estimated
 
-The boxes above are **LLM-estimated**. When the OCR backend provides real geometry (Amazon
-Textract or the Mistral OCR LambdaHook), the Assessment service grounds each field's box in
-the actual OCR coordinates from the consolidated `pageData.json` artifact — replacing the
-LLM estimate with the real box where the extracted value matches an OCR line. This is enabled
-by default (`assessment.ground_geometry_in_ocr: true`) and falls back to the LLM-estimated box
-when OCR geometry is unavailable or no match is found. It is a post-LLM, S3-side step with
-**zero impact on the assessment prompt or token budget**. See
+`assessment.geometry_mode` controls where field bounding boxes come from:
+
+- **`ocr_only`** (default): the model is **not** asked for boxes at all. Each field's
+  geometry is derived by matching the extracted value text against real OCR lines in the
+  consolidated `pageData.json` artifact (Amazon Textract or the Mistral OCR LambdaHook).
+  This is **cheaper** (no bbox coordinate tokens in the response) and **more accurate**
+  (OCR boxes beat LLM-estimated boxes, which models frequently hallucinate). When the same
+  value appears on multiple rows (e.g. a repeated amount in a table), occurrences are
+  disambiguated by **row order** — the i-th assessed list item maps to the i-th occurrence
+  in reading order. A field with no OCR match simply has no geometry (geometry is advisory).
+- **`llm_with_ocr_grounding`** (legacy): the model emits estimated boxes and the service
+  grounds them in real OCR coordinates where the value matches, falling back to the LLM box
+  otherwise. The LLM box also disambiguates repeated values by spatial proximity.
+- **`llm_only`**: use the model's boxes as-is with no grounding (escape hatch).
+
+The legacy `assessment.ground_geometry_in_ocr` flag is still honored for backward
+compatibility (a stored `false` maps to `llm_only`); `geometry_mode` takes precedence. In
+all OCR-backed modes, geometry is a post-LLM, S3-side step. See
 [Bounding Box Integration → Grounding in Real OCR Geometry](./assessment-bounding-boxes.md#grounding-in-real-ocr-geometry-pagedatajson).
 
 ## Output Format
