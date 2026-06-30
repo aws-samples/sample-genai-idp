@@ -4714,13 +4714,13 @@ Resources:
                 "listConfigurationLibrary": "${ConfigurationResolverFunction.Arn}",
                 "listDocuments": "${ListDocumentsGSIResolverFunction.Arn}",
                 "listDocumentsByDateRange": "${ListDocumentsByDateRangeResolverFunction.Arn}",
-                "pauseCircuitBreaker": "${CircuitBreakerResolverFunction.Arn}",
-                "probeCircuitBreaker": "${CircuitBreakerResolverFunction.Arn}",
+                "pauseCircuitBreaker": "${CircuitBreakerResolverFunctionArn}",
+                "probeCircuitBreaker": "${CircuitBreakerResolverFunctionArn}",
                 "processChanges": "${ProcessChangesResolverFunction.Arn}",
                 "queryKnowledgeBase": "${QueryKnowledgeBaseResolverFunction.Arn}",
                 "reprocessDocument": "${ReprocessDocumentResolverFunction.Arn}",
                 "restoreDefaultPricing": "${ConfigurationResolverFunction.Arn}",
-                "resumeCircuitBreaker": "${CircuitBreakerResolverFunction.Arn}",
+                "resumeCircuitBreaker": "${CircuitBreakerResolverFunctionArn}",
                 "sendAgentChatMessage": "${AgentChatResolverFunction.Arn}",
                 "sendChatDocumentMessage": "${SendChatDocumentMessageResolverFunction.Arn}",
                 "setActiveVersion": "${ConfigurationResolverFunction.Arn}",
@@ -4750,7 +4750,16 @@ Resources:
                 "calculateCapacity": "${CalculateCapacityResolverFunctionArn}",
                 "getLatestPublishedVersion": "${VersionCheckResolverFunctionArn}"
               }
-            - {}
+            # CircuitBreakerResolverFunction is conditional (only created when the
+            # circuit breaker is enabled). Resolve its ARN via a substitution
+            # variable so the !Sub above never references the resource directly
+            # (a direct ${CircuitBreakerResolverFunction.Arn} fails to resolve
+            # when the function is absent). Empty string when disabled — those
+            # circuit-breaker operations simply aren't routable then.
+            - CircuitBreakerResolverFunctionArn: !If
+                - CircuitBreakerEnabledCondition
+                - !GetAtt CircuitBreakerResolverFunction.Arn
+                - ""
       LoggingConfig:
         LogGroup: !Ref HttpApiDispatcherLogGroup
       Policies:

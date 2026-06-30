@@ -93,3 +93,4 @@ feature-platform/**/dist/
 # bundled OSS features + config_library/marketplace-catalog.yaml). Never
 # hand-edited or committed; marketplace-catalog.yaml is the checked-in source.
 config_library/catalog.json
+.claude/worktrees/
