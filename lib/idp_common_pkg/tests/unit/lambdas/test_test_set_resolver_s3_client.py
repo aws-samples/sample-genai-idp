@@ -7,7 +7,7 @@ import pytest
 LAMBDA_DIR = os.path.abspath(
     os.path.join(
         os.path.dirname(__file__),
-        "../../../../../nested/appsync/src/lambda/test_set_resolver",
+        "../../../../../nested/api-resolvers/src/lambda/test_set_resolver",
     )
 )
 

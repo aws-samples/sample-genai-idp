@@ -22,7 +22,7 @@ with patch("boto3.resource") as mock_resource, patch("boto3.client") as mock_cli
 
     # Add the lambda directory to the path for importing
     lambda_path = os.path.join(
-        os.path.dirname(__file__), "../../../../nested/appsync/src/lambda/delete_tests"
+        os.path.dirname(__file__), "../../../../nested/api-resolvers/src/lambda/delete_tests"
     )
     sys.path.insert(0, lambda_path)
 

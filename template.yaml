@@ -1103,7 +1103,7 @@ Conditions:
   # NOTE: the old WAF apparatus (IsWafEnabled / IsWafEnabledAndApi) and the
   # private DNS condition (IsPrivateApiAndApi) existed solely to protect /
   # expose the former GraphQL API and were removed along with it. The REST API
-  # WAF + private-endpoint wiring now lives in the nested/appsync stack.
+  # WAF + private-endpoint wiring now lives in the nested/api-resolvers stack.
   ShouldCreateDocumentKnowledgeBase:
     !Equals [ !Ref DocumentKnowledgeBase, "BEDROCK_KNOWLEDGE_BASE (Create)" ]
   ShouldUseDocumentKnowledgeBase: !Condition ShouldCreateDocumentKnowledgeBase
@@ -2620,12 +2620,12 @@ Resources:
   # Nested stack for REST API resolvers
   ##########################################################################
 
-  APPSYNCSTACK:
+  APIRESOLVERSTACK:
     DependsOn:
       - IsStacknameLengthOK
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: ./nested/appsync/.aws-sam/packaged.yaml
+      TemplateURL: ./nested/api-resolvers/.aws-sam/packaged.yaml
       Parameters:
         # GraphQL API removed: the nested stack now hosts only the REST API +
         # dispatcher. The GraphQLApiId/GraphQLApiArn/GraphQLApiUrl params are no
@@ -2808,10 +2808,10 @@ Resources:
   # Stack URL directly from those. Marketplace features use a private seller
   # bucket declared in config_library/extensions-marketplace.yaml.
 
-  # Ordering note: APPSYNCSTACK now consumes FeaturePlatformStack's resolver
+  # Ordering note: APIRESOLVERSTACK now consumes FeaturePlatformStack's resolver
   # function ARNs (the 6 UI fields) via !GetAtt FeaturePlatformStack.Outputs.*,
-  # which makes APPSYNCSTACK implicitly depend on FeaturePlatformStack. The old
-  # explicit "FeaturePlatformStack DependsOn APPSYNCSTACK" was for attaching
+  # which makes APIRESOLVERSTACK implicitly depend on FeaturePlatformStack. The old
+  # explicit "FeaturePlatformStack DependsOn APIRESOLVERSTACK" was for attaching
   # GraphQL resolvers to the main schema; with the GraphQL API gone it is removed (and
   # keeping it would create a dependency cycle). The implicit GetAtt dependency
   # is conditional-safe: it only applies when IsFeaturePlatformEnabled is true.
@@ -5234,7 +5234,7 @@ Resources:
           - ShouldUseDocumentKnowledgeBase
           - True
           - False
-        # Runtime-resolved values for APPSYNCSTACK decoupling
+        # Runtime-resolved values for APIRESOLVERSTACK decoupling
         # CloudWatch log groups moved here to decouple Agent Lambda functions from Pattern stacks
         CloudWatchLogGroups: !Join
           - ","
@@ -9934,7 +9934,7 @@ Resources:
           # REST client posts to ${VITE_API_BASE_URL}/op/<field>. (GraphQL API
           # removed, so the old GraphQL URL / API_TRANSPORT vars are no longer emitted.)
           - Name: VITE_API_BASE_URL
-            Value: !GetAtt APPSYNCSTACK.Outputs.HttpApiEndpoint
+            Value: !GetAtt APIRESOLVERSTACK.Outputs.HttpApiEndpoint
           # Chat streaming Function URL (IAM-authed, response streaming). The
           # signed stream client (src/api/stream-client.ts) reads this.
           - Name: VITE_STREAM_URL
@@ -10845,7 +10845,7 @@ Resources:
       FunctionName: !Sub "${AWS::StackName}-FinetuningJobsResolver"
       Handler: index.lambda_handler
       Runtime: python3.12
-      CodeUri: nested/appsync/src/lambda/finetuning_jobs_resolver/
+      CodeUri: nested/api-resolvers/src/lambda/finetuning_jobs_resolver/
       Timeout: 60
       MemorySize: 512
       Layers:
@@ -11035,7 +11035,7 @@ Outputs:
       - - !Sub "VITE_USER_POOL_ID=${UserPool}"
         - !Sub "VITE_USER_POOL_CLIENT_ID=${UserPoolClient}"
         - !Sub "VITE_IDENTITY_POOL_ID=${IdentityPool}"
-        - !Sub "VITE_API_BASE_URL=${APPSYNCSTACK.Outputs.HttpApiEndpoint}"
+        - !Sub "VITE_API_BASE_URL=${APIRESOLVERSTACK.Outputs.HttpApiEndpoint}"
         - !Sub "VITE_STREAM_URL=${ChatStreamProcessorUrl.FunctionUrl}"
         - !Sub "VITE_AWS_REGION=${AWS::Region}"
         - !Sub "VITE_SETTINGS_PARAMETER=${SettingsParameter}"

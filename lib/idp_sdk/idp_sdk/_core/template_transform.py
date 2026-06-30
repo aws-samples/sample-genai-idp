@@ -64,14 +64,14 @@ class HeadlessTemplateTransformer:
 
         # UI-API resources to strip for headless. AWS AppSync has been removed;
         # the interactive UI API is now an API Gateway REST API hosted in the
-        # APPSYNCSTACK nested stack (its dispatcher invokes these resolver
+        # APIRESOLVERSTACK nested stack (its dispatcher invokes these resolver
         # Lambdas). Headless = no UI API, so strip the nested stack and the
         # UI-only resolver Lambdas it fronts. (The former AppSync
         # DataSource/Resolver/GraphQLApi resources no longer exist in the base
         # template, so they are not listed here anymore.)
         self.appsync_resources: Set[str] = {
             # Nested stack hosting the REST API dispatcher + UI resolver Lambdas.
-            "APPSYNCSTACK",
+            "APIRESOLVERSTACK",
             # UI-only resolver Lambdas defined in the main template (capacity
             # planning, version check, fine-tuning) — only reachable via the
             # (stripped) UI API, so remove them in headless mode.
@@ -177,9 +177,9 @@ class HeadlessTemplateTransformer:
         }
 
         # Feature Platform nested stack — gated on EnableFeaturePlatform=true.
-        # Its parameters wire in the UI REST API (in APPSYNCSTACK), UserPool,
+        # Its parameters wire in the UI REST API (in APIRESOLVERSTACK), UserPool,
         # UserPoolClient, WebUIBucket, and DiscoveryBucket — all removed in
-        # headless mode — and it DependsOn the (removed) APPSYNCSTACK. Left in
+        # headless mode — and it DependsOn the (removed) APIRESOLVERSTACK. Left in
         # place, its references to those removed resources would fail at deploy
         # time ("Fn::GetAtt references undefined resource"). EnableFeaturePlatform
         # is forced to 'false' in _remove_parameters so the
@@ -211,7 +211,7 @@ class HeadlessTemplateTransformer:
             "StepFunctionSubscriptionRule",
             "StepFunctionSubscriptionPublisherPermission",
             # Invoked async only by the UI REST API dispatcher in the (removed)
-            # APPSYNCSTACK; with no caller, the function and its log group are
+            # APIRESOLVERSTACK; with no caller, the function and its log group are
             # dead weight in headless mode and their dangling refs to removed
             # UI resources (e.g. UsersTable) would block stack updates.
             "ChatWithDocumentProcessorFunction",
@@ -277,7 +277,7 @@ class HeadlessTemplateTransformer:
             "S3DiscoveryBucketConsoleURL",
             # UI-API DNS helper output (named for the former AppSync endpoint).
             # AppSync is gone — the UI API is now an API Gateway REST API in the
-            # (stripped) APPSYNCSTACK — so this UI-only output has no place in a
+            # (stripped) APIRESOLVERSTACK — so this UI-only output has no place in a
             # headless deployment. Kept here as a defensive strip in case the
             # base template still emits it.
             "AppSyncEndpointForDNS",

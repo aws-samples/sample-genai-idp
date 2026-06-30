@@ -21,16 +21,16 @@ pytestmark = pytest.mark.unit
 
 
 def _find_repo_root() -> Path:
-    """Walk up until we find the repo root (contains nested/appsync)."""
+    """Walk up until we find the repo root (contains nested/api-resolvers)."""
     p = Path(__file__).resolve()
     for parent in p.parents:
-        if (parent / "nested" / "appsync").is_dir():
+        if (parent / "nested" / "api-resolvers").is_dir():
             return parent
-    raise RuntimeError("Could not locate repo root containing nested/appsync")
+    raise RuntimeError("Could not locate repo root containing nested/api-resolvers")
 
 
 _DISPATCHER_DIR = (
-    _find_repo_root() / "nested" / "appsync" / "src" / "lambda" / "http_api_dispatcher"
+    _find_repo_root() / "nested" / "api-resolvers" / "src" / "lambda" / "http_api_dispatcher"
 )
 
 

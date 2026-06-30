@@ -3075,7 +3075,7 @@ def _invoke_test_set_resolver(
         (
             f["FunctionName"]
             for f in all_functions
-            if f["FunctionName"].startswith(f"{stack_name}-APPSYNCSTACK-")
+            if f["FunctionName"].startswith(f"{stack_name}-APIRESOLVERSTACK-")
             and "TestSetResolverFunction" in f["FunctionName"]
         ),
         None,
@@ -3133,7 +3133,7 @@ def _invoke_test_runner(
     import json
 
     # Find test runner function by name pattern
-    # Match: <stack_name>-APPSYNCSTACK-*-TestRunnerFunction-*
+    # Match: <stack_name>-APIRESOLVERSTACK-*-TestRunnerFunction-*
     lambda_client = boto3.client("lambda", region_name=region)
 
     # Handle pagination to get all functions
@@ -3146,7 +3146,7 @@ def _invoke_test_runner(
         (
             f["FunctionName"]
             for f in all_functions
-            if f["FunctionName"].startswith(f"{stack_name}-APPSYNCSTACK-")
+            if f["FunctionName"].startswith(f"{stack_name}-APIRESOLVERSTACK-")
             and "TestRunnerFunction" in f["FunctionName"]
         ),
         None,

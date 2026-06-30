@@ -35,7 +35,7 @@ s3_client = boto3.client('s3')
 #
 # To prevent use of this resolver as a generic S3-read gadget, we
 # restrict the accepted buckets to those explicitly passed in via
-# environment variables (set by `nested/appsync/template.yaml` from
+# environment variables (set by `nested/api-resolvers/template.yaml` from
 # the main stack's bucket refs). If the env vars are unset
 # (unusual — older deployments that haven't been redeployed), we
 # fail open with a warning to preserve functionality, and operators

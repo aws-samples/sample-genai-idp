@@ -7,7 +7,7 @@ DynamoDB-direct operations for the HTTP API dispatcher.
 Under AppSync these fields were served by **VTL DynamoDB resolvers** (no Lambda).
 The HTTP API has no VTL, so this module reimplements that exact behavior in
 Python against the same tables. It is intentionally a faithful port of the VTL
-in ``nested/appsync/template.yaml`` (DiscoveryTableDataSource and
+in ``nested/api-resolvers/template.yaml`` (DiscoveryTableDataSource and
 AgentTableDataSource resolvers).
 
 Tables are passed via environment variables set by CloudFormation:

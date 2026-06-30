@@ -2467,10 +2467,10 @@ STDERR:
             # Main template components
             "main": main_deps,
             # Nested components (includes all nested stacks - core and optional)
-            "nested/appsync": [
+            "nested/api-resolvers": [
                 LIB_DEPENDENCY,
-                "nested/appsync/src",
-                "nested/appsync/template.yaml",
+                "nested/api-resolvers/src",
+                "nested/api-resolvers/template.yaml",
             ],
             "nested/bedrockkb": [
                 "nested/bedrockkb/src",
@@ -2720,7 +2720,7 @@ STDERR:
 
         # Nested templates (packaged versions)
         # In headless mode, skip nested templates that contain resources stripped by the
-        # headless transformer (currently: nested/appsync, which contains AWS::AppSync::*).
+        # headless transformer (currently: nested/api-resolvers, which contains AWS::AppSync::*).
         headless_skip_nested = {"appsync"} if self.headless else set()
         nested_dir = "nested"
         if os.path.exists(nested_dir):
