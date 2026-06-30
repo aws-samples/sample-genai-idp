@@ -222,6 +222,51 @@ def _merge_shard_results(
     return merged_dict, merged_metering, conflicts
 
 
+def merge_assessment_dicts(
+    shard_assessments: list[dict[str, Any]],
+    list_fields: set[str],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Collate per-shard assessment dicts into one section-level assessment.
+
+    Mirrors :func:`_merge_shard_results` so the per-field assessment aligns with
+    the merged extraction data:
+
+    - **List-valued fields** (e.g. ``Transactions``) have their per-item
+      assessment arrays concatenated in page order — the same order the data
+      list items are concatenated — so ``explainability_info[0]["Transactions"][i]``
+      lines up with ``inference_result["Transactions"][i]``.
+    - **Scalar/group fields** take the FIRST shard that assessed them (a field
+      lives on one page, so only one shard meaningfully assesses it; later shards
+      that left it null contribute nothing).
+
+    ``shard_assessments`` must already be ordered by ``page_start`` (the caller
+    sorts). Each element is the ``{"assessment": {...}, "alerts": [...],
+    "page_start": int, "page_end": int}`` dict produced by ``extract_one_shard``.
+    Returns ``(merged_assessment, merged_alerts)``.
+    """
+    merged_assessment: dict[str, Any] = {}
+    merged_alerts: list[dict[str, Any]] = []
+
+    for shard in shard_assessments:
+        assessment = shard.get("assessment") or {}
+        merged_alerts.extend(shard.get("alerts") or [])
+        for key, value in assessment.items():
+            is_list_field = key in list_fields or isinstance(value, list)
+            if is_list_field:
+                existing = merged_assessment.get(key)
+                if not isinstance(existing, list):
+                    merged_assessment[key] = []
+                if isinstance(value, list):
+                    merged_assessment[key].extend(value)
+            else:
+                # Scalar/group: first shard to assess it wins (a populated
+                # assessment for a field only one shard saw).
+                if key not in merged_assessment:
+                    merged_assessment[key] = value
+
+    return merged_assessment, merged_alerts
+
+
 # A shard payload is the dict produced by ExtractionService._build_shard_payloads:
 #   {"content": <prompt content blocks>, "page_start": int, "page_end": int,
 #    "total_pages": int}
@@ -231,6 +276,11 @@ ShardPayload = dict[str, Any]
 # an awaitable of (data_format instance, response-with-metering dict). Injecting
 # it keeps extract_one_shard decoupled from strands for testing.
 ShardRunner = Callable[..., Awaitable[tuple[BaseModel, dict[str, Any]]]]
+
+# An assess runner takes (extracted_fields, payload) and returns an awaitable of
+# ``{"assessment": {...}, "alerts": [...], "metering": {...}}`` (or None to skip).
+# Injected by ExtractionService so runtime.py stays free of the assessment stack.
+AssessRunner = Callable[..., Awaitable["dict[str, Any] | None"]]
 
 
 # --------------------------------------------------------------------------- #
@@ -360,6 +410,7 @@ async def extract_one_shard(
     custom_instruction: str | None = None,
     persistence: ShardPersistence | None = None,
     shard_runner: ShardRunner | None = None,
+    assess_runner: "AssessRunner | None" = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Run ONE shard's agent (or load a previously-completed result).
 
@@ -367,6 +418,16 @@ async def extract_one_shard(
     shard's page range, it is loaded and returned **without re-inferring**. This
     is the same function that the asyncio scheduler (:class:`InProcessRuntime`)
     runs as a task body AND that the SFN Distributed Map runs per iteration.
+
+    When ``assess_runner`` is provided (integrated-assessment feature), a
+    confidence/bbox assessment is run over THIS shard's pages right after its
+    extraction (or carried from the persisted result on a cache hit), so
+    assessment inherits the same per-shard scaling + idempotent resume as
+    extraction. The per-shard assessment + alerts are persisted alongside the
+    extracted fields and also returned inside ``response["_shard_assessment"]``
+    for the merge step to collate (tuple arity is unchanged so existing callers
+    and tests are unaffected). ``assess_runner`` stays injected (not imported)
+    so this module remains free of the assessment/strands stack.
 
     Returns ``(extracted_fields_dict, response_with_metering)`` so callers that
     persist/serialise (SFN) don't need the live Pydantic instance.
@@ -384,7 +445,15 @@ async def extract_one_shard(
                 page_start,
                 page_end,
             )
-            return cached["extracted_fields"], {"metering": cached.get("metering", {})}
+            response: dict[str, Any] = {"metering": cached.get("metering", {})}
+            if cached.get("assessment") is not None:
+                response["_shard_assessment"] = {
+                    "assessment": cached.get("assessment"),
+                    "alerts": cached.get("alerts", []),
+                    "page_start": page_start,
+                    "page_end": page_end,
+                }
+            return cached["extracted_fields"], response
 
     # Deterministic fault-injection hook (Phase 3 resume proof). When
     # EXTRACTION_FORCE_FAIL_SHARDS lists a 0-based page_start (comma-separated)
@@ -445,16 +514,63 @@ async def extract_one_shard(
     )
     extracted_fields = data.model_dump(mode="json")
 
-    if persistence is not None:
-        persistence.save(
-            section_id,
-            page_start,
-            page_end,
-            {
-                "extracted_fields": extracted_fields,
-                "metering": response.get("metering", {}),
-            },
+    # In-shard assessment (integrated-assessment feature). Runs over THIS shard's
+    # pages/values only, so it scales the same way extraction does. Best-effort:
+    # an assessment failure must never fail the shard's extraction.
+    shard_assessment: dict[str, Any] | None = None
+    if assess_runner is not None:
+        try:
+            assess_out = await assess_runner(
+                extracted_fields=extracted_fields,
+                payload=payload,
+            )
+            if assess_out is not None:
+                shard_assessment = {
+                    "assessment": assess_out.get("assessment", {}),
+                    "alerts": assess_out.get("alerts", []),
+                    "page_start": page_start,
+                    "page_end": page_end,
+                }
+                _accumulate_metering(
+                    response.setdefault("metering", {}),
+                    assess_out.get("metering", {}),
+                )
+        except Exception as e:  # noqa: BLE001 - assessment is advisory
+            logger.warning(
+                "In-shard assessment failed for pages %d-%d (keeping extraction): %s",
+                page_start,
+                page_end,
+                e,
+            )
+    else:
+        # Integrated-assessment mode: the extraction agent emitted per-field
+        # confidence/bbox INLINE (one inference, no second pass). The shard
+        # runner surfaced it in the response metering; lift it into the same
+        # _shard_assessment slot so collation/reconcile/grounding are identical
+        # to separate mode. Pop it out of metering so it doesn't leak downstream.
+        inline = (response.get("metering") or {}).pop(
+            "_integrated_field_assessment", None
         )
+        if inline:
+            shard_assessment = {
+                "assessment": inline,
+                "alerts": [],
+                "page_start": page_start,
+                "page_end": page_end,
+            }
+
+    if persistence is not None:
+        persisted: dict[str, Any] = {
+            "extracted_fields": extracted_fields,
+            "metering": response.get("metering", {}),
+        }
+        if shard_assessment is not None:
+            persisted["assessment"] = shard_assessment["assessment"]
+            persisted["alerts"] = shard_assessment["alerts"]
+        persistence.save(section_id, page_start, page_end, persisted)
+
+    if shard_assessment is not None:
+        response["_shard_assessment"] = shard_assessment
 
     return extracted_fields, response
 
@@ -491,11 +607,27 @@ def merge_shard_dicts(
     regardless of completion order.
     """
     ordered = sorted(shard_dicts, key=lambda d: d.get("page_start", 0))
-    tuples = [
-        (data_format(**d["extracted_fields"]), {"metering": d.get("metering", {})})
-        for d in ordered
-    ]
-    return merge_shard_results(tuples, data_format)
+    tuples = []
+    for d in ordered:
+        response: dict[str, Any] = {"metering": d.get("metering", {})}
+        if d.get("assessment") is not None:
+            response["_shard_assessment"] = {
+                "assessment": d.get("assessment"),
+                "alerts": d.get("alerts", []),
+                "page_start": d.get("page_start", 0),
+                "page_end": d.get("page_end", 0),
+            }
+        tuples.append((data_format(**d["extracted_fields"]), response))
+    merged_dict, merged_metering, conflicts = merge_shard_results(tuples, data_format)
+    # Collate in-shard assessments into metering (parity with _finalize_merge) so
+    # the SFN merge step surfaces explainability_info exactly like the in-process
+    # path. No-op when no shard carried an assessment.
+    collated = collate_shard_assessments(tuples, data_format)
+    if collated is not None:
+        merged_assessment, merged_alerts = collated
+        merged_metering["_merged_assessment"] = merged_assessment
+        merged_metering["_merged_assessment_alerts"] = merged_alerts
+    return merged_dict, merged_metering, conflicts
 
 
 # --------------------------------------------------------------------------- #
@@ -526,6 +658,7 @@ class ExtractionRuntime(abc.ABC):
         custom_instruction: str | None = None,
         persistence: ShardPersistence | None = None,
         shard_runner: ShardRunner | None = None,
+        assess_runner: AssessRunner | None = None,
     ) -> tuple[BaseModel, dict[str, Any]]:
         """Run all shards and return ``(merged data_format instance, response)``."""
         raise NotImplementedError
@@ -561,6 +694,7 @@ class InProcessRuntime(ExtractionRuntime):
         custom_instruction: str | None = None,
         persistence: ShardPersistence | None = None,
         shard_runner: ShardRunner | None = None,
+        assess_runner: AssessRunner | None = None,
     ) -> tuple[BaseModel, dict[str, Any]]:
         total_shards = len(shard_payloads)
         logger.info(
@@ -590,6 +724,7 @@ class InProcessRuntime(ExtractionRuntime):
                     custom_instruction=custom_instruction,
                     persistence=persistence,
                     shard_runner=shard_runner,
+                    assess_runner=assess_runner,
                 )
                 # Re-hydrate into a model instance for the shared merge helper.
                 return data_format(**fields), response
@@ -598,6 +733,28 @@ class InProcessRuntime(ExtractionRuntime):
             *[_run_one(i, p) for i, p in enumerate(shard_payloads)]
         )
         return _finalize_merge(results, data_format)
+
+
+def collate_shard_assessments(
+    results: list[tuple[Any, dict[str, Any]]],
+    data_format: type[BaseModel],
+) -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
+    """Pull per-shard ``_shard_assessment`` off the responses and collate them.
+
+    Returns ``(merged_assessment, merged_alerts)`` page-ordered, or ``None`` when
+    no shard produced an assessment (integrated-assessment disabled). Shared by
+    the in-process and SFN merge paths so collation has one implementation.
+    """
+    shard_assessments = [
+        resp["_shard_assessment"]
+        for _data, resp in results
+        if isinstance(resp, dict) and resp.get("_shard_assessment") is not None
+    ]
+    if not shard_assessments:
+        return None
+    shard_assessments.sort(key=lambda s: s.get("page_start", 0))
+    list_fields = _list_valued_fields(data_format)
+    return merge_assessment_dicts(shard_assessments, list_fields)
 
 
 def _finalize_merge(
@@ -631,6 +788,17 @@ def _finalize_merge(
         },
         "metering": merged_metering,
     }
+    # Surface the collated per-field assessment (integrated-assessment feature)
+    # so the service can ground it and emit explainability_info. Absent (None)
+    # when in-shard assessment did not run — zero change to the default path.
+    # Rides inside ``metering`` (like ``_shard_scalar_conflicts``) so it survives
+    # the typed BedrockInvokeModelResponse envelope that callers re-wrap into;
+    # the service pops it out in _save_results.
+    collated = collate_shard_assessments(results, data_format)
+    if collated is not None:
+        merged_assessment, merged_alerts = collated
+        merged_metering["_merged_assessment"] = merged_assessment
+        merged_metering["_merged_assessment_alerts"] = merged_alerts
     return merged_result, response
 
 

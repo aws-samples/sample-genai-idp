@@ -19,7 +19,7 @@ assessment:
     max_workers: "20"
     simple_batch_size: "3"
     list_batch_size: "1"
-  model: us.amazon.nova-lite-v1:0
+  model: us.anthropic.claude-haiku-4-5-20251001-v1:0
   top_p: "0.0"
   max_tokens: "10000"
   top_k: "5"

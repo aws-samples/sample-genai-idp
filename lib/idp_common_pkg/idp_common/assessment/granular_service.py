@@ -2027,7 +2027,8 @@ class GranularAssessmentService:
             # AssessmentService for rationale). Applied once on the fully-aggregated
             # assessment so list/group structure is whole. Safe fallback to LLM boxes
             # when OCR geometry is unavailable or no value match is found.
-            if self.config.assessment.ground_geometry_in_ocr:
+            geometry_mode = self.config.assessment.resolved_geometry_mode()
+            if geometry_mode != "llm_only":
                 try:
                     from idp_common.assessment.ocr_grounding import (
                         ground_assessment_geometry,
@@ -2042,6 +2043,8 @@ class GranularAssessmentService:
                             enhanced_assessment_data,
                             extraction_results,
                             page_data_by_page,
+                            geometry_mode,
+                            class_schema,
                         )
                 except Exception as e:
                     logger.warning(

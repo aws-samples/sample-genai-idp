@@ -171,6 +171,10 @@ class ExtractionService:
         # per-class override resolution), recorded in metadata for audit. Reset
         # per section.
         self._pending_extraction_model: str | None = None
+        # Grounded per-field assessment staged by _attach_explainability for the
+        # current section, emitted as explainability_info by _save_results.
+        # Reset per section. None when in-shard assessment did not run.
+        self._grounded_assessment: dict[str, Any] | None = None
 
         # Get model_id from config for logging (type-safe access with fallback)
         model_id = (
@@ -525,6 +529,21 @@ class ExtractionService:
                         "page_start": shard.start,
                         "page_end": shard.end,
                         "total_pages": num_pages,
+                        # Raw (un-rendered) shard text + images, kept so an
+                        # in-shard assessment pass (integrated-assessment feature)
+                        # can reuse AssessmentService.assess_results over the SAME
+                        # pages without re-reading S3. Always page images here (not
+                        # gated on send_images): assessment benefits from the image
+                        # even when the extraction prompt has no {DOCUMENT_IMAGE}.
+                        # These never cross the SFN JSON boundary — each shard Lambda
+                        # rebuilds payloads locally — so bytes in the dict are safe.
+                        "assess_document_text": self._document_text,
+                        "assess_page_images": self._cap_agent_images(
+                            self._slice_images(saved_images, shard.start, shard.end)
+                        ),
+                        # Integrated mode: tell the shard agent to emit per-field
+                        # confidence/bbox inline (one inference, no second pass).
+                        "emit_field_assessment": self._integrated_assessment_enabled(),
                     }
                 )
         finally:
@@ -746,6 +765,7 @@ class ExtractionService:
         self._class_schema = {}
         self._page_images = []
         self._image_uris = []
+        self._grounded_assessment = None
 
     def _validate_and_find_section(
         self, document: Document, section_id: str
@@ -2325,6 +2345,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                         ),
                         persistence=self._shard_persistence,
                         runtime=runtime,
+                        assess_runner=self._build_assess_runner(section_info),
                     )
                 )
             else:
@@ -2340,6 +2361,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     checkpoint_buffer_data=checkpoint_buffer,
                     custom_instruction=custom_instruction,
                     schema_validator=schema_validator,
+                    emit_field_assessment=self._integrated_assessment_enabled(),
                 )
 
             extracted_fields = structured_data.model_dump(mode="json")
@@ -2381,6 +2403,26 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                 data_model=dynamic_model,
                 section_label=section_info.class_label,
             )
+
+            # In-shard assessment for the NON-sharded single-agent agentic path
+            # (sharding did not engage). Equivalent to a single full-section
+            # shard: assess the final (post-escalation) values over all pages,
+            # then let _save_results ground + emit explainability_info. Mirrors
+            # the sharded path's _merged_assessment metering marker.
+            if not shard_payloads and self._inshard_assessment_enabled():
+                self._assess_single_agent(
+                    extracted_fields=extracted_fields,
+                    section_info=section_info,
+                    metering=metering,
+                )
+            elif not shard_payloads and self._integrated_assessment_enabled():
+                # Integrated mode, single-agent: the agent already emitted
+                # confidence/bbox inline. Lift it from metering into the
+                # _merged_assessment slot so _save_results grounds + emits it.
+                inline = metering.pop("_integrated_field_assessment", None)
+                if inline:
+                    metering["_merged_assessment"] = inline
+                    metering["_merged_assessment_alerts"] = []
         else:
             # Standard Bedrock invocation
             response_with_metering = bedrock.invoke_model(
@@ -2590,6 +2632,69 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             clean["avg_confidence"] = max(0.0, min(100.0, float(conf)))
         return clean
 
+    def _attach_explainability(
+        self,
+        *,
+        output_metadata: dict[str, Any],
+        merged_assessment: dict[str, Any],
+        merged_assessment_alerts: list[dict[str, Any]],
+        extracted_fields: dict[str, Any],
+        document: Document,
+        section: Any,
+        section_info: SectionInfo,
+    ) -> None:
+        """Ground the merged in-shard assessment and stage it for output.
+
+        Grounds field geometry in real OCR data over the whole section (one pass,
+        same as the standalone Assessment step), stashes the grounded assessment
+        in ``self._grounded_assessment`` for ``_save_results`` to emit as
+        ``explainability_info``, sets ``section.confidence_threshold_alerts``, and
+        records lightweight metadata mirroring the standalone path. Best-effort:
+        grounding never fails extraction.
+        """
+        # AUTHORITATIVE alignment point: reconcile the fully-merged assessment
+        # against the fully-merged, final extracted_fields here — AFTER shard
+        # merge (which drops phantom rows from data) and any escalation. Doing it
+        # only per-shard is not enough: the data list is phantom-filtered on
+        # merge, so per-shard counts can drift from the final data. This single
+        # post-merge reconcile guarantees explainability_info[field][i] lines up
+        # with inference_result[field][i] for every list field.
+        merged_assessment = self._reconcile_assessment_to_data(
+            merged_assessment, extracted_fields
+        )
+
+        grounded = merged_assessment
+        geometry_mode = self.config.assessment.resolved_geometry_mode()
+        if geometry_mode != "llm_only":
+            try:
+                from idp_common.assessment.ocr_grounding import (
+                    ground_assessment_geometry,
+                    load_page_ocr_data,
+                )
+
+                page_data_by_page = load_page_ocr_data(
+                    document.pages, section_info.sorted_page_ids
+                )
+                if page_data_by_page:
+                    grounded = ground_assessment_geometry(
+                        merged_assessment,
+                        extracted_fields,
+                        page_data_by_page,
+                        geometry_mode,
+                        self._class_schema,
+                    )
+            except Exception as e:  # noqa: BLE001 - grounding is advisory
+                logger.warning(
+                    "OCR geometry grounding failed for in-shard assessment "
+                    "(keeping existing boxes): %s",
+                    e,
+                )
+
+        self._grounded_assessment = grounded
+        section.confidence_threshold_alerts = merged_assessment_alerts
+        output_metadata["assessment_integrated_in_extraction"] = True
+        output_metadata["assessment_alert_count"] = len(merged_assessment_alerts)
+
     def _save_results(
         self,
         document: Document,
@@ -2619,6 +2724,8 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         tool_used = False
         table_stats = None
         shard_conflicts = None
+        merged_assessment = None
+        merged_assessment_alerts = None
         if extraction_method == "agentic" and result.metering:
             table_stats = result.metering.pop("_table_parsing_stats", None)
             tool_used = table_stats is not None
@@ -2626,6 +2733,13 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                 table_stats = self._normalize_table_parsing_stats(table_stats)
             # Scalar conflicts surfaced by sharded concurrent extraction.
             shard_conflicts = result.metering.pop("_shard_scalar_conflicts", None)
+            # Per-field confidence/bbox assessment collated from in-shard
+            # assessment (integrated-assessment feature). Popped here so it does
+            # not leak into metering; emitted as explainability_info below.
+            merged_assessment = result.metering.pop("_merged_assessment", None)
+            merged_assessment_alerts = result.metering.pop(
+                "_merged_assessment_alerts", None
+            )
 
         # Build base metadata
         metadata: dict[str, Any] = {
@@ -2727,6 +2841,26 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         processing_report = self._generate_processing_report(metadata)
         logger.info(f"Processing Report:\n{processing_report}")
 
+        # In-shard assessment (integrated-assessment feature): ground the merged
+        # per-field assessment in real OCR geometry over the WHOLE section (one
+        # pass, identical to the standalone Assessment step) and emit it as
+        # explainability_info — the same output contract the standalone path
+        # produces, so all downstream consumers (HITL, UI, evaluation) are
+        # unchanged. No-op when in-shard assessment did not run.
+        if merged_assessment:
+            # Align against fields_for_output (what becomes inference_result), so
+            # explainability_info[field][i] matches inference_result[field][i]
+            # exactly — including after missing-field handling.
+            self._attach_explainability(
+                output_metadata=metadata,
+                merged_assessment=merged_assessment,
+                merged_assessment_alerts=merged_assessment_alerts or [],
+                extracted_fields=fields_for_output,
+                document=document,
+                section=section,
+                section_info=section_info,
+            )
+
         # Write to S3 with processing report
         output: dict[str, Any] = {
             "document_class": {"type": section_info.class_label},
@@ -2735,6 +2869,8 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             "metadata": metadata,
             "processing_report": processing_report,
         }
+        if merged_assessment is not None:
+            output["explainability_info"] = [self._grounded_assessment]
         # Surface page-type resolution and the missing-field report when the
         # feature is in use, so downstream consumers can act on the signal.
         presence = section_info.page_type_presence
@@ -2952,6 +3088,278 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
 
         return content, system_prompt
 
+    def _inshard_assessment_enabled(self) -> bool:
+        """Whether the SEPARATE-mode in-shard assessment pass should run.
+
+        True only when assessment is enabled AND the integration mode keeps a
+        *separate* assessment inference (the second-turn per-shard path). The
+        ``integrated`` (single-prompt) mode does NOT use this — the extraction
+        inference itself emits confidence/bbox via ``_integrated_assessment_enabled``.
+        Either way the standalone AssessmentStep is bypassed for the agentic path.
+        """
+        if not self.config.assessment.enabled:
+            return False
+        return self.config.extraction.assessment_integration == "separate"
+
+    def _integrated_assessment_enabled(self) -> bool:
+        """Whether the agent should emit confidence/bbox INLINE (single inference).
+
+        True when assessment is enabled AND ``assessment_integration == "integrated"``.
+        In this mode the extraction agent calls ``provide_field_assessment`` in its
+        own session (document already in cached context — no second Bedrock pass),
+        and the result rides the same collation/grounding/emit path as separate mode.
+        """
+        if not self.config.assessment.enabled:
+            return False
+        return self.config.extraction.assessment_integration == "integrated"
+
+    @staticmethod
+    def _reconcile_assessment_to_data(
+        assessment: dict[str, Any], extraction_results: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Force per-field assessment to index-align with the extracted data.
+
+        The assessment LLM frequently emits a *different* number of list-item
+        assessments than the data has rows (a 120-row table may come back with
+        only 44 row assessments). Downstream consumers (HITL, UI) index
+        ``explainability_info[0][field][i]`` against ``inference_result[field][i]``,
+        so a length mismatch silently misattributes confidence to the wrong row —
+        and in the sharded path the drift compounds across shards on merge.
+
+        For every list-valued data field this truncates an over-long assessment
+        list and pads a too-short one so ``len(assessment[field]) ==
+        len(data[field])`` exactly — including the case where the model OMITTED
+        the list field entirely (common for large tables: the shard extracted N
+        rows but the assessment response left the field out, so without this every
+        such row would be unassessed AND ungroundable).
+
+        Crucially, each padded row is a **per-sub-field placeholder mirroring the
+        data row's structure** — a ``{"confidence": null, ...}`` leaf for each
+        sub-field the data row populated (e.g. ``date``, ``description``,
+        ``amount``). This gives OCR geometry grounding a real value to match per
+        sub-field, so an un-assessed row still gets a correct bounding box from its
+        extracted values; only the LLM ``confidence`` is null. A scalar/non-dict
+        row element falls back to a single neutral leaf.
+
+        Scalar/group fields are left untouched. Mutates and returns ``assessment``.
+        """
+        if not isinstance(assessment, dict):
+            return assessment
+
+        def _row_placeholder(data_row: Any) -> dict[str, Any]:
+            reason = (
+                "Not individually assessed (assessment returned fewer items "
+                "than were extracted)."
+            )
+            # Mirror the data row's sub-fields so grounding can attach a box per
+            # populated sub-field from its actual value.
+            if isinstance(data_row, dict):
+                leaves = {
+                    sub: {"confidence": None, "confidence_reason": reason}
+                    for sub, sv in data_row.items()
+                    if sv is not None and not isinstance(sv, (dict, list))
+                }
+                if leaves:
+                    return leaves
+            # Scalar row element (or all-null/nested row): single neutral leaf.
+            return {"confidence": None, "confidence_reason": reason}
+
+        for field, data_val in extraction_results.items():
+            if not isinstance(data_val, list):
+                continue
+            target = len(data_val)
+            assessed = assessment.get(field)
+            assessed = assessed if isinstance(assessed, list) else []
+            if len(assessed) > target:
+                assessment[field] = assessed[:target]
+            elif len(assessed) < target:
+                assessment[field] = assessed + [
+                    _row_placeholder(data_val[i]) for i in range(len(assessed), target)
+                ]
+            else:
+                assessment[field] = assessed
+        return assessment
+
+    def _assess_results_batched(
+        self,
+        assessment_service: Any,
+        *,
+        class_label: str,
+        extraction_results: dict[str, Any],
+        document_text: str,
+        page_images: list[bytes],
+    ) -> dict[str, Any]:
+        """Assess one scope, batching large list fields across multiple inferences.
+
+        A single assessment call over a large list (e.g. 75 transaction rows) is
+        unreliable — the model under-enumerates or omits the list, leaving rows
+        unassessed. When the largest list field exceeds
+        ``assessment.inshard_list_batch_size``, the list is sliced into batches; each
+        batch is assessed with the SAME scalars/context (so scalar assessments and
+        the document context are preserved) but only that batch's rows, and the
+        per-row assessments are concatenated in order. Scalar/group assessments come
+        from the first batch. Returns ``{"assessment", "alerts", "metering"}``.
+
+        Falls back to a single call when no list field exceeds the batch size.
+        """
+        from idp_common.extraction.agentic_idp import _accumulate_metering
+
+        batch_size = self.config.assessment.inshard_list_batch_size
+        # Identify the single largest list field (the table being assessed).
+        list_fields = {
+            k: v
+            for k, v in extraction_results.items()
+            if isinstance(v, list) and len(v) > batch_size
+        }
+
+        def _one_call(results: dict[str, Any]) -> Any:
+            return assessment_service.assess_results(
+                class_label=class_label,
+                extraction_results=results,
+                document_text=document_text,
+                page_images=page_images,
+                ocr_text_confidence="",
+            )
+
+        if not list_fields:
+            core = _one_call(extraction_results)
+            return {
+                "assessment": self._reconcile_assessment_to_data(
+                    core.enhanced_assessment, extraction_results
+                ),
+                "alerts": core.confidence_threshold_alerts,
+                "metering": core.metering,
+            }
+
+        # Batch by the largest list field; other (smaller) list fields ride the
+        # first batch and are reconciled afterward.
+        big_field = max(list_fields, key=lambda k: len(list_fields[k]))
+        rows = extraction_results[big_field]
+        merged_assessment: dict[str, Any] = {}
+        merged_alerts: list[dict[str, Any]] = []
+        merged_metering: dict[str, Any] = {}
+        big_field_acc: list[Any] = []
+
+        for start in range(0, len(rows), batch_size):
+            chunk = rows[start : start + batch_size]
+            # Same scalars/context every batch; only the big list is sliced.
+            batch_results = dict(extraction_results)
+            batch_results[big_field] = chunk
+            core = _one_call(batch_results)
+            enhanced = self._reconcile_assessment_to_data(
+                core.enhanced_assessment, batch_results
+            )
+            # Accumulate the big list's per-row assessments in order.
+            big_field_acc.extend(
+                enhanced.get(big_field, [])
+                if isinstance(enhanced.get(big_field), list)
+                else []
+            )
+            _accumulate_metering(merged_metering, core.metering or {})
+            merged_alerts.extend(core.confidence_threshold_alerts or [])
+            # Scalars/other fields: keep the first batch's assessment.
+            if not merged_assessment:
+                merged_assessment = enhanced
+        merged_assessment[big_field] = big_field_acc
+        # Final alignment against the full extraction (pads any residual gap).
+        merged_assessment = self._reconcile_assessment_to_data(
+            merged_assessment, extraction_results
+        )
+        return {
+            "assessment": merged_assessment,
+            "alerts": merged_alerts,
+            "metering": merged_metering,
+        }
+
+    def _build_assess_runner(self, section_info: SectionInfo) -> "Any | None":
+        """Build the per-shard assess_runner closure (or None when disabled).
+
+        The closure reuses ``AssessmentService.assess_results`` over a single
+        shard's extracted values + that shard's already-loaded text/images, so
+        the in-shard assessment is byte-for-byte the same logic the standalone
+        Assessment step runs — just scoped to the shard and with no S3 round
+        trip. Returns ``None`` when in-shard assessment is not enabled, leaving
+        the default (no-assessment) extraction path completely unchanged.
+        """
+        if not self._inshard_assessment_enabled():
+            return None
+
+        from idp_common.assessment.service import AssessmentService
+
+        assessment_service = AssessmentService(region=self.region, config=self.config)
+        class_label = section_info.class_label
+
+        async def _assess_runner(
+            *, extracted_fields: dict[str, Any], payload: dict[str, Any]
+        ) -> dict[str, Any] | None:
+            extraction_results = extracted_fields or {}
+            if not extraction_results:
+                return None
+            document_text = payload.get("assess_document_text", "") or ""
+            page_images = payload.get("assess_page_images", []) or []
+
+            # assess_results does Bedrock I/O; run it off the event loop so the
+            # concurrent shard scheduler is not blocked.
+            import asyncio as _asyncio
+
+            def _run() -> dict[str, Any]:
+                # Batch large list fields across multiple inferences so the model
+                # reliably enumerates every row (a single call over a big list
+                # under-enumerates/omits it). Reconciliation inside keeps the
+                # per-row assessment index-aligned with the shard's data.
+                return self._assess_results_batched(
+                    assessment_service,
+                    class_label=class_label,
+                    extraction_results=extraction_results,
+                    document_text=document_text,
+                    page_images=page_images,
+                )
+
+            return await _asyncio.to_thread(_run)
+
+        return _assess_runner
+
+    def _assess_single_agent(
+        self,
+        *,
+        extracted_fields: dict[str, Any],
+        section_info: SectionInfo,
+        metering: dict[str, Any],
+    ) -> None:
+        """Run assessment over the whole section for the non-sharded agentic path.
+
+        Equivalent to a single full-section shard: builds the assessment over the
+        already-loaded section text/images (no S3 re-read) and writes the result
+        into ``metering`` under the same ``_merged_assessment`` markers the
+        sharded path uses, so ``_save_results`` grounds + emits it identically.
+        Best-effort: assessment never fails extraction.
+        """
+        if not extracted_fields:
+            return
+        try:
+            from idp_common.assessment.service import AssessmentService
+            from idp_common.extraction.agentic_idp import _accumulate_metering
+
+            assessment_service = AssessmentService(
+                region=self.region, config=self.config
+            )
+            # Batch large list fields (same as the sharded path) so the model
+            # reliably enumerates every row instead of omitting/under-counting it.
+            batched = self._assess_results_batched(
+                assessment_service,
+                class_label=section_info.class_label,
+                extraction_results=extracted_fields,
+                document_text=self._document_text,
+                page_images=self._page_images,
+            )
+            metering["_merged_assessment"] = batched["assessment"]
+            metering["_merged_assessment_alerts"] = batched["alerts"]
+            _accumulate_metering(metering, batched["metering"])
+        except Exception as e:  # noqa: BLE001 - assessment is advisory
+            logger.warning(
+                "Single-agent in-shard assessment failed (keeping extraction): %s", e
+            )
+
     def _build_agentic_shard_plan(
         self, section_info: SectionInfo
     ) -> tuple[str, type, list[dict[str, Any]], str | None]:
@@ -3046,6 +3454,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                 custom_instruction=custom_instruction,
                 persistence=persistence,
                 shard_runner=default_shard_runner,
+                assess_runner=self._build_assess_runner(section_info),
             )
         )
         return {

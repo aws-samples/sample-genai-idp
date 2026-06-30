@@ -415,6 +415,22 @@ class ExtractionConfig(BaseModel):
     )
     image: ImageConfig = Field(default_factory=ImageConfig)
     agentic: AgenticConfig = Field(default_factory=AgenticConfig)
+    assessment_integration: str = Field(
+        default="separate",
+        description=(
+            "Where confidence/bbox assessment runs relative to extraction. "
+            "'separate' (default) keeps extraction and assessment as distinct "
+            "inferences — for non-agentic extraction the workflow flows to the "
+            "standalone Assessment step as today; for agentic extraction a second "
+            "assessment inference runs inside each shard. 'integrated' folds "
+            "assessment into the extraction inference itself (one prompt emits the "
+            "value plus its confidence/bbox), saving a model pass; the standalone "
+            "Assessment step is then bypassed and the Assessment config's "
+            "model/prompt settings are unused. Either way, set assessment.enabled "
+            "to false to skip assessment entirely. Default 'separate' preserves "
+            "existing behavior on upgrade."
+        ),
+    )
     missing_field_handling: MissingFieldHandlingConfig = Field(
         default_factory=MissingFieldHandlingConfig,
         description=(
@@ -443,6 +459,20 @@ class ExtractionConfig(BaseModel):
         if isinstance(v, str):
             return int(v) if v else 0
         return int(v)
+
+    @field_validator("assessment_integration", mode="before")
+    @classmethod
+    def validate_assessment_integration(cls, v: Any) -> str:
+        """Normalize the integration mode; reject unknown values early."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return "separate"
+        v_str = str(v).strip().lower()
+        if v_str not in ("separate", "integrated"):
+            raise ValueError(
+                "extraction.assessment_integration must be 'separate' or "
+                f"'integrated', got {v!r}"
+            )
+        return v_str
 
     @model_validator(mode="after")
     def set_default_review_agent_model(self) -> Self:
@@ -691,7 +721,38 @@ class AssessmentConfig(BaseModel):
             "OCR geometry from pageData.json when the extracted value matches an OCR "
             "line. Falls back to the LLM-estimated box when OCR geometry is "
             "unavailable (e.g. plain LLM OCR, older documents) or no value match is "
-            "found, so the worst case is identical to LLM-only behavior."
+            "found, so the worst case is identical to LLM-only behavior. NOTE: "
+            "superseded by 'geometry_mode' — kept for backward compatibility; when "
+            "geometry_mode is set it takes precedence, and a legacy "
+            "ground_geometry_in_ocr=false maps to geometry_mode='llm_only'."
+        ),
+    )
+    geometry_mode: str = Field(
+        default="ocr_only",
+        description=(
+            "How field bounding boxes are produced. 'ocr_only' (default): DO NOT ask "
+            "the model for boxes — derive geometry purely by matching each extracted "
+            "value to real OCR lines (pageData.json), disambiguating repeated values "
+            "(e.g. the same amount on several table rows) by row order. Cheaper "
+            "(no bbox tokens) and more accurate than LLM-estimated boxes. "
+            "'llm_with_ocr_grounding': the model emits boxes and OCR grounding "
+            "refines them (the model box also disambiguates repeats). 'llm_only': "
+            "use the model's boxes as-is with no grounding. Fields with no OCR match "
+            "in ocr_only simply have no geometry (geometry is advisory)."
+        ),
+    )
+    inshard_list_batch_size: int = Field(
+        default=25,
+        gt=0,
+        description=(
+            "Max list rows assessed per inference in the in-shard assessment path "
+            "(agentic extraction). A single assessment call over a large list (e.g. "
+            "75 transaction rows) is unreliable — the model under-enumerates or omits "
+            "the list, leaving rows unassessed. When a shard's extracted list exceeds "
+            "this size, the assessment is run in batches of this many rows and "
+            "concatenated, so every row gets a confidence. Lower = more reliable "
+            "enumeration but more inferences; raise for capable models. Only affects "
+            "agentic in-shard assessment; the standalone Assessment step is unaffected."
         ),
     )
     image: ImageConfig = Field(default_factory=ImageConfig)
@@ -711,13 +772,42 @@ class AssessmentConfig(BaseModel):
             return float(v) if v else 0.0
         return float(v)
 
-    @field_validator("max_tokens", mode="before")
+    @field_validator("max_tokens", "inshard_list_batch_size", mode="before")
     @classmethod
     def parse_int(cls, v: Any) -> int:
         """Parse int from string or number"""
         if isinstance(v, str):
             return int(v) if v else 0
         return int(v)
+
+    @field_validator("geometry_mode", mode="before")
+    @classmethod
+    def validate_geometry_mode(cls, v: Any) -> str:
+        """Normalize geometry_mode; reject unknown values early."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return "ocr_only"
+        v_str = str(v).strip().lower()
+        if v_str not in ("ocr_only", "llm_with_ocr_grounding", "llm_only"):
+            raise ValueError(
+                "assessment.geometry_mode must be 'ocr_only', "
+                f"'llm_with_ocr_grounding' or 'llm_only', got {v!r}"
+            )
+        return v_str
+
+    def resolved_geometry_mode(self, *, explicit: bool = False) -> str:
+        """Effective geometry mode, honoring the legacy ``ground_geometry_in_ocr``.
+
+        ``geometry_mode`` takes precedence. For backward compatibility, a stored
+        config that predates ``geometry_mode`` and explicitly set
+        ``ground_geometry_in_ocr=false`` is treated as ``llm_only`` (its boxes were
+        used as-is). ``explicit`` is reserved for callers that have detected the key
+        was actually present in the raw config; by default we keep the simple rule
+        (legacy false -> llm_only) since the field default is true.
+        """
+        if not self.ground_geometry_in_ocr and self.geometry_mode == "ocr_only":
+            # Legacy opt-out of grounding; respect it rather than silently grounding.
+            return "llm_only"
+        return self.geometry_mode
 
 
 class SummarizationConfig(BaseModel):
