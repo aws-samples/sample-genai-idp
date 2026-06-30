@@ -60,6 +60,7 @@ make fastcommit         # fastlint (skip UI) + auto-commit + push
 - [ ] `make check-arn-partitions` passes — NO hardcoded `arn:aws:`
 - [ ] Service endpoints use `${AWS::URLSuffix}` — NO hardcoded `amazonaws.com`
 - [ ] PermissionsBoundary conditional on all IAM roles
+- [ ] New IAM role or AWS service? → `docs/aws-services-and-roles.md` updated (see infrastructure.md)
 - [ ] Dedicated LogGroup per Lambda with KMS encryption
 - [ ] cfn-nag + checkov suppression metadata where needed (with justification)
 - [ ] `make validate-buildspec` passes

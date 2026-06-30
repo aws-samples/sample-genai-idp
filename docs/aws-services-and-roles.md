@@ -9,6 +9,8 @@ SPDX-License-Identifier: MIT-0
 
 This document outlines the AWS services used by the GenAI Intelligent Document Processing (IDP) Accelerator solution, along with the IAM role scopes needed for deployment and operation.
 
+> **Architecture note:** The solution now uses a **unified pattern stack** (`patterns/unified/`) controlled by the `use_bda` configuration flag, rather than the historical separate Pattern 1/2/3 stacks. "BDA mode" (`use_bda: true`) uses Bedrock Data Automation; "Pipeline mode" (`use_bda: false`) uses Textract OCR + Bedrock classification/extraction. References to "Pattern 1/2/3" below are retained only where they aid historical understanding.
+
 ## AWS Services Used
 
 ### Core Infrastructure Services
@@ -23,9 +25,11 @@ This document outlines the AWS services used by the GenAI Intelligent Document P
 | **Amazon EventBridge** | Triggers document processing workflows when files are uploaded | ✓ | ✓ |
 | **Amazon CloudFront** | Delivers the web UI with global distribution (default hosting mode) | ✓ | ✓ |
 | **Elastic Load Balancing (ALB)** | Alternative web UI hosting via Application Load Balancer for VPC-based deployments (see [ALB Hosting](./alb-hosting.md)) | ✓ | ✓ |
+| **Amazon ECR** | Stores container images for the pattern processing Lambda functions (OCR, classification, extraction, etc., which are deployed as container images) | ✓ | ✓ |
 | **AWS CloudFormation** | Deploys and manages the solution infrastructure | ✓ | |
 | **AWS SAM** | Simplifies serverless application deployment | ✓ | |
-| **AWS CodeBuild** | Builds and packages the web UI assets | ✓ | |
+| **AWS CodeBuild** | Builds and packages the web UI assets and pattern container images | ✓ | |
+| **AWS Systems Manager (Parameter Store)** | Stores and retrieves runtime configuration/settings parameters | ✓ | ✓ |
 
 ### AI/ML Services
 
@@ -33,10 +37,11 @@ This document outlines the AWS services used by the GenAI Intelligent Document P
 |---------|-------|------------|---------|
 | **Amazon Bedrock** | Provides foundation models for document understanding | ✓ | ✓ |
 | **Amazon Bedrock Guardrails** | Enforces content safety, information security, model usage policies, and [Automated Reasoning Checks](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-automated-reasoning.html) | ✓ | ✓ |
-| **Amazon Textract** | Extracts text and data from documents (OCR) | | ✓ |
-| **Amazon SageMaker** | Hosts custom ML models for document classification (UDOP) | ✓ | ✓ |
-| **Amazon Bedrock Knowledge Base** | Enables semantic document querying (optional) | ✓ | ✓ |
-| **Bedrock Data Automation (BDA)** | Automates document processing workflows (Pattern 1) | ✓ | ✓ |
+| **Amazon Textract** | Extracts text and data from documents (OCR) in Pipeline mode | | ✓ |
+| **Amazon SageMaker (MLflow)** | Optional managed MLflow tracking server for logging processing metrics/experiments (enabled via `MlflowTrackingServerArn`) | | ✓ |
+| **Amazon Bedrock Knowledge Base** | Enables semantic document querying (optional) — backed by S3 Vectors (default) or OpenSearch Serverless | ✓ | ✓ |
+| **Bedrock Data Automation (BDA)** | Automates document processing workflows (BDA mode, `use_bda: true`) | ✓ | ✓ |
+| **Amazon Bedrock AgentCore** | Optional MCP gateway for external application access (enabled via `EnableMCP`) | ✓ | ✓ |
 
 ### Auth & API Services
 
@@ -53,6 +58,14 @@ This document outlines the AWS services used by the GenAI Intelligent Document P
 | **Amazon CloudWatch** | Provides monitoring, logging, and alerting | ✓ | ✓ |
 | **AWS SNS** | Delivers operational alerts and notifications | ✓ | ✓ |
 | **AWS KMS** | Manages encryption keys for secure data storage | ✓ | ✓ |
+
+### Analytics & Reporting
+
+| Service | Usage | Deployment | Runtime |
+|---------|-------|------------|---------|
+| **AWS Glue** | Data Catalog (database + tables) and crawler for evaluation/reporting metrics | ✓ | ✓ |
+| **Amazon Athena** | Queries evaluation metrics tables (document/section/attribute evaluations) for analytics | ✓ | ✓ |
+| **Amazon OpenSearch Serverless** | Optional vector store for the Bedrock Knowledge Base (the default vector store is S3 Vectors; `KnowledgeBaseVectorStore: OPENSEARCH_SERVERLESS` selects this instead) | ✓ | ✓ |
 
 ## IAM Role Requirements
 
@@ -91,12 +104,18 @@ Deploying this solution requires an IAM role/user with the following permissions
 * `cloudwatch:*` - Create and configure CloudWatch dashboards and alarms
 * `sns:*` - Create and configure SNS topics
 
-#### Pattern-Specific Permissions
-* `bedrock:*` - Create Bedrock resources (all patterns)
-* `sagemaker:*` - Create SageMaker endpoints (Pattern 3)
-* `opensearch:*` - Create OpenSearch domains (Knowledge Base feature)
+#### Feature-Specific Permissions
+* `bedrock:*` - Create and invoke Bedrock resources (all modes)
+* `textract:*` - OCR via Amazon Textract (Pipeline mode)
+* `ecr:*` - Create ECR repositories and push pattern container images
+* `glue:*`, `athena:*` - Create the reporting database/tables and run analytics queries (evaluation reporting)
+* `aoss:*` / `opensearch-serverless:*` - Create OpenSearch Serverless collections (Knowledge Base feature, only when `KnowledgeBaseVectorStore: OPENSEARCH_SERVERLESS`; the default S3 Vectors store does not need this)
+* `sagemaker:*` - Optional MLflow tracking server integration (only when MLflow is enabled)
 * `kms:*` - Create KMS keys for encryption
 * `wafv2:*` - Configure WAF rules (optional)
+* `glue:*` / `codebuild:*` / `ssm:*` - Supporting build, configuration, and reporting infrastructure
+
+> **Note:** Earlier releases used Amazon SageMaker to host a UDOP classification endpoint (the former "Pattern 3"). The unified architecture no longer deploys a SageMaker inference endpoint; document classification is performed by Bedrock foundation models (with optional custom/fine-tuned model ARNs). SageMaker now appears only in the optional MLflow tracking integration.
 
 ### Runtime Roles
 
@@ -120,11 +139,13 @@ The solution creates various IAM roles to run different components of the system
   * `logs:*`
 
 * **Classification Role**:
-  * `sagemaker:InvokeEndpoint` (Pattern 3)
-  * `bedrock:InvokeModel` (Patterns 2 & 3)
+  * `bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream`, `bedrock:GetInferenceProfile`
   * `bedrock:ApplyGuardrail` (when Guardrails configured)
   * `s3:GetObject`, `s3:PutObject`
+  * `dynamodb:GetItem`, `dynamodb:PutItem`, `dynamodb:UpdateItem` (tracking & configuration tables)
+  * `cloudwatch:PutMetricData`
   * `logs:*`
+  * (Optional custom classification model invoked via Lambda hook / custom model ARN; no SageMaker endpoint is used.)
 
 * **Extraction Role**:
   * `bedrock:InvokeModel`
@@ -132,10 +153,12 @@ The solution creates various IAM roles to run different components of the system
   * `s3:GetObject`, `s3:PutObject`
   * `logs:*`
 
-* **BDA Integration Role** (Pattern 1):
+* **BDA Integration Role** (BDA mode, `use_bda: true`):
   * `bedrock:InvokeDataAutomationAsync`
+  * `bedrock:GetDataAutomationProject`, `bedrock:ListDataAutomationProjects`, `bedrock:GetBlueprint`, `bedrock:GetBlueprintRecommendation`
   * `s3:GetObject`, `s3:PutObject`
   * `dynamodb:GetItem`, `dynamodb:PutItem`, `dynamodb:UpdateItem`
+  * `ssm:GetParameter`, `ssm:PutParameter`
   * `cloudwatch:PutMetricData`
   * `logs:*`
 
@@ -155,12 +178,12 @@ The solution creates various IAM roles to run different components of the system
   * `bedrock:Retrieve`
   * `bedrock:RetrieveAndGenerate`
   * `bedrock:ApplyGuardrail` (when Guardrails configured)
-  * `aoss:APIAccessAll` (for OpenSearch Serverless access)
+  * `aoss:APIAccessAll` (when using the OpenSearch Serverless vector store) **or** `s3vectors:*` (when using the default S3 Vectors store)
   * `logs:*`
 
 * **Knowledge Base Service Role**:
   * `bedrock:InvokeModel`
-  * `aoss:APIAccessAll`
+  * `aoss:APIAccessAll` (OpenSearch Serverless) **or** S3 Vectors access (default)
   * `s3:ListBucket`, `s3:GetObject` (when using S3 data source)
 
 #### Monitoring & Evaluation Roles
@@ -182,6 +205,31 @@ The solution creates various IAM roles to run different components of the system
   * `cloudwatch:PutMetricData`
   * `logs:*`
 
+* **Reporting / Analytics Roles** (evaluation reporting & analytics UI):
+  * `glue:GetDatabase`, `glue:GetTable`, `glue:GetPartitions` (reporting database/tables)
+  * `athena:StartQueryExecution`, `athena:GetQueryExecution`, `athena:GetQueryResults`, `athena:StopQueryExecution`
+  * `s3:GetObject`, `s3:PutObject`, `s3:ListBucket` (reporting/Athena results buckets)
+  * `logs:*`
+
+* **Glue Crawler Service Role**:
+  * `glue:*` (managed `AWSGlueServiceRole`) for crawling reporting data
+  * `s3:GetObject`, `s3:ListBucket`
+  * `kms:Decrypt`, `kms:DescribeKey`
+
+#### Build & Optional Feature Roles
+* **CodeBuild Roles** (UI build and pattern container-image build):
+  * `s3:GetObject`, `s3:PutObject`, `s3:ListBucket` (artifacts)
+  * `ecr:*` (push/scan container images), `cloudfront:CreateInvalidation` (UI)
+  * `logs:CreateLogGroup`, `logs:CreateLogStream`, `logs:PutLogEvents`
+  * `ec2:*` networking actions (when deploying into a VPC)
+
+* **AgentCore Gateway Execution Role** (optional MCP integration, `EnableMCP: true`):
+  * `lambda:InvokeFunction` (MCP handler)
+  * `bedrock-agentcore:InvokeAgentRuntime`
+  * `logs:*`
+
+> **Container-image Lambdas:** The pattern processing functions (OCR, classification, extraction, assessment, summarization, BDA, evaluation, rule validation, etc.) are deployed as **container images** from Amazon ECR. Each function's execution role therefore also includes `ecr:GetDownloadUrlForLayer`, `ecr:BatchGetImage`, and `ecr:BatchCheckLayerAvailability` (via a shared managed policy).
+
 ## Service Quotas Considerations
 
 For high-volume document processing, consider requesting quota increases for:
@@ -192,12 +240,12 @@ For high-volume document processing, consider requesting quota increases for:
 | Amazon Bedrock | On-demand InvokeModel requests per minute | Varies by model |
 | Amazon Bedrock | ApplyGuardrail requests per minute | Varies by region |
 | Amazon Textract | DetectDocumentText / AnalyzeDocument transactions per second | 10-25 TPS |
-| Amazon SageMaker | Number of endpoints per region | 2-10 endpoints |
 | AWS Lambda | Concurrent executions | 1,000 executions |
 | AWS Step Functions | State transitions per second | 2,000 transitions |
 | Amazon SQS | API requests per queue | Very high by default |
 | Amazon CloudWatch | PutMetricData API requests per second | 150 requests/second |
-| Bedrock Data Automation | Concurrent jobs (Pattern 1) | Varies by region |
+| Amazon Athena | Active DML/DDL queries | 20-25 queries |
+| Bedrock Data Automation | Concurrent jobs (BDA mode) | Varies by region |
 
 ## Security Recommendations
 

@@ -108,6 +108,40 @@ make delete-stack STACK_NAME=test-stack FORCE=1
 make validate-buildspec
 ```
 
+## Keep `docs/aws-services-and-roles.md` in sync
+
+`docs/aws-services-and-roles.md` is a hand-maintained inventory of every AWS
+service and IAM role the solution uses. It drifts easily because nothing
+generates it from the templates. **Whenever a template change adds, removes, or
+materially re-scopes a service or IAM role, update this doc in the same PR.**
+
+Triggers that REQUIRE a doc update:
+- A new `AWS::IAM::Role` / `AWS::IAM::ManagedPolicy`, or a new service principal.
+- A new AWS service referenced anywhere in `template.yaml`,
+  `patterns/unified/template.yaml`, or `nested/**/template.yaml` (look for a new
+  ARN `service:` segment, a new managed policy, or a new `*:Action`).
+- Removing/replacing a service (e.g. the UDOP SageMaker endpoint was removed; KB
+  moved from OpenSearch domains → OpenSearch Serverless / S3 Vectors).
+- A new optional/conditional feature gated by a parameter (e.g. `EnableMCP` →
+  Bedrock AgentCore, `MlflowTrackingServerArn` → SageMaker MLflow).
+
+How to re-audit quickly (run from repo root):
+```bash
+# Every explicit IAM role and its assuming principal
+grep -rn "Type: AWS::IAM::Role" template.yaml patterns/unified/template.yaml nested/*/template.yaml
+# Distinct AWS services referenced via ARNs
+grep -rhoE "arn:\\\$\{AWS::Partition}:[a-z0-9-]+" template.yaml patterns/unified/template.yaml | sort -u
+# Distinct IAM action namespaces (service prefixes)
+grep -rhoE "^\s*-?\s*[a-z0-9-]+:[A-Za-z*]+" template.yaml patterns/unified/template.yaml | grep -oE "^\s*-?\s*[a-z0-9-]+:" | tr -d ' -' | sort -u
+```
+Cross-check the results against the service tables and the Deployment/Runtime
+role lists in the doc. Remember the architecture is **unified** (`use_bda` flag),
+not Pattern 1/2/3 — describe modes as "BDA mode" / "Pipeline mode".
+
+The `pr-review.md` / `code-review.md` checklists already flag new IAM roles for a
+`PermissionsBoundary` conditional; when they fire, also confirm this doc was
+updated.
+
 ## Scripts (`scripts/`)
 - `generate_govcloud_template.py` — GovCloud template generation
 - `generate_standard_classes.py` — BDA standard class catalog

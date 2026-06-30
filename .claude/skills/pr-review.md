@@ -141,6 +141,7 @@ documentation, testing, code-review).
 - IAM policies scoped — no `Resource: "*"` or wildcard S3 ARNs without
   written justification
 - `PermissionsBoundary` conditional present on new IAM roles
+- New IAM role or AWS service introduced? → `docs/aws-services-and-roles.md` updated to match
 - New Lambdas have a dedicated `AWS::Logs::LogGroup` with KMS encryption
 - Input validation on new API surfaces; DOMPurify on HTML render paths
 - New Python/npm dependencies are pinned and from trusted sources
