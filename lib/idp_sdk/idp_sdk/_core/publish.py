@@ -2278,9 +2278,6 @@ STDERR:
                     "<IDP_COMMON_MULTI_DOC_DISCOVERY_LAYER_ZIP>": self._layer_arns.get(
                         "multi_document_discovery", {}
                     ).get("zip_name", "idp-common-multi_document_discovery.zip"),
-                    "<IDP_COMMON_SYNTHESIS_LAYER_ZIP>": self._layer_arns.get(
-                        "synthesis", {}
-                    ).get("zip_name", "idp-common-synthesis.zip"),
                     "<HASH_TOKEN>": self.get_directory_checksum("./lib")[:16],
                     "<LAMBDA_HASH_TOKEN>": self.get_directory_checksum(
                         "./src/lambda/agentcore_gateway_manager"
@@ -3406,7 +3403,6 @@ STDERR:
             "reporting": ["reporting"],
             "agents": ["agents"],
             "multi_document_discovery": ["multi_document_discovery"],
-            "synthesis": ["synthesis"],
         }
 
         built_layers = {}

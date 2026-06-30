@@ -2969,18 +2969,6 @@ Resources:
         - python3.12
         - python3.13
 
-  IDPCommonSynthesisLayer:
-    Type: AWS::Lambda::LayerVersion
-    Properties:
-      LayerName: !Sub "${AWS::StackName}-idp-common-synthesis"
-      Description: "IDP Common synthesis layer (core + synthesis)"
-      Content:
-        S3Bucket: "<ARTIFACT_BUCKET_TOKEN>"
-        S3Key: "<ARTIFACT_PREFIX_TOKEN>/layers/<IDP_COMMON_SYNTHESIS_LAYER_ZIP>"
-      CompatibleRuntimes:
-        - python3.12
-        - python3.13
-
   # IDPCommonMultiDocDiscoveryLayer removed — dependencies exceed 250MB Lambda layer limit.
   # Multi-doc discovery Lambdas now use container images via nested/multi-doc-discovery stack.
 

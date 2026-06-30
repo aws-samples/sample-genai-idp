@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -38,24 +37,10 @@ def post_synthesis_status(
         logger.warning("APPSYNC_API_URL not configured; skipping status post")
         return False
     try:
-        import boto3
-        import requests
-        from aws_requests_auth.aws_auth import AWSRequestsAuth
+        from idp_common.appsync.client import AppSyncClient
     except ImportError as e:
         logger.warning("AppSync status deps unavailable: %s", e)
         return False
-
-    session = boto3.Session()
-    credentials = session.get_credentials()
-    region = session.region_name or os.environ.get("AWS_REGION", "us-east-1")
-    auth = AWSRequestsAuth(
-        aws_access_key=credentials.access_key,
-        aws_secret_access_key=credentials.secret_key,
-        aws_token=credentials.token,
-        aws_host=api_url.replace("https://", "").replace("/graphql", ""),
-        aws_region=region,
-        aws_service="appsync",
-    )
 
     variables = {"jobId": job_id, "status": status}
     if status_message:
@@ -68,17 +53,9 @@ def post_synthesis_status(
         variables["testSetId"] = test_set_id
 
     try:
-        response = requests.post(
-            api_url,
-            json={"query": _MUTATION, "variables": variables},
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
-            auth=auth,
-            timeout=30,
-        )
-        if response.status_code == 200 and "errors" not in response.json():
-            return True
-        logger.error("AppSync status post failed: %s", response.text[:500])
-        return False
+        with AppSyncClient(api_url=api_url) as client:
+            client.execute_mutation(_MUTATION, variables)
+        return True
     except Exception:
         logger.warning("AppSync status post raised", exc_info=True)
         return False

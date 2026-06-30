@@ -86,6 +86,7 @@ const AgentChatLayout = ({
 
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [completedJobId, setCompletedJobId] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const { versions, setActiveVersion, fetchVersions } = useConfigurationVersions();
   const navigate = useNavigate();
 
@@ -106,6 +107,7 @@ const AgentChatLayout = ({
         `${result.clustersFound} document type(s): ${names}. These were added to my configuration. ` +
         `Please summarize what was discovered and ask whether I want to refine the schema or generate test data.`;
       setAttachedFiles([]);
+      setUploadError(null);
       setCompletedJobId(result.jobId);
       if (result.configVersion === 'quickstart' && !versions.some((v) => v.versionName === 'quickstart' && v.isActive)) {
         setActiveVersion('quickstart')
@@ -118,7 +120,7 @@ const AgentChatLayout = ({
   );
 
   const handleUploadError = useCallback((message: string) => {
-    console.error('Quick Start upload error:', message);
+    setUploadError(message);
   }, []);
 
   const {
@@ -208,6 +210,7 @@ const AgentChatLayout = ({
       const filesToProcess = attachedFiles;
       const version = targetConfigVersion || `bootstrap-${Date.now().toString(36)}`;
       setCompletedJobId(null);
+      setUploadError(null);
       setAttachedFiles([]);
       startUpload(filesToProcess, version);
     }
@@ -615,8 +618,13 @@ const AgentChatLayout = ({
                   ) : undefined
                 }
                 secondaryContent={
-                  mode === 'quick_start' && (attachedFiles.length > 0 || uploadStatus || completedJobId) ? (
+                  mode === 'quick_start' && (attachedFiles.length > 0 || uploadStatus || completedJobId || uploadError) ? (
                     <SpaceBetween size="xs">
+                      {uploadError && (
+                        <Alert type="error" dismissible onDismiss={() => setUploadError(null)} header="Document analysis failed">
+                          {uploadError}
+                        </Alert>
+                      )}
                       {attachedFiles.length > 0 && (
                         <FileTokenGroup
                           alignment="horizontal"

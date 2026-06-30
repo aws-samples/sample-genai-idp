@@ -231,14 +231,15 @@ def run_bootstrap(
     documents = packet_io.read_packet(syn.packet_dir)
     allowed = set(schema_bridge.field_names(schema))
     validation = packet_io.validate_field_names(documents, allowed)
-    result.field_validation_ok = validation.ok
     result.field_validation_extra = sorted(validation.extra_keys)
     if not validation.ok:
-        result.error = (
-            "Field-name drift between generated data and schema: "
-            f"{sorted(validation.extra_keys)}"
+        removed = packet_io.prune_documents_to_allowed_fields(documents, allowed)
+        _report(
+            90.0,
+            f"Pruned {removed} extra field name(s) not in schema: "
+            f"{sorted(validation.extra_keys)}",
         )
-        return result
+    result.field_validation_ok = True
 
     test_set_id = target_version
     _report(95.0, f"Registering test set '{test_set_id}'")

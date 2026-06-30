@@ -166,7 +166,7 @@ class TestRunBootstrap:
         assert result.docs_generated == 1
         s3.upload_file.assert_called_once()
 
-    def test_field_drift_fails_loudly(self, monkeypatch, tmp_path):
+    def test_field_drift_is_pruned_not_fatal(self, monkeypatch, tmp_path):
         from idp_common.synthesis import engine
 
         packet_dir = tmp_path / "packet"
@@ -180,7 +180,7 @@ class TestRunBootstrap:
                 {
                     "document_class": {"type": "Paystub"},
                     "split_document": {"page_indices": [0]},
-                    "inference_result": {"WrongFieldName": "x"},
+                    "inference_result": {"EmployeeName": "Jane", "WrongFieldName": "x"},
                 }
             )
         )
@@ -192,6 +192,7 @@ class TestRunBootstrap:
                 success=True, packet_dir=str(packet_dir), docs_completed=1
             ),
         )
+        s3 = Mock()
         cm = _FakeConfigManager()
         req = bootstrap.BootstrapRequest(prompt="a paystub", doc_count=1)
         result = bootstrap.run_bootstrap(
@@ -199,9 +200,11 @@ class TestRunBootstrap:
             config_manager=cm,
             test_set_bucket="bucket",
             bedrock_client=_bedrock_returning_schema(),
-            s3_client=Mock(),
+            s3_client=s3,
         )
-        assert result.field_validation_ok is False
+        assert result.success
+        assert result.field_validation_ok is True
         assert "WrongFieldName" in result.field_validation_extra
-        assert result.error is not None
-        assert result.test_set_id is None
+        assert result.test_set_id == "bootstrap-paystub"
+        assert result.docs_generated == 1
+        s3.upload_file.assert_called_once()
