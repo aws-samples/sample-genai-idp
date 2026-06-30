@@ -8733,19 +8733,22 @@ Resources:
                   - "ssm:GetParameter"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${SettingsParameter}"
-        - PolicyName: GraphQL
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - !If
-                - UseAppSync
+        # Entire policy omitted under httpapi: a policy whose only statement is
+        # !If'd to AWS::NoValue leaves an empty Statement list, which IAM rejects
+        # ("Syntax errors in policy"). Gate the whole policy instead.
+        - !If
+          - UseAppSync
+          - PolicyName: GraphQL
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
                 - Effect: Allow
                   Action:
                     - appsync:GraphQL
                   Resource:
                     - !Sub "${GraphQLApi.Arn}/types/Query/*"
                     - !Sub "${GraphQLApi.Arn}/types/Subscription/*"
-                - !Ref AWS::NoValue
+          - !Ref AWS::NoValue
 
   AdminUser:
     Type: AWS::Cognito::UserPoolUser
