@@ -541,6 +541,9 @@ class ExtractionService:
                         "assess_page_images": self._cap_agent_images(
                             self._slice_images(saved_images, shard.start, shard.end)
                         ),
+                        # Integrated mode: tell the shard agent to emit per-field
+                        # confidence/bbox inline (one inference, no second pass).
+                        "emit_field_assessment": self._integrated_assessment_enabled(),
                     }
                 )
         finally:
@@ -2358,6 +2361,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     checkpoint_buffer_data=checkpoint_buffer,
                     custom_instruction=custom_instruction,
                     schema_validator=schema_validator,
+                    emit_field_assessment=self._integrated_assessment_enabled(),
                 )
 
             extracted_fields = structured_data.model_dump(mode="json")
@@ -2411,6 +2415,14 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     section_info=section_info,
                     metering=metering,
                 )
+            elif not shard_payloads and self._integrated_assessment_enabled():
+                # Integrated mode, single-agent: the agent already emitted
+                # confidence/bbox inline. Lift it from metering into the
+                # _merged_assessment slot so _save_results grounds + emits it.
+                inline = metering.pop("_integrated_field_assessment", None)
+                if inline:
+                    metering["_merged_assessment"] = inline
+                    metering["_merged_assessment_alerts"] = []
         else:
             # Standard Bedrock invocation
             response_with_metering = bedrock.invoke_model(
@@ -3072,17 +3084,29 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         return content, system_prompt
 
     def _inshard_assessment_enabled(self) -> bool:
-        """Whether in-shard (integrated) assessment should run on the agentic path.
+        """Whether the SEPARATE-mode in-shard assessment pass should run.
 
         True only when assessment is enabled AND the integration mode keeps a
         *separate* assessment inference (the second-turn per-shard path). The
         ``integrated`` (single-prompt) mode does NOT use this — the extraction
-        inference itself emits confidence/bbox there. Either way the standalone
-        AssessmentStep is bypassed for the agentic path (see the SFN routing).
+        inference itself emits confidence/bbox via ``_integrated_assessment_enabled``.
+        Either way the standalone AssessmentStep is bypassed for the agentic path.
         """
         if not self.config.assessment.enabled:
             return False
         return self.config.extraction.assessment_integration == "separate"
+
+    def _integrated_assessment_enabled(self) -> bool:
+        """Whether the agent should emit confidence/bbox INLINE (single inference).
+
+        True when assessment is enabled AND ``assessment_integration == "integrated"``.
+        In this mode the extraction agent calls ``provide_field_assessment`` in its
+        own session (document already in cached context — no second Bedrock pass),
+        and the result rides the same collation/grounding/emit path as separate mode.
+        """
+        if not self.config.assessment.enabled:
+            return False
+        return self.config.extraction.assessment_integration == "integrated"
 
     @staticmethod
     def _reconcile_assessment_to_data(

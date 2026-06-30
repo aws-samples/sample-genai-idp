@@ -539,6 +539,28 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
 
 
 @tool
+def provide_field_assessment(assessment: dict[str, Any], agent: Agent) -> str:
+    """Record a per-field confidence + bounding-box assessment for the extraction.
+
+    Use this AFTER the extraction is complete and correct (integrated-assessment
+    mode only). Provide one entry per extracted field mirroring the extraction
+    structure:
+      - Scalar/group field -> {"confidence": 0.0-1.0, "confidence_reason": "...",
+        "bbox": [x1,y1,x2,y2], "page": N}   (bbox/page optional)
+      - List field        -> a LIST with one assessment object per extracted row,
+        IN THE SAME ORDER as the extracted rows.
+    confidence is your calibrated certainty the value is correct given the source.
+    This overwrites any previous assessment.
+    """
+    agent.state.set("field_assessment", assessment)
+    logger.info(
+        "provide_field_assessment called",
+        extra={"field_count": len(assessment) if isinstance(assessment, dict) else 0},
+    )
+    return "Assessment recorded."
+
+
+@tool
 def view_existing_extraction(agent: Agent) -> str:
     """Use this tool to view data is currently stored as extracted."""
     logger.info(
@@ -747,6 +769,23 @@ After successfully using the extraction tool, you MUST:
 4. Look for any missing fields, incorrect values, or formatting issues
 5. If any discrepancies are found, use the apply_json_patches tool to fix them
 6. Only finish when you are confident all data is accurate and complete
+"""
+
+
+INTEGRATED_ASSESSMENT_ADDENDUM = """
+
+INTEGRATED CONFIDENCE ASSESSMENT (REQUIRED FINAL STEP):
+After the extraction is complete and correct, you MUST call the
+provide_field_assessment tool exactly once to record your confidence in each
+extracted value. Mirror the extraction structure:
+- For each scalar or group field: an object
+  {"confidence": <0.0-1.0>, "confidence_reason": "<brief>"} (optionally add
+  "bbox": [x1,y1,x2,y2] and "page": <n> if you can localize the value on the page).
+- For each list field (e.g. a table): a LIST with ONE assessment object per
+  extracted row, in the SAME ORDER as the rows you extracted. Provide an entry
+  for EVERY row — do not summarize or skip rows.
+confidence = your calibrated certainty the value matches the source document
+(1.0 = certain, lower = ambiguous/illegible/inferred). This is your last action.
 """
 
 
@@ -1347,6 +1386,7 @@ async def _run_shard_agent(
     max_tokens: int | None,
     checkpoint_callback: Any | None,
     base_custom_instruction: str | None = None,
+    emit_field_assessment: bool = False,
 ) -> tuple[TargetModel, BedrockInvokeModelResponse]:
     """Run one extraction agent over a single shard.
 
@@ -1379,6 +1419,7 @@ async def _run_shard_agent(
         max_tokens=max_tokens,
         custom_instruction=combined_instruction,
         checkpoint_callback=checkpoint_callback,
+        emit_field_assessment=emit_field_assessment,
     )
 
 
@@ -1422,6 +1463,9 @@ async def default_shard_runner(
         max_tokens=max_tokens,
         checkpoint_callback=checkpoint_callback,
         base_custom_instruction=custom_instruction,
+        # Integrated-assessment mode flows through the payload (set by the
+        # service when extraction.assessment_integration == "integrated").
+        emit_field_assessment=bool(payload.get("emit_field_assessment")),
     )
 
 
@@ -1543,6 +1587,7 @@ async def structured_output_async(
     checkpoint_callback: Any | None = None,
     checkpoint_buffer_data: dict[str, Any] | None = None,
     schema_validator: Callable[[dict[str, Any]], tuple[bool, str]] | None = None,
+    emit_field_assessment: bool = False,
 ) -> tuple[TargetModel, BedrockInvokeModelResponse]:
     """
     Extract structured data using Strands agents with tool-based validation.
@@ -1660,6 +1705,17 @@ async def structured_output_async(
         update_todo,
         view_todo_list,
     ]
+
+    # Integrated-assessment mode: give the agent a tool to emit per-field
+    # confidence/bbox in this SAME inference (the document is already in its
+    # cached context), and instruct it to call the tool after extraction. The
+    # recorded assessment is read from agent state below and returned alongside
+    # the result, riding the same downstream path as separate-mode assessment.
+    if emit_field_assessment:
+        tools.append(provide_field_assessment)
+        system_prompt = (
+            system_prompt or SYSTEM_PROMPT
+        ) + INTEGRATED_ASSESSMENT_ADDENDUM
 
     # Add table parsing tools if enabled
     if table_parsing_config.enabled:
@@ -1825,6 +1881,28 @@ async def structured_output_async(
                 extra={"tool_stats": tool_stats},
             )
 
+        # Integrated-assessment mode: surface the agent's inline per-field
+        # assessment (recorded via provide_field_assessment) so the caller can
+        # route it through the same collation/grounding/emit path separate-mode
+        # uses. Rides in metering to survive the typed response envelope.
+        if emit_field_assessment:
+            field_assessment = agent.state.get("field_assessment")
+            if field_assessment:
+                metering_dict["_integrated_field_assessment"] = field_assessment
+                logger.info(
+                    "Integrated field assessment recorded",
+                    extra={
+                        "field_count": len(field_assessment)
+                        if isinstance(field_assessment, dict)
+                        else 0
+                    },
+                )
+            else:
+                logger.warning(
+                    "Integrated assessment enabled but agent did not call "
+                    "provide_field_assessment; no confidence emitted for this shard."
+                )
+
         return result, BedrockInvokeModelResponse(
             response=BedrockResponse(
                 output=BedrockOutput(
@@ -1860,6 +1938,7 @@ def structured_output(
     checkpoint_callback: Any | None = None,
     checkpoint_buffer_data: dict[str, Any] | None = None,
     schema_validator: Callable[[dict[str, Any]], tuple[bool, str]] | None = None,
+    emit_field_assessment: bool = False,
 ) -> tuple[BaseModel, BedrockInvokeModelResponse]:
     """
     Synchronous version of structured_output_async.
@@ -1949,6 +2028,7 @@ def structured_output(
                         checkpoint_callback=checkpoint_callback,
                         checkpoint_buffer_data=checkpoint_buffer_data,
                         schema_validator=schema_validator,
+                        emit_field_assessment=emit_field_assessment,
                     )
                 )
             except Exception as e:
@@ -1984,6 +2064,7 @@ def structured_output(
                 checkpoint_callback=checkpoint_callback,
                 checkpoint_buffer_data=checkpoint_buffer_data,
                 schema_validator=schema_validator,
+                emit_field_assessment=emit_field_assessment,
             )
         )
 

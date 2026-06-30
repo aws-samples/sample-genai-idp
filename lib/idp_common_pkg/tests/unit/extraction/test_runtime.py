@@ -744,3 +744,91 @@ class TestAssessmentReconciliation:
         # first 45 preserved, remainder padded neutral
         assert out["transaction_details"][0]["amt"]["c"] == 0.9
         assert out["transaction_details"][119]["confidence"] is None
+
+
+class TestIntegratedAssessment:
+    """Integrated (combined-prompt) mode: the extraction agent emits per-field
+    confidence inline; extract_one_shard lifts it from the response metering
+    into the same _shard_assessment slot separate mode uses (no assess_runner)."""
+
+    def test_extract_one_shard_lifts_inline_assessment(self):
+        # shard_runner returns inline assessment in metering (as the agent does
+        # via provide_field_assessment -> _integrated_field_assessment).
+        async def runner(*, shard_index, total_shards, payload, **kwargs):
+            return _Model(account="A", transactions=[{"r": 1}]), {
+                "metering": {
+                    "tok": {"t": 1},
+                    "_integrated_field_assessment": {
+                        "account": {"confidence": 0.88},
+                        "transactions": [{"r": {"confidence": 0.77}}],
+                    },
+                }
+            }
+
+        fields, response = asyncio.run(
+            extract_one_shard(
+                shard_index=0,
+                total_shards=1,
+                payload=_payload(0, 1),
+                model_id="m",
+                data_format=_Model,
+                config=IDPConfig(),
+                section_id="sec",
+                shard_runner=runner,  # NO assess_runner — integrated path
+            )
+        )
+        sa = response["_shard_assessment"]
+        assert sa["assessment"]["account"]["confidence"] == 0.88
+        assert sa["assessment"]["transactions"][0]["r"]["confidence"] == 0.77
+        # lifted key removed from metering so it doesn't leak downstream
+        assert "_integrated_field_assessment" not in response["metering"]
+        # real metering preserved
+        assert response["metering"]["tok"] == {"t": 1}
+
+    def test_no_inline_assessment_no_shard_assessment(self):
+        async def runner(*, shard_index, total_shards, payload, **kwargs):
+            return _Model(account="A"), {"metering": {"tok": {"t": 1}}}
+
+        _fields, response = asyncio.run(
+            extract_one_shard(
+                shard_index=0,
+                total_shards=1,
+                payload=_payload(0, 1),
+                model_id="m",
+                data_format=_Model,
+                config=IDPConfig(),
+                section_id="sec",
+                shard_runner=runner,
+            )
+        )
+        assert "_shard_assessment" not in response
+
+    def test_integrated_inline_collates_and_persists(self):
+        # Two shards each emit inline assessment; merge collates page-ordered.
+        def _runner_with_inline(per_shard_inline):
+            async def runner(*, shard_index, total_shards, payload, **kwargs):
+                ps = payload["page_start"]
+                return _Model(transactions=[{"r": ps}]), {
+                    "metering": {"_integrated_field_assessment": per_shard_inline[ps]}
+                }
+
+            return runner
+
+        runner = _runner_with_inline(
+            {
+                0: {"transactions": [{"r": {"c": 1}}]},
+                1: {"transactions": [{"r": {"c": 2}}]},
+            }
+        )
+        _merged, response = asyncio.run(
+            InProcessRuntime(max_parallelism=2).run(
+                shard_payloads=[_payload(0, 1), _payload(1, 2)],
+                model_id="m",
+                data_format=_Model,
+                config=IDPConfig(),
+                section_id="sec",
+                shard_runner=runner,
+            )
+        )
+        ma = response["metering"]["_merged_assessment"]
+        assert [t["r"]["c"] for t in ma["transactions"]] == [1, 2]

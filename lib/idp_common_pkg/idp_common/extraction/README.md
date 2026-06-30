@@ -820,9 +820,18 @@ assessment:
     Assessment step produces.
   - *Non-agentic*: unchanged — the pipeline flows to the standalone Assessment
     step exactly as before.
-- **`integrated`**: the extraction inference itself emits each value's confidence
-  and bounding box in one pass (saves a model call). The Assessment step's
-  model/prompt settings are unused.
+- **`integrated`**: the extraction agent emits each value's confidence and
+  bounding box **in its own inference** — the document is already in the agent's
+  (cached) context, so there is no second model pass and no re-sent document. The
+  agent calls a `provide_field_assessment` tool as its final step (one assessment
+  object per scalar/group field; a list with one entry per row, in row order, for
+  list fields). The inline result rides the **same** collation → post-merge
+  reconcile → OCR grounding → `explainability_info` path as `separate`, so the
+  output contract is identical; only the source of the confidence differs. The
+  Assessment step's model/prompt settings are unused, and the standalone step is
+  bypassed. Best for cost/latency once you've confirmed your model produces
+  well-calibrated inline confidence; otherwise prefer `separate` (a dedicated
+  assessment inference per shard).
 
 **Standalone Assessment step bypass.** When in-shard (or integrated) assessment
 has already written `explainability_info` to the section result, the downstream
