@@ -351,6 +351,18 @@ The bounding box feature requires no additional configuration:
   value appears on multiple rows (e.g. a repeated amount in a table), occurrences are
   disambiguated by **row order** — the i-th assessed list item maps to the i-th occurrence
   in reading order. A field with no OCR match simply has no geometry (geometry is advisory).
+
+  **Format-aware matching.** Extraction often canonicalizes a value to a schema format that
+  differs from how it appears in the document (e.g. a date extracted as `2022-04-04` but
+  printed as `04/04/2022`; an amount `1234.00` printed as `$1,234.00`; a phone `+15551234567`
+  printed as `(555) 123-4567`). Plain text matching would miss these, so matching is bridged
+  three ways: **format variants** (the value is re-rendered in common surface forms and each
+  is matched), **type-aware equality** (the value and an OCR line are parsed as the same
+  logical date/number/phone and compared — robust to any rendering), and a **character-level
+  Levenshtein** last resort for OCR noise (e.g. `Acme` vs `Acrne`). The field's logical type
+  is taken from its JSON-Schema `type`/`format` when present, else inferred from the value.
+  Format-bridged matches are tagged `geometry_source: "ocr-normalized"` and Levenshtein
+  near-misses `"ocr-fuzzy"`, distinct from exact `"ocr"` hits so they stay auditable.
 - **`llm_with_ocr_grounding`** (legacy): the model emits estimated boxes and the service
   grounds them in real OCR coordinates where the value matches, falling back to the LLM box
   otherwise. The LLM box also disambiguates repeated values by spatial proximity.

@@ -143,10 +143,28 @@ class TestRepeatedValueDisambiguation:
         geom, _, _ = g.match_value_to_geometry("50.00", pd, llm_geom)
         assert geom["boundingBox"]["top"] == pytest.approx(0.50)
 
-    def test_ambiguous_without_reference_keeps_llm_box(self):
-        # No LLM reference -> ambiguous -> return None so caller keeps LLM box.
+    def test_ambiguous_without_reference_grounds_first_occurrence(self):
+        # ocr_only scalar whose value repeats with NO LLM reference and NO
+        # occurrence_index: ground to the FIRST occurrence in reading order
+        # (a scalar's value is the same wherever printed) rather than dropping
+        # geometry.
         pd = self._three_rows()
-        assert g.match_value_to_geometry("50.00", pd, None) is None
+        geom, source, _ = g.match_value_to_geometry("50.00", pd, None)
+        assert source == "ocr"
+        assert geom["boundingBox"]["top"] == pytest.approx(0.10)
+
+    def test_llm_ref_off_page_still_resolves_by_proximity(self):
+        # Legacy mode: an LLM ref on a different page than all candidates falls
+        # back to nearest-by-center across the full pool (unchanged behavior).
+        pd = self._three_rows()
+        off_page_ref = {
+            "boundingBox": {"left": 0.8, "top": 0.48, "width": 0.1, "height": 0.02},
+            "page": 99,
+        }
+        geom, source, _ = g.match_value_to_geometry("50.00", pd, off_page_ref)
+        assert source == "ocr"
+        # nearest center to top~0.49 is the 0.50 row.
+        assert geom["boundingBox"]["top"] == pytest.approx(0.50)
 
     def test_unique_value_grounds_without_reference(self):
         pd = self._three_rows()
@@ -694,3 +712,82 @@ class TestServiceIntegration:
         field = self._run(ground=True, with_page_data=False, geometry_mode="ocr_only")
         assert "geometry" not in field
         assert "geometry_source" not in field
+
+
+class TestFormatAwareMatching:
+    """Format/type-aware matching: schema-canonicalized values (dates, currency,
+    phone) match OCR text rendered in a different surface format."""
+
+    def test_date_reformat_type_equal(self):
+        # value 2022-04-04 vs OCR "04/04/2022" — text match fails, type-equal wins.
+        pd = {1: _page([_line("Statement End Date: 04/04/2022", 0.1, 0.2)])}
+        geom, source, _ = g.match_value_to_geometry(
+            "2022-04-04", pd, schema_hint={"type": "string", "format": "date"}
+        )
+        assert geom is not None
+        assert source == g._SOURCE_NORMALIZED
+        assert geom["boundingBox"]["top"] == pytest.approx(0.2)
+
+    def test_date_reformat_heuristic_no_schema(self):
+        # Same, but no schema hint -> inferred from value.
+        pd = {1: _page([_line("04/04/2022", 0.1, 0.3)])}
+        geom, source, _ = g.match_value_to_geometry("2022-04-04", pd)
+        assert geom is not None and source == g._SOURCE_NORMALIZED
+
+    def test_currency_variant_match(self):
+        # value "1234.00" vs OCR "$1,234.00".
+        pd = {1: _page([_line("Total Due $1,234.00", 0.1, 0.4)])}
+        geom, source, _ = g.match_value_to_geometry(
+            "1234.00", pd, schema_hint={"type": "number"}
+        )
+        assert geom is not None and source == g._SOURCE_NORMALIZED
+
+    def test_phone_digits_match(self):
+        pd = {1: _page([_line("Call (555) 123-4567 today", 0.1, 0.5)])}
+        geom, source, _ = g.match_value_to_geometry("+15551234567", pd)
+        assert geom is not None and source == g._SOURCE_NORMALIZED
+
+    def test_levenshtein_near_miss(self):
+        # OCR noise: "Acme Corporation" vs "Acrne Corporation" (rn->m).
+        pd = {1: _page([_line("Acrne Corporation", 0.1, 0.6)])}
+        geom, source, _ = g.match_value_to_geometry("Acme Corporation", pd)
+        assert geom is not None
+        assert source == g._SOURCE_FUZZY
+
+    def test_exact_still_beats_normalized(self):
+        # A direct exact OCR hit keeps "ocr" provenance, not "ocr-normalized".
+        pd = {1: _page([_line("2022-04-04", 0.1, 0.7)])}
+        geom, source, _ = g.match_value_to_geometry(
+            "2022-04-04", pd, schema_hint={"format": "date"}
+        )
+        assert source == "ocr"
+
+    def test_unrelated_number_does_not_match(self):
+        # A different amount must NOT type-match (precision preserved).
+        pd = {1: _page([_line("Total $9,999.99", 0.1, 0.8)])}
+        assert (
+            g.match_value_to_geometry("1234.00", pd, schema_hint={"type": "number"})
+            is None
+        )
+
+    def test_typed_list_rows_disambiguate_by_row_order(self):
+        # Two date rows in different formats; ocr_only row-order still applies.
+        pd = {1: _page([_line("01/02/2022", 0.8, 0.2), _line("03/04/2022", 0.8, 0.5)])}
+        assessment = {"rows": [{"d": {"confidence": 0.9}}, {"d": {"confidence": 0.9}}]}
+        extraction = {"rows": [{"d": "2022-01-02"}, {"d": "2022-03-04"}]}
+        schema = {
+            "properties": {
+                "rows": {
+                    "type": "array",
+                    "items": {"properties": {"d": {"format": "date"}}},
+                }
+            }
+        }
+        out = g.ground_assessment_geometry(
+            assessment, extraction, pd, "ocr_only", schema
+        )
+        tops = [r["d"]["geometry"][0]["boundingBox"]["top"] for r in out["rows"]]
+        assert tops == [pytest.approx(0.2), pytest.approx(0.5)]
+        assert all(
+            r["d"]["geometry_source"] == g._SOURCE_NORMALIZED for r in out["rows"]
+        )

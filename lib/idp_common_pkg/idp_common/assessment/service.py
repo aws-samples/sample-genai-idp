@@ -744,7 +744,12 @@ class AssessmentService:
 
         property_descriptions = self._format_property_descriptions(class_schema)
 
-        # Prepare prompt (type-safe access)
+        # Prepare prompt (type-safe access). NOTE: when geometry_mode is ocr_only,
+        # the model's bounding boxes are ignored (geometry comes from OCR), so the
+        # assessment task_prompt SHOULD omit bbox/spatial-localization directions —
+        # they waste output tokens and bloat each list row, starving enumeration of
+        # long lists. This is handled by using a bbox-free task_prompt in config
+        # (see the ocr_only assessment config), not by editing the prompt here.
         prompt_template = self.config.assessment.task_prompt
         extraction_results_str = json.dumps(extraction_results, indent=2)
 
@@ -1132,6 +1137,7 @@ class AssessmentService:
                             extraction_results,
                             page_data_by_page,
                             geometry_mode,
+                            self._get_class_schema(class_label),
                         )
                 except Exception as e:
                     logger.warning(
