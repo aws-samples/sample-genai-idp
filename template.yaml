@@ -5413,10 +5413,20 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           QUEUE_URL: !Ref DocumentQueue
           APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
+          # httpapi: write the TrackingTable directly (no AppSync). The factory
+          # defaults to 'appsync' otherwise, which requires APPSYNC_API_URL.
+          DOCUMENT_TRACKING_MODE: !If [UseHttpApi, "dynamodb", "appsync"]
+          TRACKING_TABLE: !If [UseHttpApi, !Ref TrackingTable, !Ref "AWS::NoValue"]
           DATA_RETENTION_IN_DAYS: !Ref DataRetentionInDays
           OUTPUT_BUCKET: !Ref OutputBucket
           CONFIG_TABLE: !Ref ConfigurationTable
       Policies:
+        # httpapi: the doc service writes the TrackingTable directly.
+        - !If
+          - UseHttpApi
+          - DynamoDBCrudPolicy:
+              TableName: !Ref TrackingTable
+          - !Ref AWS::NoValue
         - SQSSendMessagePolicy:
             QueueName: !GetAtt DocumentQueue.QueueName
         - DynamoDBReadPolicy:
@@ -5506,6 +5516,10 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           STATE_MACHINE_ARN: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
           APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
+          # httpapi: write the TrackingTable directly (no AppSync). The factory
+          # defaults to 'appsync' otherwise, which requires APPSYNC_API_URL.
+          DOCUMENT_TRACKING_MODE: !If [UseHttpApi, "dynamodb", "appsync"]
+          TRACKING_TABLE: !If [UseHttpApi, !Ref TrackingTable, !Ref "AWS::NoValue"]
           CONCURRENCY_TABLE: !Ref ConcurrencyTable
           MAX_CONCURRENT: !Ref MaxConcurrentWorkflows
           WORKING_BUCKET: !Ref WorkingBucket
@@ -5514,6 +5528,12 @@ Resources:
           DOCUMENT_QUEUE_URL: !Ref DocumentQueue
           RECOVERY_TIMEOUT_SECONDS: !Ref CircuitBreakerRecoveryTimeoutSeconds
       Policies:
+        # httpapi: the doc service writes the TrackingTable directly.
+        - !If
+          - UseHttpApi
+          - DynamoDBCrudPolicy:
+              TableName: !Ref TrackingTable
+          - !Ref AWS::NoValue
         - SQSPollerPolicy:
             QueueName: !GetAtt DocumentQueue.QueueName
         - StepFunctionsExecutionPolicy:
@@ -5643,6 +5663,10 @@ Resources:
           CONCURRENCY_TABLE: !Ref ConcurrencyTable
           METRIC_NAMESPACE: !Ref AWS::StackName
           APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
+          # httpapi: write the TrackingTable directly (no AppSync). The factory
+          # defaults to 'appsync' otherwise, which requires APPSYNC_API_URL.
+          DOCUMENT_TRACKING_MODE: !If [UseHttpApi, "dynamodb", "appsync"]
+          TRACKING_TABLE: !If [UseHttpApi, !Ref TrackingTable, !Ref "AWS::NoValue"]
           OUTPUT_BUCKET: !Ref OutputBucket
           REPORTING_BUCKET:
             !If [
@@ -5656,6 +5680,12 @@ Resources:
           CIRCUIT_BREAKER_MANAGER_ARN: !If [CircuitBreakerEnabledCondition, !GetAtt CircuitBreakerManagerFunction.Arn, ""]
           ALERTS_TOPIC_ARN: !If [CircuitBreakerEnabledCondition, !Ref AlertsTopic, ""]
       Policies:
+        # httpapi: the doc service writes the TrackingTable directly.
+        - !If
+          - UseHttpApi
+          - DynamoDBCrudPolicy:
+              TableName: !Ref TrackingTable
+          - !Ref AWS::NoValue
         - DynamoDBCrudPolicy:
             TableName: !Ref TrackingTable
         - DynamoDBCrudPolicy:
