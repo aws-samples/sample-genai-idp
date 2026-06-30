@@ -30,11 +30,9 @@ from __future__ import annotations
 import logging
 import os
 import time
-from datetime import datetime
 
 import boto3
 from botocore.exceptions import ClientError
-from idp_common.appsync.client import AppSyncClient, AppSyncError
 from idp_common.bedrock.client import is_claude_4_7_model
 from idp_common.bedrock.model_utils import parse_model_id
 from idp_common.bedrock.openai_responses import is_openai_responses_model
@@ -46,9 +44,6 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 _s3 = boto3.client("s3")
 _dynamodb = boto3.resource("dynamodb")
 _bedrock_runtime = None  # Lazily created in the target region
-
-# Cached clients
-_appsync_client: AppSyncClient | None = None
 
 
 DEFAULT_SYSTEM_PROMPT = (
@@ -66,71 +61,23 @@ STREAM_FLUSH_INTERVAL_S = 0.2
 STREAM_FLUSH_CHAR_THRESHOLD = 200
 
 
-# AppSync enhanced subscriptions push the full mutation result to subscribers,
-# filtered by the subscription's selection set. The mutation response MUST
-# select every field that subscribers may request — otherwise fields missing
-# from the mutation selection arrive as null at the subscriber. Select the
-# full ChatDocumentMessage shape here so the UI receives role/content/etc.
-_PUBLISH_MUTATION = """
-mutation PublishChatDocumentMessage(
-  $sessionId: String!
-  $prompt: String!
-  $method: String
-  $status: String
-  $content: String
-  $role: String
-  $modelId: String
-  $isProcessing: Boolean
-  $timestamp: String
-) {
-  sendChatDocumentMessage(
-    sessionId: $sessionId
-    prompt: $prompt
-    method: $method
-    status: $status
-    content: $content
-    role: $role
-    modelId: $modelId
-    isProcessing: $isProcessing
-    timestamp: $timestamp
-  ) {
-    sessionId
-    role
-    content
-    timestamp
-    method
-    status
-    modelId
-    isProcessing
-  }
-}
-"""
-
-
-def _get_appsync_client() -> AppSyncClient:
-    global _appsync_client
-    if _appsync_client is None:
-        _appsync_client = AppSyncClient()
-    return _appsync_client
-
-
 # --- Emission sink -------------------------------------------------------
 #
 # All status / delta / final / error events flow through ``_emit`` rather than
-# being hard-wired to AppSync. The default sink (``_publish``) preserves the
-# original AppSync-mutation behavior so the ``ApiTransport=appsync`` path is
-# completely unchanged. The Lambda Function URL streaming endpoint
-# (``chat_stream_processor``) injects an alternative sink via ``set_sink`` that
-# writes SSE ``data: {json}`` chunks to the HTTP response stream instead.
+# being hard-wired to any transport. The chat always runs behind the streaming
+# Lambda Function URL endpoint (``chat_stream_processor``), which injects a sink
+# via ``set_sink`` that writes SSE ``data: {json}`` chunks to the HTTP response
+# stream. If no sink is installed, events are dropped with a warning — there is
+# no AppSync fallback.
 #
-# A sink is any callable with the same keyword signature as ``_publish``.
+# A sink is any callable with the ``_emit`` keyword signature below.
 _active_sink = None  # type: ignore[var-annotated]
 
 
 def set_sink(sink) -> None:  # noqa: ANN001
-    """Install an alternative emission sink (used by the streaming endpoint).
+    """Install the emission sink (used by the streaming endpoint).
 
-    Pass ``None`` to restore the default AppSync-publish behavior.
+    Pass ``None`` to clear the installed sink.
     """
     global _active_sink
     _active_sink = sink
@@ -145,9 +92,21 @@ def _emit(
     model_id: str = "",
     is_processing: bool = True,
 ) -> None:
-    """Route an event to the active sink (AppSync publish by default)."""
-    sink = _active_sink or _publish
-    sink(
+    """Route an event to the active sink.
+
+    The streaming endpoint installs the sink via ``set_sink``. If no sink is
+    installed there is nowhere to deliver the event, so it is dropped with a
+    warning rather than failing the chat work.
+    """
+    if _active_sink is None:
+        logger.warning(
+            "No emission sink installed; dropping chat event "
+            "(method=%s status=%s)",
+            method,
+            status,
+        )
+        return
+    _active_sink(
         session_id=session_id,
         method=method,
         status=status,
@@ -173,56 +132,11 @@ def _get_bedrock_runtime():
     return _bedrock_runtime
 
 
-def _now_iso() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-
-
 def _default_model_for_region() -> str:
     region = os.environ.get("AWS_REGION", "us-east-1")
     if region.startswith("eu-"):
         return "eu.anthropic.claude-opus-4-8:1m"
     return "us.anthropic.claude-opus-4-8:1m"
-
-
-def _publish(
-    session_id: str,
-    method: str,
-    status: str,
-    content: str,
-    role: str = "assistant",
-    model_id: str = "",
-    is_processing: bool = True,
-) -> None:
-    """Publish a progress/delta/final event to the AppSync subscription.
-
-    Failures are logged but not re-raised — we never want a subscription
-    publish failure to abort the actual chat work.
-    """
-    try:
-        client = _get_appsync_client()
-        # `prompt` is a required schema field but unused for processor-originated
-        # publishes; pass an empty string for consistency.
-        client.execute_mutation(
-            _PUBLISH_MUTATION,
-            {
-                "sessionId": session_id,
-                "prompt": "",
-                "method": method,
-                "status": status,
-                "content": content,
-                "role": role,
-                "modelId": model_id,
-                "isProcessing": is_processing,
-                "timestamp": _now_iso(),
-            },
-        )
-    except (AppSyncError, Exception) as e:  # noqa: BLE001
-        logger.warning(
-            "Failed to publish chat-doc message (method=%s status=%s): %s",
-            method,
-            status,
-            e,
-        )
 
 
 def _s3_object_exists(bucket: str, key: str) -> bool:

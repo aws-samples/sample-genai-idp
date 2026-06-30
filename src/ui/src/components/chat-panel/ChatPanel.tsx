@@ -11,11 +11,10 @@ import { sendChatDocumentMessage, onChatDocumentMessageUpdate } from '../../grap
 import useConfiguration from '../../hooks/use-configuration';
 import useCurrentSessionCreds from '../../hooks/use-current-session-creds';
 import { streamChat, type StreamCredentials } from '../../api/stream-client';
-import { apiTransport } from '../../aws-exports';
 import SafeMarkdown from '../common/SafeMarkdown';
 import './ChatPanel.css';
 
-const useHttpApiTransport = apiTransport === 'httpapi';
+const useHttpApiTransport = true;
 
 interface ChatMessage {
   role: string; // 'user' | 'ai' | 'loader'

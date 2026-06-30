@@ -29,7 +29,16 @@ def mod(monkeypatch):
     monkeypatch.setenv("FEATURE_BUCKET", "artifacts")
     monkeypatch.setenv("FEATURE_ARTIFACT_PREFIX", "idp-cli/extensions/f")
     monkeypatch.setenv(
-        "APPSYNC_API_URL", "https://x.appsync-api.us-west-2.amazonaws.com/graphql"
+        "REGISTER_FEATURE_FUNCTION_ARN",
+        "arn:aws:lambda:us-west-2:123456789012:function:IDP-RegisterFeature",
+    )
+    monkeypatch.setenv(
+        "REGISTER_FEATURE_HOOKS_FUNCTION_ARN",
+        "arn:aws:lambda:us-west-2:123456789012:function:IDP-RegisterFeatureHooks",
+    )
+    monkeypatch.setenv(
+        "APPLY_FEATURE_CONFIG_PRESET_FUNCTION_ARN",
+        "arn:aws:lambda:us-west-2:123456789012:function:IDP-ApplyFeatureConfigPreset",
     )
     monkeypatch.setenv("HOOK_FUNCTION_ARN", _HOOK_ARN)
     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-west-2")

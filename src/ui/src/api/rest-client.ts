@@ -133,14 +133,41 @@ const doGraphql = async ({ query, variables }: GraphqlRequest): Promise<GraphqlR
   return { data: { [field]: body } };
 };
 
-// The object returned by our generateClient() replacement. Only `.graphql()`
-// is implemented because that is all the app uses from the Amplify client.
-export interface RestGraphqlClient {
-  graphql: (req: GraphqlRequest) => Promise<GraphqlResult>;
+// Brand types emitted by the codegen for each operation. We extract the result
+// type from the brand so `.graphql(op)` returns a precisely-typed `{ data }`,
+// exactly as the Amplify client did — keeping call-site inference (e.g.
+// `result.data.listX.items.map(...)`) without referencing AppSync.
+import type { GeneratedQuery, GeneratedMutation, GeneratedSubscription } from '@aws-amplify/api-graphql';
+
+// Inert subscription handle returned for subscription ops (polling replaces them).
+interface SubscriptionHandle {
+  subscribe: (observer?: unknown) => { unsubscribe: () => void };
 }
 
-export const createRestClient = (): RestGraphqlClient => ({
-  graphql: doGraphql,
-});
+// The object returned by our generateClient() replacement. Only `.graphql()`
+// is used from the old Amplify client. Overloads mirror Amplify's typing so a
+// query/mutation resolves to `{ data: Result }` and a subscription returns an
+// (inert) subscription handle.
+export interface RestGraphqlClient {
+  graphql<Result, Variables>(options: {
+    query: GeneratedQuery<Variables, Result> | GeneratedMutation<Variables, Result>;
+    variables?: Variables;
+    authMode?: string;
+  }): Promise<{ data: Result; errors?: { message?: string; errorType?: string }[] }>;
+  graphql<Result, Variables>(options: {
+    query: GeneratedSubscription<Variables, Result>;
+    variables?: Variables;
+    authMode?: string;
+  }): SubscriptionHandle;
+  // Fallback for raw string queries (rarely used).
+  graphql(req: GraphqlRequest): Promise<GraphqlResult>;
+}
+
+export const createRestClient = (): RestGraphqlClient =>
+  ({
+    // doGraphql implements all overloads; the cast bridges the runtime impl to
+    // the typed surface above.
+    graphql: doGraphql,
+  }) as unknown as RestGraphqlClient;
 
 export default createRestClient;

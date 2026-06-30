@@ -6,18 +6,6 @@ Transform: AWS::Serverless-2016-10-31
 Description: AWS GenAI IDP Accelerator (uksb-r8evguc4p9) (SO9027) (v<VERSION>)
 
 Mappings:
-  AppSyncLogLevelMap:
-    DEBUG:
-      FieldLogLevel: ALL
-    INFO:
-      FieldLogLevel: ALL
-    WARN:
-      FieldLogLevel: ERROR
-    ERROR:
-      FieldLogLevel: ERROR
-    CRITICAL:
-      FieldLogLevel: ERROR
-
   CrawlerScheduleMap:
     Manual:
       ScheduleExpression: ""
@@ -49,21 +37,9 @@ Mappings:
       ConfigPath: "lending-package-sample-govcloud"
 
 Parameters:
-  # API transport selection: AppSync (legacy) or API Gateway HTTP API (+ polling
-  # + Lambda response streaming). HTTP API is GovCloud/FedRAMP-deployable and is
-  # the long-term replacement for AppSync. During migration both paths can be
-  # built; this flag selects which the UI uses and which the backend writes to.
-  ApiTransport:
-    Type: String
-    Default: appsync
-    AllowedValues:
-      - appsync
-      - httpapi
-    Description: >-
-      Communication transport between the web UI and backend. 'appsync' uses the
-      legacy AppSync GraphQL API. 'httpapi' uses API Gateway HTTP API for
-      queries/mutations, polling for status updates, and Lambda response
-      streaming for chat (required for GovCloud / FedRAMP).
+  # NOTE: the legacy ApiTransport parameter (appsync|httpapi) has been removed.
+  # The UI/backend now always use API Gateway HTTP API + polling + Lambda
+  # response streaming (AppSync has been fully removed).
 
   LambdaWebAdapterLayerArn:
     Type: String
@@ -1094,11 +1070,9 @@ Rules:
           (which auto-provisions an endpoint).
 
 Conditions:
-  # API transport conditions. UseHttpApi builds the API Gateway HTTP API + Lambda
-  # streaming path; UseAppSync keeps the legacy AppSync API. They are mutually
-  # exclusive via the ApiTransport parameter.
-  UseHttpApi: !Equals [!Ref ApiTransport, 'httpapi']
-  UseAppSync: !Equals [!Ref ApiTransport, 'appsync']
+  # API transport: API Gateway HTTP API + polling + Lambda response streaming is
+  # now the only path (AppSync has been fully removed). No transport conditions
+  # are needed — the HTTP API resources deploy unconditionally.
   # Headless/VPC/Bastion feature conditions
   DeployInVPC: !Equals [!Ref DeployInVPC, 'true']
   DeployApiGateway: !Equals [!Ref EnableHeadless, 'true']
@@ -1127,15 +1101,9 @@ Conditions:
   ShouldCreateEvaluationBaselineBucket:
     !Equals [ !Ref EvaluationBaselineBucketName, "" ]
   ShouldCreateReportingBucket: !Equals [ !Ref ReportingBucketName, "" ]
-  IsWafEnabled: !Not [ !Equals [ !Ref WAFAllowedIPv4Ranges, "0.0.0.0/0" ] ]
-  # The WAF apparatus (IP sets, WebACL, association) exists solely to protect the
-  # AppSync GraphQL API. Only create it when WAF is enabled AND the AppSync
-  # transport is in use; under ApiTransport=httpapi there is no GraphQLApi to
-  # associate the WebACL with (and AppSync is unavailable in GovCloud).
-  IsWafEnabledAndAppSync: !And [ !Condition IsWafEnabled, !Condition UseAppSync ]
-  # Private-AppSync DNS output only applies when AppSync is actually deployed
-  # (PRIVATE visibility) AND the AppSync transport is in use.
-  IsPrivateAppSyncAndAppSync: !And [ !Condition UsePrivateAppSync, !Condition UseAppSync ]
+  # NOTE: the WAF apparatus (IsWafEnabled / IsWafEnabledAndAppSync) and the
+  # private-AppSync DNS condition (IsPrivateAppSyncAndAppSync) existed solely to
+  # protect / expose the AppSync GraphQL API and were removed along with it.
   ShouldCreateDocumentKnowledgeBase:
     !Equals [ !Ref DocumentKnowledgeBase, "BEDROCK_KNOWLEDGE_BASE (Create)" ]
   ShouldUseDocumentKnowledgeBase: !Condition ShouldCreateDocumentKnowledgeBase
@@ -2158,7 +2126,7 @@ Resources:
           LOOKUP_FUNCTION_NAME: !Ref LookupFunction
           STRANDS_LOG_LEVEL: !Ref LogLevel
           AGENT_TABLE: !Ref AgentTable
-          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
+          APPSYNC_API_URL: ""
           ATHENA_DATABASE: !Ref ReportingDatabase
           ATHENA_WORKGROUP: primary
           QUERY_RESULTS_BUCKET: !If
@@ -2194,13 +2162,6 @@ Resources:
             Effect: Allow
             Action: bedrock-agentcore:InvokeAgentRuntime
             Resource: "*"
-        - !If
-          - UseAppSync
-          - Statement:
-              Effect: Allow
-              Action: appsync:GraphQL
-              Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${GraphQLApi.ApiId}/*"
-          - !Ref AWS::NoValue
         - DynamoDBCrudPolicy:
             TableName: !Ref ChatMessagesTable
         - DynamoDBCrudPolicy:
@@ -2303,14 +2264,6 @@ Resources:
               - Effect: Allow
                 Action: sts:AssumeRole
                 Resource: !Ref BedrockHubRoleArn
-              - !Ref AWS::NoValue
-            - !If
-              - UseAppSync
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
               - !Ref AWS::NoValue
             - Effect: Allow
               Action:
@@ -2599,14 +2552,9 @@ Resources:
         BedrockHubRoleSessionName: !Ref BedrockHubRoleSessionName
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         ConfigurationTable: !Ref ConfigurationTable
-        # When ApiTransport=httpapi, pass empty AppSync identifiers so the
-        # pattern stack's HasAppSyncApi condition is false and every processing
-        # Lambda runs with DOCUMENT_TRACKING_MODE=dynamodb (writes the
-        # TrackingTable directly, no AppSync). This is the backend half of the
-        # AppSync removal and keeps the document pipeline fully functional
-        # without AppSync.
-        AppSyncApiUrl: !If [UseHttpApi, "", !GetAtt GraphQLApi.GraphQLUrl]
-        AppSyncApiArn: !If [UseHttpApi, "", !GetAtt GraphQLApi.Arn]
+        # AppSync removed: every processing Lambda writes the TrackingTable
+        # directly (DOCUMENT_TRACKING_MODE=dynamodb). The AppSyncApiUrl/AppSyncApiArn
+        # params are no longer passed (the pattern stack no longer declares them).
         ConfigurationDefaultS3Uri: !If
           - HasCustomConfigPath
           - !Ref CustomConfigPath
@@ -2679,13 +2627,10 @@ Resources:
     Properties:
       TemplateURL: ./nested/appsync/.aws-sam/packaged.yaml
       Parameters:
-        # Core AppSync resources (empty under ApiTransport=httpapi since the
-        # GraphQLApi is not created; the nested stack tolerates empty values
-        # because its AppSync resources are themselves gated on UseAppSync).
-        GraphQLApiId: !If [UseAppSync, !GetAtt GraphQLApi.ApiId, ""]
-        GraphQLApiArn: !If [UseAppSync, !GetAtt GraphQLApi.Arn, ""]
-        GraphQLApiUrl: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
-        
+        # AppSync removed: the nested stack now hosts only the HTTP API +
+        # dispatcher. The GraphQLApiId/GraphQLApiArn/GraphQLApiUrl params are no
+        # longer passed (the nested template no longer declares them).
+
         # Background worker ARNs
         AgentChatProcessorFunctionArn: !GetAtt AgentChatProcessorFunction.Arn
         ChatWithDocumentProcessorFunctionArn: !GetAtt ChatWithDocumentProcessorFunction.Arn
@@ -2797,11 +2742,10 @@ Resources:
           - ""
         CircuitBreakerEnabled: !Ref CircuitBreakerEnabled
 
-        # API Gateway HTTP API transport (AppSync replacement). When
-        # ApiTransport=httpapi the nested stack builds the HTTP API + JWT
-        # authorizer + dispatcher Lambda. The dispatcher needs the main-template
-        # resolver function ARNs (the rest are defined in the nested stack).
-        ApiTransport: !Ref ApiTransport
+        # API Gateway HTTP API transport (the only transport now). The nested
+        # stack builds the HTTP API + JWT authorizer + dispatcher Lambda. The
+        # dispatcher needs the main-template resolver function ARNs (the rest are
+        # defined in the nested stack). ApiTransport is no longer passed.
         UserPoolId: !Ref UserPool
         UserPoolClientId: !Ref UserPoolClient
         CompleteSectionReviewFunctionArn: !GetAtt CompleteSectionReviewFunction.Arn
@@ -2809,6 +2753,36 @@ Resources:
         FinetuningJobsResolverFunctionArn: !GetAtt FinetuningJobsResolverFunction.Arn
         CalculateCapacityResolverFunctionArn: !GetAtt CalculateCapacityResolverFunction.Arn
         VersionCheckResolverFunctionArn: !GetAtt VersionCheckResolverFunction.Arn
+
+        # Feature-platform UI-field resolver ARNs. The 6 UI-facing feature
+        # fields route through this HTTP API dispatcher; their resolver Lambdas
+        # live in the FeaturePlatformStack nested stack, so the ARNs flow
+        # FeaturePlatformStack Outputs -> here -> dispatcher FIELD_FUNCTION_MAP.
+        # Empty when the feature platform is disabled (fields absent from map).
+        ListCatalogFeaturesFunctionArn: !If
+          - IsFeaturePlatformEnabled
+          - !GetAtt FeaturePlatformStack.Outputs.ListCatalogFeaturesFunctionArn
+          - ""
+        ListInstalledFeaturesFunctionArn: !If
+          - IsFeaturePlatformEnabled
+          - !GetAtt FeaturePlatformStack.Outputs.ListInstalledFeaturesFunctionArn
+          - ""
+        CheckFeatureEntitlementFunctionArn: !If
+          - IsFeaturePlatformEnabled
+          - !GetAtt FeaturePlatformStack.Outputs.CheckFeatureEntitlementFunctionArn
+          - ""
+        GetFeatureLaunchUrlFunctionArn: !If
+          - IsFeaturePlatformEnabled
+          - !GetAtt FeaturePlatformStack.Outputs.GetFeatureLaunchUrlFunctionArn
+          - ""
+        SubscribeFeatureFunctionArn: !If
+          - IsFeaturePlatformEnabled
+          - !GetAtt FeaturePlatformStack.Outputs.SubscribeFeatureFunctionArn
+          - ""
+        UnsubscribeFeatureFunctionArn: !If
+          - IsFeaturePlatformEnabled
+          - !GetAtt FeaturePlatformStack.Outputs.UnsubscribeFeatureFunctionArn
+          - ""
 
   ##########################################################################
   # === Feature Platform (optional) — BEGIN ===============================
@@ -2828,22 +2802,23 @@ Resources:
   # Stack URL directly from those. Marketplace features use a private seller
   # bucket declared in config_library/extensions-marketplace.yaml.
 
+  # Ordering note: APPSYNCSTACK now consumes FeaturePlatformStack's resolver
+  # function ARNs (the 6 UI fields) via !GetAtt FeaturePlatformStack.Outputs.*,
+  # which makes APPSYNCSTACK implicitly depend on FeaturePlatformStack. The old
+  # explicit "FeaturePlatformStack DependsOn APPSYNCSTACK" was for attaching
+  # AppSync resolvers to the main schema; with AppSync gone it is removed (and
+  # keeping it would create a dependency cycle). The implicit GetAtt dependency
+  # is conditional-safe: it only applies when IsFeaturePlatformEnabled is true.
   FeaturePlatformStack:
     Type: AWS::CloudFormation::Stack
     Condition: IsFeaturePlatformEnabled
-    DependsOn:
-      - APPSYNCSTACK  # Attach resolvers only after main schema is finalised
     Properties:
       TemplateURL: ./feature-platform/main-stack-extensions/.aws-sam/packaged.yaml
       Parameters:
         MainStackName: !Ref AWS::StackName
-        # Under httpapi the GraphQLApi is not created, so the feature-platform
-        # AppSync resources are skipped (gated on UseAppSync there too).
-        ApiTransport: !Ref ApiTransport
-        # Empty under ApiTransport=httpapi (GraphQLApi not created).
-        GraphQLApiId: !If [UseAppSync, !GetAtt GraphQLApi.ApiId, ""]
-        GraphQLApiArn: !If [UseAppSync, !GetAtt GraphQLApi.Arn, ""]
-        AppSyncApiUrl: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
+        # AppSync removed: the feature platform now uses the HTTP API only. The
+        # ApiTransport / GraphQLApiId / GraphQLApiArn / AppSyncApiUrl params are no
+        # longer passed (the feature-platform template no longer declares them).
         UserPoolId: !Ref UserPool
         # Feature stacks with HTTP APIs use these two as the JWT audience
         # (Cognito Client id) and as the document-state table name for
@@ -5412,21 +5387,18 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           QUEUE_URL: !Ref DocumentQueue
-          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
+          APPSYNC_API_URL: ""
           # httpapi: write the TrackingTable directly (no AppSync). The factory
           # defaults to 'appsync' otherwise, which requires APPSYNC_API_URL.
-          DOCUMENT_TRACKING_MODE: !If [UseHttpApi, "dynamodb", "appsync"]
-          TRACKING_TABLE: !If [UseHttpApi, !Ref TrackingTable, !Ref "AWS::NoValue"]
+          DOCUMENT_TRACKING_MODE: "dynamodb"
+          TRACKING_TABLE: !Ref TrackingTable
           DATA_RETENTION_IN_DAYS: !Ref DataRetentionInDays
           OUTPUT_BUCKET: !Ref OutputBucket
           CONFIG_TABLE: !Ref ConfigurationTable
       Policies:
         # httpapi: the doc service writes the TrackingTable directly.
-        - !If
-          - UseHttpApi
-          - DynamoDBCrudPolicy:
-              TableName: !Ref TrackingTable
-          - !Ref AWS::NoValue
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
         - SQSSendMessagePolicy:
             QueueName: !GetAtt DocumentQueue.QueueName
         - DynamoDBReadPolicy:
@@ -5434,14 +5406,6 @@ Resources:
         - S3ReadPolicy:
             BucketName: !Ref InputBucket
         - Statement:
-            - !If
-              - UseAppSync
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -5515,11 +5479,11 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           STATE_MACHINE_ARN: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
-          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
+          APPSYNC_API_URL: ""
           # httpapi: write the TrackingTable directly (no AppSync). The factory
           # defaults to 'appsync' otherwise, which requires APPSYNC_API_URL.
-          DOCUMENT_TRACKING_MODE: !If [UseHttpApi, "dynamodb", "appsync"]
-          TRACKING_TABLE: !If [UseHttpApi, !Ref TrackingTable, !Ref "AWS::NoValue"]
+          DOCUMENT_TRACKING_MODE: "dynamodb"
+          TRACKING_TABLE: !Ref TrackingTable
           CONCURRENCY_TABLE: !Ref ConcurrencyTable
           MAX_CONCURRENT: !Ref MaxConcurrentWorkflows
           WORKING_BUCKET: !Ref WorkingBucket
@@ -5529,11 +5493,8 @@ Resources:
           RECOVERY_TIMEOUT_SECONDS: !Ref CircuitBreakerRecoveryTimeoutSeconds
       Policies:
         # httpapi: the doc service writes the TrackingTable directly.
-        - !If
-          - UseHttpApi
-          - DynamoDBCrudPolicy:
-              TableName: !Ref TrackingTable
-          - !Ref AWS::NoValue
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
         - SQSPollerPolicy:
             QueueName: !GetAtt DocumentQueue.QueueName
         - StepFunctionsExecutionPolicy:
@@ -5547,15 +5508,6 @@ Resources:
         - S3CrudPolicy:
             BucketName: !Ref WorkingBucket
         - Statement:
-            - !If
-              - UseAppSync
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${GraphQLApi.Arn}/types/Query/*"
-                  - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -5662,11 +5614,11 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           CONCURRENCY_TABLE: !Ref ConcurrencyTable
           METRIC_NAMESPACE: !Ref AWS::StackName
-          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
+          APPSYNC_API_URL: ""
           # httpapi: write the TrackingTable directly (no AppSync). The factory
           # defaults to 'appsync' otherwise, which requires APPSYNC_API_URL.
-          DOCUMENT_TRACKING_MODE: !If [UseHttpApi, "dynamodb", "appsync"]
-          TRACKING_TABLE: !If [UseHttpApi, !Ref TrackingTable, !Ref "AWS::NoValue"]
+          DOCUMENT_TRACKING_MODE: "dynamodb"
+          TRACKING_TABLE: !Ref TrackingTable
           OUTPUT_BUCKET: !Ref OutputBucket
           REPORTING_BUCKET:
             !If [
@@ -5681,11 +5633,8 @@ Resources:
           ALERTS_TOPIC_ARN: !If [CircuitBreakerEnabledCondition, !Ref AlertsTopic, ""]
       Policies:
         # httpapi: the doc service writes the TrackingTable directly.
-        - !If
-          - UseHttpApi
-          - DynamoDBCrudPolicy:
-              TableName: !Ref TrackingTable
-          - !Ref AWS::NoValue
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
         - DynamoDBCrudPolicy:
             TableName: !Ref TrackingTable
         - DynamoDBCrudPolicy:
@@ -5701,14 +5650,6 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !GetAtt SaveReportingDataFunctionV2.Arn
-            - !If
-              - UseAppSync
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -6178,7 +6119,7 @@ Resources:
           # Empty under httpapi transport: circuit-breaker state is the source
           # of truth in ConcurrencyTable (DynamoDB); publish_to_appsync() no-ops
           # when APPSYNC_API_URL is empty, and the UI polls getCircuitBreakerStatus.
-          APPSYNC_API_URL: !If [UseHttpApi, "", !GetAtt GraphQLApi.GraphQLUrl]
+          APPSYNC_API_URL: ""
       LoggingConfig:
         LogGroup: !Ref CircuitBreakerManagerFunctionLogGroup
       Policies:
@@ -6188,14 +6129,6 @@ Resources:
             TopicName: !GetAtt AlertsTopic.TopicName
         - CloudWatchPutMetricPolicy: {}
         - Statement:
-            - !If
-              - UseAppSync
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${GraphQLApi.Arn}/types/Mutation/fields/publishCircuitBreakerStatus"
-              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -6911,7 +6844,7 @@ Resources:
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           TRACKING_TABLE_NAME: !Ref TrackingTable
           USERS_TABLE_NAME: !Ref UsersTable
-          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
+          APPSYNC_API_URL: ""
           GUARDRAIL_ID_AND_VERSION:
             !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
           BEDROCK_ASSUME_ROLE_ARN:
@@ -6932,13 +6865,6 @@ Resources:
         - DynamoDBReadPolicy:
             TableName: !Ref TrackingTable
         - Statement:
-            - !If
-              - UseAppSync
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${GraphQLApi.ApiId}/types/Mutation/*"
-              - !Ref AWS::NoValue
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.
             - Effect: Allow
@@ -7060,7 +6986,7 @@ Resources:
           MAX_CONVERSATION_TURNS: 20
           MAX_MESSAGE_SIZE_KB: 8.5
           DATA_RETENTION_DAYS: !Ref DataRetentionInDays
-          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
+          APPSYNC_API_URL: ""
           ATHENA_DATABASE: !Ref ReportingDatabase
           ATHENA_OUTPUT_LOCATION: !Sub
             - "s3://${Bucket}/athena-results/"
@@ -7090,13 +7016,6 @@ Resources:
             Effect: Allow
             Action: bedrock-agentcore:InvokeAgentRuntime
             Resource: "*"
-        - !If
-          - UseAppSync
-          - Statement:
-              Effect: Allow
-              Action: appsync:GraphQL
-              Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${GraphQLApi.ApiId}/*"
-          - !Ref AWS::NoValue
         - DynamoDBCrudPolicy:
             TableName: !Ref ChatMessagesTable
         - DynamoDBCrudPolicy:
@@ -7166,14 +7085,6 @@ Resources:
               - Effect: Allow
                 Action: sts:AssumeRole
                 Resource: !Ref BedrockHubRoleArn
-              - !Ref AWS::NoValue
-            - !If
-              - UseAppSync
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
               - !Ref AWS::NoValue
             - Effect: Allow
               Action:
@@ -7273,19 +7184,17 @@ Resources:
   # The function runs a tiny FastAPI app under the AWS Lambda Web Adapter (LWA)
   # and drives the SAME chat_with_document_processor / agent_chat_processor logic
   # used by the async-invoke path, with the delta sink redirected to the HTTP
-  # response stream. All resources are gated on UseHttpApi so AppSync deployments
-  # are unaffected.
+  # response stream. The HTTP API is now the only transport (AppSync removed),
+  # so these resources deploy unconditionally.
   ##########################################################################
   ChatStreamProcessorLogGroup:
     Type: AWS::Logs::LogGroup
-    Condition: UseHttpApi
     Properties:
       KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
       RetentionInDays: !Ref LogRetentionDays
 
   ChatStreamProcessorFunction:
     Type: AWS::Serverless::Function
-    Condition: UseHttpApi
     Metadata:
       BuildMethod: makefile
       cfn_nag:
@@ -7483,7 +7392,6 @@ Resources:
   # SigV4-signed requests here; CORS allows the SPA origin.
   ChatStreamProcessorUrl:
     Type: AWS::Lambda::Url
-    Condition: UseHttpApi
     Properties:
       TargetFunctionArn: !Ref ChatStreamProcessorFunction
       AuthType: AWS_IAM
@@ -7507,7 +7415,6 @@ Resources:
   # and the lambda:InvokeFunctionUrl grant on the caller's role).
   ChatStreamProcessorUrlPermission:
     Type: AWS::Lambda::Permission
-    Condition: UseHttpApi
     Properties:
       FunctionName: !Ref ChatStreamProcessorFunction
       Action: lambda:InvokeFunctionUrl
@@ -7728,46 +7635,7 @@ Resources:
       KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
       RetentionInDays: !Ref LogRetentionDays
 
-  CalculateCapacityDataSource:
-    Type: AWS::AppSync::DataSource
-    Condition: UseAppSync
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      Name: CalculateCapacityDataSource
-      Description: Lambda function for calculating capacity requirements
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt HITLAppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt CalculateCapacityResolverFunction.Arn
 
-  CalculateCapacityResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: UseAppSync
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt CalculateCapacityDataSource.Name
-      TypeName: Query
-      FieldName: calculateCapacity
-
-  ##########################################################################
-  # Public Template Version-Check Resolver
-  #
-  # Powers the "Update available" indicator in the Web UI's Deployment Info
-  # nav section. Lists the public artifacts S3 prefix for versioned templates
-  # of the form <prefix>/idp-main_<version>.yaml and returns the highest
-  # semver. The check is disabled by default (PublicArtifactsBucket=""); the
-  # public release sets it to the regional aws-ml-blog bucket.
-  #
-  # The resolver tries unsigned/anonymous S3 reads first (botocore UNSIGNED)
-  # so it works against truly public buckets without any IAM grant. If the
-  # unsigned call fails (e.g. the bucket has BlockPublicAcls / requires
-  # SigV4), it falls back to signed requests using this Lambda's execution
-  # role — that's why we attach `s3:ListBucket` and `s3:GetObject` on the
-  # configured PublicArtifactsBucket (conditional on
-  # HasPublicArtifactsBucket so headless / empty-bucket builds don't get a
-  # dangling policy).
-  ##########################################################################
 
 
   VersionCheckResolverFunctionLogGroup:
@@ -7835,28 +7703,7 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:s3:::${PublicArtifactsBucket}/${PublicArtifactsPrefix}/*"
           - !Ref AWS::NoValue
 
-  VersionCheckResolverDataSource:
 
-    Type: AWS::AppSync::DataSource
-    Condition: UseAppSync
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      Name: VersionCheckResolverDataSource
-      Description: Lambda function for the public template version-check
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt HITLAppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt VersionCheckResolverFunction.Arn
-
-  GetLatestPublishedVersionResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: UseAppSync
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt VersionCheckResolverDataSource.Name
-      TypeName: Query
-      FieldName: getLatestPublishedVersion
 
   AgentProcessorLogGroup:
     Type: AWS::Logs::LogGroup
@@ -7919,7 +7766,7 @@ Resources:
           LOOKUP_FUNCTION_NAME: !Ref LookupFunction
           STRANDS_LOG_LEVEL: !Ref LogLevel
           AGENT_TABLE: !Ref AgentTable
-          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
+          APPSYNC_API_URL: ""
           ATHENA_DATABASE: !Ref ReportingDatabase
           ATHENA_OUTPUT_LOCATION: !Sub
             - "s3://${Bucket}/athena-results/"
@@ -8012,14 +7859,6 @@ Resources:
               - Effect: Allow
                 Action: sts:AssumeRole
                 Resource: !Ref BedrockHubRoleArn
-              - !Ref AWS::NoValue
-            - !If
-              - UseAppSync
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
               - !Ref AWS::NoValue
             - Effect: Allow
               Action:
@@ -8724,16 +8563,13 @@ Resources:
         # Allow the authenticated Cognito Identity Pool role to invoke the chat
         # streaming Function URL (AuthType=AWS_IAM) under the httpapi transport.
         # This is the identity-side grant the SigV4-signed browser request needs.
-        - !If
-          - UseHttpApi
-          - PolicyName: ChatStreamInvoke
-            PolicyDocument:
-              Version: 2012-10-17
-              Statement:
-                - Effect: Allow
-                  Action: lambda:InvokeFunctionUrl
-                  Resource: !GetAtt ChatStreamProcessorFunction.Arn
-          - !Ref AWS::NoValue
+        - PolicyName: ChatStreamInvoke
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunctionUrl
+                Resource: !GetAtt ChatStreamProcessorFunction.Arn
         - PolicyName: S3
           PolicyDocument:
             Version: 2012-10-17
@@ -8766,22 +8602,6 @@ Resources:
                   - "ssm:GetParameter"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${SettingsParameter}"
-        # Entire policy omitted under httpapi: a policy whose only statement is
-        # !If'd to AWS::NoValue leaves an empty Statement list, which IAM rejects
-        # ("Syntax errors in policy"). Gate the whole policy instead.
-        - !If
-          - UseAppSync
-          - PolicyName: GraphQL
-            PolicyDocument:
-              Version: 2012-10-17
-              Statement:
-                - Effect: Allow
-                  Action:
-                    - appsync:GraphQL
-                  Resource:
-                    - !Sub "${GraphQLApi.Arn}/types/Query/*"
-                    - !Sub "${GraphQLApi.Arn}/types/Subscription/*"
-          - !Ref AWS::NoValue
 
   AdminUser:
     Type: AWS::Cognito::UserPoolUser
@@ -8943,184 +8763,14 @@ Resources:
         - Key: Name
           Value: !Sub "${AWS::StackName}-lambda-sg"
 
-  GraphQLApi:
-    Type: AWS::AppSync::GraphQLApi
-    Condition: UseAppSync
-    # checkov:skip=CKV_AWS_194: AppSync has Field-Level logging is determined by LogLevel parameter
-    Properties:
-      Name: !Sub ${AWS::StackName}-api
-      Visibility: !If [UsePrivateAppSync, PRIVATE, GLOBAL]
-      AuthenticationType: AMAZON_COGNITO_USER_POOLS
-      UserPoolConfig:
-        UserPoolId: !Ref UserPool
-        AwsRegion: !Ref AWS::Region
-        DefaultAction: ALLOW
-      AdditionalAuthenticationProviders:
-        - AuthenticationType: AWS_IAM
-      LogConfig:
-        CloudWatchLogsRoleArn: !GetAtt AppSyncCwlRole.Arn
-        ExcludeVerboseContent: false
-        FieldLogLevel:
-          !FindInMap [ AppSyncLogLevelMap, !Ref LogLevel, FieldLogLevel ]
-      # Disable introspection for security purposes
-      IntrospectionConfig: DISABLED
 
-  GraphQLApiLogGroup:
-    Type: AWS::Logs::LogGroup
-    Condition: UseAppSync
-    Properties:
-      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
-      LogGroupName: !Sub "/aws/appsync/apis/${GraphQLApi.ApiId}"
-      RetentionInDays: !Ref LogRetentionDays
 
-  AppSyncCwlRole:
-    DependsOn:
-      - IsStacknameLengthOK
-    Type: AWS::IAM::Role
-    Condition: UseAppSync
-    Properties:
-      ManagedPolicyArns:
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs"
-      PermissionsBoundary:
-        !If [
-          HasPermissionsBoundary,
-          !Ref PermissionsBoundaryArn,
-          !Ref AWS::NoValue,
-        ]
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action:
-              - sts:AssumeRole
-            Principal:
-              Service:
-                - !Sub "appsync.${AWS::URLSuffix}"
 
-  # Optionally Secure API with WAF
 
-  WAFIPV4Set:
-    Type: AWS::WAFv2::IPSet
-    Condition: IsWafEnabledAndAppSync
-    Properties:
-      Name: !Sub ${AWS::StackName}-allowed-ips
-      Description: IP ranges allowed to access the AppSync API
-      Scope: REGIONAL
-      IPAddressVersion: IPV4
-      Addresses: !Split [ ", ", !Ref WAFAllowedIPv4Ranges ]
 
-  WAFLambdaServiceIPSet:
-    Type: AWS::WAFv2::IPSet
-    Condition: IsWafEnabledAndAppSync
-    Properties:
-      Name: !Sub ${AWS::StackName}-lambda-service-ips
-      Description: IP ranges used by AWS Lambda service
-      Scope: REGIONAL
-      IPAddressVersion: IPV4
-      Addresses: [ "0.0.0.0/32" ] # Placeholder - will be updated by IPSetUpdaterFunction
 
-  IPSetUpdaterFunction:
-    Type: AWS::Serverless::Function
-    Condition: IsWafEnabledAndAppSync
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
-          - id: W92
-            reason: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data
-    Properties:
-      PermissionsBoundary:
-        !If [
-          HasPermissionsBoundary,
-          !Ref PermissionsBoundaryArn,
-          !Ref AWS::NoValue,
-        ]
-      CodeUri: ./src/lambda/ipset_updater
-      Handler: index.lambda_handler
-      Runtime: python3.12
-      Timeout: 300
-      MemorySize: 256
-      Environment:
-        Variables:
-          LOG_LEVEL: !Ref LogLevel
-          IPSET_NAME: !Sub ${AWS::StackName}-lambda-service-ips
-      Policies:
-        - Version: "2012-10-17"
-          Statement:
-            - Effect: Allow
-              Action:
-                - wafv2:GetIPSet
-                - wafv2:UpdateIPSet
-              Resource: !GetAtt WAFLambdaServiceIPSet.Arn
-            - Effect: Allow
-              Action:
-                - wafv2:ListIPSets
-              Resource: !Sub "arn:${AWS::Partition}:wafv2:${AWS::Region}:${AWS::AccountId}:regional/ipset/*"
-      Events:
-        Schedule:
-          Type: Schedule
-          Properties:
-            Schedule: rate(1 day)
-            Description: Update Lambda IP ranges daily
-            Enabled: true
 
-  IPSetUpdaterCustomResource:
-    Type: Custom::IPSetUpdater
-    Condition: IsWafEnabledAndAppSync
-    Properties:
-      ServiceToken: !GetAtt IPSetUpdaterFunction.Arn
-      UpdateTime: <BUILD_DATE_TIME> # To force an update when stack is updated
 
-  WAFWebACL:
-    Type: AWS::WAFv2::WebACL
-    Condition: IsWafEnabledAndAppSync
-    Properties:
-      Name: !Sub ${AWS::StackName}-appsync-acl
-      Description: Web ACL for AppSync API
-      Scope: REGIONAL
-      DefaultAction:
-        Block: { }
-      Rules:
-        - Name: AllowLambdaServiceIPs
-          Priority: 1
-          Statement:
-            IPSetReferenceStatement:
-              Arn: !GetAtt WAFLambdaServiceIPSet.Arn
-          Action:
-            Allow: { }
-          VisibilityConfig:
-            SampledRequestsEnabled: true
-            CloudWatchMetricsEnabled: true
-            MetricName: AllowLambdaServiceIPsRule
-        - Name: AllowListedIPs
-          Priority: 2
-          Statement:
-            IPSetReferenceStatement:
-              Arn: !GetAtt WAFIPV4Set.Arn
-          Action:
-            Allow: { }
-          VisibilityConfig:
-            SampledRequestsEnabled: true
-            CloudWatchMetricsEnabled: true
-            MetricName: AllowListedIPsRule
-      VisibilityConfig:
-        SampledRequestsEnabled: true
-        CloudWatchMetricsEnabled: true
-        MetricName: APIAccessControl
-
-  WAFWebACLAssociation:
-    Type: AWS::WAFv2::WebACLAssociation
-    Condition: IsWafEnabledAndAppSync
-    Properties:
-      ResourceArn: !GetAtt GraphQLApi.Arn
-      WebACLArn: !GetAtt WAFWebACL.Arn
-
-  # Api Schema, datasource, resolvers
 
   TestFileCopyQueueDLQ:
     Type: AWS::SQS::Queue
@@ -9643,7 +9293,7 @@ Resources:
           DISCOVERY_BUCKET: !Ref DiscoveryBucket
           DISCOVERY_TRACKING_TABLE: !Ref DiscoveryTrackingTable
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
-          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
+          APPSYNC_API_URL: ""
           BLUEPRINT_OPTIMIZATION_FUNCTION_NAME: !Ref BlueprintOptimizationFunction
       LoggingConfig:
         LogGroup: !Ref DiscoveryProcessorFunctionLogGroup
@@ -9667,14 +9317,6 @@ Resources:
               Action:
                 - cloudwatch:PutMetricData
               Resource: "*"
-            - !If
-              - UseAppSync
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -9751,7 +9393,7 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           DISCOVERY_BUCKET: !Ref DiscoveryBucket
-          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
+          APPSYNC_API_URL: ""
       LoggingConfig:
         LogGroup: !Ref MultiDocDiscoveryPrepareFunctionLogGroup
       Policies:
@@ -9765,13 +9407,6 @@ Resources:
             - Effect: Allow
               Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
               Resource: !GetAtt CustomerManagedEncryptionKey.Arn
-            - !If
-              - UseAppSync
-              - Effect: Allow
-                Action: [appsync:GraphQL]
-                Resource: !Sub "${GraphQLApi.Arn}/*"
-              - !Ref AWS::NoValue
-
   MultiDocDiscoveryPrepareFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -9805,11 +9440,10 @@ Resources:
         ArtifactBucket: "<ARTIFACT_BUCKET_TOKEN>"
         ArtifactsBucketKmsKeyArn: !Ref ArtifactsBucketKmsKeyArn
         SourceZipfile: "<ARTIFACT_PREFIX_TOKEN>/multi-doc-discovery-source.zip"
-        # Empty under httpapi so discovery status updates write straight to the
-        # DiscoveryTrackingTable (appsync_status._update_status_dynamodb) instead
-        # of calling the AppSync mutation; the UI polls listDiscoveryJobs.
-        AppSyncApiUrl: !If [UseHttpApi, "", !GetAtt GraphQLApi.GraphQLUrl]
-        AppSyncApiArn: !If [UseHttpApi, "", !GetAtt GraphQLApi.Arn]
+        # AppSync removed: discovery status updates write straight to the
+        # DiscoveryTrackingTable; the UI polls listDiscoveryJobs. The
+        # AppSyncApiUrl/AppSyncApiArn params are no longer passed (the nested
+        # template no longer declares them).
         DiscoveryTrackingTableName: !Ref DiscoveryTrackingTable
         BedrockHubRoleArn: !Ref BedrockHubRoleArn
         BedrockHubRoleExternalId: !Ref BedrockHubRoleExternalId
@@ -9910,7 +9544,7 @@ Resources:
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
+          APPSYNC_API_URL: ""
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           STACK_NAME: !Ref AWS::StackName
           DISCOVERY_TRACKING_TABLE: !Ref DiscoveryTrackingTable
@@ -9928,14 +9562,6 @@ Resources:
               Action:
                 - cloudwatch:PutMetricData
               Resource: "*"
-            - !If
-              - UseAppSync
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -10302,27 +9928,15 @@ Resources:
             Value: !Ref UserPoolClient
           - Name: VITE_IDENTITY_POOL_ID
             Value: !Ref IdentityPool
-          - Name: VITE_APPSYNC_GRAPHQL_URL
-            Value: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
-          # API transport selection + HTTP API endpoint. VITE_API_BASE_URL is
-          # the HTTP API base (empty while ApiTransport=appsync so the UI keeps
-          # using AppSync). The thin REST client posts to ${VITE_API_BASE_URL}/op/<field>.
-          - Name: VITE_API_TRANSPORT
-            Value: !Ref ApiTransport
+          # HTTP API endpoint. VITE_API_BASE_URL is the HTTP API base; the thin
+          # REST client posts to ${VITE_API_BASE_URL}/op/<field>. (AppSync removed,
+          # so VITE_APPSYNC_GRAPHQL_URL / VITE_API_TRANSPORT are no longer emitted.)
           - Name: VITE_API_BASE_URL
-            Value: !If
-              - UseHttpApi
-              - !GetAtt APPSYNCSTACK.Outputs.HttpApiEndpoint
-              - ""
-          # Chat streaming Function URL (IAM-authed, response streaming). Empty
-          # while ApiTransport=appsync so the UI keeps using AppSync chat
-          # subscriptions. The signed stream client (src/api/stream-client.ts)
-          # reads this.
+            Value: !GetAtt APPSYNCSTACK.Outputs.HttpApiEndpoint
+          # Chat streaming Function URL (IAM-authed, response streaming). The
+          # signed stream client (src/api/stream-client.ts) reads this.
           - Name: VITE_STREAM_URL
-            Value: !If
-              - UseHttpApi
-              - !GetAtt ChatStreamProcessorUrl.FunctionUrl
-              - ""
+            Value: !GetAtt ChatStreamProcessorUrl.FunctionUrl
           - Name: VITE_AWS_REGION
             Value: !Ref AWS::Region
           - Name: VITE_SHOULD_HIDE_SIGN_UP
@@ -10685,93 +10299,13 @@ Resources:
                   # `Lambda:IllegalArgument` 403.
                   - !GetAtt VersionCheckResolverFunction.Arn
 
-  UserManagementDataSource:
-    Type: AWS::AppSync::DataSource
-    Condition: UseAppSync
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      Name: UserManagementDataSource
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt HITLAppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt UserManagementFunction.Arn
 
-  CreateUserResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: UseAppSync
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt UserManagementDataSource.Name
-      TypeName: Mutation
-      FieldName: createUser
 
-  DeleteUserResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: UseAppSync
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt UserManagementDataSource.Name
-      TypeName: Mutation
-      FieldName: deleteUser
 
-  ListUsersResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: UseAppSync
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt UserManagementDataSource.Name
-      TypeName: Query
-      FieldName: listUsers
 
-  UpdateUserResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: UseAppSync
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt UserManagementDataSource.Name
-      TypeName: Mutation
-      FieldName: updateUser
 
-  GetMyProfileResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: UseAppSync
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt UserManagementDataSource.Name
-      TypeName: Query
-      FieldName: getMyProfile
 
-  CompleteSectionReviewDataSource:
-    Type: AWS::AppSync::DataSource
-    Condition: UseAppSync
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      Name: CompleteSectionReviewDataSource
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt HITLAppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt CompleteSectionReviewFunction.Arn
 
-  CompleteSectionReviewResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: UseAppSync
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt CompleteSectionReviewDataSource.Name
-      TypeName: Mutation
-      FieldName: completeSectionReview
-
-  ##########################################################################
-  # Custom Model Fine-Tuning Resources
-  ##########################################################################
-
-  # S3 Bucket for Fine-Tuning Training Data
   FinetuningDataBucket:
     Type: AWS::S3::Bucket
     UpdateReplacePolicy: Retain
@@ -11385,122 +10919,15 @@ Resources:
                 - kms:DescribeKey
               Resource: !GetAtt CustomerManagedEncryptionKey.Arn
 
-  # Fine-Tuning Jobs AppSync Data Source
-  FinetuningJobsDataSource:
-    Type: AWS::AppSync::DataSource
-    Condition: UseAppSync
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      Name: FinetuningJobsDataSource
-      Description: Lambda function for fine-tuning job operations
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt HITLAppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt FinetuningJobsResolverFunction.Arn
 
-  # Update HITLAppSyncServiceRole to include fine-tuning resolver
-  # (This is handled by adding the function ARN to the existing role's policy)
 
-  # Fine-Tuning AppSync Resolvers
-  CreateFinetuningJobResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: UseAppSync
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
-      TypeName: Mutation
-      FieldName: createFinetuningJob
 
-  DeleteFinetuningJobResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: UseAppSync
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
-      TypeName: Mutation
-      FieldName: deleteFinetuningJob
 
-  UpdateFinetuningJobStatusResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: UseAppSync
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
-      TypeName: Mutation
-      FieldName: updateFinetuningJobStatus
 
-  GetFinetuningJobResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: UseAppSync
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
-      TypeName: Query
-      FieldName: getFinetuningJob
 
-  ListFinetuningJobsResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: UseAppSync
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
-      TypeName: Query
-      FieldName: listFinetuningJobs
 
-  ValidateTestSetForFinetuningResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: UseAppSync
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
-      TypeName: Query
-      FieldName: validateTestSetForFinetuning
 
-  ListAvailableModelsResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: UseAppSync
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
-      TypeName: Query
-      FieldName: listAvailableModels
 
-  SkipAllSectionsReviewResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: UseAppSync
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt CompleteSectionReviewDataSource.Name
-      TypeName: Mutation
-      FieldName: skipAllSectionsReview
-
-  ClaimReviewResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: UseAppSync
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt CompleteSectionReviewDataSource.Name
-      TypeName: Mutation
-      FieldName: claimReview
-
-  ReleaseReviewResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: UseAppSync
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt CompleteSectionReviewDataSource.Name
-      TypeName: Mutation
-      FieldName: releaseReview
 
 Outputs:
   CustomerManagedEncryptionKeyArn:
@@ -11640,19 +11067,8 @@ Outputs:
       - - !Sub "VITE_USER_POOL_ID=${UserPool}"
         - !Sub "VITE_USER_POOL_CLIENT_ID=${UserPoolClient}"
         - !Sub "VITE_IDENTITY_POOL_ID=${IdentityPool}"
-        - !If
-          - UseAppSync
-          - !Sub "VITE_APPSYNC_GRAPHQL_URL=${GraphQLApi.GraphQLUrl}"
-          - "VITE_APPSYNC_GRAPHQL_URL="
-        - !Sub "VITE_API_TRANSPORT=${ApiTransport}"
-        - !If
-          - UseHttpApi
-          - !Sub "VITE_API_BASE_URL=${APPSYNCSTACK.Outputs.HttpApiEndpoint}"
-          - ""
-        - !If
-          - UseHttpApi
-          - !Sub "VITE_STREAM_URL=${ChatStreamProcessorUrl.FunctionUrl}"
-          - ""
+        - !Sub "VITE_API_BASE_URL=${APPSYNCSTACK.Outputs.HttpApiEndpoint}"
+        - !Sub "VITE_STREAM_URL=${ChatStreamProcessorUrl.FunctionUrl}"
         - !Sub "VITE_AWS_REGION=${AWS::Region}"
         - !Sub "VITE_SETTINGS_PARAMETER=${SettingsParameter}"
         - !If
@@ -11740,37 +11156,6 @@ Outputs:
       security group on all VPC Interface Endpoints they create for this stack.
       See scripts/vpc-endpoints.yaml for the endpoint template.
     Value: !GetAtt LambdaVpcSecurityGroup.GroupId
-  AppSyncEndpointForDNS:
-    Condition: IsPrivateAppSyncAndAppSync
-    Description: >-
-      Fully-qualified AppSync GraphQL hostname, provided for private-network
-      DNS setup when AppSyncVisibility=PRIVATE. For cross-VPC, cross-account,
-      or hybrid (on-premises) access, create TWO API-ID-scoped Route 53 Private
-      Hosted Zones — one named for this exact hostname and one for its realtime
-      counterpart (this hostname with 'appsync-api' replaced by
-      'appsync-realtime-api') — and add an apex A-record alias in each,
-      targeting the AppSync VPC Interface Endpoint (EvaluateTargetHealth=false).
-      Scope the zones to these exact hostnames, NOT the broader regional
-      'appsync-api.<region>' service domain, so DNS for every other
-      AppSync API in the region is unaffected. Both zones must be associated
-      with each VPC that resolves the API. See docs/deployment-private-network.md,
-      "AppSync DNS resolution in cross-VPC and hybrid networks".
-    Value: !Select
-      - 2
-      - !Split ["/", !GetAtt GraphQLApi.GraphQLUrl]
-
-  # ── Feature Platform cross-stack export ───────────────────────────────────
-  # `${AWS::StackName}-TrackingTableName` lets installed feature stacks
-  # Fn::ImportValue the main stack's document tracking table (e.g. the
-  # docs-by-status sample scans it for per-status counts).
-  #
-  # This export is *conditionally suppressed* when EnableFeaturePlatform=true,
-  # because the FeaturePlatformStack nested stack
-  # (feature-platform/main-stack-extensions/template.yaml) re-exports the same
-  # name for feature-stack consumption. CloudFormation rejects two stacks
-  # declaring the same export name, so when the Feature Platform is enabled it
-  # owns the export, and when it is disabled the main stack owns it. Either way
-  # a feature stack that Fn::ImportValue's this name sees the same value.
   TrackingTableName:
     Condition: IsFeaturePlatformDisabled
     Description: Name of the DynamoDB document tracking table (feature-stack cross-stack ref)

@@ -53,19 +53,10 @@ Parameters:
   SourceZipfile:
     Type: String
     Description: S3 key for the source zip file used by CodeBuild
-  AppSyncApiUrl:
-    Type: String
-    Description: AppSync GraphQL API URL for real-time status updates
-    Default: ""
-  AppSyncApiArn:
-    Type: String
-    Description: AppSync GraphQL API ARN for IAM permissions
-    Default: ""
   DiscoveryTrackingTableName:
     Type: String
     Description: >-
-      DiscoveryTrackingTable name. Used to write job status directly to DynamoDB
-      under the HTTP API transport (when AppSyncApiUrl is empty).
+      DiscoveryTrackingTable name. Used to write job status directly to DynamoDB.
     Default: ""
   BedrockHubRoleArn:
     Type: String
@@ -105,10 +96,6 @@ Parameters:
     Default: ""
 
 Conditions:
-  # When empty (HTTP API transport), the appsync:GraphQL IAM statement is
-  # omitted — discovery status is written straight to DynamoDB instead, and
-  # "${AppSyncApiArn}/*" would otherwise resolve to the invalid resource "/*".
-  HasAppSyncApi: !Not [!Equals [!Ref AppSyncApiArn, ""]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   DeployInVPC: !Not [!Equals [!Ref VpcId, ""]]
   HasBedrockHubRole: !Not [!Equals [!Ref BedrockHubRoleArn, ""]]
@@ -442,7 +429,6 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           DISCOVERY_BUCKET: !Ref DiscoveryBucketName
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           DISCOVERY_TRACKING_TABLE: !Ref DiscoveryTrackingTableName
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
@@ -485,14 +471,7 @@ Resources:
             - Effect: Allow
               Action: [cloudwatch:PutMetricData]
               Resource: "*"
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action: [appsync:GraphQL]
-                Resource: !Sub "${AppSyncApiArn}/*"
-              - !Ref AWS::NoValue
-            # HTTP API transport: write discovery job status straight to DynamoDB
-            # (appsync_status._update_status_dynamodb) when AppSync is absent.
+            # Write discovery job status straight to DynamoDB.
             - Effect: Allow
               Action:
                 - dynamodb:UpdateItem
@@ -533,7 +512,6 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           DISCOVERY_BUCKET: !Ref DiscoveryBucketName
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           DISCOVERY_TRACKING_TABLE: !Ref DiscoveryTrackingTableName
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
@@ -557,14 +535,7 @@ Resources:
                 Action: sts:AssumeRole
                 Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action: [appsync:GraphQL]
-                Resource: !Sub "${AppSyncApiArn}/*"
-              - !Ref AWS::NoValue
-            # HTTP API transport: write discovery job status straight to DynamoDB
-            # (appsync_status._update_status_dynamodb) when AppSync is absent.
+            # Write discovery job status straight to DynamoDB.
             - Effect: Allow
               Action:
                 - dynamodb:UpdateItem
@@ -683,7 +654,6 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           DISCOVERY_BUCKET: !Ref DiscoveryBucketName
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           DISCOVERY_TRACKING_TABLE: !Ref DiscoveryTrackingTableName
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
@@ -722,14 +692,7 @@ Resources:
             - Effect: Allow
               Action: [cloudwatch:PutMetricData]
               Resource: "*"
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action: [appsync:GraphQL]
-                Resource: !Sub "${AppSyncApiArn}/*"
-              - !Ref AWS::NoValue
-            # HTTP API transport: write discovery job status straight to DynamoDB
-            # (appsync_status._update_status_dynamodb) when AppSync is absent.
+            # Write discovery job status straight to DynamoDB.
             - Effect: Allow
               Action:
                 - dynamodb:UpdateItem

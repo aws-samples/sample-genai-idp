@@ -8,12 +8,11 @@ import { sendAgentChatMessage, onAgentChatMessageUpdate, getChatMessages } from 
 import { useAgentChatContext } from '../contexts/agentChat';
 import type { ChatMessage } from '../types/agent-chat';
 import { streamChat, type StreamCredentials, type StreamEvent } from '../api/stream-client';
-import { apiTransport } from '../aws-exports';
 import useCurrentSessionCreds from './use-current-session-creds';
 
 const logger = new ConsoleLogger('useAgentChat');
 const client = generateClient();
-const useHttpApiTransport = apiTransport === 'httpapi';
+const useHttpApiTransport = true;
 
 interface AgentChatConfig {
   agentType: string;

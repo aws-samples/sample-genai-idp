@@ -35,7 +35,6 @@ import { renderHitlStatus } from '../common/hitl-status-renderer';
 import StepFunctionFlowViewer from '../step-function-flow/StepFunctionFlowViewer';
 import TroubleshootModal from './TroubleshootModal';
 import { claimReview } from '../../graphql/generated';
-import { apiTransport } from '../../aws-exports';
 import usePolling from '../../hooks/use-polling';
 import { exportDocument, triggerBrowserDownload } from './document-export';
 import type { ExportErrorEntry, ExportProgress, ExportScope } from './document-export';
@@ -148,7 +147,7 @@ const client = generateClient();
 const logger = new ConsoleLogger('DocumentPanel');
 
 // Detail-view polling cadence under the HTTP API transport (no subscriptions).
-const USE_POLLING = apiTransport === 'httpapi';
+const USE_POLLING = true;
 const DOCUMENT_DETAIL_POLL_INTERVAL_MS = 4000;
 
 // Component to display confidence alerts count only

@@ -286,15 +286,15 @@ def handler(event, context):
             logger.warning("QUEUE_URL not configured, skipping SQS message")
             processing_job_id = None
 
-        # Use AppSync service for immediate UI status update
+        # Update document status for immediate UI feedback
         try:
-            appsync_service = create_document_service(mode='appsync')
+            status_service = create_document_service(mode='dynamodb')
             document.status = Status.QUEUED  # Ensure status is QUEUED for UI
-            updated_document = appsync_service.update_document(document)
-            logger.info("Updated document status to QUEUED in AppSync for immediate UI feedback")
+            status_service.update_document(document)
+            logger.info("Updated document status to QUEUED for immediate UI feedback")
         except Exception as e:
-            logger.warning(f"Failed to update document status in AppSync: {str(e)}")
-            # Don't fail the entire operation if AppSync update fails
+            logger.warning(f"Failed to update document status: {str(e)}")
+            # Don't fail the entire operation if the status update fails
 
         # Log successful completion
         logger.info(f"Successfully processed changes for {len(modified_sections)} sections")

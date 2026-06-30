@@ -7,7 +7,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 vi.mock('../../aws-exports', () => ({
   streamUrl: 'https://abc123.lambda-url.us-west-2.on.aws/',
   awsRegion: 'us-west-2',
-  apiTransport: 'httpapi',
 }));
 
 // SignatureV4 hits WebCrypto via Sha256; stub the signer so the test stays in

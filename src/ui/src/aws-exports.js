@@ -9,11 +9,9 @@ const {
   VITE_USER_POOL_ID,
   VITE_USER_POOL_CLIENT_ID,
   VITE_IDENTITY_POOL_ID,
-  VITE_APPSYNC_GRAPHQL_URL,
-  // API transport selection ('appsync' | 'httpapi') and the HTTP API / Lambda
-  // streaming endpoints. Populated when ApiTransport=httpapi; the thin REST
-  // client (src/api/) reads these. Empty/undefined when using AppSync.
-  VITE_API_TRANSPORT,
+  // HTTP API base URL + Lambda streaming endpoint. The thin REST client
+  // (src/api/) posts queries/mutations to ${VITE_API_BASE_URL}/op/<field>;
+  // chat streams come from VITE_STREAM_URL. (AppSync has been removed.)
   VITE_API_BASE_URL,
   VITE_STREAM_URL,
   VITE_AWS_REGION,
@@ -23,10 +21,6 @@ const {
   VITE_CLOUDFRONT_DOMAIN,
 } = import.meta.env;
 
-// Transport mode for UI<->backend communication. 'httpapi' routes
-// queries/mutations through the thin REST client and uses polling + Lambda
-// streaming; anything else (default) uses AppSync GraphQL via Amplify.
-export const apiTransport = VITE_API_TRANSPORT || 'appsync';
 export const apiBaseUrl = VITE_API_BASE_URL || '';
 export const streamUrl = VITE_STREAM_URL || '';
 export const awsRegion = VITE_AWS_REGION;
@@ -65,9 +59,6 @@ const awsmobile = {
     passwordPolicyCharacters: [],
   },
   aws_cognito_verification_mechanisms: ['EMAIL'],
-  aws_appsync_graphqlEndpoint: VITE_APPSYNC_GRAPHQL_URL,
-  aws_appsync_region: VITE_AWS_REGION,
-  aws_appsync_authenticationType: 'AMAZON_COGNITO_USER_POOLS',
 };
 
 export default awsmobile;
