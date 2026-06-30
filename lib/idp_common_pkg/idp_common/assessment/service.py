@@ -1132,6 +1132,7 @@ class AssessmentService:
                             extraction_results,
                             page_data_by_page,
                             geometry_mode,
+                            self._get_class_schema(class_label),
                         )
                 except Exception as e:
                     logger.warning(

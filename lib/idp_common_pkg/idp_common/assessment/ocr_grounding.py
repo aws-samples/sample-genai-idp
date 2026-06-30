@@ -39,6 +39,12 @@ logger = logging.getLogger(__name__)
 # Minimum Jaccard token-overlap for a fuzzy single-line match.
 _FUZZY_MATCH_THRESHOLD = 0.6
 
+# Minimum character-level Levenshtein similarity for the last-resort fuzzy tier
+# (matches the evaluation module's default FUZZY threshold). Catches OCR noise /
+# near-misses (e.g. "Acme Corp" vs "Acrne Corp"), NOT reformatting — that is
+# handled by format variants + type-aware equality below.
+_LEVENSHTEIN_MATCH_THRESHOLD = 0.8
+
 # Cap on how many adjacent lines a single value may span (multi-line union).
 # Keeps unions tight; multi-line addresses/cells are typically 2-4 lines.
 _MAX_SPAN_LINES = 6
@@ -69,6 +75,224 @@ def _jaccard(a: set, b: set) -> float:
     if inter == 0:
         return 0.0
     return inter / len(a | b)
+
+
+# --------------------------------------------------------------------------- #
+# Format-aware matching helpers
+#
+# Extraction often canonicalizes a value to a schema-prescribed format that does
+# NOT match how it is rendered in the document (and thus in OCR text): a date
+# extracted as "2022-04-04" appears as "04/04/2022"; an amount "1234.00" appears
+# as "$1,234.00"; a phone "+15551234567" appears as "(555) 123-4567". Plain text
+# matching then fails and the field gets no geometry. These helpers bridge that
+# gap two ways: (1) type-aware equality — parse both the value and an OCR line as
+# the same logical type (date/number) and compare the parsed forms; (2) value
+# variants — render the value in the common surface forms so the existing
+# exact/substring/span matcher can hit. Both are precision-preserving: a parse
+# must succeed on BOTH sides, so unrelated text never spuriously matches.
+# --------------------------------------------------------------------------- #
+
+# Hint values describing the logical type of a field, used to choose which
+# format bridges to attempt. Resolved from the JSON-Schema (type/format) when
+# available, else inferred from the value itself.
+HINT_DATE = "date"
+HINT_NUMBER = "number"
+HINT_PHONE = "phone"
+HINT_STRING = "string"
+
+
+def _parse_date(text: Any):
+    """Parse a string as a date, returning a ``date`` or None.
+
+    Uses dateutil when available (handles most human formats). Conservative:
+    requires the string to actually contain digits so plain words ("March")
+    or arbitrary tokens don't parse into today's date.
+    """
+    if text is None:
+        return None
+    s = str(text).strip()
+    if not s or not any(ch.isdigit() for ch in s):
+        return None
+    # A real date needs a separator or a month name — otherwise a bare number
+    # like "1234.00" or "100" would parse as a date (dateutil is permissive).
+    if not (re.search(r"[/\-.:]", s) or re.search(r"[A-Za-z]", s)):
+        return None
+    try:
+        from dateutil import parser as _dateparser
+
+        if len(re.sub(r"\D", "", s)) < 4:
+            return None
+        return _dateparser.parse(s, fuzzy=False).date()
+    except Exception:  # noqa: BLE001 - any parse failure -> not a date
+        return None
+
+
+def _parse_number(text: Any) -> Optional[float]:
+    """Parse a string as a number, stripping currency/commas/parens, or None."""
+    if text is None:
+        return None
+    s = str(text).strip()
+    if not s or not any(ch.isdigit() for ch in s):
+        return None
+    # Accounting negatives: (1,234.00) -> -1234.00
+    neg = s.startswith("(") and s.endswith(")")
+    cleaned = re.sub(r"[,$%\s()]", "", s)
+    # Reject things that aren't basically a number (e.g. "12 Main St" -> "12MainSt").
+    if not re.fullmatch(r"[-+]?\d*\.?\d+", cleaned):
+        return None
+    try:
+        val = float(cleaned)
+        return -val if neg else val
+    except (ValueError, TypeError):
+        return None
+
+
+def _digits(text: Any) -> str:
+    """All digits in a string (for phone-number comparison)."""
+    return re.sub(r"\D", "", str(text)) if text is not None else ""
+
+
+def _levenshtein_sim(a: str, b: str) -> float:
+    """Character-level Levenshtein similarity (0-1), reusing the evaluation module.
+
+    Returns 0.0 on import failure (the tier is then simply inert). Guarded so an
+    empty/degenerate string never claims a spurious match.
+    """
+    if not a or not b:
+        return 0.0
+    try:
+        from idp_common.evaluation.comparator import fuzz_score
+
+        return fuzz_score(a, b)
+    except Exception:  # noqa: BLE001 - keep grounding resilient if eval is absent
+        return 0.0
+
+
+def _infer_hint(value: Any) -> str:
+    """Infer a field's logical type from the value itself (heuristic fallback).
+
+    Order matters:
+    - PHONE before NUMBER: a phone-shaped value ("+1 (555) 123-4567") would parse
+      as a number and then miss digit-suffix matching against "(555) 123-4567".
+      Requires 7-15 digits AND phone punctuation (+, (), -, space) and nothing
+      else, so a bare integer falls through to NUMBER.
+    - NUMBER before DATE: a genuine date ("04/04/2022") fails the strict numeric
+      regex, while a bare number ("1234.00") must NOT be mistaken for a date
+      (dateutil is permissive).
+    """
+    s = str(value).strip() if value is not None else ""
+    digits = _digits(value)
+    # PHONE: 7-15 digits with phone punctuation and nothing else, AND not a date
+    # ("2022-04-04" is digits+dashes but is a date) and not a plain decimal.
+    if (
+        7 <= len(digits) <= 15
+        and len(digits) == len(re.sub(r"[\s\-().+]", "", s))
+        and re.search(r"[()+]|\d[\s\-]\d", s)
+        and "." not in s
+        and _parse_date(value) is None
+    ):
+        return HINT_PHONE
+    if _parse_number(value) is not None:
+        return HINT_NUMBER
+    if _parse_date(value) is not None:
+        return HINT_DATE
+    return HINT_STRING
+
+
+# JSON-Schema 'format' values that imply a date.
+_SCHEMA_DATE_FORMATS = {"date", "date-time", "datetime"}
+_SCHEMA_NUMBER_TYPES = {"number", "integer"}
+
+
+def _resolve_hint(value: Any, schema_hint: Optional[Dict[str, Any]]) -> str:
+    """Resolve a field's logical type: JSON-Schema hint first, else value-based.
+
+    ``schema_hint`` is the field's JSON-Schema fragment (``{"type":..,"format":..}``).
+    When it names a date/number type we trust it; otherwise (or absent) we infer
+    from the value so any config benefits without declaring formats.
+    """
+    if isinstance(schema_hint, dict):
+        fmt = str(schema_hint.get("format", "")).lower()
+        typ = str(schema_hint.get("type", "")).lower()
+        if fmt in _SCHEMA_DATE_FORMATS:
+            return HINT_DATE
+        if typ in _SCHEMA_NUMBER_TYPES:
+            return HINT_NUMBER
+        # A string field whose value still looks like a date/number/phone is
+        # bridged via the value-based inference (the schema didn't forbid it).
+    return _infer_hint(value)
+
+
+def _value_variants(value: Any, hint: str) -> List[str]:
+    """Surface-form renderings of ``value`` to try against OCR text.
+
+    Always includes the value as-is. For dates/numbers, adds the common ways the
+    same logical value is written in documents so the exact/substring matcher can
+    hit despite reformatting. All variants are returned RAW (the caller normalizes).
+    """
+    variants: List[str] = [str(value)] if value is not None else []
+    if hint == HINT_DATE:
+        d = _parse_date(value)
+        if d is not None:
+            for fmt in (
+                "%m/%d/%Y",
+                "%-m/%-d/%Y",
+                "%d/%m/%Y",
+                "%m-%d-%Y",
+                "%d-%m-%Y",
+                "%Y/%m/%d",
+                "%Y-%m-%d",
+                "%B %d, %Y",
+                "%b %d, %Y",
+                "%d %B %Y",
+                "%d %b %Y",
+                "%m/%d/%y",
+                "%-m/%-d/%y",
+            ):
+                try:
+                    variants.append(d.strftime(fmt))
+                except ValueError:
+                    continue
+    elif hint == HINT_NUMBER:
+        n = _parse_number(value)
+        if n is not None:
+            # Integer-valued -> also a no-decimal form; always a thousands form.
+            as_int = int(n) if n == int(n) else None
+            cores = []
+            if as_int is not None:
+                cores += [f"{as_int}", f"{as_int:,}"]
+            cores += [f"{n:.2f}", f"{abs(n):,.2f}", f"{n}"]
+            for core in cores:
+                variants.append(core)
+                variants.append(f"${core}")
+    return variants
+
+
+def _type_equal(value: Any, line_text: Any, hint: str) -> bool:
+    """True when ``value`` and an OCR line are the SAME logical value by type.
+
+    This is the robust bridge for reformatting (e.g. 2022-04-04 == 04/04/2022),
+    where character/­token similarity is low but the parsed values are identical.
+    Requires a successful parse on BOTH sides, so it never matches unrelated text.
+    """
+    if hint == HINT_DATE:
+        dv = _parse_date(value)
+        return dv is not None and dv == _parse_date(line_text)
+    if hint == HINT_NUMBER:
+        nv = _parse_number(value)
+        nl = _parse_number(line_text)
+        return nv is not None and nl is not None and nv == nl
+    if hint == HINT_PHONE:
+        dv = _digits(value)
+        dl = _digits(line_text)
+        if len(dv) < 7 or len(dl) < 7:
+            return False
+        # Exact, or one is a suffix of the other (country-code prefix differs,
+        # e.g. "+1 555 123 4567" vs "(555) 123-4567"). Bounded to phone lengths.
+        return dv == dl or (
+            len(dl) <= 15 and len(dv) <= 15 and (dv.endswith(dl) or dl.endswith(dv))
+        )
+    return False
 
 
 def load_page_ocr_data(
@@ -158,21 +382,48 @@ def _line_box(line: Dict[str, Any]) -> Optional[Dict[str, float]]:
 _TIER_EXACT = 1
 _TIER_SUBSTRING = 2
 _TIER_SPAN = 3
-_TIER_PARTIAL = 4
-_TIER_FUZZY = 5
+# Type-aware equality (date/number/phone parse to the same value) — high
+# precision (both sides must parse), ranks just below direct text coverage and
+# above partial/token/char fuzzy. This is what bridges format reformatting
+# (e.g. 2022-04-04 == 04/04/2022) that text similarity cannot.
+_TIER_TYPED = 4
+_TIER_PARTIAL = 5
+_TIER_FUZZY = 6
+# Character-level Levenshtein near-miss (OCR noise) — last resort.
+_TIER_LEVENSHTEIN = 7
+
+# geometry_source tags for the format-bridged tiers (distinct from "ocr" so they
+# are auditable). _TIER_TYPED / variant matches -> "ocr-normalized";
+# _TIER_LEVENSHTEIN -> "ocr-fuzzy".
+_SOURCE_NORMALIZED = "ocr-normalized"
+_SOURCE_FUZZY = "ocr-fuzzy"
 
 
 def _collect_candidates_in_page(
-    norm_value: str, value_tokens: set, page_data: Dict[str, Any], page_num: int
+    norm_value: str,
+    value_tokens: set,
+    page_data: Dict[str, Any],
+    page_num: int,
+    norm_variants: Optional[List[str]] = None,
+    raw_value: Any = None,
+    hint: str = HINT_STRING,
 ) -> List[Tuple[int, Dict[str, Any], str, Optional[float]]]:
     """
     Collect *all* matching OCR lines on one page, each tagged with a precision tier.
 
-    Returns a list of ``(tier, geometry, geometry_source, ocr_confidence)`` where
-    ``geometry`` is ``{"boundingBox": {...0-1...}, "page": page_num}``. The caller
-    picks the best tier globally and disambiguates ties spatially — critical for
-    repeated values (e.g. the same transaction amount on several rows), where
-    returning the first match would collapse every row onto one line.
+    Matching layers (best tier wins; the caller filters to the most precise):
+      1. EXACT/SUBSTRING/PARTIAL on the value AND its format variants (``norm_variants``)
+         — variants bridge reformatting (e.g. "04/04/2022" for value "2022-04-04").
+         A variant hit is tagged ``ocr-normalized``.
+      2. SPAN — value text reconstructed across consecutive lines.
+      3. TYPED — date/number/phone parse to the SAME logical value (``hint``); the
+         robust bridge for reformatting that text similarity misses. Tagged
+         ``ocr-normalized``.
+      4. FUZZY — token overlap (existing).
+      5. LEVENSHTEIN — character similarity >= threshold (OCR noise). Tagged
+         ``ocr-fuzzy``.
+
+    Returns ``(tier, geometry, geometry_source, ocr_confidence)`` tuples.
     """
     if not norm_value or not page_data.get("geometryAvailable"):
         return []
@@ -181,7 +432,19 @@ def _collect_candidates_in_page(
     if not isinstance(lines, list) or not lines:
         return []
 
-    # Pre-compute normalized line text once.
+    # Variant forms to text-match against (normalized, deduped, non-empty). The
+    # primary value is variant[0]; any OTHER variant that hits is a normalized
+    # (format-bridged) match and is tagged accordingly.
+    variants = norm_variants if norm_variants else [norm_value]
+    seen_v: set = set()
+    norm_variant_list: List[str] = []
+    for v in variants:
+        nv = _normalize(v)
+        if nv and nv not in seen_v:
+            seen_v.add(nv)
+            norm_variant_list.append(nv)
+
+    # Pre-compute normalized + raw line text once.
     norm_lines: List[Tuple[str, Dict[str, Any]]] = []
     for line in lines:
         if isinstance(line, dict):
@@ -192,30 +455,55 @@ def _collect_candidates_in_page(
     for norm_text, line in norm_lines:
         if not norm_text:
             continue
-        if norm_text == norm_value:
-            tier = _TIER_EXACT
-        elif norm_value in norm_text:
-            # Whole value covered by one line.
-            tier = _TIER_SUBSTRING
-        elif norm_text in norm_value:
-            # A single line is a fragment of a longer value (partial coverage).
-            tier = _TIER_PARTIAL
-        else:
+        best_tier = None
+        is_variant_only = True
+        for i, nv in enumerate(norm_variant_list):
+            if norm_text == nv:
+                tier = _TIER_EXACT
+            elif nv in norm_text:
+                tier = _TIER_SUBSTRING
+            elif norm_text in nv:
+                tier = _TIER_PARTIAL
+            else:
+                continue
+            if best_tier is None or tier < best_tier:
+                best_tier = tier
+                # primary value (i==0) keeps real "ocr" provenance; a non-primary
+                # variant hit is a format-normalized match.
+                is_variant_only = i != 0
+        if best_tier is not None:
+            src = _SOURCE_NORMALIZED if is_variant_only else None
+            match = _build_match(line, page_num, best_tier, src)
+            if match is not None:
+                candidates.append(match)
             continue
-        match = _build_match(line, page_num, tier)
-        if match is not None:
-            candidates.append(match)
+
+        # TYPED equality: same logical date/number/phone despite formatting.
+        if hint in (HINT_DATE, HINT_NUMBER, HINT_PHONE) and _type_equal(
+            raw_value, line.get("text"), hint
+        ):
+            match = _build_match(line, page_num, _TIER_TYPED, _SOURCE_NORMALIZED)
+            if match is not None:
+                candidates.append(match)
 
     # Multi-line spans (value == concatenation of consecutive lines).
     candidates.extend(_collect_span_candidates(norm_value, norm_lines, page_num))
 
-    # Token-overlap fuzzy: include every line at/above the threshold (only matters
-    # when no higher-precision tier matched, since the caller filters by best tier).
+    # Token-overlap fuzzy.
     for norm_text, line in norm_lines:
         if not norm_text:
             continue
         if _jaccard(value_tokens, _tokens(norm_text)) >= _FUZZY_MATCH_THRESHOLD:
             match = _build_match(line, page_num, _TIER_FUZZY)
+            if match is not None:
+                candidates.append(match)
+
+    # Character-level Levenshtein near-miss (last resort; OCR noise).
+    for norm_text, line in norm_lines:
+        if not norm_text:
+            continue
+        if _levenshtein_sim(norm_value, norm_text) >= _LEVENSHTEIN_MATCH_THRESHOLD:
+            match = _build_match(line, page_num, _TIER_LEVENSHTEIN, _SOURCE_FUZZY)
             if match is not None:
                 candidates.append(match)
 
@@ -273,13 +561,23 @@ def _collect_span_candidates(
 
 
 def _build_match(
-    line: Dict[str, Any], page_num: int, tier: int
+    line: Dict[str, Any],
+    page_num: int,
+    tier: int,
+    source_override: Optional[str] = None,
 ) -> Optional[Tuple[int, Dict[str, Any], str, Optional[float]]]:
-    """Build a candidate tuple from a single OCR line, or None if it lacks geometry."""
+    """Build a candidate tuple from a single OCR line, or None if it lacks geometry.
+
+    ``source_override`` tags format-bridged matches ("ocr-normalized"/"ocr-fuzzy")
+    distinctly; otherwise provenance is "ocr"/"ocr-paragraph" from the line.
+    """
     box = _line_box(line)
     if box is None:
         return None
-    source = "ocr-paragraph" if line.get("geometrySource") == "paragraph" else "ocr"
+    if source_override is not None:
+        source = source_override
+    else:
+        source = "ocr-paragraph" if line.get("geometrySource") == "paragraph" else "ocr"
     conf = line.get("confidence")
     ocr_conf = conf / 100.0 if isinstance(conf, (int, float)) else None
     return (tier, {"boundingBox": box, "page": page_num}, source, ocr_conf)
@@ -330,6 +628,7 @@ def match_value_to_geometry(
     page_data_by_page: Dict[int, Dict[str, Any]],
     preferred_geometry: Optional[Dict[str, Any]] = None,
     occurrence_index: Optional[int] = None,
+    schema_hint: Optional[Dict[str, Any]] = None,
 ) -> Optional[Tuple[Dict[str, Any], str, Optional[float]]]:
     """
     Match an extracted value to a real OCR line across the section's pages.
@@ -372,6 +671,12 @@ def match_value_to_geometry(
         return None
     value_tokens = _tokens(norm_value)
 
+    # Resolve the logical type (schema hint first, else infer) and build the
+    # format variants to text-match against. Bridges reformatting like
+    # "2022-04-04" (value) vs "04/04/2022" (document).
+    hint = _resolve_hint(value, schema_hint)
+    variants = _value_variants(value, hint)
+
     ref = _ref_from_llm_geometry(preferred_geometry)
 
     # Collect candidates across all pages.
@@ -379,7 +684,13 @@ def match_value_to_geometry(
     for page_num in sorted(page_data_by_page):
         candidates.extend(
             _collect_candidates_in_page(
-                norm_value, value_tokens, page_data_by_page[page_num], page_num
+                norm_value,
+                value_tokens,
+                page_data_by_page[page_num],
+                page_num,
+                norm_variants=variants,
+                raw_value=value,
+                hint=hint,
             )
         )
 
@@ -428,13 +739,44 @@ def match_value_to_geometry(
             _, geometry, source, ocr_conf = nearest
             return (geometry, source, ocr_conf)
 
-    # No usable LLM reference to disambiguate -> ambiguous; keep the LLM box.
-    logger.debug(
-        "Ambiguous OCR grounding for value '%s' (%d candidates, no usable reference); "
-        "keeping LLM box",
-        norm_value,
-        len(best),
-    )
+    # A usable LLM reference was supplied (legacy llm_with_ocr_grounding) but
+    # couldn't disambiguate -> stay ambiguous and KEEP the LLM box (return None),
+    # preserving prior behavior.
+    if ref is not None:
+        logger.debug(
+            "Ambiguous OCR grounding for '%s' (%d candidates, LLM ref didn't "
+            "resolve); keeping LLM box",
+            norm_value,
+            len(best),
+        )
+        return None
+
+    # No disambiguator at all (ocr_only scalar field whose value legitimately
+    # appears on several lines, e.g. a statement date printed in multiple places).
+    # A scalar's value is identical wherever it appears, so the FIRST occurrence in
+    # reading order is a sound, deterministic choice — better than no geometry.
+    # (List items never reach here: they always pass an occurrence_index.)
+    first = sorted(best, key=_reading_order_key)[0]
+    _, geometry, source, ocr_conf = first
+    return (geometry, source, ocr_conf)
+
+
+def _field_schema_for(schema_node: Any, key: str) -> Optional[Dict[str, Any]]:
+    """Return the JSON-Schema fragment for child ``key`` of ``schema_node``, if any."""
+    if not isinstance(schema_node, dict):
+        return None
+    props = schema_node.get("properties")
+    if isinstance(props, dict) and key in props and isinstance(props[key], dict):
+        return props[key]
+    return None
+
+
+def _item_schema_of(schema_node: Any) -> Optional[Dict[str, Any]]:
+    """Return the array ``items`` schema fragment of ``schema_node``, if any."""
+    if isinstance(schema_node, dict):
+        items = schema_node.get("items")
+        if isinstance(items, dict):
+            return items
     return None
 
 
@@ -444,6 +786,7 @@ def _ground_node(
     page_data_by_page: Dict[int, Dict[str, Any]],
     geometry_mode: str = "llm_with_ocr_grounding",
     occurrence_index: Optional[int] = None,
+    schema_node: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Recursively walk an assessment subtree, grounding leaf geometries in place.
@@ -453,7 +796,8 @@ def _ground_node(
     walked element-wise alongside the parallel extraction list. ``occurrence_index``
     is the position of the current item within its parent list (None at the top
     level / for scalars), used for ocr_only row-order disambiguation of repeated
-    values.
+    values. ``schema_node`` is the JSON-Schema fragment for the current node (its
+    ``format``/``type`` give the format-matching hint), descended in parallel.
     """
     if isinstance(assessment_node, dict):
         if "confidence" in assessment_node:
@@ -463,6 +807,7 @@ def _ground_node(
                 page_data_by_page,
                 geometry_mode,
                 occurrence_index,
+                schema_node,
             )
             return
         # Group: descend into each child alongside the matching extraction value.
@@ -490,23 +835,34 @@ def _ground_node(
             else:
                 child_extraction = None
             # Children of a group inherit this node's occurrence_index (a group
-            # field inside list row i still belongs to row i's occurrence).
+            # field inside list row i still belongs to row i's occurrence) and
+            # descend into the matching schema property fragment.
             _ground_node(
                 child,
                 child_extraction,
                 page_data_by_page,
                 geometry_mode,
                 occurrence_index,
+                _field_schema_for(schema_node, key),
             )
     elif isinstance(assessment_node, list):
+        item_schema = _item_schema_of(schema_node)
         for idx, item in enumerate(assessment_node):
             item_extraction = (
                 extraction_node[idx]
                 if isinstance(extraction_node, list) and idx < len(extraction_node)
                 else None
             )
-            # The list index IS the occurrence index for row-order disambiguation.
-            _ground_node(item, item_extraction, page_data_by_page, geometry_mode, idx)
+            # The list index IS the occurrence index for row-order disambiguation;
+            # list items share the array's ``items`` schema fragment.
+            _ground_node(
+                item,
+                item_extraction,
+                page_data_by_page,
+                geometry_mode,
+                idx,
+                item_schema,
+            )
 
 
 def _ground_leaf(
@@ -515,6 +871,7 @@ def _ground_leaf(
     page_data_by_page: Dict[int, Dict[str, Any]],
     geometry_mode: str = "llm_with_ocr_grounding",
     occurrence_index: Optional[int] = None,
+    schema_node: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Ground a single leaf assessment (has a ``confidence`` key) in place."""
     existing_geometry = leaf.get("geometry")
@@ -524,7 +881,7 @@ def _ground_leaf(
         # NOT used as a reference — repeated values are disambiguated by row order
         # via occurrence_index. Match found -> real OCR box; no match -> no box.
         match = match_value_to_geometry(
-            value, page_data_by_page, None, occurrence_index
+            value, page_data_by_page, None, occurrence_index, schema_node
         )
         if match is None:
             # No OCR match: drop any stray LLM-provided box so we never emit
@@ -549,7 +906,9 @@ def _ground_leaf(
     ):
         preferred_geometry = existing_geometry[0]
 
-    match = match_value_to_geometry(value, page_data_by_page, preferred_geometry)
+    match = match_value_to_geometry(
+        value, page_data_by_page, preferred_geometry, None, schema_node
+    )
     if match is None:
         # No OCR match -> keep the LLM box. Tag provenance only if a box exists.
         if existing_geometry:
@@ -568,6 +927,7 @@ def ground_assessment_geometry(
     extraction_results: Dict[str, Any],
     page_data_by_page: Dict[int, Dict[str, Any]],
     geometry_mode: str = "llm_with_ocr_grounding",
+    class_schema: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Produce field geometry from OCR (and optionally the LLM box), in place.
@@ -605,6 +965,8 @@ def ground_assessment_geometry(
                 extraction_value,
                 page_data_by_page,
                 geometry_mode,
+                None,
+                _field_schema_for(class_schema, attr_name),
             )
     except Exception as e:
         # Grounding is best-effort enrichment; never fail assessment over it.
