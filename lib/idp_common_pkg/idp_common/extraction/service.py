@@ -2681,6 +2681,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                         extracted_fields,
                         page_data_by_page,
                         geometry_mode,
+                        self._class_schema,
                     )
             except Exception as e:  # noqa: BLE001 - grounding is advisory
                 logger.warning(
