@@ -18,13 +18,25 @@ Parameters:
       Console quick-create URLs for feature stacks so they can look up the
       main stack's Exports.
 
+  ApiTransport:
+    Type: String
+    Default: appsync
+    AllowedValues: [appsync, httpapi]
+    Description: >-
+      API transport of the parent stack. Under 'httpapi' the main GraphQL API is
+      not created, so this stack's AppSync data sources/resolvers are skipped
+      (GraphQLApiId arrives empty). Feature-platform AppSync integration under
+      httpapi is a separate follow-up.
+
   GraphQLApiId:
     Type: String
-    Description: AppSync API id of the main stack's GraphQL API.
+    Default: ""
+    Description: AppSync API id of the main stack's GraphQL API (empty under httpapi).
 
   GraphQLApiArn:
     Type: String
-    Description: AppSync API ARN of the main stack's GraphQL API.
+    Default: ""
+    Description: AppSync API ARN of the main stack's GraphQL API (empty under httpapi).
 
   AppSyncApiUrl:
     Type: String
@@ -205,7 +217,14 @@ Parameters:
 
 Conditions:
 
+  # Skip AppSync data sources/resolvers under the httpapi transport (no main
+  # GraphQL API exists then; their ApiId would be empty and fail to create).
+  UseAppSync: !Equals [!Ref ApiTransport, 'appsync']
   HasConfigurationTable: !Not [!Equals [!Ref ConfigurationTableName, '']]
+  # Combined gate for AppSync resources that already required HasConfigurationTable.
+  HasConfigTableAndAppSync: !And
+    - !Not [!Equals [!Ref ConfigurationTableName, '']]
+    - !Equals [!Ref ApiTransport, 'appsync']
   HasConfigurationBucket: !Not [!Equals [!Ref ConfigurationBucketName, '']]
   HasReportingBucket: !Not [!Equals [!Ref ReportingBucketName, '']]
   HasOutputBucket: !Not [!Equals [!Ref OutputBucketName, '']]
@@ -570,6 +589,7 @@ Resources:
 
   ListInstalledFeaturesDataSource:
     Type: AWS::AppSync::DataSource
+    Condition: UseAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       Name: FeaturePlatformListInstalledFeatures
@@ -580,6 +600,7 @@ Resources:
 
   ListCatalogFeaturesDataSource:
     Type: AWS::AppSync::DataSource
+    Condition: UseAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       Name: FeaturePlatformListCatalogFeatures
@@ -590,6 +611,7 @@ Resources:
 
   RegisterFeatureDataSource:
     Type: AWS::AppSync::DataSource
+    Condition: UseAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       Name: FeaturePlatformRegisterFeature
@@ -600,6 +622,7 @@ Resources:
 
   GetFeatureLaunchUrlDataSource:
     Type: AWS::AppSync::DataSource
+    Condition: UseAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       Name: FeaturePlatformGetLaunchUrl
@@ -610,6 +633,7 @@ Resources:
 
   CheckFeatureEntitlementDataSource:
     Type: AWS::AppSync::DataSource
+    Condition: UseAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       Name: FeaturePlatformCheckEntitlement
@@ -620,6 +644,7 @@ Resources:
 
   SubscribeFeatureDataSource:
     Type: AWS::AppSync::DataSource
+    Condition: UseAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       Name: FeaturePlatformSubscribeFeature
@@ -630,6 +655,7 @@ Resources:
 
   UnsubscribeFeatureDataSource:
     Type: AWS::AppSync::DataSource
+    Condition: UseAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       Name: FeaturePlatformUnsubscribeFeature
@@ -640,6 +666,7 @@ Resources:
 
   ListInstalledFeaturesResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       TypeName: Query
@@ -648,6 +675,7 @@ Resources:
 
   ListCatalogFeaturesResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       TypeName: Query
@@ -656,6 +684,7 @@ Resources:
 
   CheckFeatureEntitlementResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       TypeName: Query
@@ -664,6 +693,7 @@ Resources:
 
   GetFeatureLaunchUrlResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       TypeName: Query
@@ -672,6 +702,7 @@ Resources:
 
   RegisterFeatureResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       TypeName: Mutation
@@ -680,6 +711,7 @@ Resources:
 
   UnregisterFeatureResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       TypeName: Mutation
@@ -688,6 +720,7 @@ Resources:
 
   SubscribeFeatureResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       TypeName: Mutation
@@ -696,6 +729,7 @@ Resources:
 
   UnsubscribeFeatureResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       TypeName: Mutation
@@ -704,7 +738,7 @@ Resources:
 
   RegisterFeatureHooksDataSource:
     Type: AWS::AppSync::DataSource
-    Condition: HasConfigurationTable
+    Condition: HasConfigTableAndAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       Name: FeaturePlatformRegisterFeatureHooks
@@ -715,7 +749,7 @@ Resources:
 
   RegisterFeatureHooksResolver:
     Type: AWS::AppSync::Resolver
-    Condition: HasConfigurationTable
+    Condition: HasConfigTableAndAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       TypeName: Mutation
@@ -724,7 +758,7 @@ Resources:
 
   UnregisterFeatureHooksResolver:
     Type: AWS::AppSync::Resolver
-    Condition: HasConfigurationTable
+    Condition: HasConfigTableAndAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       TypeName: Mutation
@@ -733,7 +767,7 @@ Resources:
 
   ApplyFeatureConfigPresetDataSource:
     Type: AWS::AppSync::DataSource
-    Condition: HasConfigurationTable
+    Condition: HasConfigTableAndAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       Name: FeaturePlatformApplyConfigPreset
@@ -744,7 +778,7 @@ Resources:
 
   ApplyFeatureConfigPresetResolver:
     Type: AWS::AppSync::Resolver
-    Condition: HasConfigurationTable
+    Condition: HasConfigTableAndAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       TypeName: Mutation
@@ -753,7 +787,7 @@ Resources:
 
   RemoveFeatureConfigPresetResolver:
     Type: AWS::AppSync::Resolver
-    Condition: HasConfigurationTable
+    Condition: HasConfigTableAndAppSync
     Properties:
       ApiId: !Ref GraphQLApiId
       TypeName: Mutation

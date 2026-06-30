@@ -2837,6 +2837,9 @@ Resources:
       TemplateURL: ./feature-platform/main-stack-extensions/.aws-sam/packaged.yaml
       Parameters:
         MainStackName: !Ref AWS::StackName
+        # Under httpapi the GraphQLApi is not created, so the feature-platform
+        # AppSync resources are skipped (gated on UseAppSync there too).
+        ApiTransport: !Ref ApiTransport
         # Empty under ApiTransport=httpapi (GraphQLApi not created).
         GraphQLApiId: !If [UseAppSync, !GetAtt GraphQLApi.ApiId, ""]
         GraphQLApiArn: !If [UseAppSync, !GetAtt GraphQLApi.Arn, ""]
