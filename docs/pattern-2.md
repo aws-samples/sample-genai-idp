@@ -694,6 +694,14 @@ The assessment feature runs after successful extraction and provides:
 - **Cost Optimization**: Optional deployment and efficient token usage
 - **Granular Assessment**: Advanced scalable approach for complex documents with many attributes
 
+> **In-shard / integrated assessment.** With agentic extraction, assessment can
+> run **inside the extraction shards** instead of as a separate step, controlled by
+> `extraction.assessment_integration` (`separate` default, or `integrated`). The
+> output (`explainability_info`) is identical either way, and the standalone
+> Assessment step auto-skips when extraction already produced it. See
+> [Running Assessment Inside Extraction](assessment.md#running-assessment-inside-extraction-in-shard--integrated)
+> for the full matrix and rationale.
+
 ### Enabling Assessment
 
 Assessment can now be controlled via the configuration file rather than CloudFormation stack parameters. This provides more flexibility and eliminates the need for stack redeployment when changing assessment behavior.

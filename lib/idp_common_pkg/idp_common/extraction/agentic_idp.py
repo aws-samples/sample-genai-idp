@@ -1453,6 +1453,7 @@ async def concurrent_structured_output_async(
     section_id: str = "section",
     persistence: Any | None = None,
     runtime: Any | None = None,
+    assess_runner: Any | None = None,
 ) -> tuple[TargetModel, BedrockInvokeModelResponse]:
     """
     Run one extraction agent per input shard, concurrently, and merge results.
@@ -1505,6 +1506,7 @@ async def concurrent_structured_output_async(
         custom_instruction=custom_instruction,
         persistence=persistence,
         shard_runner=default_shard_runner,
+        assess_runner=assess_runner,
     )
     # Normalise the runtime's plain-dict response into the typed envelope that
     # existing callers expect. The runtime returns a BaseModel; it is an instance

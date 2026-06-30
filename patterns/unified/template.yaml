@@ -1360,6 +1360,12 @@ Resources:
                 type: string
                 description: "(Optional) ARN of a Lambda function to generate custom extraction prompts. Function name must start with 'GENAIIDP-'. If not provided, default prompts will be used. The Lambda function receives the complete config, prompt placeholders, default task prompt content, and serialized document, and returns custom system_prompt and task_prompt_content. Example: arn:partition:lambda:us-east-1:123456789012:function:GENAIIDP-my-extractor"
                 order: 11
+              assessment_integration:
+                type: string
+                enum: ["separate", "integrated"]
+                default: "separate"
+                description: "Where per-field confidence/bounding-box assessment runs. 'separate' (default, unchanged behavior): extraction and assessment are distinct inferences — for agentic extraction a second assessment inference runs inside each shard (scales with the document); for standard extraction the pipeline flows to the separate Assessment step. 'integrated': the extraction inference itself emits each value's confidence and bounding box in one pass (saves a model call) — the separate Assessment step is bypassed and the Assessment Configuration settings below are unused. Either way, disable assessment entirely by turning OFF 'Enable assessment' in Assessment Configuration."
+                order: 12
               postHook:
                 type: array
                 collapsible: true
@@ -1456,6 +1462,7 @@ Resources:
                 sectionLabel: Image Processing Settings
                 description: Configure image resolution and processing options for for image attachments in assessment
                 dependsOn: { field: "use_bda", value: false }
+                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
                 order: 2
                 properties:
                   target_width:
@@ -1475,6 +1482,7 @@ Resources:
                 sectionLabel: Granular Assessment Configuration
                 description: Configure granular assessment for improved accuracy and scalability with large documents
                 dependsOn: { field: "use_bda", value: false }
+                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
                 order: 3
                 properties:
                   enabled:
@@ -1508,8 +1516,9 @@ Resources:
                     dependsOn: { field: "enabled", value: true }
               model:
                 type: string
-                description: "Bedrock model ID for assessment (step-by-step pipeline only)"
+                description: "Bedrock model ID for assessment (step-by-step pipeline only). Unused when Extraction's 'Assessment integration' is 'integrated' (the extraction model emits confidence/bbox)."
                 dependsOn: { field: "use_bda", value: false }
+                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
                 enum:
                   [
                     "LambdaHook",
@@ -1569,24 +1578,29 @@ Resources:
                 default: ""
                 order: 6
                 dependsOn: { field: "model", value: "LambdaHook" }
+                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
               temperature:
                 type: number
                 dependsOn: { field: "use_bda", value: false }
+                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
                 description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 7
               top_k:
                 type: number
                 dependsOn: { field: "use_bda", value: false }
+                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
                 description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 8
               top_p:
                 type: number
                 dependsOn: { field: "use_bda", value: false }
+                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
                 description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 9
               max_tokens:
                 type: number
                 dependsOn: { field: "use_bda", value: false }
+                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                 order: 10
               reasoning_effort:
@@ -1595,16 +1609,19 @@ Resources:
                 default: "medium"
                 description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
                 dependsOn: { field: "use_bda", value: false }
+                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
                 order: 10.5
               system_prompt:
                 type: string
                 dependsOn: { field: "use_bda", value: false }
+                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
                 format: textarea
                 description: System prompt
                 order: 11
               task_prompt:
                 type: string
                 dependsOn: { field: "use_bda", value: false }
+                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
                 format: textarea
                 description: Task prompt - supports placeholders {DOCUMENT_TEXT} (markdown text), {OCR_TEXT_CONFIDENCE} (OCR text blocks with confidence), {DOCUMENT_CLASS}, {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}, {EXTRACTION_RESULTS}, {GRANULAR_CONTEXT} and {DOCUMENT_IMAGE}. Use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
                 order: 12

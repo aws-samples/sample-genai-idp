@@ -793,6 +793,62 @@ doc = service.process_document_section(document, section_id)   # shards + merges
 See `notebooks/misc/standalone_sharded_extraction_demo.py` for a runnable
 demonstration (offline with a fake agent; live with real Bedrock).
 
+### Integrated Assessment (in-shard confidence & bounding boxes)
+
+Confidence/bbox **assessment can run inside extraction** instead of as a separate
+downstream step, controlled by `extraction.assessment_integration`:
+
+```yaml
+extraction:
+  assessment_integration: separate   # "separate" (default) | "integrated"
+  agentic:
+    enabled: true
+    max_concurrent_batches: 4         # sharded; assessment runs per-shard
+assessment:
+  enabled: true                       # master on/off — false disables assessment entirely
+```
+
+- **`separate`** (default, **no behavior change on upgrade**): extraction and
+  assessment are distinct inferences.
+  - *Agentic*: after each shard extracts, a **second assessment inference runs
+    inside that same shard** over the shard's pages/values — so assessment
+    inherits the same per-shard scaling as extraction (a 200-page section never
+    assesses in one oversized call). Per-shard assessments are collated on merge
+    (per-field, **page-ordered for list items**, first-shard-wins for scalars),
+    grounded once in real OCR geometry over the whole section, and emitted as
+    `explainability_info` — byte-for-byte the same output the standalone
+    Assessment step produces.
+  - *Non-agentic*: unchanged — the pipeline flows to the standalone Assessment
+    step exactly as before.
+- **`integrated`**: the extraction inference itself emits each value's confidence
+  and bounding box in one pass (saves a model call). The Assessment step's
+  model/prompt settings are unused.
+
+**Standalone Assessment step bypass.** When in-shard (or integrated) assessment
+has already written `explainability_info` to the section result, the downstream
+Assessment Lambda detects it and **skips its own inference** (a cheap
+pass-through) — so no duplicate assessment cost and no state-machine change. When
+`assessment.enabled: false`, assessment is skipped everywhere. The document status
+remains `EXTRACTING` while in-shard assessment runs (it *is* part of the extraction
+step).
+
+**List alignment guarantee.** Downstream consumers index
+`explainability_info[0][field][i]` against `inference_result[field][i]`, but an
+assessment LLM often returns a *different* number of row assessments than the
+table has rows (e.g. 44 assessments for 120 extracted rows). In-shard assessment
+**reconciles each list field's assessment to exactly match the extracted row
+count** (truncating extras, padding shortfalls with a neutral `confidence: null`
+"not individually assessed" entry) *before* the per-shard merge — so confidence is
+never misattributed to the wrong row and the drift never compounds across shards.
+
+**Reuse, not duplication.** In-shard assessment calls the **same**
+`AssessmentService.assess_results(...)` core the standalone step uses (extracted
+into a pure, S3-free method) and the same `ocr_grounding.ground_assessment_geometry`
+— so confidence scoring, thresholds, alerts, and geometry grounding are identical;
+only the *where it runs* differs. The output contract (`explainability_info[0]` +
+`section.confidence_threshold_alerts`) is unchanged, so HITL, the UI confidence
+display, evaluation, and reporting all consume it as before.
+
 ### Configuration Options
 
 #### `max_empty_line_gap` (integer, 0-10, default: 3)
