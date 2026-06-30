@@ -44,15 +44,16 @@ Parameters:
   LambdaWebAdapterLayerArn:
     Type: String
     # Public AWS Lambda Web Adapter layer (x86_64). The account 753240598075 is
-    # the LWA publisher; the layer name/version are region-stable. Default is
-    # the us-west-2 ARN — override this parameter for other regions or GovCloud
-    # (GovCloud publishes LWA under a different account; see the LWA releases).
-    # Only consumed when ApiTransport=httpapi (the chat streaming Function URL).
-    Default: arn:aws:lambda:us-west-2:753240598075:layer:LambdaAdapterLayerX86:25
+    # the LWA publisher; the layer name/version are region-stable. Leave blank
+    # to default to the LWA layer in this stack's region/partition (constructed
+    # as arn:${AWS::Partition}:lambda:${AWS::Region}:753240598075:...). Override
+    # this parameter for GovCloud (GovCloud publishes LWA under a different
+    # account; see the LWA releases) or to pin a specific version.
+    Default: ""
     Description: >-
       ARN of the AWS Lambda Web Adapter layer used by the chat streaming Function
-      URL (ApiTransport=httpapi only). Override for non-us-west-2 / GovCloud
-      regions.
+      URL. Leave blank to use the region-default LWA x86_64 layer; override for
+      GovCloud or to pin a version.
 
   # Authorization params
   AdminEmail:
@@ -1111,6 +1112,9 @@ Conditions:
     !Not [ !Equals [ !Ref DocumentSectionsCrawlerFrequency, "Manual" ] ]
   HasPermissionsBoundary: !Not [ !Equals [ !Ref PermissionsBoundaryArn, "" ] ]
   HasCustomConfigPath: !Not [ !Equals [ !Ref CustomConfigPath, "" ] ]
+  # When the LWA layer ARN is left blank, construct the region/partition default.
+  HasLambdaWebAdapterLayerArn:
+    !Not [ !Equals [ !Ref LambdaWebAdapterLayerArn, "" ] ]
   # The version-check resolver only needs IAM grants when an artifacts
   # bucket is actually configured. When `PublicArtifactsBucket` is empty
   # the resolver short-circuits before any S3 call, so we omit the policy
@@ -7229,7 +7233,10 @@ Resources:
         # imports both processor modules so it needs both layers. LWA layer last.
         - !Ref IDPCommonBaseLayer
         - !Ref IDPCommonAgentsLayer
-        - !Ref LambdaWebAdapterLayerArn
+        - !If
+          - HasLambdaWebAdapterLayerArn
+          - !Ref LambdaWebAdapterLayerArn
+          - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerX86:25
       Environment:
         Variables:
           # LWA: run the app in response-streaming mode and wrap exec with LWA.
