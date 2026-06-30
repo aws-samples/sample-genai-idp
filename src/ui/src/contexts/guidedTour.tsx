@@ -5,22 +5,21 @@ import { useNavigate } from 'react-router-dom';
 import AnnotationContext from '@cloudscape-design/components/annotation-context';
 import type { AnnotationContextProps } from '@cloudscape-design/components/annotation-context';
 import { DOCUMENTS_PATH } from '../routes/constants';
-import useSettingsContext from './settings';
+
+interface TourFlags {
+  customModels: boolean;
+  capacityPlanning: boolean;
+}
 
 interface GuidedTourContextValue {
   tutorial: AnnotationContextProps.Tutorial | null;
-  startTour: () => void;
+  startTour: (flags?: Partial<TourFlags>) => void;
   exitTour: () => void;
 }
 
 const GuidedTourContext = createContext<GuidedTourContextValue | null>(null);
 
 const DISMISS_LABEL = 'Dismiss tour';
-
-interface TourFlags {
-  customModels: boolean;
-  capacityPlanning: boolean;
-}
 
 const buildTutorial = (flags: TourFlags): AnnotationContextProps.Tutorial => ({
   title: 'Get started with GenAI IDP',
@@ -132,19 +131,18 @@ const i18nStrings: AnnotationContextProps.I18nStrings = {
 export const GuidedTourProvider = ({ children }: { children: React.ReactNode }): React.JSX.Element => {
   const [tutorial, setTutorial] = useState<AnnotationContextProps.Tutorial | null>(null);
   const navigate = useNavigate();
-  const { settings } = useSettingsContext();
 
-  const tourFlags = useMemo((): TourFlags => {
-    const pattern = (settings?.IDPPattern as string | undefined)?.toLowerCase();
-    const capacityPlanning = !pattern || /pattern[\s\-_]?2/.test(pattern) || pattern.includes('unified');
-    const customModels = (import.meta.env.VITE_AWS_REGION as string | undefined) === 'us-east-1';
-    return { customModels, capacityPlanning };
-  }, [settings?.IDPPattern]);
-
-  const startTour = useCallback(() => {
-    navigate(DOCUMENTS_PATH);
-    window.setTimeout(() => setTutorial(buildTutorial(tourFlags)), 350);
-  }, [navigate, tourFlags]);
+  const startTour = useCallback(
+    (flags?: Partial<TourFlags>) => {
+      const resolved: TourFlags = {
+        customModels: flags?.customModels ?? false,
+        capacityPlanning: flags?.capacityPlanning ?? true,
+      };
+      navigate(DOCUMENTS_PATH);
+      window.setTimeout(() => setTutorial(buildTutorial(resolved)), 350);
+    },
+    [navigate],
+  );
   const exitTour = useCallback(() => setTutorial(null), []);
   const finishTour = useCallback(() => {
     setTutorial(null);
@@ -152,7 +150,7 @@ export const GuidedTourProvider = ({ children }: { children: React.ReactNode }):
   }, []);
 
   useEffect(() => {
-    const handler = () => startTour();
+    const handler = (e: Event) => startTour((e as CustomEvent<Partial<TourFlags>>).detail);
     window.addEventListener('startTutorial', handler);
     return () => window.removeEventListener('startTutorial', handler);
   }, [startTour]);

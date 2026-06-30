@@ -4,6 +4,7 @@ import React, { useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Box, Button, Container, Header, SpaceBetween, Link } from '@cloudscape-design/components';
 import { DOCUMENTS_PATH, CONFIGURATION_PATH, UPLOAD_DOCUMENT_PATH, WELCOME_DISMISSED_KEY } from '../../routes/constants';
+import useSettingsContext from '../../contexts/settings';
 
 interface WelcomeContentProps {
   // When true, shows the "Don't show this again" dismissal (landing-page variant).
@@ -13,6 +14,7 @@ interface WelcomeContentProps {
 
 const WelcomeContent = ({ showDismiss = false, onDismiss }: WelcomeContentProps): React.JSX.Element => {
   const navigate = useNavigate();
+  const { settings } = useSettingsContext();
 
   const openQuickStart = useCallback(() => {
     navigate(DOCUMENTS_PATH);
@@ -20,8 +22,13 @@ const WelcomeContent = ({ showDismiss = false, onDismiss }: WelcomeContentProps)
   }, [navigate]);
 
   const startTour = useCallback(() => {
-    window.dispatchEvent(new CustomEvent('startTutorial'));
-  }, []);
+    const pattern = (settings?.IDPPattern as string | undefined)?.toLowerCase();
+    const detail = {
+      customModels: (import.meta.env.VITE_AWS_REGION as string | undefined) === 'us-east-1',
+      capacityPlanning: !pattern || /pattern[\s\-_]?2/.test(pattern) || pattern.includes('unified'),
+    };
+    window.dispatchEvent(new CustomEvent('startTutorial', { detail }));
+  }, [settings?.IDPPattern]);
 
   const enterConsole = useCallback(() => {
     navigate(DOCUMENTS_PATH);
