@@ -313,32 +313,51 @@ def _ref_from_llm_geometry(
     return (page_val, center[0], center[1])
 
 
+def _reading_order_key(
+    candidate: Tuple[int, Dict[str, Any], str, Optional[float]],
+) -> Tuple[int, float, float]:
+    """Sort key placing candidates in document reading order: page, top, left."""
+    geometry = candidate[1]
+    page = geometry.get("page", 0)
+    bb = geometry.get("boundingBox") if isinstance(geometry, dict) else None
+    if isinstance(bb, dict):
+        return (page, bb.get("top", 0.0), bb.get("left", 0.0))
+    return (page, 0.0, 0.0)
+
+
 def match_value_to_geometry(
     value: Any,
     page_data_by_page: Dict[int, Dict[str, Any]],
     preferred_geometry: Optional[Dict[str, Any]] = None,
+    occurrence_index: Optional[int] = None,
 ) -> Optional[Tuple[Dict[str, Any], str, Optional[float]]]:
     """
     Match an extracted value to a real OCR line across the section's pages.
 
     Collects every candidate line across all pages, keeps only the best (most
-    precise) tier, and resolves ties **spatially** using the LLM-estimated box as a
-    reference: among equally-good text matches, the one whose center is nearest the
-    LLM box wins. This is what keeps repeated values (e.g. identical transaction
-    amounts on different rows) from all collapsing onto the first matching line — the
-    LLM placed each row's box at a roughly-correct, distinct position, so proximity
-    selects the right occurrence.
+    precise) tier, and resolves ties between equally-good text matches (e.g. the
+    same transaction amount on several rows). Two disambiguation strategies:
 
-    Safe fallback: if multiple candidates remain and there is **no** usable LLM
-    reference box to disambiguate (or the reference is on a different page than all
-    candidates), the match is treated as ambiguous and None is returned, so the
-    caller keeps the existing LLM-estimated box rather than risk the wrong one.
+    - **Row order** (``occurrence_index`` set — the ``ocr_only`` geometry mode):
+      candidates are sorted into document reading order (page, then top, then
+      left) and the one at ``occurrence_index`` is chosen. The i-th assessed list
+      item is the i-th extracted row, and OCR lines read top-to-bottom, so the
+      i-th occurrence of a repeated value is that row's. Needs no LLM box.
+    - **Spatial proximity** (``preferred_geometry`` set, ``occurrence_index`` None —
+      the legacy ``llm_with_ocr_grounding`` mode): the candidate whose center is
+      nearest the LLM-estimated box wins.
+
+    Safe fallback: if multiple candidates remain and there is no usable
+    disambiguator (no ``occurrence_index`` and no usable LLM reference), the match
+    is treated as ambiguous and None is returned.
 
     Args:
         value: The extracted attribute value (scalar; coerced to string).
         page_data_by_page: Mapping of 1-indexed page number -> pageData dict.
-        preferred_geometry: The LLM-estimated ``{boundingBox, page}`` for this field,
-            used as the spatial/page reference.
+        preferred_geometry: The LLM-estimated ``{boundingBox, page}`` reference
+            (used only for spatial disambiguation; ignored when occurrence_index set).
+        occurrence_index: 0-based position of this value among repeated occurrences,
+            used for row-order disambiguation. Out-of-range clamps to the last.
 
     Returns:
         ``(geometry, geometry_source, ocr_confidence)`` where ``geometry`` is
@@ -377,9 +396,22 @@ def match_value_to_geometry(
         return (geometry, source, ocr_conf)
 
     # Ambiguous: multiple equally-good text matches (e.g. a value repeated across
-    # table rows). Disambiguate by proximity to the LLM-estimated box, which sits at
-    # a roughly-correct distinct position per occurrence. Prefer candidates on the
-    # LLM's page; among those, pick the nearest box center.
+    # table rows).
+    #
+    # Row-order disambiguation (ocr_only mode): pick the occurrence_index-th match
+    # in document reading order. This is deterministic and needs no LLM box — the
+    # i-th assessed row maps to the i-th occurrence top-to-bottom.
+    if occurrence_index is not None:
+        ordered = sorted(best, key=_reading_order_key)
+        idx = occurrence_index if occurrence_index < len(ordered) else len(ordered) - 1
+        if idx < 0:
+            idx = 0
+        _, geometry, source, ocr_conf = ordered[idx]
+        return (geometry, source, ocr_conf)
+
+    # Spatial disambiguation (legacy llm_with_ocr_grounding): proximity to the
+    # LLM-estimated box, which sits at a roughly-correct distinct position per
+    # occurrence. Prefer candidates on the LLM's page; among those, nearest center.
     if ref is not None:
         ref_page, ref_cx, ref_cy = ref
         on_ref_page = [c for c in best if c[1].get("page") == ref_page]
@@ -410,17 +442,28 @@ def _ground_node(
     assessment_node: Any,
     extraction_node: Any,
     page_data_by_page: Dict[int, Dict[str, Any]],
+    geometry_mode: str = "llm_with_ocr_grounding",
+    occurrence_index: Optional[int] = None,
 ) -> None:
     """
     Recursively walk an assessment subtree, grounding leaf geometries in place.
 
     The recursion mirrors ``_extract_geometry_from_assessment``: a dict with a
     ``confidence`` key is a leaf assessment; otherwise it is a group; lists are
-    walked element-wise alongside the parallel extraction list.
+    walked element-wise alongside the parallel extraction list. ``occurrence_index``
+    is the position of the current item within its parent list (None at the top
+    level / for scalars), used for ocr_only row-order disambiguation of repeated
+    values.
     """
     if isinstance(assessment_node, dict):
         if "confidence" in assessment_node:
-            _ground_leaf(assessment_node, extraction_node, page_data_by_page)
+            _ground_leaf(
+                assessment_node,
+                extraction_node,
+                page_data_by_page,
+                geometry_mode,
+                occurrence_index,
+            )
             return
         # Group: descend into each child alongside the matching extraction value.
         #
@@ -446,7 +489,15 @@ def _ground_node(
                 child_extraction = key
             else:
                 child_extraction = None
-            _ground_node(child, child_extraction, page_data_by_page)
+            # Children of a group inherit this node's occurrence_index (a group
+            # field inside list row i still belongs to row i's occurrence).
+            _ground_node(
+                child,
+                child_extraction,
+                page_data_by_page,
+                geometry_mode,
+                occurrence_index,
+            )
     elif isinstance(assessment_node, list):
         for idx, item in enumerate(assessment_node):
             item_extraction = (
@@ -454,18 +505,42 @@ def _ground_node(
                 if isinstance(extraction_node, list) and idx < len(extraction_node)
                 else None
             )
-            _ground_node(item, item_extraction, page_data_by_page)
+            # The list index IS the occurrence index for row-order disambiguation.
+            _ground_node(item, item_extraction, page_data_by_page, geometry_mode, idx)
 
 
 def _ground_leaf(
     leaf: Dict[str, Any],
     value: Any,
     page_data_by_page: Dict[int, Dict[str, Any]],
+    geometry_mode: str = "llm_with_ocr_grounding",
+    occurrence_index: Optional[int] = None,
 ) -> None:
     """Ground a single leaf assessment (has a ``confidence`` key) in place."""
-    # The existing (LLM-estimated) box doubles as the spatial reference used to
-    # disambiguate repeated values across table rows.
     existing_geometry = leaf.get("geometry")
+
+    if geometry_mode == "ocr_only":
+        # Derive geometry purely from OCR value-matching; the LLM box (if any) is
+        # NOT used as a reference — repeated values are disambiguated by row order
+        # via occurrence_index. Match found -> real OCR box; no match -> no box.
+        match = match_value_to_geometry(
+            value, page_data_by_page, None, occurrence_index
+        )
+        if match is None:
+            # No OCR match: drop any stray LLM-provided box so we never emit
+            # hallucinated coordinates in ocr_only mode.
+            leaf.pop("geometry", None)
+            leaf.pop("geometry_source", None)
+            return
+        geometry, source, ocr_conf = match
+        leaf["geometry"] = [geometry]
+        leaf["geometry_source"] = source
+        if ocr_conf is not None:
+            leaf["ocr_confidence"] = round(ocr_conf, 4)
+        return
+
+    # Legacy llm_with_ocr_grounding: the existing (LLM-estimated) box doubles as
+    # the spatial reference used to disambiguate repeated values across table rows.
     preferred_geometry: Optional[Dict[str, Any]] = None
     if (
         isinstance(existing_geometry, list)
@@ -492,13 +567,19 @@ def ground_assessment_geometry(
     enhanced_assessment: Dict[str, Any],
     extraction_results: Dict[str, Any],
     page_data_by_page: Dict[int, Dict[str, Any]],
+    geometry_mode: str = "llm_with_ocr_grounding",
 ) -> Dict[str, Any]:
     """
-    Replace LLM-estimated field geometry with real OCR geometry where matchable.
+    Produce field geometry from OCR (and optionally the LLM box), in place.
 
-    Mutates and returns ``enhanced_assessment``. Safe to call unconditionally: when
-    ``page_data_by_page`` is empty (no OCR geometry anywhere), it is a near no-op
-    (only tags ``geometry_source: "llm"`` on fields that already had a box).
+    Mutates and returns ``enhanced_assessment``. ``geometry_mode``:
+    - ``"ocr_only"`` (default in AssessmentConfig): geometry is derived purely by
+      matching each extracted value to OCR lines; the LLM box is ignored and a
+      field with no OCR match is left with no geometry. Repeated values are
+      disambiguated by row order. When ``page_data_by_page`` is empty this leaves
+      fields without geometry (nothing to ground against).
+    - ``"llm_with_ocr_grounding"``: refine LLM-estimated boxes with OCR geometry,
+      falling back to the LLM box when unmatched (near no-op when no OCR data).
 
     Args:
         enhanced_assessment: The per-field assessment dict (the object that becomes
@@ -507,6 +588,7 @@ def ground_assessment_geometry(
             each field's extracted value for matching.
         page_data_by_page: Mapping of 1-indexed page number -> pageData dict, from
             ``load_page_ocr_data``.
+        geometry_mode: ``"ocr_only"`` or ``"llm_with_ocr_grounding"``.
 
     Returns:
         The same ``enhanced_assessment`` dict, grounded in place.
@@ -518,7 +600,12 @@ def ground_assessment_geometry(
                 if isinstance(extraction_results, dict)
                 else None
             )
-            _ground_node(attr_assessment, extraction_value, page_data_by_page)
+            _ground_node(
+                attr_assessment,
+                extraction_value,
+                page_data_by_page,
+                geometry_mode,
+            )
     except Exception as e:
         # Grounding is best-effort enrichment; never fail assessment over it.
         logger.warning(f"OCR geometry grounding failed; keeping LLM boxes: {e}")

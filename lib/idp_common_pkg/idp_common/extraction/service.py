@@ -2664,7 +2664,8 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         )
 
         grounded = merged_assessment
-        if self.config.assessment.ground_geometry_in_ocr:
+        geometry_mode = self.config.assessment.resolved_geometry_mode()
+        if geometry_mode != "llm_only":
             try:
                 from idp_common.assessment.ocr_grounding import (
                     ground_assessment_geometry,
@@ -2676,12 +2677,15 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                 )
                 if page_data_by_page:
                     grounded = ground_assessment_geometry(
-                        merged_assessment, extracted_fields, page_data_by_page
+                        merged_assessment,
+                        extracted_fields,
+                        page_data_by_page,
+                        geometry_mode,
                     )
             except Exception as e:  # noqa: BLE001 - grounding is advisory
                 logger.warning(
                     "OCR geometry grounding failed for in-shard assessment "
-                    "(keeping LLM boxes): %s",
+                    "(keeping existing boxes): %s",
                     e,
                 )
 
