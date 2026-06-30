@@ -1128,6 +1128,14 @@ Conditions:
     !Equals [ !Ref EvaluationBaselineBucketName, "" ]
   ShouldCreateReportingBucket: !Equals [ !Ref ReportingBucketName, "" ]
   IsWafEnabled: !Not [ !Equals [ !Ref WAFAllowedIPv4Ranges, "0.0.0.0/0" ] ]
+  # The WAF apparatus (IP sets, WebACL, association) exists solely to protect the
+  # AppSync GraphQL API. Only create it when WAF is enabled AND the AppSync
+  # transport is in use; under ApiTransport=httpapi there is no GraphQLApi to
+  # associate the WebACL with (and AppSync is unavailable in GovCloud).
+  IsWafEnabledAndAppSync: !And [ !Condition IsWafEnabled, !Condition UseAppSync ]
+  # Private-AppSync DNS output only applies when AppSync is actually deployed
+  # (PRIVATE visibility) AND the AppSync transport is in use.
+  IsPrivateAppSyncAndAppSync: !And [ !Condition UsePrivateAppSync, !Condition UseAppSync ]
   ShouldCreateDocumentKnowledgeBase:
     !Equals [ !Ref DocumentKnowledgeBase, "BEDROCK_KNOWLEDGE_BASE (Create)" ]
   ShouldUseDocumentKnowledgeBase: !Condition ShouldCreateDocumentKnowledgeBase
@@ -2150,7 +2158,7 @@ Resources:
           LOOKUP_FUNCTION_NAME: !Ref LookupFunction
           STRANDS_LOG_LEVEL: !Ref LogLevel
           AGENT_TABLE: !Ref AgentTable
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
           ATHENA_DATABASE: !Ref ReportingDatabase
           ATHENA_WORKGROUP: primary
           QUERY_RESULTS_BUCKET: !If
@@ -2186,10 +2194,13 @@ Resources:
             Effect: Allow
             Action: bedrock-agentcore:InvokeAgentRuntime
             Resource: "*"
-        - Statement:
-            Effect: Allow
-            Action: appsync:GraphQL
-            Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${GraphQLApi.ApiId}/*"
+        - !If
+          - UseAppSync
+          - Statement:
+              Effect: Allow
+              Action: appsync:GraphQL
+              Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${GraphQLApi.ApiId}/*"
+          - !Ref AWS::NoValue
         - DynamoDBCrudPolicy:
             TableName: !Ref ChatMessagesTable
         - DynamoDBCrudPolicy:
@@ -2293,11 +2304,14 @@ Resources:
                 Action: sts:AssumeRole
                 Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
+            - !If
+              - UseAppSync
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
+              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -2665,10 +2679,12 @@ Resources:
     Properties:
       TemplateURL: ./nested/appsync/.aws-sam/packaged.yaml
       Parameters:
-        # Core AppSync resources
-        GraphQLApiId: !GetAtt GraphQLApi.ApiId
-        GraphQLApiArn: !GetAtt GraphQLApi.Arn
-        GraphQLApiUrl: !GetAtt GraphQLApi.GraphQLUrl
+        # Core AppSync resources (empty under ApiTransport=httpapi since the
+        # GraphQLApi is not created; the nested stack tolerates empty values
+        # because its AppSync resources are themselves gated on UseAppSync).
+        GraphQLApiId: !If [UseAppSync, !GetAtt GraphQLApi.ApiId, ""]
+        GraphQLApiArn: !If [UseAppSync, !GetAtt GraphQLApi.Arn, ""]
+        GraphQLApiUrl: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
         
         # Background worker ARNs
         AgentChatProcessorFunctionArn: !GetAtt AgentChatProcessorFunction.Arn
@@ -2821,9 +2837,10 @@ Resources:
       TemplateURL: ./feature-platform/main-stack-extensions/.aws-sam/packaged.yaml
       Parameters:
         MainStackName: !Ref AWS::StackName
-        GraphQLApiId: !GetAtt GraphQLApi.ApiId
-        GraphQLApiArn: !GetAtt GraphQLApi.Arn
-        AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
+        # Empty under ApiTransport=httpapi (GraphQLApi not created).
+        GraphQLApiId: !If [UseAppSync, !GetAtt GraphQLApi.ApiId, ""]
+        GraphQLApiArn: !If [UseAppSync, !GetAtt GraphQLApi.Arn, ""]
+        AppSyncApiUrl: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
         UserPoolId: !Ref UserPool
         # Feature stacks with HTTP APIs use these two as the JWT audience
         # (Cognito Client id) and as the document-state table name for
@@ -5392,7 +5409,7 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           QUEUE_URL: !Ref DocumentQueue
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
           DATA_RETENTION_IN_DAYS: !Ref DataRetentionInDays
           OUTPUT_BUCKET: !Ref OutputBucket
           CONFIG_TABLE: !Ref ConfigurationTable
@@ -5404,11 +5421,14 @@ Resources:
         - S3ReadPolicy:
             BucketName: !Ref InputBucket
         - Statement:
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
+            - !If
+              - UseAppSync
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
+              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -5482,7 +5502,7 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           STATE_MACHINE_ARN: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
           CONCURRENCY_TABLE: !Ref ConcurrencyTable
           MAX_CONCURRENT: !Ref MaxConcurrentWorkflows
           WORKING_BUCKET: !Ref WorkingBucket
@@ -5504,12 +5524,15 @@ Resources:
         - S3CrudPolicy:
             BucketName: !Ref WorkingBucket
         - Statement:
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Query/*"
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
+            - !If
+              - UseAppSync
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${GraphQLApi.Arn}/types/Query/*"
+                  - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
+              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -5616,7 +5639,7 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           CONCURRENCY_TABLE: !Ref ConcurrencyTable
           METRIC_NAMESPACE: !Ref AWS::StackName
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
           OUTPUT_BUCKET: !Ref OutputBucket
           REPORTING_BUCKET:
             !If [
@@ -5645,11 +5668,14 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !GetAtt SaveReportingDataFunctionV2.Arn
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
+            - !If
+              - UseAppSync
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
+              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -6129,11 +6155,14 @@ Resources:
             TopicName: !GetAtt AlertsTopic.TopicName
         - CloudWatchPutMetricPolicy: {}
         - Statement:
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/fields/publishCircuitBreakerStatus"
+            - !If
+              - UseAppSync
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${GraphQLApi.Arn}/types/Mutation/fields/publishCircuitBreakerStatus"
+              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -6849,7 +6878,7 @@ Resources:
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           TRACKING_TABLE_NAME: !Ref TrackingTable
           USERS_TABLE_NAME: !Ref UsersTable
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
           GUARDRAIL_ID_AND_VERSION:
             !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
           BEDROCK_ASSUME_ROLE_ARN:
@@ -6870,10 +6899,13 @@ Resources:
         - DynamoDBReadPolicy:
             TableName: !Ref TrackingTable
         - Statement:
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${GraphQLApi.ApiId}/types/Mutation/*"
+            - !If
+              - UseAppSync
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${GraphQLApi.ApiId}/types/Mutation/*"
+              - !Ref AWS::NoValue
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.
             - Effect: Allow
@@ -6995,7 +7027,7 @@ Resources:
           MAX_CONVERSATION_TURNS: 20
           MAX_MESSAGE_SIZE_KB: 8.5
           DATA_RETENTION_DAYS: !Ref DataRetentionInDays
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
           ATHENA_DATABASE: !Ref ReportingDatabase
           ATHENA_OUTPUT_LOCATION: !Sub
             - "s3://${Bucket}/athena-results/"
@@ -7025,10 +7057,13 @@ Resources:
             Effect: Allow
             Action: bedrock-agentcore:InvokeAgentRuntime
             Resource: "*"
-        - Statement:
-            Effect: Allow
-            Action: appsync:GraphQL
-            Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${GraphQLApi.ApiId}/*"
+        - !If
+          - UseAppSync
+          - Statement:
+              Effect: Allow
+              Action: appsync:GraphQL
+              Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${GraphQLApi.ApiId}/*"
+          - !Ref AWS::NoValue
         - DynamoDBCrudPolicy:
             TableName: !Ref ChatMessagesTable
         - DynamoDBCrudPolicy:
@@ -7099,11 +7134,14 @@ Resources:
                 Action: sts:AssumeRole
                 Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
+            - !If
+              - UseAppSync
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
+              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -7659,6 +7697,7 @@ Resources:
 
   CalculateCapacityDataSource:
     Type: AWS::AppSync::DataSource
+    Condition: UseAppSync
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
       Name: CalculateCapacityDataSource
@@ -7670,6 +7709,7 @@ Resources:
 
   CalculateCapacityResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     DependsOn: APPSYNCSTACK
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
@@ -7765,6 +7805,7 @@ Resources:
   VersionCheckResolverDataSource:
 
     Type: AWS::AppSync::DataSource
+    Condition: UseAppSync
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
       Name: VersionCheckResolverDataSource
@@ -7776,6 +7817,7 @@ Resources:
 
   GetLatestPublishedVersionResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     DependsOn: APPSYNCSTACK
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
@@ -7844,7 +7886,7 @@ Resources:
           LOOKUP_FUNCTION_NAME: !Ref LookupFunction
           STRANDS_LOG_LEVEL: !Ref LogLevel
           AGENT_TABLE: !Ref AgentTable
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
           ATHENA_DATABASE: !Ref ReportingDatabase
           ATHENA_OUTPUT_LOCATION: !Sub
             - "s3://${Bucket}/athena-results/"
@@ -7938,11 +7980,14 @@ Resources:
                 Action: sts:AssumeRole
                 Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
+            - !If
+              - UseAppSync
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
+              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -8692,12 +8737,15 @@ Resources:
           PolicyDocument:
             Version: 2012-10-17
             Statement:
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${GraphQLApi.Arn}/types/Query/*"
-                  - !Sub "${GraphQLApi.Arn}/types/Subscription/*"
+              - !If
+                - UseAppSync
+                - Effect: Allow
+                  Action:
+                    - appsync:GraphQL
+                  Resource:
+                    - !Sub "${GraphQLApi.Arn}/types/Query/*"
+                    - !Sub "${GraphQLApi.Arn}/types/Subscription/*"
+                - !Ref AWS::NoValue
 
   AdminUser:
     Type: AWS::Cognito::UserPoolUser
@@ -8861,6 +8909,7 @@ Resources:
 
   GraphQLApi:
     Type: AWS::AppSync::GraphQLApi
+    Condition: UseAppSync
     # checkov:skip=CKV_AWS_194: AppSync has Field-Level logging is determined by LogLevel parameter
     Properties:
       Name: !Sub ${AWS::StackName}-api
@@ -8882,6 +8931,7 @@ Resources:
 
   GraphQLApiLogGroup:
     Type: AWS::Logs::LogGroup
+    Condition: UseAppSync
     Properties:
       KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
       LogGroupName: !Sub "/aws/appsync/apis/${GraphQLApi.ApiId}"
@@ -8891,6 +8941,7 @@ Resources:
     DependsOn:
       - IsStacknameLengthOK
     Type: AWS::IAM::Role
+    Condition: UseAppSync
     Properties:
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs"
@@ -8914,7 +8965,7 @@ Resources:
 
   WAFIPV4Set:
     Type: AWS::WAFv2::IPSet
-    Condition: IsWafEnabled
+    Condition: IsWafEnabledAndAppSync
     Properties:
       Name: !Sub ${AWS::StackName}-allowed-ips
       Description: IP ranges allowed to access the AppSync API
@@ -8924,7 +8975,7 @@ Resources:
 
   WAFLambdaServiceIPSet:
     Type: AWS::WAFv2::IPSet
-    Condition: IsWafEnabled
+    Condition: IsWafEnabledAndAppSync
     Properties:
       Name: !Sub ${AWS::StackName}-lambda-service-ips
       Description: IP ranges used by AWS Lambda service
@@ -8934,7 +8985,7 @@ Resources:
 
   IPSetUpdaterFunction:
     Type: AWS::Serverless::Function
-    Condition: IsWafEnabled
+    Condition: IsWafEnabledAndAppSync
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -8984,14 +9035,14 @@ Resources:
 
   IPSetUpdaterCustomResource:
     Type: Custom::IPSetUpdater
-    Condition: IsWafEnabled
+    Condition: IsWafEnabledAndAppSync
     Properties:
       ServiceToken: !GetAtt IPSetUpdaterFunction.Arn
       UpdateTime: <BUILD_DATE_TIME> # To force an update when stack is updated
 
   WAFWebACL:
     Type: AWS::WAFv2::WebACL
-    Condition: IsWafEnabled
+    Condition: IsWafEnabledAndAppSync
     Properties:
       Name: !Sub ${AWS::StackName}-appsync-acl
       Description: Web ACL for AppSync API
@@ -9028,7 +9079,7 @@ Resources:
 
   WAFWebACLAssociation:
     Type: AWS::WAFv2::WebACLAssociation
-    Condition: IsWafEnabled
+    Condition: IsWafEnabledAndAppSync
     Properties:
       ResourceArn: !GetAtt GraphQLApi.Arn
       WebACLArn: !GetAtt WAFWebACL.Arn
@@ -9556,7 +9607,7 @@ Resources:
           DISCOVERY_BUCKET: !Ref DiscoveryBucket
           DISCOVERY_TRACKING_TABLE: !Ref DiscoveryTrackingTable
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
           BLUEPRINT_OPTIMIZATION_FUNCTION_NAME: !Ref BlueprintOptimizationFunction
       LoggingConfig:
         LogGroup: !Ref DiscoveryProcessorFunctionLogGroup
@@ -9580,11 +9631,14 @@ Resources:
               Action:
                 - cloudwatch:PutMetricData
               Resource: "*"
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
+            - !If
+              - UseAppSync
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
+              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -9661,7 +9715,7 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           DISCOVERY_BUCKET: !Ref DiscoveryBucket
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
       LoggingConfig:
         LogGroup: !Ref MultiDocDiscoveryPrepareFunctionLogGroup
       Policies:
@@ -9675,9 +9729,12 @@ Resources:
             - Effect: Allow
               Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
               Resource: !GetAtt CustomerManagedEncryptionKey.Arn
-            - Effect: Allow
-              Action: [appsync:GraphQL]
-              Resource: !Sub "${GraphQLApi.Arn}/*"
+            - !If
+              - UseAppSync
+              - Effect: Allow
+                Action: [appsync:GraphQL]
+                Resource: !Sub "${GraphQLApi.Arn}/*"
+              - !Ref AWS::NoValue
 
   MultiDocDiscoveryPrepareFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -9817,7 +9874,7 @@ Resources:
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           STACK_NAME: !Ref AWS::StackName
           DISCOVERY_TRACKING_TABLE: !Ref DiscoveryTrackingTable
@@ -9835,11 +9892,14 @@ Resources:
               Action:
                 - cloudwatch:PutMetricData
               Resource: "*"
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
+            - !If
+              - UseAppSync
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
+              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -10207,7 +10267,7 @@ Resources:
           - Name: VITE_IDENTITY_POOL_ID
             Value: !Ref IdentityPool
           - Name: VITE_APPSYNC_GRAPHQL_URL
-            Value: !GetAtt GraphQLApi.GraphQLUrl
+            Value: !If [UseAppSync, !GetAtt GraphQLApi.GraphQLUrl, ""]
           # API transport selection + HTTP API endpoint. VITE_API_BASE_URL is
           # the HTTP API base (empty while ApiTransport=appsync so the UI keeps
           # using AppSync). The thin REST client posts to ${VITE_API_BASE_URL}/op/<field>.
@@ -10591,6 +10651,7 @@ Resources:
 
   UserManagementDataSource:
     Type: AWS::AppSync::DataSource
+    Condition: UseAppSync
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
       Name: UserManagementDataSource
@@ -10601,6 +10662,7 @@ Resources:
 
   CreateUserResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     DependsOn: APPSYNCSTACK
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
@@ -10610,6 +10672,7 @@ Resources:
 
   DeleteUserResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     DependsOn: APPSYNCSTACK
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
@@ -10619,6 +10682,7 @@ Resources:
 
   ListUsersResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     DependsOn: APPSYNCSTACK
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
@@ -10628,6 +10692,7 @@ Resources:
 
   UpdateUserResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     DependsOn: APPSYNCSTACK
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
@@ -10637,6 +10702,7 @@ Resources:
 
   GetMyProfileResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     DependsOn: APPSYNCSTACK
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
@@ -10646,6 +10712,7 @@ Resources:
 
   CompleteSectionReviewDataSource:
     Type: AWS::AppSync::DataSource
+    Condition: UseAppSync
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
       Name: CompleteSectionReviewDataSource
@@ -10656,6 +10723,7 @@ Resources:
 
   CompleteSectionReviewResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     DependsOn: APPSYNCSTACK
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
@@ -11284,6 +11352,7 @@ Resources:
   # Fine-Tuning Jobs AppSync Data Source
   FinetuningJobsDataSource:
     Type: AWS::AppSync::DataSource
+    Condition: UseAppSync
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
       Name: FinetuningJobsDataSource
@@ -11299,6 +11368,7 @@ Resources:
   # Fine-Tuning AppSync Resolvers
   CreateFinetuningJobResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     DependsOn: APPSYNCSTACK
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
@@ -11308,6 +11378,7 @@ Resources:
 
   DeleteFinetuningJobResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     DependsOn: APPSYNCSTACK
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
@@ -11317,6 +11388,7 @@ Resources:
 
   UpdateFinetuningJobStatusResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     DependsOn: APPSYNCSTACK
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
@@ -11326,6 +11398,7 @@ Resources:
 
   GetFinetuningJobResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     DependsOn: APPSYNCSTACK
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
@@ -11335,6 +11408,7 @@ Resources:
 
   ListFinetuningJobsResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     DependsOn: APPSYNCSTACK
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
@@ -11344,6 +11418,7 @@ Resources:
 
   ValidateTestSetForFinetuningResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     DependsOn: APPSYNCSTACK
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
@@ -11353,6 +11428,7 @@ Resources:
 
   ListAvailableModelsResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     DependsOn: APPSYNCSTACK
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
@@ -11362,6 +11438,7 @@ Resources:
 
   SkipAllSectionsReviewResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     DependsOn: APPSYNCSTACK
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
@@ -11371,6 +11448,7 @@ Resources:
 
   ClaimReviewResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     DependsOn: APPSYNCSTACK
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
@@ -11380,6 +11458,7 @@ Resources:
 
   ReleaseReviewResolver:
     Type: AWS::AppSync::Resolver
+    Condition: UseAppSync
     DependsOn: APPSYNCSTACK
     Properties:
       ApiId: !GetAtt GraphQLApi.ApiId
@@ -11525,7 +11604,10 @@ Outputs:
       - - !Sub "VITE_USER_POOL_ID=${UserPool}"
         - !Sub "VITE_USER_POOL_CLIENT_ID=${UserPoolClient}"
         - !Sub "VITE_IDENTITY_POOL_ID=${IdentityPool}"
-        - !Sub "VITE_APPSYNC_GRAPHQL_URL=${GraphQLApi.GraphQLUrl}"
+        - !If
+          - UseAppSync
+          - !Sub "VITE_APPSYNC_GRAPHQL_URL=${GraphQLApi.GraphQLUrl}"
+          - "VITE_APPSYNC_GRAPHQL_URL="
         - !Sub "VITE_API_TRANSPORT=${ApiTransport}"
         - !If
           - UseHttpApi
@@ -11623,7 +11705,7 @@ Outputs:
       See scripts/vpc-endpoints.yaml for the endpoint template.
     Value: !GetAtt LambdaVpcSecurityGroup.GroupId
   AppSyncEndpointForDNS:
-    Condition: UsePrivateAppSync
+    Condition: IsPrivateAppSyncAndAppSync
     Description: >-
       Fully-qualified AppSync GraphQL hostname, provided for private-network
       DNS setup when AppSyncVisibility=PRIVATE. For cross-VPC, cross-account,
