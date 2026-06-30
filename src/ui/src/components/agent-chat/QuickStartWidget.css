@@ -19,17 +19,13 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: grab;
+  cursor: pointer;
   box-shadow: 0 4px 12px rgba(0, 7, 22, 0.3);
   touch-action: none;
 }
 
 .quick-start-widget-launcher:hover {
   background: var(--color-background-button-primary-hover, #033160);
-}
-
-.quick-start-widget-launcher:active {
-  cursor: grabbing;
 }
 
 .quick-start-widget-panel {

@@ -3,13 +3,19 @@
 import React, { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import type { SideNavigationProps } from '@cloudscape-design/components';
-import { Badge, Box, Hotspot, Link, Popover, SideNavigation, SpaceBetween } from '@cloudscape-design/components';
+import { Badge, Box, Button, Hotspot, Link, Popover, SideNavigation, SpaceBetween } from '@cloudscape-design/components';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
 import useInstalledFeatures from '../../hooks/use-installed-features';
 import useCatalogFeatures from '../../hooks/use-catalog-features';
-import { buildFeaturesNavSection } from './feature-platform-nav-items';
+import { buildFeaturesNavSection, COMING_SOON_HREF } from './feature-platform-nav-items';
 import useLatestVersion from '../../hooks/use-latest-version';
+import './navigation.css';
+
+const isQuickStartWidgetEnabled = (): boolean => {
+  const flag = import.meta.env.VITE_ENABLE_QUICK_START_WIDGET;
+  return flag === undefined || flag === 'true' || flag === true;
+};
 
 import {
   DOCUMENTS_PATH,
@@ -32,8 +38,14 @@ export const documentsNavHeader = { text: 'Tools', href: `#${DEFAULT_PATH}` };
 const NAV_HOTSPOTS: Record<string, string> = {
   [`#${DOCUMENTS_PATH}`]: 'nav-documents',
   [`#${UPLOAD_DOCUMENT_PATH}`]: 'nav-upload',
+  [`#${DOCUMENTS_KB_QUERY_PATH}`]: 'nav-document-kb',
+  [`#${AGENT_CHAT_PATH}`]: 'nav-agent-chat',
   [`#${CONFIGURATION_PATH}`]: 'nav-configuration',
   [`#${DISCOVERY_PATH}`]: 'nav-discovery',
+  [`#${CUSTOM_MODELS_PATH}`]: 'nav-custom-models',
+  [`#${CAPACITY_PLANNING_PATH}`]: 'nav-capacity-planning',
+  [`#${USER_MANAGEMENT_PATH}`]: 'nav-user-management',
+  [`#${PRICING_PATH}`]: 'nav-pricing',
   [`#${TEST_STUDIO_PATH}?tab=sets`]: 'nav-test-sets',
   [`#${TEST_STUDIO_PATH}?tab=executions`]: 'nav-test-executions',
 };
@@ -239,6 +251,7 @@ const defaultOnFollowHandler = (ev: CustomEvent<SideNavigationProps.FollowDetail
     '#idppattern',
     '#region',
     '#update-available',
+    COMING_SOON_HREF,
   ];
   if (nonNavigableHrefs.includes(ev.detail.href)) {
     ev.preventDefault();
@@ -503,12 +516,21 @@ const Navigation = ({
   }
 
   return (
-    <SideNavigation
-      items={withNavHotspots(navigationItems)}
-      header={header || documentsNavHeader}
-      activeHref={activeHref}
-      onFollow={onFollowHandler}
-    />
+    <>
+      {isQuickStartWidgetEnabled() && (
+        <div className="nav-quick-start">
+          <Button variant="primary" iconName="gen-ai" onClick={() => window.dispatchEvent(new CustomEvent('openQuickStart'))}>
+            Quick Start
+          </Button>
+        </div>
+      )}
+      <SideNavigation
+        items={withNavHotspots(navigationItems)}
+        header={header || documentsNavHeader}
+        activeHref={activeHref}
+        onFollow={onFollowHandler}
+      />
+    </>
   );
 };
 

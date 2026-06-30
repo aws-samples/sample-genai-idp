@@ -159,12 +159,20 @@ const AgentChatLayout = ({
       updateAgentChatState({ inputValue: prompt });
     };
 
+    const handleOpenQuickStart = () => {
+      if (mode !== 'quick_start') {
+        updateAgentChatState({ mode: 'quick_start' });
+      }
+    };
+
     window.addEventListener('insertSampleQuery', handleSampleQueryInsert as EventListener);
     window.addEventListener('generateSyntheticData', handleGenerateSyntheticData as EventListener);
+    window.addEventListener('openQuickStart', handleOpenQuickStart as EventListener);
 
     return () => {
       window.removeEventListener('insertSampleQuery', handleSampleQueryInsert as EventListener);
       window.removeEventListener('generateSyntheticData', handleGenerateSyntheticData as EventListener);
+      window.removeEventListener('openQuickStart', handleOpenQuickStart as EventListener);
     };
   }, [updateAgentChatState, mode]);
 

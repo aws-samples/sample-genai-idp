@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import AnnotationContext from '@cloudscape-design/components/annotation-context';
 import type { AnnotationContextProps } from '@cloudscape-design/components/annotation-context';
 import { DOCUMENTS_PATH } from '../routes/constants';
+import useSettingsContext from './settings';
 
 interface GuidedTourContextValue {
   tutorial: AnnotationContextProps.Tutorial | null;
@@ -16,7 +17,12 @@ const GuidedTourContext = createContext<GuidedTourContextValue | null>(null);
 
 const DISMISS_LABEL = 'Dismiss tour';
 
-const buildTutorial = (): AnnotationContextProps.Tutorial => ({
+interface TourFlags {
+  customModels: boolean;
+  capacityPlanning: boolean;
+}
+
+const buildTutorial = (flags: TourFlags): AnnotationContextProps.Tutorial => ({
   title: 'Get started with GenAI IDP',
   description: 'A quick walkthrough of the main areas of the console.',
   completed: false,
@@ -37,6 +43,16 @@ const buildTutorial = (): AnnotationContextProps.Tutorial => ({
           hotspotId: 'nav-upload',
         },
         {
+          title: 'Document KB',
+          content: 'Ask natural-language questions about your processed documents using the document knowledge base.',
+          hotspotId: 'nav-document-kb',
+        },
+        {
+          title: 'Agent Companion Chat',
+          content: 'Chat with the IDP assistant for help with analytics, errors, and questions about your documents and the system.',
+          hotspotId: 'nav-agent-chat',
+        },
+        {
           title: 'View / edit configuration',
           content: 'Review, edit, and activate configuration versions — the document classes and fields IDP extracts.',
           hotspotId: 'nav-configuration',
@@ -45,6 +61,34 @@ const buildTutorial = (): AnnotationContextProps.Tutorial => ({
           title: 'Discovery',
           content: 'Infer document classes and a schema automatically from a set of example documents.',
           hotspotId: 'nav-discovery',
+        },
+        ...(flags.customModels
+          ? [
+              {
+                title: 'Custom Models',
+                content: 'Fine-tune specialized classification models on your own document types for higher accuracy.',
+                hotspotId: 'nav-custom-models',
+              },
+            ]
+          : []),
+        ...(flags.capacityPlanning
+          ? [
+              {
+                title: 'Capacity Planning',
+                content: 'Analyze throughput, predict resource needs, and get AWS service-quota recommendations for your workload.',
+                hotspotId: 'nav-capacity-planning',
+              },
+            ]
+          : []),
+        {
+          title: 'User Management',
+          content: 'Manage users and their roles (Admin, Author, Reviewer, Viewer) for the console.',
+          hotspotId: 'nav-user-management',
+        },
+        {
+          title: 'View / Edit Pricing',
+          content: 'Review and adjust the per-service pricing used for document cost estimates.',
+          hotspotId: 'nav-pricing',
         },
         {
           title: 'Test sets',
@@ -88,11 +132,19 @@ const i18nStrings: AnnotationContextProps.I18nStrings = {
 export const GuidedTourProvider = ({ children }: { children: React.ReactNode }): React.JSX.Element => {
   const [tutorial, setTutorial] = useState<AnnotationContextProps.Tutorial | null>(null);
   const navigate = useNavigate();
+  const { settings } = useSettingsContext();
+
+  const tourFlags = useMemo((): TourFlags => {
+    const pattern = (settings?.IDPPattern as string | undefined)?.toLowerCase();
+    const capacityPlanning = !pattern || /pattern[\s\-_]?2/.test(pattern) || pattern.includes('unified');
+    const customModels = (import.meta.env.VITE_AWS_REGION as string | undefined) === 'us-east-1';
+    return { customModels, capacityPlanning };
+  }, [settings?.IDPPattern]);
 
   const startTour = useCallback(() => {
     navigate(DOCUMENTS_PATH);
-    window.setTimeout(() => setTutorial(buildTutorial()), 350);
-  }, [navigate]);
+    window.setTimeout(() => setTutorial(buildTutorial(tourFlags)), 350);
+  }, [navigate, tourFlags]);
   const exitTour = useCallback(() => setTutorial(null), []);
   const finishTour = useCallback(() => {
     setTutorial(null);
