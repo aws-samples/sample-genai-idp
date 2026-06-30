@@ -30,7 +30,12 @@ def _find_repo_root() -> Path:
 
 
 _DISPATCHER_DIR = (
-    _find_repo_root() / "nested" / "api-resolvers" / "src" / "lambda" / "http_api_dispatcher"
+    _find_repo_root()
+    / "nested"
+    / "api-resolvers"
+    / "src"
+    / "lambda"
+    / "http_api_dispatcher"
 )
 
 
