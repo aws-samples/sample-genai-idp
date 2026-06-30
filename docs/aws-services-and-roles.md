@@ -85,7 +85,16 @@ When no permissions boundary is specified, roles deploy normally, ensuring backw
 
 ### Deployment Roles
 
-Deploying this solution requires an IAM role/user with the following permissions:
+Deploying this solution requires an IAM role/user with the following permissions.
+
+> **Ready-to-use CloudFormation service role:** Rather than granting these
+> permissions directly to deploying users, administrators can provision the
+> example **CloudFormation service role** in
+> [iam-roles/cloudformation-management/](../iam-roles/cloudformation-management/README.md).
+> It bundles the deployment permissions below into a single role that
+> CloudFormation assumes on a user's behalf, so developers/DevOps can deploy and
+> manage IDP stacks with only `iam:PassRole` instead of broad administrator
+> access. See also [Deployment → Administrator Access Requirements](./deployment.md#administrator-access-requirements).
 
 #### Essential Permissions
 * `cloudformation:*` - Create and manage CloudFormation stacks

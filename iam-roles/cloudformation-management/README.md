@@ -13,14 +13,14 @@ This approach enables a security model where:
 
 ## <span style="color: blue;">What This Role Does</span>
 
-The **IDPAcceleratorCloudFormationServiceRole** is a CloudFormation service role that provides the necessary permissions for AWS CloudFormation to deploy, update, and manage GenAI IDP Accelerator stacks across all patterns (Pattern 1: BDA, Pattern 2: Textract+Bedrock, Pattern 3: Textract+UDOP+Bedrock). This role can only be assumed by the CloudFormation service, not by users directly.
+The **IDPAcceleratorCloudFormationServiceRole** is a CloudFormation service role that provides the necessary permissions for AWS CloudFormation to deploy, update, and manage GenAI IDP Accelerator stacks. The solution now uses a single **unified pattern stack** controlled by the `use_bda` configuration flag — **BDA mode** (Bedrock Data Automation) or **Pipeline mode** (Amazon Textract OCR + Bedrock classification/extraction). This role can only be assumed by the CloudFormation service, not by users directly.
 
 Demo (5 minutes)
 
 ### Key Capabilities
 - **Full CloudFormation Management**: Create, update, delete IDP stacks - This IAM service role (which CloudFormation assumes) gives necessary privileges to create/update/delete the stack which is helpful in development and sandbox environments. In production environments, admins can further limit these permissions to their discretion (e.g. disabling stack deletion).
 
-- **All Pattern Support**: Works with Pattern 1 (BDA), Pattern 2 (Textract+Bedrock), and Pattern 3 (UDOP)
+- **All Mode Support**: Works with both processing modes of the unified pattern stack — BDA mode (Bedrock Data Automation) and Pipeline mode (Textract + Bedrock)
 
 - **Comprehensive AWS Service Access**: Supports all services required by IDP Accelerator
 
@@ -105,7 +105,7 @@ Demo (5 minutes)
 
 ## <span style="color: blue;">AWS Service Permissions</span>
 
-The role provides comprehensive access to **28 AWS services** required by all IDP patterns. Below is a detailed breakdown organized by category.
+The role provides comprehensive access to **28 AWS services** required across both processing modes (BDA and Pipeline) of the unified pattern stack. Below is a detailed breakdown organized by category.
 
 ### Services Summary
 
@@ -113,7 +113,7 @@ The role provides comprehensive access to **28 AWS services** required by all ID
 |----------|---------------|----------|
 | Core Infrastructure | 2 | CloudFormation, IAM |
 | Compute & Serverless | 3 | Lambda, Step Functions, CodeBuild |
-| AI/ML Services | 3 | Bedrock, Textract, SageMaker |
+| AI/ML Services | 3 | Bedrock, Textract, SageMaker (optional MLflow) |
 | Storage Services | 3 | S3, DynamoDB, ECR |
 | API & Application | 2 | API Gateway, AppSync |
 | Security & Identity | 5 | Cognito User Pools, Cognito Identity, KMS, Secrets Manager, WAF v2 |
@@ -134,7 +134,7 @@ The role provides comprehensive access to **28 AWS services** required by all ID
 | CodeBuild | Full Access | Build automation for custom container images |
 | Bedrock | Full Access | Foundation models for document understanding |
 | Textract | Full Access | Document OCR and extraction capabilities |
-| SageMaker | Full Access | Custom ML model endpoints |
+| SageMaker | Full Access | Optional MLflow tracking server integration |
 | S3 | Full Access | Bucket and object management |
 | DynamoDB | Full Access | Table and data management |
 | ECR | Full Access | Container image registry |
@@ -156,7 +156,7 @@ The role provides comprehensive access to **28 AWS services** required by all ID
 | OpenSearch Serverless | Full Access | Vector search for embeddings |
 | CloudFront | Full Access | CDN for web hosting and API acceleration |
 | EC2 (VPC) | Limited Access | VPC, subnet, and security group management only |
-| Application Auto Scaling | Full Access | Auto-scaling for DynamoDB, Lambda, SageMaker |
+| Application Auto Scaling | Full Access | Auto-scaling for DynamoDB and Lambda |
 
 ---
 
@@ -349,7 +349,7 @@ textract:*
 
 **Permission Level**: Full (`*`)
 
-**Purpose**: Custom ML model endpoints (UDOP pattern), model inference, and ML pipelines
+**Purpose**: Optional Amazon SageMaker MLflow tracking server integration for logging processing metrics/experiments (enabled via `MlflowTrackingServerArn`). Note: earlier releases used a SageMaker-hosted UDOP classification endpoint (the former "Pattern 3"); the unified architecture no longer deploys a SageMaker inference endpoint — classification is performed by Bedrock foundation models.
 
 **Actions Granted**:
 ```
@@ -868,7 +868,7 @@ ec2:DescribeAvailabilityZones
 
 **Permission Level**: Full (`*`)
 
-**Purpose**: Auto-scaling for DynamoDB tables, Lambda provisioned concurrency, and SageMaker endpoints
+**Purpose**: Auto-scaling for DynamoDB tables and Lambda provisioned concurrency
 
 **Actions Granted**:
 ```
