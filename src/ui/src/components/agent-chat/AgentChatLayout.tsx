@@ -206,6 +206,8 @@ const AgentChatLayout = ({
     const hasFiles = mode === 'quick_start' && attachedFiles.length > 0;
     if (!prompt.trim() && !hasFiles) return;
 
+    const filesAttachedCount = attachedFiles.length;
+
     if (hasFiles) {
       const filesToProcess = attachedFiles;
       const version = targetConfigVersion || `bootstrap-${Date.now().toString(36)}`;
@@ -215,8 +217,16 @@ const AgentChatLayout = ({
       startUpload(filesToProcess, version);
     }
 
-    const messageToSend =
-      prompt.trim() || `I've attached ${attachedFiles.length} example document(s). Please analyze them and infer the schema.`;
+    let messageToSend: string;
+    if (hasFiles) {
+      const note =
+        `[${filesAttachedCount} document(s) attached — multi-document Discovery is now running on them ` +
+        `in the background. Acknowledge it's processing and that you'll summarize the results when they ` +
+        `arrive; do not ask me to upload again.]`;
+      messageToSend = prompt.trim() ? `${prompt.trim()}\n\n${note}` : note;
+    } else {
+      messageToSend = prompt;
+    }
 
     updateAgentChatState({ inputValue: '' });
     try {

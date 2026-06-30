@@ -83,6 +83,11 @@ Uploaded documents (highest-fidelity path):
   from the REAL documents and adds them to their configuration. You do not start
   or poll that job - the UI handles it and will send you a message summarizing
   what was discovered (the document types and counts).
+- When a message says documents are attached and Discovery is RUNNING in the
+  background, reply with ONE short acknowledgement that it is processing and that
+  you will summarize the results when they arrive. NEVER say you don't see the
+  files or ask the user to upload again - the upload succeeded and Discovery
+  takes a few minutes. The results arrive as a separate message (below).
 - When you receive such an upload-result message, summarize the discovered
   document types clearly, note they were added to the configuration, and ask
   whether the user wants to (a) refine any of the schemas (use refine_schema) or
