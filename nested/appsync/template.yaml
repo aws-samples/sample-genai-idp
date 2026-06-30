@@ -1402,16 +1402,19 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${StackName}-*-CopyToBaseline*"
-        # Allow AppSync access for document updates
-        - Statement:
-            - !If
-              - UseAppSync
+        # Allow AppSync access for document updates. Gate the WHOLE inline policy
+        # under UseAppSync: gating only the statement would leave an empty
+        # Statement list under httpapi, which IAM rejects ("Syntax errors in
+        # policy"). Under httpapi the resolver writes the TrackingTable directly.
+        - !If
+          - UseAppSync
+          - Statement:
               - Effect: Allow
                 Action:
                   - appsync:GraphQL
                 Resource:
                   - !Sub "${GraphQLApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
+          - !Ref AWS::NoValue
 
 
   ##########################################################################
