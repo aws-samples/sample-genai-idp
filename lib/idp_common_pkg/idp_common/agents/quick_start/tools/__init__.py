@@ -9,6 +9,7 @@ from .bootstrap_tools import (
     create_config_version,
     estimate_generation_cost,
     generate_from_existing_config,
+    list_available_extensions,
     list_config_versions,
     list_sample_documents,
     refine_schema,
@@ -26,5 +27,6 @@ __all__ = [
     "request_document_generation",
     "list_config_versions",
     "generate_from_existing_config",
+    "list_available_extensions",
     "list_sample_documents",
 ]

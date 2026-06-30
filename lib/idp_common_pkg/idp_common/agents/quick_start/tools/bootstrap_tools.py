@@ -43,6 +43,67 @@ def check_generator_availability_impl() -> str:
     )
 
 
+_LIST_INSTALLED_FEATURES_QUERY = """
+query ListInstalledFeatures {
+  listInstalledFeatures {
+    featureId
+    displayName
+    installedVersion
+    featureApiEndpoint
+  }
+}
+"""
+
+
+def list_available_extensions_impl() -> str:
+    """List Feature Platform extensions installed on this IDP stack.
+
+    Queries the host AppSync `listInstalledFeatures` over IAM SigV4 (the agent
+    Lambda has APPSYNC_API_URL + appsync:GraphQL on the main-stack API, so this
+    is a runtime call with no deploy-time cross-stack reference and no circular
+    dependency). Degrades to "not available" when the Feature Platform is
+    disabled (the query field is absent) or AppSync is unreachable.
+    """
+    api_url = os.environ.get("APPSYNC_API_URL")
+    if not api_url:
+        return json.dumps(
+            {
+                "available": False,
+                "reason": "Extensions registry not available (APPSYNC_API_URL unset).",
+                "extensions": [],
+            }
+        )
+
+    try:
+        from idp_common.appsync.client import AppSyncClient
+
+        client = AppSyncClient(api_url=api_url)
+        data = client.execute_query(_LIST_INSTALLED_FEATURES_QUERY)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning("Could not list installed extensions: %s", e)
+        return json.dumps(
+            {
+                "available": False,
+                "reason": "Feature Platform not enabled or unreachable.",
+                "extensions": [],
+            }
+        )
+
+    features = data.get("listInstalledFeatures") or []
+    extensions = [
+        {
+            "featureId": f.get("featureId"),
+            "displayName": f.get("displayName", f.get("featureId")),
+            "installedVersion": f.get("installedVersion"),
+            "featureApiEndpoint": f.get("featureApiEndpoint"),
+        }
+        for f in features
+        if f.get("featureId")
+    ]
+    extensions.sort(key=lambda e: (e.get("displayName") or "").lower())
+    return json.dumps({"available": True, "extensions": extensions})
+
+
 def list_sample_documents_impl() -> str:
     """List the bundled sample documents available to start from.
 
@@ -322,6 +383,22 @@ def check_generator_availability() -> str:
     Use this before offering to generate documents.
     """
     return check_generator_availability_impl()
+
+
+@strands.tool
+def list_available_extensions() -> str:
+    """List the optional IDP extensions installed on this deployment.
+
+    Use this when the user asks what add-ons/extensions are available, or before
+    offering a capability an extension provides — for example, synthetic document
+    generation is provided by the "IDP Data Generator" extension
+    (featureId "idp-data-generator"), and "IDP AutoTune"/"Auto Optimizer"
+    (featureId "idp-autotune") can optimize a configuration. Each returned
+    extension has featureId, displayName, installedVersion, and featureApiEndpoint.
+    Only mention a capability as available if its extension appears here; if not,
+    tell the user it can be installed from the Extensions page.
+    """
+    return list_available_extensions_impl()
 
 
 @strands.tool

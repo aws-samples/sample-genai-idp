@@ -1150,8 +1150,10 @@ type Query @aws_cognito_user_pools @aws_iam {
   # all coerce null → empty list / sensible default.
   # -----------------------------------------------------------------------
   """List all features currently installed in this IDP stack.
-  Returns null when EnableFeaturePlatform=false (no resolver attached)."""
-  listInstalledFeatures: [InstalledFeature!] @aws_cognito_user_pools
+  Returns null when EnableFeaturePlatform=false (no resolver attached).
+  Also @aws_iam so backend Lambdas (e.g. the Quick Start agent) can discover
+  installed extensions via SigV4 — the InstalledFeature type is already @aws_iam."""
+  listInstalledFeatures: [InstalledFeature!] @aws_cognito_user_pools @aws_iam
 
   """List all features published to the feature bucket (the catalog), whether
   installed or not. The UI takes the union of this + listInstalledFeatures to

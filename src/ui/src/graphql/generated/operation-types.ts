@@ -1198,6 +1198,8 @@ export type Query = {
   /**
    * List all features currently installed in this IDP stack.
    * Returns null when EnableFeaturePlatform=false (no resolver attached).
+   * Also @aws_iam so backend Lambdas (e.g. the Quick Start agent) can discover
+   * installed extensions via SigV4 — the InstalledFeature type is already @aws_iam.
    */
   listInstalledFeatures?: Maybe<Array<InstalledFeature>>;
   listUsers?: Maybe<UserList>;

@@ -16,6 +16,7 @@ from .tools import (
     create_config_version,
     estimate_generation_cost,
     generate_from_existing_config,
+    list_available_extensions,
     list_config_versions,
     list_sample_documents,
     refine_schema,
@@ -99,6 +100,16 @@ Modes (you are "Quick Start"):
   toggle labeled "Companion" below the message box. Do not try to answer it
   yourself.
 
+Extensions (optional add-ons):
+- Capabilities can be added by installed extensions. Call list_available_extensions
+  when the user asks what add-ons exist, or when a request maps to an extension's
+  capability, so you only mention what is actually installed. Do NOT claim an
+  extension capability is available unless it appears in the result; if it isn't,
+  say it can be installed from the Extensions page.
+- If "IDP AutoTune"/"Auto Optimizer" (featureId "idp-autotune") is installed and
+  the user wants to improve an existing configuration's accuracy or cost, prefer
+  recommending AutoTune over Discovery.
+
 Be concise and friendly. Always keep the user in control of cost-incurring
 steps. If a real example document would improve fidelity, suggest the user
 attach one using the document-upload control in the chat.
@@ -125,6 +136,7 @@ def create_quick_start_agent(
         list_config_versions,
         generate_from_existing_config,
         list_sample_documents,
+        list_available_extensions,
     ]
 
     bedrock_model = create_strands_bedrock_model(

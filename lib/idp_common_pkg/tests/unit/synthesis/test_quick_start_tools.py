@@ -171,6 +171,71 @@ class TestGenerateFromExistingConfig:
         assert "Paystub" in out["availableClasses"]
 
 
+class TestListAvailableExtensions:
+    def test_unavailable_when_appsync_url_missing(self, monkeypatch):
+        from idp_common.agents.quick_start.tools import bootstrap_tools as bt
+
+        monkeypatch.delenv("APPSYNC_API_URL", raising=False)
+        out = json.loads(bt.list_available_extensions_impl())
+        assert out["available"] is False
+        assert out["extensions"] == []
+
+    def test_lists_installed_extensions_sorted(self, monkeypatch):
+        from idp_common.agents.quick_start.tools import bootstrap_tools as bt
+
+        monkeypatch.setenv("APPSYNC_API_URL", "https://api.example.com/graphql")
+
+        class _Client:
+            def __init__(self, *a, **k):
+                pass
+
+            def execute_query(self, *_a, **_k):
+                return {
+                    "listInstalledFeatures": [
+                        {
+                            "featureId": "idp-data-generator",
+                            "displayName": "IDP Data Generator",
+                            "installedVersion": "0.1.0",
+                            "featureApiEndpoint": "https://gen.example.com",
+                        },
+                        {
+                            "featureId": "idp-autotune",
+                            "displayName": "Auto Optimizer",
+                            "installedVersion": "0.1.3",
+                            "featureApiEndpoint": "https://tune.example.com",
+                        },
+                    ]
+                }
+
+        with patch("idp_common.appsync.client.AppSyncClient", _Client):
+            out = json.loads(bt.list_available_extensions_impl())
+
+        assert out["available"] is True
+        # sorted by displayName: "Auto Optimizer" < "IDP Data Generator"
+        assert [e["featureId"] for e in out["extensions"]] == [
+            "idp-autotune",
+            "idp-data-generator",
+        ]
+
+    def test_platform_disabled_degrades(self, monkeypatch):
+        from idp_common.agents.quick_start.tools import bootstrap_tools as bt
+
+        monkeypatch.setenv("APPSYNC_API_URL", "https://api.example.com/graphql")
+
+        class _Client:
+            def __init__(self, *a, **k):
+                pass
+
+            def execute_query(self, *_a, **_k):
+                raise RuntimeError("Cannot query field 'listInstalledFeatures'")
+
+        with patch("idp_common.appsync.client.AppSyncClient", _Client):
+            out = json.loads(bt.list_available_extensions_impl())
+
+        assert out["available"] is False
+        assert out["extensions"] == []
+
+
 class TestListSampleDocuments:
     def test_unavailable_when_bucket_env_missing(self, monkeypatch):
         from idp_common.agents.quick_start.tools import bootstrap_tools as bt

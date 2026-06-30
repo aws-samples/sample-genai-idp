@@ -153,6 +153,52 @@ class AppSyncClient:
             logger.error(f"HTTP request to AppSync failed: {str(e)}")
             raise
 
+    def execute_query(
+        self, query: str, variables: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Execute a GraphQL query with error handling.
+
+        Like execute_mutation but without the mutation-specific "operation
+        returned null" check — a query field returning null (e.g. an empty
+        InstalledFeatures list when the Feature Platform is disabled) is a valid
+        result, not an error.
+        """
+        data = {"query": query, "variables": variables or {}}
+
+        request = AWSRequest(
+            method="POST",
+            url=self.api_url,
+            data=json.dumps(data, default=str).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
+        signed_headers = self._sign_request(request)
+
+        try:
+            response = self.http_session.post(
+                self.api_url, json=data, headers=signed_headers, timeout=10
+            )
+            response.raise_for_status()
+
+            result = response.json()
+            if "errors" in result:
+                error_messages = [
+                    error.get("message", "Unknown error") for error in result["errors"]
+                ]
+                raise AppSyncError(
+                    f"GraphQL query failed: {'; '.join(error_messages)}",
+                    result["errors"],
+                )
+            if "data" not in result:
+                raise AppSyncError("No data returned from AppSync")
+            return result["data"]
+
+        except requests.RequestException as e:
+            logger.error(f"HTTP request to AppSync failed: {str(e)}")
+            raise
+
     def close(self):
         """Close the HTTP session and clean up resources."""
         if hasattr(self, "http_session"):
