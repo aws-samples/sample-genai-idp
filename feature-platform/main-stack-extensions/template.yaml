@@ -874,20 +874,22 @@ Outputs:
     Export:
       Name: !Sub '${MainStackName}-WebUIBucketArn'
 
-  # AppSync re-exports are omitted under httpapi — the values are empty then and
-  # CloudFormation forbids empty Exports ("Exported values must not be empty").
+  # AppSync re-exports are ALWAYS present (never conditional): already-installed
+  # feature stacks import them, and CloudFormation refuses to delete an export
+  # that is in use ("Cannot delete export ... as it is in use"). Under httpapi
+  # the source values are empty, but empty Exports are forbidden, so substitute
+  # a clearly-marked placeholder. Feature-platform AppSync integration does not
+  # function under httpapi (documented limitation; separate follow-up) — the
+  # placeholder only keeps the export slot alive so the stack update succeeds.
   AppSyncApiUrl:
-    Condition: UseAppSync
-    Description: Re-export of main stack's AppSync API URL.
-    Value: !Ref AppSyncApiUrl
+    Description: Re-export of main stack's AppSync API URL (placeholder under httpapi).
+    Value: !If [UseAppSync, !Ref AppSyncApiUrl, "appsync-disabled-httpapi"]
     Export:
       Name: !Sub '${MainStackName}-AppSyncApiUrl'
 
   AppSyncApiArn:
-    Condition: UseAppSync
-    Description: Re-export of main stack's AppSync API ARN (feature stacks grant
-      appsync:GraphQL on this for their RegisterFeature custom-resource role).
-    Value: !Ref GraphQLApiArn
+    Description: Re-export of main stack's AppSync API ARN (placeholder under httpapi).
+    Value: !If [UseAppSync, !Ref GraphQLApiArn, "appsync-disabled-httpapi"]
     Export:
       Name: !Sub '${MainStackName}-AppSyncApiArn'
 
