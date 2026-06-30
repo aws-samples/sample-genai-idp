@@ -1518,8 +1518,8 @@ STDERR:
         Launch Stack URL from those. The feature's ui-deployer then copies the
         UI bundle into the host's WebUIBucket at install/update time.
 
-        Returns ``(hash, file_list)`` — empty when no bundled feature
-        directories are present (e.g. a trimmed checkout).
+        Returns ``(hash, file_list, oss_catalog_entries)`` — empty when no
+        bundled feature directories are present (e.g. a trimmed checkout).
         """
         feature_dirs = [
             Path(d) for d in self._bundled_feature_dirs() if Path(d).is_dir()
@@ -1529,7 +1529,7 @@ STDERR:
                 "No bundled feature directories found — skipping sample-feature "
                 "publish (feature bucket will start empty)."
             )
-            return "", []
+            return "", [], []
 
         self.log_phase("Building Sample Features", "🧩")
 

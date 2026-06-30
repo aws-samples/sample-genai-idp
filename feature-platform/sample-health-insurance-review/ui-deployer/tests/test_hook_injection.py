@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -50,7 +51,7 @@ def mod(monkeypatch):
 
 
 def test_injects_hook_into_empty_rule_validation(mod):
-    preset = {"rule_validation": {"enabled": True}}
+    preset: dict[str, Any] = {"rule_validation": {"enabled": True}}
     mod._inject_post_rule_validation_hook(preset)
 
     hooks = preset["rule_validation"]["postHook"]
@@ -69,14 +70,14 @@ def test_injects_hook_into_empty_rule_validation(mod):
 
 
 def test_creates_rule_validation_block_when_missing(mod):
-    preset = {"classes": []}
+    preset: dict[str, Any] = {"classes": []}
     mod._inject_post_rule_validation_hook(preset)
     assert preset["rule_validation"]["postHook"][0]["arn"] == _HOOK_ARN
 
 
 def test_is_idempotent_on_reapply(mod):
     """Stack Update re-runs the deployer; the same featureId must not duplicate."""
-    preset = {"rule_validation": {}}
+    preset: dict[str, Any] = {"rule_validation": {}}
     mod._inject_post_rule_validation_hook(preset)
     mod._inject_post_rule_validation_hook(preset)
     hooks = preset["rule_validation"]["postHook"]
@@ -84,7 +85,7 @@ def test_is_idempotent_on_reapply(mod):
 
 
 def test_preserves_other_features_hooks(mod):
-    preset = {
+    preset: dict[str, Any] = {
         "rule_validation": {
             "postHook": [
                 {"featureId": "some-other-feature", "arn": "arn:other", "order": 50}
@@ -100,6 +101,6 @@ def test_preserves_other_features_hooks(mod):
 def test_no_arn_skips_injection(mod, monkeypatch):
     """Without the hook ARN we must not write a half-formed entry."""
     monkeypatch.setattr(mod, "_HOOK_FUNCTION_ARN", "")
-    preset = {"rule_validation": {"enabled": True}}
+    preset: dict[str, Any] = {"rule_validation": {"enabled": True}}
     mod._inject_post_rule_validation_hook(preset)
     assert "postHook" not in preset["rule_validation"]
