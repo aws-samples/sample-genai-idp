@@ -741,6 +741,20 @@ class AssessmentConfig(BaseModel):
             "in ocr_only simply have no geometry (geometry is advisory)."
         ),
     )
+    inshard_list_batch_size: int = Field(
+        default=25,
+        gt=0,
+        description=(
+            "Max list rows assessed per inference in the in-shard assessment path "
+            "(agentic extraction). A single assessment call over a large list (e.g. "
+            "75 transaction rows) is unreliable — the model under-enumerates or omits "
+            "the list, leaving rows unassessed. When a shard's extracted list exceeds "
+            "this size, the assessment is run in batches of this many rows and "
+            "concatenated, so every row gets a confidence. Lower = more reliable "
+            "enumeration but more inferences; raise for capable models. Only affects "
+            "agentic in-shard assessment; the standalone Assessment step is unaffected."
+        ),
+    )
     image: ImageConfig = Field(default_factory=ImageConfig)
     granular: GranularAssessmentConfig = Field(default_factory=GranularAssessmentConfig)
 
@@ -758,7 +772,7 @@ class AssessmentConfig(BaseModel):
             return float(v) if v else 0.0
         return float(v)
 
-    @field_validator("max_tokens", mode="before")
+    @field_validator("max_tokens", "inshard_list_batch_size", mode="before")
     @classmethod
     def parse_int(cls, v: Any) -> int:
         """Parse int from string or number"""

@@ -3180,6 +3180,97 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                 assessment[field] = assessed
         return assessment
 
+    def _assess_results_batched(
+        self,
+        assessment_service: Any,
+        *,
+        class_label: str,
+        extraction_results: dict[str, Any],
+        document_text: str,
+        page_images: list[bytes],
+    ) -> dict[str, Any]:
+        """Assess one scope, batching large list fields across multiple inferences.
+
+        A single assessment call over a large list (e.g. 75 transaction rows) is
+        unreliable — the model under-enumerates or omits the list, leaving rows
+        unassessed. When the largest list field exceeds
+        ``assessment.inshard_list_batch_size``, the list is sliced into batches; each
+        batch is assessed with the SAME scalars/context (so scalar assessments and
+        the document context are preserved) but only that batch's rows, and the
+        per-row assessments are concatenated in order. Scalar/group assessments come
+        from the first batch. Returns ``{"assessment", "alerts", "metering"}``.
+
+        Falls back to a single call when no list field exceeds the batch size.
+        """
+        from idp_common.extraction.agentic_idp import _accumulate_metering
+
+        batch_size = self.config.assessment.inshard_list_batch_size
+        # Identify the single largest list field (the table being assessed).
+        list_fields = {
+            k: v
+            for k, v in extraction_results.items()
+            if isinstance(v, list) and len(v) > batch_size
+        }
+
+        def _one_call(results: dict[str, Any]) -> Any:
+            return assessment_service.assess_results(
+                class_label=class_label,
+                extraction_results=results,
+                document_text=document_text,
+                page_images=page_images,
+                ocr_text_confidence="",
+            )
+
+        if not list_fields:
+            core = _one_call(extraction_results)
+            return {
+                "assessment": self._reconcile_assessment_to_data(
+                    core.enhanced_assessment, extraction_results
+                ),
+                "alerts": core.confidence_threshold_alerts,
+                "metering": core.metering,
+            }
+
+        # Batch by the largest list field; other (smaller) list fields ride the
+        # first batch and are reconciled afterward.
+        big_field = max(list_fields, key=lambda k: len(list_fields[k]))
+        rows = extraction_results[big_field]
+        merged_assessment: dict[str, Any] = {}
+        merged_alerts: list[dict[str, Any]] = []
+        merged_metering: dict[str, Any] = {}
+        big_field_acc: list[Any] = []
+
+        for start in range(0, len(rows), batch_size):
+            chunk = rows[start : start + batch_size]
+            # Same scalars/context every batch; only the big list is sliced.
+            batch_results = dict(extraction_results)
+            batch_results[big_field] = chunk
+            core = _one_call(batch_results)
+            enhanced = self._reconcile_assessment_to_data(
+                core.enhanced_assessment, batch_results
+            )
+            # Accumulate the big list's per-row assessments in order.
+            big_field_acc.extend(
+                enhanced.get(big_field, [])
+                if isinstance(enhanced.get(big_field), list)
+                else []
+            )
+            _accumulate_metering(merged_metering, core.metering or {})
+            merged_alerts.extend(core.confidence_threshold_alerts or [])
+            # Scalars/other fields: keep the first batch's assessment.
+            if not merged_assessment:
+                merged_assessment = enhanced
+        merged_assessment[big_field] = big_field_acc
+        # Final alignment against the full extraction (pads any residual gap).
+        merged_assessment = self._reconcile_assessment_to_data(
+            merged_assessment, extraction_results
+        )
+        return {
+            "assessment": merged_assessment,
+            "alerts": merged_alerts,
+            "metering": merged_metering,
+        }
+
     def _build_assess_runner(self, section_info: SectionInfo) -> "Any | None":
         """Build the per-shard assess_runner closure (or None when disabled).
 
@@ -3212,24 +3303,17 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             import asyncio as _asyncio
 
             def _run() -> dict[str, Any]:
-                core = assessment_service.assess_results(
+                # Batch large list fields across multiple inferences so the model
+                # reliably enumerates every row (a single call over a big list
+                # under-enumerates/omits it). Reconciliation inside keeps the
+                # per-row assessment index-aligned with the shard's data.
+                return self._assess_results_batched(
+                    assessment_service,
                     class_label=class_label,
                     extraction_results=extraction_results,
                     document_text=document_text,
                     page_images=page_images,
-                    ocr_text_confidence="",
                 )
-                # Align list-item assessments to the shard's extracted rows so the
-                # merged explainability_info stays index-aligned with the merged
-                # data list (see _reconcile_assessment_to_data).
-                assessment = self._reconcile_assessment_to_data(
-                    core.enhanced_assessment, extraction_results
-                )
-                return {
-                    "assessment": assessment,
-                    "alerts": core.confidence_threshold_alerts,
-                    "metering": core.metering,
-                }
 
             return await _asyncio.to_thread(_run)
 
@@ -3259,36 +3343,18 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             assessment_service = AssessmentService(
                 region=self.region, config=self.config
             )
-            core = assessment_service.assess_results(
+            # Batch large list fields (same as the sharded path) so the model
+            # reliably enumerates every row instead of omitting/under-counting it.
+            batched = self._assess_results_batched(
+                assessment_service,
                 class_label=section_info.class_label,
                 extraction_results=extracted_fields,
                 document_text=self._document_text,
                 page_images=self._page_images,
-                ocr_text_confidence="",
             )
-            # Diagnostic: log per-list-field data vs raw-assessment counts so any
-            # alignment gap is visible in logs (reconcile fixes it below).
-            try:
-                _diag = {
-                    k: (
-                        len(v),
-                        len(core.enhanced_assessment.get(k))
-                        if isinstance(core.enhanced_assessment.get(k), list)
-                        else None,
-                    )
-                    for k, v in extracted_fields.items()
-                    if isinstance(v, list)
-                }
-                logger.info(
-                    "In-shard assessment list counts (data,assessed): %s", _diag
-                )
-            except Exception:  # noqa: BLE001
-                pass
-            metering["_merged_assessment"] = self._reconcile_assessment_to_data(
-                core.enhanced_assessment, extracted_fields
-            )
-            metering["_merged_assessment_alerts"] = core.confidence_threshold_alerts
-            _accumulate_metering(metering, core.metering)
+            metering["_merged_assessment"] = batched["assessment"]
+            metering["_merged_assessment_alerts"] = batched["alerts"]
+            _accumulate_metering(metering, batched["metering"])
         except Exception as e:  # noqa: BLE001 - assessment is advisory
             logger.warning(
                 "Single-agent in-shard assessment failed (keeping extraction): %s", e
