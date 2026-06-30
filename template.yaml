@@ -7013,6 +7013,18 @@ Resources:
             Effect: Allow
             Action: appsync:GraphQL
             Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${GraphQLApi.ApiId}/*"
+        - Statement:
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !Sub "arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:*"
+              Condition:
+                StringLike:
+                  "aws:ResourceTag/idp:feature-id": "*"
+            - Effect: Allow
+              Action:
+                - kms:GenerateDataKey
+                - kms:Decrypt
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
         - DynamoDBCrudPolicy:
             TableName: !Ref ChatMessagesTable
         - DynamoDBCrudPolicy:

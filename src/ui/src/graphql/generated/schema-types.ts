@@ -518,6 +518,7 @@ export type InstalledFeature = {
   displayName: Scalars['String']['output'];
   featureApiEndpoint?: Maybe<Scalars['String']['output']>;
   featureId: Scalars['String']['output'];
+  generationQueueArn?: Maybe<Scalars['String']['output']>;
   iconUrl?: Maybe<Scalars['String']['output']>;
   installedAt: Scalars['AWSDateTime']['output'];
   installedBy?: Maybe<Scalars['String']['output']>;
@@ -1407,6 +1408,7 @@ export type RegisterFeatureInput = {
   displayName: Scalars['String']['input'];
   featureApiEndpoint?: InputMaybe<Scalars['String']['input']>;
   featureId: Scalars['String']['input'];
+  generationQueueArn?: InputMaybe<Scalars['String']['input']>;
   iconUrl?: InputMaybe<Scalars['String']['input']>;
   installedBy?: InputMaybe<Scalars['String']['input']>;
   installedVersion: Scalars['String']['input'];

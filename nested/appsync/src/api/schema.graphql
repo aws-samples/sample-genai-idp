@@ -1310,6 +1310,7 @@ type InstalledFeature @aws_iam @aws_cognito_user_pools {
   stackId: String
   uiBundlePath: String!
   featureApiEndpoint: String
+  generationQueueArn: String
   iconUrl: String
   installedAt: AWSDateTime!
   installedBy: String
@@ -1388,6 +1389,7 @@ input RegisterFeatureInput {
   stackRegion: String!
   uiBundlePath: String!
   featureApiEndpoint: String
+  generationQueueArn: String
   iconUrl: String
   installedBy: String
   productCode: String

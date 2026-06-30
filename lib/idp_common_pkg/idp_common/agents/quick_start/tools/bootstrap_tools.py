@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import uuid
+from typing import Optional
 
 import strands
 
@@ -30,16 +31,13 @@ logger = logging.getLogger(__name__)
 
 
 def check_generator_availability_impl() -> str:
-    if os.environ.get("BOOTSTRAP_QUEUE_URL"):
-        return "Document generation is available."
-    available, reason = engine.generator_available()
-    if available:
+    if _generation_queue_url():
         return "Document generation is available."
     return (
-        "Document generation is NOT available in this environment. "
-        f"Reason: {reason}. {engine.INSTALL_HINT} "
-        "Schema authoring and config creation still work; the user can also "
-        "upload example documents to build a test set."
+        "Document generation is NOT available: the IDP Data Generator extension "
+        "is not installed. Schema authoring and config creation still work, and "
+        "the user can upload example documents to build a test set. The Data "
+        "Generator can be installed from the Extensions page."
     )
 
 
@@ -50,9 +48,12 @@ query ListInstalledFeatures {
     displayName
     installedVersion
     featureApiEndpoint
+    generationQueueArn
   }
 }
 """
+
+DATA_GENERATOR_FEATURE_ID = "idp-data-generator"
 
 
 def list_available_extensions_impl() -> str:
@@ -96,12 +97,62 @@ def list_available_extensions_impl() -> str:
             "displayName": f.get("displayName", f.get("featureId")),
             "installedVersion": f.get("installedVersion"),
             "featureApiEndpoint": f.get("featureApiEndpoint"),
+            "generationQueueArn": f.get("generationQueueArn"),
         }
         for f in features
         if f.get("featureId")
     ]
     extensions.sort(key=lambda e: (e.get("displayName") or "").lower())
     return json.dumps({"available": True, "extensions": extensions})
+
+
+def _installed_features() -> list:
+    """Query listInstalledFeatures via IAM SigV4; [] if unavailable."""
+    api_url = os.environ.get("APPSYNC_API_URL")
+    if not api_url:
+        return []
+    try:
+        from idp_common.appsync.client import AppSyncClient
+
+        client = AppSyncClient(api_url=api_url)
+        data = client.execute_query(_LIST_INSTALLED_FEATURES_QUERY)
+        return data.get("listInstalledFeatures") or []
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning("Could not query installed features: %s", e)
+        return []
+
+
+def _generation_queue_url() -> Optional[str]:
+    """Resolve the installed data-generator extension's BootstrapQueue URL.
+
+    Discovers the extension's generationQueueArn at runtime (no deploy-time
+    coupling) and derives the SQS queue URL from it. Returns None when the
+    extension is not installed or did not register a queue ARN.
+    """
+    for f in _installed_features():
+        if f.get("featureId") == DATA_GENERATOR_FEATURE_ID and f.get(
+            "generationQueueArn"
+        ):
+            return _queue_url_from_arn(f["generationQueueArn"])
+    return None
+
+
+def _queue_url_from_arn(arn: str) -> Optional[str]:
+    """arn:aws:sqs:<region>:<account>:<name> -> https SQS queue URL."""
+    parts = arn.split(":")
+    if len(parts) != 6 or parts[2] != "sqs":
+        logger.warning("Unrecognized SQS ARN: %s", arn)
+        return None
+    _, _, _, region, account, name = parts
+    return f"https://sqs.{region}.amazonaws.com/{account}/{name}"
+
+
+def _enqueue_generation(queue_url: str, message: dict) -> None:
+    import boto3
+
+    boto3.client("sqs").send_message(
+        QueueUrl=queue_url, MessageBody=json.dumps(message)
+    )
 
 
 def list_sample_documents_impl() -> str:
@@ -224,27 +275,20 @@ def request_document_generation_impl(
     threshold: int = 7,
     augment: bool = False,
 ) -> str:
-    queue_url = os.environ.get("BOOTSTRAP_QUEUE_URL")
+    queue_url = _generation_queue_url()
     if not queue_url:
-        available, reason = engine.generator_available()
-        if not available:
-            return json.dumps(
-                {
-                    "enqueued": False,
-                    "reason": f"Generator unavailable: {reason}",
-                    "hint": engine.INSTALL_HINT,
-                }
-            )
         return json.dumps(
-            {"enqueued": False, "reason": "BOOTSTRAP_QUEUE_URL not configured"}
+            {
+                "enqueued": False,
+                "reason": "The IDP Data Generator extension is not installed.",
+                "hint": "Install it from the Extensions page to enable generation.",
+            }
         )
 
     try:
         schema = json.loads(schema_text)
     except json.JSONDecodeError:
         return json.dumps({"error": "schema_text is not valid JSON"})
-
-    import boto3
 
     job_id = uuid.uuid4().hex
     allowed = schema_bridge.field_names(schema)
@@ -259,9 +303,7 @@ def request_document_generation_impl(
         "preauthoredSchema": schema,
         "allowedFieldNames": allowed,
     }
-    boto3.client("sqs").send_message(
-        QueueUrl=queue_url, MessageBody=json.dumps(message)
-    )
+    _enqueue_generation(queue_url, message)
     return json.dumps(
         {
             "enqueued": True,
@@ -311,19 +353,14 @@ def generate_from_existing_config_impl(
 ) -> str:
     from idp_common.config.configuration_manager import ConfigurationManager
 
-    queue_url = os.environ.get("BOOTSTRAP_QUEUE_URL")
+    queue_url = _generation_queue_url()
     if not queue_url:
-        available, reason = engine.generator_available()
-        if not available:
-            return json.dumps(
-                {
-                    "enqueued": False,
-                    "reason": f"Generator unavailable: {reason}",
-                    "hint": engine.INSTALL_HINT,
-                }
-            )
         return json.dumps(
-            {"enqueued": False, "reason": "BOOTSTRAP_QUEUE_URL not configured"}
+            {
+                "enqueued": False,
+                "reason": "The IDP Data Generator extension is not installed.",
+                "hint": "Install it from the Extensions page to enable generation.",
+            }
         )
 
     config_manager = ConfigurationManager()
@@ -348,8 +385,6 @@ def generate_from_existing_config_impl(
     schema = schema_bridge.config_class_to_generator_schema(target)
     allowed = schema_bridge.field_names(schema)
 
-    import boto3
-
     job_id = uuid.uuid4().hex
     message = {
         "jobId": job_id,
@@ -362,9 +397,7 @@ def generate_from_existing_config_impl(
         "preauthoredSchema": schema,
         "allowedFieldNames": allowed,
     }
-    boto3.client("sqs").send_message(
-        QueueUrl=queue_url, MessageBody=json.dumps(message)
-    )
+    _enqueue_generation(queue_url, message)
     return json.dumps(
         {
             "enqueued": True,

@@ -44,12 +44,15 @@ class TestEstimateAndAvailability:
 
     def test_availability_reports_unavailable(self):
         from idp_common.agents.quick_start.tools import bootstrap_tools as bt
-        from idp_common.synthesis import engine
 
-        with patch.object(
-            engine, "generator_available", return_value=(False, "no mod")
-        ):
+        with patch.object(bt, "_generation_queue_url", return_value=None):
             assert "NOT available" in bt.check_generator_availability_impl()
+
+    def test_availability_reports_available_when_extension_installed(self):
+        from idp_common.agents.quick_start.tools import bootstrap_tools as bt
+
+        with patch.object(bt, "_generation_queue_url", return_value="https://sqs/q"):
+            assert "is available" in bt.check_generator_availability_impl()
 
 
 class TestAuthorTool:
@@ -65,50 +68,50 @@ class TestAuthorTool:
 
 
 class TestRequestGenerationGuards:
-    def test_blocks_when_generator_unavailable(self):
+    def test_blocks_when_extension_not_installed(self):
         from idp_common.agents.quick_start.tools import bootstrap_tools as bt
-        from idp_common.synthesis import engine
 
-        with patch.object(engine, "generator_available", return_value=(False, "x")):
+        with patch.object(bt, "_generation_queue_url", return_value=None):
             out = json.loads(
                 bt.request_document_generation_impl(json.dumps(SCHEMA), "v1")
             )
             assert out["enqueued"] is False
+            assert "not installed" in out["reason"]
 
-    def test_blocks_when_queue_not_configured(self, monkeypatch):
+    def test_enqueues_to_discovered_extension_queue(self):
         from idp_common.agents.quick_start.tools import bootstrap_tools as bt
-        from idp_common.synthesis import engine
 
-        monkeypatch.delenv("BOOTSTRAP_QUEUE_URL", raising=False)
-        with patch.object(engine, "generator_available", return_value=(True, "")):
-            out = json.loads(
-                bt.request_document_generation_impl(json.dumps(SCHEMA), "v1")
-            )
-            assert out["enqueued"] is False
-
-    def test_enqueues_when_available_and_configured(self, monkeypatch):
-        from idp_common.agents.quick_start.tools import bootstrap_tools as bt
-        from idp_common.synthesis import engine
-
-        monkeypatch.setenv("BOOTSTRAP_QUEUE_URL", "https://sqs/queue")
         sent = {}
 
-        class _SQS:
-            def send_message(self, QueueUrl, MessageBody):
-                sent["url"] = QueueUrl
-                sent["body"] = json.loads(MessageBody)
+        def _capture(queue_url, message):
+            sent["url"] = queue_url
+            sent["body"] = message
 
-        with patch.object(engine, "generator_available", return_value=(True, "")):
-            with patch("boto3.client", return_value=_SQS()):
-                out = json.loads(
-                    bt.request_document_generation_impl(
-                        json.dumps(SCHEMA), "v1", doc_count=4
-                    )
+        with (
+            patch.object(bt, "_generation_queue_url", return_value="https://sqs/q"),
+            patch.object(bt, "_enqueue_generation", side_effect=_capture),
+        ):
+            out = json.loads(
+                bt.request_document_generation_impl(
+                    json.dumps(SCHEMA), "v1", doc_count=4
                 )
+            )
         assert out["enqueued"] is True
+        assert sent["url"] == "https://sqs/q"
         assert sent["body"]["targetVersion"] == "v1"
         assert sent["body"]["docCount"] == 4
         assert "NetPay" in sent["body"]["allowedFieldNames"]
+
+    def test_queue_url_from_arn(self):
+        from idp_common.agents.quick_start.tools import bootstrap_tools as bt
+
+        url = bt._queue_url_from_arn(
+            "arn:aws:sqs:us-east-1:123456789012:idp-feature-BootstrapQueue"
+        )
+        assert url == (
+            "https://sqs.us-east-1.amazonaws.com/123456789012/"
+            "idp-feature-BootstrapQueue"
+        )
 
 
 class TestGenerateFromExistingConfig:
@@ -128,41 +131,44 @@ class TestGenerateFromExistingConfig:
         assert out["versions"][0]["versionName"] == "v1"
         assert out["versions"][0]["classes"] == ["Paystub"]
 
-    def test_generate_from_existing_enqueues(self, monkeypatch):
+    def test_generate_from_existing_enqueues(self):
         from idp_common.agents.quick_start.tools import bootstrap_tools as bt
 
-        monkeypatch.setenv("BOOTSTRAP_QUEUE_URL", "https://sqs/queue")
         mgr = Mock()
         mgr.get_raw_configuration.return_value = {"classes": [SCHEMA]}
         sent = {}
 
-        class _SQS:
-            def send_message(self, QueueUrl, MessageBody):
-                sent["body"] = json.loads(MessageBody)
+        def _capture(queue_url, message):
+            sent["body"] = message
 
-        with patch(
-            "idp_common.config.configuration_manager.ConfigurationManager",
-            return_value=mgr,
+        with (
+            patch(
+                "idp_common.config.configuration_manager.ConfigurationManager",
+                return_value=mgr,
+            ),
+            patch.object(bt, "_generation_queue_url", return_value="https://sqs/q"),
+            patch.object(bt, "_enqueue_generation", side_effect=_capture),
         ):
-            with patch("boto3.client", return_value=_SQS()):
-                out = json.loads(
-                    bt.generate_from_existing_config_impl("v1", "Paystub", doc_count=2)
-                )
+            out = json.loads(
+                bt.generate_from_existing_config_impl("v1", "Paystub", doc_count=2)
+            )
         assert out["enqueued"] is True
         assert sent["body"]["targetVersion"] == "v1"
         assert sent["body"]["docCount"] == 2
         assert "NetPay" in sent["body"]["allowedFieldNames"]
         assert sent["body"]["preauthoredSchema"]["title"] == "Paystub"
 
-    def test_generate_from_existing_missing_class(self, monkeypatch):
+    def test_generate_from_existing_missing_class(self):
         from idp_common.agents.quick_start.tools import bootstrap_tools as bt
 
-        monkeypatch.setenv("BOOTSTRAP_QUEUE_URL", "https://sqs/queue")
         mgr = Mock()
         mgr.get_raw_configuration.return_value = {"classes": [SCHEMA]}
-        with patch(
-            "idp_common.config.configuration_manager.ConfigurationManager",
-            return_value=mgr,
+        with (
+            patch(
+                "idp_common.config.configuration_manager.ConfigurationManager",
+                return_value=mgr,
+            ),
+            patch.object(bt, "_generation_queue_url", return_value="https://sqs/q"),
         ):
             out = json.loads(
                 bt.generate_from_existing_config_impl("v1", "DoesNotExist")
