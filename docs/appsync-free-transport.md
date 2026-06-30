@@ -7,8 +7,8 @@ queries, mutations, and real-time subscriptions). AppSync is, however:
 - **not FedRAMP-compliant**, and
 - being de-emphasized by AWS for long-term new development.
 
-The `ApiTransport` stack parameter selects an alternative transport that uses
-only long-lived, GovCloud/FedRAMP-eligible services.
+AppSync has therefore been **removed entirely**. The UI<->backend transport now
+uses only long-lived, GovCloud/FedRAMP-eligible services — there is no toggle.
 
 | `ApiTransport` | UI ⇄ backend transport |
 |----------------|------------------------|
