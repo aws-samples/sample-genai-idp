@@ -61,7 +61,7 @@ export default defineConfig({
             },
             {
               label: "AppSync → REST Migration",
-              slug: "appsync-to-rest-migration",
+              slug: "migration-appsync-to-rest",
             },
             { label: "IDP CLI", slug: "idp-cli" },
             { label: "IDP SDK", slug: "idp-sdk" },
