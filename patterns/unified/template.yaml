@@ -1219,7 +1219,7 @@ Resources:
                 type: object
                 sectionLabel: Image Processing Settings
                 description: Configure image resolution and processing options for image attachments in extraction
-                order: 0
+                order: 13
                 properties:
                   target_width:
                     type: number
@@ -1235,6 +1235,7 @@ Resources:
                     order: 1
               missing_field_handling:
                 type: object
+                collapsible: false
                 sectionLabel: Missing vs Blank Fields
                 description: >-
                   Distinguish a field that is BLANK (its source page IS in the section but the value is empty)
@@ -1243,7 +1244,7 @@ Resources:
                   so you can't tell "the form had this field but it was left blank" from "that page wasn't
                   submitted at all." Applies to both standard and agentic extraction. Requires class schemas to
                   declare 'x-aws-idp-page-types' and properties to declare 'x-aws-idp-source-page-types'. Off by default.
-                order: 17
+                order: 22
                 properties:
                   enabled:
                     type: boolean
@@ -1380,7 +1381,8 @@ Resources:
                 order: 18
               geometry:
                 type: object
-                order: 16
+                order: 21
+                collapsible: false
                 sectionLabel: Bounding-box Geometry
                 description: "How field bounding boxes (geometry) are produced. Geometry is advisory enrichment shown in the UI viewer."
                 properties:
@@ -1400,11 +1402,9 @@ Resources:
                     hideWhen: { field: "extraction.geometry.mode", value: "ocr_only" }
               confidence:
                 type: object
-                order: 15
+                order: 20
                 sectionLabel: Confidence Assessment
-                collapsible: true
-                defaultExpanded: false
-                expandWhen: { field: "enabled", value: true }
+                collapsible: false
                 description: "Per-field confidence scoring. Confidence is an optional output of extraction; when enabled, each extracted value gets a confidence score (and drives HITL review). Turn OFF to skip assessment entirely (no second model pass, no explainability info)."
                 properties:
                   enabled:

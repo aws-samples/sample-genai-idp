@@ -64,6 +64,12 @@ interface SchemaProperty {
   // inference fields when extraction.confidence.mode === "integrated").
   hideWhen?: { field: string; value?: unknown };
   defaultExpanded?: boolean | string;
+  // Nested sectionLabel object rendering: `collapsible: false` renders an
+  // always-open group (bold header, no expand control) so its master toggle is
+  // never hidden. `ghostGroup: true` renders children at the PARENT config path
+  // (purely visual grouping — e.g. "Model parameters"/"Prompts" — no path change).
+  collapsible?: boolean | string;
+  ghostGroup?: boolean | string;
   nestLevel?: number;
   columns?: string | number;
   listLabel?: string;
@@ -902,6 +908,41 @@ const ConfigBuilder = ({
       return <SpaceBetween size="s">{renderedFields}</SpaceBetween>;
     }
 
+    // A `ghostGroup: true` object is a PURELY VISUAL grouping — its children render at
+    // the PARENT path (not nested under this key), so grouping labels like "Model
+    // parameters" / "Prompts" don't change any config path. childPath below picks the
+    // parent for ghost groups and the normal nested path otherwise.
+    const isGhostGroup = property.ghostGroup === true || property.ghostGroup === 'true';
+    const childPath = isGhostGroup ? path : fullPath;
+
+    // Always-open nested group: `collapsible: false` on a nested sectionLabel object
+    // renders a bold header with its fields always visible (no expand control). Used
+    // for feature groups whose master toggle should never be hidden behind a collapse
+    // (e.g. Confidence Assessment, Bounding-box Geometry, Missing vs Blank Fields).
+    if (property.sectionLabel && !isTopLevel && property.collapsible === false) {
+      const sectionTitle = property.sectionLabel as string;
+      const groupDescription = property.description as string | undefined;
+      return (
+        <ExtBox margin={{ top: '8px', bottom: '8px' }}>
+          <ExtBox borderBottom="divider-light" style={{ marginBottom: '6px' }}>
+            <ExtBox fontWeight="bold" fontSize="body-m" display="inline-block">
+              {sectionTitle}
+            </ExtBox>
+          </ExtBox>
+          {groupDescription && (
+            <ExtBox fontSize="body-s" color="text-body-secondary" style={{ marginBottom: '6px' }}>
+              {groupDescription}
+            </ExtBox>
+          )}
+          <SpaceBetween size="s">
+            {getSortedObjectProperties(property.properties).map(({ propKey, propSchema }) => {
+              return <ExtBox key={propKey}>{renderField(propKey, propSchema, childPath)}</ExtBox>;
+            })}
+          </SpaceBetween>
+        </ExtBox>
+      );
+    }
+
     // For nested objects with sectionLabel, use the same styling as list headers
     if (property.sectionLabel && !isTopLevel) {
       const sectionTitle = property.sectionLabel as string;
@@ -964,12 +1005,13 @@ const ConfigBuilder = ({
         </ExtBox>
       );
 
-      // Object content - only shown when expanded
+      // Object content - only shown when expanded. Ghost groups render children at the
+      // parent path (childPath) so the grouping doesn't change any config path.
       const objectContent = isExpanded && (
         <ExtBox padding={{ left: `${nestLevel * 50 + 200}px`, top: '0' }} className="list-content-indented">
           <SpaceBetween size="s">
             {getSortedObjectProperties(property.properties).map(({ propKey, propSchema }) => {
-              return <ExtBox key={propKey}>{renderField(propKey, propSchema, fullPath)}</ExtBox>;
+              return <ExtBox key={propKey}>{renderField(propKey, propSchema, childPath)}</ExtBox>;
             })}
           </SpaceBetween>
         </ExtBox>
