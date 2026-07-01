@@ -103,16 +103,6 @@ Parameters:
     AllowedPattern: "^[\\w+=,.@-]{0,64}$"
     Description: "(Optional) Session name for sts:AssumeRole into the Bedrock hub-account role."
 
-  AppSyncApiUrl:
-    Type: String
-    Default: ""
-    Description: "URL of the AppSync GraphQL API for document status updates"
-
-  AppSyncApiArn:
-    Type: String
-    Default: ""
-    Description: "ARN of the AppSync GraphQL API for document status updates"
-
   ConfigurationDefaultS3Uri:
     Type: String
     Description: "S3 URI (s3://bucket/path/config.json) to import default configuration from S3"
@@ -199,22 +189,22 @@ Parameters:
     Type: String
     Default: ""
 
-  # Private AppSync VPC config (req #2)
-  UsePrivateAppSync:
+  # Private REST API VPC config (req #2)
+  UsePrivateApi:
     Type: String
     Default: "false"
     AllowedValues: ["true", "false"]
-    Description: Set to "true" when AppSyncVisibility=PRIVATE — puts processing Lambdas in VPC
+    Description: Set to "true" when ApiGatewayVisibility=PRIVATE — puts processing Lambdas in VPC
 
   LambdaSubnetIds:
     Type: CommaDelimitedList
     Default: ""
-    Description: Subnet IDs for Lambda VpcConfig (required when UsePrivateAppSync=true)
+    Description: Subnet IDs for Lambda VpcConfig (required when UsePrivateApi=true)
 
   LambdaSecurityGroupId:
     Type: String
     Default: ""
-    Description: Security group ID for Lambda VpcConfig (required when UsePrivateAppSync=true)
+    Description: Security group ID for Lambda VpcConfig (required when UsePrivateApi=true)
 
   VpcId:
     Type: String
@@ -255,9 +245,8 @@ Conditions:
   HasCustomExtractionModelARN:
     !Not [!Equals [!Ref CustomExtractionModelARN, ""]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
-  HasAppSyncApi: !Not [!Equals [!Ref AppSyncApiArn, ""]]
   IsECRImageScanningEnabled: !Equals [!Ref EnableECRImageScanning, "true"]
-  IsPrivateAppSync: !Equals [!Ref UsePrivateAppSync, "true"]
+  IsPrivateApi: !Equals [!Ref UsePrivateApi, "true"]
   IsMLflowEnabled: !Equals [!Ref EnableMLflow, "true"]
   HasArtifactsBucketKmsKey: !Not [!Equals [!Ref ArtifactsBucketKmsKeyArn, ""]]
 
@@ -3352,7 +3341,7 @@ Resources:
           - id: W11
             reason: "Cloudwatch does not support resource-level permissions"
           - id: W89
-            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs — placed in VPC when AppSyncVisibility=PRIVATE"
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs — placed in VPC when ApiGatewayVisibility=PRIVATE"
           - id: W92
             reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
@@ -3374,7 +3363,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -3383,9 +3372,8 @@ Resources:
         Variables:
           METRIC_NAMESPACE: !Ref StackName
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, 'appsync', 'dynamodb']
+          DOCUMENT_TRACKING_MODE: dynamodb
           DB_NAME: !Ref BDAMetadataTable
           WORKING_BUCKET: !Ref WorkingBucket
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
@@ -3417,16 +3405,6 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: !Ref CustomerManagedEncryptionKeyArn
-          # AppSync permissions for document status queries and updates (only if AppSync API is available)
-          - !If
-            - HasAppSyncApi
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource: 
-                - !Sub "${AppSyncApiArn}/types/Mutation/*"
-                - !Sub "${AppSyncApiArn}/types/Query/*"
-            - !Ref AWS::NoValue
           - Effect: Allow
             Action:
               - ssm:GetParameter
@@ -3637,7 +3615,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -3648,9 +3626,8 @@ Resources:
           MAX_WORKERS: 20
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
@@ -3737,15 +3714,6 @@ Resources:
               Condition:
                 StringLike:
                   "lambda:FunctionName": "GENAIIDP-*"
-            # AppSync permissions for updating document status (only if AppSync API is available)
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
 
   OCRFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -3794,7 +3762,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -3807,8 +3775,7 @@ Resources:
           CONFIGURATION_BUCKET: !Ref ConfigurationBucket
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           # Guardrails break classification
           # GUARDRAIL_ID_AND_VERSION: !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
@@ -3849,15 +3816,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            # AppSync permissions for updating document status (only if AppSync API is available)
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.
             - Effect: Allow
@@ -3963,7 +3921,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -3980,9 +3938,8 @@ Resources:
               "",
             ]
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
@@ -4019,15 +3976,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            # AppSync permissions for updating document status (only if AppSync API is available)
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.
             - Effect: Allow
@@ -4139,7 +4087,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -4156,9 +4104,8 @@ Resources:
               "",
             ]
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
@@ -4195,14 +4142,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - bedrock-mantle:CreateInference
@@ -4290,7 +4229,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -4301,9 +4240,8 @@ Resources:
           CONFIGURATION_BUCKET: !Ref ConfigurationBucket
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
@@ -4340,15 +4278,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            # AppSync permissions for updating document status (only if AppSync API is available)
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.
             - Effect: Allow
@@ -4447,7 +4376,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -4456,9 +4385,8 @@ Resources:
         Variables:
           METRIC_NAMESPACE: !Ref StackName
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           OUTPUT_BUCKET: !Ref OutputBucket
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
@@ -4489,16 +4417,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            # AppSync permissions for document queries and updates (only if AppSync API is available)
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-                  - !Sub "${AppSyncApiArn}/types/Query/*"
-              - !Ref AWS::NoValue
 
   ProcessResultsFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -4546,7 +4464,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -4562,9 +4480,8 @@ Resources:
               "",
             ]
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
@@ -4599,15 +4516,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            # AppSync permissions for updating document status (only if AppSync API is available)
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.
             - Effect: Allow
@@ -4794,7 +4702,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -4803,7 +4711,6 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           METRIC_NAMESPACE: !Ref StackName
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           PROCESSING_OUTPUT_BUCKET: !Ref OutputBucket
           EVALUATION_OUTPUT_BUCKET: !Ref OutputBucket
           REPORTING_BUCKET: !Ref ReportingBucket
@@ -4811,7 +4718,7 @@ Resources:
           SAVE_REPORTING_FUNCTION_NAME: !Ref SaveReportingFunctionName
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           WORKING_BUCKET: !Ref WorkingBucket
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           TRACKING_TABLE: !Ref TrackingTable
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
@@ -4846,15 +4753,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            # AppSync permissions for updating document status (only if AppSync API is available)
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.
             - Effect: Allow
@@ -4994,9 +4892,8 @@ Resources:
           METRIC_NAMESPACE: !Ref StackName
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           OUTPUT_BUCKET: !Ref OutputBucket
           REPORTING_BUCKET: !Ref ReportingBucket
@@ -5030,14 +4927,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - lambda:InvokeFunction
@@ -5095,7 +4984,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -5111,9 +5000,8 @@ Resources:
               "",
             ]
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
@@ -5148,15 +5036,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            # AppSync permissions for updating document status (only if AppSync API is available)
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.
             - Effect: Allow
@@ -5242,7 +5121,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -5258,9 +5137,8 @@ Resources:
               "",
             ]
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           REPORTING_BUCKET: !Ref ReportingBucket
           SAVE_REPORTING_FUNCTION_NAME: !Ref SaveReportingFunctionName
@@ -5297,14 +5175,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.
             - Effect: Allow

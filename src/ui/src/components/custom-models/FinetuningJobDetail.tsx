@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import {
   Container,
   Header,

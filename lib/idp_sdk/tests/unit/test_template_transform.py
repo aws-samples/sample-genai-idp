@@ -58,7 +58,7 @@ def _minimal_template():
             "FeaturePlatformStack": {
                 "Type": "AWS::CloudFormation::Stack",
                 "Condition": "IsFeaturePlatformEnabled",
-                "DependsOn": ["APPSYNCSTACK"],
+                "DependsOn": ["APIRESOLVERSTACK"],
                 "Properties": {
                     "Parameters": {
                         "GraphQLApiId": {"Fn::GetAtt": ["GraphQLApi", "ApiId"]},

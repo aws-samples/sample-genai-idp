@@ -3,7 +3,7 @@
 
 import React, { useState } from 'react';
 import { Box } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import DOMPurify from 'dompurify';
 // Note: XLSX and mammoth imports removed since we're using download approach for Excel/Docx files

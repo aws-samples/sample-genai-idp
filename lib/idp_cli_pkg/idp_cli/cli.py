@@ -3071,11 +3071,16 @@ def _invoke_test_set_resolver(
     for page in paginator.paginate():
         all_functions.extend(page["Functions"])
 
+    # Match by the stack-name prefix + the unique function fragment. We do NOT
+    # match the full "-APIRESOLVERSTACK-" nested-stack segment because
+    # CloudFormation truncates long logical ids in physical names (e.g.
+    # "<stack>-APIRESOLVE-TestSetResolverFunction-xxxx"), which a fixed prefix
+    # would miss.
     test_set_resolver_function = next(
         (
             f["FunctionName"]
             for f in all_functions
-            if f["FunctionName"].startswith(f"{stack_name}-APPSYNCSTACK-")
+            if f["FunctionName"].startswith(f"{stack_name}-APIRESOLVE")
             and "TestSetResolverFunction" in f["FunctionName"]
         ),
         None,
@@ -3133,7 +3138,7 @@ def _invoke_test_runner(
     import json
 
     # Find test runner function by name pattern
-    # Match: <stack_name>-APPSYNCSTACK-*-TestRunnerFunction-*
+    # Match: <stack_name>-APIRESOLVE*-TestRunnerFunction-* (logical id is truncated)
     lambda_client = boto3.client("lambda", region_name=region)
 
     # Handle pagination to get all functions
@@ -3142,11 +3147,13 @@ def _invoke_test_runner(
     for page in paginator.paginate():
         all_functions.extend(page["Functions"])
 
+    # Stack prefix + function fragment (not the full "-APIRESOLVERSTACK-" segment,
+    # which CloudFormation truncates in physical names).
     test_runner_function = next(
         (
             f["FunctionName"]
             for f in all_functions
-            if f["FunctionName"].startswith(f"{stack_name}-APPSYNCSTACK-")
+            if f["FunctionName"].startswith(f"{stack_name}-APIRESOLVE")
             and "TestRunnerFunction" in f["FunctionName"]
         ),
         None,

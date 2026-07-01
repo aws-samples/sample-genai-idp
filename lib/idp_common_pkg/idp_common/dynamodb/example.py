@@ -137,12 +137,6 @@ def example_factory_usage():
     except Exception as e:
         print(f"Could not create DynamoDB service: {e}")
 
-    try:
-        appsync_service = DocumentServiceFactory.create_service(mode="appsync")
-        print(f"Created AppSync service: {type(appsync_service).__name__}")
-    except Exception as e:
-        print(f"Could not create AppSync service: {e}")
-
     # Use convenience function
     service = create_document_service()
     print(f"Created service using convenience function: {type(service).__name__}")
@@ -174,11 +168,6 @@ def example_environment_switching():
     os.environ["DOCUMENT_TRACKING_MODE"] = "dynamodb"
     service = create_document_service()
     print(f"With DOCUMENT_TRACKING_MODE=dynamodb: {type(service).__name__}")
-
-    # Test AppSync mode
-    os.environ["DOCUMENT_TRACKING_MODE"] = "appsync"
-    service = create_document_service()
-    print(f"With DOCUMENT_TRACKING_MODE=appsync: {type(service).__name__}")
 
     # Restore original environment
     if original_mode:

@@ -9,21 +9,31 @@ registrations the Claims Review sample demonstrates:
 On Create or Update:
   1. Copies s3://<FEATURE_BUCKET>/<FEATURE_ARTIFACT_PREFIX>/<FEATURE_VERSION>/ui-bundle.js
      into s3://<WEBUI_BUCKET>/features/<FEATURE_ID>/v<FEATURE_VERSION>/ui-bundle.js
-  2. Calls the host's AppSync `registerFeature` mutation (IAM auth) to add a
+  2. Directly invokes the host's `registerFeature` resolver Lambda to add a
      row to InstalledFeatures.
   3. Downloads the bundled config preset (config-preset/claims-config.yaml,
      uploaded by the publisher under <FEATURE_ARTIFACT_PREFIX>/<FEATURE_VERSION>),
      INJECTS the postRuleValidation hook into its rule_validation.postHook, and
-     calls `applyFeatureConfigPreset` — creating a NON-ACTIVE config version
+     invokes the host's `applyFeatureConfigPreset` resolver — creating a
+     NON-ACTIVE config version
      `sample-health-insurance-review-v<FEATURE_VERSION>` for an admin to activate.
      (The hook travels inside the preset, not via a separate registerFeatureHooks
      call, so activating that version brings the rules and hook together.)
 
 On Delete:
   1. Deletes the copied UI bundle.
-  2. Calls `unregisterFeature`, `unregisterFeatureHooks`, and
-     `removeFeatureConfigPreset` (the host preserves the preset version if an
-     admin has it active). Failures are logged, never block stack delete.
+  2. Invokes the host's resolver Lambdas for `unregisterFeature`,
+     `unregisterFeatureHooks`, and `removeFeatureConfigPreset` (the host
+     preserves the preset version if an admin has it active). Failures are
+     logged, never block stack delete.
+
+The AppSync transport was removed; the host resolver Lambdas already parse the
+AppSync resolver event shape {info:{fieldName}, arguments, identity}, so each
+field is dispatched by invoking the appropriate host function directly:
+  registerFeature / unregisterFeature        -> REGISTER_FEATURE_FUNCTION_ARN
+  unregisterFeatureHooks                     -> REGISTER_FEATURE_HOOKS_FUNCTION_ARN
+  applyFeatureConfigPreset / removeFeatureConfigPreset
+                                             -> APPLY_FEATURE_CONFIG_PRESET_FUNCTION_ARN
 
 The Lambda's execution role carries the tag `idp:feature-id=<FEATURE_ID>`
 (set in template.yaml) so the main stack's WebUIBucketPolicy allows writes
@@ -37,13 +47,9 @@ import logging
 import os
 import urllib.request
 from typing import Any, Dict, Optional
-from urllib.parse import urlparse
 
 import boto3
 import yaml
-from botocore.auth import SigV4Auth
-from botocore.awsrequest import AWSRequest
-from botocore.session import Session
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -58,7 +64,12 @@ _FEATURE_BUCKET = os.environ["FEATURE_BUCKET"]
 # host's artifacts bucket), e.g. "<prefix>/extensions/<id>". The versioned
 # artifacts live under "<base>/<FEATURE_VERSION>/...".
 _FEATURE_ARTIFACT_PREFIX = os.environ["FEATURE_ARTIFACT_PREFIX"].rstrip("/")
-_APPSYNC_URL = os.environ["APPSYNC_API_URL"]
+# ARNs of the host's resolver Lambdas (the AppSync transport was removed).
+_REGISTER_FEATURE_FUNCTION_ARN = os.environ["REGISTER_FEATURE_FUNCTION_ARN"]
+_REGISTER_FEATURE_HOOKS_FUNCTION_ARN = os.environ["REGISTER_FEATURE_HOOKS_FUNCTION_ARN"]
+_APPLY_FEATURE_CONFIG_PRESET_FUNCTION_ARN = os.environ[
+    "APPLY_FEATURE_CONFIG_PRESET_FUNCTION_ARN"
+]
 _FEATURE_API_ENDPOINT = os.environ.get("FEATURE_API_ENDPOINT", "")
 # ARN of this feature's postRuleValidation hook Lambda (template.yaml).
 _HOOK_FUNCTION_ARN = os.environ.get("HOOK_FUNCTION_ARN", "")
@@ -141,88 +152,45 @@ def _bundle_ui(request_type: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# AppSync registration (IAM-signed GraphQL mutations)
+# Feature registration — direct Lambda invoke of the host's resolver Lambdas.
+# The AppSync transport was removed; each resolver Lambda already parses the
+# AppSync resolver event shape, so we hand it the same event
+# {info:{fieldName}, arguments, identity} directly. Each field is routed to the
+# host function that owns it.
 # ---------------------------------------------------------------------------
-_REGISTER_QUERY = """
-mutation Register($input: RegisterFeatureInput!) {
-  registerFeature(input: $input) {
-    featureId
-    installedVersion
-    installedAt
-  }
-}
-"""
-
-_UNREGISTER_QUERY = """
-mutation Unregister($featureId: String!) {
-  unregisterFeature(featureId: $featureId)
-}
-"""
-
-# NOTE: there is no registerFeatureHooks query here on purpose — this feature
-# bakes its postRuleValidation hook into the config preset itself (see
-# _inject_post_rule_validation_hook), so the hook travels with the version the
-# admin activates. We keep the *unregister* query only to clean up any hook a
-# previous build of this feature may have written into the active version via
-# registerFeatureHooks.
-_UNREGISTER_HOOKS_QUERY = """
-mutation UnregisterHooks($featureId: String!) {
-  unregisterFeatureHooks(featureId: $featureId)
-}
-"""
-
-_APPLY_PRESET_QUERY = """
-mutation ApplyPreset($input: ApplyFeatureConfigPresetInput!) {
-  applyFeatureConfigPreset(input: $input) {
-    featureId
-    configVersionName
-    appliedAt
-  }
-}
-"""
-
-_REMOVE_PRESET_QUERY = """
-mutation RemovePreset($featureId: String!) {
-  removeFeatureConfigPreset(featureId: $featureId)
-}
-"""
+_lambda = boto3.client("lambda")
 
 
-def _call_appsync(query: str, variables: Dict[str, Any]) -> Dict[str, Any]:
-    """POST a SigV4-signed GraphQL operation to AppSync."""
-    session = Session()
-    creds = session.get_credentials()
-    parsed = urlparse(_APPSYNC_URL)
-    region = parsed.hostname.split(".")[-3] if parsed.hostname else "us-east-1"
+def _invoke_resolver(
+    function_arn: str, field_name: str, arguments: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Synchronously invoke a host resolver Lambda for a single GraphQL field.
 
-    body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
-    request = AWSRequest(
-        method="POST",
-        url=_APPSYNC_URL,
-        data=body,
-        headers={"Content-Type": "application/json"},
+    Builds the AppSync resolver event shape the resolver already understands.
+    Raises on a Lambda FunctionError (handler-raised exception).
+    """
+    payload = {
+        "info": {"fieldName": field_name},
+        "arguments": arguments,
+        "identity": {"username": "feature-install", "groups": ["Admin"]},
+    }
+    resp = _lambda.invoke(
+        FunctionName=function_arn,
+        InvocationType="RequestResponse",
+        Payload=json.dumps(payload).encode("utf-8"),
     )
-    SigV4Auth(creds, "appsync", region).add_auth(request)
-
-    req = urllib.request.Request(
-        _APPSYNC_URL,
-        data=body,
-        headers=dict(request.headers.items()),
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
-        resp_body = resp.read().decode("utf-8")
-    parsed_body = json.loads(resp_body)
-    if parsed_body.get("errors"):
-        raise RuntimeError(f"AppSync errors: {parsed_body['errors']}")
-    return parsed_body.get("data") or {}
+    body = resp["Payload"].read().decode("utf-8")
+    if resp.get("FunctionError"):
+        raise RuntimeError(f"{field_name} resolver failed: {body}")
+    return json.loads(body) if body else {}
 
 
 def _register(ui_bundle_path: str, stack_id: str) -> None:
     caller = boto3.client("sts").get_caller_identity()
     region = os.environ.get("AWS_REGION", "us-east-1")
-    _call_appsync(
-        _REGISTER_QUERY,
+    _invoke_resolver(
+        _REGISTER_FEATURE_FUNCTION_ARN,
+        "registerFeature",
         {
             "input": {
                 "featureId": _FEATURE_ID,
@@ -242,14 +210,20 @@ def _register(ui_bundle_path: str, stack_id: str) -> None:
 
 
 def _unregister() -> None:
-    _call_appsync(_UNREGISTER_QUERY, {"featureId": _FEATURE_ID})
+    _invoke_resolver(
+        _REGISTER_FEATURE_FUNCTION_ARN, "unregisterFeature", {"featureId": _FEATURE_ID}
+    )
 
 
 def _unregister_hooks() -> None:
     """Best-effort cleanup of any hook a prior build registered into the active
     config version via registerFeatureHooks. Current builds bake the hook into
     the preset instead, so this is only for backward compatibility on delete."""
-    _call_appsync(_UNREGISTER_HOOKS_QUERY, {"featureId": _FEATURE_ID})
+    _invoke_resolver(
+        _REGISTER_FEATURE_HOOKS_FUNCTION_ARN,
+        "unregisterFeatureHooks",
+        {"featureId": _FEATURE_ID},
+    )
 
 
 def _inject_post_rule_validation_hook(preset: Dict[str, Any]) -> None:
@@ -332,8 +306,9 @@ def _apply_config_preset() -> None:
     if not isinstance(preset, dict):
         raise RuntimeError(f"Config preset at {preset_key} did not parse to a mapping")
     _inject_post_rule_validation_hook(preset)
-    result = _call_appsync(
-        _APPLY_PRESET_QUERY,
+    result = _invoke_resolver(
+        _APPLY_FEATURE_CONFIG_PRESET_FUNCTION_ARN,
+        "applyFeatureConfigPreset",
         {
             "input": {
                 "featureId": _FEATURE_ID,
@@ -351,7 +326,11 @@ def _apply_config_preset() -> None:
 
 
 def _remove_config_preset() -> None:
-    _call_appsync(_REMOVE_PRESET_QUERY, {"featureId": _FEATURE_ID})
+    _invoke_resolver(
+        _APPLY_FEATURE_CONFIG_PRESET_FUNCTION_ARN,
+        "removeFeatureConfigPreset",
+        {"featureId": _FEATURE_ID},
+    )
 
 
 # ---------------------------------------------------------------------------

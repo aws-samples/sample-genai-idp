@@ -1,24 +1,23 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { useCallback, useEffect, useState } from 'react';
+import { generateClient } from '../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
 import {
   getCircuitBreakerStatus as getCircuitBreakerStatusQuery,
-  onCircuitBreakerStatusChange as onCircuitBreakerStatusChangeSubscription,
   pauseCircuitBreaker as pauseCircuitBreakerMutation,
   resumeCircuitBreaker as resumeCircuitBreakerMutation,
   probeCircuitBreaker as probeCircuitBreakerMutation,
 } from '../graphql/generated';
 import type { CircuitBreakerStatus } from '../graphql/generated/operation-types';
+import usePolling from './use-polling';
 
 const client = generateClient();
 const logger = new ConsoleLogger('useCircuitBreaker');
 
-interface Subscription {
-  unsubscribe: () => void;
-}
+// No subscriptions — circuit-breaker status is kept fresh by polling.
+const CIRCUIT_BREAKER_POLL_INTERVAL_MS = 15000;
 
 interface UseCircuitBreakerReturn {
   status: CircuitBreakerStatus | null;
@@ -33,56 +32,31 @@ const useCircuitBreaker = (): UseCircuitBreakerReturn => {
   const [status, setStatus] = useState<CircuitBreakerStatus | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<Error | null>(null);
-  const subscriptionRef = useRef<Subscription | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const load = async () => {
-      try {
-        const result = await client.graphql({ query: getCircuitBreakerStatusQuery });
-        if (cancelled) return;
-        const next = result.data?.getCircuitBreakerStatus ?? null;
-        setStatus(next as CircuitBreakerStatus | null);
-        setError(null);
-      } catch (err) {
-        if (cancelled) return;
-        logger.error('getCircuitBreakerStatus failed', err);
-        setError(err instanceof Error ? err : new Error(String(err)));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    load();
-
-    return () => {
-      cancelled = true;
-    };
+  const loadStatus = useCallback(async () => {
+    try {
+      const result = await client.graphql({ query: getCircuitBreakerStatusQuery });
+      const next = result.data?.getCircuitBreakerStatus ?? null;
+      setStatus(next as CircuitBreakerStatus | null);
+      setError(null);
+    } catch (err) {
+      logger.error('getCircuitBreakerStatus failed', err);
+      setError(err instanceof Error ? err : new Error(String(err)));
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (subscriptionRef.current) return undefined;
+    void loadStatus();
+  }, [loadStatus]);
 
-    const sub = client.graphql({ query: onCircuitBreakerStatusChangeSubscription }).subscribe({
-      next: (message) => {
-        const next = message.data?.onCircuitBreakerStatusChange;
-        if (next) {
-          setStatus(next as CircuitBreakerStatus);
-        }
-      },
-      error: (err: unknown) => {
-        logger.error('onCircuitBreakerStatusChange subscription error', err);
-      },
-    });
-
-    subscriptionRef.current = sub;
-    return () => {
-      if (subscriptionRef.current) {
-        subscriptionRef.current.unsubscribe();
-        subscriptionRef.current = null;
-      }
-    };
-  }, []);
+  // Real-time updates: AppSync subscription, or polling under the HTTP API
+  // transport (which has no subscriptions).
+  usePolling(loadStatus, {
+    enabled: true,
+    intervalMs: CIRCUIT_BREAKER_POLL_INTERVAL_MS,
+  });
 
   const pause = useCallback(async (reason: string) => {
     const result = await client.graphql({ query: pauseCircuitBreakerMutation, variables: { reason } });

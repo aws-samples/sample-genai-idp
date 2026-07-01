@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Badge, Box, Button, SpaceBetween } from '@cloudscape-design/components';
 import type { BadgeProps } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { getTestRunStatus } from '../../graphql/generated';
 
 const client = generateClient();

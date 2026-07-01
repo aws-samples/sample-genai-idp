@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState, useEffect, useCallback } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { Modal, Box, SpaceBetween, Button, FormField, Input, Select, Checkbox, Alert } from '@cloudscape-design/components';
 
 interface SelectOption {

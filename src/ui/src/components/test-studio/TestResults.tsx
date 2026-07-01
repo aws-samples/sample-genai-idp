@@ -27,7 +27,7 @@ import {
 import { useCollection } from '@cloudscape-design/collection-hooks';
 
 import yaml from 'js-yaml';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { getTestRun, startTestRun, getTestSets } from '../../graphql/generated';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import TestStudioHeader from './TestStudioHeader';
