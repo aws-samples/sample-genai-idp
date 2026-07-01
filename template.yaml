@@ -8576,12 +8576,21 @@ Resources:
         # Allow the authenticated Cognito Identity Pool role to invoke the chat
         # streaming Function URL (AuthType=AWS_IAM) under the httpapi transport.
         # This is the identity-side grant the SigV4-signed browser request needs.
+        #
+        # NB: a Function URL invocation requires lambda:InvokeFunction — NOT
+        # lambda:InvokeFunctionUrl. The latter gates the FunctionUrlConfig, not
+        # the invoke; granting only InvokeFunctionUrl yields a 403
+        # AccessDeniedException at invoke time (verified against the live
+        # us-west-2 Function URL: InvokeFunctionUrl alone -> 403,
+        # InvokeFunction -> 200). InvokeFunctionUrl is kept for completeness.
         - PolicyName: ChatStreamInvoke
           PolicyDocument:
             Version: 2012-10-17
             Statement:
               - Effect: Allow
-                Action: lambda:InvokeFunctionUrl
+                Action:
+                  - lambda:InvokeFunction
+                  - lambda:InvokeFunctionUrl
                 Resource: !GetAtt ChatStreamProcessorFunction.Arn
         - PolicyName: S3
           PolicyDocument:
@@ -9647,7 +9656,15 @@ Resources:
             #     (tracked as Talos finding #12 phase 2).
             #   - img-src: retains `https:` to allow user-supplied
             #     document thumbnails from any S3 / CloudFront origin.
-            ContentSecurityPolicy: "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com https://cognito-idp.*.amazonaws.com https://cognito-identity.*.amazonaws.com https://*.appsync-api.*.amazonaws.com https://*.execute-api.*.amazonaws.com https://*.s3.*.amazonaws.com https://*.s3-accelerate.amazonaws.com wss://*.amazonaws.com wss://*.appsync-realtime-api.*.amazonaws.com wss://*.execute-api.*.amazonaws.com ws://localhost:*;"
+            #   - connect-src: includes https://*.on.aws for the chat streaming
+            #     Lambda Function URL (RESPONSE_STREAM), whose host is
+            #     <id>.lambda-url.<region>.on.aws. CSP host-source only permits a
+            #     wildcard as the LEFTMOST label (a middle wildcard like
+            #     *.lambda-url.*.on.aws is invalid and the whole source is
+            #     discarded), so we use the region-agnostic *.on.aws — the *.
+            #     prefix matches any subdomain depth. Without this the browser
+            #     blocks the streamed fetch ("Failed to fetch").
+            ContentSecurityPolicy: "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com https://cognito-idp.*.amazonaws.com https://cognito-identity.*.amazonaws.com https://*.appsync-api.*.amazonaws.com https://*.execute-api.*.amazonaws.com https://*.on.aws https://*.s3.*.amazonaws.com https://*.s3-accelerate.amazonaws.com wss://*.amazonaws.com wss://*.appsync-realtime-api.*.amazonaws.com wss://*.execute-api.*.amazonaws.com ws://localhost:*;"
 
           StrictTransportSecurity:
             Override: true

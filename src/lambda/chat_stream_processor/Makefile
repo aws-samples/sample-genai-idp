@@ -21,4 +21,15 @@ build-ChatStreamProcessorFunction:
 	# Vendored processor sources, exposed under their importable module names.
 	cp $(CURDIR)/vendored/chat_with_document_processor.py $(ARTIFACTS_DIR)/chat_with_document_processor.py
 	cp $(CURDIR)/vendored/agent_chat_processor.py $(ARTIFACTS_DIR)/agent_chat_processor.py
-	python -m pip install -r $(CURDIR)/requirements.txt -t $(ARTIFACTS_DIR)
+	# Install for the Lambda x86_64 Linux runtime, NOT the build host. fastapi
+	# pulls in pydantic/pydantic-core, which have compiled extensions; a plain
+	# `pip install -t` on an ARM/Mac build host ships a darwin .so that cannot
+	# load on Lambda (ModuleNotFoundError: pydantic_core._pydantic_core), and it
+	# also shadows the correct Linux build in the attached layers. Cross-target
+	# manylinux wheels only (matches the layer build in idp_sdk publish).
+	python -m pip install -r $(CURDIR)/requirements.txt -t $(ARTIFACTS_DIR) \
+		--platform manylinux2014_x86_64 \
+		--python-version 3.12 \
+		--implementation cp \
+		--only-binary=:all: \
+		--upgrade
