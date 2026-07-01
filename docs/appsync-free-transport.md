@@ -136,6 +136,9 @@ account.
 
 ## See also
 
+- [AppSync → REST API Migration](appsync-to-rest-migration.md) — how this
+  transport reproduces AppSync queries, mutations, subscriptions, RBAC, and
+  performance/scale, with the design rationale for each mapping
 - [GovCloud deployment](govcloud-deployment.md)
 - [ALB hosting](alb-hosting.md)
 - [Architecture](architecture.md)
