@@ -79,7 +79,7 @@ def select_extraction_task_prompt(extraction_cfg: Any) -> str:
             or extraction_cfg.task_prompt
         )
         if geometry_requires_llm_boxes(geometry_mode):
-            core = _append_bbox_block(core, extraction_cfg.task_prompt_bbox)
+            core = _append_bbox_block(core, extraction_cfg.geometry.task_prompt_bbox)
         return core
     return extraction_cfg.task_prompt
 
@@ -87,9 +87,10 @@ def select_extraction_task_prompt(extraction_cfg: Any) -> str:
 def select_confidence_task_prompt(extraction_cfg: Any) -> str:
     """Return the task prompt for the SEPARATE confidence pass, per settings.
 
-    task_prompt_confidence (+ bbox block for LLM-box geometry).
+    extraction.confidence.task_prompt (+ extraction.geometry.task_prompt_bbox for
+    LLM-box geometry).
     """
-    core = extraction_cfg.task_prompt_confidence
+    core = extraction_cfg.confidence.task_prompt
     if geometry_requires_llm_boxes(extraction_cfg.geometry.mode):
-        core = _append_bbox_block(core, extraction_cfg.task_prompt_bbox)
+        core = _append_bbox_block(core, extraction_cfg.geometry.task_prompt_bbox)
     return core

@@ -38,6 +38,51 @@ extraction:
       You are a document analysis assessment expert. Your role is to evaluate the confidence and accuracy of data extraction results by analyzing them against source documents.
       Provide accurate confidence scores for each assessment.
       When bounding boxes are requested, provide precise coordinate locations where information appears in the document.
+    task_prompt: >-
+      <background>
+      You are an expert document analysis assessment system. Your task is to evaluate the confidence of extraction results for a document of class {DOCUMENT_CLASS}.
+      </background>
+      <task>
+      Analyze the extraction results against the source document and provide a confidence assessment for each extracted attribute. Consider factors such as:
+      1. Text clarity and OCR quality in the source regions
+      2. Alignment between extracted values and document content
+      3. Presence of clear evidence supporting the extraction
+      4. Potential ambiguity or uncertainty in the source material
+      5. Completeness and accuracy of the extracted information
+      </task>
+      <assessment-guidelines>
+      For each attribute, provide:
+      - A confidence score between 0.0 and 1.0 (1.0 = clear, unambiguous evidence;
+        lower = weaker/ambiguous evidence)
+      - A clear explanation of the confidence reasoning
+      Base assessments on actual document content and OCR quality; account for OCR
+      confidence scores when provided; be objective and specific.
+      </assessment-guidelines>
+      <final-instructions>
+      Return a JSON object mirroring the extracted data structure:
+      SIMPLE:  {"attr": {"confidence": 0.85, "confidence_reason": "..."}}
+      GROUP:   {"grp": {"sub1": {"confidence": 0.9, "confidence_reason": "..."}}}
+      LIST:    {"items": [ {"c1": {"confidence": 0.95, "confidence_reason": "..."}}, ... ]}
+      IMPORTANT:
+      - For LIST attributes, assess EACH item separately (one object per row, in order)
+      - Include assessments for ALL attributes present in the extraction results
+      - Match the exact structure of the extracted data
+      </final-instructions>
+      <<CACHEPOINT>>
+      <document-image>
+      {DOCUMENT_IMAGE}
+      </document-image>
+      <ocr-text-confidence-results>
+      {OCR_TEXT_CONFIDENCE}
+      </ocr-text-confidence-results>
+      <<CACHEPOINT>>
+      <attributes-definitions>
+      {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+      </attributes-definitions>
+      <extraction-results>
+      {EXTRACTION_RESULTS}
+      </extraction-results>
+
 
 # Human-in-the-Loop review (v0.6, top-level)
 hitl:

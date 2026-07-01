@@ -29,7 +29,6 @@ class TestV05ToV06Migration:
                     "temperature": "0.0",
                     "inshard_list_batch_size": "30",
                     "granular": {"enabled": True, "max_workers": "20"},
-                    "validation_enabled": True,
                     "image": {"target_width": "100"},
                 }
             }
@@ -38,12 +37,10 @@ class TestV05ToV06Migration:
         assert conf["enabled"] is True
         assert conf["model"] == "us.anthropic.claude-haiku-4-5-20251001-v1:0"
         assert conf["system_prompt"] == "SP"
-        # v0.6: the confidence TASK prompt moves to the top-level extraction template
-        assert out["extraction"]["task_prompt_confidence"] == "TP"
-        assert "task_prompt" not in conf
+        # v0.6: the confidence TASK prompt lives in the confidence sub-config
+        assert conf["task_prompt"] == "TP"
         assert conf["list_batch_size"] == "30"
         assert conf["granular"] == {"enabled": True, "max_workers": "20"}
-        assert conf["validation_enabled"] is True
         assert conf["image"] == {"target_width": "100"}
 
     @pytest.mark.parametrize(
@@ -191,8 +188,8 @@ class TestV05ToV06ThroughIDPConfig:
         )
         assert cfg.extraction.confidence.list_batch_size == 40
         assert cfg.extraction.confidence.system_prompt == "SP"
-        # v0.6: assessment.task_prompt migrates to the top-level confidence template
-        assert cfg.extraction.task_prompt_confidence == "TP"
+        # v0.6: assessment.task_prompt migrates to extraction.confidence.task_prompt
+        assert cfg.extraction.confidence.task_prompt == "TP"
         assert cfg.extraction.confidence.granular.enabled is False
         assert cfg.extraction.geometry.mode == "llm_grounded"
         assert cfg.hitl.enabled is True

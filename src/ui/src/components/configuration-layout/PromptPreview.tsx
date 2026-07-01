@@ -499,7 +499,8 @@ const PromptPreview = ({ formValues }: PromptPreviewProps): React.JSX.Element =>
     const mode = String(confidence.mode ?? 'separate');
     const geomMode = String(geometry.mode ?? 'ocr_only');
     const needsBbox = LLM_BOX_GEOMETRY_MODES.includes(geomMode);
-    const bboxBlock = String(extraction.task_prompt_bbox ?? '');
+    // v0.6: bbox block lives under geometry; confidence prompt under confidence.
+    const bboxBlock = String(geometry.task_prompt_bbox ?? '');
 
     if (selectedStep === 'extraction') {
       const integrated = confidence.enabled !== false && mode === 'integrated';
@@ -516,7 +517,7 @@ const PromptPreview = ({ formValues }: PromptPreviewProps): React.JSX.Element =>
     }
 
     if (selectedStep === 'confidence') {
-      let task = String(extraction.task_prompt_confidence ?? '');
+      let task = String(confidence.task_prompt ?? '');
       if (needsBbox) task = appendBboxBlock(task, bboxBlock);
       return {
         system_prompt: String(confidence.system_prompt ?? ''),

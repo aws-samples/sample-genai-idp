@@ -15,3 +15,13 @@
 extraction:
   geometry:
     mode: ocr_only
+    task_prompt_bbox: >-
+      <spatial-localization-guidelines>
+      Additionally, for each field provide bounding box coordinates alongside its
+      confidence:
+      - bbox: [x1, y1, x2, y2] in a normalized 0-1000 scale
+      - page: page number where the field appears (starting from 1)
+      Use x1,y1 = top-left and x2,y2 = bottom-right (ensure x2 > x1, y2 > y1). Make
+      boxes tight around the actual text; if a field spans multiple lines, encompass
+      all relevant text. Include bbox/page in the JSON alongside each field's confidence.
+      </spatial-localization-guidelines>

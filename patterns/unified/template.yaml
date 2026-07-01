@@ -1236,17 +1236,25 @@ Resources:
               missing_field_handling:
                 type: object
                 sectionLabel: Missing vs Blank Fields
-                description: "Applies to both standard and agentic extraction. Distinguish a BLANK field (its source page is present but the value is empty) from a MISSING field (its source page is absent from the section). Requires class schemas to declare 'x-aws-idp-page-types' and properties to declare 'x-aws-idp-source-page-types'. Off by default."
+                description: >-
+                  Distinguish a field that is BLANK (its source page IS in the section but the value is empty)
+                  from one that is MISSING (its source page is ABSENT from the section — e.g. a multi-page
+                  packet where a whole document is not present). Without this, both look identical (empty/null),
+                  so you can't tell "the form had this field but it was left blank" from "that page wasn't
+                  submitted at all." Applies to both standard and agentic extraction. Requires class schemas to
+                  declare 'x-aws-idp-page-types' and properties to declare 'x-aws-idp-source-page-types'. Off by default.
                 order: 17
                 properties:
                   enabled:
                     type: boolean
-                    description: "Enable BLANK vs MISSING field handling. When off (default), all unfound fields are treated the same."
+                    title: Enable missing vs blank detection
+                    description: "When off (default), all unfound fields are treated the same (blank/null). When on, fields whose source page is absent are marked MISSING per the representation below."
                     order: 0
                     default: false
                   representation:
                     type: string
-                    description: "Only used when enabled. How to represent a MISSING field in the output. 'omit': drop the key entirely. 'null_with_metadata': keep the key as null and list it under a sibling 'missing_fields' array. Default: omit."
+                    title: Missing field representation
+                    description: "Only used when enabled. How a MISSING field appears in the output. 'omit': drop the key entirely. 'null_with_metadata': keep the key as null and list it under a sibling 'missing_fields' array. Default: omit."
                     enum: ["omit", "null_with_metadata"]
                     default: "omit"
                     order: 1
@@ -1358,26 +1366,14 @@ Resources:
                 format: textarea
                 description: "Extraction-only task prompt — used when confidence runs separately or is disabled. Placeholders: {DOCUMENT_CLASS}, {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}, {FEW_SHOT_EXAMPLES}, {DOCUMENT_TEXT}, {DOCUMENT_IMAGE}. Use <<CACHEPOINT>> for Bedrock prompt caching. Overridable per class via 'x-aws-idp-extraction-task-prompt'."
                 order: 10
+                hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
               task_prompt_extraction_with_confidence:
                 type: string
                 title: Task prompt (extraction + confidence)
                 format: textarea
-                description: "INTEGRATED task prompt — used when Confidence Assessment mode is 'integrated' (one inference emits each value AND its confidence). Instruct the model to call provide_field_assessment. The bounding-box block below is appended automatically when Geometry mode is 'llm' or 'llm_grounded'."
+                description: "INTEGRATED task prompt — used when Confidence Assessment mode is 'integrated' (one inference emits each value AND its confidence). Instruct the model to call provide_field_assessment. The bounding-box block (Bounding-box Geometry section) is appended automatically when Geometry mode is 'llm' or 'llm_grounded'."
                 order: 11
                 dependsOn: { field: "extraction.confidence.mode", value: "integrated" }
-              task_prompt_confidence:
-                type: string
-                title: Task prompt (confidence)
-                format: textarea
-                description: "CONFIDENCE-ONLY task prompt — used by the separate confidence pass (agentic in-shard second inference and the standalone Assessment step). Placeholders: {DOCUMENT_CLASS}, {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}, {EXTRACTION_RESULTS}, {OCR_TEXT_CONFIDENCE}, {DOCUMENT_IMAGE}. The bounding-box block below is appended automatically when Geometry mode is 'llm' or 'llm_grounded'."
-                order: 12
-                hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
-              task_prompt_bbox:
-                type: string
-                title: Bounding-box instructions
-                format: textarea
-                description: "Bounding-box instruction block appended to whichever confidence-bearing prompt is active (integrated or confidence-only) ONLY when Geometry mode is 'llm' or 'llm_grounded'. Ignored for 'ocr_only'/'off' (geometry comes from OCR matching)."
-                order: 13
               custom_prompt_lambda_arn:
                 type: string
                 description: "(Optional) ARN of a Lambda function to generate custom extraction prompts. Function name must start with 'GENAIIDP-'. If not provided, default prompts will be used. The Lambda function receives the complete config, prompt placeholders, default task prompt content, and serialized document, and returns custom system_prompt and task_prompt_content. Example: arn:partition:lambda:us-east-1:123456789012:function:GENAIIDP-my-extractor"
@@ -1395,6 +1391,13 @@ Resources:
                     default: "ocr_only"
                     description: "'ocr_only' (default): derive boxes purely by matching each extracted value to real OCR lines — cheapest and most accurate, no bbox tokens. 'llm_grounded': the model emits boxes and OCR grounding refines them. 'llm': use the model's boxes as-is (no grounding). 'off': produce no geometry."
                     order: 0
+                  task_prompt_bbox:
+                    type: string
+                    title: Bounding-box instructions
+                    format: textarea
+                    description: "Instruction block telling the model to emit bounding boxes. Appended to whichever confidence-bearing prompt is active (integrated or confidence-only) ONLY when Geometry mode is 'llm' or 'llm_grounded'. Ignored for 'ocr_only'/'off' (geometry comes from OCR matching)."
+                    order: 1
+                    hideWhen: { field: "extraction.geometry.mode", value: "ocr_only" }
               confidence:
                 type: object
                 order: 15
@@ -1421,7 +1424,7 @@ Resources:
                   list_batch_size:
                     type: integer
                     title: List batch size
-                    description: "Max list rows scored per inference in the agentic in-shard path. Large lists (e.g. 75 rows) are unreliable in one call; batching guarantees every row is scored. Lower = more reliable but more inferences; raise for capable models."
+                    description: "Max list rows scored per inference in separate mode — both the agentic in-shard pass and the non-agentic standalone Assessment step. Large lists (e.g. 75 rows) are unreliable in one call; batching guarantees every row is scored. Lower = more reliable but more inferences; raise for capable models."
                     minimum: 1
                     default: 25
                     order: 2
@@ -1528,6 +1531,7 @@ Resources:
                     hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
                   system_prompt:
                     type: string
+                    title: System prompt (confidence)
                     format: textarea
                     description: "System prompt for confidence scoring."
                     order: 10
@@ -1535,8 +1539,9 @@ Resources:
                     hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
                   task_prompt:
                     type: string
+                    title: Task prompt (confidence)
                     format: textarea
-                    description: "Task prompt for confidence scoring - supports placeholders {DOCUMENT_TEXT}, {OCR_TEXT_CONFIDENCE}, {DOCUMENT_CLASS}, {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}, {EXTRACTION_RESULTS}, {GRANULAR_CONTEXT}, {DOCUMENT_IMAGE}. Use <<CACHEPOINT>> for Bedrock prompt caching."
+                    description: "CONFIDENCE-ONLY task prompt — used by the separate confidence pass (agentic in-shard second inference and the non-agentic standalone Assessment step). Placeholders: {DOCUMENT_CLASS}, {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}, {EXTRACTION_RESULTS}, {OCR_TEXT_CONFIDENCE}, {DOCUMENT_IMAGE}. The Bounding-box instructions (Geometry section) are appended when Geometry mode is 'llm'/'llm_grounded'. Use <<CACHEPOINT>> for Bedrock prompt caching."
                     order: 11
                     dependsOn: { field: "enabled", value: true }
                     hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
@@ -1597,13 +1602,6 @@ Resources:
                         default: 1
                         order: 3
                         dependsOn: { field: "enabled", value: true }
-                  validation_enabled:
-                    type: boolean
-                    description: "Enable assessment validation checks (granular path)."
-                    default: false
-                    order: 14
-                    dependsOn: { field: "enabled", value: true }
-                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
               postHook:
                 type: array
                 collapsible: true

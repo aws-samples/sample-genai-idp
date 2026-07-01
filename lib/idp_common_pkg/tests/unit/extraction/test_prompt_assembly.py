@@ -16,10 +16,15 @@ def _cfg(mode="separate", geom="ocr_only", enabled=True):
     return ExtractionConfig(
         task_prompt="EXTRACT-ONLY {DOCUMENT_TEXT}",
         task_prompt_extraction_with_confidence="INTEGRATED provide_field_assessment\n<<CACHEPOINT>>\n{DOCUMENT_TEXT}",
-        task_prompt_confidence="CONFIDENCE-ONLY\n<<CACHEPOINT>>\n{EXTRACTION_RESULTS}",
-        task_prompt_bbox="<spatial-localization>bbox here</spatial-localization>",
-        confidence={"enabled": enabled, "mode": mode},
-        geometry={"mode": geom},
+        confidence={
+            "enabled": enabled,
+            "mode": mode,
+            "task_prompt": "CONFIDENCE-ONLY\n<<CACHEPOINT>>\n{EXTRACTION_RESULTS}",
+        },
+        geometry={
+            "mode": geom,
+            "task_prompt_bbox": "<spatial-localization>bbox here</spatial-localization>",
+        },
     )
 
 
@@ -82,6 +87,6 @@ class TestSelectConfidenceTaskPrompt:
 
     def test_bbox_not_doubled_if_already_present(self):
         cfg = _cfg(mode="separate", geom="llm")
-        cfg.task_prompt_confidence = "has spatial-localization already\n<<CACHEPOINT>>"
+        cfg.confidence.task_prompt = "has spatial-localization already\n<<CACHEPOINT>>"
         c = select_confidence_task_prompt(cfg)
         assert c.count("spatial-localization") == 1

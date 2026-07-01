@@ -58,7 +58,6 @@ _CONFIDENCE_PASSTHROUGH_KEYS = (
     "reasoning_effort",
     "max_tokens",
     "image",
-    "validation_enabled",
     "granular",
 )
 
@@ -131,11 +130,11 @@ def migrate_v05_to_v06(config: Dict[str, Any]) -> Dict[str, Any]:
         # Legacy explicit opt-out of OCR grounding == "use LLM boxes as-is".
         geometry["mode"] = "llm"
 
-    # --- confidence TASK prompt -> top-level extraction.task_prompt_confidence ---
-    # (v0.6 keeps all prompt templates as editable extraction.* fields.) Only set
-    # it if the target isn't already present (explicit v0.6 wins).
-    if assessment.get("task_prompt") and "task_prompt_confidence" not in extraction:
-        extraction["task_prompt_confidence"] = assessment["task_prompt"]
+    # --- confidence TASK prompt -> extraction.confidence.task_prompt ---
+    # (v0.6: the confidence prompt lives in the confidence sub-config.) Only set it
+    # if the target isn't already present (explicit v0.6 wins).
+    if assessment.get("task_prompt") and "task_prompt" not in confidence:
+        confidence["task_prompt"] = assessment["task_prompt"]
 
     # --- HITL: hitl_enabled / default_confidence_threshold -> top-level hitl ---
     if "hitl_enabled" in assessment:

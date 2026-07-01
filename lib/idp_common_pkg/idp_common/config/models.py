@@ -451,9 +451,16 @@ class ConfidenceConfig(BaseModel):
         default="",
         description="System prompt for confidence assessment (populated from system defaults)",
     )
-    # NOTE: the confidence TASK prompt template lives at
-    # extraction.task_prompt_confidence (with extraction.task_prompt_bbox composed
-    # in for LLM-box geometry) — see prompt_assembly.select_confidence_task_prompt.
+    task_prompt: str = Field(
+        default="",
+        description=(
+            "CONFIDENCE-ONLY task prompt — used by the separate confidence pass "
+            "(agentic in-shard second inference and the standalone Assessment step). "
+            "The bounding-box block (extraction.geometry.task_prompt_bbox) is "
+            "composed in for LLM-box geometry modes. See "
+            "prompt_assembly.select_confidence_task_prompt."
+        ),
+    )
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
@@ -481,9 +488,6 @@ class ConfidenceConfig(BaseModel):
             "concatenated, so every row gets a confidence. Lower = more reliable "
             "enumeration but more inferences; raise for capable models."
         ),
-    )
-    validation_enabled: bool = Field(
-        default=False, description="Enable assessment validation (granular path)"
     )
     image: ImageConfig = Field(default_factory=ImageConfig)
     granular: GranularAssessmentConfig = Field(default_factory=GranularAssessmentConfig)
@@ -536,6 +540,15 @@ class GeometryConfig(BaseModel):
             "LLM-estimated boxes. 'llm_grounded': the model emits boxes and OCR "
             "grounding refines them. 'llm': use the model's boxes as-is with no "
             "grounding. 'off': no geometry is produced at all."
+        ),
+    )
+    task_prompt_bbox: str = Field(
+        default="",
+        description=(
+            "Bounding-box instruction block appended to whichever confidence-bearing "
+            "prompt is active (integrated or confidence-only) ONLY when mode is 'llm' "
+            "or 'llm_grounded'. Ignored for 'ocr_only'/'off'. See "
+            "prompt_assembly._append_bbox_block."
         ),
     )
 
@@ -614,24 +627,9 @@ class ExtractionConfig(BaseModel):
             "emits each value AND its confidence. Populated from system defaults."
         ),
     )
-    task_prompt_confidence: str = Field(
-        default="",
-        description=(
-            "Task prompt template for CONFIDENCE-ONLY assessment — used by the "
-            "separate confidence pass (agentic in-shard second inference and the "
-            "standalone Assessment step). Populated from system defaults."
-        ),
-    )
-    task_prompt_bbox: str = Field(
-        default="",
-        description=(
-            "Bounding-box instruction block appended to whichever confidence-bearing "
-            "prompt is active (integrated or confidence-only) when "
-            "extraction.geometry.mode is 'llm' or 'llm_grounded' — i.e. when the "
-            "model is asked to emit boxes. Ignored for 'ocr_only'/'off'. Populated "
-            "from system defaults."
-        ),
-    )
+    # NOTE (v0.6): the confidence-only prompt lives at extraction.confidence.task_prompt
+    # and the bounding-box block at extraction.geometry.task_prompt_bbox — each with its
+    # own section. Only the extraction-only and integrated templates are top-level here.
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
