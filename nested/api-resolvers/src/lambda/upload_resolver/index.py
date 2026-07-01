@@ -140,11 +140,17 @@ def handler(event, context):
         
         logger.info(f"Generated presigned POST data: {json.dumps(presigned_post)}")
         
-        # Return the presigned POST data and object key
+        # Return the presigned POST data and object key.
+        # usePostMethod is a STRING ("true") per the schema (PresignedUploadUrl.
+        # usePostMethod: String!) and the UI parses it via
+        # usePostMethod.toLowerCase() === 'true'. AppSync used to coerce a bool
+        # to a string; the REST dispatcher passes JSON through verbatim, so a
+        # bool here reaches the UI as `true` and breaks .toLowerCase(). Keep it
+        # a string.
         return {
             'presignedUrl': json.dumps(presigned_post),
             'objectKey': object_key,
-            'usePostMethod': True
+            'usePostMethod': 'true'
         }
     
     except Exception as e:

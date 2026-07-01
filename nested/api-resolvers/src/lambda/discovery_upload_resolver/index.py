@@ -145,10 +145,14 @@ def handle_upload_discovery_document(event, context):
             raise ValueError("bucket parameter is required")
 
         object_key, presigned_post = create_s3_signed_post_url(bucket_name, content_type, file_name, 'document', prefix)
+        # usePostMethod is a STRING ("true") per the schema; the UI parses it via
+        # usePostMethod.toLowerCase() === 'true'. AppSync coerced a bool to a
+        # string, but the REST dispatcher passes JSON verbatim, so a bool would
+        # reach the UI as `true` and break .toLowerCase(). Keep it a string.
         response = {
             'presignedUrl': json.dumps(presigned_post),
             'objectKey': object_key,
-            'usePostMethod': True
+            'usePostMethod': 'true'
         }
         gt_object_key = None
         if ground_truth_file_name:
