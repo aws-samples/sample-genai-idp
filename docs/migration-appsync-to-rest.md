@@ -4,17 +4,18 @@ title: "AppSync → REST API Migration"
 
 # Migrating off AWS AppSync: how the new transport mirrors GraphQL
 
-This document explains **how the AppSync-free transport reproduces every
-capability the solution previously got from AWS AppSync** — GraphQL queries,
-mutations, and subscriptions, plus the security/RBAC model and the
-performance/scale characteristics — and the deliberate design choices behind
-each mapping.
+This document is the reference for the UI ⇄ backend transport. It explains
+**how the AppSync-free transport reproduces every capability the solution
+previously got from AWS AppSync** — GraphQL queries, mutations, and
+subscriptions, plus the security/RBAC model and the performance/scale
+characteristics — and the deliberate design choices behind each mapping. Read it
+for the component overview, when extending the API, or when auditing security
+parity.
 
-It is the "why and how it maps" companion to
-[UI ⇄ Backend Transport](appsync-free-transport.md), which is the concise
-reference for the shipped components. Read that first for the component
-overview; read this when you need to understand the equivalence to AppSync
-(e.g. reviewing the migration, extending the API, or auditing security parity).
+The web UI and backend communicate over an **API Gateway REST API**, with
+**polling** for status updates and **Lambda response streaming** for chat. There
+is **no toggle** and no AppSync footprint — the REST API is the only transport,
+and the solution uses only long-lived, GovCloud/FedRAMP-eligible services.
 
 ## Why AppSync was removed
 
@@ -78,7 +79,7 @@ Dispatcher Lambda (idp_common.api_adapter)
 
 Only the **REST API** supports a **PRIVATE endpoint type** and an **AWS WAFv2
 WebACL** on its stage — both required for regulated/GovCloud deployments. HTTP
-APIs support neither. See [§5 of the transport reference](appsync-free-transport.md).
+APIs support neither. See [§6 Private endpoint & WAF](#6-private-endpoint--waf).
 
 ### CORS
 
@@ -190,7 +191,7 @@ as follows:
 - **Streaming auth** is enforced by IAM at the Function URL edge (§3), and the
   **Feature Platform** install-hook fields use direct `lambda:InvokeFunction`
   with IAM instead of the old AppSync SigV4 mutation (see
-  [transport reference §4](appsync-free-transport.md)).
+  [§5 Feature Platform](#5-feature-platform)).
 
 The authoritative RBAC baseline remains
 `nested/api-resolvers/src/api/schema.graphql` (its `Query`/`Mutation` group
@@ -200,7 +201,45 @@ each Cognito group (Admin/Author/Viewer/Reviewer) plus unauthenticated and
 asserts every operation's authorization outcome against that baseline — run it
 after any change to a resolver, the dispatcher, `ddb_direct`, or the REST client.
 
-## 5. Performance & scale
+## 5. Feature Platform
+
+The optional Feature Platform (`EnableFeaturePlatform=true`) is also AppSync-free:
+
+- its **6 UI-facing fields** (list catalog/installed, check entitlement, launch
+  URL, subscribe/unsubscribe) route through the same REST API dispatcher — their
+  resolver function ARNs flow from the FeaturePlatform nested stack into the
+  dispatcher's field→function map;
+- its **6 install-hook fields** (register/unregister feature & hooks,
+  apply/remove config preset) are invoked **directly** (`lambda:InvokeFunction`)
+  by feature stacks at install time, using function ARNs the host re-exports —
+  replacing the old AppSync SigV4 mutation.
+
+> **Upgrading a stack that already has installed feature stacks:** installed
+> feature stacks used to import the host's `AppSyncApiArn`/`AppSyncApiUrl`
+> exports, which this release removes. CloudFormation forbids removing an in-use
+> export, so the one-time upgrade sequence is **delete the feature stacks →
+> update the host stack → reinstall the features** from a build updated for this
+> release. After that the coupling is gone (features use direct Lambda invoke).
+> External/marketplace features must be rebuilt against the new host exports —
+> see [Migrating an external/marketplace feature](extensions/MIGRATION-PROMPT-appsync-removal.md).
+
+## 6. Private endpoint & WAF
+
+The REST API can be locked down for regulated deployments — capabilities AppSync
+could not offer in GovCloud/FedRAMP partitions:
+
+- **`ApiGatewayVisibility=PRIVATE`** makes the REST API a **PRIVATE** endpoint
+  reachable only from within the VPC via an interface VPC endpoint
+  (`ApiGatewayVpcEndpointId`) + a resource policy — like the existing headless
+  Jobs API. The resolver/dispatcher Lambdas then run inside the VPC. The default
+  is `GLOBAL` (public, Cognito-authorized).
+- **WAFv2 WebACL:** setting `WAFAllowedIPv4Ranges` to anything other than
+  `0.0.0.0/0` attaches a REGIONAL WAFv2 WebACL to the API stage that blocks
+  non-listed source IPs. (The WebACL is `REGIONAL` and lives in the stack's
+  region — API Gateway is a regional resource, so unlike CloudFront it does *not*
+  require a us-east-1 WebACL.)
+
+## 7. Performance & scale
 
 The replacement preserves — and in places simplifies — the scaling story:
 
@@ -226,9 +265,25 @@ The replacement preserves — and in places simplifies — the scaling story:
   mutation→subscription path, without the fan-out overhead of publishing every
   token as a mutation.
 - **Private endpoint & WAF:** because it's a REST API, regulated deployments can
-  set `ApiGatewayVisibility=PRIVATE` (VPC-only via an interface endpoint +
-  resource policy) and attach a WAFv2 WebACL via `WAFAllowedIPv4Ranges` — scale
-  and isolation controls AppSync could not offer in these partitions.
+  set `ApiGatewayVisibility=PRIVATE` and attach a WAFv2 WebACL — scale and
+  isolation controls AppSync could not offer in these partitions (see §6).
+
+## Deploying
+
+No special parameter is needed — the REST API is built unconditionally:
+
+```bash
+idp-cli deploy \
+  --stack-name my-idp-stack \
+  --template-url <published idp-main.yaml> \
+  --region <region> \
+  --wait
+```
+
+The Lambda Web Adapter layer (for chat streaming) ARN is exposed as the
+`LambdaWebAdapterLayerArn` parameter (leave blank to use the region-default LWA
+x86_64 layer); override it for GovCloud or other partitions where the layer is
+published under a different account.
 
 ## Summary
 
@@ -245,7 +300,6 @@ The replacement preserves — and in places simplifies — the scaling story:
 
 ## See also
 
-- [UI ⇄ Backend Transport (reference)](appsync-free-transport.md)
 - [API RBAC test script](../scripts/README.md) (`scripts/test_api_rbac.py`)
 - [Architecture](architecture.md)
 - [GovCloud deployment](govcloud-deployment.md)

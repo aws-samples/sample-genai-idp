@@ -56,11 +56,7 @@ export default defineConfig({
             },
             { label: "Web UI", slug: "web-ui" },
             {
-              label: "UI ⇄ Backend Transport",
-              slug: "appsync-free-transport",
-            },
-            {
-              label: "AppSync → REST Migration",
+              label: "UI ⇄ Backend Transport (AppSync → REST)",
               slug: "migration-appsync-to-rest",
             },
             { label: "IDP CLI", slug: "idp-cli" },
