@@ -114,8 +114,17 @@ def migrate_v05_to_v06(config: Dict[str, Any]) -> Dict[str, Any]:
         confidence["mode"] = extraction.pop("assessment_integration")
 
     # --- confidence enablement + inference knobs (from assessment.*) ---
-    if "enabled" in assessment:
-        confidence["enabled"] = assessment["enabled"]
+    # v0.6 folds enable+integration into a single confidence.mode
+    # (off|separate|integrated). A legacy assessment.enabled=false (bool or the
+    # string "false"/"0"/"no"/"off") becomes 'off' and overrides the integration
+    # mode; otherwise assessment_integration (above) supplies the mode.
+    _enabled = assessment.get("enabled")
+    _enabled_is_false = _enabled is False or (
+        isinstance(_enabled, str)
+        and _enabled.strip().lower() in ("false", "0", "no", "off")
+    )
+    if _enabled_is_false:
+        confidence["mode"] = "off"
     if "inshard_list_batch_size" in assessment:
         confidence["list_batch_size"] = assessment["inshard_list_batch_size"]
     for key in _CONFIDENCE_PASSTHROUGH_KEYS:

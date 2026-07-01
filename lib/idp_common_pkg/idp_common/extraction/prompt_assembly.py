@@ -72,8 +72,7 @@ def select_extraction_task_prompt(extraction_cfg: Any) -> str:
     """
     confidence = extraction_cfg.confidence
     geometry_mode = extraction_cfg.geometry.mode
-    integrated = confidence.enabled and confidence.mode == "integrated"
-    if integrated:
+    if confidence.mode == "integrated":
         core = (
             extraction_cfg.task_prompt_extraction_with_confidence
             or extraction_cfg.task_prompt

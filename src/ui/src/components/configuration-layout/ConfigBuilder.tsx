@@ -1644,16 +1644,19 @@ const ConfigBuilder = ({
     const fieldDescription = (property.description as string) || undefined;
     const constraints = getConstraintText(property);
 
-    // The input fills the field; the "Restore default" action lives in the
-    // FormField `secondaryControl` slot (below) so it renders reliably alongside
-    // the field description and constraint text.
-    const inputWithActions = <ExtBox flex="1">{input}</ExtBox>;
-
-    const secondaryControl = showRestoreDefault ? (
-      <Button variant="link" onClick={handleRestoreDefault} className="restore-default-button" iconName="undo">
-        Restore default
-      </Button>
-    ) : undefined;
+    // Input on the left; the "Restore default" action inline on the right (only
+    // when the current value differs from default). Kept in the control row so it
+    // renders reliably regardless of FormField description/constraint slots.
+    const inputWithActions = (
+      <ExtBox display="flex" alignItems="center">
+        <ExtBox flex="1">{input}</ExtBox>
+        {showRestoreDefault && (
+          <Button variant="link" onClick={handleRestoreDefault} className="restore-default-button" iconName="undo">
+            Restore default
+          </Button>
+        )}
+      </ExtBox>
+    );
 
     // Use standard constraints
     const finalConstraints = constraints.length > 0 ? constraints : undefined;
@@ -1678,7 +1681,6 @@ const ConfigBuilder = ({
         label={labelContent}
         description={fieldDescription}
         constraintText={finalConstraints}
-        secondaryControl={secondaryControl}
         stretch
         className={fieldClasses.join(' ')}
       >

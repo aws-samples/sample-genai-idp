@@ -34,7 +34,9 @@ class TestV05ToV06Migration:
             }
         )
         conf = out["extraction"]["confidence"]
-        assert conf["enabled"] is True
+        # enabled=True is the default (mode stays 'separate') so migration doesn't
+        # need to force mode; enablement is derived from mode by the model.
+        assert conf.get("mode", "separate") != "off"
         assert conf["model"] == "us.anthropic.claude-haiku-4-5-20251001-v1:0"
         assert conf["system_prompt"] == "SP"
         # v0.6: the confidence TASK prompt lives in the confidence sub-config
@@ -87,7 +89,7 @@ class TestV05ToV06Migration:
         out = migrate_v05_to_v06(
             {
                 "assessment": {
-                    "enabled": False,  # -> confidence.enabled
+                    "enabled": False,  # -> confidence.mode = off
                     "model": "m",  # -> confidence.model
                     "postHook": [{"featureId": "f", "arn": "a"}],  # dropped (v0.6)
                 }
@@ -95,7 +97,8 @@ class TestV05ToV06Migration:
         )
         # the entire assessment block is retired in v0.6
         assert "assessment" not in out
-        assert out["extraction"]["confidence"]["enabled"] is False
+        # legacy disable-via-enabled maps to the new 'off' scoring mode
+        assert out["extraction"]["confidence"]["mode"] == "off"
         assert out["extraction"]["confidence"]["model"] == "m"
 
     def test_stamps_format_version(self):

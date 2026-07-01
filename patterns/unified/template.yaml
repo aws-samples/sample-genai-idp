@@ -527,7 +527,7 @@ Resources:
                   order: 2.6
                 extraction_model:
                   type: string
-                  description: "Optional per-class extraction model override. When set, this model is used for extraction instead of the global extraction.model. Useful for classes that benefit from a different model. NOTE: OpenAI GPT-5.x models (openai.gpt-5.*) are NOT compatible with agentic extraction (extraction.agentic.enabled=true); that combination is rejected by config validation."
+                  description: "Optional per-class extraction model override. When set, this model is used for extraction instead of the global extraction.model. Useful for classes that benefit from a different model. NOTE: OpenAI GPT-5.x models (openai.gpt-5.*) are NOT compatible with 'advanced' Extraction mode; that combination is rejected by config validation."
                   order: 2.7
                   enum:
                     - ""
@@ -1047,7 +1047,7 @@ Resources:
                 type: object
                 sectionLabel: Advanced extraction settings
                 description: "Tuning for Advanced extraction mode: page sharding/concurrency, deterministic table parsing, and schema validation/escalation. Shown only when Extraction mode is 'advanced'."
-                order: 14
+                order: 15
                 dependsOn: { field: "extraction.mode", value: "advanced" }
                 properties:
                   max_concurrent_batches:
@@ -1208,7 +1208,7 @@ Resources:
                 type: object
                 sectionLabel: Image Processing Settings
                 description: Configure image resolution and processing options for image attachments in extraction
-                order: 13
+                order: 14
                 properties:
                   target_width:
                     type: number
@@ -1251,7 +1251,7 @@ Resources:
                     dependsOn: { field: "enabled", value: true }
               model:
                 type: string
-                description: "Model identifier. Select 'LambdaHook' to use a custom Lambda function for inference. NOTE: OpenAI GPT-5.x models (openai.gpt-5.*) run via the bedrock-mantle Responses API and are NOT compatible with agentic extraction (agentic.enabled=true); that combination is rejected by config validation."
+                description: "Model identifier. Select 'LambdaHook' to use a custom Lambda function for inference. NOTE: OpenAI GPT-5.x models (openai.gpt-5.*) run via the bedrock-mantle Responses API and are NOT compatible with 'advanced' Extraction mode; that combination is rejected by config validation."
                 enum:
                   - "LambdaHook"
                   - !If
@@ -1313,56 +1313,56 @@ Resources:
                   - "global.anthropic.claude-opus-4-7:1m"
                   - "global.anthropic.claude-opus-4-8"
                   - "global.anthropic.claude-opus-4-8:1m"
-                order: 2
+                order: 4
               model_lambda_hook_arn:
                 type: string
                 description: "Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-."
                 default: ""
-                order: 3
+                order: 5
                 dependsOn: { field: "model", value: "LambdaHook" }
               reasoning_effort:
                 type: string
                 enum: ["minimal", "low", "medium", "high"]
                 default: "medium"
                 description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
-                order: 4
+                order: 6
                 dependsOn: { field: "model", valuePrefix: "openai." }
               temperature:
                 type: number
                 minimum: 0
                 maximum: 1
                 description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 5
+                order: 7
               top_k:
                 type: integer
                 minimum: 1
                 description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 6
+                order: 8
               top_p:
                 type: number
                 description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 7
+                order: 9
               max_tokens:
                 type: number
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
-                order: 8
+                order: 10
               system_prompt:
                 type: string
                 description: "System prompt. Can be overridden per document class via the 'x-aws-idp-extraction-system-prompt' schema extension in the Document Schema editor."
-                order: 9
+                order: 11
               task_prompt:
                 type: string
                 title: Task prompt (extraction)
                 format: textarea
                 description: "Extraction-only task prompt — used when confidence runs separately or is disabled. Placeholders: {DOCUMENT_CLASS}, {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}, {FEW_SHOT_EXAMPLES}, {DOCUMENT_TEXT}, {DOCUMENT_IMAGE}. Use <<CACHEPOINT>> for Bedrock prompt caching. Overridable per class via 'x-aws-idp-extraction-task-prompt'."
-                order: 10
+                order: 12
                 hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
               task_prompt_extraction_with_confidence:
                 type: string
                 title: Task prompt (extraction + confidence)
                 format: textarea
                 description: "INTEGRATED task prompt — used when Confidence Assessment mode is 'integrated' (one inference emits each value AND its confidence). Instruct the model to call provide_field_assessment. The bounding-box block (Bounding-box Geometry section) is appended automatically when Geometry mode is 'llm' or 'llm_grounded'."
-                order: 11
+                order: 13
                 dependsOn: { field: "extraction.confidence.mode", value: "integrated" }
               custom_prompt_lambda_arn:
                 type: string
@@ -1370,7 +1370,7 @@ Resources:
                 order: 18
               geometry:
                 type: object
-                order: 21
+                order: 3
                 collapsible: false
                 sectionLabel: Bounding-box Geometry
                 description: "How field bounding boxes (geometry) are produced. Geometry is advisory enrichment shown in the UI viewer."
@@ -1391,39 +1391,31 @@ Resources:
                     hideWhen: { field: "extraction.geometry.mode", value: "ocr_only" }
               confidence:
                 type: object
-                order: 20
+                order: 2
                 sectionLabel: Confidence Assessment
                 collapsible: false
                 description: "Per-field confidence scoring. Confidence is an optional output of extraction; when enabled, each extracted value gets a confidence score (and drives HITL review). Turn OFF to skip assessment entirely (no second model pass, no explainability info)."
                 properties:
-                  enabled:
-                    type: boolean
-                    title: Enable confidence assessment
-                    description: "Emit per-field confidence. When OFF, no assessment runs at all."
-                    default: true
-                    order: 0
                   mode:
                     type: string
-                    title: Integration mode
-                    enum: ["separate", "integrated"]
+                    title: Confidence scoring mode
+                    enum: ["off", "separate", "integrated"]
                     default: "separate"
-                    description: "'separate' (default): confidence is scored in a distinct inference — for agentic extraction a second pass runs inside each shard; for standard extraction the pipeline flows to the separate Assessment step. 'integrated': the extraction inference emits each value's confidence in one pass (saves a model call); the separate Assessment step is bypassed."
-                    order: 1
-                    dependsOn: { field: "enabled", value: true }
+                    description: "How per-field confidence is produced. 'off': no confidence scoring (no extra model pass, no confidence data). 'separate' (default): scored in a distinct inference — a per-shard second pass in Advanced extraction mode, or the standalone Assessment step in Simple mode. 'integrated': the extraction inference emits each value's confidence in one pass (saves a model call). Confidence drives HITL review and the UI confidence display."
+                    order: 0
                   list_batch_size:
                     type: integer
                     title: List batch size
-                    description: "Max list rows scored per inference in separate mode — both the agentic in-shard pass and the non-agentic standalone Assessment step. Large lists (e.g. 75 rows) are unreliable in one call; batching guarantees every row is scored. Lower = more reliable but more inferences; raise for capable models."
+                    description: "Max list rows scored per inference in separate mode — both the Advanced in-shard pass and the Simple standalone Assessment step. Large lists (e.g. 75 rows) are unreliable in one call; batching guarantees every row is scored. Lower = more reliable but more inferences; raise for capable models."
                     minimum: 1
                     default: 25
                     order: 2
-                    dependsOn: { field: "enabled", value: true }
+                    hideWhen: { field: "extraction.confidence.mode", value: "off" }
                   model:
                     type: string
                     title: Confidence model
                     description: "Bedrock model ID for confidence scoring (used by the separate/standalone assessment path). Use 'LambdaHook' for a custom Lambda. Unused when mode is 'integrated' (the extraction model emits confidence)."
-                    dependsOn: { field: "enabled", value: true }
-                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
                     enum:
                       [
                         "LambdaHook",
@@ -1483,64 +1475,55 @@ Resources:
                     default: ""
                     order: 4
                     dependsOn: { field: "model", value: "LambdaHook" }
-                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
                   temperature:
                     type: number
                     minimum: 0
                     maximum: 1
                     description: "Sampling temperature. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                     order: 5
-                    dependsOn: { field: "enabled", value: true }
-                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
                   top_k:
                     type: number
                     description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                     order: 6
-                    dependsOn: { field: "enabled", value: true }
-                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
                   top_p:
                     type: number
                     description: "Sampling Top P. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                     order: 7
-                    dependsOn: { field: "enabled", value: true }
-                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
                   max_tokens:
                     type: number
                     description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit."
                     order: 8
-                    dependsOn: { field: "enabled", value: true }
-                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
                   reasoning_effort:
                     type: string
                     enum: ["minimal", "low", "medium", "high"]
                     default: "medium"
                     description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY. Ignored by other models."
                     order: 9
-                    dependsOn: { field: "enabled", value: true }
-                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
                   system_prompt:
                     type: string
                     title: System prompt (confidence)
                     format: textarea
                     description: "System prompt for confidence scoring."
                     order: 10
-                    dependsOn: { field: "enabled", value: true }
-                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
                   task_prompt:
                     type: string
                     title: Task prompt (confidence)
                     format: textarea
                     description: "CONFIDENCE-ONLY task prompt — used by the separate confidence pass (agentic in-shard second inference and the non-agentic standalone Assessment step). Placeholders: {DOCUMENT_CLASS}, {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}, {EXTRACTION_RESULTS}, {OCR_TEXT_CONFIDENCE}, {DOCUMENT_IMAGE}. The Bounding-box instructions (Geometry section) are appended when Geometry mode is 'llm'/'llm_grounded'. Use <<CACHEPOINT>> for Bedrock prompt caching."
                     order: 11
-                    dependsOn: { field: "enabled", value: true }
-                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
                   image:
                     type: object
                     sectionLabel: Image Processing Settings
                     description: "Image resolution for confidence-scoring page attachments."
                     order: 12
-                    dependsOn: { field: "enabled", value: true }
-                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
                     properties:
                       target_width:
                         type: number
@@ -1559,8 +1542,7 @@ Resources:
                     sectionLabel: Granular Assessment (large documents)
                     description: "Break confidence scoring into smaller focused tasks for large documents (standalone Assessment step only)."
                     order: 13
-                    dependsOn: { field: "enabled", value: true }
-                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
                     properties:
                       enabled:
                         type: boolean
@@ -1574,7 +1556,7 @@ Resources:
                         maximum: 20
                         default: 4
                         order: 1
-                        dependsOn: { field: "enabled", value: true }
+                        dependsOn: { field: "extraction.confidence.mode", value: "separate" }
                       simple_batch_size:
                         type: integer
                         description: "Number of simple attributes grouped per scoring task."
@@ -1582,7 +1564,7 @@ Resources:
                         maximum: 10
                         default: 3
                         order: 2
-                        dependsOn: { field: "enabled", value: true }
+                        dependsOn: { field: "extraction.confidence.mode", value: "separate" }
                       list_batch_size:
                         type: integer
                         description: "Number of list items per scoring task (1 = best accuracy)."
@@ -1590,7 +1572,7 @@ Resources:
                         maximum: 5
                         default: 1
                         order: 3
-                        dependsOn: { field: "enabled", value: true }
+                        dependsOn: { field: "extraction.confidence.mode", value: "separate" }
               postHook:
                 type: array
                 collapsible: true

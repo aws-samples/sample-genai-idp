@@ -417,26 +417,24 @@ class ConfidenceConfig(BaseModel):
     top-level ``hitl`` block; geometry is ``extraction.geometry``.
     """
 
-    enabled: bool = Field(
-        default=True,
-        description=(
-            "Emit per-field confidence at all. When false, no assessment runs "
-            "(neither the in-shard pass nor the standalone step) and no "
-            "explainability_info is produced."
-        ),
-    )
     mode: str = Field(
         default="separate",
         description=(
-            "Where confidence/bbox assessment runs relative to extraction. "
-            "'separate' (default) keeps extraction and assessment as distinct "
-            "inferences — for non-agentic extraction the workflow flows to the "
-            "standalone Assessment step; for agentic extraction a second "
-            "assessment inference runs inside each shard. 'integrated' folds "
-            "assessment into the extraction inference itself (one prompt emits "
-            "the value plus its confidence/bbox), saving a model pass; the "
-            "standalone Assessment step is then bypassed and the confidence "
-            "model/prompt settings are unused."
+            "Confidence scoring mode — the single control for per-field confidence: "
+            "'off' (no confidence scoring at all — no extra model pass, no "
+            "explainability_info); 'separate' (default — scored in a distinct "
+            "inference: a per-shard second pass for advanced/agentic extraction, or "
+            "the standalone Assessment step for simple extraction); 'integrated' "
+            "(the extraction inference emits each value's confidence in one pass, "
+            "saving a model call — the standalone step is bypassed)."
+        ),
+    )
+    enabled: bool = Field(
+        default=True,
+        description=(
+            "DERIVED from `mode` (enabled = mode != 'off'). Retained for backward "
+            "compatibility of code that reads confidence.enabled; do not set directly "
+            "— use `mode`."
         ),
     )
     model: Optional[str] = Field(
@@ -511,16 +509,30 @@ class ConfidenceConfig(BaseModel):
     @field_validator("mode", mode="before")
     @classmethod
     def validate_mode(cls, v: Any) -> str:
-        """Normalize the integration mode; reject unknown values early."""
+        """Normalize the confidence scoring mode; reject unknown values early."""
         if v is None or (isinstance(v, str) and not v.strip()):
             return "separate"
         v_str = str(v).strip().lower()
-        if v_str not in ("separate", "integrated"):
+        if v_str not in ("off", "separate", "integrated"):
             raise ValueError(
-                "extraction.confidence.mode must be 'separate' or "
+                "extraction.confidence.mode must be 'off', 'separate', or "
                 f"'integrated', got {v!r}"
             )
         return v_str
+
+    @model_validator(mode="after")
+    def derive_enabled_from_mode(self) -> Self:
+        """`enabled` is derived from `mode` (enabled = mode != 'off').
+
+        Back-compat: a config that set `enabled: false` but left mode at its
+        'separate' default is honored as OFF (so old disable-via-enabled configs
+        still turn confidence off); otherwise mode is authoritative.
+        """
+        if self.enabled is False and self.mode != "off":
+            # Legacy disable-via-enabled: respect it.
+            self.mode = "off"
+        self.enabled = self.mode != "off"
+        return self
 
 
 class GeometryConfig(BaseModel):

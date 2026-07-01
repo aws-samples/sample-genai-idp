@@ -17,9 +17,7 @@
 
 extraction:
   confidence:
-    enabled: true
-    mode: separate               # separate | integrated
-    validation_enabled: false
+    mode: separate               # off | separate | integrated (enabled derived: mode != off)
     model: us.anthropic.claude-haiku-4-5-20251001-v1:0
     top_p: "0.0"
     top_k: "5"

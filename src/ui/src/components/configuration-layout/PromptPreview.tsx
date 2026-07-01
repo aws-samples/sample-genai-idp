@@ -503,7 +503,7 @@ const PromptPreview = ({ formValues }: PromptPreviewProps): React.JSX.Element =>
     const bboxBlock = String(geometry.task_prompt_bbox ?? '');
 
     if (selectedStep === 'extraction') {
-      const integrated = confidence.enabled !== false && mode === 'integrated';
+      const integrated = mode === 'integrated';
       let task = String(extraction.task_prompt ?? '');
       if (integrated) {
         task = String(extraction.task_prompt_extraction_with_confidence ?? '') || String(extraction.task_prompt ?? '');
@@ -630,8 +630,8 @@ const PromptPreview = ({ formValues }: PromptPreviewProps): React.JSX.Element =>
           const extraction = (formValues?.extraction as Record<string, unknown>) || {};
           const confidence = (extraction.confidence as Record<string, unknown>) || {};
           const geometry = (extraction.geometry as Record<string, unknown>) || {};
-          const enabled = confidence.enabled !== false;
-          const mode = String(confidence.mode ?? 'separate');
+          const mode = String(confidence.mode ?? 'separate'); // off | separate | integrated
+          const enabled = mode !== 'off';
           const geomMode = String(geometry.mode ?? 'ocr_only');
           const bbox = LLM_BOX_GEOMETRY_MODES.includes(geomMode)
             ? ` The bounding-box instruction block is appended (Geometry mode: ${geomMode}).`
@@ -639,18 +639,18 @@ const PromptPreview = ({ formValues }: PromptPreviewProps): React.JSX.Element =>
           let msg: string;
           if (selectedStep === 'extraction') {
             msg =
-              enabled && mode === 'integrated'
-                ? `Integrated mode: showing the extraction + confidence template (one inference emits value and confidence).${bbox}`
-                : 'Showing the extraction-only template (confidence runs separately or is disabled).';
+              mode === 'integrated'
+                ? `Integrated confidence mode: showing the extraction + confidence template (one inference emits value and confidence).${bbox}`
+                : 'Showing the extraction-only template (confidence scoring is off or runs separately).';
           } else if (!enabled) {
-            msg = 'Confidence assessment is disabled — this prompt is not used.';
+            msg = 'Confidence scoring mode is Off — this prompt is not used.';
           } else if (mode === 'integrated') {
             msg =
-              'Integrated mode: confidence is produced inside the Extraction inference — this confidence-only prompt is NOT used. See the Extraction step.';
+              'Integrated confidence mode: confidence is produced inside the Extraction inference — this confidence-only prompt is NOT used. See the Extraction step.';
           } else {
-            msg = `Separate mode: this confidence prompt runs as a second inference (agentic in-shard) or the standalone Assessment step.${bbox}`;
+            msg = `Separate confidence mode: this prompt runs as a second inference (Advanced in-shard) or the standalone Assessment step.${bbox}`;
           }
-          return <Alert type={selectedStep === 'confidence' && (mode === 'integrated' || !enabled) ? 'warning' : 'info'}>{msg}</Alert>;
+          return <Alert type={selectedStep === 'confidence' && !enabled ? 'warning' : 'info'}>{msg}</Alert>;
         })()}
 
       {/* Info about what's shown */}
