@@ -1360,12 +1360,223 @@ Resources:
                 type: string
                 description: "(Optional) ARN of a Lambda function to generate custom extraction prompts. Function name must start with 'GENAIIDP-'. If not provided, default prompts will be used. The Lambda function receives the complete config, prompt placeholders, default task prompt content, and serialized document, and returns custom system_prompt and task_prompt_content. Example: arn:partition:lambda:us-east-1:123456789012:function:GENAIIDP-my-extractor"
                 order: 11
-              assessment_integration:
-                type: string
-                enum: ["separate", "integrated"]
-                default: "separate"
-                description: "Where per-field confidence/bounding-box assessment runs. 'separate' (default, unchanged behavior): extraction and assessment are distinct inferences — for agentic extraction a second assessment inference runs inside each shard (scales with the document); for standard extraction the pipeline flows to the separate Assessment step. 'integrated': the extraction inference itself emits each value's confidence and bounding box in one pass (saves a model call) — the separate Assessment step is bypassed and the Assessment Configuration settings below are unused. Either way, disable assessment entirely by turning OFF 'Enable assessment' in Assessment Configuration."
+              geometry:
+                type: object
                 order: 12
+                sectionLabel: Bounding-box Geometry
+                description: "How field bounding boxes (geometry) are produced. Geometry is advisory enrichment shown in the UI viewer."
+                properties:
+                  mode:
+                    type: string
+                    enum: ["ocr_only", "llm_grounded", "llm", "off"]
+                    default: "ocr_only"
+                    description: "'ocr_only' (default): derive boxes purely by matching each extracted value to real OCR lines — cheapest and most accurate, no bbox tokens. 'llm_grounded': the model emits boxes and OCR grounding refines them. 'llm': use the model's boxes as-is (no grounding). 'off': produce no geometry."
+                    order: 0
+              confidence:
+                type: object
+                order: 13
+                sectionLabel: Confidence Assessment
+                collapsible: true
+                defaultExpanded: false
+                expandWhen: { field: "enabled", value: true }
+                description: "Per-field confidence scoring. Confidence is an optional output of extraction; when enabled, each extracted value gets a confidence score (and drives HITL review). Turn OFF to skip assessment entirely (no second model pass, no explainability info)."
+                properties:
+                  enabled:
+                    type: boolean
+                    description: "Emit per-field confidence. When OFF, no assessment runs at all."
+                    default: true
+                    order: 0
+                  mode:
+                    type: string
+                    enum: ["separate", "integrated"]
+                    default: "separate"
+                    description: "'separate' (default): confidence is scored in a distinct inference — for agentic extraction a second pass runs inside each shard; for standard extraction the pipeline flows to the separate Assessment step. 'integrated': the extraction inference emits each value's confidence in one pass (saves a model call); the separate Assessment step is bypassed."
+                    order: 1
+                    dependsOn: { field: "enabled", value: true }
+                  list_batch_size:
+                    type: integer
+                    description: "Max list rows scored per inference in the agentic in-shard path. Large lists (e.g. 75 rows) are unreliable in one call; batching guarantees every row is scored. Lower = more reliable but more inferences; raise for capable models."
+                    minimum: 1
+                    default: 25
+                    order: 2
+                    dependsOn: { field: "enabled", value: true }
+                  model:
+                    type: string
+                    description: "Bedrock model ID for confidence scoring (used by the separate/standalone assessment path). Use 'LambdaHook' for a custom Lambda. Unused when mode is 'integrated' (the extraction model emits confidence)."
+                    dependsOn: { field: "enabled", value: true }
+                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                    enum:
+                      [
+                        "LambdaHook",
+                        "us.amazon.nova-lite-v1:0",
+                        "us.amazon.nova-pro-v1:0",
+                        "us.amazon.nova-premier-v1:0",
+                        "us.amazon.nova-2-lite-v1:0", "us.amazon.nova-2-lite-v1:0:priority", "us.amazon.nova-2-lite-v1:0:flex", "global.amazon.nova-2-lite-v1:0", "global.amazon.nova-2-lite-v1:0:priority", "global.amazon.nova-2-lite-v1:0:flex",
+                        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+                        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                        "us.anthropic.claude-sonnet-4-6",
+                        "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-opus-4-5-20251101-v1:0",
+                        "us.anthropic.claude-opus-4-6-v1",
+                        "us.anthropic.claude-opus-4-6-v1:1m",
+                        "us.anthropic.claude-opus-4-7",
+                        "us.anthropic.claude-opus-4-7:1m",
+                        "us.anthropic.claude-opus-4-8",
+                        "us.anthropic.claude-opus-4-8:1m",
+                        "openai.gpt-5.4",
+                        "openai.gpt-5.5",
+                        "eu.amazon.nova-lite-v1:0",
+                        "eu.amazon.nova-pro-v1:0",
+                        "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
+                        "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+                        "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                        "eu.anthropic.claude-sonnet-4-6",
+                        "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-opus-4-5-20251101-v1:0",
+                        "eu.anthropic.claude-opus-4-6-v1",
+                        "eu.anthropic.claude-opus-4-6-v1:1m",
+                        "eu.anthropic.claude-opus-4-7",
+                        "eu.anthropic.claude-opus-4-7:1m",
+                        "eu.anthropic.claude-opus-4-8",
+                        "eu.anthropic.claude-opus-4-8:1m",
+                        "qwen.qwen3-vl-235b-a22b",
+                        "us.meta.llama4-maverick-17b-instruct-v1:0",
+                        "us.meta.llama4-scout-17b-instruct-v1:0",
+                        "google.gemma-3-27b-it",
+                        "nvidia.nemotron-nano-12b-v2",
+                        "global.amazon.nova-2-lite-v1:0",
+                        "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+                        "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                        "global.anthropic.claude-sonnet-4-6",
+                        "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-opus-4-5-20251101-v1:0",
+                        "global.anthropic.claude-opus-4-6-v1",
+                        "global.anthropic.claude-opus-4-6-v1:1m",
+                        "global.anthropic.claude-opus-4-7",
+                        "global.anthropic.claude-opus-4-7:1m",
+                        "global.anthropic.claude-opus-4-8",
+                        "global.anthropic.claude-opus-4-8:1m"
+                      ]
+                    order: 3
+                  model_lambda_hook_arn:
+                    type: string
+                    description: "Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-."
+                    default: ""
+                    order: 4
+                    dependsOn: { field: "model", value: "LambdaHook" }
+                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                  temperature:
+                    type: number
+                    minimum: 0
+                    maximum: 1
+                    description: "Sampling temperature. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
+                    order: 5
+                    dependsOn: { field: "enabled", value: true }
+                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                  top_k:
+                    type: number
+                    description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
+                    order: 6
+                    dependsOn: { field: "enabled", value: true }
+                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                  top_p:
+                    type: number
+                    description: "Sampling Top P. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
+                    order: 7
+                    dependsOn: { field: "enabled", value: true }
+                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                  max_tokens:
+                    type: number
+                    description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit."
+                    order: 8
+                    dependsOn: { field: "enabled", value: true }
+                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                  reasoning_effort:
+                    type: string
+                    enum: ["minimal", "low", "medium", "high"]
+                    default: "medium"
+                    description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY. Ignored by other models."
+                    order: 9
+                    dependsOn: { field: "enabled", value: true }
+                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                  system_prompt:
+                    type: string
+                    format: textarea
+                    description: "System prompt for confidence scoring."
+                    order: 10
+                    dependsOn: { field: "enabled", value: true }
+                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                  task_prompt:
+                    type: string
+                    format: textarea
+                    description: "Task prompt for confidence scoring - supports placeholders {DOCUMENT_TEXT}, {OCR_TEXT_CONFIDENCE}, {DOCUMENT_CLASS}, {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}, {EXTRACTION_RESULTS}, {GRANULAR_CONTEXT}, {DOCUMENT_IMAGE}. Use <<CACHEPOINT>> for Bedrock prompt caching."
+                    order: 11
+                    dependsOn: { field: "enabled", value: true }
+                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                  image:
+                    type: object
+                    sectionLabel: Image Processing Settings
+                    description: "Image resolution for confidence-scoring page attachments."
+                    order: 12
+                    dependsOn: { field: "enabled", value: true }
+                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                    properties:
+                      target_width:
+                        type: number
+                        description: "Target image width in pixels. Default: 951"
+                        minimum: 100
+                        maximum: 3500
+                        order: 0
+                      target_height:
+                        type: number
+                        description: "Target image height in pixels. Default: 1268"
+                        minimum: 100
+                        maximum: 3500
+                        order: 1
+                  granular:
+                    type: object
+                    sectionLabel: Granular Assessment (large documents)
+                    description: "Break confidence scoring into smaller focused tasks for large documents (standalone Assessment step only)."
+                    order: 13
+                    dependsOn: { field: "enabled", value: true }
+                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Enable granular assessment (smaller, focused scoring tasks)."
+                        default: true
+                        order: 0
+                      max_workers:
+                        type: integer
+                        description: "Maximum parallel workers for concurrent scoring tasks."
+                        minimum: 1
+                        maximum: 20
+                        default: 4
+                        order: 1
+                        dependsOn: { field: "enabled", value: true }
+                      simple_batch_size:
+                        type: integer
+                        description: "Number of simple attributes grouped per scoring task."
+                        minimum: 1
+                        maximum: 10
+                        default: 3
+                        order: 2
+                        dependsOn: { field: "enabled", value: true }
+                      list_batch_size:
+                        type: integer
+                        description: "Number of list items per scoring task (1 = best accuracy)."
+                        minimum: 1
+                        maximum: 5
+                        default: 1
+                        order: 3
+                        dependsOn: { field: "enabled", value: true }
+                  validation_enabled:
+                    type: boolean
+                    description: "Enable assessment validation checks (granular path)."
+                    default: false
+                    order: 14
+                    dependsOn: { field: "enabled", value: true }
+                    hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
               postHook:
                 type: array
                 collapsible: true
@@ -1420,211 +1631,23 @@ Resources:
                       description: Disable without removing
                       default: true
                       order: 4
+          # v0.6: confidence/geometry inference knobs live under
+          # extraction.confidence / extraction.geometry; HITL is the top-level
+          # 'hitl' section below. This slim block is the standalone Assessment
+          # STEP carrier: its enable flag + postAssessment pipeline hooks.
           assessment:
             order: 6
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Assessment & HITL Configuration
+            sectionLabel: Assessment Step (standalone)
             properties:
-              hitl_enabled:
-                type: boolean
-                description: Enable Human-in-the-Loop (HITL) review for low confidence extractions
-                default: false
-                order: 0
-              default_confidence_threshold:
-                type: number
-                description: Confidence Threshold (0.0-1.0) - Documents with confidence below this threshold will trigger HITL review and show confidence alerts
-                minimum: 0.0
-                maximum: 1.0
-                default: 0.8
-                order: 1
               enabled:
                 type: boolean
-                description: Enable or disable assessment processing (step-by-step pipeline only)
+                description: "Run the standalone Assessment step. Mirrors extraction.confidence.enabled; the step is also auto-bypassed when extraction already emitted confidence. (Standard pipeline only.)"
                 default: true
-                order: 2
+                order: 0
                 dependsOn: { field: "use_bda", value: false }
-              validation_enabled:
-                type: boolean
-                description: Enable or disable assessment validation checks
-                default: false
-                order: 3
-                dependsOn: { field: "use_bda", value: false }
-              ground_geometry_in_ocr:
-                type: boolean
-                description: Replace LLM-estimated bounding boxes with real OCR geometry from pageData.json when the extracted value matches an OCR line. Falls back to the LLM-estimated box when OCR geometry is unavailable or no match is found.
-                default: true
-                order: 4
-                dependsOn: { field: "use_bda", value: false }
-              image:
-                type: object
-                sectionLabel: Image Processing Settings
-                description: Configure image resolution and processing options for for image attachments in assessment
-                dependsOn: { field: "use_bda", value: false }
-                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
-                order: 2
-                properties:
-                  target_width:
-                    type: number
-                    description: "Target image width in pixels. Images larger than this will be resized. Default: 951"
-                    minimum: 100
-                    maximum: 3500
-                    order: 0
-                  target_height:
-                    type: number
-                    description: "Target image height in pixels. Images larger than this will be resized. Default: 1268"
-                    minimum: 100
-                    maximum: 3500
-                    order: 1
-              granular:
-                type: object
-                sectionLabel: Granular Assessment Configuration
-                description: Configure granular assessment for improved accuracy and scalability with large documents
-                dependsOn: { field: "use_bda", value: false }
-                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
-                order: 3
-                properties:
-                  enabled:
-                    type: boolean
-                    description: Enable granular assessment approach. When enabled, assessments are broken down into smaller, focused tasks for better accuracy and performance.
-                    default: true
-                    order: 0
-                  max_workers:
-                    type: integer
-                    description: Maximum number of parallel workers for concurrent assessment tasks. Higher values increase throughput but consume more resources.
-                    minimum: 1
-                    maximum: 20
-                    default: 4
-                    order: 1
-                    dependsOn: { field: "enabled", value: true }
-                  simple_batch_size:
-                    type: integer
-                    description: Number of simple attributes to group together in each assessment task. Smaller batches provide more focused assessments.
-                    minimum: 1
-                    maximum: 10
-                    default: 3
-                    order: 2
-                    dependsOn: { field: "enabled", value: true }
-                  list_batch_size:
-                    type: integer
-                    description: Number of list items to process in each assessment task. Usually 1 for best accuracy, can be increased for speed.
-                    minimum: 1
-                    maximum: 5
-                    default: 1
-                    order: 3
-                    dependsOn: { field: "enabled", value: true }
-              model:
-                type: string
-                description: "Bedrock model ID for assessment (step-by-step pipeline only). Unused when Extraction's 'Assessment integration' is 'integrated' (the extraction model emits confidence/bbox)."
-                dependsOn: { field: "use_bda", value: false }
-                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
-                enum:
-                  [
-                    "LambdaHook",
-                    "us.amazon.nova-lite-v1:0",
-                    "us.amazon.nova-pro-v1:0",
-                    "us.amazon.nova-premier-v1:0",
-                    "us.amazon.nova-2-lite-v1:0", "us.amazon.nova-2-lite-v1:0:priority", "us.amazon.nova-2-lite-v1:0:flex", "global.amazon.nova-2-lite-v1:0", "global.amazon.nova-2-lite-v1:0:priority", "global.amazon.nova-2-lite-v1:0:flex",
-                    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-                    "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-                    "us.anthropic.claude-sonnet-4-6",
-                    "us.anthropic.claude-sonnet-4-6:1m",
-                    "us.anthropic.claude-opus-4-5-20251101-v1:0",
-                    "us.anthropic.claude-opus-4-6-v1",
-                    "us.anthropic.claude-opus-4-6-v1:1m",
-                    "us.anthropic.claude-opus-4-7",
-                    "us.anthropic.claude-opus-4-7:1m",
-                    "us.anthropic.claude-opus-4-8",
-                    "us.anthropic.claude-opus-4-8:1m",
-                    "openai.gpt-5.4",
-                    "openai.gpt-5.5",
-                    "eu.amazon.nova-lite-v1:0",
-                    "eu.amazon.nova-pro-v1:0",
-                    "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
-                    "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
-                    "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
-                    "eu.anthropic.claude-sonnet-4-6",
-                    "eu.anthropic.claude-sonnet-4-6:1m",
-                    "eu.anthropic.claude-opus-4-5-20251101-v1:0",
-                    "eu.anthropic.claude-opus-4-6-v1",
-                    "eu.anthropic.claude-opus-4-6-v1:1m",
-                    "eu.anthropic.claude-opus-4-7",
-                    "eu.anthropic.claude-opus-4-7:1m",
-                    "eu.anthropic.claude-opus-4-8",
-                    "eu.anthropic.claude-opus-4-8:1m",
-                    "qwen.qwen3-vl-235b-a22b",
-                    "us.meta.llama4-maverick-17b-instruct-v1:0",
-                    "us.meta.llama4-scout-17b-instruct-v1:0",
-                    "google.gemma-3-27b-it",
-                    "nvidia.nemotron-nano-12b-v2",
-                    "global.amazon.nova-2-lite-v1:0",
-                    "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-                    "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
-                    "global.anthropic.claude-sonnet-4-6",
-                    "global.anthropic.claude-sonnet-4-6:1m",
-                    "global.anthropic.claude-opus-4-5-20251101-v1:0",
-                    "global.anthropic.claude-opus-4-6-v1",
-                    "global.anthropic.claude-opus-4-6-v1:1m",
-                    "global.anthropic.claude-opus-4-7",
-                    "global.anthropic.claude-opus-4-7:1m",
-                    "global.anthropic.claude-opus-4-8",
-                    "global.anthropic.claude-opus-4-8:1m"
-                  ]
-                order: 5
-              model_lambda_hook_arn:
-                type: string
-                description: "Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-."
-                default: ""
-                order: 6
-                dependsOn: { field: "model", value: "LambdaHook" }
-                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
-              temperature:
-                type: number
-                dependsOn: { field: "use_bda", value: false }
-                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
-                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 7
-              top_k:
-                type: number
-                dependsOn: { field: "use_bda", value: false }
-                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
-                description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 8
-              top_p:
-                type: number
-                dependsOn: { field: "use_bda", value: false }
-                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
-                description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 9
-              max_tokens:
-                type: number
-                dependsOn: { field: "use_bda", value: false }
-                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
-                description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
-                order: 10
-              reasoning_effort:
-                type: string
-                enum: ["minimal", "low", "medium", "high"]
-                default: "medium"
-                description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
-                dependsOn: { field: "use_bda", value: false }
-                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
-                order: 10.5
-              system_prompt:
-                type: string
-                dependsOn: { field: "use_bda", value: false }
-                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
-                format: textarea
-                description: System prompt
-                order: 11
-              task_prompt:
-                type: string
-                dependsOn: { field: "use_bda", value: false }
-                hideWhen: { field: "extraction.assessment_integration", value: "integrated" }
-                format: textarea
-                description: Task prompt - supports placeholders {DOCUMENT_TEXT} (markdown text), {OCR_TEXT_CONFIDENCE} (OCR text blocks with confidence), {DOCUMENT_CLASS}, {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}, {EXTRACTION_RESULTS}, {GRANULAR_CONTEXT} and {DOCUMENT_IMAGE}. Use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
-                order: 12
               postHook:
                 type: array
                 collapsible: true
@@ -1679,6 +1702,26 @@ Resources:
                       description: Disable without removing
                       default: true
                       order: 4
+          hitl:
+            order: 6.5
+            type: object
+            collapsible: true
+            defaultExpanded: false
+            sectionLabel: Human-in-the-Loop (HITL) Review
+            description: "Route low-confidence extractions to human review. Requires per-field confidence (see Extraction → Confidence Assessment)."
+            properties:
+              enabled:
+                type: boolean
+                description: "Enable Human-in-the-Loop review for low-confidence extractions."
+                default: false
+                order: 0
+              confidence_threshold:
+                type: number
+                description: "Confidence threshold (0.0-1.0). Fields scoring below this trigger HITL review and show confidence alerts."
+                minimum: 0.0
+                maximum: 1.0
+                default: 0.8
+                order: 1
           summarization:
             order: 7
             type: object

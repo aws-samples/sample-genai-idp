@@ -1,17 +1,19 @@
 import json
 import logging
 from typing import Optional
-from idp_common.config import AssessmentConfig
+from idp_common.config import ConfidenceConfig
 from idp_common.utils import normalize_boolean_value
 
 logger = logging.getLogger(__name__)
 
 class AssessmentValidator:
-    def __init__(self, extraction_data, assessment_config: Optional[ AssessmentConfig ]=None, enable_missing_check=False, enable_count_check=False):
+    # ``assessment_config`` is the v0.6 extraction.confidence block (only its
+    # ``.enabled`` flag is read here).
+    def __init__(self, extraction_data, assessment_config: Optional[ ConfidenceConfig ]=None, enable_missing_check=False, enable_count_check=False):
         self.extraction_data = extraction_data
         self.inference_result = extraction_data.get('inference_result', {})
         self.explainability_info = extraction_data.get('explainability_info', [])
-        self.assessment_config = assessment_config or AssessmentConfig() 
+        self.assessment_config = assessment_config or ConfidenceConfig()
         self.enable_missing_check = enable_missing_check
         self.enable_count_check = enable_count_check
         

@@ -6,6 +6,12 @@
  */
 
 interface MergedConfig {
+  // v0.6: HITL threshold moved to the top-level `hitl` block. `assessment`
+  // retained for pre-migration configs / backward compatibility.
+  hitl?: {
+    enabled?: boolean;
+    confidence_threshold?: number | string;
+  };
   assessment?: {
     hitl_confidence_score?: string;
     default_confidence_threshold?: number;
@@ -56,13 +62,30 @@ interface FieldConfidenceInfo {
 }
 
 export const getHitlConfidenceThreshold = (mergedConfig: MergedConfig | null): number => {
-  if (!mergedConfig || !mergedConfig.assessment || !mergedConfig.assessment.hitl_confidence_score) {
-    return 0.8; // Default threshold of 80%
+  // v0.6: threshold lives in the top-level `hitl` block as a 0.0-1.0 decimal
+  // (was assessment.default_confidence_threshold). Fall back to the legacy
+  // assessment.* keys for configs read before migration completes.
+  const hitl = mergedConfig?.hitl as { confidence_threshold?: number | string } | undefined;
+  if (hitl && hitl.confidence_threshold !== undefined && hitl.confidence_threshold !== null) {
+    const t = parseFloat(String(hitl.confidence_threshold));
+    if (!Number.isNaN(t)) {
+      // Stored as a 0.0-1.0 decimal; tolerate a legacy 1-100 percentage.
+      return t > 1 ? t / 100 : t;
+    }
   }
 
-  const threshold = parseFloat(mergedConfig.assessment.hitl_confidence_score);
-  // Convert from percentage (1-100) to decimal (0.0-1.0)
-  return threshold / 100;
+  const legacy = mergedConfig?.assessment as
+    | { default_confidence_threshold?: number | string; hitl_confidence_score?: number | string }
+    | undefined;
+  const legacyVal = legacy?.default_confidence_threshold ?? legacy?.hitl_confidence_score;
+  if (legacyVal !== undefined && legacyVal !== null) {
+    const t = parseFloat(String(legacyVal));
+    if (!Number.isNaN(t)) {
+      return t > 1 ? t / 100 : t;
+    }
+  }
+
+  return 0.8; // Default threshold of 80%
 };
 
 /**

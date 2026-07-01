@@ -791,8 +791,9 @@ confidence = your calibrated certainty the value matches the source document
 (1.0 = certain, lower = ambiguous/illegible/inferred). This is your last action.
 """
 
-# bbox suffix appended only when geometry_mode is not ocr_only (the model is asked
-# to localize values itself, and OCR grounding refines those boxes).
+# bbox suffix appended only in the LLM-box geometry modes (llm, llm_grounded) —
+# the model is asked to localize values itself, and (in llm_grounded) OCR
+# grounding refines those boxes.
 INTEGRATED_ASSESSMENT_BBOX_SUFFIX = """
 Additionally, for each assessment object include "bbox": [x1,y1,x2,y2] (normalized
 0-1000 scale) and "page": <n> giving the value's location in the document.
@@ -1474,7 +1475,7 @@ async def default_shard_runner(
         checkpoint_callback=checkpoint_callback,
         base_custom_instruction=custom_instruction,
         # Integrated-assessment mode flows through the payload (set by the
-        # service when extraction.assessment_integration == "integrated").
+        # service when extraction.confidence.mode == "integrated").
         emit_field_assessment=bool(payload.get("emit_field_assessment")),
     )
 
@@ -1724,10 +1725,11 @@ async def structured_output_async(
     if emit_field_assessment:
         tools.append(provide_field_assessment)
         addendum = INTEGRATED_ASSESSMENT_ADDENDUM
-        # Only ask the model for bounding boxes when geometry is NOT derived purely
-        # from OCR. In the default ocr_only mode we omit them (saves tokens, avoids
-        # hallucinated coordinates) — geometry is filled by OCR value-matching.
-        if config.assessment.resolved_geometry_mode() != "ocr_only":
+        # Only ask the model for bounding boxes in the LLM-box geometry modes
+        # (llm, llm_grounded). In the default ocr_only mode (and off) we omit them
+        # (saves tokens, avoids hallucinated coordinates) — geometry is filled by
+        # OCR value-matching.
+        if config.extraction.geometry.mode in ("llm", "llm_grounded"):
             addendum = addendum + INTEGRATED_ASSESSMENT_BBOX_SUFFIX
         system_prompt = (system_prompt or SYSTEM_PROMPT) + addendum
 

@@ -8,7 +8,6 @@ Tests for configuration Pydantic models.
 import pytest
 from idp_common.config.models import (
     AgenticConfig,
-    AssessmentConfig,
     ChatConfig,
     ExtractionConfig,
     IDPConfig,
@@ -168,8 +167,10 @@ class TestConfigModels:
         result = process_config(config)
         assert result is True
 
-    def test_assessment_granular_config(self):
-        """Test granular assessment configuration"""
+    def test_confidence_granular_config(self):
+        """Test granular confidence configuration (v0.6: extraction.confidence)"""
+        from idp_common.config import ConfidenceConfig
+
         config_dict = {
             "model": "us.amazon.nova-lite-v1:0",
             "granular": {
@@ -179,7 +180,7 @@ class TestConfigModels:
                 "max_workers": "20",
             },
         }
-        config = AssessmentConfig.model_validate(config_dict)
+        config = ConfidenceConfig.model_validate(config_dict)
 
         assert config.granular.enabled is True
         assert config.granular.list_batch_size == 5

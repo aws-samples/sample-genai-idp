@@ -31,6 +31,9 @@ const logger = new ConsoleLogger('StepFunctionFlowViewer');
 
 interface StepConfig {
   summarization?: { enabled?: boolean };
+  // v0.6: confidence enablement lives under extraction.confidence; the slim
+  // assessment carrier still exposes `enabled` for the step itself.
+  extraction?: { confidence?: { enabled?: boolean } };
   assessment?: { enabled?: boolean };
   evaluation?: { enabled?: boolean };
 }
@@ -82,7 +85,7 @@ const isStepDisabled = (stepName: string, config: StepConfig | null | undefined)
 
   // Check if this is an assessment step
   if (stepNameLower.includes('assessment') || stepNameLower.includes('assess')) {
-    return config.assessment?.enabled === false;
+    return (config.extraction?.confidence?.enabled ?? config.assessment?.enabled) === false;
   }
 
   // Check if this is an evaluation step

@@ -150,8 +150,8 @@ def handler(event, context):
     logger.info(f"Section {section_id} is at index {section_index} in the Sections array")
 
     # Check if granular assessment is enabled (moved earlier for Lambda metering context)
-    assessment_context = "GranularAssessment" if config.assessment.granular.enabled else "Assessment"
-    logger.info(f"Assessment mode: {'Granular' if config.assessment.granular.enabled else 'Regular'} (context: {assessment_context})")
+    assessment_context = "GranularAssessment" if config.extraction.confidence.granular.enabled else "Assessment"
+    logger.info(f"Assessment mode: {'Granular' if config.extraction.confidence.granular.enabled else 'Regular'} (context: {assessment_context})")
 
     # Intelligent Assessment Skip: Check if extraction results already contain explainability_info
     if section.extraction_result_uri and section.extraction_result_uri.strip():
@@ -236,7 +236,7 @@ def handler(event, context):
     
     # Check if granular assessment is enabled
     
-    if config.assessment.granular.enabled:
+    if config.extraction.confidence.granular.enabled:
         # Use enhanced granular assessment service with caching and retry support
         from idp_common.assessment.granular_service import GranularAssessmentService
         assessment_service = GranularAssessmentService(config=config, cache_table=cache_table)
@@ -299,10 +299,10 @@ def handler(event, context):
             updated_document.errors.append(str(e))
 
     # Assessment validation
-    validation_enabled = config.assessment.granular.enabled and config.assessment.validation_enabled
-    logger.info(f"Assessment Enabled:{config.assessment.granular.enabled}")
+    validation_enabled = config.extraction.confidence.granular.enabled and config.extraction.confidence.validation_enabled
+    logger.info(f"Assessment Enabled:{config.extraction.confidence.granular.enabled}")
     logger.info(f"Validation Enabled:{validation_enabled}")
-    if not config.assessment.granular.enabled:
+    if not config.extraction.confidence.granular.enabled:
         logger.info("Assessment is disabled.")
     elif not validation_enabled:
         logger.info("Assessment validation is disabled.")
@@ -313,7 +313,7 @@ def handler(event, context):
                 # Load extraction data with assessment results
                 extraction_data = s3.get_json_content(section.extraction_result_uri)
                 validator = AssessmentValidator(extraction_data,
-                                                assessment_config=config.assessment,
+                                                assessment_config=config.extraction.confidence,
                                                 enable_missing_check=True,
                                                 enable_count_check=True)
                 validation_results = validator.validate_all()

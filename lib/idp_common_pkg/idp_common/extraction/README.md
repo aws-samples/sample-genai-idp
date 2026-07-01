@@ -793,19 +793,31 @@ doc = service.process_document_section(document, section_id)   # shards + merges
 See `notebooks/misc/standalone_sharded_extraction_demo.py` for a runnable
 demonstration (offline with a fake agent; live with real Bedrock).
 
-### Integrated Assessment (in-shard confidence & bounding boxes)
+### Confidence Assessment (in-shard confidence & bounding boxes)
 
-Confidence/bbox **assessment can run inside extraction** instead of as a separate
-downstream step, controlled by `extraction.assessment_integration`:
+> **Config v0.6:** confidence scoring is an **output of extraction** — its settings
+> live under `extraction.confidence` (was the top-level `assessment` block) and
+> geometry under `extraction.geometry` (was `assessment.geometry_mode`). HITL moved
+> to the top-level `hitl` block. Old configs are migrated on read.
+
+Per-field confidence/bbox **assessment can run inside extraction** instead of as a
+separate downstream step, controlled by `extraction.confidence.mode`:
 
 ```yaml
 extraction:
-  assessment_integration: separate   # "separate" (default) | "integrated"
+  confidence:
+    enabled: true                     # master on/off — false disables confidence entirely
+    mode: separate                    # "separate" (default) | "integrated"
+    model: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    list_batch_size: 25               # rows scored per inference (agentic in-shard)
+  geometry:
+    mode: ocr_only                    # ocr_only (default) | llm_grounded | llm | off
   agentic:
     enabled: true
-    max_concurrent_batches: 4         # sharded; assessment runs per-shard
-assessment:
-  enabled: true                       # master on/off — false disables assessment entirely
+    max_concurrent_batches: 4         # sharded; confidence scoring runs per-shard
+hitl:
+  enabled: false                      # route low-confidence fields to human review
+  confidence_threshold: 0.8
 ```
 
 - **`separate`** (default, **no behavior change on upgrade**): extraction and
@@ -828,8 +840,8 @@ assessment:
   list fields). The inline result rides the **same** collation → post-merge
   reconcile → OCR grounding → `explainability_info` path as `separate`, so the
   output contract is identical; only the source of the confidence differs. The
-  Assessment step's model/prompt settings are unused, and the standalone step is
-  bypassed. Best for cost/latency once you've confirmed your model produces
+  `extraction.confidence` model/prompt settings are unused, and the standalone
+  step is bypassed. Best for cost/latency once you've confirmed your model produces
   well-calibrated inline confidence; otherwise prefer `separate` (a dedicated
   assessment inference per shard).
 
@@ -837,7 +849,7 @@ assessment:
 has already written `explainability_info` to the section result, the downstream
 Assessment Lambda detects it and **skips its own inference** (a cheap
 pass-through) — so no duplicate assessment cost and no state-machine change. When
-`assessment.enabled: false`, assessment is skipped everywhere. The document status
+`extraction.confidence.enabled: false`, confidence scoring is skipped everywhere. The document status
 remains `EXTRACTING` while in-shard assessment runs (it *is* part of the extraction
 step).
 

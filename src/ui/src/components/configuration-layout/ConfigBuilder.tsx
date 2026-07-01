@@ -38,8 +38,8 @@ interface SchemaProperty {
   // sibling field matches (e.g. expand "Agentic Extraction" when enabled=true).
   expandWhen?: { field: string; value?: unknown };
   // Hide this field when an ABSOLUTE-path (form-root) field equals a value.
-  // Composes with dependsOn; resolves cross-section (e.g. hide unused Assessment
-  // inference fields when extraction.assessment_integration === "integrated").
+  // Composes with dependsOn; resolves cross-section (e.g. hide unused confidence
+  // inference fields when extraction.confidence.mode === "integrated").
   hideWhen?: { field: string; value?: unknown };
   defaultExpanded?: boolean | string;
   nestLevel?: number;
@@ -695,7 +695,7 @@ const ConfigBuilder = ({
         // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Debug logging with controlled internal data
         property,
         value,
-        formValues: getValueAtPath(formValues, 'assessment'),
+        formValues: getValueAtPath(formValues, 'extraction.confidence'),
       });
     }
 
@@ -708,8 +708,8 @@ const ConfigBuilder = ({
     // matches a value (composes with dependsOn — both must pass to render).
     // Unlike dependsOn (sibling-first), hideWhen.field is always resolved from
     // the form root, so a field in one top-level section can be hidden based on
-    // a setting in another (e.g. hide unused Assessment inference fields when
-    // extraction.assessment_integration === "integrated").
+    // a setting in another (e.g. hide unused confidence inference fields when
+    // extraction.confidence.mode === "integrated").
     if (property.hideWhen) {
       const hideVal = getValueAtPath(formValues, property.hideWhen.field);
       if (hideVal === property.hideWhen.value) {

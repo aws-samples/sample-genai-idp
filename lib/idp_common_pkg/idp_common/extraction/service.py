@@ -2664,8 +2664,8 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         )
 
         grounded = merged_assessment
-        geometry_mode = self.config.assessment.resolved_geometry_mode()
-        if geometry_mode != "llm_only":
+        geometry_mode = self.config.extraction.geometry.mode
+        if geometry_mode not in ("llm", "off"):
             try:
                 from idp_common.assessment.ocr_grounding import (
                     ground_assessment_geometry,
@@ -3097,21 +3097,21 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         inference itself emits confidence/bbox via ``_integrated_assessment_enabled``.
         Either way the standalone AssessmentStep is bypassed for the agentic path.
         """
-        if not self.config.assessment.enabled:
+        if not self.config.extraction.confidence.enabled:
             return False
-        return self.config.extraction.assessment_integration == "separate"
+        return self.config.extraction.confidence.mode == "separate"
 
     def _integrated_assessment_enabled(self) -> bool:
         """Whether the agent should emit confidence/bbox INLINE (single inference).
 
-        True when assessment is enabled AND ``assessment_integration == "integrated"``.
+        True when confidence is enabled AND ``confidence.mode == "integrated"``.
         In this mode the extraction agent calls ``provide_field_assessment`` in its
         own session (document already in cached context — no second Bedrock pass),
         and the result rides the same collation/grounding/emit path as separate mode.
         """
-        if not self.config.assessment.enabled:
+        if not self.config.extraction.confidence.enabled:
             return False
-        return self.config.extraction.assessment_integration == "integrated"
+        return self.config.extraction.confidence.mode == "integrated"
 
     @staticmethod
     def _reconcile_assessment_to_data(
@@ -3204,7 +3204,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         """
         from idp_common.extraction.agentic_idp import _accumulate_metering
 
-        batch_size = self.config.assessment.inshard_list_batch_size
+        batch_size = self.config.extraction.confidence.list_batch_size
         # Identify the single largest list field (the table being assessed).
         list_fields = {
             k: v

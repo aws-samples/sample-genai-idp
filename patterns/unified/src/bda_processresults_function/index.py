@@ -36,7 +36,7 @@ def is_hitl_enabled(config_version=None):
     """Check if HITL is enabled from configuration."""
     try:
         config = get_config(as_model=True, version=config_version)
-        hitl_enabled = config.assessment.hitl_enabled
+        hitl_enabled = config.hitl.enabled
         logger.info(f"HITL enabled from config: {hitl_enabled}")
         return hitl_enabled
     except Exception as e:
@@ -1157,7 +1157,7 @@ def handle_skip_bda(event):
     document_service.update_document(document)
     
     # Get confidence threshold from configuration for potential HITL checks
-    confidence_threshold = config.assessment.default_confidence_threshold
+    confidence_threshold = config.hitl.confidence_threshold
     logger.info(f"Using confidence threshold: {confidence_threshold}")
     
     # Check if HITL should be triggered based on existing confidence alerts
@@ -1296,7 +1296,7 @@ def handler(event, context):
 
     # Get confidence threshold from configuration
     # Used for both creating confidence alerts and triggering HITL
-    confidence_threshold = config.assessment.default_confidence_threshold
+    confidence_threshold = config.hitl.confidence_threshold
     logger.info(f"Using confidence threshold: {confidence_threshold}")
 
     # Update document status

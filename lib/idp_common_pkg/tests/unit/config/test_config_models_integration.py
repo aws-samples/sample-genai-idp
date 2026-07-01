@@ -265,8 +265,9 @@ class TestConfigModelsIntegration:
         assert config.extraction.top_p == 0.2
         assert isinstance(config.extraction.top_p, float)
 
-        assert config.assessment.granular.list_batch_size == 5
-        assert isinstance(config.assessment.granular.list_batch_size, int)
+        # v0.6: granular moved to extraction.confidence (migrated from assessment.*)
+        assert config.extraction.confidence.granular.list_batch_size == 5
+        assert isinstance(config.extraction.confidence.granular.list_batch_size, int)
 
     def test_boolean_variations(self):
         """Test various boolean representations"""
