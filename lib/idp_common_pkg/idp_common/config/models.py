@@ -842,17 +842,17 @@ class ClassificationConfig(BaseModel):
 
 
 class AssessmentConfig(BaseModel):
-    """Standalone Assessment *step* carrier (v0.6, slimmed).
+    """Standalone Assessment *step* hook carrier (v0.6, slimmed).
 
-    In v0.6 the confidence/geometry INFERENCE knobs moved to
-    ``extraction.confidence`` / ``extraction.geometry`` and HITL to top-level
-    ``hitl``. This block survives only as the carrier for:
-      * ``enabled`` — whether the standalone Assessment step runs (the step is
-        also auto-bypassed when extraction already emitted explainability_info),
-        kept in sync with ``extraction.confidence.enabled`` by migration; and
-      * ``postHook`` — the ``postAssessment`` pipeline-hook point, which the
-        Feature Platform dispatcher resolves single-level to ``assessment.postHook``.
-    It will be removed entirely when the standalone step is retired (follow-up PR).
+    In v0.6 ALL confidence/geometry settings moved under ``extraction`` — the
+    inference knobs to ``extraction.confidence``, geometry to
+    ``extraction.geometry``, and HITL to top-level ``hitl``. Whether assessment
+    runs at all is governed solely by ``extraction.confidence.enabled`` (the
+    standalone step also auto-bypasses once extraction has emitted
+    explainability_info). This block therefore survives ONLY as the carrier for
+    ``postHook`` — the ``postAssessment`` pipeline-hook point, which the Feature
+    Platform dispatcher resolves single-level to ``assessment.postHook``. It will
+    be removed entirely when the standalone step is retired (follow-up PR).
     ``extra='allow'`` so any not-yet-migrated legacy keys round-trip harmlessly.
     """
 
@@ -861,13 +861,6 @@ class AssessmentConfig(BaseModel):
     postHook: List[PipelineHook] = Field(  # noqa: N815 — matches stored config key
         default_factory=list,
         description="Pipeline hooks invoked after the Assessment step (Feature Platform)",
-    )
-    enabled: bool = Field(
-        default=True,
-        description=(
-            "Whether the standalone Assessment step runs. Mirrors "
-            "extraction.confidence.enabled (kept in sync by migration)."
-        ),
     )
 
 

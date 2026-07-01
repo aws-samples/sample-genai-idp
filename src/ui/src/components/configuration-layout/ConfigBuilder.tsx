@@ -23,9 +23,31 @@ import type { BoxProps } from '@cloudscape-design/components';
 import SchemaBuilder from '../json-schema-builder/SchemaBuilder';
 import PromptPreview from './PromptPreview';
 
+// Turn a schema key into a concise, human-readable field label.
+// e.g. "assessment_integration" -> "Assessment Integration",
+//      "model_lambda_hook_arn"  -> "Model Lambda Hook Arn",
+//      "top_p" -> "Top P". Small acronyms are upper-cased.
+const _ACRONYMS = new Set(['ocr', 'llm', 'hitl', 'arn', 'bda', 'id', 'url', 'api', 'ui', 's3']);
+function humanizeKey(key: string): string {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2') // camelCase -> spaced
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((w) => (_ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(' ');
+}
+
+// Concise field label: prefer an explicit schema `title`, else humanize the key.
+// The (potentially long) `description` is shown separately as help text.
+function getFieldLabel(key: string, property: { title?: unknown }): string {
+  const title = property?.title;
+  return typeof title === 'string' && title.trim() ? title : humanizeKey(key);
+}
+
 // Type for schema property definitions used throughout the config builder
 interface SchemaProperty {
   type?: string;
+  title?: string;
   properties?: Record<string, SchemaProperty>;
   items?: SchemaProperty;
   enum?: string[];
@@ -1574,8 +1596,10 @@ const ConfigBuilder = ({
       );
     }
 
-    // Use description as the label
-    const displayText = (property.description as string) || key;
+    // Concise label from title/humanized key; the full description renders as
+    // lighter help text under the field (Cloudscape FormField `description`).
+    const displayText = getFieldLabel(key, property);
+    const fieldDescription = (property.description as string) || undefined;
     const constraints = getConstraintText(property);
 
     // Stable flex wrapper prevents input remount/focus loss
@@ -1611,7 +1635,13 @@ const ConfigBuilder = ({
     );
 
     return (
-      <FormField label={labelContent} constraintText={finalConstraints} stretch className={fieldClasses.join(' ')}>
+      <FormField
+        label={labelContent}
+        description={fieldDescription}
+        constraintText={finalConstraints}
+        stretch
+        className={fieldClasses.join(' ')}
+      >
         {inputWithActions}
       </FormField>
     );

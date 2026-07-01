@@ -1368,6 +1368,7 @@ Resources:
                 properties:
                   mode:
                     type: string
+                    title: Geometry mode
                     enum: ["ocr_only", "llm_grounded", "llm", "off"]
                     default: "ocr_only"
                     description: "'ocr_only' (default): derive boxes purely by matching each extracted value to real OCR lines — cheapest and most accurate, no bbox tokens. 'llm_grounded': the model emits boxes and OCR grounding refines them. 'llm': use the model's boxes as-is (no grounding). 'off': produce no geometry."
@@ -1383,11 +1384,13 @@ Resources:
                 properties:
                   enabled:
                     type: boolean
+                    title: Enable confidence assessment
                     description: "Emit per-field confidence. When OFF, no assessment runs at all."
                     default: true
                     order: 0
                   mode:
                     type: string
+                    title: Integration mode
                     enum: ["separate", "integrated"]
                     default: "separate"
                     description: "'separate' (default): confidence is scored in a distinct inference — for agentic extraction a second pass runs inside each shard; for standard extraction the pipeline flows to the separate Assessment step. 'integrated': the extraction inference emits each value's confidence in one pass (saves a model call); the separate Assessment step is bypassed."
@@ -1395,6 +1398,7 @@ Resources:
                     dependsOn: { field: "enabled", value: true }
                   list_batch_size:
                     type: integer
+                    title: List batch size
                     description: "Max list rows scored per inference in the agentic in-shard path. Large lists (e.g. 75 rows) are unreliable in one call; batching guarantees every row is scored. Lower = more reliable but more inferences; raise for capable models."
                     minimum: 1
                     default: 25
@@ -1402,6 +1406,7 @@ Resources:
                     dependsOn: { field: "enabled", value: true }
                   model:
                     type: string
+                    title: Confidence model
                     description: "Bedrock model ID for confidence scoring (used by the separate/standalone assessment path). Use 'LambdaHook' for a custom Lambda. Unused when mode is 'integrated' (the extraction model emits confidence)."
                     dependsOn: { field: "enabled", value: true }
                     hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
@@ -1640,14 +1645,9 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Assessment Step (standalone)
+            sectionLabel: Assessment Step Hooks
+            description: "Post-assessment pipeline hooks (Feature Platform). Whether confidence assessment runs at all is set under Extraction → Confidence Assessment."
             properties:
-              enabled:
-                type: boolean
-                description: "Run the standalone Assessment step. Mirrors extraction.confidence.enabled; the step is also auto-bypassed when extraction already emitted confidence. (Standard pipeline only.)"
-                default: true
-                order: 0
-                dependsOn: { field: "use_bda", value: false }
               postHook:
                 type: array
                 collapsible: true
@@ -1712,11 +1712,13 @@ Resources:
             properties:
               enabled:
                 type: boolean
+                title: Enable HITL review
                 description: "Enable Human-in-the-Loop review for low-confidence extractions."
                 default: false
                 order: 0
               confidence_threshold:
                 type: number
+                title: Confidence threshold
                 description: "Confidence threshold (0.0-1.0). Fields scoring below this trigger HITL review and show confidence alerts."
                 minimum: 0.0
                 maximum: 1.0

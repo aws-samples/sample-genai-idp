@@ -6,6 +6,8 @@
 import pytest
 from idp_common.extraction.prompt_assembly import (
     assemble_confidence_prompt,
+    assemble_integrated_extraction_prompt,
+    build_integrated_confidence_section,
     geometry_requires_llm_boxes,
 )
 
@@ -63,3 +65,34 @@ class TestAssembleConfidencePrompt:
 
     def test_empty_core_returns_empty(self):
         assert assemble_confidence_prompt("", "llm") == ""
+
+
+class TestIntegratedConfidenceSection:
+    def test_core_always_present(self):
+        for mode in ("ocr_only", "off", "llm", "llm_grounded"):
+            s = build_integrated_confidence_section(mode)
+            assert "provide_field_assessment" in s
+
+    @pytest.mark.parametrize(
+        "mode,has_bbox",
+        [
+            ("ocr_only", False),
+            ("off", False),
+            ("llm", True),
+            ("llm_grounded", True),
+        ],
+    )
+    def test_bbox_only_for_llm_modes(self, mode, has_bbox):
+        s = build_integrated_confidence_section(mode)
+        assert ("bbox" in s) is has_bbox
+
+    def test_assemble_appends_to_extraction_prompt(self):
+        out = assemble_integrated_extraction_prompt("EXTRACT SYS", "ocr_only")
+        assert out.startswith("EXTRACT SYS")
+        assert "provide_field_assessment" in out
+        assert "bbox" not in out
+
+    def test_assemble_none_prompt(self):
+        out = assemble_integrated_extraction_prompt("", "llm")
+        assert "provide_field_assessment" in out
+        assert "bbox" in out

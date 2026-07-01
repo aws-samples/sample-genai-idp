@@ -2,18 +2,19 @@
 # SPDX-License-Identifier: MIT-0
 
 # =============================================================================
-# BASE ASSESSMENT - standalone Assessment step carrier (v0.6, slimmed)
+# BASE ASSESSMENT - standalone Assessment step hook carrier (v0.6, slimmed)
 # =============================================================================
-# In v0.6 the confidence/geometry INFERENCE knobs moved to
-# `extraction.confidence` (base-confidence.yaml) and `extraction.geometry`
-# (base-geometry.yaml); HITL moved to top-level `hitl`. This block survives only
-# as the carrier for the standalone Assessment *step*:
-#   - enabled : whether the step runs (also auto-bypassed when extraction already
-#               emitted explainability_info); kept in sync with
-#               extraction.confidence.enabled by migration.
-#   - postHook: the `postAssessment` pipeline-hook point (Feature Platform).
-# It will be removed when the standalone step is retired.
+# In v0.6 ALL confidence/geometry settings moved under `extraction`:
+#   - inference knobs -> extraction.confidence (base-confidence.yaml)
+#   - geometry mode   -> extraction.geometry (base-geometry.yaml)
+#   - HITL            -> top-level `hitl`
+# Whether assessment runs at all is governed by extraction.confidence.enabled
+# (the standalone step also auto-bypasses once extraction emitted
+# explainability_info). This block survives ONLY as the carrier for the
+# `postAssessment` pipeline-hook point (Feature Platform) and is populated at
+# runtime (empty postHook list by default). It will be removed when the
+# standalone step is retired.
 # =============================================================================
 
 assessment:
-  enabled: true
+  postHook: []

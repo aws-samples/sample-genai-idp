@@ -63,7 +63,7 @@ _CONFIDENCE_PASSTHROUGH_KEYS = (
 
 
 # Keys that legitimately survive in the slimmed v0.6 assessment carrier.
-_SLIM_ASSESSMENT_KEYS = {"enabled", "postHook"}
+_SLIM_ASSESSMENT_KEYS = {"postHook"}
 
 
 def _has_legacy_markers(config: Dict[str, Any]) -> bool:
@@ -159,11 +159,12 @@ def migrate_v05_to_v06(config: Dict[str, Any]) -> Dict[str, Any]:
         existing = existing if isinstance(existing, dict) else {}
         result["hitl"] = {**hitl, **existing}
 
-    # --- slim the surviving assessment carrier (step enable + postHook only) ---
+    # --- slim the surviving assessment carrier (postAssessment hooks only) ---
+    # Whether assessment runs is governed by extraction.confidence.enabled; the
+    # old assessment.enabled is dropped (its value already mapped to
+    # confidence.enabled above).
     if assessment:
         slim: Dict[str, Any] = {}
-        if "enabled" in assessment:
-            slim["enabled"] = assessment["enabled"]
         if "postHook" in assessment:
             slim["postHook"] = assessment["postHook"]
         result["assessment"] = slim

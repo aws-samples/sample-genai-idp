@@ -46,6 +46,36 @@ Include the bbox/page alongside each field's confidence in the JSON you return.
 # Modes in which the model is asked to emit bounding boxes.
 _LLM_BOX_MODES = ("llm", "llm_grounded")
 
+# --- INTEGRATED (single-inference) confidence section -----------------------
+# When extraction.confidence.mode == "integrated", the extraction agent emits
+# per-field confidence INLINE (via the provide_field_assessment tool) in its own
+# inference — no second model pass. These sections are composed ONTO the
+# extraction system prompt the same way the separate-mode geometry block is
+# composed onto the confidence prompt, so both modes share one assembly module.
+
+# Confidence-only core (geometry comes from OCR — no bbox asked of the model).
+INTEGRATED_CONFIDENCE_CORE = """
+
+INTEGRATED CONFIDENCE ASSESSMENT (REQUIRED FINAL STEP):
+After the extraction is complete and correct, you MUST call the
+provide_field_assessment tool exactly once to record your confidence in each
+extracted value. Mirror the extraction structure:
+- For each scalar or group field: an object
+  {"confidence": <0.0-1.0>, "confidence_reason": "<brief>"}.
+- For each list field (e.g. a table): a LIST with ONE assessment object per
+  extracted row, in the SAME ORDER as the rows you extracted. Provide an entry
+  for EVERY row — do not summarize or skip rows.
+Do NOT include bounding boxes — field locations are derived automatically from OCR.
+confidence = your calibrated certainty the value matches the source document
+(1.0 = certain, lower = ambiguous/illegible/inferred). This is your last action.
+"""
+
+# Bbox suffix appended to the integrated core ONLY in the LLM-box geometry modes.
+INTEGRATED_CONFIDENCE_BBOX_SUFFIX = """
+Additionally, for each assessment object include "bbox": [x1,y1,x2,y2] (normalized
+0-1000 scale) and "page": <n> giving the value's location in the document.
+"""
+
 # Splice geometry instructions before the first of these markers so the trailing
 # dynamic document sections (and cache points) stay after it.
 _SPLICE_MARKERS = ("<<CACHEPOINT>>", "<document-image>", "{DOCUMENT_IMAGE}")
@@ -81,3 +111,33 @@ def assemble_confidence_prompt(core_task_prompt: str, geometry_mode: str) -> str
             return core_task_prompt[:idx] + block + "\n\n" + core_task_prompt[idx:]
     # No marker found — append at the end.
     return core_task_prompt.rstrip() + "\n\n" + block + "\n"
+
+
+def build_integrated_confidence_section(geometry_mode: str) -> str:
+    """Return the integrated-mode confidence instruction section to append to the
+    extraction system prompt.
+
+    The confidence core is always included; the bbox suffix is added only in the
+    LLM-box geometry modes (``llm``, ``llm_grounded``), mirroring separate-mode
+    geometry composition. Callers append the result to the extraction system
+    prompt when ``extraction.confidence.mode == "integrated"``.
+    """
+    section = INTEGRATED_CONFIDENCE_CORE
+    if geometry_requires_llm_boxes(geometry_mode):
+        section = section + INTEGRATED_CONFIDENCE_BBOX_SUFFIX
+    return section
+
+
+def assemble_integrated_extraction_prompt(
+    extraction_system_prompt: str, geometry_mode: str
+) -> str:
+    """Compose the integrated confidence section onto an extraction system prompt.
+
+    This is the integrated-mode analogue of ``assemble_confidence_prompt``: the
+    extraction agent will emit confidence inline, so the confidence instructions
+    are appended to its system prompt (geometry directions included only for the
+    LLM-box modes).
+    """
+    return (extraction_system_prompt or "") + build_integrated_confidence_section(
+        geometry_mode
+    )

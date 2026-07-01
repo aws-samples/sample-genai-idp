@@ -84,20 +84,20 @@ class TestV05ToV06Migration:
         assert out["hitl"]["enabled"] is True
         assert out["hitl"]["confidence_threshold"] == "0.7"
 
-    def test_assessment_slimmed_to_carrier(self):
+    def test_assessment_slimmed_to_hook_carrier(self):
         out = migrate_v05_to_v06(
             {
                 "assessment": {
-                    "enabled": False,
+                    "enabled": False,  # dropped — enablement is confidence.enabled
                     "model": "m",
                     "postHook": [{"featureId": "f", "arn": "a"}],
                 }
             }
         )
-        # only carrier keys survive
-        assert set(out["assessment"].keys()) == {"enabled", "postHook"}
-        assert out["assessment"]["enabled"] is False
+        # only the postHook carrier key survives; enabled maps to confidence.enabled
+        assert set(out["assessment"].keys()) == {"postHook"}
         assert out["assessment"]["postHook"] == [{"featureId": "f", "arn": "a"}]
+        assert out["extraction"]["confidence"]["enabled"] is False
 
     def test_stamps_format_version(self):
         out = migrate_v05_to_v06({"assessment": {"enabled": True}})
@@ -124,7 +124,7 @@ class TestV05ToV06Migration:
                 "geometry": {"mode": "off"},
             },
             "hitl": {"enabled": True},
-            "assessment": {"enabled": True},
+            "assessment": {"postHook": []},
         }
         out = migrate_v05_to_v06(v06)
         assert out == v06
@@ -194,5 +194,5 @@ class TestV05ToV06ThroughIDPConfig:
         assert cfg.extraction.geometry.mode == "llm_grounded"
         assert cfg.hitl.enabled is True
         assert cfg.hitl.confidence_threshold == 0.75
-        # slim carrier still reflects step-enable
-        assert cfg.assessment.enabled is True
+        # enablement now lives solely on confidence.enabled
+        assert cfg.extraction.confidence.enabled is True

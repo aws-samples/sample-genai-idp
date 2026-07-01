@@ -113,7 +113,8 @@ class TestConfigModels:
         # Booleans
         assert config.extraction.agentic.enabled is False
         assert config.extraction.agentic.review_agent is True
-        assert config.assessment.enabled is True
+        # v0.6: assessment.enabled migrated to extraction.confidence.enabled
+        assert config.extraction.confidence.enabled is True
 
         # Numbers from strings
         assert config.classification.temperature == 0.0
