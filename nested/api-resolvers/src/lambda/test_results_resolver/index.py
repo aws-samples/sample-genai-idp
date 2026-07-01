@@ -94,6 +94,16 @@ def _validate_sql_input(value, name):
 dynamodb = boto3.resource("dynamodb")
 
 
+def _caller_groups(event):
+    """Extract the caller's Cognito groups from the (normalized) identity."""
+    identity = event.get("identity") or {}
+    claims = identity.get("claims") or {}
+    groups = claims.get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [groups]
+    return list(groups)
+
+
 def handler(event, context):
     """Handle both GraphQL resolver and SQS events"""
 
@@ -103,6 +113,18 @@ def handler(event, context):
 
     # Otherwise handle as GraphQL resolver
     field_name = event["info"]["fieldName"]
+
+    # Defense-in-depth RBAC: all Test Studio read ops are Admin/Author only in
+    # the AppSync schema (@aws_cognito_user_pools(cognito_groups:["Admin",
+    # "Author"])). The REST dispatcher's Cognito authorizer only authenticates,
+    # so re-enforce the group check here (dispatcher maps PermissionError->403).
+    groups = _caller_groups(event)
+    if not ({"Admin", "Author"}.intersection(groups)):
+        logger.warning(
+            "Forbidden: caller (groups=%s) attempted %s (requires Admin/Author)",
+            groups, field_name,
+        )
+        raise PermissionError(f"Unauthorized: {field_name} requires Admin or Author group")
 
     if field_name == "getTestRuns":
         args = event.get("arguments", {})

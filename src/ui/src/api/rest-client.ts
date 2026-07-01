@@ -29,13 +29,23 @@ const logger = new ConsoleLogger('restClient');
 // Match the operation kind + field name from a generated GraphQL op string.
 //   "  query ListDocuments($x: Int) {\n  listDocuments(...) { ... } }"
 // -> kind = "query", field = "listDocuments"
-const OP_RE = /\b(query|mutation|subscription)\s+\w+\s*(?:\([^)]*\))?\s*\{\s*([A-Za-z_][A-Za-z0-9_]*)/;
+// Also captures the top-level field's argument list so we can map GraphQL
+// argument names to their $variable names (see argMap below).
+const OP_RE = /\b(query|mutation|subscription)\s+\w+\s*(?:\([^)]*\))?\s*\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(([^)]*)\))?/;
 
-const fieldCache = new Map<string, { kind: string; field: string }>();
+// Extract "ArgName: $varName" pairs from a field's argument list.
+const ARG_RE = /([A-Za-z_]\w*)\s*:\s*\$([A-Za-z_]\w*)/g;
+
+const fieldCache = new Map<string, ParsedOp>();
 
 interface ParsedOp {
   kind: string;
   field: string;
+  // GraphQL-argument-name -> $variable-name for the top-level field. AppSync
+  // exposed $ctx.arguments keyed by ARGUMENT name, not variable name; the two
+  // usually match but not always (e.g. getDocument(ObjectKey: $objectKey)), so
+  // we must remap before sending or the resolver sees the wrong key.
+  argMap: Record<string, string>;
 }
 
 const parseOperation = (query: string): ParsedOp => {
@@ -45,9 +55,37 @@ const parseOperation = (query: string): ParsedOp => {
   if (!m) {
     throw new Error('restClient: could not parse operation from query string');
   }
-  const parsed = { kind: m[1], field: m[2] };
+  const argMap: Record<string, string> = {};
+  const argList = m[3] ?? '';
+  let a: RegExpExecArray | null;
+  ARG_RE.lastIndex = 0;
+  while ((a = ARG_RE.exec(argList)) !== null) {
+    argMap[a[1]] = a[2];
+  }
+  const parsed = { kind: m[1], field: m[2], argMap };
   fieldCache.set(query, parsed);
   return parsed;
+};
+
+// Build the `arguments` object the resolver expects (keyed by GraphQL argument
+// name) from the caller's `variables` (keyed by $variable name). When the
+// operation declares no field args, or a variable has no matching arg, pass it
+// through unchanged so nothing is silently dropped.
+const buildArguments = (argMap: Record<string, string>, variables: Record<string, unknown> | undefined): Record<string, unknown> => {
+  const vars = variables ?? {};
+  const mappedVarNames = new Set(Object.values(argMap));
+  const out: Record<string, unknown> = {};
+  // 1) Remap declared field args: argName <- variables[varName].
+  for (const [argName, varName] of Object.entries(argMap)) {
+    if (varName in vars) out[argName] = vars[varName];
+  }
+  // 2) Pass through any variables not consumed by the arg map (arg name ==
+  //    variable name is the common case and is covered by (1); this keeps any
+  //    extras that weren't declared in the parsed arg list).
+  for (const [k, v] of Object.entries(vars)) {
+    if (!mappedVarNames.has(k) && !(k in out)) out[k] = v;
+  }
+  return out;
 };
 
 const getIdToken = async (): Promise<string> => {
@@ -81,7 +119,7 @@ const inertSubscription = (field: string) => ({
 });
 
 const doGraphql = async ({ query, variables }: GraphqlRequest): Promise<GraphqlResult> => {
-  const { kind, field } = parseOperation(query);
+  const { kind, field, argMap } = parseOperation(query);
 
   if (kind === 'subscription') {
     return inertSubscription(field) as unknown as GraphqlResult;
@@ -100,7 +138,7 @@ const doGraphql = async ({ query, variables }: GraphqlRequest): Promise<GraphqlR
         Authorization: token,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ arguments: variables ?? {} }),
+      body: JSON.stringify({ arguments: buildArguments(argMap, variables) }),
     });
   } catch (e) {
     // Network error — surface in the same { errors: [...] } shape callers parse.

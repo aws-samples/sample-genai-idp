@@ -388,6 +388,11 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           SETTINGS_PARAMETER: !Ref SettingsParameterName
+          # create_document_service() (imported at module load) reads
+          # TRACKING_TABLE; without it every abortWorkflow call fails at import
+          # with a 400 "DynamoDB table name must be provided". Masked under
+          # AppSync (VTL). See ReprocessDocumentResolverFunction.
+          TRACKING_TABLE: !Ref TrackingTableName
       LoggingConfig:
         LogGroup: !Ref AbortWorkflowResolverFunctionLogGroup
       Policies:
@@ -755,6 +760,11 @@ Resources:
             - ShouldCreateEvaluationBaselineBucket
             - !Ref EvaluationBaselineBucketName
             - !Ref EvaluationBaselineBucketName
+          # create_document_service().update_document() reads TRACKING_TABLE;
+          # without it the post-copy status update fails. (RBAC denial fires
+          # before this, so the leak test didn't surface it, but the happy
+          # path for Admin/Author needs it.)
+          TRACKING_TABLE: !Ref TrackingTableName
       LoggingConfig:
         LogGroup: !Ref CopyToBaselineResolverFunctionLogGroup
       Policies:
@@ -1726,6 +1736,12 @@ Resources:
           OUTPUT_BUCKET: !Ref OutputBucketName
           QUEUE_URL: !Ref DocumentQueueUrl
           DATA_RETENTION_IN_DAYS: !Ref DataRetentionInDays
+          # create_document_service() (imported at module load) builds a
+          # DynamoDB doc service that reads TRACKING_TABLE; without it every
+          # invocation fails at import with "DynamoDB table name must be
+          # provided or set in TRACKING_TABLE" (surfaced as a 400 to all
+          # callers). This was masked under AppSync (VTL, no Python service).
+          TRACKING_TABLE: !Ref TrackingTableName
           # RBAC: resolve caller's allowedConfigVersions from UsersTable to
           # enforce config-version scope on the `version` argument. Empty
           # string in single-user / pre-RBAC deployments (fail-open).
@@ -2403,6 +2419,7 @@ Resources:
             "deleteTestSets": "${TestSetResolverFunction}",
             "deleteTests": "${DeleteTestsResolverFunction}",
             "getChatMessages": "${GetAgentChatMessagesFunction}",
+            "getCircuitBreakerStatus": "${CircuitBreakerResolverFunctionArn}",
             "getConfigVersion": "${ConfigurationResolverFunction}",
             "getConfigVersions": "${ConfigurationResolverFunction}",
             "getConfigurationLibraryFile": "${ConfigurationResolverFunction}",

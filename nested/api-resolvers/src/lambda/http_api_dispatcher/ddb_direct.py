@@ -66,11 +66,73 @@ _HANDLED = {
     "listAgentJobs",
     "updateAgentJobStatus",
     "deleteAgentJob",
+    # Circuit breaker — only handled here as the disabled-state fallback. When
+    # the circuit breaker is ENABLED the field is routed to the dedicated
+    # CircuitBreakerResolverFunction via FIELD_FUNCTION_MAP and never reaches
+    # this module; when DISABLED that resolver Lambda doesn't exist (its ARN is
+    # empty), so the dispatcher falls through to here for a graceful response.
+    "getCircuitBreakerStatus",
 }
 
 
 def handles(field: str) -> bool:
     return field in _HANDLED
+
+
+# Per-op RBAC, preserving the AppSync schema's authorization exactly. Under
+# AppSync the @aws_cognito_user_pools(cognito_groups) directive gated these
+# fields BEFORE the VTL resolver ran; the REST dispatcher's Cognito authorizer
+# only authenticates, so the group check must be re-applied here (defense in
+# depth, matching the Lambda-backed resolvers).
+#   - value = set of allowed groups (caller must be in at least one)
+#   - value = None            -> any authenticated user (schema type-default)
+#   - value = _IAM_ONLY       -> backend/IAM principals only; NEVER a Cognito
+#                                user. These are unreachable from the UI and the
+#                                backend workers now write DynamoDB directly
+#                                (APPSYNC_API_URL is empty), so reject outright.
+_IAM_ONLY = object()
+_REQUIRED_GROUPS: Dict[str, Any] = {
+    "getDocument": None,
+    "listDocumentsDateHour": None,
+    "listDocumentsDateShard": None,
+    "listDiscoveryJobs": {"Admin", "Author"},
+    "deleteDiscoveryJob": {"Admin", "Author"},
+    "updateDiscoveryJobStatus": _IAM_ONLY,
+    "getAgentJobStatus": {"Admin", "Author", "Viewer"},
+    "listAgentJobs": {"Admin", "Author", "Viewer"},
+    "updateAgentJobStatus": _IAM_ONLY,
+    "deleteAgentJob": None,  # any authed; further scoped to caller's own PK
+    "getCircuitBreakerStatus": None,
+}
+
+
+def _caller_groups(event: Dict[str, Any]) -> list:
+    identity = event.get("identity") or {}
+    claims = identity.get("claims") or {}
+    groups = claims.get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [groups]
+    return list(groups)
+
+
+def _enforce_rbac(field: str, event: Dict[str, Any]) -> None:
+    """Raise PermissionError if the caller isn't allowed to run `field`.
+    Mirrors the AppSync schema directives (dispatcher maps PermissionError->403)."""
+    required = _REQUIRED_GROUPS.get(field)
+    if required is None:
+        return  # any authenticated user
+    if required is _IAM_ONLY:
+        logger.warning("Rejected IAM-only op %s from Cognito caller", field)
+        raise PermissionError(f"Unauthorized: {field} is not callable via the API")
+    groups = _caller_groups(event)
+    if not (set(required).intersection(groups)):
+        logger.warning(
+            "Forbidden: caller (groups=%s) attempted %s (requires %s)",
+            groups, field, sorted(required),
+        )
+        raise PermissionError(
+            f"Unauthorized: {field} requires one of {sorted(required)}"
+        )
 
 
 def _now_iso() -> str:
@@ -305,8 +367,28 @@ def _delete_agent_job(event: Dict[str, Any]) -> bool:
     return True
 
 
+# --------------------------------------------------------------------------- #
+# Circuit breaker (disabled-state fallback only)
+# --------------------------------------------------------------------------- #
+def _get_circuit_breaker_status(_event: Dict[str, Any]) -> Dict[str, Any]:
+    """Disabled-state CircuitBreakerStatus. Mirrors circuit_breaker_resolver's
+    _format_status({}) when CIRCUIT_BREAKER_ENABLED is false. Only invoked when
+    the circuit breaker feature is off (see _HANDLED note); the UI's
+    CircuitBreakerBadge hides itself on enabled=false."""
+    return {
+        "enabled": False,
+        "state": None,
+        "openedAt": None,
+        "lastCheckedAt": None,
+        "failureCount": 0,
+        "recoveryAttempts": 0,
+        "lastError": None,
+    }
+
+
 _DISPATCH = {
     "getDocument": _get_document,
+    "getCircuitBreakerStatus": _get_circuit_breaker_status,
     "listDocumentsDateHour": _list_documents_date_hour,
     "listDocumentsDateShard": _list_documents_date_shard,
     "listDiscoveryJobs": _list_discovery_jobs,
@@ -320,4 +402,5 @@ _DISPATCH = {
 
 
 def dispatch(field: str, event: Dict[str, Any]) -> Any:
+    _enforce_rbac(field, event)
     return _DISPATCH[field](event)

@@ -65,15 +65,12 @@ def handler(event, context):
     logger.info(f"Abort workflow resolver invoked with event: {json.dumps(sanitize_event_for_logging(event))}")
 
     try:
-        # Defense-in-depth: abortWorkflow is an Admin+Author operation.
+        # Defense-in-depth: abortWorkflow is an Admin+Author operation. Raise
+        # (not return a 200 dict) so the dispatcher maps it to 403/Unauthorized.
         if not _caller_in_groups(event, ("Admin", "Author")):
-            return {
-                "success": False,
-                "message": "Unauthorized: abortWorkflow requires Admin or Author group",
-                "abortedCount": 0,
-                "failedCount": 0,
-                "errors": ["Unauthorized: abortWorkflow requires Admin or Author group"],
-            }
+            raise PermissionError(
+                "Unauthorized: abortWorkflow requires Admin or Author group"
+            )
 
         # Extract arguments from GraphQL event
         args = event.get('arguments', {})
@@ -124,6 +121,9 @@ def handler(event, context):
             "errors": errors if errors else None
         }
         
+    except PermissionError:
+        # RBAC denial must reach the dispatcher as 403; do not swallow into 200.
+        raise
     except Exception as e:
         logger.error(f"Error in abort workflow handler: {str(e)}", exc_info=True)
         return {
@@ -187,7 +187,7 @@ def abort_document(object_key):
     document.completion_time = datetime.now(timezone.utc).isoformat()
     
     try:
-        updated_doc = document_service.update_document(document)
+        document_service.update_document(document)
         logger.info(f"Document {object_key} status updated to ABORTED")
         return {"success": True}
     except Exception as e:

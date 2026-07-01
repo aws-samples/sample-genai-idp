@@ -424,10 +424,12 @@ def handler(event, context):
                 logger.warning(
                     f"Forbidden: caller (groups={groups}) attempted copyToBaseline"
                 )
-                return {
-                    "success": False,
-                    "message": "Unauthorized: copyToBaseline requires Admin or Author group",
-                }
+                # Raise (not return) so the HTTP API dispatcher maps this to a
+                # 403 with errorType "Unauthorized" (the UI keys on that);
+                # returning a 200 dict would read as success.
+                raise PermissionError(
+                    "Unauthorized: copyToBaseline requires Admin or Author group"
+                )
 
             # Extract parameters from the GraphQL event
             object_key = event['arguments']['objectKey']
@@ -481,6 +483,10 @@ def handler(event, context):
                     'message': f'Failed to start copy operation for {object_key}'
                 }
             
+        except PermissionError:
+            # RBAC denial must propagate so the dispatcher returns 403; never
+            # swallow it into a 200 success/failure dict.
+            raise
         except ClientError as e:
             error_message = str(e)
             logger.error(f'Failed to initialize copy operation: {error_message}')

@@ -122,7 +122,24 @@ def handler(event, context):
                 "statusCode": 401,
                 "body": str(e)
             }
-        
+
+        # Defense-in-depth RBAC: submitAgentQuery is Admin/Author/Viewer only
+        # (Reviewer excluded) in the AppSync schema. The REST dispatcher's
+        # Cognito authorizer only authenticates, so re-enforce the group check
+        # here (dispatcher maps PermissionError -> 403).
+        claims = identity.get("claims") or {}
+        groups = claims.get("cognito:groups") or []
+        if isinstance(groups, str):
+            groups = [groups]
+        if not ({"Admin", "Author", "Viewer"}.intersection(groups)):
+            logger.warning(
+                "Forbidden: caller %s (groups=%s) attempted submitAgentQuery",
+                user_id, list(groups),
+            )
+            raise PermissionError(
+                "Unauthorized: submitAgentQuery requires Admin, Author, or Viewer group"
+            )
+
         # Generate a unique job ID
         job_id = str(uuid.uuid4())
         
@@ -176,6 +193,10 @@ def handler(event, context):
             "statusCode": 500,
             "body": error_msg
         }
+    except PermissionError:
+        # RBAC denial — must propagate so the dispatcher maps it to 403 (not a
+        # 500 body). Never swallow into the generic handler below.
+        raise
     except Exception as e:
         # Check if this is a validation error that should propagate as GraphQL error
         error_str = str(e)

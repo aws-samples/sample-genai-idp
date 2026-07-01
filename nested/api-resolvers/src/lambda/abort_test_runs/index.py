@@ -58,15 +58,12 @@ def lambda_handler(event, context):
         Dict with abort results including counts and errors
     """
     try:
-        # Defense-in-depth: abortTestRuns is an Admin+Author operation.
+        # Defense-in-depth: abortTestRuns is an Admin+Author operation. Raise
+        # (not return a 200 dict) so the dispatcher maps it to 403/Unauthorized.
         if not _caller_in_groups(event, ("Admin", "Author")):
-            return {
-                "success": False,
-                "message": "Unauthorized: abortTestRuns requires Admin or Author group",
-                "abortedCount": 0,
-                "failedCount": 0,
-                "errors": ["Unauthorized: abortTestRuns requires Admin or Author group"],
-            }
+            raise PermissionError(
+                "Unauthorized: abortTestRuns requires Admin or Author group"
+            )
 
         test_run_ids = event['arguments']['testRunIds']
 
@@ -137,6 +134,9 @@ def lambda_handler(event, context):
             "errors": errors if errors else None
         }
 
+    except PermissionError:
+        # RBAC denial must reach the dispatcher as 403; do not swallow into 200.
+        raise
     except Exception as e:
         logger.error(f"Error in abort test runs handler: {str(e)}", exc_info=True)
         # Extract test_run_ids if available from event

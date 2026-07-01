@@ -41,11 +41,10 @@ def handler(event, context):
             logger.warning(
                 f"Forbidden: caller (groups={caller_groups}) attempted processChanges"
             )
-            return {
-                'success': False,
-                'message': 'Unauthorized: processChanges requires Admin or Reviewer group',
-                'processingJobId': None,
-            }
+            # Raise (not return a 200 dict) so the dispatcher maps to 403.
+            raise PermissionError(
+                'Unauthorized: processChanges requires Admin or Reviewer group'
+            )
 
         # Extract arguments from the GraphQL event
         args = event.get('arguments', {})
@@ -308,15 +307,18 @@ def handler(event, context):
         logger.info(f"Returning response: {json.dumps(response)}")
         return response
 
+    except PermissionError:
+        # RBAC denial must reach the dispatcher as 403; do not swallow into 200.
+        raise
     except Exception as e:
         logger.error(f"Error processing changes: {str(e)}", exc_info=True)
-        
+
         error_response = {
             'success': False,
             'message': f'Error processing changes: {str(e)}',
             'processingJobId': None
         }
-        
+
         logger.error(f"Returning error response: {json.dumps(error_response)}")
         return error_response
 

@@ -73,12 +73,28 @@ def _invoke_resolver(function_arn: str, appsync_event: Dict[str, Any]) -> Any:
     payload = resp["Payload"].read()
     data = json.loads(payload) if payload else None
 
-    # A handled Lambda error surfaces as FunctionError; raise so the wrapper
-    # maps it to a 500 with the error message.
+    # A handled Lambda error surfaces as FunctionError. Re-raise as the closest
+    # Python exception TYPE so the handler maps it to the right HTTP status —
+    # crucially, a resolver's RBAC denial (PermissionError) must become a 403
+    # with errorType "Unauthorized" (which the UI keys on), NOT an opaque 500.
+    # The invoke response carries the original exception class name in
+    # data["errorType"] (e.g. "PermissionError") and the message in
+    # data["errorMessage"].
     if resp.get("FunctionError"):
         msg = "resolver error"
+        err_type = ""
         if isinstance(data, dict):
             msg = data.get("errorMessage", msg)
+            err_type = data.get("errorType", "") or ""
+        # Authorization denials -> 403. Match by exception class name or a
+        # conventional "Unauthorized:"/"Forbidden" message prefix.
+        if err_type in ("PermissionError", "AuthorizationError") or msg.startswith(
+            ("Unauthorized", "Forbidden")
+        ):
+            raise PermissionError(msg)
+        # Client input errors -> 400.
+        if err_type in ("ValueError", "KeyError"):
+            raise ValueError(msg)
         raise RuntimeError(msg)
     return data
 
@@ -98,8 +114,14 @@ def handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         )
 
     try:
-        if field in FIELD_FUNCTION_MAP:
-            result = _invoke_resolver(FIELD_FUNCTION_MAP[field], appsync_event)
+        # A mapped-but-empty ARN means the resolver is feature-flagged off (its
+        # Lambda is conditional and absent), e.g. the circuit-breaker fields when
+        # CircuitBreakerEnabled=false. Treat empty as unroutable so it falls
+        # through to ddb_direct (which serves a graceful disabled response for
+        # getCircuitBreakerStatus) rather than invoking an empty FunctionName.
+        mapped_arn = FIELD_FUNCTION_MAP.get(field)
+        if mapped_arn:
+            result = _invoke_resolver(mapped_arn, appsync_event)
         elif ddb_direct.handles(field):
             result = ddb_direct.dispatch(field, appsync_event)
         else:

@@ -91,8 +91,17 @@ def ddb_env():
         yield mod, ddb
 
 
-def _ev(args, username="user@example.com"):
-    return {"arguments": args, "identity": {"username": username, "sub": "sub-1"}}
+def _ev(args, username="user@example.com", groups=("Admin",)):
+    # Default to an Admin caller so RBAC-gated ops pass; individual tests pass
+    # groups=... to exercise the group checks that mirror the AppSync schema.
+    return {
+        "arguments": args,
+        "identity": {
+            "username": username,
+            "sub": "sub-1",
+            "claims": {"cognito:groups": list(groups)},
+        },
+    }
 
 
 # ----------------------------- documents ----------------------------------- #
@@ -152,11 +161,22 @@ def test_list_documents_invalid_hour(ddb_env):
 
 
 # --------------------------- discovery jobs --------------------------------- #
+# NB: updateDiscoveryJobStatus / updateAgentJobStatus are _IAM_ONLY at the
+# dispatch() layer (backend workers write DynamoDB directly; these fields are
+# never callable by a Cognito user). Tests seed via the underlying handler
+# (mod._DISPATCH[...]) to bypass the RBAC gate, exactly as the backend would
+# mutate the table, then assert the user-facing read ops.
+def _seed_discovery(mod, args):
+    return mod._DISPATCH["updateDiscoveryJobStatus"]({"arguments": args})
+
+
+def _seed_agent_update(mod, args):
+    return mod._DISPATCH["updateAgentJobStatus"]({"arguments": args})
+
+
 def test_discovery_update_and_list(ddb_env):
     mod, _ = ddb_env
-    mod.dispatch(
-        "updateDiscoveryJobStatus", _ev({"jobId": "j1", "status": "IN_PROGRESS"})
-    )
+    _seed_discovery(mod, {"jobId": "j1", "status": "IN_PROGRESS"})
     out = mod.dispatch("listDiscoveryJobs", _ev({}))
     jobs = out["DiscoveryJobs"]
     assert len(jobs) == 1
@@ -168,9 +188,8 @@ def test_discovery_update_and_list(ddb_env):
 
 def test_discovery_terminal_sets_completedat(ddb_env):
     mod, _ = ddb_env
-    res = mod.dispatch(
-        "updateDiscoveryJobStatus",
-        _ev({"jobId": "j2", "status": "COMPLETED", "clustersFound": 3}),
+    res = _seed_discovery(
+        mod, {"jobId": "j2", "status": "COMPLETED", "clustersFound": 3}
     )
     assert res["status"] == "COMPLETED"
     assert res["completedAt"]
@@ -180,17 +199,45 @@ def test_discovery_terminal_sets_completedat(ddb_env):
 def test_discovery_invalid_status_raises(ddb_env):
     mod, _ = ddb_env
     with pytest.raises(ValueError):
-        mod.dispatch(
-            "updateDiscoveryJobStatus", _ev({"jobId": "j3", "status": "BOGUS"})
-        )
+        _seed_discovery(mod, {"jobId": "j3", "status": "BOGUS"})
 
 
 def test_discovery_delete(ddb_env):
     mod, _ = ddb_env
-    mod.dispatch("updateDiscoveryJobStatus", _ev({"jobId": "j4", "status": "QUEUED"}))
+    _seed_discovery(mod, {"jobId": "j4", "status": "QUEUED"})
     assert mod.dispatch("deleteDiscoveryJob", _ev({"jobId": "j4"})) is True
     out = mod.dispatch("listDiscoveryJobs", _ev({}))
     assert out["DiscoveryJobs"] == []
+
+
+# ------------------------------ RBAC -------------------------------------- #
+def test_iam_only_ops_reject_cognito_caller(ddb_env):
+    """updateDiscoveryJobStatus / updateAgentJobStatus are backend-only; a
+    Cognito user (any group) must never reach them via dispatch()."""
+    mod, _ = ddb_env
+    for field in ("updateDiscoveryJobStatus", "updateAgentJobStatus"):
+        with pytest.raises(PermissionError):
+            mod.dispatch(
+                field, _ev({"jobId": "x", "status": "QUEUED"}, groups=("Admin",))
+            )
+
+
+def test_group_restricted_ops_enforce_groups(ddb_env):
+    mod, _ = ddb_env
+    # listDiscoveryJobs/deleteDiscoveryJob require Admin/Author.
+    for field, args in (
+        ("listDiscoveryJobs", {}),
+        ("deleteDiscoveryJob", {"jobId": "z"}),
+    ):
+        with pytest.raises(PermissionError):
+            mod.dispatch(field, _ev(args, groups=("Viewer",)))
+        with pytest.raises(PermissionError):
+            mod.dispatch(field, _ev(args, groups=()))
+    # agent read ops require Admin/Author/Viewer (Reviewer excluded).
+    with pytest.raises(PermissionError):
+        mod.dispatch("listAgentJobs", _ev({}, groups=("Reviewer",)))
+    # getDocument is open to any authenticated user (no groups needed).
+    mod.dispatch("getDocument", _ev({"ObjectKey": "nope"}, groups=()))
 
 
 # ----------------------------- agent jobs ---------------------------------- #
@@ -224,16 +271,14 @@ def test_agent_update_status_terminal(ddb_env):
     ddb.Table("AgentTable").put_item(
         Item={"PK": "agent#carol@x.com", "SK": "jC", "status": "RUNNING"}
     )
-    ok = mod.dispatch(
-        "updateAgentJobStatus",
-        _ev(
-            {
-                "jobId": "jC",
-                "userId": "carol@x.com",
-                "status": "COMPLETED",
-                "result": "{}",
-            }
-        ),
+    ok = _seed_agent_update(
+        mod,
+        {
+            "jobId": "jC",
+            "userId": "carol@x.com",
+            "status": "COMPLETED",
+            "result": "{}",
+        },
     )
     assert ok is True
     got = mod.dispatch(
