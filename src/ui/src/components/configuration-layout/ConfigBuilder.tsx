@@ -1543,8 +1543,14 @@ const ConfigBuilder = ({
       hasUnsavedChange = !areValuesEqual(formValue, savedValue);
     }
 
-    // Show "Restore to default" only if form value currently differs from default
-    const showRestoreDefault = isFormValueDifferentFromDefault && onResetToDefault;
+    // Show "Restore default" whenever this field currently differs from the stack
+    // default — either as a live form edit (isFormValueDifferentFromDefault) or a
+    // saved customization (isFieldCustomized, the same signal that paints the yellow
+    // "modified" highlight, so the button always accompanies it). We require only a
+    // known defaultConfig to revert to; handleRestoreDefault falls back to reverting
+    // the form value directly when onResetToDefault isn't wired (e.g. read-only or the
+    // 'default' version), so the control no longer silently disappears there.
+    const showRestoreDefault = (isFormValueDifferentFromDefault || isFieldCustomized) && !!defaultConfig;
 
     // Check if this is a 'name' field inside an array item by looking for array indices in path
     const isNameInArray =
@@ -1605,7 +1611,10 @@ const ConfigBuilder = ({
           options={(property.enum as string[]).map((opt: string) => ({ value: opt, label: opt }))}
         />
       );
-    } else if (property.format === 'text-area' || path.toLowerCase().includes('prompt') || path.toLowerCase().includes('description')) {
+    } else if (
+      property.format !== 'single-line' &&
+      (property.format === 'text-area' || path.toLowerCase().includes('prompt') || path.toLowerCase().includes('description'))
+    ) {
       input = (
         <Textarea
           value={displayValue !== undefined && displayValue !== null ? String(displayValue) : ''}

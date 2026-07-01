@@ -1047,7 +1047,7 @@ Resources:
                 type: object
                 sectionLabel: Advanced extraction settings
                 description: "Tuning for Advanced extraction mode: page sharding/concurrency, deterministic table parsing, and schema validation/escalation. Shown only when Extraction mode is 'advanced'."
-                order: 15
+                order: 2
                 dependsOn: { field: "extraction.mode", value: "advanced" }
                 properties:
                   max_concurrent_batches:
@@ -1208,7 +1208,7 @@ Resources:
                 type: object
                 sectionLabel: Image Processing Settings
                 description: Configure image resolution and processing options for image attachments in extraction
-                order: 14
+                order: 15
                 properties:
                   target_width:
                     type: number
@@ -1313,64 +1313,66 @@ Resources:
                   - "global.anthropic.claude-opus-4-7:1m"
                   - "global.anthropic.claude-opus-4-8"
                   - "global.anthropic.claude-opus-4-8:1m"
-                order: 4
+                order: 5
               model_lambda_hook_arn:
                 type: string
                 description: "Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-."
                 default: ""
-                order: 5
+                order: 6
                 dependsOn: { field: "model", value: "LambdaHook" }
               reasoning_effort:
                 type: string
                 enum: ["minimal", "low", "medium", "high"]
                 default: "medium"
                 description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
-                order: 6
+                order: 7
                 dependsOn: { field: "model", valuePrefix: "openai." }
               temperature:
                 type: number
                 minimum: 0
                 maximum: 1
                 description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 7
+                order: 8
               top_k:
                 type: integer
                 minimum: 1
                 description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 8
+                order: 9
               top_p:
                 type: number
                 description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 9
+                order: 10
               max_tokens:
                 type: number
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
-                order: 10
+                order: 11
               system_prompt:
                 type: string
                 description: "System prompt. Can be overridden per document class via the 'x-aws-idp-extraction-system-prompt' schema extension in the Document Schema editor."
-                order: 11
+                order: 12
               task_prompt:
                 type: string
                 title: Task prompt (extraction)
                 format: textarea
                 description: "Extraction-only task prompt — used when confidence runs separately or is disabled. Placeholders: {DOCUMENT_CLASS}, {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}, {FEW_SHOT_EXAMPLES}, {DOCUMENT_TEXT}, {DOCUMENT_IMAGE}. Use <<CACHEPOINT>> for Bedrock prompt caching. Overridable per class via 'x-aws-idp-extraction-task-prompt'."
-                order: 12
+                order: 13
                 hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
               task_prompt_extraction_with_confidence:
                 type: string
                 title: Task prompt (extraction + confidence)
                 format: textarea
                 description: "INTEGRATED task prompt — used when Confidence Assessment mode is 'integrated' (one inference emits each value AND its confidence). Instruct the model to call provide_field_assessment. The bounding-box block (Bounding-box Geometry section) is appended automatically when Geometry mode is 'llm' or 'llm_grounded'."
-                order: 13
+                order: 14
                 dependsOn: { field: "extraction.confidence.mode", value: "integrated" }
               custom_prompt_lambda_arn:
                 type: string
+                title: Custom Prompt Lambda ARN
+                format: single-line
                 description: "(Optional) ARN of a Lambda function to generate custom extraction prompts. Function name must start with 'GENAIIDP-'. If not provided, default prompts will be used. The Lambda function receives the complete config, prompt placeholders, default task prompt content, and serialized document, and returns custom system_prompt and task_prompt_content. Example: arn:partition:lambda:us-east-1:123456789012:function:GENAIIDP-my-extractor"
-                order: 18
+                order: 100
               geometry:
                 type: object
-                order: 3
+                order: 4
                 collapsible: false
                 sectionLabel: Bounding-box Geometry
                 description: "How field bounding boxes (geometry) are produced. Geometry is advisory enrichment shown in the UI viewer."
@@ -1391,7 +1393,7 @@ Resources:
                     hideWhen: { field: "extraction.geometry.mode", value: "ocr_only" }
               confidence:
                 type: object
-                order: 2
+                order: 3
                 sectionLabel: Confidence Assessment
                 collapsible: false
                 description: "Per-field confidence scoring. Confidence is an optional output of extraction; when enabled, each extracted value gets a confidence score (and drives HITL review). Turn OFF to skip assessment entirely (no second model pass, no explainability info)."
@@ -1537,42 +1539,13 @@ Resources:
                         minimum: 100
                         maximum: 3500
                         order: 1
-                  granular:
-                    type: object
-                    sectionLabel: Granular Assessment (large documents)
-                    description: "Break confidence scoring into smaller focused tasks for large documents (standalone Assessment step only)."
-                    order: 13
-                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
-                    properties:
-                      enabled:
-                        type: boolean
-                        description: "Enable granular assessment (smaller, focused scoring tasks)."
-                        default: true
-                        order: 0
-                      max_workers:
-                        type: integer
-                        description: "Maximum parallel workers for concurrent scoring tasks."
-                        minimum: 1
-                        maximum: 20
-                        default: 4
-                        order: 1
-                        dependsOn: { field: "extraction.confidence.mode", value: "separate" }
-                      simple_batch_size:
-                        type: integer
-                        description: "Number of simple attributes grouped per scoring task."
-                        minimum: 1
-                        maximum: 10
-                        default: 3
-                        order: 2
-                        dependsOn: { field: "extraction.confidence.mode", value: "separate" }
-                      list_batch_size:
-                        type: integer
-                        description: "Number of list items per scoring task (1 = best accuracy)."
-                        minimum: 1
-                        maximum: 5
-                        default: 1
-                        order: 3
-                        dependsOn: { field: "extraction.confidence.mode", value: "separate" }
+                  # NOTE: the legacy `extraction.confidence.granular.*` sub-block
+                  # (standalone-Assessment ThreadPool batching) is intentionally NOT
+                  # surfaced in the UI. Its single relevant knob duplicated the
+                  # top-level "List batch size" above, and the block is slated for
+                  # removal (see GranularAssessmentConfig in config/models.py). The
+                  # runtime still reads its model-side defaults; there is nothing for
+                  # an admin to tune here, so a single list-batch control is shown.
               postHook:
                 type: array
                 collapsible: true
