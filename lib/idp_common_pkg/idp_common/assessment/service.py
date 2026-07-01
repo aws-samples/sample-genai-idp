@@ -745,13 +745,18 @@ class AssessmentService:
 
         property_descriptions = self._format_property_descriptions(class_schema)
 
-        # Prepare prompt (type-safe access). NOTE: when geometry_mode is ocr_only,
-        # the model's bounding boxes are ignored (geometry comes from OCR), so the
-        # assessment task_prompt SHOULD omit bbox/spatial-localization directions —
-        # they waste output tokens and bloat each list row, starving enumeration of
-        # long lists. This is handled by using a bbox-free task_prompt in config
-        # (see the ocr_only assessment config), not by editing the prompt here.
-        prompt_template = confidence_cfg.task_prompt
+        # Prepare prompt via modular section assembly (v0.6). The stored
+        # confidence task_prompt is the bbox-free CORE; geometry-localization
+        # directions are composed in ONLY for the LLM-box geometry modes
+        # (llm, llm_grounded). In ocr_only (default) / off the model is never asked
+        # for boxes — geometry comes from OCR value-matching — so those directions
+        # are omitted, saving output tokens and freeing long-list enumeration.
+        from idp_common.extraction.prompt_assembly import assemble_confidence_prompt
+
+        prompt_template = assemble_confidence_prompt(
+            confidence_cfg.task_prompt,
+            self.config.extraction.geometry.mode,
+        )
         extraction_results_str = json.dumps(extraction_results, indent=2)
 
         if not prompt_template:

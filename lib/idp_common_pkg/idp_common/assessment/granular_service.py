@@ -432,8 +432,15 @@ class GranularAssessmentService:
         Returns:
             List of content items for the cacheable portion
         """
-        # Get the base task prompt template (v0.6: extraction.confidence)
-        task_prompt_template = self.config.extraction.confidence.task_prompt
+        # Get the base task prompt template (v0.6: extraction.confidence) and
+        # compose geometry-localization directions in only for LLM-box modes
+        # (see idp_common.extraction.prompt_assembly).
+        from idp_common.extraction.prompt_assembly import assemble_confidence_prompt
+
+        task_prompt_template = assemble_confidence_prompt(
+            self.config.extraction.confidence.task_prompt,
+            self.config.extraction.geometry.mode,
+        )
 
         if not task_prompt_template:
             raise ValueError(

@@ -7,6 +7,8 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+- **Confidence prompt is now bbox-free by default; geometry directions composed only when needed** — The default confidence task-prompt (`base-confidence.yaml`) no longer asks the model for bounding boxes. Since OCR-only geometry (the default) derives boxes by matching values to OCR lines and *ignores* any model-emitted coordinates, the bbox/spatial-localization directions were pure waste — extra output tokens per field that measurably starved long-list enumeration. A new `idp_common.extraction.prompt_assembly.assemble_confidence_prompt` composes the geometry-localization section **into** the prompt only for the LLM-box geometry modes (`llm`, `llm_grounded`); in `ocr_only`/`off` it is omitted. This replaces (and permanently removes the need for) the previously-reverted dynamic bbox-*stripping* approach — sections are composed, never regex-stripped. Applies to the standalone Assessment step and granular assessment. No output-contract change.
+
 - **Config format v0.6: confidence and geometry are now outputs of extraction; HITL is its own section (clean break, auto-migrated on read)** — The standalone top-level `assessment` block is retired as the home for per-field confidence scoring. Confidence and bounding-box geometry are reframed as optional **outputs of extraction**, so their settings move under `extraction`:
   - `extraction.assessment_integration` → **`extraction.confidence.mode`** (`separate` | `integrated`)
   - `assessment.{enabled, model, system_prompt, task_prompt, temperature, top_p, top_k, max_tokens, reasoning_effort, model_lambda_hook_arn, image, validation_enabled, granular}` → **`extraction.confidence.*`**
