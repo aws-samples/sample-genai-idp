@@ -1,83 +1,40 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-"""Modular confidence/geometry prompt assembly (v0.6).
+"""Modular prompt selection/assembly for extraction + confidence (v0.6).
 
-Rather than shipping one monolithic confidence task-prompt that always asks the
-model for bounding boxes — and then *ignoring* those boxes in the default
-``ocr_only`` geometry mode (wasted output tokens that measurably starve long-list
-enumeration) — the prompt is composed from opt-in **sections**:
+The prompts are EDITABLE CONFIG TEMPLATES (so they can be optimized/customized in
+the UI), selected by the active settings rather than hardcoded in Python:
 
-    [confidence_core]                      (always)
-    [confidence_core] + [geometry_block]   (only when the model must emit boxes:
-                                             geometry.mode in {llm, llm_grounded})
+    extraction.task_prompt                              -> extraction only
+    extraction.task_prompt_extraction_with_confidence   -> integrated (value+confidence, one inference)
+    extraction.task_prompt_confidence                   -> confidence only (separate pass)
+    extraction.task_prompt_bbox                          -> bounding-box block, appended to whichever
+                                                            confidence-bearing prompt is active when
+                                                            geometry.mode is 'llm' or 'llm_grounded'
 
-The confidence task-prompt stored in config (``extraction.confidence.task_prompt``)
-is the bbox-free CORE. When geometry requires LLM boxes, ``GEOMETRY_INSTRUCTIONS``
-is spliced in *before* the trailing ``<<CACHEPOINT>>`` / document sections so the
-static instruction block stays cache-friendly. In ``ocr_only`` (default) and
-``off`` no geometry block is added — geometry comes from OCR value-matching (or not
-at all), and the model is never asked for coordinates.
+Selection rules (mode = extraction.confidence.mode, geom = extraction.geometry.mode):
+- Extraction inference prompt:
+    * confidence.enabled and mode == 'integrated' -> task_prompt_extraction_with_confidence
+      (+ task_prompt_bbox when geom in {llm, llm_grounded})
+    * otherwise                                    -> task_prompt (extraction only)
+- Confidence (separate-pass) prompt:
+    * task_prompt_confidence (+ task_prompt_bbox when geom in {llm, llm_grounded})
 
-This replaces the reverted dynamic bbox-*stripping* hack: sections are composed,
-never regex-stripped.
+The bbox block is composed in only for the LLM-box geometry modes; in the default
+``ocr_only`` (and ``off``) the model is never asked for coordinates — geometry comes
+from OCR value-matching. This is why the default prompts stay lean.
 """
 
 from __future__ import annotations
 
-# Geometry-localization instructions appended to the confidence core ONLY in the
-# LLM-box modes. Kept as a section constant (not per-config) so every class/preset
-# gets consistent bbox guidance without duplicating it in each stored prompt.
-GEOMETRY_INSTRUCTIONS = """
-<spatial-localization-guidelines>
-Additionally, for each field provide bounding box coordinates:
-- bbox: [x1, y1, x2, y2] coordinates in normalized 0-1000 scale
-- page: Page number where the field appears (starting from 1)
-
-Coordinate system:
-- Use normalized scale 0-1000 for both x and y axes
-- x1, y1 = top-left corner; x2, y2 = bottom-right corner (ensure x2 > x1, y2 > y1)
-- Make bounding boxes tight around the actual text content
-- If a field spans multiple lines, encompass all relevant text
-Include the bbox/page alongside each field's confidence in the JSON you return.
-</spatial-localization-guidelines>
-"""
+from typing import Any
 
 # Modes in which the model is asked to emit bounding boxes.
 _LLM_BOX_MODES = ("llm", "llm_grounded")
 
-# --- INTEGRATED (single-inference) confidence section -----------------------
-# When extraction.confidence.mode == "integrated", the extraction agent emits
-# per-field confidence INLINE (via the provide_field_assessment tool) in its own
-# inference — no second model pass. These sections are composed ONTO the
-# extraction system prompt the same way the separate-mode geometry block is
-# composed onto the confidence prompt, so both modes share one assembly module.
-
-# Confidence-only core (geometry comes from OCR — no bbox asked of the model).
-INTEGRATED_CONFIDENCE_CORE = """
-
-INTEGRATED CONFIDENCE ASSESSMENT (REQUIRED FINAL STEP):
-After the extraction is complete and correct, you MUST call the
-provide_field_assessment tool exactly once to record your confidence in each
-extracted value. Mirror the extraction structure:
-- For each scalar or group field: an object
-  {"confidence": <0.0-1.0>, "confidence_reason": "<brief>"}.
-- For each list field (e.g. a table): a LIST with ONE assessment object per
-  extracted row, in the SAME ORDER as the rows you extracted. Provide an entry
-  for EVERY row — do not summarize or skip rows.
-Do NOT include bounding boxes — field locations are derived automatically from OCR.
-confidence = your calibrated certainty the value matches the source document
-(1.0 = certain, lower = ambiguous/illegible/inferred). This is your last action.
-"""
-
-# Bbox suffix appended to the integrated core ONLY in the LLM-box geometry modes.
-INTEGRATED_CONFIDENCE_BBOX_SUFFIX = """
-Additionally, for each assessment object include "bbox": [x1,y1,x2,y2] (normalized
-0-1000 scale) and "page": <n> giving the value's location in the document.
-"""
-
-# Splice geometry instructions before the first of these markers so the trailing
-# dynamic document sections (and cache points) stay after it.
+# Marker used to splice the bbox block before the trailing document/cache-point
+# sections so the static instruction block stays cache-friendly.
 _SPLICE_MARKERS = ("<<CACHEPOINT>>", "<document-image>", "{DOCUMENT_IMAGE}")
 
 
@@ -86,58 +43,53 @@ def geometry_requires_llm_boxes(geometry_mode: str) -> bool:
     return geometry_mode in _LLM_BOX_MODES
 
 
-def assemble_confidence_prompt(core_task_prompt: str, geometry_mode: str) -> str:
-    """Compose the confidence task-prompt for the active geometry mode.
+def _append_bbox_block(core: str, bbox_block: str) -> str:
+    """Splice the bbox instruction block into ``core``.
 
-    - ``ocr_only`` (default) / ``off``: returns the bbox-free core unchanged.
-    - ``llm`` / ``llm_grounded``: splices ``GEOMETRY_INSTRUCTIONS`` into the core
-      (before the first document/cache-point marker, else appended) so the model
-      also emits bounding boxes.
-
-    Idempotent-ish: if the core already contains the geometry block (e.g. a legacy
-    prompt that still carries bbox directions), it is returned unchanged to avoid
-    duplication.
+    Inserted before the first document/cache-point marker (so runtime document
+    sections stay after it); appended at the end if no marker is present. No-op if
+    the core already carries a bbox block (idempotent for legacy prompts).
     """
-    if not core_task_prompt or not geometry_requires_llm_boxes(geometry_mode):
-        return core_task_prompt
-    if "spatial-localization-guidelines" in core_task_prompt:
-        # Core already carries geometry directions (legacy prompt) — don't double up.
-        return core_task_prompt
-
-    block = GEOMETRY_INSTRUCTIONS.strip("\n")
+    if not core or not bbox_block:
+        return core
+    if "spatial-localization" in core or "task_prompt_bbox" in core:
+        return core
+    block = bbox_block.strip("\n")
     for marker in _SPLICE_MARKERS:
-        idx = core_task_prompt.find(marker)
+        idx = core.find(marker)
         if idx != -1:
-            return core_task_prompt[:idx] + block + "\n\n" + core_task_prompt[idx:]
-    # No marker found — append at the end.
-    return core_task_prompt.rstrip() + "\n\n" + block + "\n"
+            return core[:idx] + block + "\n\n" + core[idx:]
+    return core.rstrip() + "\n\n" + block + "\n"
 
 
-def build_integrated_confidence_section(geometry_mode: str) -> str:
-    """Return the integrated-mode confidence instruction section to append to the
-    extraction system prompt.
+def select_extraction_task_prompt(extraction_cfg: Any) -> str:
+    """Return the task prompt for the EXTRACTION inference, per settings.
 
-    The confidence core is always included; the bbox suffix is added only in the
-    LLM-box geometry modes (``llm``, ``llm_grounded``), mirroring separate-mode
-    geometry composition. Callers append the result to the extraction system
-    prompt when ``extraction.confidence.mode == "integrated"``.
+    Integrated confidence -> task_prompt_extraction_with_confidence (+ bbox for
+    LLM-box geometry); otherwise the plain extraction task_prompt.
+    ``extraction_cfg`` is an ExtractionConfig (has .confidence, .geometry, and the
+    task_prompt* fields).
     """
-    section = INTEGRATED_CONFIDENCE_CORE
-    if geometry_requires_llm_boxes(geometry_mode):
-        section = section + INTEGRATED_CONFIDENCE_BBOX_SUFFIX
-    return section
+    confidence = extraction_cfg.confidence
+    geometry_mode = extraction_cfg.geometry.mode
+    integrated = confidence.enabled and confidence.mode == "integrated"
+    if integrated:
+        core = (
+            extraction_cfg.task_prompt_extraction_with_confidence
+            or extraction_cfg.task_prompt
+        )
+        if geometry_requires_llm_boxes(geometry_mode):
+            core = _append_bbox_block(core, extraction_cfg.task_prompt_bbox)
+        return core
+    return extraction_cfg.task_prompt
 
 
-def assemble_integrated_extraction_prompt(
-    extraction_system_prompt: str, geometry_mode: str
-) -> str:
-    """Compose the integrated confidence section onto an extraction system prompt.
+def select_confidence_task_prompt(extraction_cfg: Any) -> str:
+    """Return the task prompt for the SEPARATE confidence pass, per settings.
 
-    This is the integrated-mode analogue of ``assemble_confidence_prompt``: the
-    extraction agent will emit confidence inline, so the confidence instructions
-    are appended to its system prompt (geometry directions included only for the
-    LLM-box modes).
+    task_prompt_confidence (+ bbox block for LLM-box geometry).
     """
-    return (extraction_system_prompt or "") + build_integrated_confidence_section(
-        geometry_mode
-    )
+    core = extraction_cfg.task_prompt_confidence
+    if geometry_requires_llm_boxes(extraction_cfg.geometry.mode):
+        core = _append_bbox_block(core, extraction_cfg.task_prompt_bbox)
+    return core

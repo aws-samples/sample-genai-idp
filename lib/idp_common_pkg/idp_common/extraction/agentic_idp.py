@@ -772,10 +772,10 @@ After successfully using the extraction tool, you MUST:
 """
 
 
-# Integrated-mode confidence prompt sections now live in the shared
-# prompt_assembly module (single source of truth for separate- and
-# integrated-mode confidence prompts); see build_integrated_confidence_section,
-# imported at its point of use below.
+# Prompt templates are editable config fields (extraction.task_prompt*), selected
+# per settings by idp_common.extraction.prompt_assembly (select_extraction_task_prompt
+# / select_confidence_task_prompt). The integrated confidence instructions live in
+# extraction.task_prompt_extraction_with_confidence — not hardcoded here.
 
 
 TABLE_PARSING_PROMPT_ADDENDUM = """
@@ -1701,20 +1701,13 @@ async def structured_output_async(
     # recorded assessment is read from agent state below and returned alongside
     # the result, riding the same downstream path as separate-mode assessment.
     if emit_field_assessment:
+        # Register the tool the agent calls to record inline confidence. The
+        # instructions telling it to do so now live in the selected extraction
+        # TASK prompt (extraction.task_prompt_extraction_with_confidence, + the
+        # bbox block for LLM-box geometry), chosen by select_extraction_task_prompt
+        # in the service — a single editable template rather than a hardcoded
+        # system-prompt append. So we only ensure the tool is available here.
         tools.append(provide_field_assessment)
-        # Compose the integrated confidence section onto the extraction system
-        # prompt via the shared prompt_assembly module (single source of truth for
-        # both separate- and integrated-mode confidence prompts). The bbox
-        # directions are included only for the LLM-box geometry modes (llm,
-        # llm_grounded); in ocr_only (default) / off they're omitted — geometry is
-        # filled by OCR value-matching.
-        from idp_common.extraction.prompt_assembly import (
-            build_integrated_confidence_section,
-        )
-
-        system_prompt = (system_prompt or SYSTEM_PROMPT) + (
-            build_integrated_confidence_section(config.extraction.geometry.mode)
-        )
 
     # Add table parsing tools if enabled
     if table_parsing_config.enabled:

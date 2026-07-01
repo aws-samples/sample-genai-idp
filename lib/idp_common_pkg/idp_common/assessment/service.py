@@ -745,18 +745,17 @@ class AssessmentService:
 
         property_descriptions = self._format_property_descriptions(class_schema)
 
-        # Prepare prompt via modular section assembly (v0.6). The stored
-        # confidence task_prompt is the bbox-free CORE; geometry-localization
-        # directions are composed in ONLY for the LLM-box geometry modes
-        # (llm, llm_grounded). In ocr_only (default) / off the model is never asked
-        # for boxes — geometry comes from OCR value-matching — so those directions
-        # are omitted, saving output tokens and freeing long-list enumeration.
-        from idp_common.extraction.prompt_assembly import assemble_confidence_prompt
-
-        prompt_template = assemble_confidence_prompt(
-            confidence_cfg.task_prompt,
-            self.config.extraction.geometry.mode,
+        # Select the CONFIDENCE-ONLY task prompt (extraction.task_prompt_confidence)
+        # and compose the editable bbox block (extraction.task_prompt_bbox) ONLY for
+        # the LLM-box geometry modes (llm, llm_grounded). In ocr_only (default) / off
+        # the model is never asked for boxes — geometry comes from OCR
+        # value-matching — so those directions are omitted, saving output tokens and
+        # freeing long-list enumeration.
+        from idp_common.extraction.prompt_assembly import (
+            select_confidence_task_prompt,
         )
+
+        prompt_template = select_confidence_task_prompt(self.config.extraction)
         extraction_results_str = json.dumps(extraction_results, indent=2)
 
         if not prompt_template:

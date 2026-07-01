@@ -1,20 +1,26 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-"""Unit tests for modular confidence/geometry prompt assembly (v0.6)."""
+"""Unit tests for settings-aware prompt template selection (v0.6)."""
 
 import pytest
+from idp_common.config.models import ExtractionConfig
 from idp_common.extraction.prompt_assembly import (
-    assemble_confidence_prompt,
-    assemble_integrated_extraction_prompt,
-    build_integrated_confidence_section,
     geometry_requires_llm_boxes,
+    select_confidence_task_prompt,
+    select_extraction_task_prompt,
 )
 
-CORE = (
-    "<task>score confidence</task>\n\n"
-    "<<CACHEPOINT>>\n<document-image>{DOCUMENT_IMAGE}</document-image>"
-)
+
+def _cfg(mode="separate", geom="ocr_only", enabled=True):
+    return ExtractionConfig(
+        task_prompt="EXTRACT-ONLY {DOCUMENT_TEXT}",
+        task_prompt_extraction_with_confidence="INTEGRATED provide_field_assessment\n<<CACHEPOINT>>\n{DOCUMENT_TEXT}",
+        task_prompt_confidence="CONFIDENCE-ONLY\n<<CACHEPOINT>>\n{EXTRACTION_RESULTS}",
+        task_prompt_bbox="<spatial-localization>bbox here</spatial-localization>",
+        confidence={"enabled": enabled, "mode": mode},
+        geometry={"mode": geom},
+    )
 
 
 class TestGeometryRequiresLlmBoxes:
@@ -32,67 +38,50 @@ class TestGeometryRequiresLlmBoxes:
         assert geometry_requires_llm_boxes(mode) is expected
 
 
-class TestAssembleConfidencePrompt:
-    def test_ocr_only_returns_core_unchanged(self):
-        assert assemble_confidence_prompt(CORE, "ocr_only") == CORE
+class TestSelectExtractionTaskPrompt:
+    def test_separate_uses_plain_extraction(self):
+        p = select_extraction_task_prompt(_cfg(mode="separate", geom="ocr_only"))
+        assert p.startswith("EXTRACT-ONLY")
+        assert "provide_field_assessment" not in p
 
-    def test_off_returns_core_unchanged(self):
-        assert assemble_confidence_prompt(CORE, "off") == CORE
+    def test_confidence_disabled_uses_plain_extraction(self):
+        p = select_extraction_task_prompt(_cfg(mode="integrated", enabled=False))
+        assert p.startswith("EXTRACT-ONLY")
 
-    def test_llm_splices_geometry_before_cachepoint(self):
-        out = assemble_confidence_prompt(CORE, "llm")
-        assert "spatial-localization-guidelines" in out
-        assert out.index("spatial-localization") < out.index("<<CACHEPOINT>>")
+    def test_integrated_uses_integrated_template(self):
+        p = select_extraction_task_prompt(_cfg(mode="integrated", geom="ocr_only"))
+        assert "provide_field_assessment" in p
+        assert "spatial-localization" not in p  # ocr_only -> no bbox
 
-    def test_llm_grounded_splices_geometry(self):
-        assert "spatial-localization-guidelines" in assemble_confidence_prompt(
-            CORE, "llm_grounded"
-        )
+    def test_integrated_llm_grounded_appends_bbox(self):
+        p = select_extraction_task_prompt(_cfg(mode="integrated", geom="llm_grounded"))
+        assert "provide_field_assessment" in p
+        assert "spatial-localization" in p
+        # bbox spliced before the cachepoint/document marker
+        assert p.index("spatial-localization") < p.index("<<CACHEPOINT>>")
 
-    def test_legacy_prompt_with_bbox_not_doubled(self):
-        legacy = (
-            "<spatial-localization-guidelines>x</spatial-localization-guidelines>\n"
-            "<<CACHEPOINT>>"
-        )
-        out = assemble_confidence_prompt(legacy, "llm")
-        # unchanged (the existing block's open+close tag == 2 substring hits)
-        assert out == legacy
-
-    def test_no_marker_appends_geometry(self):
-        out = assemble_confidence_prompt("just a core prompt", "llm")
-        assert "spatial-localization-guidelines" in out
-        assert out.startswith("just a core prompt")
-
-    def test_empty_core_returns_empty(self):
-        assert assemble_confidence_prompt("", "llm") == ""
+    def test_integrated_llm_appends_bbox(self):
+        p = select_extraction_task_prompt(_cfg(mode="integrated", geom="llm"))
+        assert "spatial-localization" in p
 
 
-class TestIntegratedConfidenceSection:
-    def test_core_always_present(self):
-        for mode in ("ocr_only", "off", "llm", "llm_grounded"):
-            s = build_integrated_confidence_section(mode)
-            assert "provide_field_assessment" in s
+class TestSelectConfidenceTaskPrompt:
+    def test_ocr_only_no_bbox(self):
+        c = select_confidence_task_prompt(_cfg(mode="separate", geom="ocr_only"))
+        assert c.startswith("CONFIDENCE-ONLY")
+        assert "spatial-localization" not in c
 
-    @pytest.mark.parametrize(
-        "mode,has_bbox",
-        [
-            ("ocr_only", False),
-            ("off", False),
-            ("llm", True),
-            ("llm_grounded", True),
-        ],
-    )
-    def test_bbox_only_for_llm_modes(self, mode, has_bbox):
-        s = build_integrated_confidence_section(mode)
-        assert ("bbox" in s) is has_bbox
+    @pytest.mark.parametrize("geom", ["llm", "llm_grounded"])
+    def test_llm_modes_append_bbox(self, geom):
+        c = select_confidence_task_prompt(_cfg(mode="separate", geom=geom))
+        assert "spatial-localization" in c
 
-    def test_assemble_appends_to_extraction_prompt(self):
-        out = assemble_integrated_extraction_prompt("EXTRACT SYS", "ocr_only")
-        assert out.startswith("EXTRACT SYS")
-        assert "provide_field_assessment" in out
-        assert "bbox" not in out
+    def test_off_no_bbox(self):
+        c = select_confidence_task_prompt(_cfg(mode="separate", geom="off"))
+        assert "spatial-localization" not in c
 
-    def test_assemble_none_prompt(self):
-        out = assemble_integrated_extraction_prompt("", "llm")
-        assert "provide_field_assessment" in out
-        assert "bbox" in out
+    def test_bbox_not_doubled_if_already_present(self):
+        cfg = _cfg(mode="separate", geom="llm")
+        cfg.task_prompt_confidence = "has spatial-localization already\n<<CACHEPOINT>>"
+        c = select_confidence_task_prompt(cfg)
+        assert c.count("spatial-localization") == 1

@@ -451,10 +451,9 @@ class ConfidenceConfig(BaseModel):
         default="",
         description="System prompt for confidence assessment (populated from system defaults)",
     )
-    task_prompt: str = Field(
-        default="",
-        description="Task prompt template for confidence assessment (populated from system defaults)",
-    )
+    # NOTE: the confidence TASK prompt template lives at
+    # extraction.task_prompt_confidence (with extraction.task_prompt_bbox composed
+    # in for LLM-box geometry) — see prompt_assembly.select_confidence_task_prompt.
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
@@ -605,7 +604,33 @@ class ExtractionConfig(BaseModel):
     )
     task_prompt: str = Field(
         default="",
-        description="Task prompt template for extraction (populated from system defaults)",
+        description="Task prompt template for EXTRACTION ONLY (used when confidence is disabled or runs separately). Populated from system defaults.",
+    )
+    task_prompt_extraction_with_confidence: str = Field(
+        default="",
+        description=(
+            "Task prompt template for INTEGRATED extraction+confidence — used when "
+            "extraction.confidence.mode == 'integrated', where a single inference "
+            "emits each value AND its confidence. Populated from system defaults."
+        ),
+    )
+    task_prompt_confidence: str = Field(
+        default="",
+        description=(
+            "Task prompt template for CONFIDENCE-ONLY assessment — used by the "
+            "separate confidence pass (agentic in-shard second inference and the "
+            "standalone Assessment step). Populated from system defaults."
+        ),
+    )
+    task_prompt_bbox: str = Field(
+        default="",
+        description=(
+            "Bounding-box instruction block appended to whichever confidence-bearing "
+            "prompt is active (integrated or confidence-only) when "
+            "extraction.geometry.mode is 'llm' or 'llm_grounded' — i.e. when the "
+            "model is asked to emit boxes. Ignored for 'ocr_only'/'off'. Populated "
+            "from system defaults."
+        ),
     )
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)

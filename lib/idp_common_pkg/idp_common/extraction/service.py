@@ -1146,10 +1146,19 @@ class ExtractionService:
                 f"'{self._class_label}'"
             )
 
+        from idp_common.extraction.prompt_assembly import (
+            select_extraction_task_prompt,
+        )
+
         class_task_prompt_override = self._class_schema.get(
             X_AWS_IDP_EXTRACTION_TASK_PROMPT
         )
-        task_prompt = class_task_prompt_override or self.config.extraction.task_prompt
+        # Select the extraction task prompt per settings: integrated mode uses the
+        # extraction+confidence template (+ bbox for LLM-box geometry); otherwise
+        # the plain extraction template. A per-class override still wins.
+        task_prompt = class_task_prompt_override or select_extraction_task_prompt(
+            self.config.extraction
+        )
         if class_task_prompt_override:
             logger.info(
                 f"Using per-class extraction task prompt override for "
@@ -2280,7 +2289,13 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             # If the task prompt does not reference {DOCUMENT_IMAGE}, sending
             # page images is wasteful and can cause context-window overflow
             # on large documents.
-            prompt_template = self.config.extraction.task_prompt or ""
+            from idp_common.extraction.prompt_assembly import (
+                select_extraction_task_prompt,
+            )
+
+            prompt_template = (
+                select_extraction_task_prompt(self.config.extraction) or ""
+            )
             send_images = "{DOCUMENT_IMAGE}" in prompt_template
             agentic_images = (
                 self._cap_agent_images(self._page_images) if send_images else []

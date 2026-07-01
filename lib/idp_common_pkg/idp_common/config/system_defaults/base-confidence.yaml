@@ -8,6 +8,11 @@
 # `extraction.confidence` (v0.6 — replaces the former top-level `assessment`
 # block and `extraction.assessment_integration`). HITL lives in top-level
 # `hitl`; geometry in `extraction.geometry` (base-geometry.yaml).
+#
+# PROMPT TEMPLATES are separate editable extraction.* fields (see
+# base-extraction.yaml): task_prompt (extraction only),
+# task_prompt_extraction_with_confidence (integrated), task_prompt_confidence
+# (confidence-only), task_prompt_bbox (bbox block for llm/llm_grounded geometry).
 # =============================================================================
 
 extraction:
@@ -33,104 +38,6 @@ extraction:
       You are a document analysis assessment expert. Your role is to evaluate the confidence and accuracy of data extraction results by analyzing them against source documents.
       Provide accurate confidence scores for each assessment.
       When bounding boxes are requested, provide precise coordinate locations where information appears in the document.
-    # BBOX-FREE CORE. Geometry-localization directions are composed in at runtime
-    # ONLY for the LLM-box geometry modes (llm, llm_grounded) via
-    # idp_common.extraction.prompt_assembly.assemble_confidence_prompt. In the
-    # default ocr_only mode (and off) the model is never asked for boxes — geometry
-    # comes from OCR value-matching — so this prompt stays lean, which measurably
-    # improves long-list enumeration.
-    task_prompt: >-
-      <background>
-      You are an expert document analysis assessment system. Your task is to evaluate the confidence of extraction results for a document of class {DOCUMENT_CLASS}.
-      </background>
-
-      <task>
-      Analyze the extraction results against the source document and provide a confidence assessment for each extracted attribute. Consider factors such as:
-      1. Text clarity and OCR quality in the source regions
-      2. Alignment between extracted values and document content
-      3. Presence of clear evidence supporting the extraction
-      4. Potential ambiguity or uncertainty in the source material
-      5. Completeness and accuracy of the extracted information
-      </task>
-
-      <assessment-guidelines>
-      For each attribute, provide:
-      - A confidence score between 0.0 and 1.0 where:
-         - 1.0 = Very high confidence, clear and unambiguous evidence
-         - 0.8-0.9 = High confidence, strong evidence with minor uncertainty
-         - 0.6-0.7 = Medium confidence, reasonable evidence but some ambiguity
-         - 0.4-0.5 = Low confidence, weak or unclear evidence
-         - 0.0-0.3 = Very low confidence, little to no supporting evidence
-      - A clear explanation of the confidence reasoning
-
-      Guidelines:
-      - Base assessments on actual document content and OCR quality
-      - Consider both text-based evidence and visual/layout clues
-      - Account for OCR confidence scores when provided
-      - Be objective and specific in reasoning
-      - If an extraction appears incorrect, score accordingly with explanation
-      </assessment-guidelines>
-
-      <final-instructions>
-      Analyze the extraction results against the source document and return a JSON object with the following structure based on the attribute type:
-
-      For SIMPLE attributes:
-      {
-        "simple_attribute_name": {
-          "confidence": 0.85,
-          "confidence_reason": "..."
-        }
-      }
-
-      For GROUP attributes (nested object structure):
-      {
-        "group_attribute_name": {
-          "sub_attribute_1": { "confidence": 0.90, "confidence_reason": "..." },
-          "sub_attribute_2": { "confidence": 0.75, "confidence_reason": "..." }
-        }
-      }
-
-      For LIST attributes (array of assessed items):
-      {
-        "list_attribute_name": [
-          {
-            "item_attribute_1": { "confidence": 0.95, "confidence_reason": "..." },
-            "item_attribute_2": { "confidence": 0.88, "confidence_reason": "..." }
-          },
-          {
-            "item_attribute_1": { "confidence": 0.92, "confidence_reason": "..." },
-            "item_attribute_2": { "confidence": 0.70, "confidence_reason": "..." }
-          }
-        ]
-      }
-
-      IMPORTANT:
-      - For LIST attributes like "Transactions", assess EACH individual item in the list separately
-      - Each transaction should be assessed as a separate object in the array
-      - Do NOT provide aggregate assessments for list items - assess each one individually
-      - Include assessments for ALL attributes present in the extraction results
-      - Match the exact structure of the extracted data
-      </final-instructions>
-
-      <<CACHEPOINT>>
-
-      <document-image>
-      {DOCUMENT_IMAGE}
-      </document-image>
-
-      <ocr-text-confidence-results>
-      {OCR_TEXT_CONFIDENCE}
-      </ocr-text-confidence-results>
-
-      <<CACHEPOINT>>
-
-      <attributes-definitions>
-      {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-      </attributes-definitions>
-
-      <extraction-results>
-      {EXTRACTION_RESULTS}
-      </extraction-results>
 
 # Human-in-the-Loop review (v0.6, top-level)
 hitl:
