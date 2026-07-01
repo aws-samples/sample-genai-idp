@@ -6,7 +6,10 @@
 # =============================================================================
 
 extraction:
-  # Agentic extraction with table parsing - NEW DEFAULT for robust extraction
+  # Extraction mode (user-facing): simple = single-pass; advanced = robust/sharded
+  # engine. agentic.enabled is derived from this by the config model.
+  mode: simple
+  # Agentic extraction with table parsing (the "advanced" engine).
   agentic:
     enabled: false
     table_parsing:

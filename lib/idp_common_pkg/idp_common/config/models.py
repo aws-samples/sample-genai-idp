@@ -646,6 +646,17 @@ class ExtractionConfig(BaseModel):
         description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
     )
     image: ImageConfig = Field(default_factory=ImageConfig)
+    mode: Optional[str] = Field(
+        default=None,
+        description=(
+            "Extraction mode: 'simple' (single-pass — fast/cheap, best for short "
+            "documents) or 'advanced' (robust/sharded engine for large documents, "
+            "big tables, and completeness). This is the user-facing control; the "
+            "underlying 'agentic.enabled' flag is derived from it "
+            "('advanced' -> agentic on). If omitted, it is inferred from "
+            "agentic.enabled for backward compatibility."
+        ),
+    )
     agentic: AgenticConfig = Field(default_factory=AgenticConfig)
     confidence: ConfidenceConfig = Field(
         default_factory=ConfidenceConfig,
@@ -692,6 +703,35 @@ class ExtractionConfig(BaseModel):
         if isinstance(v, str):
             return int(v) if v else 0
         return int(v)
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def validate_mode(cls, v: Any) -> Optional[str]:
+        """Normalize the extraction mode; reject unknown values early."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        v_str = str(v).strip().lower()
+        if v_str not in ("simple", "advanced"):
+            raise ValueError(
+                f"extraction.mode must be 'simple' or 'advanced', got {v!r}"
+            )
+        return v_str
+
+    @model_validator(mode="after")
+    def reconcile_mode_and_agentic(self) -> Self:
+        """Reconcile the user-facing extraction.mode with agentic.enabled.
+
+        - If ``mode`` is set, it is authoritative: 'advanced' -> agentic.enabled=True,
+          'simple' -> False (so all existing ``agentic.enabled`` read-sites keep
+          working while the UI exposes only Simple/Advanced).
+        - If ``mode`` is omitted (legacy config), infer it from agentic.enabled so the
+          field is always populated for the UI.
+        """
+        if self.mode is not None:
+            self.agentic.enabled = self.mode == "advanced"
+        else:
+            self.mode = "advanced" if self.agentic.enabled else "simple"
+        return self
 
     @model_validator(mode="after")
     def set_default_review_agent_model(self) -> Self:

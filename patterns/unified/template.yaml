@@ -1036,18 +1036,20 @@ Resources:
               - system_prompt
               - task_prompt
             properties:
+              mode:
+                type: string
+                title: Extraction mode
+                enum: ["simple", "advanced"]
+                default: "simple"
+                order: 1
+                description: "'simple' (default): single-pass extraction — fast and cheap, best for short documents. 'advanced': the robust, sharded extraction engine for large documents, big tables, and completeness (exposes the Advanced extraction settings below). Recommended with Anthropic Claude models."
               agentic:
                 type: object
-                sectionLabel: Agentic Extraction
-                description: "Runs extraction inside a Strands agent loop so the model can use tools and self-correct. Recommended with Anthropic Claude models; small models are likely to fail. Turn on 'Enable Agentic Extraction' to reveal the agentic options (table parsing, schema validation, escalation)."
+                sectionLabel: Advanced extraction settings
+                description: "Tuning for Advanced extraction mode: page sharding/concurrency, deterministic table parsing, and schema validation/escalation. Shown only when Extraction mode is 'advanced'."
                 order: 14
-                expandWhen: { field: "enabled", value: true }
+                dependsOn: { field: "extraction.mode", value: "advanced" }
                 properties:
-                  enabled:
-                    type: boolean
-                    description: "Enable Agentic Extraction. When off, extraction uses a single standard model call and the options below are ignored."
-                    order: 0
-                    default: false
                   max_concurrent_batches:
                     type: number
                     description: "Only used when Agentic Extraction is enabled. Max concurrent extraction agents. 1 = single pass (default). >1 SHARDS the section's pages into token-budgeted ranges (each agent sees ONLY its pages, not the whole document) and runs them concurrently - this both speeds up long documents AND prevents context-window overflow. Acts as an upper bound on parallelism and shard count. Higher values increase Bedrock requests-per-minute; tune to your quota."
@@ -1055,7 +1057,6 @@ Resources:
                     maximum: 10
                     default: 1
                     order: 1
-                    dependsOn: { field: "enabled", value: true }
                   shard_token_budget:
                     type: number
                     description: "Only used when concurrent extraction is active (max_concurrent_batches > 1). Target maximum input tokens (estimated ~chars/4) of OCR text per shard. Pages are grouped so each shard stays under this budget, creating as many shards as needed (capped by max_concurrent_batches). The default (8000) reliably shards large documents so a single agent never has to emit a giant table in one Bedrock call (the read-timeout failure mode). Lower this if shards still overflow the model context; raise it for large-context models (e.g. 1M-context Claude)."
@@ -1063,7 +1064,6 @@ Resources:
                     maximum: 900000
                     default: 8000
                     order: 2
-                    dependsOn: { field: "enabled", value: true }
                   max_pages_per_shard:
                     type: number
                     description: "Only used when concurrent extraction is active (max_concurrent_batches > 1). Page-count ceiling per shard. A shard is closed once it holds this many pages even if its OCR text is still under shard_token_budget - so a document with unusually compact pages still shards on page count (tokens AND pages both bound a shard). This guarantees large docs shard regardless of text density. 0 = disabled (token budget alone bounds shards). Default: 5."
@@ -1071,13 +1071,11 @@ Resources:
                     maximum: 100
                     default: 5
                     order: 2.5
-                    dependsOn: { field: "enabled", value: true }
                   table_parsing:
                     type: object
                     sectionLabel: Table Parsing Tool
                     description: "Only used when Agentic Extraction is enabled. Gives the agent a deterministic parse_table tool that extracts well-formatted Markdown tables from OCR output without LLM inference - faster and more reliable for large/dense tables (bank statements, transaction logs). The agent decides when to use it based on table quality."
                     order: 3
-                    dependsOn: { field: "enabled", value: true }
                     properties:
                       enabled:
                         type: boolean
@@ -1091,7 +1089,6 @@ Resources:
                         maximum: 100
                         default: 95
                         order: 1
-                        dependsOn: { field: "enabled", value: true }
                       min_parse_success_rate:
                         type: number
                         description: "Only used when this tool is enabled. Minimum parse_success_rate from the parse_table tool for the agent to trust parsed results. Below this threshold, the agent falls back to LLM extraction. Default: 0.9."
@@ -1099,13 +1096,11 @@ Resources:
                         maximum: 1
                         default: 0.9
                         order: 2
-                        dependsOn: { field: "enabled", value: true }
                       use_confidence_data:
                         type: boolean
                         description: "Only used when this tool is enabled. Load and provide OCR confidence data to the parse_table tool for quality assessment. Requires text_confidence_uri from Textract OCR (no effect with other OCR backends). Default: on."
                         default: true
                         order: 3
-                        dependsOn: { field: "enabled", value: true }
                       max_empty_line_gap:
                         type: number
                         description: "Only used when this tool is enabled. Maximum consecutive empty lines tolerated inside a table before treating it as a boundary - helps recover tables split by OCR page breaks. Higher = more tolerant but may merge unrelated tables. Tuning: 2 for high-quality OCR, 3 standard, 5-7 for noisy documents. Default: 3."
@@ -1113,19 +1108,16 @@ Resources:
                         maximum: 10
                         default: 3
                         order: 4
-                        dependsOn: { field: "enabled", value: true }
                       auto_merge_adjacent_tables:
                         type: boolean
                         description: "Only used when this tool is enabled. Automatically merge consecutive tables with identical columns (recovers tables split by page breaks). Disable if a document legitimately contains multiple separate tables with the same columns. Default: on."
                         default: true
                         order: 5
-                        dependsOn: { field: "enabled", value: true }
                   validation:
                     type: object
                     sectionLabel: Schema Validation & Escalation
                     description: "Only used when Agentic Extraction is enabled. Validates the agent's output against the full class JSON Schema (notably 'format' keywords like date/email/uuid that the model's type validation does not enforce) and optionally escalates failing fields to a stronger model. Off by default."
                     order: 4
-                    dependsOn: { field: "enabled", value: true }
                     properties:
                       enabled:
                         type: boolean
@@ -1137,14 +1129,12 @@ Resources:
                         description: "Only used when validation is enabled. Enforce JSON-Schema 'format' keywords (date, date-time, email, uri, uuid, ...). Note: 'format: date' means ISO-8601 (YYYY-MM-DD); disable this if your schema uses 'format: date' for non-ISO values such as MM/DD/YYYY (or use a 'pattern' instead). Default: on."
                         order: 1
                         default: true
-                        dependsOn: { field: "enabled", value: true }
                       fail_action:
                         type: string
                         description: "Only used when validation is enabled. What to do when validation still fails after the agent's own retries. 'warn': record the outcome in metadata and proceed. 'escalate': re-extract only the failing fields with the Escalation Model (roughly doubles that section's cost, still far cheaper than human review), then warn if still invalid. 'reject': mark the section as failed so downstream/HITL can act. Default: escalate."
                         enum: ["warn", "escalate", "reject"]
                         order: 2
                         default: "escalate"
-                        dependsOn: { field: "enabled", value: true }
                       escalation_model:
                         type: string
                         description: "Only used when Fail Action is 'escalate'. Stronger Bedrock model used to re-extract failing fields. Select blank to retry with the extraction model. Can be overridden per document class via the 'x-aws-idp-extraction-escalation-model' schema extension in the Document Schema editor."
@@ -1214,7 +1204,6 @@ Resources:
                         maximum: 1
                         order: 4
                         default: 0.5
-                        dependsOn: { field: "enabled", value: true }
               image:
                 type: object
                 sectionLabel: Image Processing Settings
