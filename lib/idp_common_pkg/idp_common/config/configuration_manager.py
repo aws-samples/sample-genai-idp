@@ -711,6 +711,20 @@ class ConfigurationManager:
             config_dict.pop("pricing", None)
             config_dict.pop(_FULL_CONFIG_MARKER, None)
 
+        # Migrate an incoming legacy-shaped config/delta to the current format BEFORE
+        # it is merged onto a v0.6 default/current config below. If a v0.5-shaped upload
+        # (top-level `assessment`, `extraction.assessment_integration`, ...) were
+        # deep_update-merged onto a v0.6 dict first, the migration's "explicit v0.6 keys
+        # win" rule would let the v0.6 DEFAULTS clobber the user's migrated legacy
+        # customizations (pinned assessment model / list_batch_size / geometry_mode
+        # reverting to default). Migration is idempotent, so this is a no-op for v0.6
+        # input. (saveAsVersion/saveAsDefault/normal-update all merge, so migrate once
+        # here at the single choke point.)
+        if isinstance(config_dict, dict) and config_dict:
+            from .migrations.v05_to_v06 import migrate_v05_to_v06
+
+            config_dict = migrate_v05_to_v06(config_dict)
+
         # === Reset to default ===
         if reset_to_default:
             logger.info(f"Resetting version {version} to default")
