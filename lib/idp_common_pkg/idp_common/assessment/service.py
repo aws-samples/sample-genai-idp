@@ -137,8 +137,8 @@ class AssessmentService:
         self.config = config_model
         self.region = region or os.environ.get("AWS_REGION")
 
-        # Get model_id from typed config for logging
-        model_id = self.config.assessment.model
+        # Get model_id from typed config for logging (v0.6: extraction.confidence)
+        model_id = self.config.extraction.confidence.model
         logger.info(f"Initialized assessment service with model {model_id}")
 
     def _get_class_schema(self, class_label: str) -> Dict[str, Any]:
@@ -728,14 +728,15 @@ class AssessmentService:
             logger.warning("assess_results called with empty extraction_results")
             return AssessmentCoreResult()
 
-        # Get assessment configuration (type-safe access)
-        model_id = self.config.assessment.model
-        temperature = self.config.assessment.temperature
-        top_k = self.config.assessment.top_k
-        top_p = self.config.assessment.top_p
-        reasoning_effort = self.config.assessment.reasoning_effort
-        max_tokens = self.config.assessment.max_tokens
-        system_prompt = self.config.assessment.system_prompt
+        # Get confidence configuration (v0.6: extraction.confidence.*)
+        confidence_cfg = self.config.extraction.confidence
+        model_id = confidence_cfg.model
+        temperature = confidence_cfg.temperature
+        top_k = confidence_cfg.top_k
+        top_p = confidence_cfg.top_p
+        reasoning_effort = confidence_cfg.reasoning_effort
+        max_tokens = confidence_cfg.max_tokens
+        system_prompt = confidence_cfg.system_prompt
 
         # Get schema for this document class
         class_schema = self._get_class_schema(class_label)
@@ -744,13 +745,17 @@ class AssessmentService:
 
         property_descriptions = self._format_property_descriptions(class_schema)
 
-        # Prepare prompt (type-safe access). NOTE: when geometry_mode is ocr_only,
-        # the model's bounding boxes are ignored (geometry comes from OCR), so the
-        # assessment task_prompt SHOULD omit bbox/spatial-localization directions —
-        # they waste output tokens and bloat each list row, starving enumeration of
-        # long lists. This is handled by using a bbox-free task_prompt in config
-        # (see the ocr_only assessment config), not by editing the prompt here.
-        prompt_template = self.config.assessment.task_prompt
+        # Select the CONFIDENCE-ONLY task prompt (extraction.task_prompt_confidence)
+        # and compose the editable bbox block (extraction.task_prompt_bbox) ONLY for
+        # the LLM-box geometry modes (llm, llm_grounded). In ocr_only (default) / off
+        # the model is never asked for boxes — geometry comes from OCR
+        # value-matching — so those directions are omitted, saving output tokens and
+        # freeing long-list enumeration.
+        from idp_common.extraction.prompt_assembly import (
+            select_confidence_task_prompt,
+        )
+
+        prompt_template = select_confidence_task_prompt(self.config.extraction)
         extraction_results_str = json.dumps(extraction_results, indent=2)
 
         if not prompt_template:
@@ -783,7 +788,7 @@ class AssessmentService:
             top_p=top_p,
             max_tokens=max_tokens,
             context="Assessment",
-            model_lambda_hook_arn=self.config.assessment.model_lambda_hook_arn,
+            model_lambda_hook_arn=confidence_cfg.model_lambda_hook_arn,
             reasoning_effort=reasoning_effort,
         )
 
@@ -829,11 +834,12 @@ class AssessmentService:
                 }
             parsing_succeeded = False
 
-        # Convert any model-provided bbox into geometry — UNLESS geometry_mode is
-        # 'ocr_only', where we intentionally ignore model boxes (geometry comes
-        # solely from OCR value-matching during grounding). This keeps hallucinated
-        # LLM coordinates out of the result entirely in the default mode.
-        if self.config.assessment.resolved_geometry_mode() != "ocr_only":
+        # Convert any model-provided bbox into geometry — only in the LLM-box
+        # geometry modes ('llm', 'llm_grounded'). In 'ocr_only' (default) and 'off'
+        # we intentionally ignore model boxes (geometry comes solely from OCR
+        # value-matching during grounding, or not at all), keeping hallucinated LLM
+        # coordinates out of the result.
+        if self.config.extraction.geometry.mode in ("llm", "llm_grounded"):
             try:
                 assessment_data = self._extract_geometry_from_assessment(
                     assessment_data
@@ -841,9 +847,7 @@ class AssessmentService:
             except Exception as e:
                 logger.warning(f"Failed to extract geometry data: {str(e)}")
 
-        default_confidence_threshold = (
-            self.config.assessment.default_confidence_threshold
-        )
+        default_confidence_threshold = self.config.hitl.confidence_threshold
 
         enhanced_assessment_data: Dict[str, Any] = {}
         confidence_threshold_alerts: List[Dict[str, Any]] = []
@@ -954,8 +958,8 @@ class AssessmentService:
         Returns:
             Document: Updated Document object with assessment results appended to extraction results
         """
-        # Check if assessment is enabled in typed configuration
-        enabled = self.config.assessment.enabled
+        # Check if confidence assessment is enabled (v0.6: extraction.confidence)
+        enabled = self.config.extraction.confidence.enabled
         if not enabled:
             logger.info("Assessment is disabled via configuration")
             return document
@@ -1058,9 +1062,9 @@ class AssessmentService:
             t2 = time.time()
             logger.info(f"Time taken to read text content: {t2 - t1:.2f} seconds")
 
-            # Read page images with configurable dimensions (type-safe access)
-            target_width = self.config.assessment.image.target_width
-            target_height = self.config.assessment.image.target_height
+            # Read page images with configurable dimensions (v0.6: confidence.image)
+            target_width = self.config.extraction.confidence.image.target_width
+            target_height = self.config.extraction.confidence.image.target_height
 
             page_images = []
             for page_id in sorted_page_ids:
@@ -1118,10 +1122,10 @@ class AssessmentService:
 
             # Ground field geometry from OCR. In 'ocr_only' (default) geometry is
             # derived purely from OCR value-matching (model boxes were never
-            # produced); in 'llm_with_ocr_grounding' real OCR boxes refine the
-            # model's estimates. Skipped only for 'llm_only'.
-            geometry_mode = self.config.assessment.resolved_geometry_mode()
-            if geometry_mode != "llm_only":
+            # produced); in 'llm_grounded' real OCR boxes refine the model's
+            # estimates. Skipped for 'llm' (boxes as-is) and 'off' (no geometry).
+            geometry_mode = self.config.extraction.geometry.mode
+            if geometry_mode not in ("llm", "off"):
                 try:
                     from idp_common.assessment.ocr_grounding import (
                         ground_assessment_geometry,

@@ -1347,8 +1347,12 @@ const ConfigurationLayout = (): React.JSX.Element => {
         console.log('DEBUG: About to compare formValues with mergedConfig:', {
           formValues,
           mergedConfig,
-          granularInFormValues: (formValues?.assessment as Record<string, unknown> | undefined)?.granular,
-          granularInMergedConfig: (mergedConfig?.assessment as Record<string, unknown> | undefined)?.granular,
+          granularInFormValues: (
+            (formValues?.extraction as Record<string, unknown> | undefined)?.confidence as Record<string, unknown> | undefined
+          )?.granular,
+          granularInMergedConfig: (
+            (mergedConfig?.extraction as Record<string, unknown> | undefined)?.confidence as Record<string, unknown> | undefined
+          )?.granular,
         });
         const differences = compareWithDefault(formValues, mergedConfig ?? {});
         console.log('DEBUG: Differences found by compareWithDefault:', differences);

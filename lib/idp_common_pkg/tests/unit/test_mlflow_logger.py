@@ -268,11 +268,11 @@ class TestExtractConfigParams:
         assert params["classification.method"] == "multimodalPageLevelClassification"
 
     def test_assessment_granular(self):
+        # v0.6: HITL threshold is top-level; granular lives under
+        # extraction.confidence.
         config = {
-            "assessment": {
-                "default_confidence_threshold": "0.8",
-                "granular": {"enabled": True},
-            }
+            "hitl": {"confidence_threshold": "0.8"},
+            "extraction": {"confidence": {"granular": {"enabled": True}}},
         }
         params, _, _ = mlflow_logger._extract_config_params(config)
         assert params["assessment.confidence_threshold"] == "0.8"

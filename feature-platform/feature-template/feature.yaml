@@ -33,7 +33,7 @@ ui:
 # pipelineHooks:                # Optional: run a Lambda at a processing extension point.
 #   postExtraction: MyHookFunction   # hookPoint -> logical Lambda resource name in template.yaml.
                                       # Points: postOcr, postClassification, postExtraction,
-                                      # postAssessment, postRuleValidation, postSummarization.
+                                      # postRuleValidation, postSummarization.
                                       # The feature stack registers these with the host via
                                       # registerFeatureHooks at install — see the Developer Guide.
 

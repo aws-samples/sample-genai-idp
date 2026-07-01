@@ -643,7 +643,7 @@ def match_value_to_geometry(
       item is the i-th extracted row, and OCR lines read top-to-bottom, so the
       i-th occurrence of a repeated value is that row's. Needs no LLM box.
     - **Spatial proximity** (``preferred_geometry`` set, ``occurrence_index`` None —
-      the legacy ``llm_with_ocr_grounding`` mode): the candidate whose center is
+      the ``llm_grounded`` mode): the candidate whose center is
       nearest the LLM-estimated box wins.
 
     Safe fallback: if multiple candidates remain and there is no usable
@@ -720,7 +720,7 @@ def match_value_to_geometry(
         _, geometry, source, ocr_conf = ordered[idx]
         return (geometry, source, ocr_conf)
 
-    # Spatial disambiguation (legacy llm_with_ocr_grounding): proximity to the
+    # Spatial disambiguation (llm_grounded mode): proximity to the
     # LLM-estimated box, which sits at a roughly-correct distinct position per
     # occurrence. Prefer candidates on the LLM's page; among those, nearest center.
     if ref is not None:
@@ -739,7 +739,7 @@ def match_value_to_geometry(
             _, geometry, source, ocr_conf = nearest
             return (geometry, source, ocr_conf)
 
-    # A usable LLM reference was supplied (legacy llm_with_ocr_grounding) but
+    # A usable LLM reference was supplied (llm_grounded mode) but
     # couldn't disambiguate -> stay ambiguous and KEEP the LLM box (return None),
     # preserving prior behavior.
     if ref is not None:
@@ -784,7 +784,7 @@ def _ground_node(
     assessment_node: Any,
     extraction_node: Any,
     page_data_by_page: Dict[int, Dict[str, Any]],
-    geometry_mode: str = "llm_with_ocr_grounding",
+    geometry_mode: str = "llm_grounded",
     occurrence_index: Optional[int] = None,
     schema_node: Optional[Dict[str, Any]] = None,
 ) -> None:
@@ -869,7 +869,7 @@ def _ground_leaf(
     leaf: Dict[str, Any],
     value: Any,
     page_data_by_page: Dict[int, Dict[str, Any]],
-    geometry_mode: str = "llm_with_ocr_grounding",
+    geometry_mode: str = "llm_grounded",
     occurrence_index: Optional[int] = None,
     schema_node: Optional[Dict[str, Any]] = None,
 ) -> None:
@@ -896,7 +896,7 @@ def _ground_leaf(
             leaf["ocr_confidence"] = round(ocr_conf, 4)
         return
 
-    # Legacy llm_with_ocr_grounding: the existing (LLM-estimated) box doubles as
+    # llm_grounded: the existing (LLM-estimated) box doubles as
     # the spatial reference used to disambiguate repeated values across table rows.
     preferred_geometry: Optional[Dict[str, Any]] = None
     if (
@@ -926,7 +926,7 @@ def ground_assessment_geometry(
     enhanced_assessment: Dict[str, Any],
     extraction_results: Dict[str, Any],
     page_data_by_page: Dict[int, Dict[str, Any]],
-    geometry_mode: str = "llm_with_ocr_grounding",
+    geometry_mode: str = "llm_grounded",
     class_schema: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
@@ -938,7 +938,7 @@ def ground_assessment_geometry(
       field with no OCR match is left with no geometry. Repeated values are
       disambiguated by row order. When ``page_data_by_page`` is empty this leaves
       fields without geometry (nothing to ground against).
-    - ``"llm_with_ocr_grounding"``: refine LLM-estimated boxes with OCR geometry,
+    - ``"llm_grounded"``: refine LLM-estimated boxes with OCR geometry,
       falling back to the LLM box when unmatched (near no-op when no OCR data).
 
     Args:
@@ -948,7 +948,7 @@ def ground_assessment_geometry(
             each field's extracted value for matching.
         page_data_by_page: Mapping of 1-indexed page number -> pageData dict, from
             ``load_page_ocr_data``.
-        geometry_mode: ``"ocr_only"`` or ``"llm_with_ocr_grounding"``.
+        geometry_mode: ``"ocr_only"``, ``"llm_grounded"``, ``"llm"``, or ``"off"``.
 
     Returns:
         The same ``enhanced_assessment`` dict, grounded in place.

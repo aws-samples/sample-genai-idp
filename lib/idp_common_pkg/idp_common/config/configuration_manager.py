@@ -271,6 +271,16 @@ class ConfigurationManager:
         # Remove format marker if present (shouldn't be in sparse, but just in case)
         version_dict.pop(_FULL_CONFIG_MARKER, None)
 
+        # Migrate the raw sparse delta to v0.6 BEFORE merging. The default is
+        # already v0.6 (get_configuration validates through IDPConfig, which
+        # migrates), so migrating the delta first keeps the merge a clean
+        # v0.6-over-v0.6 deep_update — the delta's confidence/geometry/hitl keys
+        # correctly override the default's, instead of a hybrid where a legacy
+        # `assessment.*` delta would be shadowed by the default's new-home keys.
+        from .migrations.v05_to_v06 import migrate_v05_to_v06
+
+        version_dict = migrate_v05_to_v06(version_dict)
+
         # Merge: Start with Default, deep update with version deltas
         default_dict = default_config.model_dump(mode="python")
         merged_dict = deepcopy(default_dict)

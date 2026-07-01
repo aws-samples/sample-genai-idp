@@ -1146,10 +1146,19 @@ class ExtractionService:
                 f"'{self._class_label}'"
             )
 
+        from idp_common.extraction.prompt_assembly import (
+            select_extraction_task_prompt,
+        )
+
         class_task_prompt_override = self._class_schema.get(
             X_AWS_IDP_EXTRACTION_TASK_PROMPT
         )
-        task_prompt = class_task_prompt_override or self.config.extraction.task_prompt
+        # Select the extraction task prompt per settings: integrated mode uses the
+        # extraction+confidence template (+ bbox for LLM-box geometry); otherwise
+        # the plain extraction template. A per-class override still wins.
+        task_prompt = class_task_prompt_override or select_extraction_task_prompt(
+            self.config.extraction
+        )
         if class_task_prompt_override:
             logger.info(
                 f"Using per-class extraction task prompt override for "
@@ -2280,7 +2289,13 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             # If the task prompt does not reference {DOCUMENT_IMAGE}, sending
             # page images is wasteful and can cause context-window overflow
             # on large documents.
-            prompt_template = self.config.extraction.task_prompt or ""
+            from idp_common.extraction.prompt_assembly import (
+                select_extraction_task_prompt,
+            )
+
+            prompt_template = (
+                select_extraction_task_prompt(self.config.extraction) or ""
+            )
             send_images = "{DOCUMENT_IMAGE}" in prompt_template
             agentic_images = (
                 self._cap_agent_images(self._page_images) if send_images else []
@@ -2664,8 +2679,8 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         )
 
         grounded = merged_assessment
-        geometry_mode = self.config.assessment.resolved_geometry_mode()
-        if geometry_mode != "llm_only":
+        geometry_mode = self.config.extraction.geometry.mode
+        if geometry_mode not in ("llm", "off"):
             try:
                 from idp_common.assessment.ocr_grounding import (
                     ground_assessment_geometry,
@@ -3097,21 +3112,21 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         inference itself emits confidence/bbox via ``_integrated_assessment_enabled``.
         Either way the standalone AssessmentStep is bypassed for the agentic path.
         """
-        if not self.config.assessment.enabled:
+        if not self.config.extraction.confidence.enabled:
             return False
-        return self.config.extraction.assessment_integration == "separate"
+        return self.config.extraction.confidence.mode == "separate"
 
     def _integrated_assessment_enabled(self) -> bool:
         """Whether the agent should emit confidence/bbox INLINE (single inference).
 
-        True when assessment is enabled AND ``assessment_integration == "integrated"``.
+        True when confidence is enabled AND ``confidence.mode == "integrated"``.
         In this mode the extraction agent calls ``provide_field_assessment`` in its
         own session (document already in cached context — no second Bedrock pass),
         and the result rides the same collation/grounding/emit path as separate mode.
         """
-        if not self.config.assessment.enabled:
+        if not self.config.extraction.confidence.enabled:
             return False
-        return self.config.extraction.assessment_integration == "integrated"
+        return self.config.extraction.confidence.mode == "integrated"
 
     @staticmethod
     def _reconcile_assessment_to_data(
@@ -3204,7 +3219,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         """
         from idp_common.extraction.agentic_idp import _accumulate_metering
 
-        batch_size = self.config.assessment.inshard_list_batch_size
+        batch_size = self.config.extraction.confidence.list_batch_size
         # Identify the single largest list field (the table being assessed).
         list_fields = {
             k: v

@@ -47,7 +47,7 @@ _HOOK_POINT_TO_STEP = {
     "postOcr": "ocr",
     "postClassification": "classification",
     "postExtraction": "extraction",
-    "postAssessment": "assessment",
+    # postAssessment removed in v0.6 (confidence folded into extraction).
     "postRuleValidation": "rule_validation",
     "postSummarization": "summarization",
 }

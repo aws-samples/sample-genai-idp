@@ -6,7 +6,10 @@
 # =============================================================================
 
 extraction:
-  # Agentic extraction with table parsing - NEW DEFAULT for robust extraction
+  # Extraction mode (user-facing): simple = single-pass; advanced = robust/sharded
+  # engine. agentic.enabled is derived from this by the config model.
+  mode: simple
+  # Agentic extraction with table parsing (the "advanced" engine).
   agentic:
     enabled: false
     table_parsing:
@@ -98,3 +101,68 @@ extraction:
     6. Ensure the output is properly formatted JSON with quoted keys and values
     7. Think step by step before finalizing your answer
     </final-instructions>
+
+  # =========================================================================
+  # PROMPT TEMPLATE VARIANTS (v0.6) — selected by settings at runtime:
+  #   confidence.mode == integrated -> task_prompt_extraction_with_confidence
+  #   confidence.mode == separate   -> task_prompt (above) + task_prompt_confidence
+  #   geometry.mode in {llm, llm_grounded} -> task_prompt_bbox appended to the
+  #     active confidence-bearing prompt (integrated or confidence-only).
+  # See idp_common.extraction.prompt_assembly.
+  # =========================================================================
+
+  # INTEGRATED: one inference emits each value AND its confidence. Used when
+  # confidence.mode == integrated. The agent calls the provide_field_assessment
+  # tool as its final step (record confidence per field / per list row).
+  task_prompt_extraction_with_confidence: >-
+    <background>
+    You are an expert in document analysis and information extraction.
+    You extract key information from documents classified as type: {DOCUMENT_CLASS},
+    and you also report your confidence in each extracted value.
+    </background>
+
+    <task>
+    Convert the unstructured document into a well-organized JSON object using the
+    attribute names below as keys, extracting the relevant values. Then record your
+    confidence in each extracted value.
+    </task>
+
+    <extraction-guidelines>
+    1. Include double quotes around all keys and values
+    2. Do not make up data - only extract information explicitly found in the document
+    3. Use a space instead of newlines
+    4. If a field is not found or you are unsure, return null
+    5. All dates should be in MM/DD/YYYY format
+    6. Do not perform calculations unless totals are explicitly given
+    7. Carefully examine checkboxes/selection fields; only include options with clear
+       visual selection marks
+    8. Think step by step first, then answer
+    </extraction-guidelines>
+
+    <attributes>
+    {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+    </attributes>
+
+    <confidence-assessment>
+    After the extraction is complete and correct, call the provide_field_assessment
+    tool exactly once to record your confidence in each extracted value. Mirror the
+    extraction structure:
+    - For each scalar or group field: {"confidence": <0.0-1.0>, "confidence_reason": "<brief>"}.
+    - For each list field (e.g. a table): a LIST with ONE assessment object per
+      extracted row, in the SAME ORDER as the rows you extracted. Provide an entry
+      for EVERY row — do not summarize or skip rows.
+    confidence = your calibrated certainty the value matches the source document
+    (1.0 = certain, lower = ambiguous/illegible/inferred).
+    Do NOT include bounding boxes unless explicitly instructed below — field
+    locations are derived automatically from OCR.
+    </confidence-assessment>
+
+    <<CACHEPOINT>>
+
+    <document-text>
+    {DOCUMENT_TEXT}
+    </document-text>
+
+    <document_image>
+    {DOCUMENT_IMAGE}
+    </document_image>

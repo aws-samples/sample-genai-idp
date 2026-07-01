@@ -23,9 +23,31 @@ import type { BoxProps } from '@cloudscape-design/components';
 import SchemaBuilder from '../json-schema-builder/SchemaBuilder';
 import PromptPreview from './PromptPreview';
 
+// Turn a schema key into a concise, human-readable field label.
+// e.g. "assessment_integration" -> "Assessment Integration",
+//      "model_lambda_hook_arn"  -> "Model Lambda Hook Arn",
+//      "top_p" -> "Top P". Small acronyms are upper-cased.
+const _ACRONYMS = new Set(['ocr', 'llm', 'hitl', 'arn', 'bda', 'id', 'url', 'api', 'ui', 's3']);
+function humanizeKey(key: string): string {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2') // camelCase -> spaced
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((w) => (_ACRONYMS.has(w.toLowerCase()) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(' ');
+}
+
+// Concise field label: prefer an explicit schema `title`, else humanize the key.
+// The (potentially long) `description` is shown separately as help text.
+function getFieldLabel(key: string, property: { title?: unknown }): string {
+  const title = property?.title;
+  return typeof title === 'string' && title.trim() ? title : humanizeKey(key);
+}
+
 // Type for schema property definitions used throughout the config builder
 interface SchemaProperty {
   type?: string;
+  title?: string;
   properties?: Record<string, SchemaProperty>;
   items?: SchemaProperty;
   enum?: string[];
@@ -38,10 +60,16 @@ interface SchemaProperty {
   // sibling field matches (e.g. expand "Agentic Extraction" when enabled=true).
   expandWhen?: { field: string; value?: unknown };
   // Hide this field when an ABSOLUTE-path (form-root) field equals a value.
-  // Composes with dependsOn; resolves cross-section (e.g. hide unused Assessment
-  // inference fields when extraction.assessment_integration === "integrated").
+  // Composes with dependsOn; resolves cross-section (e.g. hide unused confidence
+  // inference fields when extraction.confidence.mode === "integrated").
   hideWhen?: { field: string; value?: unknown };
   defaultExpanded?: boolean | string;
+  // Nested sectionLabel object rendering: `collapsible: false` renders an
+  // always-open group (bold header, no expand control) so its master toggle is
+  // never hidden. `ghostGroup: true` renders children at the PARENT config path
+  // (purely visual grouping — e.g. "Model parameters"/"Prompts" — no path change).
+  collapsible?: boolean | string;
+  ghostGroup?: boolean | string;
   nestLevel?: number;
   columns?: string | number;
   listLabel?: string;
@@ -695,7 +723,7 @@ const ConfigBuilder = ({
         // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Debug logging with controlled internal data
         property,
         value,
-        formValues: getValueAtPath(formValues, 'assessment'),
+        formValues: getValueAtPath(formValues, 'extraction.confidence'),
       });
     }
 
@@ -708,8 +736,8 @@ const ConfigBuilder = ({
     // matches a value (composes with dependsOn — both must pass to render).
     // Unlike dependsOn (sibling-first), hideWhen.field is always resolved from
     // the form root, so a field in one top-level section can be hidden based on
-    // a setting in another (e.g. hide unused Assessment inference fields when
-    // extraction.assessment_integration === "integrated").
+    // a setting in another (e.g. hide unused confidence inference fields when
+    // extraction.confidence.mode === "integrated").
     if (property.hideWhen) {
       const hideVal = getValueAtPath(formValues, property.hideWhen.field);
       if (hideVal === property.hideWhen.value) {
@@ -880,6 +908,41 @@ const ConfigBuilder = ({
       return <SpaceBetween size="s">{renderedFields}</SpaceBetween>;
     }
 
+    // A `ghostGroup: true` object is a PURELY VISUAL grouping — its children render at
+    // the PARENT path (not nested under this key), so grouping labels like "Model
+    // parameters" / "Prompts" don't change any config path. childPath below picks the
+    // parent for ghost groups and the normal nested path otherwise.
+    const isGhostGroup = property.ghostGroup === true || property.ghostGroup === 'true';
+    const childPath = isGhostGroup ? path : fullPath;
+
+    // Always-open nested group: `collapsible: false` on a nested sectionLabel object
+    // renders a bold header with its fields always visible (no expand control). Used
+    // for feature groups whose master toggle should never be hidden behind a collapse
+    // (e.g. Confidence Assessment, Bounding-box Geometry, Missing vs Blank Fields).
+    if (property.sectionLabel && !isTopLevel && property.collapsible === false) {
+      const sectionTitle = property.sectionLabel as string;
+      const groupDescription = property.description as string | undefined;
+      return (
+        <ExtBox margin={{ top: '8px', bottom: '8px' }}>
+          <ExtBox borderBottom="divider-light" style={{ marginBottom: '6px' }}>
+            <ExtBox fontWeight="bold" fontSize="body-m" display="inline-block">
+              {sectionTitle}
+            </ExtBox>
+          </ExtBox>
+          {groupDescription && (
+            <ExtBox fontSize="body-s" color="text-body-secondary" style={{ marginBottom: '6px' }}>
+              {groupDescription}
+            </ExtBox>
+          )}
+          <SpaceBetween size="s">
+            {getSortedObjectProperties(property.properties).map(({ propKey, propSchema }) => {
+              return <ExtBox key={propKey}>{renderField(propKey, propSchema, childPath)}</ExtBox>;
+            })}
+          </SpaceBetween>
+        </ExtBox>
+      );
+    }
+
     // For nested objects with sectionLabel, use the same styling as list headers
     if (property.sectionLabel && !isTopLevel) {
       const sectionTitle = property.sectionLabel as string;
@@ -942,12 +1005,13 @@ const ConfigBuilder = ({
         </ExtBox>
       );
 
-      // Object content - only shown when expanded
+      // Object content - only shown when expanded. Ghost groups render children at the
+      // parent path (childPath) so the grouping doesn't change any config path.
       const objectContent = isExpanded && (
         <ExtBox padding={{ left: `${nestLevel * 50 + 200}px`, top: '0' }} className="list-content-indented">
           <SpaceBetween size="s">
             {getSortedObjectProperties(property.properties).map(({ propKey, propSchema }) => {
-              return <ExtBox key={propKey}>{renderField(propKey, propSchema, fullPath)}</ExtBox>;
+              return <ExtBox key={propKey}>{renderField(propKey, propSchema, childPath)}</ExtBox>;
             })}
           </SpaceBetween>
         </ExtBox>
@@ -1479,8 +1543,14 @@ const ConfigBuilder = ({
       hasUnsavedChange = !areValuesEqual(formValue, savedValue);
     }
 
-    // Show "Restore to default" only if form value currently differs from default
-    const showRestoreDefault = isFormValueDifferentFromDefault && onResetToDefault;
+    // Show "Restore default" whenever this field currently differs from the stack
+    // default — either as a live form edit (isFormValueDifferentFromDefault) or a
+    // saved customization (isFieldCustomized, the same signal that paints the yellow
+    // "modified" highlight, so the button always accompanies it). We require only a
+    // known defaultConfig to revert to; handleRestoreDefault falls back to reverting
+    // the form value directly when onResetToDefault isn't wired (e.g. read-only or the
+    // 'default' version), so the control no longer silently disappears there.
+    const showRestoreDefault = (isFormValueDifferentFromDefault || isFieldCustomized) && !!defaultConfig;
 
     // Check if this is a 'name' field inside an array item by looking for array indices in path
     const isNameInArray =
@@ -1541,7 +1611,10 @@ const ConfigBuilder = ({
           options={(property.enum as string[]).map((opt: string) => ({ value: opt, label: opt }))}
         />
       );
-    } else if (property.format === 'text-area' || path.toLowerCase().includes('prompt') || path.toLowerCase().includes('description')) {
+    } else if (
+      property.format !== 'single-line' &&
+      (property.format === 'text-area' || path.toLowerCase().includes('prompt') || path.toLowerCase().includes('description'))
+    ) {
       input = (
         <Textarea
           value={displayValue !== undefined && displayValue !== null ? String(displayValue) : ''}
@@ -1574,13 +1647,15 @@ const ConfigBuilder = ({
       );
     }
 
-    // Use description as the label
-    const displayText = (property.description as string) || key;
+    // Concise label from title/humanized key; the full description renders as
+    // lighter help text under the field (Cloudscape FormField `description`).
+    const displayText = getFieldLabel(key, property);
+    const fieldDescription = (property.description as string) || undefined;
     const constraints = getConstraintText(property);
 
-    // Stable flex wrapper prevents input remount/focus loss
-    // Input is always inside <ExtBox flex="1"> — adding/removing sibling Button
-    // doesn't unmount the input, just changes siblings
+    // Input on the left; the "Restore default" action inline on the right (only
+    // when the current value differs from default). Kept in the control row so it
+    // renders reliably regardless of FormField description/constraint slots.
     const inputWithActions = (
       <ExtBox display="flex" alignItems="center">
         <ExtBox flex="1">{input}</ExtBox>
@@ -1611,7 +1686,13 @@ const ConfigBuilder = ({
     );
 
     return (
-      <FormField label={labelContent} constraintText={finalConstraints} stretch className={fieldClasses.join(' ')}>
+      <FormField
+        label={labelContent}
+        description={fieldDescription}
+        constraintText={finalConstraints}
+        stretch
+        className={fieldClasses.join(' ')}
+      >
         {inputWithActions}
       </FormField>
     );

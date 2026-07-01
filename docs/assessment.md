@@ -60,16 +60,22 @@ The assessment step is conditionally integrated into Pattern-2's ProcessSections
 
 ### Running Assessment Inside Extraction (in-shard / integrated)
 
+> **Config v0.6:** confidence scoring is now an **output of extraction**. Its
+> settings live under `extraction.confidence` (was the top-level `assessment` block),
+> geometry under `extraction.geometry` (was `assessment.geometry_mode`), and HITL
+> under the top-level `hitl` block. Existing configs are migrated automatically on
+> read. The examples below use the v0.6 shape.
+
 Assessment does not have to run as a separate downstream step. The
-`extraction.assessment_integration` setting controls *where* per-field confidence
+`extraction.confidence.mode` setting controls *where* per-field confidence
 and bounding boxes are produced:
 
-| `extraction.assessment_integration` | Extraction mode | Where assessment runs | Standalone Assessment step |
+| `extraction.confidence.mode` | Extraction mode | Where assessment runs | Standalone Assessment step |
 |---|---|---|---|
 | `separate` (default) | non-agentic | the standalone Assessment step (unchanged) | runs |
 | `separate` | agentic | a second inference **inside each extraction shard** | bypassed (skip) |
 | `integrated` | any | the extraction inference itself, in one pass | bypassed (skip) |
-| (any) | (any) with `assessment.enabled: false` | nowhere | bypassed |
+| (any) | (any) with `extraction.confidence.enabled: false` | nowhere | bypassed |
 
 **Why in-shard for agentic.** Agentic extraction shards large sections into
 token-budgeted page ranges so no single inference sees the whole document. A
@@ -97,11 +103,13 @@ Assessment can now be controlled via the configuration file rather than CloudFor
 
 **Configuration-based Control (Recommended):**
 ```yaml
-assessment:
-  enabled: true  # Set to false to disable assessment
-  model: us.amazon.nova-lite-v1:0
-  temperature: 0.0
-  # ... other assessment settings
+extraction:
+  confidence:
+    enabled: true  # Set to false to disable confidence assessment entirely
+    mode: separate # "separate" (default) | "integrated"
+    model: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    temperature: 0.0
+    # ... other confidence settings
 ```
 
 **Key Benefits:**
@@ -341,7 +349,7 @@ The bounding box feature requires no additional configuration:
 
 ### Geometry source: OCR-only (default) vs LLM-estimated
 
-`assessment.geometry_mode` controls where field bounding boxes come from:
+`extraction.geometry.mode` controls where field bounding boxes come from:
 
 - **`ocr_only`** (default): the model is **not** asked for boxes at all. Each field's
   geometry is derived by matching the extracted value text against real OCR lines in the
@@ -363,14 +371,15 @@ The bounding box feature requires no additional configuration:
   is taken from its JSON-Schema `type`/`format` when present, else inferred from the value.
   Format-bridged matches are tagged `geometry_source: "ocr-normalized"` and Levenshtein
   near-misses `"ocr-fuzzy"`, distinct from exact `"ocr"` hits so they stay auditable.
-- **`llm_with_ocr_grounding`** (legacy): the model emits estimated boxes and the service
+- **`llm_grounded`**: the model emits estimated boxes and the service
   grounds them in real OCR coordinates where the value matches, falling back to the LLM box
   otherwise. The LLM box also disambiguates repeated values by spatial proximity.
-- **`llm_only`**: use the model's boxes as-is with no grounding (escape hatch).
+- **`llm`**: use the model's boxes as-is with no grounding (escape hatch).
+- **`off`**: produce no geometry at all.
 
-The legacy `assessment.ground_geometry_in_ocr` flag is still honored for backward
-compatibility (a stored `false` maps to `llm_only`); `geometry_mode` takes precedence. In
-all OCR-backed modes, geometry is a post-LLM, S3-side step. See
+(v0.6 renamed the LLM-box modes from the previous `llm_with_ocr_grounding` / `llm_only`;
+the legacy `assessment.ground_geometry_in_ocr: false` maps to `llm`. Old configs are
+migrated on read.) In all OCR-backed modes, geometry is a post-LLM, S3-side step. See
 [Bounding Box Integration → Grounding in Real OCR Geometry](./assessment-bounding-boxes.md#grounding-in-real-ocr-geometry-pagedatajson).
 
 ## Output Format

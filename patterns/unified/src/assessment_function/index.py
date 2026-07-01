@@ -11,7 +11,6 @@ from idp_common.models import Document, Status
 from idp_common.docs_service import create_document_service
 from idp_common import s3
 from idp_common.utils import normalize_boolean_value, calculate_lambda_metering, merge_metering_data
-from assessment_validator import AssessmentValidator
 from aws_xray_sdk.core import xray_recorder, patch_all
 
 patch_all()
@@ -150,8 +149,8 @@ def handler(event, context):
     logger.info(f"Section {section_id} is at index {section_index} in the Sections array")
 
     # Check if granular assessment is enabled (moved earlier for Lambda metering context)
-    assessment_context = "GranularAssessment" if config.assessment.granular.enabled else "Assessment"
-    logger.info(f"Assessment mode: {'Granular' if config.assessment.granular.enabled else 'Regular'} (context: {assessment_context})")
+    assessment_context = "GranularAssessment" if config.extraction.confidence.granular.enabled else "Assessment"
+    logger.info(f"Assessment mode: {'Granular' if config.extraction.confidence.granular.enabled else 'Regular'} (context: {assessment_context})")
 
     # Intelligent Assessment Skip: Check if extraction results already contain explainability_info
     if section.extraction_result_uri and section.extraction_result_uri.strip():
@@ -236,7 +235,7 @@ def handler(event, context):
     
     # Check if granular assessment is enabled
     
-    if config.assessment.granular.enabled:
+    if config.extraction.confidence.granular.enabled:
         # Use enhanced granular assessment service with caching and retry support
         from idp_common.assessment.granular_service import GranularAssessmentService
         assessment_service = GranularAssessmentService(config=config, cache_table=cache_table)
@@ -298,31 +297,10 @@ def handler(event, context):
             updated_document.status = Status.FAILED
             updated_document.errors.append(str(e))
 
-    # Assessment validation
-    validation_enabled = config.assessment.granular.enabled and config.assessment.validation_enabled
-    logger.info(f"Assessment Enabled:{config.assessment.granular.enabled}")
-    logger.info(f"Validation Enabled:{validation_enabled}")
-    if not config.assessment.granular.enabled:
-        logger.info("Assessment is disabled.")
-    elif not validation_enabled:
-        logger.info("Assessment validation is disabled.")
-    else:
-        for section in updated_document.sections:
-            if section.section_id == section_id and section.extraction_result_uri:
-                logger.info(f"Loading assessment results from: {section.extraction_result_uri}")
-                # Load extraction data with assessment results
-                extraction_data = s3.get_json_content(section.extraction_result_uri)
-                validator = AssessmentValidator(extraction_data,
-                                                assessment_config=config.assessment,
-                                                enable_missing_check=True,
-                                                enable_count_check=True)
-                validation_results = validator.validate_all()
-                if not validation_results['is_valid']:
-                    # Handle validation failure
-                    updated_document.status = Status.FAILED
-                    validation_errors = validation_results['validation_errors']
-                    updated_document.errors.extend(validation_errors)
-                    logger.error(f"Validation Error: {validation_errors}")
+    # (The optional post-assessment validation checks — previously gated behind
+    # the removed `confidence.validation_enabled` toggle — are no longer run
+    # automatically. The AssessmentValidator class remains available for
+    # programmatic/offline use.)
 
     # Add Lambda metering for successful assessment execution with dynamic context
     try:
