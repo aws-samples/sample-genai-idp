@@ -7182,7 +7182,7 @@ Resources:
       RetentionInDays: !Ref LogRetentionDays
 
   ##########################################################################
-  # Chat streaming endpoint (ApiTransport=httpapi only)
+  # Chat streaming endpoint
   #
   # Replaces the former GraphQL mutation->subscription fan-out for chat token deltas
   # with Lambda response streaming via a direct Function URL

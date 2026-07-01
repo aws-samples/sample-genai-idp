@@ -2331,11 +2331,11 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "VPC attachment is conditional on AppSyncVisibility=PRIVATE (see VpcConfig below). The resolver must live in the same VPC as the private AppSync API so AppSync can invoke it and its DynamoDB reads can traverse a gateway endpoint. On the default/public AppSync path the resolver only talks to DynamoDB and Lambda over AWS-managed networking and VPC access is not required."
+            reason: "VPC attachment is conditional on ApiGatewayVisibility=PRIVATE (see VpcConfig below). The resolver must live in the same VPC as the private REST API so its DynamoDB reads can traverse a gateway endpoint. On the default/public path the resolver only talks to DynamoDB and Lambda over AWS-managed networking and VPC access is not required."
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver function"
-    # checkov:skip=CKV_AWS_117: "VPC attachment is conditional on AppSyncVisibility=PRIVATE (see VpcConfig below); default path does not require VPC access"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for UI API resolver function"
+    # checkov:skip=CKV_AWS_117: "VPC attachment is conditional on ApiGatewayVisibility=PRIVATE (see VpcConfig below); default path does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
     Properties:
