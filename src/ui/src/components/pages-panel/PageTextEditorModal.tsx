@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Modal, Box, SpaceBetween, Button, SegmentedControl, Alert, Spinner, Badge } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { Editor } from '@monaco-editor/react';
 import MarkdownViewer from '../document-viewer/MarkdownViewer';

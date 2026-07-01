@@ -15,7 +15,6 @@ Covers the three critical behaviors of the processor:
 
 from __future__ import annotations
 
-import importlib
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -48,6 +47,40 @@ def _make_stream_events(deltas: list[str]) -> list[dict]:
     events.append({"contentBlockStop": {}})
     events.append({"messageStop": {"stopReason": "end_turn"}})
     return events
+
+
+def _install_capture_sink(index, publishes: list[dict]) -> None:
+    """Install an emission sink on the processor that records every event.
+
+    The streaming endpoint installs a sink via ``set_sink``; tests do the same
+    and assert against the captured events. Each captured dict exposes both the
+    snake_case key emitted by the processor (``is_processing``) and the
+    camelCase alias (``isProcessing``) the original assertions used.
+    """
+
+    def _sink(
+        session_id,
+        method,
+        status,
+        content,
+        role="assistant",
+        model_id="",
+        is_processing=True,
+    ):
+        publishes.append(
+            {
+                "sessionId": session_id,
+                "method": method,
+                "status": status,
+                "content": content,
+                "role": role,
+                "modelId": model_id,
+                "is_processing": is_processing,
+                "isProcessing": is_processing,
+            }
+        )
+
+    index.set_sink(_sink)
 
 
 class TestProcessorHappyPath:
@@ -83,20 +116,14 @@ class TestProcessorHappyPath:
             "stream": iter(_make_stream_events(["Hello, ", "world", "!"]))
         }
 
-        # Capture every publish call so we can assert ordering.
+        # Capture every emitted event so we can assert ordering.
         publishes: list[dict] = []
-        fake_client = MagicMock()
-
-        def _exec(_mutation, variables):
-            publishes.append(dict(variables))
-
-        fake_client.execute_mutation.side_effect = _exec
+        _install_capture_sink(index, publishes)
 
         with (
             patch.object(index, "_s3", s3),
             patch.object(index, "_dynamodb", dyn_resource),
             patch.object(index, "_get_bedrock_runtime", return_value=bedrock),
-            patch.object(index, "_get_appsync_client", return_value=fake_client),
             patch.object(
                 index, "_resolve_chat_settings",
                 return_value={
@@ -170,10 +197,7 @@ class TestProcessorOpenAIResponses:
         bedrock_runtime = MagicMock()
 
         publishes: list[dict] = []
-        fake_client = MagicMock()
-        fake_client.execute_mutation.side_effect = lambda _m, v: publishes.append(
-            dict(v)
-        )
+        _install_capture_sink(index, publishes)
 
         # Fake streaming generator: several text deltas, then a final metering dict.
         captured: dict = {}
@@ -191,7 +215,6 @@ class TestProcessorOpenAIResponses:
             patch.object(index, "_s3", s3),
             patch.object(index, "_dynamodb", dyn_resource),
             patch.object(index, "_get_bedrock_runtime", return_value=bedrock_runtime),
-            patch.object(index, "_get_appsync_client", return_value=fake_client),
             patch("idp_common.bedrock.stream_responses_api", _fake_stream),
             # Bypass throttling so each delta publishes.
             patch.object(index, "STREAM_FLUSH_INTERVAL_S", 0.0),
@@ -253,15 +276,11 @@ class TestProcessorRBAC:
 
         bedrock = MagicMock()
         publishes: list[dict] = []
-        fake_client = MagicMock()
-        fake_client.execute_mutation.side_effect = (
-            lambda _m, v: publishes.append(dict(v))
-        )
+        _install_capture_sink(index, publishes)
 
         with (
             patch.object(index, "_dynamodb", dyn_resource),
             patch.object(index, "_get_bedrock_runtime", return_value=bedrock),
-            patch.object(index, "_get_appsync_client", return_value=fake_client),
             patch.object(
                 index, "_get_user_allowed_config_versions", return_value=["other-v2"]
             ),
@@ -293,21 +312,17 @@ class TestProcessorValidation:
         import index
 
         publishes: list[dict] = []
-        fake_client = MagicMock()
-        fake_client.execute_mutation.side_effect = (
-            lambda _m, v: publishes.append(dict(v))
-        )
+        _install_capture_sink(index, publishes)
 
-        with patch.object(index, "_get_appsync_client", return_value=fake_client):
-            result = index.handler(
-                {
-                    "sessionId": "s-1",
-                    "turnId": "t-1",
-                    "prompt": "",  # missing
-                    "s3Uri": "uploads/x.pdf",
-                },
-                None,
-            )
+        result = index.handler(
+            {
+                "sessionId": "s-1",
+                "turnId": "t-1",
+                "prompt": "",  # missing
+                "s3Uri": "uploads/x.pdf",
+            },
+            None,
+        )
 
         assert result == {"ok": False, "reason": "invalid_event"}
         assert publishes and publishes[0]["method"] == "assistant_error"
@@ -335,7 +350,7 @@ class TestProcessorModelIdSuffixes:
         tracking_table = MagicMock()
         tracking_table.get_item.return_value = {
             "Item": {
-                "PK": f"doc#uploads/x.pdf",
+                "PK": "doc#uploads/x.pdf",
                 "SK": "none",
                 "ConfigVersion": "default",
                 "Pages": [
@@ -357,13 +372,12 @@ class TestProcessorModelIdSuffixes:
             "stream": iter(_make_stream_events(["ok"]))
         }
 
-        fake_client = MagicMock()
+        _install_capture_sink(index, [])
 
         with (
             patch.object(index, "_s3", s3),
             patch.object(index, "_dynamodb", dyn_resource),
             patch.object(index, "_get_bedrock_runtime", return_value=bedrock),
-            patch.object(index, "_get_appsync_client", return_value=fake_client),
             patch.object(
                 index, "_resolve_chat_settings",
                 return_value={

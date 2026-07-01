@@ -17,7 +17,7 @@ import {
   FaList,
   FaExclamationTriangle,
 } from 'react-icons/fa';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
 import { getStepFunctionExecution } from '../../graphql/generated';

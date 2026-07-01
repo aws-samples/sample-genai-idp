@@ -20,7 +20,7 @@ const config = {
      scalar AWSEmail
      scalar AWSPhone
      scalar AWSIPAddress`,
-    path.resolve(__dirname, "../../nested/appsync/src/api/schema.graphql"),
+    path.resolve(__dirname, "../../nested/api-resolvers/src/api/schema.graphql"),
   ],
   documents: path.resolve(__dirname, "src/graphql/operations/**/*.graphql"),
   config: {

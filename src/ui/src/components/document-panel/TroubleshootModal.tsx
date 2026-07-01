@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: MIT-0
 
 import React, { useState, useEffect } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { Modal, Box, SpaceBetween, Button, Spinner, Alert, Header } from '@cloudscape-design/components';
 
-import { submitAgentQuery, getAgentJobStatus, onAgentJobComplete, listAvailableAgents } from '../../graphql/generated';
+import { submitAgentQuery, getAgentJobStatus, listAvailableAgents } from '../../graphql/generated';
 import AgentResultDisplay from '../document-agents-layout/AgentResultDisplay';
 import AgentMessagesDisplay from '../document-agents-layout/AgentMessagesDisplay';
 
@@ -74,56 +74,12 @@ const TroubleshootModal = ({
 
   const query = `Troubleshoot ${documentItem?.objectKey} for failures or performance issues.`;
 
+  // AppSync subscriptions were removed; agent job completion is detected by the
+  // interval polling effect below (polls getAgentJobStatus until terminal). This
+  // is a no-op retained so existing call sites stay unchanged.
   const subscribeToJobCompletion = (id: string): Subscription | null => {
-    try {
-      logger.debug('Subscribing to job completion for job ID:', id);
-      const sub = client
-        .graphql({
-          query: onAgentJobComplete,
-          variables: { jobId: id },
-        })
-        .subscribe({
-          next: async (message) => {
-            const jobCompleted = message.data?.onAgentJobComplete;
-            logger.debug('Job completion notification:', jobCompleted);
-
-            if (jobCompleted) {
-              try {
-                const jobResponse = await client.graphql({
-                  query: getAgentJobStatus,
-                  variables: { jobId: id },
-                });
-
-                const job = jobResponse.data?.getAgentJobStatus;
-                if (job) {
-                  setJobStatus(job.status);
-                  setAgentMessages(job.agent_messages);
-
-                  if (job.status === 'COMPLETED') {
-                    setJobResult(job.result ?? null);
-                  } else if (job.status === 'FAILED') {
-                    setError(job.error ?? 'Job processing failed');
-                  }
-                }
-              } catch (fetchError) {
-                logger.error('Error fetching job details:', fetchError);
-                setError(`Failed to fetch job details: ${(fetchError as Error).message}`);
-              }
-            }
-          },
-          error: (err: Error) => {
-            logger.error('Subscription error:', err);
-            setError(`Subscription error: ${err.message}`);
-          },
-        });
-
-      setSubscription(sub);
-      return sub;
-    } catch (err) {
-      logger.error('Error setting up subscription:', err);
-      setError(`Failed to set up job status subscription: ${(err as Error).message}`);
-      return null;
-    }
+    logger.debug('Job completion tracked via polling for job ID:', id);
+    return null;
   };
 
   const checkAvailableAgents = async (): Promise<AgentInfo[]> => {

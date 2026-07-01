@@ -2,7 +2,7 @@
 #
 # E3002 suppression for nested/alb-hosting/template.yaml is handled inline
 # via Metadata.cfn-lint.config.ignore_checks in that template (same pattern
-# as nested/appsync/template.yaml uses for W1030/W1031).
+# as nested/api-resolvers/template.yaml uses for W1030/W1031).
 #
 # Rationale: ALB ListenerRule "Transforms" property (host-header-rewrite,
 # url-rewrite) is not yet in the cfn-lint resource schema (v1.37+). Scoping

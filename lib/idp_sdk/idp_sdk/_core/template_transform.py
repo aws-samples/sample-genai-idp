@@ -5,8 +5,8 @@
 Headless template transformation for IDP CloudFormation templates.
 
 Transforms a standard IDP CloudFormation template into a headless version
-by removing UI, AppSync, Cognito, WAF, Agent, HITL, and Knowledge Base
-resources. The resulting template is suitable for API-only deployments
+by removing UI, the UI REST API, Cognito, WAF, Agent, HITL, and Knowledge
+Base resources. The resulting template is suitable for API-only deployments
 (e.g., GovCloud regions or headless use cases).
 """
 
@@ -24,7 +24,7 @@ class HeadlessTemplateTransformer:
     """Transform IDP CloudFormation templates for headless (no-UI) deployment.
 
     This class extracts and removes AWS services that are not needed for
-    headless/API-only deployments: CloudFront, AppSync, Cognito, WAF,
+    headless/API-only deployments: CloudFront, the UI REST API, Cognito, WAF,
     Agent/MCP, HITL/A2I, and Knowledge Base resources.
 
     Usage:
@@ -62,36 +62,23 @@ class HeadlessTemplateTransformer:
             "CodeBuildRun",
         }
 
+        # UI-API resources to strip for headless. AWS AppSync has been removed;
+        # the interactive UI API is now an API Gateway REST API hosted in the
+        # APIRESOLVERSTACK nested stack (its dispatcher invokes these resolver
+        # Lambdas). Headless = no UI API, so strip the nested stack and the
+        # UI-only resolver Lambdas it fronts. (The former AppSync
+        # DataSource/Resolver/GraphQLApi resources no longer exist in the base
+        # template, so they are not listed here anymore.)
         self.appsync_resources: Set[str] = {
-            "APPSYNCSTACK",
-            "GraphQLApi",
-            "GraphQLApiLogGroup",
-            "AppSyncCwlRole",
-            "CalculateCapacityDataSource",
-            "CalculateCapacityResolver",
+            # Nested stack hosting the REST API dispatcher + UI resolver Lambdas.
+            "APIRESOLVERSTACK",
+            # UI-only resolver Lambdas defined in the main template (capacity
+            # planning, version check, fine-tuning) — only reachable via the
+            # (stripped) UI API, so remove them in headless mode.
             "CalculateCapacityResolverFunction",
             "CalculateCapacityResolverFunctionLogGroup",
-            # Public-template version-check resolver — UI-only feature, must
-            # be stripped because its DataSource references the AppSync
-            # GraphQLApi (removed below) and HITLAppSyncServiceRole (removed
-            # in self.hitl_resources). Same shape/rationale as the
-            # CalculateCapacityResolver entries above — these resources live
-            # in the main template (next to GraphQLApi) rather than in the
-            # nested/appsync stack to avoid the cross-stack circular
-            # dependency on `!GetAtt GraphQLApi.ApiId`.
             "VersionCheckResolverFunction",
             "VersionCheckResolverFunctionLogGroup",
-            "VersionCheckResolverDataSource",
-            "GetLatestPublishedVersionResolver",
-            # Fine-tuning AppSync resources — depend on GraphQLApi
-            "FinetuningJobsDataSource",
-            "CreateFinetuningJobResolver",
-            "DeleteFinetuningJobResolver",
-            "UpdateFinetuningJobStatusResolver",
-            "GetFinetuningJobResolver",
-            "ListFinetuningJobsResolver",
-            "ValidateTestSetForFinetuningResolver",
-            "ListAvailableModelsResolver",
         }
 
         self.auth_resources: Set[str] = {
@@ -172,7 +159,6 @@ class HeadlessTemplateTransformer:
             "UserSyncFunction",
             "CompleteSectionReviewFunctionLogGroup",
             "CompleteSectionReviewFunction",
-            "HITLAppSyncServiceRole",
             "UserManagementDataSource",
             "CreateUserResolver",
             "DeleteUserResolver",
@@ -191,14 +177,13 @@ class HeadlessTemplateTransformer:
         }
 
         # Feature Platform nested stack — gated on EnableFeaturePlatform=true.
-        # Its parameters wire in GraphQLApi (ApiId/Arn/GraphQLUrl), UserPool,
+        # Its parameters wire in the UI REST API (in APIRESOLVERSTACK), UserPool,
         # UserPoolClient, WebUIBucket, and DiscoveryBucket — all removed in
-        # headless mode — and it DependsOn the (removed) APPSYNCSTACK. Left in
-        # place, its dangling `!GetAtt GraphQLApi.*` refs cause
-        # "Template error: instance of Fn::GetAtt references undefined resource
-        # GraphQLApi" at deploy time. EnableFeaturePlatform is forced to
-        # 'false' in _remove_parameters so the IsFeaturePlatformDisabled-gated
-        # TrackingTableName export stays active.
+        # headless mode — and it DependsOn the (removed) APIRESOLVERSTACK. Left in
+        # place, its references to those removed resources would fail at deploy
+        # time ("Fn::GetAtt references undefined resource"). EnableFeaturePlatform
+        # is forced to 'false' in _remove_parameters so the
+        # IsFeaturePlatformDisabled-gated TrackingTableName export stays active.
         self.feature_platform_resources: Set[str] = {
             "FeaturePlatformStack",
         }
@@ -225,10 +210,10 @@ class HeadlessTemplateTransformer:
             "StepFunctionSubscriptionPublisherLogGroup",
             "StepFunctionSubscriptionRule",
             "StepFunctionSubscriptionPublisherPermission",
-            # Invoked async only by an AppSync resolver in the (removed)
-            # APPSYNCSTACK; with no resolver caller, the function and its
-            # log group are dead weight in headless mode and their dangling
-            # refs to UsersTable/GraphQLApi block stack updates.
+            # Invoked async only by the UI REST API dispatcher in the (removed)
+            # APIRESOLVERSTACK; with no caller, the function and its log group are
+            # dead weight in headless mode and their dangling refs to removed
+            # UI resources (e.g. UsersTable) would block stack updates.
             "ChatWithDocumentProcessorFunction",
             "ChatWithDocumentProcessorLogGroup",
         }
@@ -290,7 +275,11 @@ class HeadlessTemplateTransformer:
             "MCPConnectorClientSecret",
             "S3DiscoveryBucketName",
             "S3DiscoveryBucketConsoleURL",
-            # References !GetAtt GraphQLApi.GraphQLUrl (AppSync removed headless)
+            # UI-API DNS helper output (named for the former AppSync endpoint).
+            # AppSync is gone — the UI API is now an API Gateway REST API in the
+            # (stripped) APIRESOLVERSTACK — so this UI-only output has no place in a
+            # headless deployment. Kept here as a defensive strip in case the
+            # base template still emits it.
             "AppSyncEndpointForDNS",
         }
 
@@ -617,10 +606,10 @@ class HeadlessTemplateTransformer:
     ) -> Dict[str, Any]:
         """Clean template for headless deployment.
 
-        - Remove Cognito auth from any remaining GraphQLApi
         - Remove CloudFront policy statements
         - Remove CORS from S3 buckets
-        - Convert Lambda functions from AppSync to DynamoDB tracking mode
+        - Strip dangling references to removed resources from kept Lambda
+          functions (e.g. ExternalMCPAgentsSecret policy statements)
         - Clean nested stack parameters
         - Fix Knowledge Base condition references
         - Clean UpdateSettingsValues custom resource
@@ -628,37 +617,6 @@ class HeadlessTemplateTransformer:
         """
         logger.info("Cleaning template for headless deployment")
         resources = template.get("Resources", {})
-
-        # Fix GraphQLApi — remove Cognito auth since UserPool is removed
-        if "GraphQLApi" in resources:
-            graphql_api = resources["GraphQLApi"]
-            if "Properties" in graphql_api:
-                if "UserPoolConfig" in graphql_api["Properties"]:
-                    del graphql_api["Properties"]["UserPoolConfig"]
-                    logger.debug("Removed UserPoolConfig from GraphQLApi")
-                if "AuthenticationType" in graphql_api["Properties"]:
-                    graphql_api["Properties"]["AuthenticationType"] = "AWS_IAM"
-                    logger.debug("Changed GraphQLApi AuthenticationType to AWS_IAM")
-                if "AdditionalAuthenticationProviders" in graphql_api["Properties"]:
-                    auth_providers = graphql_api["Properties"][
-                        "AdditionalAuthenticationProviders"
-                    ]
-                    iam_providers = [
-                        p
-                        for p in auth_providers
-                        if p.get("AuthenticationType") == "AWS_IAM"
-                    ]
-                    if iam_providers:
-                        graphql_api["Properties"][
-                            "AdditionalAuthenticationProviders"
-                        ] = iam_providers
-                    else:
-                        del graphql_api["Properties"][
-                            "AdditionalAuthenticationProviders"
-                        ]
-                    logger.debug(
-                        "Cleaned AdditionalAuthenticationProviders in GraphQLApi"
-                    )
 
         # Remove CloudFront policy statements
         template = self._clean_cloudfront_policy_statements(template)
@@ -674,8 +632,14 @@ class HeadlessTemplateTransformer:
                     del properties["CorsConfiguration"]
                     logger.debug(f"Removed CORS configuration from {resource_name}")
 
-        # Convert backend functions from AppSync to DynamoDB tracking mode
-        functions_to_convert = [
+        # Tidy backend functions that survive in headless mode. The base
+        # template already tracks via DynamoDB (DOCUMENT_TRACKING_MODE=dynamodb,
+        # APPSYNC_API_URL=""), so there is no AppSync→DynamoDB conversion to do.
+        # What still matters: drop the now-empty APPSYNC_API_URL env var and
+        # strip any policy statements that reference resources we removed (e.g.
+        # the ExternalMCPAgentsSecret on the agent-chat function, or a stray
+        # appsync:GraphQL action) so no dangling refs remain.
+        functions_to_clean = [
             "QueueSender",
             "QueueProcessor",
             "WorkflowTracker",
@@ -683,15 +647,14 @@ class HeadlessTemplateTransformer:
             "AgentChatProcessorFunction",
             "AgentProcessorFunction",
             "DiscoveryProcessorFunction",
-            # Publishes circuit-breaker status to AppSync mutations for the
-            # UI; the function still has work to do (state management,
-            # alarm processing) in headless mode, so we keep it but strip
-            # the APPSYNC_API_URL env var and appsync:GraphQL policy.
+            # The circuit-breaker manager still does real work in headless mode
+            # (state management, alarm processing); we keep it but drop the
+            # empty APPSYNC_API_URL env var and any appsync:GraphQL policy.
             "CircuitBreakerManagerFunction",
         ]
-        for func_name in functions_to_convert:
+        for func_name in functions_to_clean:
             if func_name in resources:
-                self._convert_function_to_dynamodb_tracking(resources, func_name)
+                self._clean_tracking_function(resources, func_name)
 
         # Clean ALB hosting nested stack parameters
         if "ALBHOSTINGSTACK" in resources:
@@ -723,22 +686,31 @@ class HeadlessTemplateTransformer:
 
         return template
 
-    def _convert_function_to_dynamodb_tracking(
+    def _clean_tracking_function(
         self, resources: Dict[str, Any], func_name: str
     ) -> None:
-        """Convert a Lambda function from AppSync to DynamoDB tracking mode."""
+        """Tidy a kept Lambda function for headless deployment.
+
+        The base template already tracks documents via DynamoDB directly
+        (DOCUMENT_TRACKING_MODE=dynamodb, TRACKING_TABLE set, APPSYNC_API_URL=""),
+        so this is no longer an AppSync→DynamoDB conversion. It just drops the
+        now-empty APPSYNC_API_URL env var, ensures a DynamoDB CRUD policy is
+        present, and strips any policy statements that reference removed
+        resources (ExternalMCPAgentsSecret) or stale appsync:GraphQL actions.
+        """
         func_def = resources[func_name]
         env_vars = (
             func_def.get("Properties", {}).get("Environment", {}).get("Variables", {})
         )
 
+        # Drop the leftover (empty) APPSYNC_API_URL env var. The base template
+        # already sets DOCUMENT_TRACKING_MODE=dynamodb and TRACKING_TABLE, so we
+        # only backfill them defensively if they are somehow missing.
         if "APPSYNC_API_URL" in env_vars:
             del env_vars["APPSYNC_API_URL"]
-            env_vars["DOCUMENT_TRACKING_MODE"] = "dynamodb"
-            env_vars["TRACKING_TABLE"] = {"Ref": "TrackingTable"}
-            logger.debug(
-                f"Converted {func_name} from AppSync to DynamoDB tracking mode"
-            )
+            env_vars.setdefault("DOCUMENT_TRACKING_MODE", "dynamodb")
+            env_vars.setdefault("TRACKING_TABLE", {"Ref": "TrackingTable"})
+            logger.debug(f"Removed empty APPSYNC_API_URL env var from {func_name}")
 
         # Add DynamoDB CRUD policy if not present
         policies = func_def.get("Properties", {}).get("Policies", [])

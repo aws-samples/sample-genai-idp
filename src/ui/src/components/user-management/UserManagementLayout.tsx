@@ -19,7 +19,7 @@ import {
   StatusIndicator,
   Badge,
 } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
 import useUserRole from '../../hooks/use-user-role';

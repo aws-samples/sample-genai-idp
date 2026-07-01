@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /* eslint-disable react/no-array-index-key */
 import React, { useState, useMemo, useEffect } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { calculateCapacity as calculateCapacityOp } from '../../graphql/generated';
 import {
   Container,

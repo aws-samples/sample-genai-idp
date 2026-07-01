@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { SpaceBetween, Box, Button, StatusIndicator } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
 import { copyToBaseline } from '../../graphql/generated';

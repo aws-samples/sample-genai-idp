@@ -3,8 +3,9 @@
 """Test configuration for chat_with_document_processor.
 
 Sets fake AWS credentials + mocks ``idp_common`` imports that would otherwise
-require the Lambda layer. Tests patch the public AppSync / Bedrock surface
-instead of relying on those packages being installed locally.
+require the Lambda layer. Tests install an emission sink via ``set_sink`` and
+patch the Bedrock surface instead of relying on those packages being installed
+locally.
 """
 
 from __future__ import annotations
@@ -27,20 +28,8 @@ os.environ.setdefault("USERS_TABLE_NAME", "")  # RBAC defaults to unrestricted
 
 # Stub `idp_common.*` symbols that the processor imports. The real package is
 # delivered via a Lambda layer at deploy time; for unit tests we only need to
-# mock the two symbols the module references at import time.
-_appsync_mod = MagicMock()
-
-
-class _FakeAppSyncError(Exception):
-    pass
-
-
-_appsync_mod.AppSyncError = _FakeAppSyncError
-_appsync_mod.AppSyncClient = MagicMock
-
+# mock the symbols the module references at import time.
 sys.modules.setdefault("idp_common", MagicMock())
-sys.modules.setdefault("idp_common.appsync", MagicMock())
-sys.modules["idp_common.appsync.client"] = _appsync_mod
 _cfg_mod = MagicMock()
 _cfg_mod.get_config = MagicMock(return_value={})
 sys.modules["idp_common.config"] = _cfg_mod

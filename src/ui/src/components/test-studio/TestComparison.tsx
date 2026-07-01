@@ -14,7 +14,7 @@ import {
   CollectionPreferences,
   ExpandableSection,
 } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { compareTestRuns } from '../../graphql/generated';
 import TestStudioHeader from './TestStudioHeader';
 import useLocalStorage from '../common/local-storage';

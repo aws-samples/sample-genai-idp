@@ -1,10 +1,11 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
 import useAppContext from '../contexts/app';
+import usePolling from './use-polling';
 import {
   listDocuments,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -13,11 +14,14 @@ import {
   deleteDocument,
   reprocessDocument,
   abortWorkflow,
-  onCreateDocument,
-  onUpdateDocument,
 } from '../graphql/generated';
 import { DOCUMENT_LIST_SHARDS_PER_DAY } from '../components/document-list/documents-table-config';
 import { Document } from '../types/documents';
+
+// Under the HTTP API transport there are no GraphQL subscriptions; the document
+// list is kept fresh by polling instead. AppSync deployments keep using
+// subscriptions (real-time) unchanged.
+const DOCUMENT_LIST_POLL_INTERVAL_MS = 5000;
 
 const client = generateClient();
 
@@ -45,10 +49,6 @@ interface UseGraphQlApiReturn {
   deleteDocuments: (objectKeys: string[]) => Promise<unknown>;
   reprocessDocuments: (objectKeys: string[], version?: string) => Promise<unknown>;
   abortWorkflows: (objectKeys: string[]) => Promise<unknown>;
-}
-
-interface GraphQLSubscriptionRef {
-  unsubscribe: () => void;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -81,37 +81,11 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
   const [customDateRange, setCustomDateRange] = useState<DateRange | null>(null);
   const { setErrorMessage } = useAppContext();
 
-  const subscriptionsRef = useRef<{
-    onCreate: GraphQLSubscriptionRef | null;
-    onUpdate: GraphQLSubscriptionRef | null;
-  }>({ onCreate: null, onUpdate: null });
-
   // Ref to track customDateRange in subscription callbacks (closures capture stale state)
   const customDateRangeRef = useRef<DateRange | null>(customDateRange);
   useEffect(() => {
     customDateRangeRef.current = customDateRange;
   }, [customDateRange]);
-
-  // Ref to track current documents for subscription callbacks.
-  // Needed so onUpdateDocument can check if a document is already tracked without
-  // stale closure issues.
-  const documentsRef = useRef<Document[]>([]);
-  useEffect(() => {
-    documentsRef.current = documents;
-  }, [documents]);
-
-  /**
-   * Check if a document falls within the active date range filter.
-   */
-  const isDocumentInActiveRange = useCallback(
-    (doc: Document): boolean => {
-      const range = customDateRangeRef.current || getDateRangeForPeriod(periodsToLoad);
-      const docTime = doc?.InitialEventTime || doc?.QueuedTime;
-      if (!docTime) return false;
-      return docTime >= range.startDateTime && docTime <= range.endDateTime;
-    },
-    [periodsToLoad],
-  );
 
   const setDocumentsDeduped = useCallback((documentValues: Document[]): void => {
     setDocuments((currentDocuments) => {
@@ -197,82 +171,8 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
   // The onCreateDocument subscription only has ObjectKey, so we add a minimal
   // placeholder that will be updated by the next onUpdateDocument event.
 
-  useEffect(() => {
-    if (subscriptionsRef.current.onCreate) return undefined;
-
-    logger.debug('onCreateDocument subscription');
-    const subscription = client.graphql({ query: onCreateDocument }).subscribe({
-      next: (message) => {
-        const objectKey = message.data?.onCreateDocument?.ObjectKey || '';
-        if (objectKey) {
-          // Create a minimal placeholder document from the subscription event.
-          // It will be enriched by the next onUpdateDocument subscription event.
-          const placeholderDoc = {
-            ObjectKey: objectKey,
-            PK: `doc#${objectKey}`,
-            SK: 'none',
-            ObjectStatus: 'QUEUED',
-            InitialEventTime: new Date().toISOString(),
-          } as unknown as Document;
-
-          if (isDocumentInActiveRange(placeholderDoc)) {
-            setDocumentsDeduped([placeholderDoc]);
-            logger.debug(`Subscription: added new document placeholder ${objectKey}`);
-          }
-        }
-      },
-      error: (error: unknown) => {
-        logger.error('onCreateDocument subscription error:', error);
-        setErrorMessage('document list network subscription failed - please reload the page');
-      },
-    });
-
-    subscriptionsRef.current.onCreate = subscription;
-    return () => {
-      if (subscriptionsRef.current.onCreate) {
-        subscriptionsRef.current.onCreate.unsubscribe();
-        subscriptionsRef.current.onCreate = null;
-      }
-    };
-  }, [setDocumentsDeduped, setErrorMessage, isDocumentInActiveRange]);
-
-  useEffect(() => {
-    if (subscriptionsRef.current.onUpdate) return undefined;
-
-    logger.debug('onUpdateDocument subscription setup');
-    const subscription = client.graphql({ query: onUpdateDocument }).subscribe({
-      next: (message) => {
-        // Use the subscription event data directly — it already includes all Document fields.
-        // No need to call getDocument for each update!
-        const documentUpdateEvent = message.data?.onUpdateDocument;
-        if (documentUpdateEvent?.ObjectKey) {
-          const doc = documentUpdateEvent as unknown as Document;
-
-          // Always accept updates for documents already in the list.
-          // Lightweight mutations like updateDocumentStatus (used during Map state
-          // steps: Extraction, Assessment, Rule Validation) may not include
-          // InitialEventTime/QueuedTime, causing isDocumentInActiveRange to return
-          // false. For documents we're already tracking, skip the date range check.
-          const isAlreadyTracked = documentsRef.current.some((d) => d.ObjectKey === doc.ObjectKey);
-          if (isAlreadyTracked || isDocumentInActiveRange(doc)) {
-            setDocumentsDeduped([doc]);
-          }
-        }
-      },
-      error: (error: unknown) => {
-        logger.error('onUpdateDocument subscription error:', error);
-        setErrorMessage('document update network request failed - please reload the page');
-      },
-    });
-
-    subscriptionsRef.current.onUpdate = subscription;
-    return () => {
-      if (subscriptionsRef.current.onUpdate) {
-        subscriptionsRef.current.onUpdate.unsubscribe();
-        subscriptionsRef.current.onUpdate = null;
-      }
-    };
-  }, [setDocumentsDeduped, setErrorMessage, isDocumentInActiveRange]);
+  // AppSync subscriptions (onCreateDocument/onUpdateDocument) have been removed;
+  // the document list is kept fresh by polling (see the usePolling block below).
 
   // ── Document Loading (GSI-based, paginated with cap) ────────────────
 
@@ -368,6 +268,23 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       setIsDocumentsListLoading(true);
     }
   }, [customDateRange]);
+
+  // ── Polling (httpapi transport — replaces onCreate/onUpdate subscriptions) ──
+  // Silently re-fetch the active date range on an interval. sendSetDocumentsForDateRange
+  // feeds setDocumentsDeduped, whose merge logic preserves rich detail already
+  // loaded — so list rows update (status, new docs) without wiping open-document
+  // detail. Only runs once the list has actually been requested, and the shared
+  // usePolling hook pauses while the tab is hidden.
+  const pollDocuments = useCallback(() => {
+    if (!hasListBeenRequestedRef.current) return;
+    const dateRange = customDateRangeRef.current || getDateRangeForPeriod(periodsToLoad);
+    void sendSetDocumentsForDateRange(dateRange);
+  }, [periodsToLoad]);
+
+  usePolling(pollDocuments, {
+    enabled: true,
+    intervalMs: DOCUMENT_LIST_POLL_INTERVAL_MS,
+  });
 
   // ── Mutations ──────────────────────────────────────────────────────────
 

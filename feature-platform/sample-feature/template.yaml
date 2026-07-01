@@ -187,7 +187,8 @@ Resources:
       RetentionInDays: 30
 
   ###########################################################################
-  # UI deployer: copies the UMD bundle + registers the feature via AppSync.
+  # UI deployer: copies the UMD bundle + registers the feature by directly
+  # invoking the host's registerFeature resolver Lambda.
   # Identical to feature-template/ui-deployer.
   ###########################################################################
   UiDeployerRole:
@@ -230,19 +231,18 @@ Resources:
                 Resource: !Sub
                   - 'arn:${AWS::Partition}:s3:::${Bucket}/features/${FeatureId}/*'
                   - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-WebUIBucketName' }
-        - PolicyName: InvokeAppSync
+        - PolicyName: InvokeRegisterFeature
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
+              # Direct Lambda invoke of the host's registerFeature resolver
+              # (handles both registerFeature and unregisterFeature fields). The
+              # AppSync transport was removed — the ui-deployer invokes this
+              # function with the resolver event shape {info, arguments, identity}.
               - Effect: Allow
-                Action: appsync:GraphQL
+                Action: lambda:InvokeFunction
                 Resource:
-                  - !Sub
-                    - '${ApiArn}/types/Mutation/fields/registerFeature'
-                    - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
-                  - !Sub
-                    - '${ApiArn}/types/Mutation/fields/unregisterFeature'
-                    - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
+                  - { 'Fn::ImportValue': !Sub '${MainStackName}-RegisterFeatureFunctionArn' }
 
   UiDeployerFunction:
     Type: AWS::Serverless::Function
@@ -262,7 +262,7 @@ Resources:
           FEATURE_BUCKET: !Ref FeatureBucket
           # Baked at publish time (see top-of-file note) — NOT a CFN param.
           FEATURE_ARTIFACT_PREFIX: '<FEATURE_ARTIFACT_PREFIX_TOKEN>'
-          APPSYNC_API_URL: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiUrl' }
+          REGISTER_FEATURE_FUNCTION_ARN: { 'Fn::ImportValue': !Sub '${MainStackName}-RegisterFeatureFunctionArn' }
           FEATURE_API_ENDPOINT: !GetAtt FeatureApi.ApiEndpoint
           LOG_LEVEL: !Ref LogLevel
 

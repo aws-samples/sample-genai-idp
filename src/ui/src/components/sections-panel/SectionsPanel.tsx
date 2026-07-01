@@ -20,7 +20,7 @@ import {
   Badge,
 } from '@cloudscape-design/components';
 import type { ButtonDropdownProps } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
 import FileViewer from '../document-viewer/JSONViewer';

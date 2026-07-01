@@ -55,6 +55,10 @@ export default defineConfig({
               slug: "json-schema-migration",
             },
             { label: "Web UI", slug: "web-ui" },
+            {
+              label: "UI ⇄ Backend Transport (AppSync → REST)",
+              slug: "migration-appsync-to-rest",
+            },
             { label: "IDP CLI", slug: "idp-cli" },
             { label: "IDP SDK", slug: "idp-sdk" },
             { label: "idp_common API Reference", slug: "idpcommon-api-reference" },

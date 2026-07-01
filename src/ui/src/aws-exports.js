@@ -9,13 +9,21 @@ const {
   VITE_USER_POOL_ID,
   VITE_USER_POOL_CLIENT_ID,
   VITE_IDENTITY_POOL_ID,
-  VITE_APPSYNC_GRAPHQL_URL,
+  // HTTP API base URL + Lambda streaming endpoint. The thin REST client
+  // (src/api/) posts queries/mutations to ${VITE_API_BASE_URL}/op/<field>;
+  // chat streams come from VITE_STREAM_URL. (AppSync has been removed.)
+  VITE_API_BASE_URL,
+  VITE_STREAM_URL,
   VITE_AWS_REGION,
   VITE_COGNITO_DOMAIN,
   VITE_EXTERNAL_IDP_NAME,
   VITE_EXTERNAL_IDP_AUTO_LOGIN,
   VITE_CLOUDFRONT_DOMAIN,
 } = import.meta.env;
+
+export const apiBaseUrl = VITE_API_BASE_URL || '';
+export const streamUrl = VITE_STREAM_URL || '';
+export const awsRegion = VITE_AWS_REGION;
 
 // Build OAuth config only when an external IdP is configured.
 // Cognito matches redirect_uri case-sensitively against its registered
@@ -51,9 +59,6 @@ const awsmobile = {
     passwordPolicyCharacters: [],
   },
   aws_cognito_verification_mechanisms: ['EMAIL'],
-  aws_appsync_graphqlEndpoint: VITE_APPSYNC_GRAPHQL_URL,
-  aws_appsync_region: VITE_AWS_REGION,
-  aws_appsync_authenticationType: 'AMAZON_COGNITO_USER_POOLS',
 };
 
 export default awsmobile;

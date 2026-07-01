@@ -2,13 +2,19 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
   Feature Platform extensions — nested stack deployed from the main IDP stack
-  when EnableFeaturePlatform=true. Adds the InstalledFeatures table, 4 AppSync
-  resolvers + Lambdas, and the prefix-scoped bucket policy that lets feature
-  stacks write their UI bundles under features/<id>/* in the main WebUIBucket.
+  when EnableFeaturePlatform=true. Adds the InstalledFeatures table, the
+  feature-platform resolver Lambdas, and the prefix-scoped bucket policy that
+  lets feature stacks write their UI bundles under features/<id>/* in the main
+  WebUIBucket.
+
+  The 6 UI-facing fields are served by the main stack's HTTP API dispatcher
+  (their function ARNs flow up to the dispatcher's FIELD_FUNCTION_MAP via stack
+  Outputs). The 6 install-hook fields are invoked directly (Lambda Invoke) by
+  feature stacks at install time, using the function ARN Exports below.
 
   Nothing here is destructive: the template is purely additive. It references
-  the main stack's existing GraphQLApi, WebUIBucket, UserPool, UsersTable via
-  parameters — the main stack passes !Ref / !GetAtt values through.
+  the main stack's existing WebUIBucket, UserPool via parameters — the main
+  stack passes !Ref / !GetAtt values through.
 
 Parameters:
 
@@ -17,18 +23,6 @@ Parameters:
     Description: Name of the parent IDP stack. Stamped into CloudFormation
       Console quick-create URLs for feature stacks so they can look up the
       main stack's Exports.
-
-  GraphQLApiId:
-    Type: String
-    Description: AppSync API id of the main stack's GraphQL API.
-
-  GraphQLApiArn:
-    Type: String
-    Description: AppSync API ARN of the main stack's GraphQL API.
-
-  AppSyncApiUrl:
-    Type: String
-    Description: AppSync API URL (https://xxx.appsync-api.<region>.amazonaws.com/graphql).
 
   UserPoolId:
     Type: String
@@ -532,235 +526,6 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
 
   ###########################################################################
-  # AppSync plumbing: 1 service role + 1 Lambda data source per Lambda +
-  # resolvers wired to Query/Mutation field names matching the schema fragment.
-  ###########################################################################
-  AppSyncServiceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal: { Service: !Sub "appsync.${AWS::URLSuffix}" }
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: InvokeFeaturePlatformLambdas
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: lambda:InvokeFunction
-                Resource:
-                  - !GetAtt ListInstalledFeaturesFunction.Arn
-                  - !GetAtt ListCatalogFeaturesFunction.Arn
-                  - !GetAtt RegisterFeatureFunction.Arn
-                  - !GetAtt GetFeatureLaunchUrlFunction.Arn
-                  - !GetAtt CheckFeatureEntitlementFunction.Arn
-                  - !GetAtt SubscribeFeatureFunction.Arn
-                  - !GetAtt UnsubscribeFeatureFunction.Arn
-              - !If
-                - HasConfigurationTable
-                - Effect: Allow
-                  Action: lambda:InvokeFunction
-                  Resource:
-                    - !GetAtt RegisterFeatureHooksFunction.Arn
-                    - !GetAtt ApplyFeatureConfigPresetFunction.Arn
-                - !Ref AWS::NoValue
-
-  ListInstalledFeaturesDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      Name: FeaturePlatformListInstalledFeatures
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt ListInstalledFeaturesFunction.Arn
-
-  ListCatalogFeaturesDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      Name: FeaturePlatformListCatalogFeatures
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt ListCatalogFeaturesFunction.Arn
-
-  RegisterFeatureDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      Name: FeaturePlatformRegisterFeature
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt RegisterFeatureFunction.Arn
-
-  GetFeatureLaunchUrlDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      Name: FeaturePlatformGetLaunchUrl
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt GetFeatureLaunchUrlFunction.Arn
-
-  CheckFeatureEntitlementDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      Name: FeaturePlatformCheckEntitlement
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt CheckFeatureEntitlementFunction.Arn
-
-  SubscribeFeatureDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      Name: FeaturePlatformSubscribeFeature
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt SubscribeFeatureFunction.Arn
-
-  UnsubscribeFeatureDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      Name: FeaturePlatformUnsubscribeFeature
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt UnsubscribeFeatureFunction.Arn
-
-  ListInstalledFeaturesResolver:
-    Type: AWS::AppSync::Resolver
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      TypeName: Query
-      FieldName: listInstalledFeatures
-      DataSourceName: !GetAtt ListInstalledFeaturesDataSource.Name
-
-  ListCatalogFeaturesResolver:
-    Type: AWS::AppSync::Resolver
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      TypeName: Query
-      FieldName: listCatalogFeatures
-      DataSourceName: !GetAtt ListCatalogFeaturesDataSource.Name
-
-  CheckFeatureEntitlementResolver:
-    Type: AWS::AppSync::Resolver
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      TypeName: Query
-      FieldName: checkFeatureEntitlement
-      DataSourceName: !GetAtt CheckFeatureEntitlementDataSource.Name
-
-  GetFeatureLaunchUrlResolver:
-    Type: AWS::AppSync::Resolver
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      TypeName: Query
-      FieldName: getFeatureLaunchUrl
-      DataSourceName: !GetAtt GetFeatureLaunchUrlDataSource.Name
-
-  RegisterFeatureResolver:
-    Type: AWS::AppSync::Resolver
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      TypeName: Mutation
-      FieldName: registerFeature
-      DataSourceName: !GetAtt RegisterFeatureDataSource.Name
-
-  UnregisterFeatureResolver:
-    Type: AWS::AppSync::Resolver
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      TypeName: Mutation
-      FieldName: unregisterFeature
-      DataSourceName: !GetAtt RegisterFeatureDataSource.Name
-
-  SubscribeFeatureResolver:
-    Type: AWS::AppSync::Resolver
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      TypeName: Mutation
-      FieldName: subscribeFeature
-      DataSourceName: !GetAtt SubscribeFeatureDataSource.Name
-
-  UnsubscribeFeatureResolver:
-    Type: AWS::AppSync::Resolver
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      TypeName: Mutation
-      FieldName: unsubscribeFeature
-      DataSourceName: !GetAtt UnsubscribeFeatureDataSource.Name
-
-  RegisterFeatureHooksDataSource:
-    Type: AWS::AppSync::DataSource
-    Condition: HasConfigurationTable
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      Name: FeaturePlatformRegisterFeatureHooks
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt RegisterFeatureHooksFunction.Arn
-
-  RegisterFeatureHooksResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: HasConfigurationTable
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      TypeName: Mutation
-      FieldName: registerFeatureHooks
-      DataSourceName: !GetAtt RegisterFeatureHooksDataSource.Name
-
-  UnregisterFeatureHooksResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: HasConfigurationTable
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      TypeName: Mutation
-      FieldName: unregisterFeatureHooks
-      DataSourceName: !GetAtt RegisterFeatureHooksDataSource.Name
-
-  ApplyFeatureConfigPresetDataSource:
-    Type: AWS::AppSync::DataSource
-    Condition: HasConfigurationTable
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      Name: FeaturePlatformApplyConfigPreset
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt ApplyFeatureConfigPresetFunction.Arn
-
-  ApplyFeatureConfigPresetResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: HasConfigurationTable
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      TypeName: Mutation
-      FieldName: applyFeatureConfigPreset
-      DataSourceName: !GetAtt ApplyFeatureConfigPresetDataSource.Name
-
-  RemoveFeatureConfigPresetResolver:
-    Type: AWS::AppSync::Resolver
-    Condition: HasConfigurationTable
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      TypeName: Mutation
-      FieldName: removeFeatureConfigPreset
-      DataSourceName: !GetAtt ApplyFeatureConfigPresetDataSource.Name
-
-  ###########################################################################
   # WebUIBucket prefix-scoped policy
   # -----------------------------------------------------------------
   # This is the bucket policy **statement** that the main stack's
@@ -820,12 +585,70 @@ Outputs:
     Export:
       Name: !Sub '${MainStackName}-InstalledFeaturesTableArn'
 
-  RegisterFeatureLambdaArn:
-    Description: ARN of the registerFeature resolver Lambda. Feature stacks grant
-      lambda:InvokeFunction to their RegisterFeature custom-resource role.
+  # ----------------------------------------------------------------------- #
+  # Install-hook resolver function ARNs — re-exported so feature stacks can
+  # invoke these resolvers DIRECTLY (lambda:InvokeFunction) at install time.
+  # These 6 fields (registerFeature/unregisterFeature, registerFeatureHooks/
+  # unregisterFeatureHooks, applyFeatureConfigPreset/removeFeatureConfigPreset)
+  # are NOT served by the host's HTTP API dispatcher — they are called by the
+  # feature stack's own ui-deployer custom resource, which passes the AppSync
+  # resolver event shape {info:{fieldName}, arguments, identity}.
+  # ----------------------------------------------------------------------- #
+  RegisterFeatureFunctionArn:
+    Description: ARN of the registerFeature/unregisterFeature resolver Lambda.
+      Feature stacks grant lambda:InvokeFunction to their RegisterFeature
+      custom-resource role and invoke it directly with the resolver event shape.
     Value: !GetAtt RegisterFeatureFunction.Arn
     Export:
-      Name: !Sub '${MainStackName}-RegisterFeatureLambdaArn'
+      Name: !Sub '${MainStackName}-RegisterFeatureFunctionArn'
+
+  RegisterFeatureHooksFunctionArn:
+    Condition: HasConfigurationTable
+    Description: ARN of the registerFeatureHooks/unregisterFeatureHooks resolver
+      Lambda. Feature stacks that register pipeline hooks at install invoke this
+      directly with the resolver event shape.
+    Value: !GetAtt RegisterFeatureHooksFunction.Arn
+    Export:
+      Name: !Sub '${MainStackName}-RegisterFeatureHooksFunctionArn'
+
+  ApplyFeatureConfigPresetFunctionArn:
+    Condition: HasConfigurationTable
+    Description: ARN of the applyFeatureConfigPreset/removeFeatureConfigPreset
+      resolver Lambda. Feature stacks that bundle a config preset invoke this
+      directly with the resolver event shape.
+    Value: !GetAtt ApplyFeatureConfigPresetFunction.Arn
+    Export:
+      Name: !Sub '${MainStackName}-ApplyFeatureConfigPresetFunctionArn'
+
+  # ----------------------------------------------------------------------- #
+  # UI-facing resolver function ARNs — consumed by the MAIN template (read via
+  # !GetAtt FeaturePlatformStack.Outputs.X) and forwarded to the HTTP API
+  # dispatcher's FIELD_FUNCTION_MAP so the 6 UI fields route through the host
+  # HTTP API. Plain stack Outputs (no Export) — the parent reads them directly.
+  # ----------------------------------------------------------------------- #
+  ListCatalogFeaturesFunctionArn:
+    Description: ARN of the listCatalogFeatures resolver Lambda (HTTP API dispatcher).
+    Value: !GetAtt ListCatalogFeaturesFunction.Arn
+
+  ListInstalledFeaturesFunctionArn:
+    Description: ARN of the listInstalledFeatures resolver Lambda (HTTP API dispatcher).
+    Value: !GetAtt ListInstalledFeaturesFunction.Arn
+
+  CheckFeatureEntitlementFunctionArn:
+    Description: ARN of the checkFeatureEntitlement resolver Lambda (HTTP API dispatcher).
+    Value: !GetAtt CheckFeatureEntitlementFunction.Arn
+
+  GetFeatureLaunchUrlFunctionArn:
+    Description: ARN of the getFeatureLaunchUrl resolver Lambda (HTTP API dispatcher).
+    Value: !GetAtt GetFeatureLaunchUrlFunction.Arn
+
+  SubscribeFeatureFunctionArn:
+    Description: ARN of the subscribeFeature resolver Lambda (HTTP API dispatcher).
+    Value: !GetAtt SubscribeFeatureFunction.Arn
+
+  UnsubscribeFeatureFunctionArn:
+    Description: ARN of the unsubscribeFeature resolver Lambda (HTTP API dispatcher).
+    Value: !GetAtt UnsubscribeFeatureFunction.Arn
 
   WebUIBucketName:
     Description: Re-export of the main stack's WebUIBucket name (feature stacks
@@ -839,19 +662,6 @@ Outputs:
     Value: !Ref WebUIBucketArn
     Export:
       Name: !Sub '${MainStackName}-WebUIBucketArn'
-
-  AppSyncApiUrl:
-    Description: Re-export of main stack's AppSync API URL.
-    Value: !Ref AppSyncApiUrl
-    Export:
-      Name: !Sub '${MainStackName}-AppSyncApiUrl'
-
-  AppSyncApiArn:
-    Description: Re-export of main stack's AppSync API ARN (feature stacks grant
-      appsync:GraphQL on this for their RegisterFeature custom-resource role).
-    Value: !Ref GraphQLApiArn
-    Export:
-      Name: !Sub '${MainStackName}-AppSyncApiArn'
 
   UserPoolId:
     Description: Re-export of main stack's Cognito User Pool id (feature APIs
