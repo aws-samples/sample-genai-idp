@@ -841,29 +841,6 @@ class ClassificationConfig(BaseModel):
         return bool(v)
 
 
-class AssessmentConfig(BaseModel):
-    """Standalone Assessment *step* hook carrier (v0.6, slimmed).
-
-    In v0.6 ALL confidence/geometry settings moved under ``extraction`` — the
-    inference knobs to ``extraction.confidence``, geometry to
-    ``extraction.geometry``, and HITL to top-level ``hitl``. Whether assessment
-    runs at all is governed solely by ``extraction.confidence.enabled`` (the
-    standalone step also auto-bypasses once extraction has emitted
-    explainability_info). This block therefore survives ONLY as the carrier for
-    ``postHook`` — the ``postAssessment`` pipeline-hook point, which the Feature
-    Platform dispatcher resolves single-level to ``assessment.postHook``. It will
-    be removed entirely when the standalone step is retired (follow-up PR).
-    ``extra='allow'`` so any not-yet-migrated legacy keys round-trip harmlessly.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    postHook: List[PipelineHook] = Field(  # noqa: N815 — matches stored config key
-        default_factory=list,
-        description="Pipeline hooks invoked after the Assessment step (Feature Platform)",
-    )
-
-
 class SummarizationConfig(BaseModel):
     """Document summarization configuration"""
 
@@ -2124,15 +2101,6 @@ class IDPConfig(BaseModel):
     )
     extraction: ExtractionConfig = Field(
         default_factory=ExtractionConfig, description="Extraction configuration"
-    )
-    assessment: AssessmentConfig = Field(
-        default_factory=AssessmentConfig,
-        description=(
-            "Standalone Assessment step carrier (v0.6, slimmed): step enable + "
-            "postAssessment hooks only. Confidence inference knobs live under "
-            "extraction.confidence; geometry under extraction.geometry; HITL "
-            "under top-level hitl."
-        ),
     )
     hitl: HITLConfig = Field(
         default_factory=HITLConfig,

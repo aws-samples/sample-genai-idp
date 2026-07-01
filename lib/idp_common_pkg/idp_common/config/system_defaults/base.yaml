@@ -15,7 +15,6 @@
 #   - base-extraction.yaml:        LLM extraction settings
 #   - base-confidence.yaml:        Per-field confidence assessment (v0.6) + hitl
 #   - base-geometry.yaml:          Field bounding-box geometry mode (v0.6)
-#   - base-assessment.yaml:        Standalone Assessment step carrier (slimmed)
 #   - base-summarization.yaml:     Document summarization
 #   - base-chat.yaml:              Chat-with-Document (interactive Q&A)
 #   - base-evaluation.yaml:        Evaluation/testing
@@ -40,7 +39,6 @@ _inherits:
   - base-extraction.yaml
   - base-confidence.yaml
   - base-geometry.yaml
-  - base-assessment.yaml
   - base-summarization.yaml
   - base-chat.yaml
   - base-evaluation.yaml

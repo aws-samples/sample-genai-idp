@@ -149,7 +149,6 @@
           "postOcr",
           "postClassification",
           "postExtraction",
-          "postAssessment",
           "postRuleValidation",
           "postSummarization"
         ]

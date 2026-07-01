@@ -1638,70 +1638,8 @@ Resources:
                       order: 4
           # v0.6: confidence/geometry inference knobs live under
           # extraction.confidence / extraction.geometry; HITL is the top-level
-          # 'hitl' section below. This slim block is the standalone Assessment
-          # STEP carrier: its enable flag + postAssessment pipeline hooks.
-          assessment:
-            order: 6
-            type: object
-            collapsible: true
-            defaultExpanded: false
-            sectionLabel: Assessment Step Hooks
-            description: "Post-assessment pipeline hooks (Feature Platform). Whether confidence assessment runs at all is set under Extraction → Confidence Assessment."
-            properties:
-              postHook:
-                type: array
-                collapsible: true
-                defaultExpanded: false
-                sectionLabel: Post-step pipeline hooks
-                description: >-
-                  Lambda functions invoked after this step completes,
-                  before the next step runs. Each hook receives the
-                  document state and returns a JSON-serializable result
-                  (logged for traceability). Hooks let vertical-product
-                  packs (claims, loans, etc.) inject business logic
-                  without forking the accelerator. Admins can edit, add,
-                  reorder, or disable hooks here. The Lambda function
-                  ARN must EITHER be tagged with `idp:feature-id=<anything>`
-                  (vertical packs do this automatically) OR have a function
-                  name starting with `GENAIIDP-` (admin-managed Lambdas).
-                  Functions outside both categories will be rejected by
-                  the dispatcher's IAM policy at invoke time.
-                listLabel: Post-step pipeline hooks
-                itemLabel: Hook
-                order: 99
-                items:
-                  type: object
-                  required:
-                    - featureId
-                    - arn
-                  properties:
-                    featureId:
-                      type: string
-                      description: Feature that owns this hook (label only)
-                      order: 0
-                    arn:
-                      type: string
-                      description: >-
-                        Lambda function ARN to invoke. Must either be
-                        tagged `idp:feature-id=<anything>` OR have a
-                        function name beginning with `GENAIIDP-`.
-                      order: 1
-                    order:
-                      type: number
-                      description: Execution order (lower = earlier)
-                      default: 100
-                      order: 2
-                    onError:
-                      type: string
-                      enum: ["continue", "fail", "skip-remaining"]
-                      default: continue
-                      description: Behavior when this hook errors
-                      order: 3
-                    enabled:
-                      type: boolean
-                      description: Disable without removing
-                      default: true
-                      order: 4
+          # 'hitl' section below. (The standalone 'assessment' config block and
+          # its postAssessment hook point were retired in v0.6.)
           hitl:
             order: 6.5
             type: object

@@ -62,10 +62,6 @@ _CONFIDENCE_PASSTHROUGH_KEYS = (
 )
 
 
-# Keys that legitimately survive in the slimmed v0.6 assessment carrier.
-_SLIM_ASSESSMENT_KEYS = {"postHook"}
-
-
 def _has_legacy_markers(config: Dict[str, Any]) -> bool:
     """True if the config still carries any v0.5-shaped assessment keys.
 
@@ -73,15 +69,14 @@ def _has_legacy_markers(config: Dict[str, Any]) -> bool:
     ``config_format_version == "0.6"`` (inherited from the full default) that
     still carries a v0.5-shaped ``assessment`` delta from a sparse custom
     override. Relying on the stamp alone would skip such a hybrid; the presence
-    of any legacy key forces the migration to run.
+    of any legacy key forces the migration to run. In v0.6 the entire
+    ``assessment`` block is retired, so ANY ``assessment`` key is a legacy marker.
     """
     extraction = config.get("extraction")
     if isinstance(extraction, dict) and "assessment_integration" in extraction:
         return True
-    assessment = config.get("assessment")
-    if isinstance(assessment, dict):
-        if set(assessment.keys()) - _SLIM_ASSESSMENT_KEYS:
-            return True
+    if isinstance(config.get("assessment"), dict):
+        return True
     return False
 
 
@@ -159,15 +154,12 @@ def migrate_v05_to_v06(config: Dict[str, Any]) -> Dict[str, Any]:
         existing = existing if isinstance(existing, dict) else {}
         result["hitl"] = {**hitl, **existing}
 
-    # --- slim the surviving assessment carrier (postAssessment hooks only) ---
-    # Whether assessment runs is governed by extraction.confidence.enabled; the
-    # old assessment.enabled is dropped (its value already mapped to
-    # confidence.enabled above).
-    if assessment:
-        slim: Dict[str, Any] = {}
-        if "postHook" in assessment:
-            slim["postHook"] = assessment["postHook"]
-        result["assessment"] = slim
+    # --- drop the assessment block entirely (v0.6) ---
+    # Confidence inference knobs, geometry, HITL, and enablement all moved to
+    # extraction.confidence / extraction.geometry / hitl above. The standalone
+    # `assessment` block (including its postAssessment pipeline-hook point) is
+    # retired; IDPConfig ignores any leftover on read.
+    result.pop("assessment", None)
 
     if any([confidence, geometry, hitl]):
         logger.info(

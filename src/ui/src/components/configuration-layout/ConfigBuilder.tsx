@@ -1602,19 +1602,16 @@ const ConfigBuilder = ({
     const fieldDescription = (property.description as string) || undefined;
     const constraints = getConstraintText(property);
 
-    // Stable flex wrapper prevents input remount/focus loss
-    // Input is always inside <ExtBox flex="1"> — adding/removing sibling Button
-    // doesn't unmount the input, just changes siblings
-    const inputWithActions = (
-      <ExtBox display="flex" alignItems="center">
-        <ExtBox flex="1">{input}</ExtBox>
-        {showRestoreDefault && (
-          <Button variant="link" onClick={handleRestoreDefault} className="restore-default-button" iconName="undo">
-            Restore default
-          </Button>
-        )}
-      </ExtBox>
-    );
+    // The input fills the field; the "Restore default" action lives in the
+    // FormField `secondaryControl` slot (below) so it renders reliably alongside
+    // the field description and constraint text.
+    const inputWithActions = <ExtBox flex="1">{input}</ExtBox>;
+
+    const secondaryControl = showRestoreDefault ? (
+      <Button variant="link" onClick={handleRestoreDefault} className="restore-default-button" iconName="undo">
+        Restore default
+      </Button>
+    ) : undefined;
 
     // Use standard constraints
     const finalConstraints = constraints.length > 0 ? constraints : undefined;
@@ -1639,6 +1636,7 @@ const ConfigBuilder = ({
         label={labelContent}
         description={fieldDescription}
         constraintText={finalConstraints}
+        secondaryControl={secondaryControl}
         stretch
         className={fieldClasses.join(' ')}
       >

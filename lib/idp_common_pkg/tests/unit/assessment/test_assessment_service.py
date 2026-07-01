@@ -190,7 +190,8 @@ class TestAssessmentService:
 
         assert service.region == "us-west-2"
         # Config is converted to IDPConfig model, verify it has the expected structure
-        assert hasattr(service.config, "assessment")
+        # (v0.6: confidence assessment config lives under extraction.confidence)
+        assert hasattr(service.config.extraction, "confidence")
         assert (
             service.config.extraction.confidence.model
             == mock_config["assessment"]["model"]
@@ -493,8 +494,8 @@ class TestAssessmentService:
 
         assert service.region == "us-east-1"
         assert isinstance(service.config, IDPConfig)
-        # Verify default config has assessment settings
-        assert hasattr(service.config, "assessment")
+        # Verify default config has confidence settings (v0.6: extraction.confidence)
+        assert hasattr(service.config.extraction, "confidence")
 
     def test_init_with_dict_config(self, mock_config):
         """Test initialization with dict config converts to IDPConfig."""

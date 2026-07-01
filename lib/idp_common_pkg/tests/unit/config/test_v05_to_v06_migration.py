@@ -84,20 +84,20 @@ class TestV05ToV06Migration:
         assert out["hitl"]["enabled"] is True
         assert out["hitl"]["confidence_threshold"] == "0.7"
 
-    def test_assessment_slimmed_to_hook_carrier(self):
+    def test_assessment_block_dropped_entirely(self):
         out = migrate_v05_to_v06(
             {
                 "assessment": {
-                    "enabled": False,  # dropped — enablement is confidence.enabled
-                    "model": "m",
-                    "postHook": [{"featureId": "f", "arn": "a"}],
+                    "enabled": False,  # -> confidence.enabled
+                    "model": "m",  # -> confidence.model
+                    "postHook": [{"featureId": "f", "arn": "a"}],  # dropped (v0.6)
                 }
             }
         )
-        # only the postHook carrier key survives; enabled maps to confidence.enabled
-        assert set(out["assessment"].keys()) == {"postHook"}
-        assert out["assessment"]["postHook"] == [{"featureId": "f", "arn": "a"}]
+        # the entire assessment block is retired in v0.6
+        assert "assessment" not in out
         assert out["extraction"]["confidence"]["enabled"] is False
+        assert out["extraction"]["confidence"]["model"] == "m"
 
     def test_stamps_format_version(self):
         out = migrate_v05_to_v06({"assessment": {"enabled": True}})
@@ -124,7 +124,6 @@ class TestV05ToV06Migration:
                 "geometry": {"mode": "off"},
             },
             "hitl": {"enabled": True},
-            "assessment": {"postHook": []},
         }
         out = migrate_v05_to_v06(v06)
         assert out == v06

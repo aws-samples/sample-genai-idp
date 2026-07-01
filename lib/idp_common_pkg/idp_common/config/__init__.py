@@ -14,7 +14,6 @@ from .models import (
     ConfigurationRecord,
     ExtractionConfig,
     ClassificationConfig,
-    AssessmentConfig,
     ConfidenceConfig,
     GeometryConfig,
     HITLConfig,

@@ -465,27 +465,6 @@
                                 "BackoffRate": 2.5
                             }
                         ],
-                        "Next": "PostAssessmentHook"
-                    },
-                    "PostAssessmentHook": {
-                        "Type": "Task",
-                        "Resource": "arn:aws:states:::lambda:invoke",
-                        "Parameters": {
-                            "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
-                            "Payload": {
-                                "hookPoint": "postAssessment",
-                                "executionArn.$": "$$.Execution.Id",
-                                "document.$": "$.document",
-                                "section.$": "$"
-                            }
-                        },
-                        "ResultPath": "$.HookResults",
-                        "Retry": [
-                            { "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2 }
-                        ],
-                        "Catch": [
-                            { "ErrorEquals": ["States.ALL"], "ResultPath": "$.HookResults.error", "Next": "SectionComplete" }
-                        ],
                         "Next": "SectionComplete"
                     },
                     "SectionComplete": {

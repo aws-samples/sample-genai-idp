@@ -509,10 +509,11 @@ class TestPydanticConfigModels:
         assert config.model == "LambdaHook"
         assert config.model_lambda_hook_arn is not None
 
-    def test_assessment_config_with_lambda_hook(self):
-        from idp_common.config.models import AssessmentConfig
+    def test_confidence_config_with_lambda_hook(self):
+        # v0.6: confidence assessment config is extraction.confidence
+        from idp_common.config.models import ConfidenceConfig
 
-        config = AssessmentConfig(
+        config = ConfidenceConfig(
             model="LambdaHook",
             model_lambda_hook_arn="arn:aws:lambda:us-east-1:123456789012:function:GENAIIDP-assessor",
         )

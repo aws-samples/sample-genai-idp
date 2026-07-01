@@ -284,11 +284,12 @@ class TestPipelineHookPreservation:
         "onError": "continue",
         "enabled": True,
     }
+    # v0.6: the standalone `assessment` step config was retired (confidence folded
+    # into extraction), so it no longer carries a postHook list.
     _STEPS = [
         "ocr",
         "classification",
         "extraction",
-        "assessment",
         "rule_validation",
         "summarization",
     ]
