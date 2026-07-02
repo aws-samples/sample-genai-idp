@@ -222,7 +222,7 @@ test: ## Run all tests (idp_common, cli, sdk, feature platform, capacity, circui
 	@echo "Running Chat-with-Document Lambda tests..."
 	$(PYTHON) -m pytest -v \
 	    src/lambda/chat_with_document_processor/tests \
-	    nested/appsync/src/lambda/send_chat_document_message_resolver/tests
+	    nested/api-resolvers/src/lambda/send_chat_document_message_resolver/tests
 	@echo "Validating config library files..."
 	$(PYTHON) -m pytest config_library/test_config_library.py -v
 
