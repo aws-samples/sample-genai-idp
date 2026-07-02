@@ -327,12 +327,14 @@ Resources:
                     order: 3
               backend:
                 type: string
+                title: OCR backend
                 description: "OCR backend to use: 'textract' for AWS Textract, 'bedrock' for LLM-based OCR, 'none' for image-only processing without OCR"
                 enum: ["textract", "bedrock", "none"]
                 default: "textract"
-                order: 3
+                order: 1
               model_id:
                 type: string
+                title: Model
                 description: "Bedrock model ID (only used if backend is 'bedrock'). Select 'LambdaHook' to use a custom Lambda function for inference."
                 enum:
                   - "LambdaHook"
@@ -394,30 +396,22 @@ Resources:
                 dependsOn: { field: "backend", value: "bedrock" }
               model_lambda_hook_arn:
                 type: string
+                title: Model Lambda hook ARN
                 description: "Lambda function ARN for custom inference (used when model_id is 'LambdaHook'). Function name must start with GENAIIDP-."
                 default: ""
-                order: 2
+                order: 3
                 dependsOn: { field: "model_id", value: "LambdaHook" }
-              system_prompt:
-                type: string
-                description: "System prompt for Bedrock OCR (only used if backend is 'bedrock')"
-                default: "You are an expert OCR system. Extract all text from the provided image accurately, preserving layout where possible."
-                order: 8
-                dependsOn: { field: "backend", value: "bedrock" }
-              task_prompt:
-                type: string
-                description: "Task prompt for Bedrock OCR (only used if backend is 'bedrock')"
-                default: "Extract all text from this document image. Preserve the layout, including paragraphs, tables, and formatting."
-                order: 9
-                dependsOn: { field: "backend", value: "bedrock" }
               reasoning_effort:
                 type: string
+                title: Reasoning effort
                 enum: ["minimal", "low", "medium", "high"]
                 default: "medium"
                 description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
-                order: 3
+                order: 4
+                dependsOn: { field: "model_id", valuePrefix: "openai." }
               features:
                 type: array
+                title: Textract features
                 listLabel: "Textract Features"
                 itemLabel: "Feature"
                 description: "Textract features (only used if backend is 'textract')"
@@ -432,6 +426,22 @@ Resources:
                       type: string
                       description: "Feature - select one of the supported OCR feature types"
                       enum: ["TABLES", "FORMS", "SIGNATURES", "LAYOUT"]
+              system_prompt:
+                type: string
+                title: System prompt
+                format: textarea
+                description: "System prompt for Bedrock OCR (only used if backend is 'bedrock')"
+                default: "You are an expert OCR system. Extract all text from the provided image accurately, preserving layout where possible."
+                order: 8
+                dependsOn: { field: "backend", value: "bedrock" }
+              task_prompt:
+                type: string
+                title: Task prompt
+                format: textarea
+                description: "Task prompt for Bedrock OCR (only used if backend is 'bedrock')"
+                default: "Extract all text from this document image. Preserve the layout, including paragraphs, tables, and formatting."
+                order: 9
+                dependsOn: { field: "backend", value: "bedrock" }
               postHook:
                 type: array
                 collapsible: true
@@ -502,22 +512,29 @@ Resources:
               properties:
                 name:
                   type: string
+                  title: Class name
                   description: Class name
+                  order: 0
                 description:
                   type: string
+                  title: Class description
                   description: Class description. Instruct LLM how to identify the class from the context provided in the classification prompt.
+                  order: 1
                 document_name_regex:
                   type: string
+                  title: Document name regex
                   description: "Optional regex pattern to match against document ID/name. When matched, all pages will be classified as this class type without LLM processing. Use only when all pages should be the same class."
-                  order: 2.5
+                  order: 2
                 document_page_content_regex:
                   type: string
+                  title: Page content regex
                   description: "Optional regex pattern to match against page content text. When matched during multi-modal page-level classification, the page will be classified as this class type without LLM processing."
-                  order: 2.6
+                  order: 3
                 extraction_model:
                   type: string
+                  title: Extraction model override
                   description: "Optional per-class extraction model override. When set, this model is used for extraction instead of the global extraction.model. Useful for classes that benefit from a different model. NOTE: OpenAI GPT-5.x models (openai.gpt-5.*) are NOT compatible with 'advanced' Extraction mode; that combination is rejected by config validation."
-                  order: 2.7
+                  order: 4
                   enum:
                     - ""
                     - "us.amazon.nova-lite-v1:0"
@@ -803,6 +820,7 @@ Resources:
                     order: 1
               model:
                 type: string
+                title: Model
                 description: "Model identifier. Select 'LambdaHook' to use a custom Lambda function for inference."
                 enum:
                   - "LambdaHook"
@@ -868,12 +886,14 @@ Resources:
                 order: 1
               model_lambda_hook_arn:
                 type: string
+                title: Model Lambda hook ARN
                 description: "Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-."
                 default: ""
-                order: 2
+                order: 3
                 dependsOn: { field: "model", value: "LambdaHook" }
               classificationMethod:
                 type: string
+                title: Classification method
                 description: "Classification methodology to use"
                 enum:
                   [
@@ -883,76 +903,92 @@ Resources:
                 order: 2
               maxPagesForClassification:
                 type: string
+                title: Pages to classify
                 description: "Number of pages to use for classification [When set to a number, forces the entire document to be assigned a single class]"
                 enum: ["ALL", "1", "2", "3", "5", "10"]
-                order: 3
+                order: 4
               sectionSplitting:
                 type: string
+                title: Section splitting
                 description: "Section splitting strategy: 'disabled' (entire doc as one section), 'page' (one section per page - prevents joining same-type documents), 'llm_determined' (use LLM boundary detection - default)"
                 enum: ["disabled", "page", "llm_determined"]
                 default: "llm_determined"
-                order: 3.5
+                order: 5
               contextPagesCount:
                 type: integer
+                title: Context pages
                 description: "Number of surrounding pages to include as context for multi-modal page-level classification. Value of 0 means no additional context (default). Value of 1 includes 1 page before and after. Value of 2 includes 2 pages before and after. Only applies to multimodalPageLevelClassification method."
                 minimum: 0
                 maximum: 5
                 default: 0
-                order: 3.6
+                order: 6
                 dependsOn: { field: "classificationMethod", value: "multimodalPageLevelClassification" }
               enforceValidClasses:
                 type: boolean
+                title: Enforce valid classes
                 description: "When enabled, the predicted class is validated against the defined class vocabulary. If the model returns a class that is not in the list, it is re-prompted with the valid choices and retried (see Max Validation Retries). If retries are exhausted, the page is assigned the Invalid Class Fallback and flagged with a validation error. When disabled, an out-of-vocabulary prediction is used as-is (legacy behavior). Only applies to multimodalPageLevelClassification."
                 default: true
-                order: 3.7
+                order: 7
                 dependsOn: { field: "classificationMethod", value: "multimodalPageLevelClassification" }
               maxValidationRetries:
                 type: integer
+                title: Max validation retries
                 description: "Maximum number of times to re-prompt the model when it returns a class outside the defined vocabulary. Only used when Enforce Valid Classes is enabled. 0 disables retries (a single invalid prediction goes straight to the fallback)."
                 minimum: 0
                 maximum: 5
                 default: 2
-                order: 3.8
+                order: 8
                 dependsOn: { field: "enforceValidClasses", value: true }
               invalidClassFallback:
                 type: string
+                title: Invalid class fallback
                 description: "Class label assigned to a page when all validation retries are exhausted. Should be one of your defined classes, or the built-in 'unclassified'. Only used when Enforce Valid Classes is enabled."
                 default: "unclassified"
-                order: 3.9
+                order: 9
                 dependsOn: { field: "enforceValidClasses", value: true }
               temperature:
                 type: number
+                title: Temperature
                 minimum: 0
                 maximum: 1
                 description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 4
+                order: 10
               top_k:
                 type: integer
+                title: Top K
                 minimum: 1
                 description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 5
+                order: 11
               top_p:
                 type: number
+                title: Top P
                 description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 6
+                order: 12
               max_tokens:
                 type: number
+                title: Max tokens
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
-                order: 7
+                order: 13
               reasoning_effort:
                 type: string
+                title: Reasoning effort
                 enum: ["minimal", "low", "medium", "high"]
                 default: "medium"
                 description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
-                order: 7.5
+                order: 14
+                dependsOn: { field: "model", valuePrefix: "openai." }
               system_prompt:
                 type: string
+                title: System prompt
+                format: textarea
                 description: System prompt
-                order: 8
+                order: 15
               task_prompt:
                 type: string
+                title: Task prompt
+                format: textarea
                 description: Task prompt - include placeholders {CLASS_NAMES_AND_DESCRIPTIONS} (replaced with the class names and descriptions for all specified classes), {FEW_SHOT_EXAMPLES} (replaced by classPrompt and image data from examples in class definitions), {DOCUMENT_TEXT} (replaced by the OCR output), and for multi-modal classification {DOCUMENT_IMAGE} (replaced by the page image attachment). Optionally include {CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS} (replaced with class names, descriptions, AND schema attribute field names — useful for disambiguating classes with similar names but different extraction schemas; opt-in and cost-neutral when not referenced). Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
-                order: 9
+                order: 16
               postHook:
                 type: array
                 collapsible: true
@@ -1059,12 +1095,12 @@ Resources:
                     minimum: 0
                     maximum: 100
                     default: 5
-                    order: 2.5
+                    order: 3
                   table_parsing:
                     type: object
                     sectionLabel: Table Parsing Tool
                     description: "Only used when Agentic Extraction is enabled. Gives the agent a deterministic parse_table tool that extracts well-formatted Markdown tables from OCR output without LLM inference - faster and more reliable for large/dense tables (bank statements, transaction logs). The agent decides when to use it based on table quality."
-                    order: 3
+                    order: 4
                     properties:
                       enabled:
                         type: boolean
@@ -1106,7 +1142,7 @@ Resources:
                     type: object
                     sectionLabel: Schema Validation & Escalation
                     description: "Only used when Agentic Extraction is enabled. Validates the agent's output against the full class JSON Schema (notably 'format' keywords like date/email/uuid that the model's type validation does not enforce) and optionally escalates failing fields to a stronger model. Off by default."
-                    order: 4
+                    order: 5
                     properties:
                       enabled:
                         type: boolean
@@ -1599,7 +1635,7 @@ Resources:
             collapsible: true
             defaultExpanded: false
             sectionLabel: Human-in-the-Loop (HITL) Review
-            description: "Route low-confidence extractions to human review. Requires per-field confidence (see Extraction → Confidence Assessment)."
+            description: "Route low-confidence extractions to human review. Requires Confidence Assessment to be enabled (Extraction → Confidence scoring mode must not be 'off') so fields carry a confidence score."
             properties:
               enabled:
                 type: boolean
@@ -1615,6 +1651,7 @@ Resources:
                 maximum: 1.0
                 default: 0.8
                 order: 1
+                hideWhen: { field: "hitl.enabled", value: false }
           summarization:
             order: 7
             type: object
@@ -1629,7 +1666,9 @@ Resources:
                 order: 0
               model:
                 type: string
+                title: Model
                 description: "Bedrock model ID. Select 'LambdaHook' to use a custom Lambda function for inference."
+                dependsOn: { field: "summarization.enabled", value: true }
                 enum:
                   [
                     "LambdaHook",
@@ -1691,36 +1730,50 @@ Resources:
                 dependsOn: { field: "model", value: "LambdaHook" }
               temperature:
                 type: number
+                title: Temperature
                 description: "Sampling temperature. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 3
+                dependsOn: { field: "summarization.enabled", value: true }
               top_k:
                 type: number
+                title: Top K
                 description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 4
+                dependsOn: { field: "summarization.enabled", value: true }
               top_p:
                 type: number
+                title: Top P
                 description: "Sampling Top P. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 5
+                dependsOn: { field: "summarization.enabled", value: true }
               max_tokens:
                 type: number
+                title: Max tokens
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                 order: 6
+                dependsOn: { field: "summarization.enabled", value: true }
               reasoning_effort:
                 type: string
+                title: Reasoning effort
                 enum: ["minimal", "low", "medium", "high"]
                 default: "medium"
                 description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
-                order: 6.5
+                order: 7
+                dependsOn: { field: "model", valuePrefix: "openai." }
               system_prompt:
                 type: string
+                title: System prompt
                 format: textarea
                 description: System prompt
-                order: 7
+                order: 8
+                dependsOn: { field: "summarization.enabled", value: true }
               task_prompt:
                 type: string
+                title: Task prompt
                 format: textarea
                 description: Task prompt - supports parameters {DOCUMENT_TEXT} and {EXTRACTION_RESULTS}. Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
-                order: 8
+                order: 9
+                dependsOn: { field: "summarization.enabled", value: true }
               postHook:
                 type: array
                 collapsible: true
@@ -1784,14 +1837,21 @@ Resources:
             properties:
               enabled:
                 type: boolean
+                title: Enable evaluation
                 description: Enable or disable evaluation processing
                 default: true
                 order: 0
               llm_method:
                 type: object
+                order: 1
+                sectionLabel: LLM method
+                collapsible: false
+                description: "Model and prompts used to score extraction accuracy against ground truth (LLM-as-judge)."
+                dependsOn: { field: "evaluation.enabled", value: true }
                 properties:
                   model:
                     type: string
+                    title: Model
                     description: Bedrock model ID
                     enum:
                       [
@@ -1847,38 +1907,46 @@ Resources:
                     order: 1
                   temperature:
                     type: number
+                    title: Temperature
                     description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                     default: 0.0
                     order: 2
                   top_k:
                     type: number
+                    title: Top K
                     description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                     default: 250
                     order: 3
                   top_p:
                     type: number
+                    title: Top P
                     description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                     order: 4
                   max_tokens:
                     type: number
+                    title: Max tokens
                     description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                     order: 5
                   reasoning_effort:
                     type: string
+                    title: Reasoning effort
                     enum: ["minimal", "low", "medium", "high"]
                     default: "medium"
                     description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
-                    order: 5.5
+                    order: 6
+                    dependsOn: { field: "model", valuePrefix: "openai." }
                   system_prompt:
                     type: string
+                    title: System prompt
                     format: textarea
                     description: System prompt for LLM evaluation
-                    order: 6
+                    order: 7
                   task_prompt:
                     type: string
+                    title: Task prompt
                     format: textarea
                     description: Task prompt for LLM evaluation - supports placeholders {DOCUMENT_CLASS}, {ATTRIBUTE_NAME}, {ATTRIBUTE_DESCRIPTION}, {EXPECTED_VALUE} and {ACTUAL_VALUE}
-                    order: 7
+                    order: 8
           discovery:
             order: 10
             type: object
@@ -2473,12 +2541,15 @@ Resources:
             properties:
               enabled:
                 type: boolean
+                title: Enable chat
                 description: Enable or disable the Chat-with-Document feature
                 default: true
                 order: 0
               model:
                 type: string
+                title: Model
                 description: "Bedrock model ID for chat. A large-context model is recommended because the entire document text is sent in one prompt. Select 'LambdaHook' to use a custom Lambda function for inference."
+                dependsOn: { field: "chat.enabled", value: true }
                 enum:
                   [
                     "LambdaHook",
@@ -2534,31 +2605,43 @@ Resources:
                 dependsOn: { field: "model", value: "LambdaHook" }
               temperature:
                 type: number
+                title: Temperature
                 description: "Sampling temperature. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 3
+                dependsOn: { field: "chat.enabled", value: true }
               top_k:
                 type: number
+                title: Top K
                 description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 4
+                dependsOn: { field: "chat.enabled", value: true }
               top_p:
                 type: number
+                title: Top P
                 description: "Sampling Top P. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 5
+                dependsOn: { field: "chat.enabled", value: true }
               max_tokens:
                 type: number
+                title: Max tokens
                 description: "Maximum number of output tokens for the chat response. Ensure this does not exceed the selected model's limit."
                 order: 6
+                dependsOn: { field: "chat.enabled", value: true }
               reasoning_effort:
                 type: string
+                title: Reasoning effort
                 enum: ["minimal", "low", "medium", "high"]
                 default: "medium"
                 description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
-                order: 6.5
+                order: 7
+                dependsOn: { field: "model", valuePrefix: "openai." }
               system_prompt:
                 type: string
+                title: System prompt
                 format: textarea
                 description: System prompt for the Chat-with-Document assistant
-                order: 7
+                order: 8
+                dependsOn: { field: "chat.enabled", value: true }
           rule_validation:
             order: 8
             type: object

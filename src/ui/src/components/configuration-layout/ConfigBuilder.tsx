@@ -740,7 +740,14 @@ const ConfigBuilder = ({
     // extraction.confidence.mode === "integrated").
     if (property.hideWhen) {
       const hideVal = getValueAtPath(formValues, property.hideWhen.field);
-      if (hideVal === property.hideWhen.value) {
+      // Normalize string "true"/"false" to booleans on BOTH sides: schema values
+      // deserialize from DynamoDB as strings, while form state holds real booleans,
+      // so a boolean toggle (e.g. hitl.enabled) would never strict-equal 'false'.
+      const normalizeBool = (v: unknown): unknown => {
+        if (typeof v === 'string' && (v === 'true' || v === 'false')) return v === 'true';
+        return v;
+      };
+      if (normalizeBool(hideVal) === normalizeBool(property.hideWhen.value)) {
         return null;
       }
     }
@@ -1613,7 +1620,10 @@ const ConfigBuilder = ({
       );
     } else if (
       property.format !== 'single-line' &&
-      (property.format === 'text-area' || path.toLowerCase().includes('prompt') || path.toLowerCase().includes('description'))
+      (property.format === 'textarea' ||
+        property.format === 'text-area' || // back-compat alias for 'textarea'
+        path.toLowerCase().includes('prompt') ||
+        path.toLowerCase().includes('description'))
     ) {
       input = (
         <Textarea
