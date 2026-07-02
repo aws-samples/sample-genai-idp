@@ -175,9 +175,7 @@ class StackDeployer:
         # only set the Tags key when the caller explicitly provides tags; omitting
         # it on update preserves the stack's existing tags.
         if tags:
-            common_params["Tags"] = [
-                {"Key": k, "Value": v} for k, v in tags.items()
-            ]
+            common_params["Tags"] = [{"Key": k, "Value": v} for k, v in tags.items()]
 
         try:
             # Capture deploy start time for filtering stale events in failure analysis
