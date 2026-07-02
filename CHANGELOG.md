@@ -5,6 +5,10 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Changed
+
+- **`config_library` sample configs rewritten to v0.6 shape** — The 11 bundled sample/preset configs that still carried a top-level `assessment` block are rewritten to the v0.6 shape (`extraction.confidence` / `extraction.geometry`): the confidence-disabled samples become `extraction.confidence.mode: 'off'`, and the GovCloud preset's pinned assessment model moves to `extraction.confidence.{model,max_tokens}`. These configs already worked via migrate-on-read; this is a cosmetic cleanup so the shipped bodies match the current format. Runtime behavior is unchanged — verified each rewritten config merges+validates to an IDPConfig identical to the original (the only differences are inert `confidence.model`/`task_prompt` fields on `mode: 'off'` samples, where confidence never runs).
+
 ### Added
 
 - **`idp-cli config-validate --emit-migrated <path>`** — Writes the config migrated to the current format (e.g. v0.5 → v0.6) to a file, so you can pre-migrate a saved older config file and review the v0.6-shaped result before importing it. Runs up front (works even on files that would otherwise warn about deprecated fields). Complements the server-side migrate-on-import.
