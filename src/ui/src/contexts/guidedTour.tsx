@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import AnnotationContext from '@cloudscape-design/components/annotation-context';
 import type { AnnotationContextProps } from '@cloudscape-design/components/annotation-context';
 import { DOCUMENTS_PATH } from '../routes/constants';
+import './guidedTour.css';
 
 interface TourFlags {
   customModels: boolean;
