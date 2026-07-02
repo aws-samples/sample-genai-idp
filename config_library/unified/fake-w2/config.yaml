@@ -3,8 +3,9 @@ notes: >-
   US W-2 tax documents. Uses 45 flat ground truth fields matching standard W-2 boxes.
   Source: HuggingFace singhsays/fake-w2-us-tax-form-dataset (CC0: Public Domain).
 use_bda: false
-assessment:
-  enabled: false
+extraction:
+  confidence:
+    mode: 'off'   # v0.6: confidence scoring disabled (was assessment.enabled: false)
 summarization:
   enabled: false
 

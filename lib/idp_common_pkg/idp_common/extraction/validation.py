@@ -105,15 +105,48 @@ class ValidationReport:
         }
 
 
+# Standard JSON Schema constraint keywords that are numeric but which the
+# Configuration table stores as strings. jsonschema's validators compare them
+# directly against instance values (e.g. ``len(instance) < minItems``), which
+# raises ``TypeError`` if the constraint is a string — so coerce them back.
+_NUMERIC_SCHEMA_KEYWORDS = frozenset(
+    {
+        "minItems",
+        "maxItems",
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "minLength",
+        "maxLength",
+        "minProperties",
+        "maxProperties",
+        "multipleOf",
+    }
+)
+
+
+def _coerce_numeric_keyword(key: str, value: Any) -> Any:
+    """Coerce a stringified numeric JSON Schema constraint back to a number."""
+    if key in _NUMERIC_SCHEMA_KEYWORDS and isinstance(value, str):
+        try:
+            return int(value) if value.lstrip("-").isdigit() else float(value)
+        except ValueError:
+            return value
+    return value
+
+
 def _strip_idp_extensions(schema: Any) -> Any:
     """Recursively drop ``x-aws-idp-*`` keys so only standard JSON Schema remains.
 
     Mirrors ``schema.pydantic_generator.clean_schema_for_generation`` but is
     inlined to keep this module's dependency surface limited to ``jsonschema``.
+    Also coerces stringified numeric constraint keywords (the Configuration
+    table stores them as strings) so jsonschema validators don't raise.
     """
     if isinstance(schema, dict):
         return {
-            k: _strip_idp_extensions(v)
+            k: _coerce_numeric_keyword(k, _strip_idp_extensions(v))
             for k, v in schema.items()
             if not k.startswith(_IDP_EXTENSION_PREFIX)
         }

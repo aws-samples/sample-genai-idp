@@ -11,21 +11,20 @@ and streams responses in real-time via AppSync subscriptions.
 import asyncio
 import json
 import logging
-import os
 import re
 import uuid
 
 import boto3
 import botocore.exceptions
-
 from idp_common.agents.analytics import get_analytics_config
 from idp_common.agents.common.config import configure_logging
 from idp_common.agents.factory import agent_factory
-from idp_common.appsync.client import AppSyncClient
 
 # Import Bedrock error handling
 try:
-    from idp_common.agents.common.bedrock_error_messages import BedrockErrorMessageHandler
+    from idp_common.agents.common.bedrock_error_messages import (
+        BedrockErrorMessageHandler,
+    )
     _BEDROCK_ERROR_HANDLING_AVAILABLE = True
 except ImportError:
     _BEDROCK_ERROR_HANDLING_AVAILABLE = False
@@ -45,59 +44,45 @@ _lambda_invocation_count = 0
 # Global client cache for warm Lambda containers
 # Reusing clients significantly reduces latency in warm starts
 _client_cache = {}
-_appsync_client_cache = None
 
 def get_cached_boto3_session():
     """
     Get or create a cached boto3 session for warm Lambda containers.
-    
+
     Returns:
         Cached boto3.Session instance
     """
     global _client_cache
-    
+
     if 'session' not in _client_cache:
         _client_cache['session'] = boto3.Session()
         logger.info("Created new boto3 session (will be cached for warm starts)")
     else:
         logger.info("Reusing cached boto3 session from warm container")
-    
+
     return _client_cache['session']
 
-def get_cached_appsync_client():
-    """
-    Get or create a cached AppSync client for warm Lambda containers.
-    
-    Returns:
-        Cached AppSyncClient instance
-    """
-    global _appsync_client_cache
-    
-    if _appsync_client_cache is None:
-        _appsync_client_cache = AppSyncClient()
-        logger.info("Created new AppSync client (will be cached for warm starts)")
-    else:
-        logger.info("Reusing cached AppSync client from warm container")
-    
-    return _appsync_client_cache
 
-# GraphQL mutation for streaming agent chat messages
-STREAMING_MUTATION = """
-mutation SendAgentChatMessage($prompt: String!, $sessionId: String, $method: String, $toolMetadata: ToolMetadataInput) {
-    sendAgentChatMessage(prompt: $prompt, sessionId: $sessionId, method: $method, toolMetadata: $toolMetadata) {
-        role
-        content
-        timestamp
-        isProcessing
-        sessionId
-        messageType
-        toolMetadata {
-            toolName
-            toolUseId
-        }
-    }
-}
-"""
+# --- Emission sink -------------------------------------------------------
+#
+# Streaming events flow through ``publish_stream_update`` to the active sink.
+# This processor always runs behind the Lambda Function URL streaming endpoint
+# (``chat_stream_processor``), which injects a sink via ``set_sink`` that writes
+# SSE ``data: {json}`` chunks to the HTTP response stream. If no sink is
+# installed, events are dropped with a warning — there is no AppSync fallback.
+#
+# A sink is a callable: sink(session_id, content, method, is_processing,
+# tool_metadata) -> None (it may be sync; it is invoked from async code).
+_active_sink = None
+
+
+def set_sink(sink) -> None:
+    """Install the emission sink (used by the streaming endpoint).
+
+    Pass ``None`` to clear the installed sink.
+    """
+    global _active_sink
+    _active_sink = sink
 
 
 def clean_content_for_display(content):
@@ -121,48 +106,52 @@ async def publish_stream_update(
     appsync_client, session_id, content, method, message_id, is_processing=True, tool_metadata=None
 ):
     """
-    Publish streaming updates via AppSync mutation.
-    
-    This function sends chunks of the agent's response to the frontend
-    via AppSync GraphQL mutations, which trigger subscriptions for real-time updates.
-    
+    Publish a streaming update to the active emission sink.
+
+    This processor always runs behind the Lambda Function URL streaming
+    endpoint, which installs a sink via ``set_sink``. The ``appsync_client``
+    parameter is retained for call-site compatibility but is unused — there is
+    no AppSync fallback. If no sink is installed, the event is dropped with a
+    warning.
+
     Args:
-        appsync_client: The AppSync client instance to use
+        appsync_client: Unused (retained for call-site compatibility).
         session_id: The conversation session ID
         content: The content to send
         method: The message method (e.g., "assistant_stream", "assistant_final_response")
         message_id: Unique ID for this message
         is_processing: Whether the agent is still processing
         tool_metadata: Optional tool metadata for tool-related messages
-        
+
     Returns:
-        The AppSync response
+        None
     """
     try:
         # Clean and truncate content if needed
         cleaned_content = str(content).replace('\r', ' ')
         if len(cleaned_content) > 10000:
             cleaned_content = cleaned_content[:10000] + "..."
-        
-        # Prepare variables for the mutation
-        variables = {
-            "prompt": cleaned_content,
-            "sessionId": str(session_id),
-            "method": method
-        }
-        
-        # Add tool metadata if provided
-        if tool_metadata:
-            variables["toolMetadata"] = tool_metadata
-        
-        # Execute the GraphQL mutation
-        response = appsync_client.execute_mutation(
-            STREAMING_MUTATION,
-            variables
+
+        if _active_sink is None:
+            logger.warning(
+                "No emission sink installed; dropping agent chat event "
+                "(method=%s)",
+                method,
+            )
+            return None
+
+        # Route the event to the streaming sink. The sink mirrors the same
+        # payload shape the UI consumes.
+        _active_sink(
+            session_id=str(session_id),
+            content=cleaned_content,
+            method=method,
+            is_processing=bool(is_processing),
+            tool_metadata=tool_metadata,
         )
-        logger.info(f"Published message via AppSync: {method}")
-        return response
-        
+        logger.info(f"Published message via stream sink: {method}")
+        return None
+
     except Exception as e:
         logger.error(f"Error publishing stream update: {e}")
         return None
@@ -274,7 +263,7 @@ async def stream_agent_response(appsync_client, orchestrator, prompt, session_id
                         message_id,
                         False
                     )
-                    logger.info(f"Published force_stop error to frontend")
+                    logger.info("Published force_stop error to frontend")
                 except Exception as publish_error:
                     logger.error(f"Failed to publish force_stop error: {publish_error}")
                 
@@ -413,7 +402,7 @@ async def stream_agent_response(appsync_client, orchestrator, prompt, session_id
                             message_id,
                             False
                         )
-                        logger.info(f"Published sub-agent Bedrock error to frontend")
+                        logger.info("Published sub-agent Bedrock error to frontend")
                     except Exception as publish_error:
                         logger.error(f"Failed to publish sub-agent Bedrock error: {publish_error}")
                     
@@ -797,9 +786,8 @@ def handler(event, context):
         # Extract parameters from event
         prompt = event.get("prompt", "")
         session_id = event.get("sessionId")
-        method = event.get("method", "chat")
-        timestamp = event.get("timestamp")
         enable_code_intelligence = event.get("enableCodeIntelligence", True)
+        method = event.get("method", "chat")
         
         # Validate required parameters
         if not prompt or not session_id:
@@ -858,13 +846,16 @@ def handler(event, context):
         asyncio.set_event_loop(loop)
         
         try:
-            # Use cached AppSync client for warm Lambda containers
-            appsync_client = get_cached_appsync_client()
-            logger.info("AppSync client ready")
-            
+            # Events are delivered through the streaming sink installed via
+            # set_sink (Function URL transport); no transport client is needed.
+            if _active_sink is None:
+                logger.warning(
+                    "No emission sink installed; agent chat events will be dropped"
+                )
+
             # Stream the agent response
-            result = loop.run_until_complete(
-                stream_agent_response(appsync_client, orchestrator, prompt, session_id)
+            loop.run_until_complete(
+                stream_agent_response(None, orchestrator, prompt, session_id)
             )
             logger.info(f"Streaming completed successfully for session {session_id}")
         finally:
@@ -925,15 +916,14 @@ def handler(event, context):
         try:
             session_id = event.get("sessionId")
             if session_id:
-                # Create fresh AppSync client for error publishing
-                error_appsync_client = AppSyncClient()
+                # Publish the error through the streaming sink (if installed).
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
                     loop.run_until_complete(
                         publish_stream_update(
-                            error_appsync_client,
-                            session_id, 
+                            None,
+                            session_id,
                             f"Error: {str(e)}", 
                             "assistant_error", 
                             str(uuid.uuid4()), 

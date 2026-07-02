@@ -61,13 +61,8 @@ extras_require = {
     "reporting": [
         "pyarrow==23.0.1",  # For Parquet conversion
     ],
-    # Appsync module dependencies
-    "appsync": [
-        "requests==2.32.4",
-    ],
-    # Document service factory dependencies (includes both appsync and dynamodb support)
+    # Document service factory dependencies (DynamoDB-only)
     "docs_service": [
-        "requests==2.32.4",
         "aws-xray-sdk>=2.14.0",
     ],
     # Testing dependencies
@@ -127,7 +122,7 @@ extras_require = {
 
 setup(
     name="idp_common",
-    version="0.5.15",
+    version="0.5.16",
     packages=find_packages(
         exclude=[
             "build",

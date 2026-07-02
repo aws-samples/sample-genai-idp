@@ -14,7 +14,7 @@ import boto3
 import pytest
 from idp_common.config.configuration_manager import ConfigurationManager
 from idp_common.config.models import (
-    AssessmentConfig,
+    ConfidenceConfig,
     ExtractionConfig,
     GranularAssessmentConfig,
     IDPConfig,
@@ -85,20 +85,29 @@ class TestSyncCustomWithNewDefault:
         manager = ConfigurationManager(table_name="test-table")
 
         old_default = IDPConfig(
-            extraction=ExtractionConfig(temperature=0.0, model="nova-pro-v1:0"),
-            assessment=AssessmentConfig(enabled=True, temperature=0.0),
+            extraction=ExtractionConfig(
+                temperature=0.0,
+                model="nova-pro-v1:0",
+                confidence=ConfidenceConfig(enabled=True, temperature=0.0),
+            ),
         )
 
-        # User customized extraction.temperature and assessment.enabled
+        # User customized extraction.temperature and extraction.confidence.enabled
         old_custom = IDPConfig(
-            extraction=ExtractionConfig(temperature=0.9, model="nova-pro-v1:0"),
-            assessment=AssessmentConfig(enabled=False, temperature=0.0),
+            extraction=ExtractionConfig(
+                temperature=0.9,
+                model="nova-pro-v1:0",
+                confidence=ConfidenceConfig(enabled=False, temperature=0.0),
+            ),
         )
 
         # New default changes everything
         new_default = IDPConfig(
-            extraction=ExtractionConfig(temperature=0.5, model="nova-premier-v1:0"),
-            assessment=AssessmentConfig(enabled=True, temperature=0.5),
+            extraction=ExtractionConfig(
+                temperature=0.5,
+                model="nova-premier-v1:0",
+                confidence=ConfidenceConfig(enabled=True, temperature=0.5),
+            ),
         )
 
         new_custom = manager.sync_custom_with_new_default(
@@ -107,11 +116,11 @@ class TestSyncCustomWithNewDefault:
 
         # User's customizations preserved
         assert new_custom.extraction.temperature == 0.9
-        assert not new_custom.assessment.enabled
+        assert not new_custom.extraction.confidence.enabled
 
         # New defaults applied to non-customized fields
         assert new_custom.extraction.model == "nova-premier-v1:0"
-        assert new_custom.assessment.temperature == 0.5
+        assert new_custom.extraction.confidence.temperature == 0.5
 
     def test_nested_field_customization(self):
         """User customized a nested field - only that field should be preserved."""
@@ -184,16 +193,16 @@ class TestSyncCustomWithNewDefault:
                 temperature=0.0,
                 top_p=0.1,
                 max_tokens=10000,
-            ),
-            assessment=AssessmentConfig(
-                enabled=True, temperature=0.0, granular={"enabled": False}
+                confidence=ConfidenceConfig(
+                    enabled=True, temperature=0.0, granular={"enabled": False}
+                ),
             ),
             classes=[],
         )
 
         # User's customizations:
         # - Changed extraction.temperature to 0.8
-        # - Disabled assessment
+        # - Disabled confidence assessment
         # - Added custom classes
         old_custom = IDPConfig(
             extraction=ExtractionConfig(
@@ -201,11 +210,11 @@ class TestSyncCustomWithNewDefault:
                 temperature=0.8,  # CUSTOM
                 top_p=0.1,
                 max_tokens=10000,
-            ),
-            assessment=AssessmentConfig(
-                enabled=False,  # CUSTOM
-                temperature=0.0,
-                granular=GranularAssessmentConfig(enabled=False),
+                confidence=ConfidenceConfig(
+                    enabled=False,  # CUSTOM
+                    temperature=0.0,
+                    granular=GranularAssessmentConfig(enabled=False),
+                ),
             ),
             classes=[{"$id": "Invoice", "properties": {}}],  # CUSTOM
         )
@@ -214,18 +223,18 @@ class TestSyncCustomWithNewDefault:
         # - New model
         # - Different defaults for temp/top_p
         # - Increased max_tokens
-        # - Enabled granular assessment
+        # - Enabled granular confidence assessment
         new_default = IDPConfig(
             extraction=ExtractionConfig(
                 model="us.amazon.nova-premier-v1:0",  # NEW
                 temperature=0.5,  # NEW
                 top_p=0.2,  # NEW
                 max_tokens=15000,  # NEW
-            ),
-            assessment=AssessmentConfig(
-                enabled=True,
-                temperature=0.5,  # NEW
-                granular=GranularAssessmentConfig(enabled=True),  # NEW
+                confidence=ConfidenceConfig(
+                    enabled=True,
+                    temperature=0.5,  # NEW
+                    granular=GranularAssessmentConfig(enabled=True),  # NEW
+                ),
             ),
             classes=[],
         )
@@ -237,7 +246,7 @@ class TestSyncCustomWithNewDefault:
 
         # User's customizations PRESERVED:
         assert new_custom.extraction.temperature == 0.8  # User's custom value
-        assert not new_custom.assessment.enabled  # User's custom value
+        assert not new_custom.extraction.confidence.enabled  # User's custom value
         assert len(new_custom.classes) == 1  # User's custom classes
         assert new_custom.classes[0]["$id"] == "Invoice"
 
@@ -245,8 +254,8 @@ class TestSyncCustomWithNewDefault:
         assert new_custom.extraction.model == "us.amazon.nova-premier-v1:0"
         assert new_custom.extraction.top_p == 0.2
         assert new_custom.extraction.max_tokens == 15000
-        assert new_custom.assessment.temperature == 0.5
-        assert new_custom.assessment.granular.enabled
+        assert new_custom.extraction.confidence.temperature == 0.5
+        assert new_custom.extraction.confidence.granular.enabled
 
 
 @pytest.mark.unit

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useState, useEffect } from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../api/client-shim';
 import { getMyProfile } from '../graphql/generated';
 
 /**

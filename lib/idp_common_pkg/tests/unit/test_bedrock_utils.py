@@ -397,6 +397,49 @@ class TestAsyncExponentialBackoffRetry:
                 f"Expected 2 calls for {error_code}, got {call_count}"
             )
 
+    @pytest.mark.asyncio
+    async def test_retry_on_read_timeout_message(self):
+        """Bedrock read timeouts (urllib3 pool text, often wrapped by Strands as
+        EventLoopException) must be retried via message-substring match, not
+        fail the whole section. Regression for the 11-min LargeTruist hang."""
+        call_count = 0
+
+        @async_exponential_backoff_retry(max_retries=3, initial_delay=0.01)
+        async def timeout_func():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                # Mirrors the real wrapped message we observed.
+                raise RuntimeError(
+                    "AWSHTTPSConnectionPool(host='bedrock-runtime.us-west-2."
+                    "amazonaws.com', port=443): Read timed out."
+                )
+            return "success"
+
+        result = await timeout_func()
+        assert result == "success"
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_retry_on_read_timeout_error_by_name(self):
+        """botocore ReadTimeoutError (by exception type name) is retryable."""
+        call_count = 0
+
+        class ReadTimeoutError(Exception):
+            pass
+
+        @async_exponential_backoff_retry(max_retries=3, initial_delay=0.01)
+        async def timeout_func():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                raise ReadTimeoutError("read timeout on endpoint")
+            return "success"
+
+        result = await timeout_func()
+        assert result == "success"
+        assert call_count == 2
+
 
 @pytest.mark.unit
 class TestExponentialBackoffRetry:

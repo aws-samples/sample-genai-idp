@@ -563,11 +563,9 @@ Configure agentic extraction in your configuration file:
 
 ```yaml
 extraction:
-  model: "us.anthropic.claude-sonnet-4-20250514-v1:0"  # or Nova models
+  model: "us.anthropic.claude-sonnet-4-6"  # Anthropic Claude recommended for agentic
   agentic:
     enabled: true
-    review_agent: false  # Optional second-pass review
-    review_agent_model: null  # or specify a model for review
     max_concurrent_batches: 1  # Parallel processing (2-10 for very large docs)
     table_parsing:
       enabled: true  # Enable deterministic table parser tool
@@ -576,7 +574,17 @@ extraction:
       use_confidence_data: true  # Cross-reference with OCR confidence
       max_empty_line_gap: 3  # Tolerate up to N empty lines in tables
       auto_merge_adjacent_tables: true  # Merge table fragments
+    validation:                # see "Schema-Constraint Validation" below
+      enabled: false
 ```
+
+> **Every `agentic.*` sub-option only takes effect when `agentic.enabled: true`**
+> — `table_parsing`, `validation`, and `max_concurrent_batches` are all ignored
+> for non-agentic extraction. In the **Configuration UI** these options are
+> progressively disclosed: they appear only after you enable Agentic Extraction,
+> the table-parsing thresholds appear only after you enable the parse_table tool,
+> and the escalation model appears only when validation `fail_action` is
+> `escalate` — so you only see the knobs that currently matter.
 
 ### Table Parsing Tool
 
@@ -671,17 +679,196 @@ Statement Period: January 2025
 
 The table parser transparently skips page markers inside tables — they do not break table continuity or appear in parsed rows.
 
-**Batch extraction** (`max_concurrent_batches > 1`): The document is split into N page ranges, and N agents run in parallel. Each batch agent receives the full document text but extracts only its assigned page range, using page markers to identify boundaries. Results are merged: list fields are concatenated, scalar fields take the last non-None value.
+**Sharded concurrent extraction** (`max_concurrent_batches > 1`): the section's
+pages are split into **token-budgeted page ranges**, and each shard's prompt
+contains **only that shard's OCR text and images** — not the whole document. The
+shards run concurrently (up to `max_concurrent_batches` at a time) and their
+results are merged. This serves two purposes:
+
+1. **Bounds the context window.** Because each agent sees only its pages, a long
+   or dense section that would overflow a single agent's context (the failure
+   mode behind `ContextWindowOverflowException`) is split until each shard fits.
+2. **Reduces wall-clock time** via parallelism.
+
+Key behaviors:
+- **Bounded by tokens AND pages.** Pages are grouped so each shard's estimated
+  input stays under `shard_token_budget` (default **8,000**; `≈ chars/4`) **and**
+  holds at most `max_pages_per_shard` pages (default **5**, `0` disables the page
+  ceiling). A shard closes when *either* bound is hit. The page ceiling
+  guarantees a large document shards even when its OCR text is unusually compact
+  and would otherwise fit one token budget — so sharding engages **by default**
+  with no per-config tuning. `max_concurrent_batches` is an **upper bound on
+  parallelism and shard count** — a very large section is split into as many
+  shards as needed to fit (capped at `max_concurrent_batches`), not exactly N
+  equal pieces.
+  > **Why the low default budget?** A high budget (the old 40,000 default) let
+  > even a ~25-page dense table fit one shard, so sharding silently did *not*
+  > engage and a single agent had to emit the whole giant table in one Bedrock
+  > call → read timeout. 8,000 + a 5-page ceiling reliably shard large docs so
+  > each agent's work stays bounded. Raise `shard_token_budget` for
+  > large-context (`:1m`) models if you want fewer, larger shards.
+- **Page-aligned splits keep table rows intact.** A table spans pages but each
+  row lives on one page, so splits fall between rows; list fields are
+  concatenated in page order on merge (no row loss/duplication).
+- **Header context propagation.** The section's first-page text is prepended to
+  every later shard (clearly marked "for context only") so column headers and
+  page-1 scalar context survive the split.
+- **Scalar merge.** Each shard extracts what it can see; scalars take the
+  **first non-null** value across shards. If two shards disagree on a scalar, the
+  first is kept and the conflict is recorded in `metadata.shard_scalar_conflicts`.
+
+> If a single shard's input *still* exceeds the model context window, extraction
+> raises a clear, actionable error (enable table parsing / lower
+> `shard_token_budget` / use a larger-context `:1m` model) rather than the
+> opaque Strands "insufficient messages for summarization" message.
 
 ```yaml
-# Enable batch extraction with 4 concurrent agents
+# Enable sharded concurrent extraction (up to 4 shards in parallel)
 extraction:
   agentic:
     enabled: true
     max_concurrent_batches: 4
+    shard_token_budget: 8000    # default; lower if shards still overflow, raise for 1M-context models
+    max_pages_per_shard: 5      # default; page ceiling so large docs always shard (0 = disable)
     table_parsing:
       enabled: true
 ```
+
+**Document-size guidance.** The defaults above are tuned to work without
+hand-tuning on large documents (validated at scale on 100- and 200-page
+single- and multi-table PDFs). For very large documents (100+ pages) prefer the
+Step Functions Distributed Map runtime (`runtime: step_functions`) so each shard
+runs in its own Lambda and the section is not bound by the single-Lambda 15-min
+ceiling; the in-process runtime still shards correctly but a 200-page section may
+approach that ceiling.
+
+### ExtractionRuntime: pluggable orchestration over shared primitives
+
+Sharding is factored into runtime-agnostic primitives in
+`idp_common.extraction.runtime` so the **same** shard/merge logic runs whether
+you call the library from a notebook, a CLI, a single Lambda, or a production
+Step Functions Distributed Map — one implementation, no behaviour divergence.
+
+**Primitives (the single source of truth):**
+
+- `extract_one_shard(...)` — runs ONE shard's agent (via an injected
+  `shard_runner`; `agentic_idp.default_shard_runner` in production) and is
+  **idempotent**: if a `ShardPersistence` backend already holds a complete
+  result for the shard's page range, it is loaded and returned instead of
+  re-inferring. This is the asyncio task body AND the SFN Map iteration body.
+- `merge_shard_results(...)` / `merge_shard_dicts(...)` — concatenate list fields
+  in page order and take first-non-null scalars (recording conflicts).
+- `ShardPersistence` protocol + `S3ShardPersistence`, keyed at
+  `checkpoints/{execution_arn}/{section_id}/shards/shard_{start}_{end}.json`.
+
+**Two backends behind the `ExtractionRuntime` interface:**
+
+- **`InProcessRuntime`** (default) — plans shards, runs them via `asyncio.gather`
+  + a semaphore, then merges. This is what a notebook / CLI / single Lambda uses;
+  **sharding works fully here with no Step Functions dependency.**
+  `ExtractionService.process_document_section()` routes its concurrent path
+  through this runtime, so standalone usage is unchanged.
+- **`StepFunctionsRuntime`** (production) — a nested SFN **Distributed Map** where
+  each iteration is a thin shard Lambda calling `extract_one_shard` (one fresh
+  15-minute Lambda per shard) and a following merge state calls
+  `merge_shard_results`. Because each shard persists its result idempotently to
+  S3, SFN's **native per-iteration retry re-runs only the failed/incomplete
+  shards** — completed shards load from S3, with no custom near-timeout/reentry
+  code and no 15-minute ceiling for the section as a whole.
+
+Select the backend with `extraction.agentic.runtime` (`in_process` default, or
+`step_functions`); the `EXTRACTION_RUNTIME` env var and an explicit `override`
+argument also work. The in-process section Lambda additionally wires
+`S3ShardPersistence`, so even on the in-process path an SFN `ExtractionStep`
+retry of a timed-out section resumes only the incomplete shards.
+
+**Standalone usage (plain Python, no SFN):**
+
+```python
+from idp_common.extraction import ExtractionService
+service = ExtractionService(config=config)            # config.extraction.agentic.max_concurrent_batches > 1
+doc = service.process_document_section(document, section_id)   # shards + merges in-process
+```
+
+See `notebooks/misc/standalone_sharded_extraction_demo.py` for a runnable
+demonstration (offline with a fake agent; live with real Bedrock).
+
+### Confidence Assessment (in-shard confidence & bounding boxes)
+
+> **Config v0.6:** confidence scoring is an **output of extraction** — its settings
+> live under `extraction.confidence` (was the top-level `assessment` block) and
+> geometry under `extraction.geometry` (was `assessment.geometry_mode`). HITL moved
+> to the top-level `hitl` block. Old configs are migrated on read.
+
+Per-field confidence/bbox **assessment can run inside extraction** instead of as a
+separate downstream step, controlled by `extraction.confidence.mode`:
+
+```yaml
+extraction:
+  confidence:
+    enabled: true                     # master on/off — false disables confidence entirely
+    mode: separate                    # "separate" (default) | "integrated"
+    model: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    list_batch_size: 25               # rows scored per inference (agentic in-shard)
+  geometry:
+    mode: ocr_only                    # ocr_only (default) | llm_grounded | llm | off
+  agentic:
+    enabled: true
+    max_concurrent_batches: 4         # sharded; confidence scoring runs per-shard
+hitl:
+  enabled: false                      # route low-confidence fields to human review
+  confidence_threshold: 0.8
+```
+
+- **`separate`** (default, **no behavior change on upgrade**): extraction and
+  assessment are distinct inferences.
+  - *Agentic*: after each shard extracts, a **second assessment inference runs
+    inside that same shard** over the shard's pages/values — so assessment
+    inherits the same per-shard scaling as extraction (a 200-page section never
+    assesses in one oversized call). Per-shard assessments are collated on merge
+    (per-field, **page-ordered for list items**, first-shard-wins for scalars),
+    grounded once in real OCR geometry over the whole section, and emitted as
+    `explainability_info` — byte-for-byte the same output the standalone
+    Assessment step produces.
+  - *Non-agentic*: unchanged — the pipeline flows to the standalone Assessment
+    step exactly as before.
+- **`integrated`**: the extraction agent emits each value's confidence and
+  bounding box **in its own inference** — the document is already in the agent's
+  (cached) context, so there is no second model pass and no re-sent document. The
+  agent calls a `provide_field_assessment` tool as its final step (one assessment
+  object per scalar/group field; a list with one entry per row, in row order, for
+  list fields). The inline result rides the **same** collation → post-merge
+  reconcile → OCR grounding → `explainability_info` path as `separate`, so the
+  output contract is identical; only the source of the confidence differs. The
+  `extraction.confidence` model/prompt settings are unused, and the standalone
+  step is bypassed. Best for cost/latency once you've confirmed your model produces
+  well-calibrated inline confidence; otherwise prefer `separate` (a dedicated
+  assessment inference per shard).
+
+**Standalone Assessment step bypass.** When in-shard (or integrated) assessment
+has already written `explainability_info` to the section result, the downstream
+Assessment Lambda detects it and **skips its own inference** (a cheap
+pass-through) — so no duplicate assessment cost and no state-machine change. When
+`extraction.confidence.enabled: false`, confidence scoring is skipped everywhere. The document status
+remains `EXTRACTING` while in-shard assessment runs (it *is* part of the extraction
+step).
+
+**List alignment guarantee.** Downstream consumers index
+`explainability_info[0][field][i]` against `inference_result[field][i]`, but an
+assessment LLM often returns a *different* number of row assessments than the
+table has rows (e.g. 44 assessments for 120 extracted rows). In-shard assessment
+**reconciles each list field's assessment to exactly match the extracted row
+count** (truncating extras, padding shortfalls with a neutral `confidence: null`
+"not individually assessed" entry) *before* the per-shard merge — so confidence is
+never misattributed to the wrong row and the drift never compounds across shards.
+
+**Reuse, not duplication.** In-shard assessment calls the **same**
+`AssessmentService.assess_results(...)` core the standalone step uses (extracted
+into a pure, S3-free method) and the same `ocr_grounding.ground_assessment_geometry`
+— so confidence scoring, thresholds, alerts, and geometry grounding are identical;
+only the *where it runs* differs. The output contract (`explainability_info[0]` +
+`section.confidence_threshold_alerts`) is unchanged, so HITL, the UI confidence
+display, evaluation, and reporting all consume it as before.
 
 ### Configuration Options
 
@@ -900,6 +1087,13 @@ Extraction results include table parsing metadata when the tool is used:
   }
 }
 ```
+
+When a section is sharded across concurrent agents, each shard contributes its own
+`table_parsing_stats` and they are merged with quality-aware semantics (not summed):
+counts (`tables_parsed`, `rows_parsed`, `rows_mapped`, `invocation_count`) add up,
+while `parse_success_rate` and `avg_confidence` are combined as **row-weighted
+averages** so the reported values stay a real 0-1 rate / 0-100 confidence regardless
+of shard count.
 
 Use these metrics to:
 - Identify documents where table parsing is working well

@@ -41,7 +41,7 @@ import {
 import type { SelectProps } from '@cloudscape-design/components';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 
 import {
   startMultiDocDiscovery,

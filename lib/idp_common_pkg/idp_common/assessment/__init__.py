@@ -79,10 +79,10 @@ def create_assessment_service(
     # Normalize the enabled value to handle both boolean and string values
 
     logger.info(
-        f"Granular assessment enabled check: raw_value={config.assessment.granular.enabled} (type: {type(config.assessment.granular.enabled)})"
+        f"Granular assessment enabled check: raw_value={config.extraction.confidence.granular.enabled} (type: {type(config.extraction.confidence.granular.enabled)})"
     )
 
-    if config.assessment.granular.enabled:
+    if config.extraction.confidence.granular.enabled:
         logger.info("Granular assessment enabled, using GranularAssessmentService")
         return GranularAssessmentService(region=region, config=config)
     else:

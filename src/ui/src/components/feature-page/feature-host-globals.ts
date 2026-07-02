@@ -3,11 +3,11 @@
 
 /**
  * Exposes the host's React / ReactDOM / Cloudscape / aws-amplify /
- * aws-amplify/api / react-router-dom instances as `window.*` globals so that
- * feature UMD bundles (built with rollup externals mapped to `React`,
+ * aws-amplify/api / react-router-dom / recharts instances as `window.*` globals
+ * so that feature UMD bundles (built with rollup externals mapped to `React`,
  * `ReactDOM`, `ReactRouterDOM`, `awsAmplify`, `awsAmplifyApi`,
- * `CloudscapeComponents`, `CloudscapeDesignTokens`) can resolve them at load
- * time.
+ * `CloudscapeComponents`, `Recharts`, `CloudscapeDesignTokens`) can resolve
+ * them at load time.
  *
  * Also exposes a small `IdpFeatureHost` helper namespace (currently the
  * sanitizing `SafeMarkdown` renderer) so features can render backend-emitted
@@ -33,6 +33,7 @@ import * as ReactRouterDOM from 'react-router-dom';
 import * as awsAmplify from 'aws-amplify';
 import * as awsAmplifyApi from 'aws-amplify/api';
 import * as CloudscapeComponents from '@cloudscape-design/components';
+import * as Recharts from 'recharts';
 import SafeMarkdown from '../common/SafeMarkdown';
 
 // `@cloudscape-design/design-tokens` is a feature-template external but is NOT
@@ -49,6 +50,7 @@ interface FeatureHostWindow {
   awsAmplify?: unknown;
   awsAmplifyApi?: unknown;
   CloudscapeComponents?: unknown;
+  Recharts?: unknown;
   IdpFeatureHost?: { SafeMarkdown?: unknown };
   __idpFeatureGlobalsInstalled?: boolean;
 }
@@ -76,6 +78,9 @@ export function installFeatureHostGlobals(): void {
   // it as its own global so that external resolves at bundle load time.
   w.awsAmplifyApi = awsAmplifyApi;
   w.CloudscapeComponents = CloudscapeComponents;
+  // Recharts is used by both the host (Test Studio) and features (IDP Monitor)
+  // for charting. Share a single instance to avoid bundling it in each feature.
+  w.Recharts = Recharts;
   // Host helper namespace for features. SafeMarkdown sanitizes embedded HTML
   // (rehype-raw + rehype-sanitize allow-list) so features can safely render
   // backend markdown without bundling — or having to security-review — their

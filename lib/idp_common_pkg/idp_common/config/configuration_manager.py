@@ -271,6 +271,16 @@ class ConfigurationManager:
         # Remove format marker if present (shouldn't be in sparse, but just in case)
         version_dict.pop(_FULL_CONFIG_MARKER, None)
 
+        # Migrate the raw sparse delta to v0.6 BEFORE merging. The default is
+        # already v0.6 (get_configuration validates through IDPConfig, which
+        # migrates), so migrating the delta first keeps the merge a clean
+        # v0.6-over-v0.6 deep_update — the delta's confidence/geometry/hitl keys
+        # correctly override the default's, instead of a hybrid where a legacy
+        # `assessment.*` delta would be shadowed by the default's new-home keys.
+        from .migrations.v05_to_v06 import migrate_v05_to_v06
+
+        version_dict = migrate_v05_to_v06(version_dict)
+
         # Merge: Start with Default, deep update with version deltas
         default_dict = default_config.model_dump(mode="python")
         merged_dict = deepcopy(default_dict)
@@ -700,6 +710,20 @@ class ConfigurationManager:
         if isinstance(config_dict, dict):
             config_dict.pop("pricing", None)
             config_dict.pop(_FULL_CONFIG_MARKER, None)
+
+        # Migrate an incoming legacy-shaped config/delta to the current format BEFORE
+        # it is merged onto a v0.6 default/current config below. If a v0.5-shaped upload
+        # (top-level `assessment`, `extraction.assessment_integration`, ...) were
+        # deep_update-merged onto a v0.6 dict first, the migration's "explicit v0.6 keys
+        # win" rule would let the v0.6 DEFAULTS clobber the user's migrated legacy
+        # customizations (pinned assessment model / list_batch_size / geometry_mode
+        # reverting to default). Migration is idempotent, so this is a no-op for v0.6
+        # input. (saveAsVersion/saveAsDefault/normal-update all merge, so migrate once
+        # here at the single choke point.)
+        if isinstance(config_dict, dict) and config_dict:
+            from .migrations.v05_to_v06 import migrate_v05_to_v06
+
+            config_dict = migrate_v05_to_v06(config_dict)
 
         # === Reset to default ===
         if reset_to_default:

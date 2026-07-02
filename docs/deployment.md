@@ -20,6 +20,8 @@ The GenAI IDP Accelerator can be deployed using either the AWS CloudFormation co
 - **For Administrators**: Use the deployment options below with your existing administrator privileges
 - **For Delegated Access**: See [iam-roles/cloudformation-management/README.md](../iam-roles/cloudformation-management/README.md) for instructions on provisioning a CloudFormation service role that allows non-administrator users to deploy and maintain IDP stacks without requiring administrator permissions
 
+For the full breakdown of AWS services and the IAM permission scopes required for deployment and runtime, see [AWS Services and IAM Role Requirements](./aws-services-and-roles.md).
+
 ### Option 1: One-Click CloudFormation Console Deployment (Recommended for First-Time Users)
 
 1. Choose your region and click the Launch Stack button:

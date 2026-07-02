@@ -41,47 +41,20 @@ def check_generator_availability_impl() -> str:
     )
 
 
-_LIST_INSTALLED_FEATURES_QUERY = """
-query ListInstalledFeatures {
-  listInstalledFeatures {
-    featureId
-    displayName
-    installedVersion
-    featureApiEndpoint
-    generationQueueArn
-  }
-}
-"""
-
 DATA_GENERATOR_FEATURE_ID = "idp-data-generator"
 
 
 def list_available_extensions_impl() -> str:
     """List Feature Platform extensions installed on this IDP stack.
 
-    Queries the host AppSync `listInstalledFeatures` over IAM SigV4 (the agent
-    Lambda has APPSYNC_API_URL + appsync:GraphQL on the main-stack API, so this
-    is a runtime call with no deploy-time cross-stack reference and no circular
-    dependency). Degrades to "not available" when the Feature Platform is
-    disabled (the query field is absent) or AppSync is unreachable.
+    Reads the host's InstalledFeatures DynamoDB table directly (the agent Lambda
+    has INSTALLED_FEATURES_TABLE + read IAM on it). This is a runtime read with
+    no deploy-time cross-stack reference and no circular dependency. Degrades to
+    "not available" when the Feature Platform is disabled (env var unset) or the
+    table is unreachable.
     """
-    api_url = os.environ.get("APPSYNC_API_URL")
-    if not api_url:
-        return json.dumps(
-            {
-                "available": False,
-                "reason": "Extensions registry not available (APPSYNC_API_URL unset).",
-                "extensions": [],
-            }
-        )
-
-    try:
-        from idp_common.appsync.client import AppSyncClient
-
-        client = AppSyncClient(api_url=api_url)
-        data = client.execute_query(_LIST_INSTALLED_FEATURES_QUERY)
-    except Exception as e:  # pragma: no cover - defensive
-        logger.warning("Could not list installed extensions: %s", e)
+    features = _installed_features()
+    if features is None:
         return json.dumps(
             {
                 "available": False,
@@ -90,7 +63,6 @@ def list_available_extensions_impl() -> str:
             }
         )
 
-    features = data.get("listInstalledFeatures") or []
     extensions = [
         {
             "featureId": f.get("featureId"),
@@ -106,20 +78,32 @@ def list_available_extensions_impl() -> str:
     return json.dumps({"available": True, "extensions": extensions})
 
 
-def _installed_features() -> list:
-    """Query listInstalledFeatures via IAM SigV4; [] if unavailable."""
-    api_url = os.environ.get("APPSYNC_API_URL")
-    if not api_url:
-        return []
-    try:
-        from idp_common.appsync.client import AppSyncClient
+def _installed_features() -> Optional[list]:
+    """Scan the InstalledFeatures DynamoDB table; None if unavailable.
 
-        client = AppSyncClient(api_url=api_url)
-        data = client.execute_query(_LIST_INSTALLED_FEATURES_QUERY)
-        return data.get("listInstalledFeatures") or []
+    Returns None (not []) when the registry is unavailable so callers can tell
+    "not enabled/unreachable" apart from "enabled but nothing installed".
+    """
+    table_name = os.environ.get("INSTALLED_FEATURES_TABLE")
+    if not table_name:
+        return None
+    try:
+        import boto3
+
+        table = boto3.resource("dynamodb").Table(table_name)
+        items = []
+        kwargs: dict = {}
+        while True:
+            resp = table.scan(**kwargs)
+            items.extend(resp.get("Items", []))
+            key = resp.get("LastEvaluatedKey")
+            if not key:
+                break
+            kwargs["ExclusiveStartKey"] = key
+        return items
     except Exception as e:  # pragma: no cover - defensive
-        logger.warning("Could not query installed features: %s", e)
-        return []
+        logger.warning("Could not read installed features table: %s", e)
+        return None
 
 
 def _generation_queue_url() -> Optional[str]:
@@ -129,7 +113,7 @@ def _generation_queue_url() -> Optional[str]:
     coupling) and derives the SQS queue URL from it. Returns None when the
     extension is not installed or did not register a queue ARN.
     """
-    for f in _installed_features():
+    for f in _installed_features() or []:
         if f.get("featureId") == DATA_GENERATOR_FEATURE_ID and f.get(
             "generationQueueArn"
         ):

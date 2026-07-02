@@ -20,7 +20,7 @@ import {
   Alert,
   Tabs,
 } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import generateS3PresignedUrl from '../common/generate-s3-presigned-url';
 import useAppContext from '../../contexts/app';
@@ -3530,6 +3530,11 @@ const VisualEditorModal = ({
               <ProcessingReportTab
                 metadata={localJsonData?.metadata as Record<string, unknown> | undefined}
                 processingReport={localJsonData?.processing_report as string | undefined}
+                inferenceResult={
+                  (localJsonData?.inference_result || localJsonData?.inferenceResult) as
+                    | Record<string, unknown>
+                    | undefined
+                }
               />
             ),
           },

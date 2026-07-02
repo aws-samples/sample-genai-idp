@@ -19,7 +19,7 @@ with patch("boto3.resource") as mock_resource, patch("boto3.client") as mock_cli
         "results_index",
         os.path.join(
             os.path.dirname(__file__),
-            "../../../../nested/appsync/src/lambda/test_results_resolver/index.py",
+            "../../../../nested/api-resolvers/src/lambda/test_results_resolver/index.py",
         ),
     )
     if spec is None or spec.loader is None:

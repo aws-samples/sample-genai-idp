@@ -28,7 +28,8 @@ def _load(monkeypatch, *, feature_version: str, artifact_prefix: str = _BASE):
     monkeypatch.setenv("FEATURE_BUCKET", "artifacts")
     monkeypatch.setenv("FEATURE_ARTIFACT_PREFIX", artifact_prefix)
     monkeypatch.setenv(
-        "APPSYNC_API_URL", "https://x.appsync-api.us-west-2.amazonaws.com/graphql"
+        "REGISTER_FEATURE_FUNCTION_ARN",
+        "arn:aws:lambda:us-west-2:123456789012:function:IDP-RegisterFeature",
     )
     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-west-2")
     sys.path.insert(0, str(_HANDLER_DIR))

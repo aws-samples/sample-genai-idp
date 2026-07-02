@@ -8,7 +8,6 @@ Tests for configuration Pydantic models.
 import pytest
 from idp_common.config.models import (
     AgenticConfig,
-    AssessmentConfig,
     ChatConfig,
     ExtractionConfig,
     IDPConfig,
@@ -36,6 +35,28 @@ class TestConfigModels:
         # Pydantic should convert string booleans
         assert config.enabled is False
         assert config.review_agent is True
+
+    def test_extraction_mode_derives_agentic_enabled(self):
+        """extraction.mode is authoritative and derives agentic.enabled."""
+        from idp_common.config.models import ExtractionConfig
+
+        # mode=advanced -> agentic on
+        c = ExtractionConfig(mode="advanced")
+        assert c.agentic.enabled is True
+        # mode=simple -> agentic off (mode wins even over an explicit agentic.enabled)
+        c = ExtractionConfig(mode="simple", agentic={"enabled": True})
+        assert c.agentic.enabled is False
+        # legacy config with no mode -> inferred from agentic.enabled
+        c = ExtractionConfig(agentic={"enabled": True})
+        assert c.mode == "advanced"
+        c = ExtractionConfig(agentic={"enabled": False})
+        assert c.mode == "simple"
+
+    def test_extraction_mode_rejects_unknown(self):
+        from idp_common.config.models import ExtractionConfig
+
+        with pytest.raises(Exception):
+            ExtractionConfig(mode="turbo")
 
     def test_extraction_config_with_string_numbers(self):
         """Test ExtractionConfig with string numeric values"""
@@ -114,7 +135,8 @@ class TestConfigModels:
         # Booleans
         assert config.extraction.agentic.enabled is False
         assert config.extraction.agentic.review_agent is True
-        assert config.assessment.enabled is True
+        # v0.6: assessment.enabled migrated to extraction.confidence.enabled
+        assert config.extraction.confidence.enabled is True
 
         # Numbers from strings
         assert config.classification.temperature == 0.0
@@ -168,8 +190,10 @@ class TestConfigModels:
         result = process_config(config)
         assert result is True
 
-    def test_assessment_granular_config(self):
-        """Test granular assessment configuration"""
+    def test_confidence_granular_config(self):
+        """Test granular confidence configuration (v0.6: extraction.confidence)"""
+        from idp_common.config import ConfidenceConfig
+
         config_dict = {
             "model": "us.amazon.nova-lite-v1:0",
             "granular": {
@@ -179,7 +203,7 @@ class TestConfigModels:
                 "max_workers": "20",
             },
         }
-        config = AssessmentConfig.model_validate(config_dict)
+        config = ConfidenceConfig.model_validate(config_dict)
 
         assert config.granular.enabled is True
         assert config.granular.list_batch_size == 5
@@ -282,11 +306,12 @@ class TestPipelineHookPreservation:
         "onError": "continue",
         "enabled": True,
     }
+    # v0.6: the standalone `assessment` step config was retired (confidence folded
+    # into extraction), so it no longer carries a postHook list.
     _STEPS = [
         "ocr",
         "classification",
         "extraction",
-        "assessment",
         "rule_validation",
         "summarization",
     ]

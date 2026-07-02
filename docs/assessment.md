@@ -58,6 +58,43 @@ The assessment step is conditionally integrated into Pattern-2's ProcessSections
 }
 ```
 
+### Running Assessment Inside Extraction (in-shard / integrated)
+
+> **Config v0.6:** confidence scoring is now an **output of extraction**. Its
+> settings live under `extraction.confidence` (was the top-level `assessment` block),
+> geometry under `extraction.geometry` (was `assessment.geometry_mode`), and HITL
+> under the top-level `hitl` block. Existing configs are migrated automatically on
+> read. The examples below use the v0.6 shape.
+
+Assessment does not have to run as a separate downstream step. The
+`extraction.confidence.mode` setting controls *where* per-field confidence
+and bounding boxes are produced:
+
+| `extraction.confidence.mode` | Extraction mode | Where assessment runs | Standalone Assessment step |
+|---|---|---|---|
+| `separate` (default) | non-agentic | the standalone Assessment step (unchanged) | runs |
+| `separate` | agentic | a second inference **inside each extraction shard** | bypassed (skip) |
+| `integrated` | any | the extraction inference itself, in one pass | bypassed (skip) |
+| (any) | (any) with `extraction.confidence.enabled: false` | nowhere | bypassed |
+
+**Why in-shard for agentic.** Agentic extraction shards large sections into
+token-budgeted page ranges so no single inference sees the whole document. A
+single post-merge assessment would re-introduce exactly the context-window
+pressure sharding removes, so assessment runs **per shard** (over that shard's
+pages and extracted values) and is **collated on merge** — per-field, page-ordered
+for list items, first-shard-wins for scalars — then grounded once in OCR geometry
+over the whole section. This reuses the *same* `AssessmentService.assess_results`
+core and `ground_assessment_geometry` the standalone step uses, so the
+`explainability_info` output is identical; only the execution location differs.
+
+**Automatic bypass of the standalone step.** When extraction has already written
+`explainability_info` to the section result, the Assessment Lambda's
+*intelligent skip* detects it and returns immediately without a second LLM call —
+so there is no duplicate assessment cost and **no state-machine change is
+required**. This is what lets the standalone (non-agentic, ThreadPool-based)
+Assessment step wither as agentic adoption grows, without a hard cutover. The
+document status stays `EXTRACTING` while in-shard assessment runs.
+
 ## Configuration
 
 ### Configuration-Based Control
@@ -66,11 +103,13 @@ Assessment can now be controlled via the configuration file rather than CloudFor
 
 **Configuration-based Control (Recommended):**
 ```yaml
-assessment:
-  enabled: true  # Set to false to disable assessment
-  model: us.amazon.nova-lite-v1:0
-  temperature: 0.0
-  # ... other assessment settings
+extraction:
+  confidence:
+    enabled: true  # Set to false to disable confidence assessment entirely
+    mode: separate # "separate" (default) | "integrated"
+    model: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    temperature: 0.0
+    # ... other confidence settings
 ```
 
 **Key Benefits:**
@@ -307,6 +346,41 @@ The bounding box feature requires no additional configuration:
 - **Fallback handling**: Works normally when no bounding boxes are provided
 - **Backward compatibility**: Existing configurations continue to work unchanged
 - **Optional enhancement**: Bounding boxes enhance existing assessment without breaking changes
+
+### Geometry source: OCR-only (default) vs LLM-estimated
+
+`extraction.geometry.mode` controls where field bounding boxes come from:
+
+- **`ocr_only`** (default): the model is **not** asked for boxes at all. Each field's
+  geometry is derived by matching the extracted value text against real OCR lines in the
+  consolidated `pageData.json` artifact (Amazon Textract or the Mistral OCR LambdaHook).
+  This is **cheaper** (no bbox coordinate tokens in the response) and **more accurate**
+  (OCR boxes beat LLM-estimated boxes, which models frequently hallucinate). When the same
+  value appears on multiple rows (e.g. a repeated amount in a table), occurrences are
+  disambiguated by **row order** — the i-th assessed list item maps to the i-th occurrence
+  in reading order. A field with no OCR match simply has no geometry (geometry is advisory).
+
+  **Format-aware matching.** Extraction often canonicalizes a value to a schema format that
+  differs from how it appears in the document (e.g. a date extracted as `2022-04-04` but
+  printed as `04/04/2022`; an amount `1234.00` printed as `$1,234.00`; a phone `+15551234567`
+  printed as `(555) 123-4567`). Plain text matching would miss these, so matching is bridged
+  three ways: **format variants** (the value is re-rendered in common surface forms and each
+  is matched), **type-aware equality** (the value and an OCR line are parsed as the same
+  logical date/number/phone and compared — robust to any rendering), and a **character-level
+  Levenshtein** last resort for OCR noise (e.g. `Acme` vs `Acrne`). The field's logical type
+  is taken from its JSON-Schema `type`/`format` when present, else inferred from the value.
+  Format-bridged matches are tagged `geometry_source: "ocr-normalized"` and Levenshtein
+  near-misses `"ocr-fuzzy"`, distinct from exact `"ocr"` hits so they stay auditable.
+- **`llm_grounded`**: the model emits estimated boxes and the service
+  grounds them in real OCR coordinates where the value matches, falling back to the LLM box
+  otherwise. The LLM box also disambiguates repeated values by spatial proximity.
+- **`llm`**: use the model's boxes as-is with no grounding (escape hatch).
+- **`off`**: produce no geometry at all.
+
+(v0.6 renamed the LLM-box modes from the previous `llm_with_ocr_grounding` / `llm_only`;
+the legacy `assessment.ground_geometry_in_ocr: false` maps to `llm`. Old configs are
+migrated on read.) In all OCR-backed modes, geometry is a post-LLM, S3-side step. See
+[Bounding Box Integration → Grounding in Real OCR Geometry](./assessment-bounding-boxes.md#grounding-in-real-ocr-geometry-pagedatajson).
 
 ## Output Format
 

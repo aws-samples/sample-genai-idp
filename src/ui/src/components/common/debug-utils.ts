@@ -64,10 +64,10 @@ export const debugDocumentStructure = (document: Record<string, unknown>): void 
       });
     }
 
-    if (document.mergedConfig && (document.mergedConfig as Record<string, unknown>).assessment) {
+    if (document.mergedConfig && (document.mergedConfig as Record<string, unknown>).hitl) {
       console.log(
-        'Default confidence threshold from config:',
-        ((document.mergedConfig as Record<string, unknown>).assessment as Record<string, unknown>).default_confidence_threshold,
+        'HITL confidence threshold from config:',
+        ((document.mergedConfig as Record<string, unknown>).hitl as Record<string, unknown>).confidence_threshold,
       );
     }
 

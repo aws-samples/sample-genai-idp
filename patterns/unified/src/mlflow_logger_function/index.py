@@ -168,13 +168,19 @@ def _extract_config_params(config):
         if cls_method:
             params["classification.method"] = str(cls_method)
 
-    # Assessment granular
-    assess_cfg = config.get("assessment")
-    if isinstance(assess_cfg, dict):
-        threshold = assess_cfg.get("default_confidence_threshold")
+    # HITL threshold (v0.6: top-level hitl) + confidence granular (v0.6:
+    # extraction.confidence.granular)
+    hitl_cfg = config.get("hitl")
+    if isinstance(hitl_cfg, dict):
+        threshold = hitl_cfg.get("confidence_threshold")
         if threshold is not None:
             params["assessment.confidence_threshold"] = str(threshold)
-        granular = assess_cfg.get("granular")
+    extraction_cfg = config.get("extraction")
+    confidence_cfg = (
+        extraction_cfg.get("confidence") if isinstance(extraction_cfg, dict) else None
+    )
+    if isinstance(confidence_cfg, dict):
+        granular = confidence_cfg.get("granular")
         if isinstance(granular, dict):
             gran_enabled = granular.get("enabled")
             if gran_enabled is not None:

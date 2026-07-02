@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import type { SelectProps, IconProps } from '@cloudscape-design/components';
 import { Container, Header, SpaceBetween, Button, FormField, Select, Alert, Textarea, Input } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { startTestRun, getTestSets } from '../../graphql/generated';
 import handlePrint from './PrintUtils';

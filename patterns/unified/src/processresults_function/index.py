@@ -27,7 +27,7 @@ def is_hitl_enabled(config_version=None):
     """Check if HITL is enabled from configuration."""
     try:
         config = get_config(as_model=True, version=config_version)
-        return config.assessment.hitl_enabled
+        return config.hitl.enabled
     except Exception as e:
         logger.warning(f"Failed to get HITL config: {e}")
         return False  # Default to disabled if config unavailable
@@ -64,7 +64,7 @@ def handler(event, context):
     execution_id = execution_arn.split(":")[-1] if execution_arn else "unknown"
 
     # Get confidence threshold from configuration
-    confidence_threshold = config.assessment.default_confidence_threshold
+    confidence_threshold = config.hitl.confidence_threshold
     logger.info(f"Using confidence threshold: {confidence_threshold}")
 
     # Update document status to POSTPROCESSING

@@ -6,6 +6,12 @@
  */
 
 interface MergedConfig {
+  // v0.6: HITL threshold moved to the top-level `hitl` block. `assessment`
+  // retained for pre-migration configs / backward compatibility.
+  hitl?: {
+    enabled?: boolean;
+    confidence_threshold?: number | string;
+  };
   assessment?: {
     hitl_confidence_score?: string;
     default_confidence_threshold?: number;
@@ -56,13 +62,30 @@ interface FieldConfidenceInfo {
 }
 
 export const getHitlConfidenceThreshold = (mergedConfig: MergedConfig | null): number => {
-  if (!mergedConfig || !mergedConfig.assessment || !mergedConfig.assessment.hitl_confidence_score) {
-    return 0.8; // Default threshold of 80%
+  // v0.6: threshold lives in the top-level `hitl` block as a 0.0-1.0 decimal
+  // (was assessment.default_confidence_threshold). Fall back to the legacy
+  // assessment.* keys for configs read before migration completes.
+  const hitl = mergedConfig?.hitl as { confidence_threshold?: number | string } | undefined;
+  if (hitl && hitl.confidence_threshold !== undefined && hitl.confidence_threshold !== null) {
+    const t = parseFloat(String(hitl.confidence_threshold));
+    if (!Number.isNaN(t)) {
+      // Stored as a 0.0-1.0 decimal; tolerate a legacy 1-100 percentage.
+      return t > 1 ? t / 100 : t;
+    }
   }
 
-  const threshold = parseFloat(mergedConfig.assessment.hitl_confidence_score);
-  // Convert from percentage (1-100) to decimal (0.0-1.0)
-  return threshold / 100;
+  const legacy = mergedConfig?.assessment as
+    | { default_confidence_threshold?: number | string; hitl_confidence_score?: number | string }
+    | undefined;
+  const legacyVal = legacy?.default_confidence_threshold ?? legacy?.hitl_confidence_score;
+  if (legacyVal !== undefined && legacyVal !== null) {
+    const t = parseFloat(String(legacyVal));
+    if (!Number.isNaN(t)) {
+      return t > 1 ? t / 100 : t;
+    }
+  }
+
+  return 0.8; // Default threshold of 80%
 };
 
 /**
@@ -329,6 +352,36 @@ export const getFieldHighlightInfo = (
  * @returns {Object} Object with confidence info and display properties
  */
 
+/**
+ * Aggregate confidence from the child assessments of a decomposed-string field.
+ *
+ * When the assessment LLM splits a plain-string field into sub-keyed child
+ * assessments, the field object has no top-level `confidence` but each direct child
+ * does. Returns the minimum child confidence (worst case — the value that should
+ * drive review highlighting) together with that child's threshold, or null when no
+ * direct child carries a numeric confidence.
+ */
+const aggregateChildConfidence = (fieldData: Record<string, unknown>): { confidence: number; confidenceThreshold?: number } | null => {
+  let minConfidence: number | null = null;
+  let thresholdForMin: number | undefined;
+
+  for (const value of Object.values(fieldData)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      continue;
+    }
+    const child = value as ConfidenceFieldData;
+    if (typeof child.confidence === 'number' && (minConfidence === null || child.confidence < minConfidence)) {
+      minConfidence = child.confidence;
+      thresholdForMin = typeof child.confidence_threshold === 'number' ? child.confidence_threshold : undefined;
+    }
+  }
+
+  if (minConfidence === null) {
+    return null;
+  }
+  return { confidence: minConfidence, confidenceThreshold: thresholdForMin };
+};
+
 export const getFieldConfidenceInfo = (
   fieldName: string,
   explainabilityInfo: Record<string, unknown> | Record<string, unknown>[] | null,
@@ -382,15 +435,30 @@ export const getFieldConfidenceInfo = (
     return { hasConfidenceInfo: false };
   }
 
-  const { confidence } = fieldData;
+  let { confidence } = fieldData;
   let confidenceThreshold = fieldData.confidence_threshold;
 
-  // Check if we have confidence data
-  const hasConfidence = typeof confidence === 'number';
+  // Some assessments decompose a single string field into sub-keyed child
+  // assessments (e.g. "Insurance Company": { "Fake Insurance Co": {confidence...},
+  // "650 Davis Street": {confidence...} }) instead of returning a flat
+  // {confidence} on the field itself. In that case aggregate the children: use the
+  // *minimum* child confidence (worst case is the right signal for review/alerts)
+  // and the matching child's threshold.
+  if (typeof confidence !== 'number') {
+    const aggregated = aggregateChildConfidence(fieldData);
+    if (aggregated) {
+      confidence = aggregated.confidence;
+      if (confidenceThreshold === undefined || confidenceThreshold === null) {
+        confidenceThreshold = aggregated.confidenceThreshold;
+      }
+    }
+  }
 
-  if (!hasConfidence) {
+  // Check if we have confidence data
+  if (typeof confidence !== 'number') {
     return { hasConfidenceInfo: false };
   }
+  const hasConfidence = true;
 
   // Use dynamic threshold from configuration if available and no field-specific threshold
   if (mergedConfig && (confidenceThreshold === undefined || confidenceThreshold === null)) {

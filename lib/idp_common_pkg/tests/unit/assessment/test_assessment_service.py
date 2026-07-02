@@ -190,8 +190,12 @@ class TestAssessmentService:
 
         assert service.region == "us-west-2"
         # Config is converted to IDPConfig model, verify it has the expected structure
-        assert hasattr(service.config, "assessment")
-        assert service.config.assessment.model == mock_config["assessment"]["model"]
+        # (v0.6: confidence assessment config lives under extraction.confidence)
+        assert hasattr(service.config.extraction, "confidence")
+        assert (
+            service.config.extraction.confidence.model
+            == mock_config["assessment"]["model"]
+        )
 
     def test_get_class_schema(self, service):
         """Test getting schema for a document class."""
@@ -490,8 +494,8 @@ class TestAssessmentService:
 
         assert service.region == "us-east-1"
         assert isinstance(service.config, IDPConfig)
-        # Verify default config has assessment settings
-        assert hasattr(service.config, "assessment")
+        # Verify default config has confidence settings (v0.6: extraction.confidence)
+        assert hasattr(service.config.extraction, "confidence")
 
     def test_init_with_dict_config(self, mock_config):
         """Test initialization with dict config converts to IDPConfig."""
@@ -500,7 +504,10 @@ class TestAssessmentService:
         assert service.region == "us-east-1"
         assert isinstance(service.config, IDPConfig)
         # Verify config was properly converted
-        assert service.config.assessment.model == mock_config["assessment"]["model"]
+        assert (
+            service.config.extraction.confidence.model
+            == mock_config["assessment"]["model"]
+        )
 
     def test_init_with_idpconfig_instance(self, mock_config):
         """Test initialization with IDPConfig instance (the previously failing case)."""
@@ -515,7 +522,10 @@ class TestAssessmentService:
         # Should use the same instance
         assert service.config is config_instance
         # Verify config properties are accessible
-        assert service.config.assessment.model == mock_config["assessment"]["model"]
+        assert (
+            service.config.extraction.confidence.model
+            == mock_config["assessment"]["model"]
+        )
 
     def test_init_with_invalid_config_type(self):
         """Test initialization with invalid config type raises ValueError."""

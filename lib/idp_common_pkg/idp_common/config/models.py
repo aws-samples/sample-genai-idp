@@ -30,6 +30,12 @@ from pydantic import (
 )
 from typing_extensions import Self
 
+# Current config schema/shape version. Bump when the stored config shape changes
+# in a way that requires a migration (see config/migrations/). v0.6 folded the
+# top-level `assessment` block into `extraction.confidence` / `extraction.geometry`
+# and introduced the top-level `hitl` block.
+CONFIG_FORMAT_VERSION = "0.6"
+
 
 class ImageConfig(BaseModel):
     """Image processing configuration"""
@@ -246,15 +252,61 @@ class AgenticConfig(BaseModel):
         ge=1,
         le=10,
         description="Max concurrent page-batch agents for parallel extraction. "
-        "1 = sequential (default). >1 splits pages into N batches and runs N agents "
-        "concurrently. Reduces wall-clock time but increases Bedrock RPM. "
-        "Tune based on your Bedrock quota.",
+        "1 = sequential (default). >1 shards the section's pages into "
+        "token-budgeted ranges (each agent sees ONLY its pages' OCR text/images, "
+        "not the whole document) and runs them concurrently. This both reduces "
+        "wall-clock time AND prevents context-window overflow on long documents. "
+        "Acts as an upper bound on parallelism and shard count. Increases Bedrock "
+        "RPM — tune to your quota.",
+    )
+    shard_token_budget: int = Field(
+        default=8000,
+        gt=0,
+        description="Target maximum input tokens (estimated, ~chars/4) of OCR "
+        "text per shard when max_concurrent_batches > 1. Pages are grouped so "
+        "each shard stays under this budget, creating as many shards as needed "
+        "(capped by max_concurrent_batches). The default (8000) reliably shards "
+        "large documents so a single agent never has to emit a giant table in "
+        "one Bedrock call (the read-timeout failure mode). Raise for "
+        "large-context models (e.g. 1M-context Claude); lower if shards still "
+        "overflow.",
+    )
+    max_pages_per_shard: int = Field(
+        default=5,
+        ge=0,
+        description="Page-count ceiling per shard when max_concurrent_batches "
+        "> 1. A shard is closed once it holds this many pages even if its OCR "
+        "text is still under shard_token_budget — so a document with unusually "
+        "compact pages still shards on page count (tokens AND pages both bound a "
+        "shard). This guarantees large docs shard regardless of text density. "
+        "0 = disabled (token budget alone bounds shards).",
+    )
+    max_images_per_agent: int = Field(
+        default=20,
+        ge=0,
+        description="Safety cap on how many page images are attached to a single "
+        "agent invocation when the task prompt uses {DOCUMENT_IMAGE}. Sending many "
+        "large images in one request can cause Bedrock read timeouts / oversized "
+        "first turns (a long doc with 25+ page images is the classic case). When "
+        "the section (or a shard) has more images than this, only the first N are "
+        "attached and a warning is logged; the agent still has the full OCR text "
+        "and can fetch specific pages with the view_image tool. 0 = unlimited "
+        "(legacy behavior). Per-shard sharding already bounds this; the cap is the "
+        "backstop for the single-agent path.",
     )
     table_parsing: TableParsingConfig = Field(
         default_factory=TableParsingConfig,
         description="Configuration for deterministic table parsing tool. "
         "When enabled, the extraction agent can parse well-formatted "
         "Markdown tables from OCR output without LLM inference.",
+    )
+    runtime: str | None = Field(
+        default=None,
+        description="Sharded-extraction orchestration backend. None/'in_process' "
+        "(default) runs shards via asyncio in the single section Lambda — the "
+        "standalone/notebook path. 'step_functions' selects the nested SFN "
+        "Distributed Map (one Lambda per shard, native per-shard retry/resume). "
+        "Selection only affects orchestration; shard/merge logic is shared.",
     )
 
 
@@ -329,6 +381,233 @@ class PipelineHook(BaseModel):
     enabled: bool = Field(default=True, description="Whether this hook is active")
 
 
+class GranularAssessmentConfig(BaseModel):
+    """Granular assessment configuration (large-document batching for the
+    standalone Assessment step). Nested under ``extraction.confidence``.
+
+    NOTE: slated for removal in a follow-up PR (superseded by
+    ``confidence.list_batch_size`` + a capable confidence model). Retained here
+    so the standalone AssessmentService keeps working until that PR lands.
+    """
+
+    enabled: bool = Field(default=False, description="Enable granular assessment")
+    list_batch_size: int = Field(default=1, gt=0)
+    simple_batch_size: int = Field(default=3, gt=0)
+    max_workers: int = Field(default=20, gt=0)
+
+    @field_validator(
+        "list_batch_size", "simple_batch_size", "max_workers", mode="before"
+    )
+    @classmethod
+    def parse_int(cls, v: Any) -> int:
+        """Parse int from string or number"""
+        if isinstance(v, str):
+            return int(v) if v else 0
+        return int(v)
+
+
+class ConfidenceConfig(BaseModel):
+    """Per-field confidence configuration (v0.6).
+
+    Confidence is an optional OUTPUT of extraction, not a separate stage. This
+    block (nested as ``extraction.confidence``) is the single home for every knob
+    that used to live under the top-level ``assessment`` block — the confidence
+    model, its prompts/image/decoding params, the integration mode, list
+    batching, and the granular sub-config. HITL (human review) is its own
+    top-level ``hitl`` block; geometry is ``extraction.geometry``.
+    """
+
+    mode: str = Field(
+        default="separate",
+        description=(
+            "Confidence scoring mode — the single control for per-field confidence: "
+            "'off' (no confidence scoring at all — no extra model pass, no "
+            "explainability_info); 'separate' (default — scored in a distinct "
+            "inference: a per-shard second pass for advanced/agentic extraction, or "
+            "the standalone Assessment step for simple extraction); 'integrated' "
+            "(the extraction inference emits each value's confidence in one pass, "
+            "saving a model call — the standalone step is bypassed)."
+        ),
+    )
+    enabled: bool = Field(
+        default=True,
+        description=(
+            "DERIVED from `mode` (enabled = mode != 'off'). Retained for backward "
+            "compatibility of code that reads confidence.enabled; do not set directly "
+            "— use `mode`."
+        ),
+    )
+    model: Optional[str] = Field(
+        default=None,
+        description="Bedrock model ID for confidence assessment. Use 'LambdaHook' to invoke a custom Lambda function instead of Bedrock.",
+    )
+    model_lambda_hook_arn: Optional[str] = Field(
+        default=None,
+        description="Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-.",
+    )
+    system_prompt: str = Field(
+        default="",
+        description="System prompt for confidence assessment (populated from system defaults)",
+    )
+    task_prompt: str = Field(
+        default="",
+        description=(
+            "CONFIDENCE-ONLY task prompt — used by the separate confidence pass "
+            "(agentic in-shard second inference and the standalone Assessment step). "
+            "The bounding-box block (extraction.geometry.task_prompt_bbox) is "
+            "composed in for LLM-box geometry modes. See "
+            "prompt_assembly.select_confidence_task_prompt."
+        ),
+    )
+    temperature: float = Field(default=0.0, ge=0.0, le=1.0)
+    top_p: float = Field(default=0.1, ge=0.0, le=1.0)
+    top_k: float = Field(default=5.0, ge=0.0)
+    reasoning_effort: str = Field(
+        default="medium",
+        description=(
+            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
+            "minimal, low, medium, or high. Ignored by other model families."
+        ),
+    )
+    max_tokens: int = Field(
+        default=10000,
+        gt=0,
+        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit.",
+    )
+    list_batch_size: int = Field(
+        default=25,
+        gt=0,
+        description=(
+            "Max list rows assessed per inference in the in-shard assessment path "
+            "(agentic extraction). A single assessment call over a large list (e.g. "
+            "75 transaction rows) is unreliable — the model under-enumerates or omits "
+            "the list, leaving rows unassessed. When a shard's extracted list exceeds "
+            "this size, the assessment is run in batches of this many rows and "
+            "concatenated, so every row gets a confidence. Lower = more reliable "
+            "enumeration but more inferences; raise for capable models."
+        ),
+    )
+    image: ImageConfig = Field(default_factory=ImageConfig)
+    granular: GranularAssessmentConfig = Field(default_factory=GranularAssessmentConfig)
+
+    @field_validator("temperature", "top_p", "top_k", mode="before")
+    @classmethod
+    def parse_float(cls, v: Any) -> float:
+        """Parse float from string or number"""
+        if isinstance(v, str):
+            return float(v) if v else 0.0
+        return float(v)
+
+    @field_validator("max_tokens", "list_batch_size", mode="before")
+    @classmethod
+    def parse_int(cls, v: Any) -> int:
+        """Parse int from string or number"""
+        if isinstance(v, str):
+            return int(v) if v else 0
+        return int(v)
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def validate_mode(cls, v: Any) -> str:
+        """Normalize the confidence scoring mode; reject unknown values early."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return "separate"
+        v_str = str(v).strip().lower()
+        if v_str not in ("off", "separate", "integrated"):
+            raise ValueError(
+                "extraction.confidence.mode must be 'off', 'separate', or "
+                f"'integrated', got {v!r}"
+            )
+        return v_str
+
+    @model_validator(mode="after")
+    def derive_enabled_from_mode(self) -> Self:
+        """`enabled` is derived from `mode` (enabled = mode != 'off').
+
+        Back-compat: a config that set `enabled: false` but left mode at its
+        'separate' default is honored as OFF (so old disable-via-enabled configs
+        still turn confidence off); otherwise mode is authoritative.
+        """
+        if self.enabled is False and self.mode != "off":
+            # Legacy disable-via-enabled: respect it.
+            self.mode = "off"
+        self.enabled = self.mode != "off"
+        return self
+
+
+class GeometryConfig(BaseModel):
+    """Field bounding-box (geometry) configuration (v0.6).
+
+    Nested as ``extraction.geometry``. Geometry is advisory enrichment attached
+    to per-field confidence leaves.
+    """
+
+    mode: str = Field(
+        default="ocr_only",
+        description=(
+            "How field bounding boxes are produced. 'ocr_only' (default): DO NOT "
+            "ask the model for boxes — derive geometry purely by matching each "
+            "extracted value to real OCR lines (pageData.json), disambiguating "
+            "repeated values by row order. Cheaper and more accurate than "
+            "LLM-estimated boxes. 'llm_grounded': the model emits boxes and OCR "
+            "grounding refines them. 'llm': use the model's boxes as-is with no "
+            "grounding. 'off': no geometry is produced at all."
+        ),
+    )
+    task_prompt_bbox: str = Field(
+        default="",
+        description=(
+            "Bounding-box instruction block appended to whichever confidence-bearing "
+            "prompt is active (integrated or confidence-only) ONLY when mode is 'llm' "
+            "or 'llm_grounded'. Ignored for 'ocr_only'/'off'. See "
+            "prompt_assembly._append_bbox_block."
+        ),
+    )
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def validate_mode(cls, v: Any) -> str:
+        """Normalize geometry mode; reject unknown values early."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return "ocr_only"
+        v_str = str(v).strip().lower()
+        if v_str not in ("ocr_only", "llm_grounded", "llm", "off"):
+            raise ValueError(
+                "extraction.geometry.mode must be 'ocr_only', 'llm_grounded', "
+                f"'llm', or 'off', got {v!r}"
+            )
+        return v_str
+
+
+class HITLConfig(BaseModel):
+    """Human-in-the-Loop review configuration (v0.6, top-level ``hitl``).
+
+    HITL is a genuinely separate concern (routing low-confidence extractions to
+    human review), so it lives outside extraction. The confidence-scoring path
+    reads ``confidence_threshold`` to flag fields; the processresults path reads
+    ``enabled`` to decide whether flagged fields trigger a review task.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable Human-in-the-Loop review for low-confidence extractions",
+    )
+    confidence_threshold: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        description="Confidence threshold below which a field is flagged for review",
+    )
+
+    @field_validator("confidence_threshold", mode="before")
+    @classmethod
+    def parse_float(cls, v: Any) -> float:
+        """Parse float from string or number"""
+        if isinstance(v, str):
+            return float(v) if v else 0.0
+        return float(v)
+
+
 class ExtractionConfig(BaseModel):
     """Document extraction configuration"""
 
@@ -350,8 +629,19 @@ class ExtractionConfig(BaseModel):
     )
     task_prompt: str = Field(
         default="",
-        description="Task prompt template for extraction (populated from system defaults)",
+        description="Task prompt template for EXTRACTION ONLY (used when confidence is disabled or runs separately). Populated from system defaults.",
     )
+    task_prompt_extraction_with_confidence: str = Field(
+        default="",
+        description=(
+            "Task prompt template for INTEGRATED extraction+confidence — used when "
+            "extraction.confidence.mode == 'integrated', where a single inference "
+            "emits each value AND its confidence. Populated from system defaults."
+        ),
+    )
+    # NOTE (v0.6): the confidence-only prompt lives at extraction.confidence.task_prompt
+    # and the bounding-box block at extraction.geometry.task_prompt_bbox — each with its
+    # own section. Only the extraction-only and integrated templates are top-level here.
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
@@ -368,7 +658,35 @@ class ExtractionConfig(BaseModel):
         description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
     )
     image: ImageConfig = Field(default_factory=ImageConfig)
+    mode: Optional[str] = Field(
+        default=None,
+        description=(
+            "Extraction mode: 'simple' (single-pass — fast/cheap, best for short "
+            "documents) or 'advanced' (robust/sharded engine for large documents, "
+            "big tables, and completeness). This is the user-facing control; the "
+            "underlying 'agentic.enabled' flag is derived from it "
+            "('advanced' -> agentic on). If omitted, it is inferred from "
+            "agentic.enabled for backward compatibility."
+        ),
+    )
     agentic: AgenticConfig = Field(default_factory=AgenticConfig)
+    confidence: ConfidenceConfig = Field(
+        default_factory=ConfidenceConfig,
+        description=(
+            "Per-field confidence configuration. Confidence is an optional output "
+            "of extraction; this block is the single home for the confidence "
+            "model, prompts, integration mode, and list batching (v0.6 — replaces "
+            "the former top-level 'assessment' block and "
+            "'extraction.assessment_integration')."
+        ),
+    )
+    geometry: GeometryConfig = Field(
+        default_factory=GeometryConfig,
+        description=(
+            "Field bounding-box (geometry) configuration (v0.6 — replaces "
+            "'assessment.geometry_mode')."
+        ),
+    )
     missing_field_handling: MissingFieldHandlingConfig = Field(
         default_factory=MissingFieldHandlingConfig,
         description=(
@@ -397,6 +715,35 @@ class ExtractionConfig(BaseModel):
         if isinstance(v, str):
             return int(v) if v else 0
         return int(v)
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def validate_mode(cls, v: Any) -> Optional[str]:
+        """Normalize the extraction mode; reject unknown values early."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        v_str = str(v).strip().lower()
+        if v_str not in ("simple", "advanced"):
+            raise ValueError(
+                f"extraction.mode must be 'simple' or 'advanced', got {v!r}"
+            )
+        return v_str
+
+    @model_validator(mode="after")
+    def reconcile_mode_and_agentic(self) -> Self:
+        """Reconcile the user-facing extraction.mode with agentic.enabled.
+
+        - If ``mode`` is set, it is authoritative: 'advanced' -> agentic.enabled=True,
+          'simple' -> False (so all existing ``agentic.enabled`` read-sites keep
+          working while the UI exposes only Simple/Advanced).
+        - If ``mode`` is omitted (legacy config), infer it from agentic.enabled so the
+          field is always populated for the UI.
+        """
+        if self.mode is not None:
+            self.agentic.enabled = self.mode == "advanced"
+        else:
+            self.mode = "advanced" if self.agentic.enabled else "simple"
+        return self
 
     @model_validator(mode="after")
     def set_default_review_agent_model(self) -> Self:
@@ -567,101 +914,6 @@ class ClassificationConfig(BaseModel):
         if isinstance(v, str):
             return v.strip().lower() in ("true", "1", "yes", "on")
         return bool(v)
-
-
-class GranularAssessmentConfig(BaseModel):
-    """Granular assessment configuration"""
-
-    enabled: bool = Field(default=False, description="Enable granular assessment")
-    list_batch_size: int = Field(default=1, gt=0)
-    simple_batch_size: int = Field(default=3, gt=0)
-    max_workers: int = Field(default=20, gt=0)
-
-    @field_validator(
-        "list_batch_size", "simple_batch_size", "max_workers", mode="before"
-    )
-    @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
-
-
-class AssessmentConfig(BaseModel):
-    """Document assessment configuration"""
-
-    postHook: List[PipelineHook] = Field(  # noqa: N815 — matches stored config key
-        default_factory=list,
-        description="Pipeline hooks invoked after assessment (Feature Platform)",
-    )
-    enabled: bool = Field(default=True, description="Enable assessment")
-    hitl_enabled: bool = Field(
-        default=False,
-        description="Enable Human-in-the-Loop review for low confidence extractions",
-    )
-    model: Optional[str] = Field(
-        default=None,
-        description="Bedrock model ID for assessment. Use 'LambdaHook' to invoke a custom Lambda function instead of Bedrock.",
-    )
-    model_lambda_hook_arn: Optional[str] = Field(
-        default=None,
-        description="Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-.",
-    )
-    system_prompt: str = Field(
-        default="",
-        description="System prompt for assessment (populated from system defaults)",
-    )
-    task_prompt: str = Field(
-        default="",
-        description="Task prompt template for assessment (populated from system defaults)",
-    )
-    temperature: float = Field(default=0.0, ge=0.0, le=1.0)
-    top_p: float = Field(default=0.1, ge=0.0, le=1.0)
-    top_k: float = Field(default=5.0, ge=0.0)
-    reasoning_effort: str = Field(
-        default="medium",
-        description=(
-            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
-            "minimal, low, medium, or high. Ignored by other model families."
-        ),
-    )
-    max_tokens: int = Field(
-        default=10000,
-        gt=0,
-        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
-    )
-    default_confidence_threshold: float = Field(
-        default=0.8,
-        ge=0.0,
-        le=1.0,
-        description="Confidence threshold for assessment and HITL triggering",
-    )
-    validation_enabled: bool = Field(default=False, description="Enable validation")
-    image: ImageConfig = Field(default_factory=ImageConfig)
-    granular: GranularAssessmentConfig = Field(default_factory=GranularAssessmentConfig)
-
-    @field_validator(
-        "temperature",
-        "top_p",
-        "top_k",
-        "default_confidence_threshold",
-        mode="before",
-    )
-    @classmethod
-    def parse_float(cls, v: Any) -> float:
-        """Parse float from string or number"""
-        if isinstance(v, str):
-            return float(v) if v else 0.0
-        return float(v)
-
-    @field_validator("max_tokens", mode="before")
-    @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
 
 
 class SummarizationConfig(BaseModel):
@@ -1881,6 +2133,15 @@ class IDPConfig(BaseModel):
         default="Config", description="Configuration type"
     )
 
+    config_format_version: str = Field(
+        default=CONFIG_FORMAT_VERSION,
+        description=(
+            "Config schema/shape version. Configs without this stamp (or stamped "
+            "below the current version) are migrated on read (see "
+            "config/migrations)."
+        ),
+    )
+
     use_bda: bool = Field(
         default=False,
         description="Use Bedrock Data Automation (BDA) for document processing. "
@@ -1916,8 +2177,9 @@ class IDPConfig(BaseModel):
     extraction: ExtractionConfig = Field(
         default_factory=ExtractionConfig, description="Extraction configuration"
     )
-    assessment: AssessmentConfig = Field(
-        default_factory=AssessmentConfig, description="Assessment configuration"
+    hitl: HITLConfig = Field(
+        default_factory=HITLConfig,
+        description="Human-in-the-Loop review configuration (v0.6, top-level)",
     )
     summarization: SummarizationConfig = Field(
         default_factory=lambda: SummarizationConfig(
@@ -1981,6 +2243,13 @@ class IDPConfig(BaseModel):
         logger = logging.getLogger(__name__)
 
         if isinstance(data, dict):
+            # Migrate v0.5 config shape → v0.6 (assessment.* → extraction.confidence
+            # / extraction.geometry / top-level hitl). Idempotent: a no-op once the
+            # config is already stamped config_format_version == CONFIG_FORMAT_VERSION.
+            from .migrations.v05_to_v06 import migrate_v05_to_v06
+
+            data = migrate_v05_to_v06(data)
+
             # Migrate rule_classes → policy_classes (renamed in v0.5.9)
             if "rule_classes" in data and "policy_classes" not in data:
                 data["policy_classes"] = data.pop("rule_classes")

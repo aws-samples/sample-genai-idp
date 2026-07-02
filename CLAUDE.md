@@ -341,12 +341,13 @@ The codebase maintains GovCloud compatibility:
 - Use `${AWS::URLSuffix}` instead of hardcoded `amazonaws.com`
 - Validation enforced via `make check-arn-partitions`
 
-### Nested Template Generation
+### Nested Stacks
 
-AppSync resources are split into a nested template to work around CloudFormation resource limits:
-- Script: `scripts/generate_nested_template.py`
-- Generated template: `nested/appsync-nested-template.yaml`
-- Automatically extracted from main template during build
+The solution is split into nested stacks to stay under CloudFormation resource
+limits. Notably, `nested/api-resolvers/` holds the UI API resolver Lambdas plus
+the API Gateway REST API + dispatcher that the web UI calls (logical id
+`APIRESOLVERSTACK`). (This stack was historically named `nested/appsync` /
+`APPSYNCSTACK` when the UI used AWS AppSync, which has since been removed.)
 
 ### Lambda Layer Dependencies
 

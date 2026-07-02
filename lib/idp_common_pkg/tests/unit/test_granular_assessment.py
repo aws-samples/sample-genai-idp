@@ -526,15 +526,15 @@ class TestGranularAssessmentService:
         tasks = service._create_assessment_tasks({}, properties, 0.9)
         assert len(tasks) == 0
 
-    def test_missing_task_prompt_uses_default(self, sample_config):
-        """Test that default task_prompt is used when not in config."""
-        # Remove task_prompt from config
-        del sample_config["assessment"]["task_prompt"]
+    def test_configured_task_prompt_is_used(self, sample_config):
+        """The confidence task_prompt from config is used to build the prompt.
 
+        (v0.6: assessment.task_prompt migrates to extraction.confidence.task_prompt;
+        the granular service composes from it via prompt_assembly.)
+        """
         idp_config = IDPConfig.model_validate(sample_config)
         service = GranularAssessmentService(config=idp_config)
 
-        # Should not raise an error, should use default task_prompt from IDPConfig
         prompt = service._build_cached_prompt_base("text", "letter", "attrs", "ocr", [])
 
         # Verify a prompt was generated (not empty)

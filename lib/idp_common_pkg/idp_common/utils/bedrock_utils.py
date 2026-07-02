@@ -50,6 +50,19 @@ DEFAULT_RETRYABLE_ERRORS = {
     "InternalServerError",  # Variant of InternalServerException
     "RequestTimeout",
     "RequestTimeoutException",
+    # Transient network/read timeouts to Bedrock. These surface as botocore
+    # ReadTimeoutError / ConnectTimeoutError, or are wrapped by Strands in an
+    # EventLoopException whose message contains the urllib3 pool text. We match
+    # the timeout-SPECIFIC markers (by exception name and as message substrings
+    # — see the generic-Exception branch), NOT the generic "EventLoopException"
+    # wrapper name (which also wraps non-retryable failures), so a slow/oversized
+    # request retries with backoff instead of failing the whole section after the
+    # full read timeout. The durable fix for oversized requests is image capping
+    # + sharding (below); this just prevents a hard fail on a transient blip.
+    "ReadTimeoutError",
+    "ConnectTimeoutError",
+    "Read timed out",
+    "AWSHTTPSConnectionPool",
 }
 
 # Default retryable exception types (caught by isinstance check)

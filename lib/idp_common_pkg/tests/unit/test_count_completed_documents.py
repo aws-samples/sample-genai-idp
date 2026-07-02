@@ -25,7 +25,7 @@ def test_count_completed_documents_all_completed():
         "index",
         os.path.join(
             os.path.dirname(__file__),
-            "../../../../nested/appsync/src/lambda/test_results_resolver/index.py",
+            "../../../../nested/api-resolvers/src/lambda/test_results_resolver/index.py",
         ),
     )
     index = importlib.util.module_from_spec(spec)
@@ -77,7 +77,7 @@ def test_count_completed_documents_partial():
         "index",
         os.path.join(
             os.path.dirname(__file__),
-            "../../../../nested/appsync/src/lambda/test_results_resolver/index.py",
+            "../../../../nested/api-resolvers/src/lambda/test_results_resolver/index.py",
         ),
     )
     index = importlib.util.module_from_spec(spec)
@@ -127,7 +127,7 @@ def test_count_completed_documents_none_completed():
         "index",
         os.path.join(
             os.path.dirname(__file__),
-            "../../../../nested/appsync/src/lambda/test_results_resolver/index.py",
+            "../../../../nested/api-resolvers/src/lambda/test_results_resolver/index.py",
         ),
     )
     index = importlib.util.module_from_spec(spec)
@@ -165,7 +165,7 @@ def test_count_completed_documents_missing_evaluation_status():
         "index",
         os.path.join(
             os.path.dirname(__file__),
-            "../../../../nested/appsync/src/lambda/test_results_resolver/index.py",
+            "../../../../nested/api-resolvers/src/lambda/test_results_resolver/index.py",
         ),
     )
     index = importlib.util.module_from_spec(spec)
@@ -206,7 +206,7 @@ def test_count_completed_documents_document_not_found():
         "index",
         os.path.join(
             os.path.dirname(__file__),
-            "../../../../nested/appsync/src/lambda/test_results_resolver/index.py",
+            "../../../../nested/api-resolvers/src/lambda/test_results_resolver/index.py",
         ),
     )
     index = importlib.util.module_from_spec(spec)
@@ -238,7 +238,7 @@ def test_count_completed_documents_handles_exceptions():
         "index",
         os.path.join(
             os.path.dirname(__file__),
-            "../../../../nested/appsync/src/lambda/test_results_resolver/index.py",
+            "../../../../nested/api-resolvers/src/lambda/test_results_resolver/index.py",
         ),
     )
     index = importlib.util.module_from_spec(spec)
@@ -269,7 +269,7 @@ def test_count_completed_documents_uses_correct_sk():
         "index",
         os.path.join(
             os.path.dirname(__file__),
-            "../../../../nested/appsync/src/lambda/test_results_resolver/index.py",
+            "../../../../nested/api-resolvers/src/lambda/test_results_resolver/index.py",
         ),
     )
     index = importlib.util.module_from_spec(spec)
@@ -315,7 +315,7 @@ def test_count_completed_documents_case_insensitive():
         "index",
         os.path.join(
             os.path.dirname(__file__),
-            "../../../../nested/appsync/src/lambda/test_results_resolver/index.py",
+            "../../../../nested/api-resolvers/src/lambda/test_results_resolver/index.py",
         ),
     )
     index = importlib.util.module_from_spec(spec)

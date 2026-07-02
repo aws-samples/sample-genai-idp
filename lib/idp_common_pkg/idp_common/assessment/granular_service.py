@@ -131,10 +131,11 @@ class GranularAssessmentService:
         self.config = config_model
         self.region = region or os.environ.get("AWS_REGION")
 
-        # Granular processing configuration (type-safe access, Pydantic handles conversions)
-        self.max_workers = self.config.assessment.granular.max_workers
-        self.simple_batch_size = self.config.assessment.granular.simple_batch_size
-        self.list_batch_size = self.config.assessment.granular.list_batch_size
+        # Granular processing configuration (v0.6: extraction.confidence.granular)
+        _granular = self.config.extraction.confidence.granular
+        self.max_workers = _granular.max_workers
+        self.simple_batch_size = _granular.simple_batch_size
+        self.list_batch_size = _granular.list_batch_size
 
         # Ensure safe minimum values
         self.max_workers = max(1, self.max_workers)
@@ -169,8 +170,8 @@ class GranularAssessmentService:
             "RequestLimitExceeded",
         ]
 
-        # Get model_id from typed config for logging
-        model_id = self.config.assessment.model
+        # Get model_id from typed config for logging (v0.6: extraction.confidence)
+        model_id = self.config.extraction.confidence.model
         logger.info(f"Initialized granular assessment service with model {model_id}")
         logger.info(
             f"Granular config: max_workers={self.max_workers}, "
@@ -431,8 +432,14 @@ class GranularAssessmentService:
         Returns:
             List of content items for the cacheable portion
         """
-        # Get the base task prompt template (type-safe access)
-        task_prompt_template = self.config.assessment.task_prompt
+        # Select the CONFIDENCE-ONLY task prompt (extraction.task_prompt_confidence)
+        # and compose the editable bbox block only for LLM-box geometry modes
+        # (see idp_common.extraction.prompt_assembly.select_confidence_task_prompt).
+        from idp_common.extraction.prompt_assembly import (
+            select_confidence_task_prompt,
+        )
+
+        task_prompt_template = select_confidence_task_prompt(self.config.extraction)
 
         if not task_prompt_template:
             raise ValueError(
@@ -864,7 +871,7 @@ class GranularAssessmentService:
                 top_p=top_p,
                 max_tokens=max_tokens,
                 context="GranularAssessment",
-                model_lambda_hook_arn=self.config.assessment.model_lambda_hook_arn,
+                model_lambda_hook_arn=self.config.extraction.confidence.model_lambda_hook_arn,
                 reasoning_effort=reasoning_effort,
             )
 
@@ -1567,8 +1574,8 @@ class GranularAssessmentService:
         Returns:
             Document: Updated Document object with assessment results appended to extraction results
         """
-        # Check if assessment is enabled in typed configuration
-        enabled = self.config.assessment.enabled
+        # Check if confidence assessment is enabled (v0.6: extraction.confidence)
+        enabled = self.config.extraction.confidence.enabled
         if not enabled:
             logger.info("Assessment is disabled via configuration")
             return document
@@ -1674,9 +1681,9 @@ class GranularAssessmentService:
             t2 = time.time()
             logger.info(f"Time taken to read text content: {t2 - t1:.2f} seconds")
 
-            # Read page images with configurable dimensions (type-safe access)
-            target_width = self.config.assessment.image.target_width
-            target_height = self.config.assessment.image.target_height
+            # Read page images with configurable dimensions (v0.6: confidence.image)
+            target_width = self.config.extraction.confidence.image.target_width
+            target_height = self.config.extraction.confidence.image.target_height
 
             page_images = []
             for page_id in sorted_page_ids:
@@ -1711,14 +1718,15 @@ class GranularAssessmentService:
             t4 = time.time()
             logger.info(f"Time taken to read raw OCR results: {t4 - t3:.2f} seconds")
 
-            # Get assessment configuration (type-safe, Pydantic handles conversions)
-            model_id = self.config.assessment.model
-            temperature = self.config.assessment.temperature
-            top_k = self.config.assessment.top_k
-            top_p = self.config.assessment.top_p
-            reasoning_effort = self.config.assessment.reasoning_effort
-            max_tokens = self.config.assessment.max_tokens
-            system_prompt = self.config.assessment.system_prompt
+            # Get confidence configuration (v0.6: extraction.confidence.*)
+            confidence_cfg = self.config.extraction.confidence
+            model_id = confidence_cfg.model
+            temperature = confidence_cfg.temperature
+            top_k = confidence_cfg.top_k
+            top_p = confidence_cfg.top_p
+            reasoning_effort = confidence_cfg.reasoning_effort
+            max_tokens = confidence_cfg.max_tokens
+            system_prompt = confidence_cfg.system_prompt
 
             # Get schema for this document class
             class_schema = self._get_class_schema(class_label)
@@ -1729,9 +1737,7 @@ class GranularAssessmentService:
             properties = class_schema.get(SCHEMA_PROPERTIES, {})
 
             # Get confidence thresholds (type-safe, already float from Pydantic)
-            default_confidence_threshold = (
-                self.config.assessment.default_confidence_threshold
-            )
+            default_confidence_threshold = self.config.hitl.confidence_threshold
 
             # Build the cached base prompt (without attribute descriptions - those are task-specific)
             base_content = self._build_cached_prompt_base(
@@ -2022,6 +2028,35 @@ class GranularAssessmentService:
                             f"Primary exception is not throttling-related: {type(primary_exception).__name__}. "
                             f"Document will be marked as failed without retry."
                         )
+
+            # Ground field geometry in real OCR data when enabled (see
+            # AssessmentService for rationale). Applied once on the fully-aggregated
+            # assessment so list/group structure is whole. Safe fallback to LLM boxes
+            # when OCR geometry is unavailable or no value match is found.
+            geometry_mode = self.config.extraction.geometry.mode
+            if geometry_mode not in ("llm", "off"):
+                try:
+                    from idp_common.assessment.ocr_grounding import (
+                        ground_assessment_geometry,
+                        load_page_ocr_data,
+                    )
+
+                    page_data_by_page = load_page_ocr_data(
+                        document.pages, sorted_page_ids
+                    )
+                    if page_data_by_page:
+                        enhanced_assessment_data = ground_assessment_geometry(
+                            enhanced_assessment_data,
+                            extraction_results,
+                            page_data_by_page,
+                            geometry_mode,
+                            class_schema,
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"OCR geometry grounding failed for section {section_id}; "
+                        f"keeping LLM-estimated boxes: {e}"
+                    )
 
             # Update the existing extraction result with enhanced assessment data
             extraction_data["explainability_info"] = [enhanced_assessment_data]

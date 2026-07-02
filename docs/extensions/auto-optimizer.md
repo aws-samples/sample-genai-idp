@@ -9,8 +9,9 @@ The **Auto Optimizer** is a fully autonomous AI agentic system that optimizes yo
 
 **Duration**: ~3.5 minutes
 
-<!-- TODO: Replace with final GitHub assets URL -->
-https://github.com/user-attachments/assets/PLACEHOLDER
+https://github.com/user-attachments/assets/981ae354-bb5d-4613-bf01-ac17675be25b
+
+
 
 ## What it does
 

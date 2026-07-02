@@ -539,6 +539,28 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
 
 
 @tool
+def provide_field_assessment(assessment: dict[str, Any], agent: Agent) -> str:
+    """Record a per-field confidence + bounding-box assessment for the extraction.
+
+    Use this AFTER the extraction is complete and correct (integrated-assessment
+    mode only). Provide one entry per extracted field mirroring the extraction
+    structure:
+      - Scalar/group field -> {"confidence": 0.0-1.0, "confidence_reason": "...",
+        "bbox": [x1,y1,x2,y2], "page": N}   (bbox/page optional)
+      - List field        -> a LIST with one assessment object per extracted row,
+        IN THE SAME ORDER as the extracted rows.
+    confidence is your calibrated certainty the value is correct given the source.
+    This overwrites any previous assessment.
+    """
+    agent.state.set("field_assessment", assessment)
+    logger.info(
+        "provide_field_assessment called",
+        extra={"field_count": len(assessment) if isinstance(assessment, dict) else 0},
+    )
+    return "Assessment recorded."
+
+
+@tool
 def view_existing_extraction(agent: Agent) -> str:
     """Use this tool to view data is currently stored as extracted."""
     logger.info(
@@ -750,6 +772,12 @@ After successfully using the extraction tool, you MUST:
 """
 
 
+# Prompt templates are editable config fields (extraction.task_prompt*), selected
+# per settings by idp_common.extraction.prompt_assembly (select_extraction_task_prompt
+# / select_confidence_task_prompt). The integrated confidence instructions live in
+# extraction.task_prompt_extraction_with_confidence — not hardcoded here.
+
+
 TABLE_PARSING_PROMPT_ADDENDUM = """
 TABLE EXTRACTION OPTIMIZATION:
 When you encounter tables in the document text (Markdown tables with | delimiters),
@@ -802,6 +830,36 @@ ROW COUNT VALIDATION:
 )
 async def invoke_agent_with_retry(input: AgentInput, agent: Agent):
     return await agent.invoke_async(input)
+
+
+def _is_context_overflow_error(exc: Exception) -> bool:
+    """Heuristically detect a model context-window overflow.
+
+    Strands raises ``ContextWindowOverflowException`` and, when its
+    SummarizingConversationManager can't recover (e.g. the very first turn
+    already overflows), surfaces "Cannot summarize: insufficient messages for
+    summarization". Bedrock may also report validation errors mentioning the
+    input/context length. Match on type name and message text rather than
+    importing Strands' exception type (keeps this module import-light).
+    """
+    name = type(exc).__name__
+    msg = str(exc).lower()
+    if "contextwindowoverflow" in name.lower():
+        return True
+    # Keep these specific to context-window/token-budget overflow so an
+    # unrelated validation error is not mis-tagged (the message is advisory,
+    # but a wrong remediation is still noise).
+    needles = (
+        "insufficient messages for summarization",
+        "context window",
+        "context length",
+        "input is too long",
+        "too many input tokens",
+        "too many tokens",
+        "maximum context length",
+        "exceeds the context",
+    )
+    return any(n in msg for n in needles)
 
 
 def _initialize_token_usage() -> dict[str, int]:
@@ -1200,7 +1258,22 @@ async def _invoke_agent_for_extraction(
 
     for attempt in range(max_extraction_retries):
         # invoke_agent_with_retry already handles network errors and throttling
-        response = await invoke_agent_with_retry(agent=agent, input=prompt_content)
+        try:
+            response = await invoke_agent_with_retry(agent=agent, input=prompt_content)
+        except Exception as e:  # noqa: BLE001 - translate one specific failure mode
+            if _is_context_overflow_error(e):
+                raise ValueError(
+                    "Extraction input exceeds the model's context window. The "
+                    "document/section is too large to process in one agent pass. "
+                    "Remedies: enable concurrent sharding "
+                    "(extraction.agentic.max_concurrent_batches > 1) and/or lower "
+                    "extraction.agentic.shard_token_budget; enable table parsing "
+                    "(requires Textract TABLES so OCR emits Markdown tables); "
+                    "reduce attached page images; or use a larger-context model "
+                    "(e.g. a ':1m' Claude variant). "
+                    f"(underlying error: {e})"
+                ) from e
+            raise
         logger.debug("Agent response received")
 
         # Try to get extraction from state
@@ -1285,16 +1358,15 @@ async def _invoke_agent_for_extraction(
     return response, None
 
 
-async def _run_batch_agent(
-    batch_index: int,
-    total_batches: int,
+async def _run_shard_agent(
+    shard_index: int,
+    total_shards: int,
     page_start: int,
     page_end: int,
     total_pages: int,
     model_id: str,
     data_format: type[TargetModel],
-    prompt: str | Message | Image.Image,
-    page_images: list[bytes] | None,
+    shard_prompt: str | Message | Image.Image,
     config: IDPConfig,
     context: str,
     max_retries: int,
@@ -1303,26 +1375,31 @@ async def _run_batch_agent(
     max_tokens: int | None,
     checkpoint_callback: Any | None,
     base_custom_instruction: str | None = None,
+    emit_field_assessment: bool = False,
 ) -> tuple[TargetModel, BedrockInvokeModelResponse]:
-    """Run a single batch agent for a page range, with instructions to extract only its assigned pages."""
-    # Build a custom instruction telling this agent its page assignment
-    batch_instruction = (
-        f"You are batch {batch_index + 1} of {total_batches}. "
-        f"Extract data ONLY from pages {page_start + 1} to {page_end} "
-        f"(out of {total_pages} total pages). "
-        f"Ignore content from other pages."
-    )
+    """Run one extraction agent over a single shard.
 
-    # Combine base custom instruction with batch instruction
-    combined_instruction = batch_instruction
+    ``shard_prompt`` already contains ONLY this shard's page text/images (the
+    service slices the input before calling). The instruction reinforces that
+    the agent should extract everything visible in its pages; fields that live
+    on other pages are simply absent (resolved at merge).
+    """
+    shard_instruction = (
+        f"You are processing shard {shard_index + 1} of {total_shards}, covering "
+        f"pages {page_start + 1}-{page_end} of {total_pages}. The document text "
+        f"and images you have been given contain ONLY these pages. Extract every "
+        f"requested field that appears in your pages. If a field does not appear "
+        f"in your pages, leave it null — another shard will provide it."
+    )
+    combined_instruction = shard_instruction
     if base_custom_instruction:
-        combined_instruction = f"{base_custom_instruction}\n\n{batch_instruction}"
+        combined_instruction = f"{base_custom_instruction}\n\n{shard_instruction}"
 
     return await structured_output_async(
         model_id=model_id,
         data_format=data_format,
-        prompt=prompt,
-        page_images=page_images,
+        prompt=shard_prompt,
+        page_images=None,  # images already embedded in shard_prompt content
         config=config,
         context=context,
         max_retries=max_retries,
@@ -1331,33 +1408,73 @@ async def _run_batch_agent(
         max_tokens=max_tokens,
         custom_instruction=combined_instruction,
         checkpoint_callback=checkpoint_callback,
+        emit_field_assessment=emit_field_assessment,
     )
 
 
-def _accumulate_metering(
-    merged_metering: dict[str, Any], metering: dict[str, Any]
-) -> None:
-    """Accumulate per-model token-metering counts into ``merged_metering``.
+async def default_shard_runner(
+    *,
+    shard_index: int,
+    total_shards: int,
+    payload: dict[str, Any],
+    model_id: str,
+    data_format: type[TargetModel],
+    config: IDPConfig,
+    context: str,
+    max_retries: int,
+    connect_timeout: float,
+    read_timeout: float,
+    max_tokens: int | None,
+    checkpoint_callback: Any | None,
+    custom_instruction: str | None,
+) -> tuple[TargetModel, "BedrockInvokeModelResponse"]:
+    """Strands-backed shard runner used by the runtime backends.
 
-    Token values from Bedrock responses may be ``None`` (e.g. when a model does
-    not report a particular counter). Both the accumulated value and the
-    incoming value are coerced to ``0`` so the addition never raises a
-    TypeError on a ``None`` operand (see issue #337).
+    Adapts the runtime's ``(shard_index, payload, ...)`` calling convention to
+    ``_run_shard_agent``. Defined here (not in ``runtime.py``) so ``runtime`` has
+    no dependency on the strands stack — the runtime stays import-light and the
+    import graph has no cycle.
     """
-    for mk, mv in metering.items():
-        if mk not in merged_metering:
-            merged_metering[mk] = dict(mv)
-        else:
-            for tk, tv in mv.items():
-                merged_metering[mk][tk] = (merged_metering[mk].get(tk) or 0) + (tv or 0)
+    return await _run_shard_agent(
+        shard_index=shard_index,
+        total_shards=total_shards,
+        page_start=payload["page_start"],
+        page_end=payload["page_end"],
+        total_pages=payload["total_pages"],
+        model_id=model_id,
+        data_format=data_format,
+        shard_prompt={"role": "user", "content": payload["content"]},
+        config=config,
+        context=context,
+        max_retries=max_retries,
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+        max_tokens=max_tokens,
+        checkpoint_callback=checkpoint_callback,
+        base_custom_instruction=custom_instruction,
+        # Integrated-assessment mode flows through the payload (set by the
+        # service when extraction.confidence.mode == "integrated").
+        emit_field_assessment=bool(payload.get("emit_field_assessment")),
+    )
+
+
+# Merge primitives live in idp_common.extraction.runtime (strands-free, the
+# single source of truth). Re-exported here for backward compatibility with
+# existing imports (`from idp_common.extraction.agentic_idp import
+# _merge_shard_results`, `_accumulate_metering`, ...).
+from idp_common.extraction.runtime import (  # noqa: E402,F401
+    _accumulate_metering,  # noqa: F401  (re-export for backward compat)
+    _annotation_is_list,  # noqa: F401
+    _list_valued_fields,  # noqa: F401
+    _merge_shard_results,  # noqa: F401
+)
 
 
 async def concurrent_structured_output_async(
     model_id: str,
     data_format: type[TargetModel],
-    prompt: str | Message | Image.Image,
-    page_images: list[bytes],
-    num_batches: int,
+    shard_payloads: list[dict[str, Any]],
+    max_parallelism: int,
     config: IDPConfig = IDPConfig(),
     context: str = "Extraction",
     max_retries: int = 7,
@@ -1366,94 +1483,71 @@ async def concurrent_structured_output_async(
     max_tokens: int | None = None,
     checkpoint_callback: Any | None = None,
     custom_instruction: str | None = None,
-    total_pages: int | None = None,
+    section_id: str = "section",
+    persistence: Any | None = None,
+    runtime: Any | None = None,
+    assess_runner: Any | None = None,
 ) -> tuple[TargetModel, BedrockInvokeModelResponse]:
     """
-    Run multiple extraction agents concurrently on different page ranges.
+    Run one extraction agent per input shard, concurrently, and merge results.
 
-    Splits the document's pages into N batches, runs N agents in parallel
-    (each seeing ALL images but instructed to extract only its assigned pages),
-    then merges results by concatenating list fields and taking the last
-    non-None value for scalar fields.
+    Each shard's prompt contains ONLY that shard's page text/images (the service
+    slices the input before calling), so no agent loads the whole document — this
+    bounds the context window and prevents overflow on long documents. At most
+    ``max_parallelism`` shards run at once (Bedrock RPM control).
+
+    This is now a thin shim over the runtime-agnostic primitives in
+    :mod:`idp_common.extraction.runtime`: it delegates to an
+    :class:`~idp_common.extraction.runtime.ExtractionRuntime` (default
+    :class:`~idp_common.extraction.runtime.InProcessRuntime`), which schedules
+    :func:`~idp_common.extraction.runtime.extract_one_shard` per shard and merges
+    via :func:`~idp_common.extraction.runtime.merge_shard_results`. Observable
+    behaviour is unchanged; existing callers keep working.
 
     Args:
-        num_batches: Number of concurrent agents to run (2-10)
-        total_pages: Override for page count (used when images not provided)
-        Other args: Same as structured_output_async
+        shard_payloads: List of dicts with keys ``content`` (pre-rendered prompt
+            content blocks for the shard), ``page_start``, ``page_end``,
+            ``total_pages``.
+        max_parallelism: Max number of shards to run concurrently.
+        section_id: Section identifier used to derive deterministic per-shard
+            persistence keys (when ``persistence`` is supplied).
+        persistence: Optional per-shard persistence backend (idempotent
+            skip-if-complete). ``None`` => in-memory only (today's behaviour).
+        runtime: Optional explicit ExtractionRuntime; defaults to InProcessRuntime.
+        Other args: Same as structured_output_async.
 
     Returns:
-        Merged (data_format instance, metering response)
+        Merged (data_format instance, metering response). The response metering
+        includes a ``_shard_scalar_conflicts`` marker when shards disagreed on a
+        scalar field, so the service can record it in metadata.
     """
-    total_pages = total_pages or len(page_images)
-    # Calculate page ranges for each batch
-    pages_per_batch = max(1, total_pages // num_batches)
-    batch_ranges = []
-    for i in range(num_batches):
-        start = i * pages_per_batch
-        end = (
-            min((i + 1) * pages_per_batch, total_pages)
-            if i < num_batches - 1
-            else total_pages
-        )
-        if start < total_pages:
-            batch_ranges.append((start, end))
+    from idp_common.extraction.runtime import InProcessRuntime
 
-    logger.info(
-        "Starting concurrent batch extraction",
-        extra={
-            "num_batches": len(batch_ranges),
-            "total_pages": total_pages,
-            "batch_ranges": [(s, e) for s, e in batch_ranges],
-        },
+    rt = runtime or InProcessRuntime(max_parallelism)
+    merged_result, response = await rt.run(
+        shard_payloads=shard_payloads,
+        model_id=model_id,
+        data_format=data_format,
+        config=config,
+        section_id=section_id,
+        context=context,
+        max_retries=max_retries,
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+        max_tokens=max_tokens,
+        checkpoint_callback=checkpoint_callback,
+        custom_instruction=custom_instruction,
+        persistence=persistence,
+        shard_runner=default_shard_runner,
+        assess_runner=assess_runner,
     )
+    # Normalise the runtime's plain-dict response into the typed envelope that
+    # existing callers expect. The runtime returns a BaseModel; it is an instance
+    # of ``data_format`` (TargetModel) by construction.
+    import typing as _typing
 
-    # Run all batches concurrently
-    tasks = [
-        _run_batch_agent(
-            batch_index=i,
-            total_batches=len(batch_ranges),
-            page_start=start,
-            page_end=end,
-            total_pages=total_pages,
-            model_id=model_id,
-            data_format=data_format,
-            prompt=prompt,
-            page_images=page_images,
-            config=config,
-            context=context,
-            max_retries=max_retries,
-            connect_timeout=connect_timeout,
-            read_timeout=read_timeout,
-            max_tokens=max_tokens,
-            checkpoint_callback=checkpoint_callback,
-            base_custom_instruction=custom_instruction,
-        )
-        for i, (start, end) in enumerate(batch_ranges)
-    ]
-    results = await asyncio.gather(*tasks)
-
-    # Merge results: concatenate list fields, take last non-None for scalars
-    merged_dict: dict[str, Any] = {}
-    merged_metering: dict[str, Any] = {}
-    for result_data, result_response in results:
-        result_dict = result_data.model_dump(mode="json")
-        for key, value in result_dict.items():
-            if isinstance(value, list):
-                merged_dict.setdefault(key, []).extend(value)
-            elif value is not None:
-                merged_dict[key] = value
-        # Accumulate metering
-        _accumulate_metering(merged_metering, result_response.get("metering", {}))
-
-    merged_result = data_format(**merged_dict)
-    # Count merged items for logging
-    total_items = sum(len(v) for v in merged_dict.values() if isinstance(v, list))
-    logger.info(
-        "Concurrent batch extraction complete",
-        extra={"total_items": total_items, "batches_completed": len(results)},
-    )
-
-    return merged_result, BedrockInvokeModelResponse(
+    typed_result = _typing.cast(TargetModel, merged_result)
+    return typed_result, BedrockInvokeModelResponse(
         response=BedrockResponse(
             output=BedrockOutput(
                 message=BedrockMessage(
@@ -1461,7 +1555,7 @@ async def concurrent_structured_output_async(
                 )
             )
         ),
-        metering=merged_metering,
+        metering=response.get("metering", {}),
     )
 
 
@@ -1482,6 +1576,7 @@ async def structured_output_async(
     checkpoint_callback: Any | None = None,
     checkpoint_buffer_data: dict[str, Any] | None = None,
     schema_validator: Callable[[dict[str, Any]], tuple[bool, str]] | None = None,
+    emit_field_assessment: bool = False,
 ) -> tuple[TargetModel, BedrockInvokeModelResponse]:
     """
     Extract structured data using Strands agents with tool-based validation.
@@ -1599,6 +1694,20 @@ async def structured_output_async(
         update_todo,
         view_todo_list,
     ]
+
+    # Integrated-assessment mode: give the agent a tool to emit per-field
+    # confidence/bbox in this SAME inference (the document is already in its
+    # cached context), and instruct it to call the tool after extraction. The
+    # recorded assessment is read from agent state below and returned alongside
+    # the result, riding the same downstream path as separate-mode assessment.
+    if emit_field_assessment:
+        # Register the tool the agent calls to record inline confidence. The
+        # instructions telling it to do so now live in the selected extraction
+        # TASK prompt (extraction.task_prompt_extraction_with_confidence, + the
+        # bbox block for LLM-box geometry), chosen by select_extraction_task_prompt
+        # in the service — a single editable template rather than a hardcoded
+        # system-prompt append. So we only ensure the tool is available here.
+        tools.append(provide_field_assessment)
 
     # Add table parsing tools if enabled
     if table_parsing_config.enabled:
@@ -1764,6 +1873,28 @@ async def structured_output_async(
                 extra={"tool_stats": tool_stats},
             )
 
+        # Integrated-assessment mode: surface the agent's inline per-field
+        # assessment (recorded via provide_field_assessment) so the caller can
+        # route it through the same collation/grounding/emit path separate-mode
+        # uses. Rides in metering to survive the typed response envelope.
+        if emit_field_assessment:
+            field_assessment = agent.state.get("field_assessment")
+            if field_assessment:
+                metering_dict["_integrated_field_assessment"] = field_assessment
+                logger.info(
+                    "Integrated field assessment recorded",
+                    extra={
+                        "field_count": len(field_assessment)
+                        if isinstance(field_assessment, dict)
+                        else 0
+                    },
+                )
+            else:
+                logger.warning(
+                    "Integrated assessment enabled but agent did not call "
+                    "provide_field_assessment; no confidence emitted for this shard."
+                )
+
         return result, BedrockInvokeModelResponse(
             response=BedrockResponse(
                 output=BedrockOutput(
@@ -1799,6 +1930,7 @@ def structured_output(
     checkpoint_callback: Any | None = None,
     checkpoint_buffer_data: dict[str, Any] | None = None,
     schema_validator: Callable[[dict[str, Any]], tuple[bool, str]] | None = None,
+    emit_field_assessment: bool = False,
 ) -> tuple[BaseModel, BedrockInvokeModelResponse]:
     """
     Synchronous version of structured_output_async.
@@ -1888,6 +2020,7 @@ def structured_output(
                         checkpoint_callback=checkpoint_callback,
                         checkpoint_buffer_data=checkpoint_buffer_data,
                         schema_validator=schema_validator,
+                        emit_field_assessment=emit_field_assessment,
                     )
                 )
             except Exception as e:
@@ -1923,6 +2056,7 @@ def structured_output(
                 checkpoint_callback=checkpoint_callback,
                 checkpoint_buffer_data=checkpoint_buffer_data,
                 schema_validator=schema_validator,
+                emit_field_assessment=emit_field_assessment,
             )
         )
 

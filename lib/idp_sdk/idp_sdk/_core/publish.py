@@ -1518,8 +1518,8 @@ STDERR:
         Launch Stack URL from those. The feature's ui-deployer then copies the
         UI bundle into the host's WebUIBucket at install/update time.
 
-        Returns ``(hash, file_list)`` — empty when no bundled feature
-        directories are present (e.g. a trimmed checkout).
+        Returns ``(hash, file_list, oss_catalog_entries)`` — empty when no
+        bundled feature directories are present (e.g. a trimmed checkout).
         """
         feature_dirs = [
             Path(d) for d in self._bundled_feature_dirs() if Path(d).is_dir()
@@ -2619,10 +2619,10 @@ STDERR:
             # Main template components
             "main": main_deps,
             # Nested components (includes all nested stacks - core and optional)
-            "nested/appsync": [
+            "nested/api-resolvers": [
                 LIB_DEPENDENCY,
-                "nested/appsync/src",
-                "nested/appsync/template.yaml",
+                "nested/api-resolvers/src",
+                "nested/api-resolvers/template.yaml",
             ],
             "nested/bedrockkb": [
                 "nested/bedrockkb/src",
@@ -2872,7 +2872,7 @@ STDERR:
 
         # Nested templates (packaged versions)
         # In headless mode, skip nested templates that contain resources stripped by the
-        # headless transformer (currently: nested/appsync, which contains AWS::AppSync::*).
+        # headless transformer (currently: nested/api-resolvers, which contains AWS::AppSync::*).
         headless_skip_nested = {"appsync"} if self.headless else set()
         nested_dir = "nested"
         if os.path.exists(nested_dir):

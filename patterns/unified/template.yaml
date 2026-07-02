@@ -103,16 +103,6 @@ Parameters:
     AllowedPattern: "^[\\w+=,.@-]{0,64}$"
     Description: "(Optional) Session name for sts:AssumeRole into the Bedrock hub-account role."
 
-  AppSyncApiUrl:
-    Type: String
-    Default: ""
-    Description: "URL of the AppSync GraphQL API for document status updates"
-
-  AppSyncApiArn:
-    Type: String
-    Default: ""
-    Description: "ARN of the AppSync GraphQL API for document status updates"
-
   ConfigurationDefaultS3Uri:
     Type: String
     Description: "S3 URI (s3://bucket/path/config.json) to import default configuration from S3"
@@ -199,22 +189,22 @@ Parameters:
     Type: String
     Default: ""
 
-  # Private AppSync VPC config (req #2)
-  UsePrivateAppSync:
+  # Private REST API VPC config (req #2)
+  UsePrivateApi:
     Type: String
     Default: "false"
     AllowedValues: ["true", "false"]
-    Description: Set to "true" when AppSyncVisibility=PRIVATE — puts processing Lambdas in VPC
+    Description: Set to "true" when ApiGatewayVisibility=PRIVATE — puts processing Lambdas in VPC
 
   LambdaSubnetIds:
     Type: CommaDelimitedList
     Default: ""
-    Description: Subnet IDs for Lambda VpcConfig (required when UsePrivateAppSync=true)
+    Description: Subnet IDs for Lambda VpcConfig (required when UsePrivateApi=true)
 
   LambdaSecurityGroupId:
     Type: String
     Default: ""
-    Description: Security group ID for Lambda VpcConfig (required when UsePrivateAppSync=true)
+    Description: Security group ID for Lambda VpcConfig (required when UsePrivateApi=true)
 
   VpcId:
     Type: String
@@ -255,9 +245,8 @@ Conditions:
   HasCustomExtractionModelARN:
     !Not [!Equals [!Ref CustomExtractionModelARN, ""]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
-  HasAppSyncApi: !Not [!Equals [!Ref AppSyncApiArn, ""]]
   IsECRImageScanningEnabled: !Equals [!Ref EnableECRImageScanning, "true"]
-  IsPrivateAppSync: !Equals [!Ref UsePrivateAppSync, "true"]
+  IsPrivateApi: !Equals [!Ref UsePrivateApi, "true"]
   IsMLflowEnabled: !Equals [!Ref EnableMLflow, "true"]
   HasArtifactsBucketKmsKey: !Not [!Equals [!Ref ArtifactsBucketKmsKeyArn, ""]]
 
@@ -338,12 +327,14 @@ Resources:
                     order: 3
               backend:
                 type: string
+                title: OCR backend
                 description: "OCR backend to use: 'textract' for AWS Textract, 'bedrock' for LLM-based OCR, 'none' for image-only processing without OCR"
                 enum: ["textract", "bedrock", "none"]
                 default: "textract"
-                order: 3
+                order: 1
               model_id:
                 type: string
+                title: Model
                 description: "Bedrock model ID (only used if backend is 'bedrock'). Select 'LambdaHook' to use a custom Lambda function for inference."
                 enum:
                   - "LambdaHook"
@@ -405,30 +396,22 @@ Resources:
                 dependsOn: { field: "backend", value: "bedrock" }
               model_lambda_hook_arn:
                 type: string
+                title: Model Lambda hook ARN
                 description: "Lambda function ARN for custom inference (used when model_id is 'LambdaHook'). Function name must start with GENAIIDP-."
                 default: ""
                 order: 3
                 dependsOn: { field: "model_id", value: "LambdaHook" }
-              system_prompt:
-                type: string
-                description: "System prompt for Bedrock OCR (only used if backend is 'bedrock')"
-                default: "You are an expert OCR system. Extract all text from the provided image accurately, preserving layout where possible."
-                order: 4
-                dependsOn: { field: "backend", value: "bedrock" }
-              task_prompt:
-                type: string
-                description: "Task prompt for Bedrock OCR (only used if backend is 'bedrock')"
-                default: "Extract all text from this document image. Preserve the layout, including paragraphs, tables, and formatting."
-                order: 5
-                dependsOn: { field: "backend", value: "bedrock" }
               reasoning_effort:
                 type: string
+                title: Reasoning effort
                 enum: ["minimal", "low", "medium", "high"]
                 default: "medium"
                 description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
-                order: 5.5
+                order: 4
+                dependsOn: { field: "model_id", valuePrefix: "openai." }
               features:
                 type: array
+                title: Textract features
                 listLabel: "Textract Features"
                 itemLabel: "Feature"
                 description: "Textract features (only used if backend is 'textract')"
@@ -443,6 +426,22 @@ Resources:
                       type: string
                       description: "Feature - select one of the supported OCR feature types"
                       enum: ["TABLES", "FORMS", "SIGNATURES", "LAYOUT"]
+              system_prompt:
+                type: string
+                title: System prompt
+                format: textarea
+                description: "System prompt for Bedrock OCR (only used if backend is 'bedrock')"
+                default: "You are an expert OCR system. Extract all text from the provided image accurately, preserving layout where possible."
+                order: 8
+                dependsOn: { field: "backend", value: "bedrock" }
+              task_prompt:
+                type: string
+                title: Task prompt
+                format: textarea
+                description: "Task prompt for Bedrock OCR (only used if backend is 'bedrock')"
+                default: "Extract all text from this document image. Preserve the layout, including paragraphs, tables, and formatting."
+                order: 9
+                dependsOn: { field: "backend", value: "bedrock" }
               postHook:
                 type: array
                 collapsible: true
@@ -513,22 +512,29 @@ Resources:
               properties:
                 name:
                   type: string
+                  title: Class name
                   description: Class name
+                  order: 0
                 description:
                   type: string
+                  title: Class description
                   description: Class description. Instruct LLM how to identify the class from the context provided in the classification prompt.
+                  order: 1
                 document_name_regex:
                   type: string
+                  title: Document name regex
                   description: "Optional regex pattern to match against document ID/name. When matched, all pages will be classified as this class type without LLM processing. Use only when all pages should be the same class."
-                  order: 2.5
+                  order: 2
                 document_page_content_regex:
                   type: string
+                  title: Page content regex
                   description: "Optional regex pattern to match against page content text. When matched during multi-modal page-level classification, the page will be classified as this class type without LLM processing."
-                  order: 2.6
+                  order: 3
                 extraction_model:
                   type: string
-                  description: "Optional per-class extraction model override. When set, this model is used for extraction instead of the global extraction.model. Useful for classes that benefit from a different model. NOTE: OpenAI GPT-5.x models (openai.gpt-5.*) are NOT compatible with agentic extraction (extraction.agentic.enabled=true); that combination is rejected by config validation."
-                  order: 2.7
+                  title: Extraction model override
+                  description: "Optional per-class extraction model override. When set, this model is used for extraction instead of the global extraction.model. Useful for classes that benefit from a different model. NOTE: OpenAI GPT-5.x models (openai.gpt-5.*) are NOT compatible with 'advanced' Extraction mode; that combination is rejected by config validation."
+                  order: 4
                   enum:
                     - ""
                     - "us.amazon.nova-lite-v1:0"
@@ -814,6 +820,7 @@ Resources:
                     order: 1
               model:
                 type: string
+                title: Model
                 description: "Model identifier. Select 'LambdaHook' to use a custom Lambda function for inference."
                 enum:
                   - "LambdaHook"
@@ -879,12 +886,14 @@ Resources:
                 order: 1
               model_lambda_hook_arn:
                 type: string
+                title: Model Lambda hook ARN
                 description: "Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-."
                 default: ""
-                order: 2
+                order: 3
                 dependsOn: { field: "model", value: "LambdaHook" }
               classificationMethod:
                 type: string
+                title: Classification method
                 description: "Classification methodology to use"
                 enum:
                   [
@@ -894,76 +903,92 @@ Resources:
                 order: 2
               maxPagesForClassification:
                 type: string
+                title: Pages to classify
                 description: "Number of pages to use for classification [When set to a number, forces the entire document to be assigned a single class]"
                 enum: ["ALL", "1", "2", "3", "5", "10"]
-                order: 3
+                order: 4
               sectionSplitting:
                 type: string
+                title: Section splitting
                 description: "Section splitting strategy: 'disabled' (entire doc as one section), 'page' (one section per page - prevents joining same-type documents), 'llm_determined' (use LLM boundary detection - default)"
                 enum: ["disabled", "page", "llm_determined"]
                 default: "llm_determined"
-                order: 3.5
+                order: 5
               contextPagesCount:
                 type: integer
+                title: Context pages
                 description: "Number of surrounding pages to include as context for multi-modal page-level classification. Value of 0 means no additional context (default). Value of 1 includes 1 page before and after. Value of 2 includes 2 pages before and after. Only applies to multimodalPageLevelClassification method."
                 minimum: 0
                 maximum: 5
                 default: 0
-                order: 3.6
+                order: 6
                 dependsOn: { field: "classificationMethod", value: "multimodalPageLevelClassification" }
               enforceValidClasses:
                 type: boolean
+                title: Enforce valid classes
                 description: "When enabled, the predicted class is validated against the defined class vocabulary. If the model returns a class that is not in the list, it is re-prompted with the valid choices and retried (see Max Validation Retries). If retries are exhausted, the page is assigned the Invalid Class Fallback and flagged with a validation error. When disabled, an out-of-vocabulary prediction is used as-is (legacy behavior). Only applies to multimodalPageLevelClassification."
                 default: true
-                order: 3.7
+                order: 7
                 dependsOn: { field: "classificationMethod", value: "multimodalPageLevelClassification" }
               maxValidationRetries:
                 type: integer
+                title: Max validation retries
                 description: "Maximum number of times to re-prompt the model when it returns a class outside the defined vocabulary. Only used when Enforce Valid Classes is enabled. 0 disables retries (a single invalid prediction goes straight to the fallback)."
                 minimum: 0
                 maximum: 5
                 default: 2
-                order: 3.8
+                order: 8
                 dependsOn: { field: "enforceValidClasses", value: true }
               invalidClassFallback:
                 type: string
+                title: Invalid class fallback
                 description: "Class label assigned to a page when all validation retries are exhausted. Should be one of your defined classes, or the built-in 'unclassified'. Only used when Enforce Valid Classes is enabled."
                 default: "unclassified"
-                order: 3.9
+                order: 9
                 dependsOn: { field: "enforceValidClasses", value: true }
               temperature:
                 type: number
+                title: Temperature
                 minimum: 0
                 maximum: 1
                 description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 4
+                order: 10
               top_k:
                 type: integer
+                title: Top K
                 minimum: 1
                 description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 5
+                order: 11
               top_p:
                 type: number
+                title: Top P
                 description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 6
+                order: 12
               max_tokens:
                 type: number
+                title: Max tokens
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
-                order: 7
+                order: 13
               reasoning_effort:
                 type: string
+                title: Reasoning effort
                 enum: ["minimal", "low", "medium", "high"]
                 default: "medium"
                 description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
-                order: 7.5
+                order: 14
+                dependsOn: { field: "model", valuePrefix: "openai." }
               system_prompt:
                 type: string
+                title: System prompt
+                format: textarea
                 description: System prompt
-                order: 8
+                order: 15
               task_prompt:
                 type: string
+                title: Task prompt
+                format: textarea
                 description: Task prompt - include placeholders {CLASS_NAMES_AND_DESCRIPTIONS} (replaced with the class names and descriptions for all specified classes), {FEW_SHOT_EXAMPLES} (replaced by classPrompt and image data from examples in class definitions), {DOCUMENT_TEXT} (replaced by the OCR output), and for multi-modal classification {DOCUMENT_IMAGE} (replaced by the page image attachment). Optionally include {CLASS_AND_ATTRIBUTE_NAMES_AND_DESCRIPTIONS} (replaced with class names, descriptions, AND schema attribute field names — useful for disambiguating classes with similar names but different extraction schemas; opt-in and cost-neutral when not referenced). Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
-                order: 9
+                order: 16
               postHook:
                 type: array
                 collapsible: true
@@ -1036,54 +1061,87 @@ Resources:
               - system_prompt
               - task_prompt
             properties:
+              mode:
+                type: string
+                title: Extraction mode
+                enum: ["simple", "advanced"]
+                default: "simple"
+                order: 1
+                description: "'simple' (default): single-pass extraction — fast and cheap, best for short documents. 'advanced': the robust, sharded extraction engine for large documents, big tables, and completeness (exposes the Advanced extraction settings below). Recommended with Anthropic Claude models."
               agentic:
                 type: object
-                sectionLabel: Agentic Extraction configuration
-                description: If enabled the extraction will happen inside a Strands Agent Loop, that allows the model to retry. Recommnded with Anthropic models, small models likely to fail.
-                order: 0
+                sectionLabel: Advanced extraction settings
+                description: "Tuning for Advanced extraction mode: page sharding/concurrency, deterministic table parsing, and schema validation/escalation. Shown only when Extraction mode is 'advanced'."
+                order: 2
+                dependsOn: { field: "extraction.mode", value: "advanced" }
                 properties:
-                  enabled:
-                    type: boolean
-                    description: Enable Agentic Extraction
-                    order: 0
-                    default: false
                   max_concurrent_batches:
                     type: number
-                    description: "Number of concurrent page-batch agents for parallel extraction. 1=sequential (default). Higher values (2-5) split pages into batches and run agents concurrently for faster extraction. Increases Bedrock RPM usage. Tune based on your Bedrock quota."
+                    description: "Only used when Agentic Extraction is enabled. Max concurrent extraction agents. 1 = single pass (default). >1 SHARDS the section's pages into token-budgeted ranges (each agent sees ONLY its pages, not the whole document) and runs them concurrently - this both speeds up long documents AND prevents context-window overflow. Acts as an upper bound on parallelism and shard count. Higher values increase Bedrock requests-per-minute; tune to your quota."
                     minimum: 1
                     maximum: 10
                     default: 1
+                    order: 1
+                  shard_token_budget:
+                    type: number
+                    description: "Only used when concurrent extraction is active (max_concurrent_batches > 1). Target maximum input tokens (estimated ~chars/4) of OCR text per shard. Pages are grouped so each shard stays under this budget, creating as many shards as needed (capped by max_concurrent_batches). The default (8000) reliably shards large documents so a single agent never has to emit a giant table in one Bedrock call (the read-timeout failure mode). Lower this if shards still overflow the model context; raise it for large-context models (e.g. 1M-context Claude)."
+                    minimum: 1000
+                    maximum: 900000
+                    default: 8000
+                    order: 2
+                  max_pages_per_shard:
+                    type: number
+                    description: "Only used when concurrent extraction is active (max_concurrent_batches > 1). Page-count ceiling per shard. A shard is closed once it holds this many pages even if its OCR text is still under shard_token_budget - so a document with unusually compact pages still shards on page count (tokens AND pages both bound a shard). This guarantees large docs shard regardless of text density. 0 = disabled (token budget alone bounds shards). Default: 5."
+                    minimum: 0
+                    maximum: 100
+                    default: 5
+                    order: 3
                   table_parsing:
                     type: object
                     sectionLabel: Table Parsing Tool
-                    description: "When enabled, the extraction agent gains a deterministic parse_table tool for efficiently extracting well-formatted Markdown tables from OCR output without LLM inference. The agent decides when to use this tool based on table quality and OCR confidence metrics."
+                    description: "Only used when Agentic Extraction is enabled. Gives the agent a deterministic parse_table tool that extracts well-formatted Markdown tables from OCR output without LLM inference - faster and more reliable for large/dense tables (bank statements, transaction logs). The agent decides when to use it based on table quality."
                     order: 4
                     properties:
                       enabled:
                         type: boolean
-                        description: "Enable the parse_table tool for the extraction agent. When enabled, the agent can use deterministic table parsing for well-formatted OCR tabular data instead of LLM inference."
+                        description: "Enable the parse_table tool. When enabled, the agent can use deterministic table parsing for well-formatted OCR tabular data instead of generating table rows with the LLM."
                         order: 0
                         default: false
                       min_confidence_threshold:
                         type: number
-                        description: "Minimum average OCR text confidence (Textract 0-100 scale) for the agent to prefer table parsing over LLM extraction. Included in the agent system prompt as guidance."
+                        description: "Only used when this tool is enabled. Minimum average OCR text confidence (Textract 0-100 scale) for the agent to prefer table parsing over LLM extraction. Included in the agent system prompt as guidance. Default: 95."
                         minimum: 0
                         maximum: 100
                         default: 95
+                        order: 1
                       min_parse_success_rate:
                         type: number
-                        description: "Minimum parse_success_rate from the parse_table tool for the agent to trust parsed results. Below this threshold, the agent falls back to LLM extraction."
+                        description: "Only used when this tool is enabled. Minimum parse_success_rate from the parse_table tool for the agent to trust parsed results. Below this threshold, the agent falls back to LLM extraction. Default: 0.9."
                         minimum: 0
                         maximum: 1
                         default: 0.9
+                        order: 2
                       use_confidence_data:
                         type: boolean
-                        description: "Whether to load and provide OCR confidence data to the parse_table tool for quality assessment. Requires text_confidence_uri from Textract OCR."
+                        description: "Only used when this tool is enabled. Load and provide OCR confidence data to the parse_table tool for quality assessment. Requires text_confidence_uri from Textract OCR (no effect with other OCR backends). Default: on."
                         default: true
+                        order: 3
+                      max_empty_line_gap:
+                        type: number
+                        description: "Only used when this tool is enabled. Maximum consecutive empty lines tolerated inside a table before treating it as a boundary - helps recover tables split by OCR page breaks. Higher = more tolerant but may merge unrelated tables. Tuning: 2 for high-quality OCR, 3 standard, 5-7 for noisy documents. Default: 3."
+                        minimum: 0
+                        maximum: 10
+                        default: 3
+                        order: 4
+                      auto_merge_adjacent_tables:
+                        type: boolean
+                        description: "Only used when this tool is enabled. Automatically merge consecutive tables with identical columns (recovers tables split by page breaks). Disable if a document legitimately contains multiple separate tables with the same columns. Default: on."
+                        default: true
+                        order: 5
                   validation:
                     type: object
                     sectionLabel: Schema Validation & Escalation
-                    description: "Validate the agent's output against the full class JSON Schema (notably 'format' keywords like date/email/uuid that the model's type validation does not enforce) and optionally escalate failing fields to a stronger model. Off by default."
+                    description: "Only used when Agentic Extraction is enabled. Validates the agent's output against the full class JSON Schema (notably 'format' keywords like date/email/uuid that the model's type validation does not enforce) and optionally escalates failing fields to a stronger model. Off by default."
                     order: 5
                     properties:
                       enabled:
@@ -1093,18 +1151,20 @@ Resources:
                         default: false
                       check_formats:
                         type: boolean
-                        description: "Enforce JSON-Schema 'format' keywords (date, date-time, email, uri, uuid, ...). Note: 'format: date' means ISO-8601 (YYYY-MM-DD); disable this if your schema uses 'format: date' for non-ISO values such as MM/DD/YYYY (or use a 'pattern' instead)."
+                        description: "Only used when validation is enabled. Enforce JSON-Schema 'format' keywords (date, date-time, email, uri, uuid, ...). Note: 'format: date' means ISO-8601 (YYYY-MM-DD); disable this if your schema uses 'format: date' for non-ISO values such as MM/DD/YYYY (or use a 'pattern' instead). Default: on."
                         order: 1
                         default: true
                       fail_action:
                         type: string
-                        description: "What to do when validation still fails after the agent's own retries. 'warn': record the outcome in metadata and proceed. 'escalate': re-extract only the failing fields with the Escalation Model, then warn if still invalid. 'reject': mark the section as failed so downstream/HITL can act."
+                        description: "Only used when validation is enabled. What to do when validation still fails after the agent's own retries. 'warn': record the outcome in metadata and proceed. 'escalate': re-extract only the failing fields with the Escalation Model (roughly doubles that section's cost, still far cheaper than human review), then warn if still invalid. 'reject': mark the section as failed so downstream/HITL can act. Default: escalate."
                         enum: ["warn", "escalate", "reject"]
                         order: 2
                         default: "escalate"
                       escalation_model:
                         type: string
-                        description: "Stronger Bedrock model used to re-extract failing fields when Fail Action is 'escalate'. Select blank to retry with the extraction model. Can be overridden per document class via the 'x-aws-idp-extraction-escalation-model' schema extension in the Document Schema editor."
+                        description: "Only used when Fail Action is 'escalate'. Stronger Bedrock model used to re-extract failing fields. Select blank to retry with the extraction model. Can be overridden per document class via the 'x-aws-idp-extraction-escalation-model' schema extension in the Document Schema editor."
+                        order: 3
+                        dependsOn: { field: "fail_action", value: "escalate" }
                         enum:
                           - ""
                           - "us.amazon.nova-lite-v1:0"
@@ -1161,11 +1221,10 @@ Resources:
                           - "global.anthropic.claude-opus-4-7:1m"
                           - "global.anthropic.claude-opus-4-8"
                           - "global.anthropic.claude-opus-4-8:1m"
-                        order: 3
                         default: ""
                       min_population_ratio:
                         type: number
-                        description: "Advisory completeness threshold (0-1). After extraction, the fraction of schema-defined fields that came back populated is computed; if it falls below this value a warning is logged and metadata.population_check is flagged (catches silent loss such as nested fields returning null or a table extracting zero rows). Advisory only - never fails extraction. Set to 0 to disable."
+                        description: "Only used when validation is enabled. Advisory completeness threshold (0-1). After extraction, the fraction of schema-defined fields that came back populated is computed; if it falls below this value a warning is logged and metadata.population_check is flagged (catches silent loss such as nested fields returning null or a table extracting zero rows). Advisory only - never fails extraction. Set to 0 to disable. Default: 0.5."
                         minimum: 0
                         maximum: 1
                         order: 4
@@ -1173,8 +1232,8 @@ Resources:
               image:
                 type: object
                 sectionLabel: Image Processing Settings
-                description: Configure image resolution and processing options for for image attachments in extraction
-                order: 0
+                description: Configure image resolution and processing options for image attachments in extraction
+                order: 15
                 properties:
                   target_width:
                     type: number
@@ -1188,9 +1247,36 @@ Resources:
                     minimum: 100
                     maximum: 3500
                     order: 1
+              missing_field_handling:
+                type: object
+                collapsible: false
+                sectionLabel: Missing vs Blank Fields
+                description: >-
+                  Distinguish a field that is BLANK (its source page IS in the section but the value is empty)
+                  from one that is MISSING (its source page is ABSENT from the section — e.g. a multi-page
+                  packet where a whole document is not present). Without this, both look identical (empty/null),
+                  so you can't tell "the form had this field but it was left blank" from "that page wasn't
+                  submitted at all." Applies to both standard and agentic extraction. Requires class schemas to
+                  declare 'x-aws-idp-page-types' and properties to declare 'x-aws-idp-source-page-types'. Off by default.
+                order: 22
+                properties:
+                  enabled:
+                    type: boolean
+                    title: Enable missing vs blank detection
+                    description: "When off (default), all unfound fields are treated the same (blank/null). When on, fields whose source page is absent are marked MISSING per the representation below."
+                    order: 0
+                    default: false
+                  representation:
+                    type: string
+                    title: Missing field representation
+                    description: "Only used when enabled. How a MISSING field appears in the output. 'omit': drop the key entirely. 'null_with_metadata': keep the key as null and list it under a sibling 'missing_fields' array. Default: omit."
+                    enum: ["omit", "null_with_metadata"]
+                    default: "omit"
+                    order: 1
+                    dependsOn: { field: "enabled", value: true }
               model:
                 type: string
-                description: "Model identifier. Select 'LambdaHook' to use a custom Lambda function for inference. NOTE: OpenAI GPT-5.x models (openai.gpt-5.*) run via the bedrock-mantle Responses API and are NOT compatible with agentic extraction (agentic.enabled=true); that combination is rejected by config validation."
+                description: "Model identifier. Select 'LambdaHook' to use a custom Lambda function for inference. NOTE: OpenAI GPT-5.x models (openai.gpt-5.*) run via the bedrock-mantle Responses API and are NOT compatible with 'advanced' Extraction mode; that combination is rejected by config validation."
                 enum:
                   - "LambdaHook"
                   - !If
@@ -1252,50 +1338,239 @@ Resources:
                   - "global.anthropic.claude-opus-4-7:1m"
                   - "global.anthropic.claude-opus-4-8"
                   - "global.anthropic.claude-opus-4-8:1m"
-                order: 1
+                order: 5
               model_lambda_hook_arn:
                 type: string
                 description: "Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-."
                 default: ""
-                order: 2
+                order: 6
                 dependsOn: { field: "model", value: "LambdaHook" }
+              reasoning_effort:
+                type: string
+                enum: ["minimal", "low", "medium", "high"]
+                default: "medium"
+                description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
+                order: 7
+                dependsOn: { field: "model", valuePrefix: "openai." }
               temperature:
                 type: number
                 minimum: 0
                 maximum: 1
                 description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 3
+                order: 8
               top_k:
                 type: integer
                 minimum: 1
                 description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 4
+                order: 9
               top_p:
                 type: number
                 description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 5
+                order: 10
               max_tokens:
                 type: number
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
-                order: 6
-              reasoning_effort:
-                type: string
-                enum: ["minimal", "low", "medium", "high"]
-                default: "medium"
-                description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
-                order: 6.5
+                order: 11
               system_prompt:
                 type: string
-                description: System prompt
-                order: 7
+                description: "System prompt. Can be overridden per document class via the 'x-aws-idp-extraction-system-prompt' schema extension in the Document Schema editor."
+                order: 12
               task_prompt:
                 type: string
-                description: Task prompt - supports placeholders {DOCUMENT_CLASS} (replaced with the detected class label), {ATTRIBUTE_NAMES_AND_DESCRIPTIONS} (replaced with the attribute names and descriptions for the detected class), {FEW_SHOT_EXAMPLES} (replaced by classPrompt and image data from examples in class definitions), {DOCUMENT_TEXT} (replaced by the OCR output), and {DOCUMENT_IMAGE} (replaced by the page image attachments for each page). Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
-                order: 8
+                title: Task prompt (extraction)
+                format: textarea
+                description: "Extraction-only task prompt — used when confidence runs separately or is disabled. Placeholders: {DOCUMENT_CLASS}, {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}, {FEW_SHOT_EXAMPLES}, {DOCUMENT_TEXT}, {DOCUMENT_IMAGE}. Use <<CACHEPOINT>> for Bedrock prompt caching. Overridable per class via 'x-aws-idp-extraction-task-prompt'."
+                order: 13
+                hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
+              task_prompt_extraction_with_confidence:
+                type: string
+                title: Task prompt (extraction + confidence)
+                format: textarea
+                description: "INTEGRATED task prompt — used when Confidence Assessment mode is 'integrated' (one inference emits each value AND its confidence). Instruct the model to call provide_field_assessment. The bounding-box block (Bounding-box Geometry section) is appended automatically when Geometry mode is 'llm' or 'llm_grounded'."
+                order: 14
+                dependsOn: { field: "extraction.confidence.mode", value: "integrated" }
               custom_prompt_lambda_arn:
                 type: string
+                title: Custom Prompt Lambda ARN
+                format: single-line
                 description: "(Optional) ARN of a Lambda function to generate custom extraction prompts. Function name must start with 'GENAIIDP-'. If not provided, default prompts will be used. The Lambda function receives the complete config, prompt placeholders, default task prompt content, and serialized document, and returns custom system_prompt and task_prompt_content. Example: arn:partition:lambda:us-east-1:123456789012:function:GENAIIDP-my-extractor"
-                order: 9
+                order: 100
+              geometry:
+                type: object
+                order: 4
+                collapsible: false
+                sectionLabel: Bounding-box Geometry
+                description: "How field bounding boxes (geometry) are produced. Geometry is advisory enrichment shown in the UI viewer."
+                properties:
+                  mode:
+                    type: string
+                    title: Geometry mode
+                    enum: ["ocr_only", "llm_grounded", "llm", "off"]
+                    default: "ocr_only"
+                    description: "'ocr_only' (default): derive boxes purely by matching each extracted value to real OCR lines — cheapest and most accurate, no bbox tokens. 'llm_grounded': the model emits boxes and OCR grounding refines them. 'llm': use the model's boxes as-is (no grounding). 'off': produce no geometry."
+                    order: 0
+                  task_prompt_bbox:
+                    type: string
+                    title: Bounding-box instructions
+                    format: textarea
+                    description: "Instruction block telling the model to emit bounding boxes. Appended to whichever confidence-bearing prompt is active (integrated or confidence-only) ONLY when Geometry mode is 'llm' or 'llm_grounded'. Ignored for 'ocr_only'/'off' (geometry comes from OCR matching)."
+                    order: 1
+                    hideWhen: { field: "extraction.geometry.mode", value: "ocr_only" }
+              confidence:
+                type: object
+                order: 3
+                sectionLabel: Confidence Assessment
+                collapsible: false
+                description: "Per-field confidence scoring. Confidence is an optional output of extraction; when enabled, each extracted value gets a confidence score (and drives HITL review). Turn OFF to skip assessment entirely (no second model pass, no explainability info)."
+                properties:
+                  mode:
+                    type: string
+                    title: Confidence scoring mode
+                    enum: ["off", "separate", "integrated"]
+                    default: "separate"
+                    description: "How per-field confidence is produced. 'off': no confidence scoring (no extra model pass, no confidence data). 'separate' (default): scored in a distinct inference — a per-shard second pass in Advanced extraction mode, or the standalone Assessment step in Simple mode. 'integrated': the extraction inference emits each value's confidence in one pass (saves a model call). Confidence drives HITL review and the UI confidence display."
+                    order: 0
+                  list_batch_size:
+                    type: integer
+                    title: List batch size
+                    description: "Max list rows scored per inference in separate mode — both the Advanced in-shard pass and the Simple standalone Assessment step. Large lists (e.g. 75 rows) are unreliable in one call; batching guarantees every row is scored. Lower = more reliable but more inferences; raise for capable models."
+                    minimum: 1
+                    default: 25
+                    order: 2
+                    hideWhen: { field: "extraction.confidence.mode", value: "off" }
+                  model:
+                    type: string
+                    title: Confidence model
+                    description: "Bedrock model ID for confidence scoring (used by the separate/standalone assessment path). Use 'LambdaHook' for a custom Lambda. Unused when mode is 'integrated' (the extraction model emits confidence)."
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
+                    enum:
+                      [
+                        "LambdaHook",
+                        "us.amazon.nova-lite-v1:0",
+                        "us.amazon.nova-pro-v1:0",
+                        "us.amazon.nova-premier-v1:0",
+                        "us.amazon.nova-2-lite-v1:0", "us.amazon.nova-2-lite-v1:0:priority", "us.amazon.nova-2-lite-v1:0:flex", "global.amazon.nova-2-lite-v1:0", "global.amazon.nova-2-lite-v1:0:priority", "global.amazon.nova-2-lite-v1:0:flex",
+                        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+                        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                        "us.anthropic.claude-sonnet-4-6",
+                        "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-opus-4-5-20251101-v1:0",
+                        "us.anthropic.claude-opus-4-6-v1",
+                        "us.anthropic.claude-opus-4-6-v1:1m",
+                        "us.anthropic.claude-opus-4-7",
+                        "us.anthropic.claude-opus-4-7:1m",
+                        "us.anthropic.claude-opus-4-8",
+                        "us.anthropic.claude-opus-4-8:1m",
+                        "openai.gpt-5.4",
+                        "openai.gpt-5.5",
+                        "eu.amazon.nova-lite-v1:0",
+                        "eu.amazon.nova-pro-v1:0",
+                        "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
+                        "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+                        "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                        "eu.anthropic.claude-sonnet-4-6",
+                        "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-opus-4-5-20251101-v1:0",
+                        "eu.anthropic.claude-opus-4-6-v1",
+                        "eu.anthropic.claude-opus-4-6-v1:1m",
+                        "eu.anthropic.claude-opus-4-7",
+                        "eu.anthropic.claude-opus-4-7:1m",
+                        "eu.anthropic.claude-opus-4-8",
+                        "eu.anthropic.claude-opus-4-8:1m",
+                        "qwen.qwen3-vl-235b-a22b",
+                        "us.meta.llama4-maverick-17b-instruct-v1:0",
+                        "us.meta.llama4-scout-17b-instruct-v1:0",
+                        "google.gemma-3-27b-it",
+                        "nvidia.nemotron-nano-12b-v2",
+                        "global.amazon.nova-2-lite-v1:0",
+                        "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+                        "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                        "global.anthropic.claude-sonnet-4-6",
+                        "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-opus-4-5-20251101-v1:0",
+                        "global.anthropic.claude-opus-4-6-v1",
+                        "global.anthropic.claude-opus-4-6-v1:1m",
+                        "global.anthropic.claude-opus-4-7",
+                        "global.anthropic.claude-opus-4-7:1m",
+                        "global.anthropic.claude-opus-4-8",
+                        "global.anthropic.claude-opus-4-8:1m"
+                      ]
+                    order: 3
+                  model_lambda_hook_arn:
+                    type: string
+                    description: "Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-."
+                    default: ""
+                    order: 4
+                    dependsOn: { field: "model", value: "LambdaHook" }
+                  temperature:
+                    type: number
+                    minimum: 0
+                    maximum: 1
+                    description: "Sampling temperature. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
+                    order: 5
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
+                  top_k:
+                    type: number
+                    description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
+                    order: 6
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
+                  top_p:
+                    type: number
+                    description: "Sampling Top P. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
+                    order: 7
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
+                  max_tokens:
+                    type: number
+                    description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit."
+                    order: 8
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
+                  reasoning_effort:
+                    type: string
+                    enum: ["minimal", "low", "medium", "high"]
+                    default: "medium"
+                    description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY. Ignored by other models."
+                    order: 9
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
+                  system_prompt:
+                    type: string
+                    title: System prompt (confidence)
+                    format: textarea
+                    description: "System prompt for confidence scoring."
+                    order: 10
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
+                  task_prompt:
+                    type: string
+                    title: Task prompt (confidence)
+                    format: textarea
+                    description: "CONFIDENCE-ONLY task prompt — used by the separate confidence pass (agentic in-shard second inference and the non-agentic standalone Assessment step). Placeholders: {DOCUMENT_CLASS}, {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}, {EXTRACTION_RESULTS}, {OCR_TEXT_CONFIDENCE}, {DOCUMENT_IMAGE}. The Bounding-box instructions (Geometry section) are appended when Geometry mode is 'llm'/'llm_grounded'. Use <<CACHEPOINT>> for Bedrock prompt caching."
+                    order: 11
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
+                  image:
+                    type: object
+                    sectionLabel: Image Processing Settings
+                    description: "Image resolution for confidence-scoring page attachments."
+                    order: 12
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
+                    properties:
+                      target_width:
+                        type: number
+                        description: "Target image width in pixels. Default: 951"
+                        minimum: 100
+                        maximum: 3500
+                        order: 0
+                      target_height:
+                        type: number
+                        description: "Target image height in pixels. Default: 1268"
+                        minimum: 100
+                        maximum: 3500
+                        order: 1
+                  # NOTE: the legacy `extraction.confidence.granular.*` sub-block
+                  # (standalone-Assessment ThreadPool batching) is intentionally NOT
+                  # surfaced in the UI. Its single relevant knob duplicated the
+                  # top-level "List batch size" above, and the block is slated for
+                  # removal (see GranularAssessmentConfig in config/models.py). The
+                  # runtime still reads its model-side defaults; there is nothing for
+                  # an admin to tune here, so a single list-batch control is shown.
               postHook:
                 type: array
                 collapsible: true
@@ -1350,248 +1625,33 @@ Resources:
                       description: Disable without removing
                       default: true
                       order: 4
-          assessment:
-            order: 6
+          # v0.6: confidence/geometry inference knobs live under
+          # extraction.confidence / extraction.geometry; HITL is the top-level
+          # 'hitl' section below. (The standalone 'assessment' config block and
+          # its postAssessment hook point were retired in v0.6.)
+          hitl:
+            order: 6.5
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Assessment & HITL Configuration
+            sectionLabel: Human-in-the-Loop (HITL) Review
+            description: "Route low-confidence extractions to human review. Requires Confidence Assessment to be enabled (Extraction → Confidence scoring mode must not be 'off') so fields carry a confidence score."
             properties:
-              hitl_enabled:
+              enabled:
                 type: boolean
-                description: Enable Human-in-the-Loop (HITL) review for low confidence extractions
+                title: Enable HITL review
+                description: "Enable Human-in-the-Loop review for low-confidence extractions."
                 default: false
                 order: 0
-              default_confidence_threshold:
+              confidence_threshold:
                 type: number
-                description: Confidence Threshold (0.0-1.0) - Documents with confidence below this threshold will trigger HITL review and show confidence alerts
+                title: Confidence threshold
+                description: "Confidence threshold (0.0-1.0). Fields scoring below this trigger HITL review and show confidence alerts."
                 minimum: 0.0
                 maximum: 1.0
                 default: 0.8
                 order: 1
-              enabled:
-                type: boolean
-                description: Enable or disable assessment processing (step-by-step pipeline only)
-                default: true
-                order: 2
-                dependsOn: { field: "use_bda", value: false }
-              validation_enabled:
-                type: boolean
-                description: Enable or disable assessment validation checks
-                default: false
-                order: 3
-                dependsOn: { field: "use_bda", value: false }
-              image:
-                type: object
-                sectionLabel: Image Processing Settings
-                description: Configure image resolution and processing options for for image attachments in assessment
-                dependsOn: { field: "use_bda", value: false }
-                order: 2
-                properties:
-                  target_width:
-                    type: number
-                    description: "Target image width in pixels. Images larger than this will be resized. Default: 951"
-                    minimum: 100
-                    maximum: 3500
-                    order: 0
-                  target_height:
-                    type: number
-                    description: "Target image height in pixels. Images larger than this will be resized. Default: 1268"
-                    minimum: 100
-                    maximum: 3500
-                    order: 1
-              granular:
-                type: object
-                sectionLabel: Granular Assessment Configuration
-                description: Configure granular assessment for improved accuracy and scalability with large documents
-                dependsOn: { field: "use_bda", value: false }
-                order: 3
-                properties:
-                  enabled:
-                    type: boolean
-                    description: Enable granular assessment approach. When enabled, assessments are broken down into smaller, focused tasks for better accuracy and performance.
-                    default: true
-                    order: 0
-                  max_workers:
-                    type: integer
-                    description: Maximum number of parallel workers for concurrent assessment tasks. Higher values increase throughput but consume more resources.
-                    minimum: 1
-                    maximum: 20
-                    default: 4
-                    order: 1
-                    dependsOn: { field: "enabled", value: true }
-                  simple_batch_size:
-                    type: integer
-                    description: Number of simple attributes to group together in each assessment task. Smaller batches provide more focused assessments.
-                    minimum: 1
-                    maximum: 10
-                    default: 3
-                    order: 2
-                    dependsOn: { field: "enabled", value: true }
-                  list_batch_size:
-                    type: integer
-                    description: Number of list items to process in each assessment task. Usually 1 for best accuracy, can be increased for speed.
-                    minimum: 1
-                    maximum: 5
-                    default: 1
-                    order: 3
-                    dependsOn: { field: "enabled", value: true }
-              model:
-                type: string
-                description: "Bedrock model ID for assessment (step-by-step pipeline only)"
-                dependsOn: { field: "use_bda", value: false }
-                enum:
-                  [
-                    "LambdaHook",
-                    "us.amazon.nova-lite-v1:0",
-                    "us.amazon.nova-pro-v1:0",
-                    "us.amazon.nova-premier-v1:0",
-                    "us.amazon.nova-2-lite-v1:0", "us.amazon.nova-2-lite-v1:0:priority", "us.amazon.nova-2-lite-v1:0:flex", "global.amazon.nova-2-lite-v1:0", "global.amazon.nova-2-lite-v1:0:priority", "global.amazon.nova-2-lite-v1:0:flex",
-                    "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-                    "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-                    "us.anthropic.claude-sonnet-4-6",
-                    "us.anthropic.claude-sonnet-4-6:1m",
-                    "us.anthropic.claude-opus-4-5-20251101-v1:0",
-                    "us.anthropic.claude-opus-4-6-v1",
-                    "us.anthropic.claude-opus-4-6-v1:1m",
-                    "us.anthropic.claude-opus-4-7",
-                    "us.anthropic.claude-opus-4-7:1m",
-                    "us.anthropic.claude-opus-4-8",
-                    "us.anthropic.claude-opus-4-8:1m",
-                    "openai.gpt-5.4",
-                    "openai.gpt-5.5",
-                    "eu.amazon.nova-lite-v1:0",
-                    "eu.amazon.nova-pro-v1:0",
-                    "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
-                    "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
-                    "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
-                    "eu.anthropic.claude-sonnet-4-6",
-                    "eu.anthropic.claude-sonnet-4-6:1m",
-                    "eu.anthropic.claude-opus-4-5-20251101-v1:0",
-                    "eu.anthropic.claude-opus-4-6-v1",
-                    "eu.anthropic.claude-opus-4-6-v1:1m",
-                    "eu.anthropic.claude-opus-4-7",
-                    "eu.anthropic.claude-opus-4-7:1m",
-                    "eu.anthropic.claude-opus-4-8",
-                    "eu.anthropic.claude-opus-4-8:1m",
-                    "qwen.qwen3-vl-235b-a22b",
-                    "us.meta.llama4-maverick-17b-instruct-v1:0",
-                    "us.meta.llama4-scout-17b-instruct-v1:0",
-                    "google.gemma-3-27b-it",
-                    "nvidia.nemotron-nano-12b-v2",
-                    "global.amazon.nova-2-lite-v1:0",
-                    "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-                    "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
-                    "global.anthropic.claude-sonnet-4-6",
-                    "global.anthropic.claude-sonnet-4-6:1m",
-                    "global.anthropic.claude-opus-4-5-20251101-v1:0",
-                    "global.anthropic.claude-opus-4-6-v1",
-                    "global.anthropic.claude-opus-4-6-v1:1m",
-                    "global.anthropic.claude-opus-4-7",
-                    "global.anthropic.claude-opus-4-7:1m",
-                    "global.anthropic.claude-opus-4-8",
-                    "global.anthropic.claude-opus-4-8:1m"
-                  ]
-                order: 5
-              model_lambda_hook_arn:
-                type: string
-                description: "Lambda function ARN for custom inference (used when model is 'LambdaHook'). Function name must start with GENAIIDP-."
-                default: ""
-                order: 6
-                dependsOn: { field: "model", value: "LambdaHook" }
-              temperature:
-                type: number
-                dependsOn: { field: "use_bda", value: false }
-                description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 7
-              top_k:
-                type: number
-                dependsOn: { field: "use_bda", value: false }
-                description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 8
-              top_p:
-                type: number
-                dependsOn: { field: "use_bda", value: false }
-                description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
-                order: 9
-              max_tokens:
-                type: number
-                dependsOn: { field: "use_bda", value: false }
-                description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
-                order: 10
-              reasoning_effort:
-                type: string
-                enum: ["minimal", "low", "medium", "high"]
-                default: "medium"
-                description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
-                dependsOn: { field: "use_bda", value: false }
-                order: 10.5
-              system_prompt:
-                type: string
-                dependsOn: { field: "use_bda", value: false }
-                format: textarea
-                description: System prompt
-                order: 11
-              task_prompt:
-                type: string
-                dependsOn: { field: "use_bda", value: false }
-                format: textarea
-                description: Task prompt - supports placeholders {DOCUMENT_TEXT} (markdown text), {OCR_TEXT_CONFIDENCE} (OCR text blocks with confidence), {DOCUMENT_CLASS}, {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}, {EXTRACTION_RESULTS}, {GRANULAR_CONTEXT} and {DOCUMENT_IMAGE}. Use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
-                order: 12
-              postHook:
-                type: array
-                collapsible: true
-                defaultExpanded: false
-                sectionLabel: Post-step pipeline hooks
-                description: >-
-                  Lambda functions invoked after this step completes,
-                  before the next step runs. Each hook receives the
-                  document state and returns a JSON-serializable result
-                  (logged for traceability). Hooks let vertical-product
-                  packs (claims, loans, etc.) inject business logic
-                  without forking the accelerator. Admins can edit, add,
-                  reorder, or disable hooks here. The Lambda function
-                  ARN must EITHER be tagged with `idp:feature-id=<anything>`
-                  (vertical packs do this automatically) OR have a function
-                  name starting with `GENAIIDP-` (admin-managed Lambdas).
-                  Functions outside both categories will be rejected by
-                  the dispatcher's IAM policy at invoke time.
-                listLabel: Post-step pipeline hooks
-                itemLabel: Hook
-                order: 99
-                items:
-                  type: object
-                  required:
-                    - featureId
-                    - arn
-                  properties:
-                    featureId:
-                      type: string
-                      description: Feature that owns this hook (label only)
-                      order: 0
-                    arn:
-                      type: string
-                      description: >-
-                        Lambda function ARN to invoke. Must either be
-                        tagged `idp:feature-id=<anything>` OR have a
-                        function name beginning with `GENAIIDP-`.
-                      order: 1
-                    order:
-                      type: number
-                      description: Execution order (lower = earlier)
-                      default: 100
-                      order: 2
-                    onError:
-                      type: string
-                      enum: ["continue", "fail", "skip-remaining"]
-                      default: continue
-                      description: Behavior when this hook errors
-                      order: 3
-                    enabled:
-                      type: boolean
-                      description: Disable without removing
-                      default: true
-                      order: 4
+                hideWhen: { field: "hitl.enabled", value: false }
           summarization:
             order: 7
             type: object
@@ -1606,7 +1666,9 @@ Resources:
                 order: 0
               model:
                 type: string
+                title: Model
                 description: "Bedrock model ID. Select 'LambdaHook' to use a custom Lambda function for inference."
+                dependsOn: { field: "summarization.enabled", value: true }
                 enum:
                   [
                     "LambdaHook",
@@ -1668,36 +1730,50 @@ Resources:
                 dependsOn: { field: "model", value: "LambdaHook" }
               temperature:
                 type: number
+                title: Temperature
                 description: "Sampling temperature. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 3
+                dependsOn: { field: "summarization.enabled", value: true }
               top_k:
                 type: number
+                title: Top K
                 description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 4
+                dependsOn: { field: "summarization.enabled", value: true }
               top_p:
                 type: number
+                title: Top P
                 description: "Sampling Top P. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 5
+                dependsOn: { field: "summarization.enabled", value: true }
               max_tokens:
                 type: number
+                title: Max tokens
                 description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                 order: 6
+                dependsOn: { field: "summarization.enabled", value: true }
               reasoning_effort:
                 type: string
+                title: Reasoning effort
                 enum: ["minimal", "low", "medium", "high"]
                 default: "medium"
                 description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
-                order: 6.5
+                order: 7
+                dependsOn: { field: "model", valuePrefix: "openai." }
               system_prompt:
                 type: string
+                title: System prompt
                 format: textarea
                 description: System prompt
-                order: 7
+                order: 8
+                dependsOn: { field: "summarization.enabled", value: true }
               task_prompt:
                 type: string
+                title: Task prompt
                 format: textarea
                 description: Task prompt - supports parameters {DOCUMENT_TEXT} and {EXTRACTION_RESULTS}. Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
-                order: 8
+                order: 9
+                dependsOn: { field: "summarization.enabled", value: true }
               postHook:
                 type: array
                 collapsible: true
@@ -1761,14 +1837,21 @@ Resources:
             properties:
               enabled:
                 type: boolean
+                title: Enable evaluation
                 description: Enable or disable evaluation processing
                 default: true
                 order: 0
               llm_method:
                 type: object
+                order: 1
+                sectionLabel: LLM method
+                collapsible: false
+                description: "Model and prompts used to score extraction accuracy against ground truth (LLM-as-judge)."
+                dependsOn: { field: "evaluation.enabled", value: true }
                 properties:
                   model:
                     type: string
+                    title: Model
                     description: Bedrock model ID
                     enum:
                       [
@@ -1824,38 +1907,46 @@ Resources:
                     order: 1
                   temperature:
                     type: number
+                    title: Temperature
                     description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random). Used when top_p is 0. Set temperature=0.0 for consistent, deterministic outputs. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                     default: 0.0
                     order: 2
                   top_k:
                     type: number
+                    title: Top K
                     description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                     default: 250
                     order: 3
                   top_p:
                     type: number
+                    title: Top P
                     description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0). When set to a positive value (> 0), overrides temperature parameter. Set to 0 to use temperature instead. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                     order: 4
                   max_tokens:
                     type: number
+                    title: Max tokens
                     description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                     order: 5
                   reasoning_effort:
                     type: string
+                    title: Reasoning effort
                     enum: ["minimal", "low", "medium", "high"]
                     default: "medium"
                     description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
-                    order: 5.5
+                    order: 6
+                    dependsOn: { field: "model", valuePrefix: "openai." }
                   system_prompt:
                     type: string
+                    title: System prompt
                     format: textarea
                     description: System prompt for LLM evaluation
-                    order: 6
+                    order: 7
                   task_prompt:
                     type: string
+                    title: Task prompt
                     format: textarea
                     description: Task prompt for LLM evaluation - supports placeholders {DOCUMENT_CLASS}, {ATTRIBUTE_NAME}, {ATTRIBUTE_DESCRIPTION}, {EXPECTED_VALUE} and {ACTUAL_VALUE}
-                    order: 7
+                    order: 8
           discovery:
             order: 10
             type: object
@@ -2450,12 +2541,15 @@ Resources:
             properties:
               enabled:
                 type: boolean
+                title: Enable chat
                 description: Enable or disable the Chat-with-Document feature
                 default: true
                 order: 0
               model:
                 type: string
+                title: Model
                 description: "Bedrock model ID for chat. A large-context model is recommended because the entire document text is sent in one prompt. Select 'LambdaHook' to use a custom Lambda function for inference."
+                dependsOn: { field: "chat.enabled", value: true }
                 enum:
                   [
                     "LambdaHook",
@@ -2511,31 +2605,43 @@ Resources:
                 dependsOn: { field: "model", value: "LambdaHook" }
               temperature:
                 type: number
+                title: Temperature
                 description: "Sampling temperature. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 3
+                dependsOn: { field: "chat.enabled", value: true }
               top_k:
                 type: number
+                title: Top K
                 description: "Sampling Top K. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 4
+                dependsOn: { field: "chat.enabled", value: true }
               top_p:
                 type: number
+                title: Top P
                 description: "Sampling Top P. Not used for Claude 4.7+ or OpenAI GPT-5.x models."
                 order: 5
+                dependsOn: { field: "chat.enabled", value: true }
               max_tokens:
                 type: number
+                title: Max tokens
                 description: "Maximum number of output tokens for the chat response. Ensure this does not exceed the selected model's limit."
                 order: 6
+                dependsOn: { field: "chat.enabled", value: true }
               reasoning_effort:
                 type: string
+                title: Reasoning effort
                 enum: ["minimal", "low", "medium", "high"]
                 default: "medium"
                 description: "Reasoning effort for OpenAI GPT-5.x (Responses API) models ONLY: controls how much the model reasons before answering. Ignored by Anthropic/Nova/other models. Default: medium."
-                order: 6.5
+                order: 7
+                dependsOn: { field: "model", valuePrefix: "openai." }
               system_prompt:
                 type: string
+                title: System prompt
                 format: textarea
                 description: System prompt for the Chat-with-Document assistant
-                order: 7
+                order: 8
+                dependsOn: { field: "chat.enabled", value: true }
           rule_validation:
             order: 8
             type: object
@@ -3265,7 +3371,7 @@ Resources:
           - id: W11
             reason: "Cloudwatch does not support resource-level permissions"
           - id: W89
-            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs — placed in VPC when AppSyncVisibility=PRIVATE"
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs — placed in VPC when ApiGatewayVisibility=PRIVATE"
           - id: W92
             reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
@@ -3287,7 +3393,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -3296,9 +3402,8 @@ Resources:
         Variables:
           METRIC_NAMESPACE: !Ref StackName
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, 'appsync', 'dynamodb']
+          DOCUMENT_TRACKING_MODE: dynamodb
           DB_NAME: !Ref BDAMetadataTable
           WORKING_BUCKET: !Ref WorkingBucket
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
@@ -3330,16 +3435,6 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: !Ref CustomerManagedEncryptionKeyArn
-          # AppSync permissions for document status queries and updates (only if AppSync API is available)
-          - !If
-            - HasAppSyncApi
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource: 
-                - !Sub "${AppSyncApiArn}/types/Mutation/*"
-                - !Sub "${AppSyncApiArn}/types/Query/*"
-            - !Ref AWS::NoValue
           - Effect: Allow
             Action:
               - ssm:GetParameter
@@ -3550,7 +3645,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -3561,9 +3656,8 @@ Resources:
           MAX_WORKERS: 20
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
@@ -3650,15 +3744,6 @@ Resources:
               Condition:
                 StringLike:
                   "lambda:FunctionName": "GENAIIDP-*"
-            # AppSync permissions for updating document status (only if AppSync API is available)
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
 
   OCRFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -3707,7 +3792,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -3720,8 +3805,7 @@ Resources:
           CONFIGURATION_BUCKET: !Ref ConfigurationBucket
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           # Guardrails break classification
           # GUARDRAIL_ID_AND_VERSION: !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
@@ -3762,15 +3846,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            # AppSync permissions for updating document status (only if AppSync API is available)
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.
             - Effect: Allow
@@ -3876,7 +3951,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -3893,9 +3968,8 @@ Resources:
               "",
             ]
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
@@ -3932,15 +4006,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            # AppSync permissions for updating document status (only if AppSync API is available)
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.
             - Effect: Allow
@@ -4003,6 +4068,157 @@ Resources:
       LogGroupName: !Sub "/${AWS::StackName}/lambda/ExtractionFunction"
       RetentionInDays: !Ref LogRetentionDays
 
+  # Nested SFN Distributed Map shard-runtime function (Phase 3). Reuses the SAME
+  # extraction container image (no extra Docker build), selected via a different
+  # ImageConfig.Command. A single handler dispatches plan/shard/merge modes, each
+  # reusing idp_common.extraction primitives (extract_one_shard, merge_shard_dicts)
+  # — the single source of truth shared with the in-process runtime. One fresh
+  # 15-min Lambda runs per shard, so SFN's native per-iteration retry re-runs only
+  # failed/incomplete shards (completed shards load idempotently from S3).
+  ShardRuntimeFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: DockerBuildRun
+    Metadata:
+      SkipBuild: True
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+          - id: W92
+            reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
+          - id: W11
+            reason: "Cloudwatch does not support resource-level permissions, and Bedrock should support any enabled Bedrock model_id or inference profile"
+          - id: W76
+            reason: "Suppressing W76: SPCM for IAM policy document is higher than 25"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      PackageType: Image
+      ImageUri: !Sub "${ECRRepository.RepositoryUri}:extraction-function-${ImageVersion}"
+      Architectures:
+        - !Ref LambdaArchitecture
+      ImageConfig:
+        Command:
+          - "sfn_runtime_handler.handler"
+      Timeout: 900
+      MemorySize: 4096
+      Tracing: Active
+      VpcConfig: !If
+        - DeployInVPC
+        - SubnetIds: !Ref PrivateSubnetIds
+          SecurityGroupIds:
+            - !Ref LambdaSecurityGroupId
+        - !If
+          - IsPrivateApi
+          - SubnetIds: !Ref LambdaSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+          - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          METRIC_NAMESPACE: !Ref StackName
+          CONFIGURATION_BUCKET: !Ref ConfigurationBucket
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          GUARDRAIL_ID_AND_VERSION:
+            !If [
+              HasGuardrailConfig,
+              !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}",
+              "",
+            ]
+          LOG_LEVEL: !Ref LogLevel
+          TRACKING_TABLE: !Ref TrackingTable
+          DOCUMENT_TRACKING_MODE: dynamodb
+          WORKING_BUCKET: !Ref WorkingBucket
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
+      LoggingConfig:
+        LogGroup: !Ref ShardRuntimeFunctionLogGroup
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - !Ref LambdaECRAccessPolicy
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - S3CrudPolicy:
+            BucketName: !Ref WorkingBucket
+        - S3ReadPolicy:
+            BucketName: !Ref InputBucket
+        - S3ReadPolicy:
+            BucketName: !Ref ConfigurationBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConfigurationTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - Statement:
+            - Effect: Allow
+              Action: cloudwatch:PutMetricData
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+                - bedrock:GetInferenceProfile
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model-deployment/*"
+                - !If
+                  - HasCustomExtractionModelARN
+                  - !Ref CustomExtractionModelARN
+                  - !Ref AWS::NoValue
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
+            - Effect: Allow
+              Action:
+                - aws-marketplace:Subscribe
+                - aws-marketplace:Unsubscribe
+                - aws-marketplace:ViewSubscriptions
+              Resource: "*"
+            - !If
+              - HasGuardrailConfig
+              - Effect: Allow
+                Action: bedrock:ApplyGuardrail
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+
+  ShardRuntimeFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/ShardRuntimeFunction"
+      RetentionInDays: !Ref LogRetentionDays
+
   AssessmentFunction:
     Type: AWS::Serverless::Function
     DependsOn: DockerBuildRun
@@ -4043,7 +4259,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -4054,9 +4270,8 @@ Resources:
           CONFIGURATION_BUCKET: !Ref ConfigurationBucket
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
@@ -4093,15 +4308,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            # AppSync permissions for updating document status (only if AppSync API is available)
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.
             - Effect: Allow
@@ -4200,7 +4406,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -4209,9 +4415,8 @@ Resources:
         Variables:
           METRIC_NAMESPACE: !Ref StackName
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           OUTPUT_BUCKET: !Ref OutputBucket
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
@@ -4242,16 +4447,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            # AppSync permissions for document queries and updates (only if AppSync API is available)
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-                  - !Sub "${AppSyncApiArn}/types/Query/*"
-              - !Ref AWS::NoValue
 
   ProcessResultsFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -4299,7 +4494,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -4315,9 +4510,8 @@ Resources:
               "",
             ]
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
@@ -4352,15 +4546,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            # AppSync permissions for updating document status (only if AppSync API is available)
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.
             - Effect: Allow
@@ -4547,7 +4732,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -4556,7 +4741,6 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           METRIC_NAMESPACE: !Ref StackName
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           PROCESSING_OUTPUT_BUCKET: !Ref OutputBucket
           EVALUATION_OUTPUT_BUCKET: !Ref OutputBucket
           REPORTING_BUCKET: !Ref ReportingBucket
@@ -4564,7 +4748,7 @@ Resources:
           SAVE_REPORTING_FUNCTION_NAME: !Ref SaveReportingFunctionName
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           WORKING_BUCKET: !Ref WorkingBucket
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           TRACKING_TABLE: !Ref TrackingTable
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
@@ -4599,15 +4783,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            # AppSync permissions for updating document status (only if AppSync API is available)
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.
             - Effect: Allow
@@ -4747,9 +4922,8 @@ Resources:
           METRIC_NAMESPACE: !Ref StackName
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           OUTPUT_BUCKET: !Ref OutputBucket
           REPORTING_BUCKET: !Ref ReportingBucket
@@ -4783,14 +4957,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             - Effect: Allow
               Action:
                 - lambda:InvokeFunction
@@ -4848,7 +5014,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -4864,9 +5030,8 @@ Resources:
               "",
             ]
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
@@ -4901,15 +5066,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            # AppSync permissions for updating document status (only if AppSync API is available)
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.
             - Effect: Allow
@@ -4995,7 +5151,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - IsPrivateAppSync
+          - IsPrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaSecurityGroupId
@@ -5011,9 +5167,8 @@ Resources:
               "",
             ]
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !Ref AppSyncApiUrl
           TRACKING_TABLE: !Ref TrackingTable
-          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
           REPORTING_BUCKET: !Ref ReportingBucket
           SAVE_REPORTING_FUNCTION_NAME: !Ref SaveReportingFunctionName
@@ -5050,14 +5205,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
-            - !If
-              - HasAppSyncApi
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
-              - !Ref AWS::NoValue
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.
             - Effect: Allow
@@ -5208,6 +5355,7 @@ Resources:
         OCRFunctionArn: !GetAtt OCRFunction.Arn
         ClassificationFunctionArn: !GetAtt ClassificationFunction.Arn
         ExtractionFunctionArn: !GetAtt ExtractionFunction.Arn
+        ShardRuntimeFunctionArn: !GetAtt ShardRuntimeFunction.Arn
         AssessmentFunctionArn: !GetAtt AssessmentFunction.Arn
         PipelineProcessResultsLambdaArn: !GetAtt ProcessResultsFunction.Arn
         RuleValidationPolicyClassificationLambdaArn: !GetAtt RuleValidationPolicyClassificationFunction.Arn
@@ -5241,6 +5389,8 @@ Resources:
         - LambdaInvokePolicy:
             FunctionName: !Ref ExtractionFunction
         - LambdaInvokePolicy:
+            FunctionName: !Ref ShardRuntimeFunction
+        - LambdaInvokePolicy:
             FunctionName: !Ref AssessmentFunction
         - LambdaInvokePolicy:
             FunctionName: !Ref ProcessResultsFunction
@@ -5259,6 +5409,26 @@ Resources:
         - LambdaInvokePolicy:
             FunctionName: !Ref PipelineHooksDispatcherFunction
         - CloudWatchLogsFullAccess
+        # Nested Distributed Map (Phase 3 sharded extraction): the state machine
+        # starts/manages its own child executions for the inline Distributed Map
+        # and reads/writes map item batches in the working bucket.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+                - states:DescribeExecution
+                - states:StopExecution
+              Resource:
+                - !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-DocumentProcessingWorkflow"
+                - !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${AWS::StackName}-DocumentProcessingWorkflow/*"
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:ListBucket
+              Resource:
+                - !Sub "arn:${AWS::Partition}:s3:::${WorkingBucket}"
+                - !Sub "arn:${AWS::Partition}:s3:::${WorkingBucket}/*"
 
   StateMachineLogGroup:
     Type: AWS::Logs::LogGroup
