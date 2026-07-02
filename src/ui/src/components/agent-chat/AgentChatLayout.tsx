@@ -105,7 +105,7 @@ const AgentChatLayout = ({
       const summary =
         `I uploaded ${result.totalDocuments} document(s). Multi-document discovery inferred ` +
         `${result.clustersFound} document type(s): ${names}. These were added to my configuration. ` +
-        `Please summarize what was discovered and ask whether I want to refine the schema or generate test data.`;
+        `Please summarize what was discovered and ask whether I want to refine the schema.`;
       setAttachedFiles([]);
       setUploadError(null);
       setCompletedJobId(result.jobId);
@@ -152,15 +152,6 @@ const AgentChatLayout = ({
       updateAgentChatState({ inputValue: query });
     };
 
-    const handleGenerateSyntheticData = (event: CustomEvent<{ className?: string }>) => {
-      if (mode !== 'quick_start') return;
-      const targetClass = event.detail?.className;
-      const prompt = targetClass
-        ? `Generate synthetic test documents for the "${targetClass}" class from one of my existing configurations.`
-        : 'Generate synthetic test documents from one of my existing configurations.';
-      updateAgentChatState({ inputValue: prompt });
-    };
-
     const handleOpenQuickStart = () => {
       if (mode !== 'quick_start') {
         updateAgentChatState({ mode: 'quick_start' });
@@ -168,12 +159,10 @@ const AgentChatLayout = ({
     };
 
     window.addEventListener('insertSampleQuery', handleSampleQueryInsert as EventListener);
-    window.addEventListener('generateSyntheticData', handleGenerateSyntheticData as EventListener);
     window.addEventListener('openQuickStart', handleOpenQuickStart as EventListener);
 
     return () => {
       window.removeEventListener('insertSampleQuery', handleSampleQueryInsert as EventListener);
-      window.removeEventListener('generateSyntheticData', handleGenerateSyntheticData as EventListener);
       window.removeEventListener('openQuickStart', handleOpenQuickStart as EventListener);
     };
   }, [updateAgentChatState, mode]);
@@ -347,7 +336,7 @@ const AgentChatLayout = ({
     },
     {
       id: 'QuickStartPaystub',
-      prompt: 'Bootstrap a config for employee paystubs and make some test documents',
+      prompt: 'Bootstrap a config for employee paystubs',
     },
     {
       id: 'QuickStartAddType',
@@ -565,8 +554,7 @@ const AgentChatLayout = ({
               </h2>
               {mode === 'quick_start' && (
                 <Box variant="p" color="text-body-secondary">
-                  Describe the documents you want to process and I&apos;ll help you set up a configuration and generate test data — no prior
-                  setup needed.
+                  Describe the documents you want to process and I&apos;ll help you set up a configuration — no prior setup needed.
                 </Box>
               )}
             </div>
@@ -677,8 +665,8 @@ const AgentChatLayout = ({
               />
               {mode === 'quick_start' ? (
                 <Box {...({ fontSize: 'body-s', color: 'text-status-info', flex: '1' } as Record<string, unknown>)}>
-                  Quick Start helps you author a configuration and generate synthetic test data. Document generation can take a few minutes
-                  and will ask you to confirm before running.
+                  Quick Start helps you author a configuration for your document type. Describe your documents or attach examples to get
+                  started.
                 </Box>
               ) : (
                 <SpaceBetween direction="horizontal" size="m" alignItems="center">

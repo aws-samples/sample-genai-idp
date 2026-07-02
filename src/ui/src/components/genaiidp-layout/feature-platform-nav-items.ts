@@ -27,12 +27,7 @@ export const FEATURES_SECTION_ID = 'idp-feature-platform';
 
 export const COMING_SOON_HREF = '#extension-coming-soon';
 
-const COMING_SOON_EXTENSIONS: { displayName: string; description: string }[] = [
-  {
-    displayName: 'IDP Data Generator',
-    description: 'Generate labeled synthetic document test sets. Coming soon.',
-  },
-];
+const COMING_SOON_EXTENSIONS: { displayName: string; description: string }[] = [];
 
 /**
  * Lifecycle status of a feature, used to choose the nav badge:

@@ -37,7 +37,7 @@ const WelcomeContent = ({ showDismiss = false, onDismiss }: WelcomeContentProps)
   return (
     <Container
       header={
-        <Header variant="h1" description="Get a working configuration and test set in minutes — or jump straight into the console.">
+        <Header variant="h1" description="Get a working configuration in minutes — or jump straight into the console.">
           Welcome to GenAI IDP
         </Header>
       }
@@ -58,7 +58,7 @@ const WelcomeContent = ({ showDismiss = false, onDismiss }: WelcomeContentProps)
           <SpaceBetween size="xs">
             <Box variant="p">
               <b>No configuration yet?</b> Use <Link onFollow={openQuickStart}>Quick Start</Link> to describe your document type (or upload
-              an example) and we&apos;ll build a config and synthetic test set for you.
+              an example) and we&apos;ll build a config for you.
             </Box>
             <Box variant="p">
               <b>Already have a config?</b> Go to{' '}

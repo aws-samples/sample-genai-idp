@@ -519,9 +519,11 @@ const Navigation = ({
     <>
       {isQuickStartWidgetEnabled() && (
         <div className="nav-quick-start">
-          <Button variant="primary" iconName="gen-ai" onClick={() => window.dispatchEvent(new CustomEvent('openQuickStart'))}>
-            Quick Start
-          </Button>
+          <Hotspot hotspotId="nav-quick-start" side="right">
+            <Button variant="primary" iconName="gen-ai" onClick={() => window.dispatchEvent(new CustomEvent('openQuickStart'))}>
+              Quick Start
+            </Button>
+          </Hotspot>
         </div>
       )}
       <SideNavigation

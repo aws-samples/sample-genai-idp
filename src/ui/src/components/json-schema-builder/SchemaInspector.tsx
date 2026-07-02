@@ -213,28 +213,6 @@ const SchemaInspector = ({
               )}
 
               {!isRuleSchema && (
-                <FormField
-                  label="Synthetic test data"
-                  description="Generate labeled synthetic documents for this class using the document generator."
-                >
-                  <Button
-                    iconName="gen-ai"
-                    onClick={() => {
-                      const className = selectedClass.name;
-                      window.dispatchEvent(
-                        new CustomEvent('generateSyntheticData', {
-                          detail: { className },
-                        }),
-                      );
-                      window.dispatchEvent(new CustomEvent('openQuickStart'));
-                    }}
-                  >
-                    Generate synthetic data
-                  </Button>
-                </FormField>
-              )}
-
-              {!isRuleSchema && (
                 <PageTypesEditor
                   pageTypes={(selectedClass[X_AWS_IDP_PAGE_TYPES] as PageTypeEntry[]) || []}
                   onChange={(pageTypes) => onUpdateClass({ [X_AWS_IDP_PAGE_TYPES]: pageTypes.length > 0 ? pageTypes : undefined })}

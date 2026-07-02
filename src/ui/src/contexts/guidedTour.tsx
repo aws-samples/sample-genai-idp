@@ -25,8 +25,7 @@ const buildTutorial = (flags: TourFlags): AnnotationContextProps.Tutorial => ({
   title: 'Get started with GenAI IDP',
   description: 'A quick walkthrough of the main areas of the console.',
   completed: false,
-  completedScreenDescription:
-    "That's the tour! Open the Quick Start assistant any time to build a configuration, generate test data, or get help.",
+  completedScreenDescription: "That's the tour! Open the Quick Start assistant any time to build a configuration or get help.",
   tasks: [
     {
       title: 'Find your way around',
@@ -91,7 +90,7 @@ const buildTutorial = (flags: TourFlags): AnnotationContextProps.Tutorial => ({
         },
         {
           title: 'Test sets',
-          content: 'Manage labeled test sets — including synthetic ones generated for you — to measure extraction accuracy.',
+          content: 'Manage labeled test sets to measure extraction accuracy.',
           hotspotId: 'nav-test-sets',
         },
         {
@@ -108,10 +107,8 @@ const buildTutorial = (flags: TourFlags): AnnotationContextProps.Tutorial => ({
         },
         {
           title: 'Get started',
-          content:
-            'Open the Quick Start assistant any time to set up a configuration, generate synthetic test data, or ask questions. ' +
-            'Click Finish to open it now.',
-          hotspotId: 'quick-start-launcher',
+          content: 'Open the Quick Start assistant any time to set up a configuration or ask questions. ' + 'Click Finish to open it now.',
+          hotspotId: 'nav-quick-start',
         },
       ],
     },
