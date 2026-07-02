@@ -12,11 +12,20 @@ WebUI, Discovery, Feature Platform, ...).
 """
 
 import re
+from pathlib import Path
 
 import pytest
 from idp_sdk._core.template_transform import HeadlessTemplateTransformer
 
 pytestmark = pytest.mark.unit
+
+
+def _repo_root() -> Path:
+    """Walk up until we find the repo root (contains the main template.yaml)."""
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "template.yaml").is_file() and (parent / "publish.py").is_file():
+            return parent
+    raise RuntimeError("Could not locate repo root containing template.yaml")
 
 
 def _minimal_template():
@@ -152,3 +161,47 @@ def test_no_dangling_references_to_removed_resources():
     result = t.apply_transforms(_minimal_template())
     findings = _dangling_refs(result, t.all_resources_to_remove)
     assert findings == [], f"Dangling references remain: {findings}"
+
+
+def test_real_template_transforms_without_dangling_refs():
+    """Run the transform against the ACTUAL committed template.yaml and assert no
+    resource/output/Sub left behind references a removed resource.
+
+    The synthetic _minimal_template only carries a handful of resources, so a
+    resource that survives the transform while referencing a removed one (e.g.
+    ChatStreamProcessorFunction -> UsersTable) slips past it. This exercises the
+    same class of bug — "Fn::GetAtt references undefined resource ..." — against
+    every resource that actually ships.
+    """
+    # cfnlint ships a CloudFormation-aware YAML decoder that understands the
+    # shorthand !Ref/!GetAtt/!Sub tags in the source template (plain
+    # yaml.safe_load cannot). Skip cleanly if it isn't installed.
+    cfnlint_decode = pytest.importorskip("cfnlint.decode.cfn_yaml")
+
+    template_path = _repo_root() / "template.yaml"
+
+    # cfn_yaml.load returns the template as dict-subclass "node" objects (it
+    # understands the shorthand !Ref/!GetAtt/!Sub tags plain yaml.safe_load
+    # chokes on). The transform round-trips through yaml.safe_dump/load
+    # internally, which can't serialize those node types — so coerce the whole
+    # tree to plain dict/list/str/scalars first.
+    def _plain(node):
+        if isinstance(node, dict):
+            return {str(k): _plain(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [_plain(x) for x in node]
+        if isinstance(node, str):
+            return str(node)
+        return node
+
+    template = _plain(cfnlint_decode.load(str(template_path)))
+    assert isinstance(template, dict) and "Resources" in template
+
+    t = HeadlessTemplateTransformer()
+    result = t.apply_transforms(template)
+
+    findings = _dangling_refs(result, t.all_resources_to_remove)
+    assert findings == [], (
+        "Headless transform left dangling references to removed resources "
+        f"(add them to a strip set in template_transform.py): {findings}"
+    )

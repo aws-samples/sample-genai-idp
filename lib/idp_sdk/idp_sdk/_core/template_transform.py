@@ -216,6 +216,16 @@ class HeadlessTemplateTransformer:
             # UI resources (e.g. UsersTable) would block stack updates.
             "ChatWithDocumentProcessorFunction",
             "ChatWithDocumentProcessorLogGroup",
+            # Chat streaming endpoint (Function URL + LWA). UI-only: reached
+            # directly by the browser via VITE_STREAM_URL (emitted only by the
+            # removed UI CodeBuild/WebUITestEnvFile), invoked by the removed
+            # CognitoAuthorizedRole, and it references the removed UsersTable
+            # (RBAC scope) — so a dangling "Fn::GetAtt UsersTable" would block
+            # headless deploys. Strip the whole family.
+            "ChatStreamProcessorFunction",
+            "ChatStreamProcessorLogGroup",
+            "ChatStreamProcessorUrl",
+            "ChatStreamProcessorUrlPermission",
         }
 
         # ---- Parameters to remove ----
