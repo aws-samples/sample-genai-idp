@@ -71,7 +71,8 @@ const GenAIIDPTopNavigation = (): React.JSX.Element => {
   // (Claims, Loans, etc.) can swap the default "AWS IDP Accelerator Console"
   // text without rebuilding the UI. Set ConsoleTitle in the host's SSM
   // Settings parameter (driven by the ConsoleTitle CFN parameter).
-  const consoleTitle = ((settings as Record<string, unknown> | undefined)?.ConsoleTitle as string | undefined) || 'AWS IDP Accelerator Console';
+  const consoleTitle =
+    ((settings as Record<string, unknown> | undefined)?.ConsoleTitle as string | undefined) || 'AWS IDP Accelerator Console';
 
   // Determine role display
   const getRoleDisplay = (): string => {
