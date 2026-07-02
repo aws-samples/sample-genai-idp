@@ -354,15 +354,14 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
         A tool-decorated function that validates against the model
     """
 
-    @tool
-    def extraction_tool(
-        extraction: model_class,  # pyright: ignore[reportInvalidTypeForm]
-        agent: Agent,  # pyright: ignore[reportInvalidTypeForm]
-    ) -> str:  # pyright: ignore[reportInvalidTypeForm]
-        """Use this tool to return the requested data extraction.
-        When you call this tool it overwrites the previous extraction, if you want to expand the extraction use jsonpatch.
-        This tool needs to be Successfully invoked before the patch tool can be used."""
+    def _record_extraction(extraction: Any, agent: Agent) -> str | None:
+        """Validate + store an extraction payload in agent state.
 
+        Shared by ``extraction_tool`` and ``extraction_with_confidence_tool`` so both
+        the plain and the single-shot integrated paths validate/normalize/persist the
+        extraction identically. Returns an error string to hand back to the model on a
+        malformed payload, or ``None`` on success (extraction stored in state).
+        """
         # Note: The @tool decorator passes data as a dict, not as a model instance
         # We need to validate it manually using the Pydantic model
 
@@ -397,9 +396,7 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
 
         extraction_model = model_class.model_validate(extraction_data)  # pyright: ignore[reportAssignmentType]
         extraction_dict = extraction_model.model_dump(mode="json")
-        logger.info(
-            "extraction_tool called", extra={"models_extraction": extraction_dict}
-        )
+        logger.info("extraction recorded", extra={"models_extraction": extraction_dict})
         agent.state.set(key="current_extraction", value=extraction_dict)
         logger.debug(
             "Successfully stored extraction in state",
@@ -407,7 +404,52 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
         )
         # Save checkpoint after successful extraction
         _invoke_checkpoint_callback(agent)
+        return None
+
+    @tool
+    def extraction_tool(
+        extraction: model_class,  # pyright: ignore[reportInvalidTypeForm]
+        agent: Agent,  # pyright: ignore[reportInvalidTypeForm]
+    ) -> str:  # pyright: ignore[reportInvalidTypeForm]
+        """Use this tool to return the requested data extraction.
+        When you call this tool it overwrites the previous extraction, if you want to expand the extraction use jsonpatch.
+        This tool needs to be Successfully invoked before the patch tool can be used."""
+        error = _record_extraction(extraction, agent)
+        if error is not None:
+            return error
         return "Extraction succeeded, the data format is correct"
+
+    @tool
+    def extraction_with_confidence_tool(
+        extraction: model_class,  # pyright: ignore[reportInvalidTypeForm]
+        field_assessment: dict[str, Any],
+        agent: Agent,  # pyright: ignore[reportInvalidTypeForm]
+    ) -> str:  # pyright: ignore[reportInvalidTypeForm]
+        """Return the extracted data AND your per-field confidence in ONE call.
+
+        Use this INSTEAD of calling an extraction tool and an assessment tool
+        separately (single-shot integrated confidence). Provide:
+        - extraction: the extracted values, matching the schema.
+        - field_assessment: your confidence, MIRRORING the extraction structure —
+          for each scalar/group field: {"confidence": 0.0-1.0, "confidence_reason": "..."};
+          for each list field: a LIST with ONE object per extracted row, in the SAME
+          ORDER as the rows (one entry for EVERY row — do not summarize or skip).
+        confidence is your calibrated certainty the value matches the source document.
+        This overwrites any previous extraction and assessment.
+        """
+        error = _record_extraction(extraction, agent)
+        if error is not None:
+            return error
+        agent.state.set("field_assessment", field_assessment)
+        logger.info(
+            "extraction_with_confidence_tool called (single-shot integrated)",
+            extra={
+                "field_count": len(field_assessment)
+                if isinstance(field_assessment, dict)
+                else 0
+            },
+        )
+        return "Extraction and confidence recorded; the data format is correct"
 
     @tool
     def apply_json_patches(
@@ -532,6 +574,7 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
 
     return (
         extraction_tool,
+        extraction_with_confidence_tool,
         apply_json_patches,
         make_buffer_data_final_extraction,
         finalize_table_extraction,
@@ -1671,17 +1714,47 @@ async def structured_output_async(
         extra={"data_format": data_format.__name__, "model_id": model_id},
     )
 
-    # Create the dynamic extraction tool for this specific model
-    dynamic_extraction_tools = create_dynamic_extraction_tool_and_patch_tool(
-        data_format
+    # Create the dynamic extraction tools for this specific model.
+    (
+        extraction_tool,
+        extraction_with_confidence_tool,
+        apply_json_patches,
+        make_buffer_data_final_extraction,
+        finalize_table_extraction,
+    ) = create_dynamic_extraction_tool_and_patch_tool(data_format)
+
+    # Integrated-assessment: select HOW the agent produces confidence.
+    #   two_step (default): extract via extraction_tool, then call
+    #     provide_field_assessment in a follow-up inference (a dedicated reflection
+    #     pass over the finalized values).
+    #   single_shot: extract + confidence in ONE combined tool call
+    #     (extraction_with_confidence_tool), saving the follow-up inference.
+    # Both write agent.state["field_assessment"], so the downstream collation /
+    # reconcile / grounding / explainability_info path is identical. The choice is
+    # a hidden experimental knob (extraction.agentic.integrated_confidence_strategy)
+    # so cost/latency vs. confidence-calibration can be A/B tested; it is NOT in the
+    # config UI schema. The instructions telling the agent which call to make live
+    # in the selected extraction TASK prompt (task_prompt_extraction_with_confidence).
+    single_shot_integrated = (
+        emit_field_assessment
+        and config.extraction.agentic.integrated_confidence_strategy == "single_shot"
     )
+
+    if single_shot_integrated:
+        primary_extraction_tool = extraction_with_confidence_tool
+    else:
+        primary_extraction_tool = extraction_tool
+
     image_tools = []
     if page_images:
         image_tools.append(create_view_image_tool(page_images))
 
     # Prepare tools list
     tools = [
-        *dynamic_extraction_tools,
+        primary_extraction_tool,
+        apply_json_patches,
+        make_buffer_data_final_extraction,
+        finalize_table_extraction,
         *image_tools,
         view_existing_extraction,
         patch_buffer_data,
@@ -1695,18 +1768,12 @@ async def structured_output_async(
         view_todo_list,
     ]
 
-    # Integrated-assessment mode: give the agent a tool to emit per-field
-    # confidence/bbox in this SAME inference (the document is already in its
-    # cached context), and instruct it to call the tool after extraction. The
-    # recorded assessment is read from agent state below and returned alongside
-    # the result, riding the same downstream path as separate-mode assessment.
     if emit_field_assessment:
-        # Register the tool the agent calls to record inline confidence. The
-        # instructions telling it to do so now live in the selected extraction
-        # TASK prompt (extraction.task_prompt_extraction_with_confidence, + the
-        # bbox block for LLM-box geometry), chosen by select_extraction_task_prompt
-        # in the service — a single editable template rather than a hardcoded
-        # system-prompt append. So we only ensure the tool is available here.
+        # two_step: this is the assessment tool the agent calls AFTER extraction.
+        # single_shot: this stays available only as an OPTIONAL end-of-batch
+        #   fallback so a multi-step / patched extraction (rows added AFTER the
+        #   combined call) can still (re)assess all rows; the common single-call
+        #   case never needs it.
         tools.append(provide_field_assessment)
 
     # Add table parsing tools if enabled

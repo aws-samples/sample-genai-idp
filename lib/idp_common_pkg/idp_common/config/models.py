@@ -238,6 +238,22 @@ class AgenticConfig(BaseModel):
     """Agentic extraction configuration"""
 
     enabled: bool = Field(default=False, description="Enable agentic extraction")
+    integrated_confidence_strategy: str = Field(
+        default="two_step",
+        description=(
+            "HIDDEN/EXPERIMENTAL (not surfaced in the config UI). How the agentic "
+            "extractor produces confidence when confidence.mode == 'integrated'. "
+            "'two_step' (default): the agent extracts via the extraction tool, then "
+            "calls provide_field_assessment in a follow-up inference within the same "
+            "turn (a dedicated reflection pass over the finalized values). "
+            "'single_shot': the agent emits values AND per-field confidence together "
+            "in ONE combined tool call, saving the follow-up inference. Both produce "
+            "identical explainability_info downstream; this only changes inference "
+            "mechanics. Provided so cost/latency vs. confidence-calibration can be "
+            "A/B tested before choosing a default. Ignored unless "
+            "confidence.mode == 'integrated' AND agentic extraction is active."
+        ),
+    )
     review_agent: bool = Field(default=False, description="Enable review agent")
     review_agent_model: str | None = Field(
         default=None,
@@ -308,6 +324,24 @@ class AgenticConfig(BaseModel):
         "Distributed Map (one Lambda per shard, native per-shard retry/resume). "
         "Selection only affects orchestration; shard/merge logic is shared.",
     )
+
+    @field_validator("integrated_confidence_strategy", mode="before")
+    @classmethod
+    def _validate_integrated_confidence_strategy(cls, v: Any) -> str:
+        """Normalize/validate the (hidden) integrated-confidence strategy.
+
+        Empty/None falls back to the default 'two_step' so a blanked config value
+        never breaks the runtime; unknown values are rejected loudly.
+        """
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return "two_step"
+        v = str(v).strip().lower()
+        if v not in ("two_step", "single_shot"):
+            raise ValueError(
+                "integrated_confidence_strategy must be 'two_step' or 'single_shot', "
+                f"got {v!r}"
+            )
+        return v
 
 
 class MissingFieldHandlingConfig(BaseModel):

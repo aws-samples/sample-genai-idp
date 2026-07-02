@@ -74,7 +74,8 @@ and bounding boxes are produced:
 |---|---|---|---|
 | `separate` (default) | non-agentic | the standalone Assessment step (unchanged) | runs |
 | `separate` | agentic | a second inference **inside each extraction shard** | bypassed (skip) |
-| `integrated` | any | the extraction inference itself, in one pass | bypassed (skip) |
+| `integrated` | non-agentic (simple) | the single extraction inference itself, in one pass | bypassed (skip) |
+| `integrated` | agentic | within the extraction agent's turn (see strategy note below) | bypassed (skip) |
 | (any) | (any) with `extraction.confidence.enabled: false` | nowhere | bypassed |
 
 **Why in-shard for agentic.** Agentic extraction shards large sections into
@@ -86,6 +87,31 @@ for list items, first-shard-wins for scalars — then grounded once in OCR geome
 over the whole section. This reuses the *same* `AssessmentService.assess_results`
 core and `ground_assessment_geometry` the standalone step uses, so the
 `explainability_info` output is identical; only the execution location differs.
+
+**Integrated on the agentic path — `two_step` vs `single_shot` (hidden knob).**
+Non-agentic (simple) `integrated` is a true single inference: one Bedrock call
+returns values and confidence together. The *agentic* path cannot do that as
+simply, because extraction is delivered through a **tool call** (and the tool-use
+protocol ends an inference at each tool call). So a hidden, experimental setting —
+`extraction.agentic.integrated_confidence_strategy` — controls how confidence is
+produced there. It is **deliberately not exposed in the config UI**; set it via
+`idp-cli config-upload` on a throwaway config version to A/B the trade-off. Both
+values yield identical `explainability_info`:
+
+- **`two_step`** *(default)*: the agent extracts, then calls
+  `provide_field_assessment` in a **follow-up inference** in the same turn — a
+  dedicated reflection pass over the finalized values (often better-calibrated).
+  ~3 inferences: extract → assess → close.
+- **`single_shot`**: the agent emits values **and** per-field confidence in **one
+  combined tool call**, saving the middle inference. ~2 inferences: extract+confidence
+  → close. Cheaper/faster; scores inline as it extracts. Multi-step (patched)
+  extractions may still call `provide_field_assessment` once at the end so every
+  row is assessed (unassessed rows are padded with neutral `confidence: null`).
+
+Both reuse the same prompt cache (the document/system/tools prefix is written once
+and read by later inferences in the turn), so the saving from `single_shot` is one
+fewer inference, not a change in cached-token economics. See the extraction
+README's *Confidence Assessment* section for the full rationale.
 
 **Automatic bypass of the standalone step.** When extraction has already written
 `explainability_info` to the section result, the Assessment Lambda's

@@ -832,18 +832,43 @@ hitl:
     Assessment step produces.
   - *Non-agentic*: unchanged — the pipeline flows to the standalone Assessment
     step exactly as before.
-- **`integrated`**: the extraction agent emits each value's confidence and
-  bounding box **in its own inference** — the document is already in the agent's
-  (cached) context, so there is no second model pass and no re-sent document. The
-  agent calls a `provide_field_assessment` tool as its final step (one assessment
-  object per scalar/group field; a list with one entry per row, in row order, for
-  list fields). The inline result rides the **same** collation → post-merge
-  reconcile → OCR grounding → `explainability_info` path as `separate`, so the
-  output contract is identical; only the source of the confidence differs. The
-  `extraction.confidence` model/prompt settings are unused, and the standalone
-  step is bypassed. Best for cost/latency once you've confirmed your model produces
-  well-calibrated inline confidence; otherwise prefer `separate` (a dedicated
-  assessment inference per shard).
+- **`integrated`**: the extraction agent produces confidence **within its own
+  extraction turn** — the document is already in the agent's (cached) context, so
+  there is no separate assessment request and no re-sent document. The inline
+  result rides the **same** collation → post-merge reconcile → OCR grounding →
+  `explainability_info` path as `separate`, so the output contract is identical;
+  only the source of the confidence differs. The `extraction.confidence`
+  model/prompt settings are unused, and the standalone step is bypassed. Best for
+  cost/latency once you've confirmed your model produces well-calibrated inline
+  confidence; otherwise prefer `separate` (a dedicated assessment inference per
+  shard).
+
+  <a id="integrated-confidence-strategy"></a>
+  **Hidden setting — `extraction.agentic.integrated_confidence_strategy` (experimental).**
+  For the *agentic* path, integrated confidence can be produced two ways. This knob
+  is **not surfaced in the config UI** — it exists so operators can A/B the
+  cost/latency-vs-calibration trade-off before we pick a default. Set it via
+  `idp-cli config-upload` on a throwaway config version; both values produce
+  identical `explainability_info` downstream (only the inference mechanics differ):
+
+  | value | how confidence is produced | inferences per turn/shard (happy path) |
+  |---|---|---|
+  | `two_step` *(default)* | the agent extracts via the extraction tool, then calls `provide_field_assessment` in a **follow-up inference** within the same turn — a dedicated reflection pass over the finalized values | 3 (extract → assess → close) |
+  | `single_shot` | the agent emits values **and** per-field confidence in **one combined tool call** (`extraction_with_confidence_tool`), saving the follow-up inference | 2 (extract+confidence → close) |
+
+  Why it is not one inference either way: agentic extraction is delivered via a
+  *tool call*, and the tool-use protocol ends an inference at each tool call, so a
+  final "close the turn" inference is always required after the last tool result.
+  `single_shot` removes the *middle* (assessment) inference, not the close. It
+  reuses the same prompt cache as `two_step` (the document/system/tools prefix is
+  written once and read by the closing inference). Trade-off: `two_step` gives the
+  model a dedicated look at the finalized extraction before scoring (often
+  better-calibrated confidence); `single_shot` is cheaper/faster but scores inline
+  as it extracts. For large/multi-step (patched) extractions where rows are added
+  after the combined call, the agent may still call `provide_field_assessment` once
+  at the end to (re)assess every row (rows never assessed are padded with neutral
+  `confidence: null`, same as today). Non-agentic (simple) integrated is always a
+  true single inference and is unaffected by this knob.
 
 **Standalone Assessment step bypass.** When in-shard (or integrated) assessment
 has already written `explainability_info` to the section result, the downstream
