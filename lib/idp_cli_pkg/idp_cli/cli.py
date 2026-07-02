@@ -3856,10 +3856,20 @@ def config_create(
     is_flag=True,
     help="Fail validation if config contains unknown or deprecated fields",
 )
+@click.option(
+    "--emit-migrated",
+    type=click.Path(),
+    default=None,
+    help=(
+        "Write the config migrated to the current format (e.g. v0.5 -> v0.6) to this "
+        "path. Useful for pre-migrating a saved older config file before import."
+    ),
+)
 def config_validate(
     config_file: str,
     show_merged: bool,
     strict: bool,
+    emit_migrated: Optional[str],
 ):
     """
     Validate a configuration file against system defaults
@@ -3900,6 +3910,30 @@ def config_validate(
         except Exception as e:
             console.print(f"[red]✗ Failed to load file: {e}[/red]")
             sys.exit(1)
+
+        # Emit the migrated (current-format) config if requested. Done up front so it
+        # works even when the file is an older format that would otherwise warn about
+        # deprecated fields — the whole point is to hand the user a pre-migrated file.
+        if emit_migrated:
+            from idp_common.config.migrations.v05_to_v06 import migrate_v05_to_v06
+
+            migrated = migrate_v05_to_v06(user_config)
+            migrated_yaml = yaml.dump(
+                migrated,
+                default_flow_style=False,
+                sort_keys=False,
+                allow_unicode=True,
+                width=120,
+            )
+            with open(emit_migrated, "w", encoding="utf-8") as f:
+                f.write(
+                    f"# Migrated to config_format_version {migrated.get('config_format_version', '?')} "
+                    f"from: {config_file}\n\n"
+                )
+                f.write(migrated_yaml)
+            console.print(
+                f"[green]✓ Migrated config written to: {emit_migrated}[/green]"
+            )
 
         # Check for extra/deprecated fields before Pydantic validation
         from idp_common.config.models import IDP_CONFIG_DEPRECATED_FIELDS, IDPConfig
