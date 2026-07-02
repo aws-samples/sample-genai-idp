@@ -111,9 +111,13 @@ extraction:
   # See idp_common.extraction.prompt_assembly.
   # =========================================================================
 
-  # INTEGRATED: one inference emits each value AND its confidence. Used when
-  # confidence.mode == integrated. The agent calls the provide_field_assessment
-  # tool as its final step (record confidence per field / per list row).
+  # INTEGRATED: each value AND its confidence are produced together. Used when
+  # confidence.mode == integrated. Two runtime strategies share this prompt
+  # (extraction.agentic.integrated_confidence_strategy — a hidden experimental knob):
+  #   two_step (default): the agent extracts, then calls provide_field_assessment.
+  #   single_shot: the agent calls one combined extraction_with_confidence_tool.
+  # The prompt describes the intent so the agent uses whichever tool is registered;
+  # both record confidence into the same downstream path.
   task_prompt_extraction_with_confidence: >-
     <background>
     You are an expert in document analysis and information extraction.
@@ -144,15 +148,18 @@ extraction:
     </attributes>
 
     <confidence-assessment>
-    After the extraction is complete and correct, call the provide_field_assessment
-    tool exactly once to record your confidence in each extracted value. Mirror the
-    extraction structure:
+    Record your confidence in each extracted value, mirroring the extraction structure:
     - For each scalar or group field: {"confidence": <0.0-1.0>, "confidence_reason": "<brief>"}.
     - For each list field (e.g. a table): a LIST with ONE assessment object per
       extracted row, in the SAME ORDER as the rows you extracted. Provide an entry
       for EVERY row — do not summarize or skip rows.
     confidence = your calibrated certainty the value matches the source document
     (1.0 = certain, lower = ambiguous/illegible/inferred).
+    HOW TO REPORT IT: if an extraction_with_confidence tool is available, pass the
+    values and this field_assessment together in that ONE call. Otherwise, after the
+    extraction is complete and correct, call the provide_field_assessment tool exactly
+    once. If you extracted in multiple steps (e.g. adding rows via patches), call
+    provide_field_assessment once at the very end so every row is assessed.
     Do NOT include bounding boxes unless explicitly instructed below — field
     locations are derived automatically from OCR.
     </confidence-assessment>
