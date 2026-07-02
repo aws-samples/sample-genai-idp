@@ -106,6 +106,7 @@ make publish REGION=us-gov-west-1 HEADLESS=1
 make deploy STACK_NAME=my-idp ADMIN_EMAIL=me@example.com
 make deploy STACK_NAME=my-idp-dev ADMIN_EMAIL=me@example.com FROM_CODE=1
 make deploy STACK_NAME=my-idp CUSTOM_CONFIG=./my-config.yaml
+make deploy STACK_NAME=my-idp TAGS="Owner=docs-team,Environment=prod"
 
 # Delete a stack
 make delete-stack STACK_NAME=test-stack FORCE=1 FORCE_DELETE_ALL=1
@@ -124,6 +125,7 @@ make delete-stack STACK_NAME=test-stack FORCE=1 FORCE_DELETE_ALL=1
 | `BUCKET_BASENAME` | publish | `--bucket-basename` |
 | `PREFIX` | publish | `--prefix` |
 | `CUSTOM_CONFIG` | deploy | `--custom-config` |
+| `TAGS` | deploy | `--tags` |
 | `TEMPLATE_URL` | deploy | `--template-url` |
 | `TEMPLATE_FILE` | deploy | `--template-file` |
 | `NO_WAIT=1` | deploy, delete-stack | omits `--wait` |
@@ -221,6 +223,7 @@ idp-cli deploy [OPTIONS]
 - `--log-level`: Logging level (`DEBUG`, `INFO`, `WARN`, `ERROR`) (default: INFO)
 - `--enable-hitl`: Enable Human-in-the-Loop (`true` or `false`)
 - `--parameters`: Additional parameters as `key=value,key2=value2`
+- `--tags`: Stack tags as `key=value,key2=value2`. CloudFormation applies these to the stack and propagates them to all taggable resources and nested stacks — useful for governance/ownership (e.g. `Owner`, `Team`, `Environment`). See [Resource tagging](#resource-tagging) below.
 - `--wait`: Wait for stack operation to complete
 - `--no-rollback`: Disable rollback on stack creation failure
 - `--region`: AWS region (optional, auto-detected)
@@ -287,6 +290,13 @@ idp-cli deploy \
     --log-level DEBUG \
     --wait
 
+# Deploy with governance/ownership tags (propagated to all resources)
+idp-cli deploy \
+    --stack-name my-idp \
+    --admin-email user@example.com \
+    --tags "Owner=docs-team,Team=idp,Environment=prod" \
+    --wait
+
 # Deploy with custom template URL (for regions not auto-supported)
 idp-cli deploy \
     --stack-name my-idp \
@@ -350,6 +360,25 @@ idp-cli deploy \
 ```
 
 > **Headless?** See the [Headless Deployment Guide](./headless-deployment.md) for when to use it (not just GovCloud — also API-only / pipeline integrations in Commercial regions) and the [GovCloud Deployment Guide](./govcloud-deployment.md) for GovCloud-specific considerations.
+
+#### Resource tagging
+
+`--tags "key=value,key2=value2"` applies **CloudFormation stack-level tags**. CloudFormation adds them to the stack and automatically propagates them to all taggable resources it creates — including the nested stacks (pattern, API resolvers, KB, discovery, ALB hosting, feature platform) and their resources — so you tag the whole deployment in one place.
+
+Notes and caveats:
+
+- **Format:** comma-separated `key=value` pairs. Tag keys may contain spaces and the characters `. : / + - _` (a value may itself contain `=`; only the first `=` splits key from value). Commas inside a tag value are not supported.
+- **Update behavior:** re-running `deploy` with `--tags` **replaces** the stack's entire tag set with what you pass. Omitting `--tags` on an update **preserves** the existing tags (unlike a bare AWS API call, which would clear them).
+- **Not every resource type accepts propagated tags.** CloudFormation propagation is best-effort — a small number of resource types (e.g. some Cognito, CloudFront, and custom resources) do not receive stack tags. This is an AWS platform limitation, not a configuration option.
+- **Cost allocation:** to use these tags in AWS Cost Explorer / cost allocation reports you must additionally activate them as *cost allocation tags* in the Billing console (a one-time, account-level step); this CLI option does not do that for you.
+
+```bash
+idp-cli deploy \
+    --stack-name my-idp \
+    --admin-email user@example.com \
+    --tags "Owner=docs-team,Team=idp,Environment=prod" \
+    --wait
+```
 
 ---
 

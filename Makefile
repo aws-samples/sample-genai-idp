@@ -470,11 +470,12 @@ endif
 #   make deploy STACK_NAME=my-idp-dev ADMIN_EMAIL=me@example.com FROM_CODE=1  # build & deploy from local source
 #   make deploy STACK_NAME=my-idp ADMIN_EMAIL=me@example.com HEADLESS=1       # headless (no UI)
 #   make deploy STACK_NAME=my-idp CUSTOM_CONFIG=./my-config.yaml              # update config on existing stack
+#   make deploy STACK_NAME=my-idp TAGS="Owner=docs-team,Environment=prod"     # stack tags (propagated to all resources)
 #   make deploy STACK_NAME=my-idp NO_WAIT=1                                   # fire-and-forget (default is --wait)
 #   make deploy STACK_NAME=my-idp EXTRA_ARGS="--max-concurrent 200 --log-level DEBUG"
-deploy: ## Deploy/update IDP CloudFormation stack (Usage: make deploy STACK_NAME=... [ADMIN_EMAIL=...] [REGION=...] [FROM_CODE=1] [HEADLESS=1] [CUSTOM_CONFIG=...] [TEMPLATE_URL=...] [TEMPLATE_FILE=...] [NO_WAIT=1] [EXTRA_ARGS=...])
+deploy: ## Deploy/update IDP CloudFormation stack (Usage: make deploy STACK_NAME=... [ADMIN_EMAIL=...] [REGION=...] [FROM_CODE=1] [HEADLESS=1] [CUSTOM_CONFIG=...] [TAGS=...] [TEMPLATE_URL=...] [TEMPLATE_FILE=...] [NO_WAIT=1] [EXTRA_ARGS=...])
 ifndef STACK_NAME
-	$(error STACK_NAME is not set. Usage: make deploy STACK_NAME=my-stack [ADMIN_EMAIL=...] [REGION=...] [FROM_CODE=1] [HEADLESS=1] [CUSTOM_CONFIG=...] [NO_WAIT=1] [EXTRA_ARGS=...])
+	$(error STACK_NAME is not set. Usage: make deploy STACK_NAME=my-stack [ADMIN_EMAIL=...] [REGION=...] [FROM_CODE=1] [HEADLESS=1] [CUSTOM_CONFIG=...] [TAGS=...] [NO_WAIT=1] [EXTRA_ARGS=...])
 endif
 	@echo -e "$(CYAN)Running idp-cli deploy (stack=$(STACK_NAME))...$(NC)"
 	$(IDP_CLI) deploy \
@@ -484,6 +485,7 @@ endif
 		$(if $(FROM_CODE),--from-code .) \
 		$(if $(HEADLESS),--headless) \
 		$(if $(CUSTOM_CONFIG),--custom-config $(CUSTOM_CONFIG)) \
+		$(if $(TAGS),--tags "$(TAGS)") \
 		$(if $(TEMPLATE_URL),--template-url $(TEMPLATE_URL)) \
 		$(if $(TEMPLATE_FILE),--template-file $(TEMPLATE_FILE)) \
 		$(if $(NO_WAIT),,--wait) \
