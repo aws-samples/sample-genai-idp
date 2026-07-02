@@ -7,7 +7,12 @@ Tests for deploy command parameter handling
 Verifies that stack updates only modify explicitly provided parameters.
 """
 
-from idp_sdk._core.stack import build_parameters
+from unittest.mock import MagicMock
+
+import click
+import pytest
+from idp_cli.cli import _parse_tags
+from idp_sdk._core.stack import StackDeployer, build_parameters
 
 
 class TestParameterPreservation:
@@ -168,3 +173,117 @@ class TestParameterPreservationIntegration:
 
         # When custom_config is None, shouldn't be in params
         assert "CustomConfigPath" not in params
+
+
+def _make_deployer(stack_exists):
+    """Build a StackDeployer with boto3 / template IO stubbed out.
+
+    Returns (deployer, cfn_mock) so tests can assert on the CloudFormation
+    create_stack / update_stack call kwargs.
+    """
+    deployer = StackDeployer.__new__(StackDeployer)
+    deployer.region = "us-west-2"
+    cfn_mock = MagicMock()
+    cfn_mock.create_stack.return_value = {"StackId": "arn:stack/new"}
+    cfn_mock.update_stack.return_value = {"StackId": "arn:stack/existing"}
+    deployer.cfn = cfn_mock
+
+    # Use a small inline template body so no S3 upload path is triggered.
+    deployer._read_template = MagicMock(return_value="Resources: {}")
+    deployer._stack_exists = MagicMock(return_value=stack_exists)
+    deployer._get_stack_parameters = MagicMock(return_value={})
+    deployer._get_template_parameters = MagicMock(return_value=set())
+    return deployer, cfn_mock
+
+
+class TestParseTags:
+    """Tests for the --tags CLI string parser."""
+
+    def test_none_returns_empty(self):
+        assert _parse_tags(None) == {}
+
+    def test_empty_string_returns_empty(self):
+        assert _parse_tags("") == {}
+
+    def test_single_pair(self):
+        assert _parse_tags("Owner=docs-team") == {"Owner": "docs-team"}
+
+    def test_multiple_pairs_and_whitespace(self):
+        assert _parse_tags(" Owner=docs-team , Environment=prod ") == {
+            "Owner": "docs-team",
+            "Environment": "prod",
+        }
+
+    def test_value_may_contain_equals(self):
+        # Only the first '=' splits key/value.
+        assert _parse_tags("Expr=a=b") == {"Expr": "a=b"}
+
+    def test_key_with_allowed_special_chars(self):
+        assert _parse_tags("aws:cost-center=1234") == {"aws:cost-center": "1234"}
+
+    def test_missing_equals_raises(self):
+        with pytest.raises(click.BadParameter):
+            _parse_tags("OwnerNoValue")
+
+    def test_empty_key_raises(self):
+        with pytest.raises(click.BadParameter):
+            _parse_tags("=value")
+
+
+class TestStackTags:
+    """Tests for stack-level tag propagation in deploy_stack."""
+
+    def test_create_includes_tags(self):
+        deployer, cfn_mock = _make_deployer(stack_exists=False)
+
+        deployer.deploy_stack(
+            stack_name="idp-test",
+            template_path="/tmp/template.yaml",
+            parameters={},
+            tags={"Owner": "docs-team", "Environment": "prod"},
+        )
+
+        _, kwargs = cfn_mock.create_stack.call_args
+        assert kwargs["Tags"] == [
+            {"Key": "Owner", "Value": "docs-team"},
+            {"Key": "Environment", "Value": "prod"},
+        ]
+
+    def test_update_includes_tags_when_provided(self):
+        deployer, cfn_mock = _make_deployer(stack_exists=True)
+
+        deployer.deploy_stack(
+            stack_name="idp-test",
+            template_path="/tmp/template.yaml",
+            parameters={},
+            tags={"Owner": "docs-team"},
+        )
+
+        _, kwargs = cfn_mock.update_stack.call_args
+        assert kwargs["Tags"] == [{"Key": "Owner", "Value": "docs-team"}]
+
+    def test_update_omits_tags_when_none_preserves_existing(self):
+        """No tags passed on update -> Tags key omitted so CFN keeps existing."""
+        deployer, cfn_mock = _make_deployer(stack_exists=True)
+
+        deployer.deploy_stack(
+            stack_name="idp-test",
+            template_path="/tmp/template.yaml",
+            parameters={},
+            tags=None,
+        )
+
+        _, kwargs = cfn_mock.update_stack.call_args
+        assert "Tags" not in kwargs
+
+    def test_create_omits_tags_when_none(self):
+        deployer, cfn_mock = _make_deployer(stack_exists=False)
+
+        deployer.deploy_stack(
+            stack_name="idp-test",
+            template_path="/tmp/template.yaml",
+            parameters={},
+        )
+
+        _, kwargs = cfn_mock.create_stack.call_args
+        assert "Tags" not in kwargs

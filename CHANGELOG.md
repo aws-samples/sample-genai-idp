@@ -17,6 +17,8 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
+- **`idp-cli deploy --tags "key=value,key2=value2"`** — Applies CloudFormation stack-level tags at deploy time. CloudFormation propagates them to the stack and all taggable resources it creates, including every nested stack (pattern, API resolvers, KB, multi-doc discovery, ALB hosting, feature platform) and their resources — so a whole deployment can be tagged for governance/ownership (e.g. `Owner`, `Team`, `Environment`) from one place, no `template.yaml` changes required. Tags flow `cli.py` → `IDPClient.stack.deploy()` → `StackDeployer.deploy_stack()` → `create_stack`/`update_stack`. On update, passing `--tags` replaces the stack's tag set while omitting it preserves existing tags (the `Tags` key is only sent when tags are provided). Propagation is best-effort per AWS (a few resource types such as some Cognito/CloudFront/custom resources don't receive propagated tags), and using the tags for cost allocation still requires the one-time Billing-console activation step. See [Resource tagging](docs/idp-cli.md#resource-tagging).
+
 - **`idp-cli config-validate --emit-migrated <path>`** — Writes the config migrated to the current format (e.g. v0.5 → v0.6) to a file, so you can pre-migrate a saved older config file and review the v0.6-shaped result before importing it. Runs up front (works even on files that would otherwise warn about deprecated fields). Complements the server-side migrate-on-import.
 
 ### Changed
