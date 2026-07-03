@@ -624,12 +624,6 @@ def validate_config(
             "No document classes defined - you must add at least one class"
         )
 
-    assessment = merged.get("assessment", {})
-    if assessment.get("granular", {}).get("enabled") and not assessment.get("enabled"):
-        result["warnings"].append(
-            "assessment.granular.enabled=true but assessment.enabled=false - granular assessment won't run"
-        )
-
     # Enhanced validation checks
     _validate_model_ids(merged, result)
     _validate_max_tokens(merged, result)

@@ -125,7 +125,6 @@ class TestConfigModels:
                 "model": "us.amazon.nova-lite-v1:0",
                 "enabled": True,
                 "temperature": "0.0",
-                "granular": {"enabled": False, "list_batch_size": "1"},
             },
             "classes": [],
         }
@@ -190,25 +189,21 @@ class TestConfigModels:
         result = process_config(config)
         assert result is True
 
-    def test_confidence_granular_config(self):
-        """Test granular confidence configuration (v0.6: extraction.confidence)"""
+    def test_confidence_list_batch_size_config(self):
+        """Confidence list batching config (v0.6: extraction.confidence). Any
+        leftover retired ``granular.*`` keys are ignored, not errors."""
         from idp_common.config import ConfidenceConfig
 
         config_dict = {
             "model": "us.amazon.nova-lite-v1:0",
-            "granular": {
-                "enabled": True,
-                "list_batch_size": "5",
-                "simple_batch_size": "10",
-                "max_workers": "20",
-            },
+            "list_batch_size": "5",
+            # Retired granular sub-config: tolerated (ignored) for back-compat.
+            "granular": {"enabled": True, "max_workers": "20"},
         }
         config = ConfidenceConfig.model_validate(config_dict)
 
-        assert config.granular.enabled is True
-        assert config.granular.list_batch_size == 5
-        assert config.granular.simple_batch_size == 10
-        assert config.granular.max_workers == 20
+        assert config.list_batch_size == 5
+        assert not hasattr(config, "granular")
 
     def test_config_validation_range_checks(self):
         """Test that validation enforces ranges"""

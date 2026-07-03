@@ -5,6 +5,10 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Removed
+
+- **Granular assessment service deleted** — Following the default-off change, the granular assessment implementation is now removed entirely: `idp_common/assessment/granular_service.py`, `README_GRANULAR.md`, the `GranularAssessmentService` branch in the assessment Lambda, the `GranularAssessmentConfig` model + its `extraction.confidence.granular` field, the migration passthrough of `assessment.granular`, and the granular-specific unit tests. Large-list assessment is handled entirely by the standalone `list_batch_size` batching (see the earlier entries). **Migration is a no-op:** leftover `granular.*` keys in an existing config still validate (they are silently ignored — `ConfidenceConfig` uses `extra="ignore"`), and the v0.5→v0.6 migration now simply drops `assessment.granular` instead of carrying it forward. The single knob is `extraction.confidence.list_batch_size`. Config format stays v0.6 (no bump needed since leftover keys validate away). See `docs/planning/retire-granular-assessment-plan.md`.
+
 ### Fixed
 
 - **Agentic (advanced) extraction cost was under-reported to ~zero** — The Assessment step's "intelligent skip" (which fires whenever extraction already emitted `explainability_info` — i.e. every agentic/advanced section) rebuilt its section document with `metering={}`, discarding the Extraction step's Bedrock token usage and lambda duration before collate aggregated it. This made advanced modes look nearly free versus simple in cost reports, when advanced actually does more inference. The skip branch now deep-copies and preserves the incoming metering. Regression test: `tests/unit/assessment/test_assessment_skip_metering.py`.

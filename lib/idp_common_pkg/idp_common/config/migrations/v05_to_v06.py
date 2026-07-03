@@ -9,7 +9,7 @@ than a separate stage:
     extraction.assessment_integration       -> extraction.confidence.mode
     assessment.{model,prompts,image,...}     -> extraction.confidence.*
     assessment.inshard_list_batch_size       -> extraction.confidence.list_batch_size
-    assessment.granular                      -> extraction.confidence.granular
+    assessment.granular                      -> DROPPED (granular assessment retired)
     assessment.geometry_mode / legacy flag   -> extraction.geometry.mode  (renamed values)
     assessment.hitl_enabled                  -> hitl.enabled
     assessment.default_confidence_threshold  -> hitl.confidence_threshold
@@ -58,7 +58,6 @@ _CONFIDENCE_PASSTHROUGH_KEYS = (
     "reasoning_effort",
     "max_tokens",
     "image",
-    "granular",
 )
 
 

@@ -22,7 +22,7 @@ The Assessment service is designed to assess the confidence and accuracy of extr
 - **Fallback mechanisms** for robust error handling
 - **Metering integration** for usage tracking
 - **Direct Document model integration**
-- **Both regular and granular assessment support** with identical bounding box capabilities
+- **Automatic large-list batching** for long tables (see *Large-list batching* below)
 
 ## Usage Example
 
@@ -309,7 +309,7 @@ assessment:
 - **No Configuration Required**: Works automatically when LLM provides bbox data
 - **Backward Compatible**: Existing assessments without bbox continue working
 - **UI Ready**: Geometry format works immediately with existing visualizations
-- **All Services Supported**: Both regular and granular assessment include this capability
+- **Consistent**: applies uniformly across the standalone step and the agentic in-shard path
 
 ## Grounding Geometry in Real OCR Data
 
@@ -317,7 +317,7 @@ The bounding boxes produced above are **LLM-estimated**. When the OCR backend su
 geometry (Textract or the Mistral OCR LambdaHook), a post-LLM enrichment pass grounds each
 field's box in the actual OCR coordinates from the consolidated per-page `pageData.json`
 artifact (see `idp_common/ocr/README.md`). Implemented in `idp_common.assessment.ocr_grounding`
-and shared by both the standard (`service.py`) and granular (`granular_service.py`) paths.
+and used by the standalone assessment step (`service.py`) and the agentic in-shard path alike.
 
 ```python
 from idp_common.assessment.ocr_grounding import (

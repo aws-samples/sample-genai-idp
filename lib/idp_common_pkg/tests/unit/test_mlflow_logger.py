@@ -267,16 +267,16 @@ class TestExtractConfigParams:
         params, _, _ = mlflow_logger._extract_config_params(config)
         assert params["classification.method"] == "multimodalPageLevelClassification"
 
-    def test_assessment_granular(self):
-        # v0.6: HITL threshold is top-level; granular lives under
-        # extraction.confidence.
+    def test_assessment_confidence_params(self):
+        # v0.6: HITL threshold is top-level; confidence knobs live under
+        # extraction.confidence (granular assessment has been retired).
         config = {
             "hitl": {"confidence_threshold": "0.8"},
-            "extraction": {"confidence": {"granular": {"enabled": True}}},
+            "extraction": {"confidence": {"list_batch_size": "25"}},
         }
         params, _, _ = mlflow_logger._extract_config_params(config)
         assert params["assessment.confidence_threshold"] == "0.8"
-        assert params["assessment.granular.enabled"] == "True"
+        assert params["assessment.list_batch_size"] == "25"
 
     def test_prompts_extracted(self):
         config = {

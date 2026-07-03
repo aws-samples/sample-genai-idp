@@ -14,7 +14,7 @@ Covers:
   compatible (only emits the fields when they're set).
 * Downstream service skip behaviour (extraction) writes a stub result
   and leaves the section otherwise untouched.
-* Assessment (classic + granular) short-circuits without calling LLM.
+* Assessment short-circuits without calling LLM.
 * Summarization short-circuits and writes a stub ``summary.json``.
 * Rule validation short-circuits and returns empty responses.
 
@@ -598,70 +598,6 @@ class TestAssessmentSkipsExcludedSections:
         )
         result = svc.process_document_section(doc, "1")
         # Should have hit the "no extraction results" error, not the skip guard.
-        assert any("no extraction results" in e.lower() for e in result.errors)
-
-
-# ---------------------------------------------------------------------------
-# Granular Assessment service: skips excluded sections
-# ---------------------------------------------------------------------------
-
-
-class TestGranularAssessmentSkipsExcludedSections:
-    """``GranularAssessmentService.process_document_section`` returns the
-    document unchanged for excluded sections."""
-
-    def _make_service(self):
-        from idp_common.assessment.granular_service import GranularAssessmentService
-
-        svc = GranularAssessmentService.__new__(GranularAssessmentService)
-        svc.config = MagicMock()
-        svc.config.assessment.enabled = True
-        svc._load_extraction_results = MagicMock()  # type: ignore[method-assign]
-        svc._assess_granular = MagicMock()  # type: ignore[method-assign]
-        return svc
-
-    def _make_excluded_doc(self):
-        sec = Section(
-            section_id="1",
-            classification="Instructions",
-            page_ids=["1", "2"],
-            excluded=True,
-            exclusion_reason="instructions",
-        )
-        return Document(
-            id="doc-1",
-            input_key="doc-1",
-            output_bucket="out-bkt",
-            sections=[sec],
-            pages={"1": Page(page_id="1"), "2": Page(page_id="2")},
-        )
-
-    def test_process_document_section_short_circuits(self) -> None:
-        svc = self._make_service()
-        doc = self._make_excluded_doc()
-
-        result = svc.process_document_section(doc, "1")
-
-        assert result is doc
-        svc._load_extraction_results.assert_not_called()
-        svc._assess_granular.assert_not_called()
-
-    def test_non_excluded_section_proceeds(self) -> None:
-        svc = self._make_service()
-        sec = Section(
-            section_id="1",
-            classification="Form",
-            page_ids=["1"],
-            excluded=False,
-        )
-        doc = Document(
-            id="doc-1",
-            input_key="doc-1",
-            output_bucket="out-bkt",
-            sections=[sec],
-            pages={"1": Page(page_id="1")},
-        )
-        result = svc.process_document_section(doc, "1")
         assert any("no extraction results" in e.lower() for e in result.errors)
 
 

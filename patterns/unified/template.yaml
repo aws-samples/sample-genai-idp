@@ -1564,13 +1564,11 @@ Resources:
                         minimum: 100
                         maximum: 3500
                         order: 1
-                  # NOTE: the legacy `extraction.confidence.granular.*` sub-block
-                  # (standalone-Assessment ThreadPool batching) is intentionally NOT
-                  # surfaced in the UI. Its single relevant knob duplicated the
-                  # top-level "List batch size" above, and the block is slated for
-                  # removal (see GranularAssessmentConfig in config/models.py). The
-                  # runtime still reads its model-side defaults; there is nothing for
-                  # an admin to tune here, so a single list-batch control is shown.
+                  # NOTE: granular assessment has been retired. Large lists are
+                  # handled by the "List batch size" control above
+                  # (extraction.confidence.list_batch_size). Leftover
+                  # `extraction.confidence.granular.*` keys in an existing config
+                  # validate but are ignored at runtime.
               postHook:
                 type: array
                 collapsible: true
