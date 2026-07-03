@@ -42,7 +42,8 @@ class TestV05ToV06Migration:
         # v0.6: the confidence TASK prompt lives in the confidence sub-config
         assert conf["task_prompt"] == "TP"
         assert conf["list_batch_size"] == "30"
-        assert conf["granular"] == {"enabled": True, "max_workers": "20"}
+        # granular assessment is retired: the key is DROPPED, not carried forward.
+        assert "granular" not in conf
         assert conf["image"] == {"target_width": "100"}
 
     @pytest.mark.parametrize(
@@ -193,7 +194,8 @@ class TestV05ToV06ThroughIDPConfig:
         assert cfg.extraction.confidence.system_prompt == "SP"
         # v0.6: assessment.task_prompt migrates to extraction.confidence.task_prompt
         assert cfg.extraction.confidence.task_prompt == "TP"
-        assert cfg.extraction.confidence.granular.enabled is False
+        # granular assessment is retired: the field no longer exists on the model.
+        assert not hasattr(cfg.extraction.confidence, "granular")
         assert cfg.extraction.geometry.mode == "llm_grounded"
         assert cfg.hitl.enabled is True
         assert cfg.hitl.confidence_threshold == 0.75

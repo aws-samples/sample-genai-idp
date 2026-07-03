@@ -8,9 +8,9 @@ This module provides a service for assessing the confidence and accuracy of
 extraction results by analyzing them against source documents using LLMs,
 with support for text and image content.
 
-The service supports both:
-1. Original approach: Single inference for all attributes in a section
-2. Granular approach: Multiple focused inferences with caching and parallelization
+Large list fields (e.g. hundreds of transaction rows) are assessed in batches of
+``extraction.confidence.list_batch_size`` rows via
+``idp_common.assessment.batching`` so the model reliably enumerates every row.
 """
 
 import json

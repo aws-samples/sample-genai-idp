@@ -16,7 +16,6 @@ from idp_common.config.configuration_manager import ConfigurationManager
 from idp_common.config.models import (
     ConfidenceConfig,
     ExtractionConfig,
-    GranularAssessmentConfig,
     IDPConfig,
     ImageConfig,
 )
@@ -194,7 +193,7 @@ class TestSyncCustomWithNewDefault:
                 top_p=0.1,
                 max_tokens=10000,
                 confidence=ConfidenceConfig(
-                    enabled=True, temperature=0.0, granular={"enabled": False}
+                    enabled=True, temperature=0.0, list_batch_size=25
                 ),
             ),
             classes=[],
@@ -213,7 +212,7 @@ class TestSyncCustomWithNewDefault:
                 confidence=ConfidenceConfig(
                     enabled=False,  # CUSTOM
                     temperature=0.0,
-                    granular=GranularAssessmentConfig(enabled=False),
+                    list_batch_size=25,
                 ),
             ),
             classes=[{"$id": "Invoice", "properties": {}}],  # CUSTOM
@@ -223,7 +222,7 @@ class TestSyncCustomWithNewDefault:
         # - New model
         # - Different defaults for temp/top_p
         # - Increased max_tokens
-        # - Enabled granular confidence assessment
+        # - Larger confidence list_batch_size
         new_default = IDPConfig(
             extraction=ExtractionConfig(
                 model="us.amazon.nova-premier-v1:0",  # NEW
@@ -233,7 +232,7 @@ class TestSyncCustomWithNewDefault:
                 confidence=ConfidenceConfig(
                     enabled=True,
                     temperature=0.5,  # NEW
-                    granular=GranularAssessmentConfig(enabled=True),  # NEW
+                    list_batch_size=50,  # NEW
                 ),
             ),
             classes=[],
@@ -255,7 +254,7 @@ class TestSyncCustomWithNewDefault:
         assert new_custom.extraction.top_p == 0.2
         assert new_custom.extraction.max_tokens == 15000
         assert new_custom.extraction.confidence.temperature == 0.5
-        assert new_custom.extraction.confidence.granular.enabled
+        assert new_custom.extraction.confidence.list_batch_size == 50
 
 
 @pytest.mark.unit

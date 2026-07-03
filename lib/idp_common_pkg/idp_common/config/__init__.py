@@ -17,7 +17,6 @@ from .models import (
     ConfidenceConfig,
     GeometryConfig,
     HITLConfig,
-    GranularAssessmentConfig,
     SchemaConfig,
     SummarizationConfig,
     ChatConfig,

@@ -151,9 +151,9 @@ def handler(event, context):
     section_index = next(i for i, s in enumerate(document.sections) if s.section_id == section_id)
     logger.info(f"Section {section_id} is at index {section_index} in the Sections array")
 
-    # Check if granular assessment is enabled (moved earlier for Lambda metering context)
-    assessment_context = "GranularAssessment" if config.extraction.confidence.granular.enabled else "Assessment"
-    logger.info(f"Assessment mode: {'Granular' if config.extraction.confidence.granular.enabled else 'Regular'} (context: {assessment_context})")
+    # Assessment metering context (granular assessment has been retired; the
+    # standalone AssessmentService batches large lists on its own).
+    assessment_context = "Assessment"
 
     # Intelligent Assessment Skip: Check if extraction results already contain explainability_info
     if section.extraction_result_uri and section.extraction_result_uri.strip():
@@ -239,50 +239,20 @@ def handler(event, context):
     except Exception as e:
         logger.error(f"Failed to update document status: {str(e)}", exc_info=True)
 
-    # Initialize assessment service with cache table for enhanced retry handling
-    cache_table = os.environ.get('TRACKING_TABLE')
-    
-    # Check if granular assessment is enabled
-    
-    if config.extraction.confidence.granular.enabled:
-        # Use enhanced granular assessment service with caching and retry support
-        from idp_common.assessment.granular_service import GranularAssessmentService
-        assessment_service = GranularAssessmentService(config=config, cache_table=cache_table)
-        logger.info("Using granular assessment service with enhanced error handling and caching")
-    else:
-        # Use regular assessment service
-        assessment_service = assessment.AssessmentService(config=config)
-        logger.info("Using regular assessment service")
+    # Standalone assessment service (batches large lists via
+    # extraction.confidence.list_batch_size; granular assessment is retired).
+    assessment_service = assessment.AssessmentService(config=config)
+    logger.info("Using assessment service")
 
     # Process the document section for assessment
     t0 = time.time()
     logger.info(f"Starting assessment for section {section_id}")
-    
+
     try:
         updated_document = assessment_service.process_document_section(document, section_id)
         t1 = time.time()
         logger.info(f"Total assessment time: {t1-t0:.2f} seconds")
-        
-        # Check for failed assessment tasks that might require retry (granular assessment)
-        if hasattr(updated_document, 'metadata') and updated_document.metadata:
-            failed_tasks = updated_document.metadata.get('failed_assessment_tasks', {})
-            if failed_tasks:
-                throttling_tasks = {
-                    task_id: task_info for task_id, task_info in failed_tasks.items()
-                    if task_info.get('is_throttling', False)
-                }
-                
-                logger.warning(
-                    f"Assessment completed with {len(failed_tasks)} failed tasks, "
-                    f"{len(throttling_tasks)} due to throttling"
-                )
-                
-                if throttling_tasks:
-                    logger.info(
-                        f"Throttling detected in {len(throttling_tasks)} tasks. "
-                        f"Successful tasks have been cached for retry."
-                    )
-        
+
         # Check for throttling errors in document status and errors field
         has_throttling, throttling_error = check_document_for_throttling_errors(updated_document)
         if has_throttling:

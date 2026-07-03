@@ -415,40 +415,15 @@ class PipelineHook(BaseModel):
     enabled: bool = Field(default=True, description="Whether this hook is active")
 
 
-class GranularAssessmentConfig(BaseModel):
-    """Granular assessment configuration (large-document batching for the
-    standalone Assessment step). Nested under ``extraction.confidence``.
-
-    NOTE: slated for removal in a follow-up PR (superseded by
-    ``confidence.list_batch_size`` + a capable confidence model). Retained here
-    so the standalone AssessmentService keeps working until that PR lands.
-    """
-
-    enabled: bool = Field(default=False, description="Enable granular assessment")
-    list_batch_size: int = Field(default=1, gt=0)
-    simple_batch_size: int = Field(default=3, gt=0)
-    max_workers: int = Field(default=20, gt=0)
-
-    @field_validator(
-        "list_batch_size", "simple_batch_size", "max_workers", mode="before"
-    )
-    @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
-
-
 class ConfidenceConfig(BaseModel):
     """Per-field confidence configuration (v0.6).
 
     Confidence is an optional OUTPUT of extraction, not a separate stage. This
     block (nested as ``extraction.confidence``) is the single home for every knob
     that used to live under the top-level ``assessment`` block — the confidence
-    model, its prompts/image/decoding params, the integration mode, list
-    batching, and the granular sub-config. HITL (human review) is its own
-    top-level ``hitl`` block; geometry is ``extraction.geometry``.
+    model, its prompts/image/decoding params, the integration mode, and list
+    batching (``list_batch_size``). HITL (human review) is its own top-level
+    ``hitl`` block; geometry is ``extraction.geometry``.
     """
 
     mode: str = Field(
@@ -522,7 +497,6 @@ class ConfidenceConfig(BaseModel):
         ),
     )
     image: ImageConfig = Field(default_factory=ImageConfig)
-    granular: GranularAssessmentConfig = Field(default_factory=GranularAssessmentConfig)
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
     @classmethod
