@@ -1014,7 +1014,25 @@ assessment:
 4. **Monitor Resource Usage**: Higher resolution images consume more memory and processing time
 5. **Balance Accuracy vs Performance**: Choose appropriate settings based on your assessment requirements and processing volume
 
+## Large-list batching (standalone assessment)
+
+For documents with large lists (bank statements with hundreds of transactions, line-item tables, etc.), a single confidence inference over the whole section under-enumerates or omits the list, leaving most rows unassessed. The **standalone Assessment step now batches large lists on its own** — it slices the largest list field into `extraction.confidence.list_batch_size` chunks (default 25), assesses each chunk sequentially with the shared scalars/context, and reconciles the concatenated per-row assessments so **every** list cell receives its own confidence and bounding box.
+
+This means simple (non-agentic) extraction with separate confidence handles large lists without any additional configuration. The one knob is `extraction.confidence.list_batch_size` — lower it if a model still struggles to enumerate a full chunk, raise it to reduce the number of inference calls.
+
+```yaml
+extraction:
+  confidence:
+    enabled: true
+    mode: separate            # separate (default) | integrated | off
+    list_batch_size: 25       # rows per assessment batch for large lists
+```
+
+> **Note:** For very large or complex documents, **Advanced (agentic) extraction** is generally the better fit — it shards both extraction and assessment and produced the best-calibrated confidence in A/B testing. Simple + separate remains fully viable for large lists via the batching described above.
+
 ## Granular Assessment
+
+> **Deprecation notice:** Granular assessment is being retired. Large-list assessment for the non-agentic path is now handled by the standalone batching described above (`extraction.confidence.list_batch_size`), which is cheaper and equally accurate. See the sequenced retirement plan in `docs/planning/retire-granular-assessment-plan.md`. The `granular.*` configuration keys continue to validate for backward compatibility.
 
 ### Overview
 

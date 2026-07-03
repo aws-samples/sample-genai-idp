@@ -3134,98 +3134,14 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
     ) -> dict[str, Any]:
         """Force per-field assessment to index-align with the extracted data.
 
-        The assessment LLM frequently emits a *different* number of list-item
-        assessments than the data has rows (a 120-row table may come back with
-        only 44 row assessments). Downstream consumers (HITL, UI) index
-        ``explainability_info[0][field][i]`` against ``inference_result[field][i]``,
-        so a length mismatch silently misattributes confidence to the wrong row —
-        and in the sharded path the drift compounds across shards on merge.
-
-        For every list-valued data field this truncates an over-long assessment
-        list and pads a too-short one so ``len(assessment[field]) ==
-        len(data[field])`` exactly — including the case where the model OMITTED
-        the list field entirely (common for large tables: the shard extracted N
-        rows but the assessment response left the field out, so without this every
-        such row would be unassessed AND ungroundable).
-
-        Crucially, each padded row is a **per-sub-field placeholder mirroring the
-        data row's structure** — a ``{"confidence": null, ...}`` leaf for each
-        sub-field the data row populated (e.g. ``date``, ``description``,
-        ``amount``). This gives OCR geometry grounding a real value to match per
-        sub-field, so an un-assessed row still gets a correct bounding box from its
-        extracted values; only the LLM ``confidence`` is null. A scalar/non-dict
-        row element falls back to a single neutral leaf.
-
-        Scalar/group fields are left untouched. Mutates and returns ``assessment``.
+        Thin delegate to the shared
+        :func:`idp_common.assessment.batching.reconcile_assessment_to_data` so the
+        agentic in-shard path and the standalone Assessment step share one
+        implementation. See that function for the full contract.
         """
-        if not isinstance(assessment, dict):
-            return assessment
+        from idp_common.assessment.batching import reconcile_assessment_to_data
 
-        def _row_placeholder(data_row: Any) -> dict[str, Any]:
-            reason = (
-                "Not individually assessed (assessment returned fewer items "
-                "than were extracted)."
-            )
-            # Mirror the data row's sub-fields so grounding can attach a box per
-            # populated sub-field from its actual value.
-            if isinstance(data_row, dict):
-                leaves = {
-                    sub: {"confidence": None, "confidence_reason": reason}
-                    for sub, sv in data_row.items()
-                    if sv is not None and not isinstance(sv, (dict, list))
-                }
-                if leaves:
-                    return leaves
-            # Scalar row element (or all-null/nested row): single neutral leaf.
-            return {"confidence": None, "confidence_reason": reason}
-
-        def _expand_row_to_per_column(row_assess: Any, data_row: Any) -> Any:
-            """Normalize a per-ROW confidence into per-COLUMN leaves.
-
-            Some models (esp. integrated mode) emit ONE ``{"confidence", ...}`` object
-            for an entire list row. Downstream (HITL, UI, grounding) index confidence
-            per sub-field, so when the data row is a dict but the assessment row is a
-            single confidence leaf, fan that one score out across the row's populated
-            scalar columns (preserving the model's confidence/reason on each). Rows
-            that already carry per-column leaves, or scalar row elements, pass through.
-            """
-            if (
-                isinstance(row_assess, dict)
-                and "confidence" in row_assess
-                and isinstance(data_row, dict)
-            ):
-                leaf = {
-                    "confidence": row_assess.get("confidence"),
-                    "confidence_reason": row_assess.get("confidence_reason"),
-                }
-                cols = {
-                    sub: dict(leaf)
-                    for sub, sv in data_row.items()
-                    if sv is not None and not isinstance(sv, (dict, list))
-                }
-                if cols:
-                    return cols
-            return row_assess
-
-        for field, data_val in extraction_results.items():
-            if not isinstance(data_val, list):
-                continue
-            target = len(data_val)
-            assessed = assessment.get(field)
-            assessed = assessed if isinstance(assessed, list) else []
-            if len(assessed) > target:
-                assessed = assessed[:target]
-            elif len(assessed) < target:
-                assessed = assessed + [
-                    _row_placeholder(data_val[i]) for i in range(len(assessed), target)
-                ]
-            # Normalize any per-row scalar confidence to per-column leaves so every
-            # list-item field gets its own confidence + geometry downstream.
-            assessment[field] = [
-                _expand_row_to_per_column(assessed[i], data_val[i])
-                for i in range(target)
-            ]
-        return assessment
+        return reconcile_assessment_to_data(assessment, extraction_results)
 
     def _assess_results_batched(
         self,
@@ -3238,85 +3154,23 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
     ) -> dict[str, Any]:
         """Assess one scope, batching large list fields across multiple inferences.
 
-        A single assessment call over a large list (e.g. 75 transaction rows) is
-        unreliable — the model under-enumerates or omits the list, leaving rows
-        unassessed. When the largest list field exceeds
-        ``assessment.inshard_list_batch_size``, the list is sliced into batches; each
-        batch is assessed with the SAME scalars/context (so scalar assessments and
-        the document context are preserved) but only that batch's rows, and the
-        per-row assessments are concatenated in order. Scalar/group assessments come
-        from the first batch. Returns ``{"assessment", "alerts", "metering"}``.
-
-        Falls back to a single call when no list field exceeds the batch size.
+        Thin delegate to the shared
+        :func:`idp_common.assessment.batching.assess_results_batched` (the same
+        implementation the standalone Assessment step now uses) with the batch size
+        read from ``extraction.confidence.list_batch_size``. Returns
+        ``{"assessment", "alerts", "metering", "parsing_succeeded",
+        "duration_seconds"}``.
         """
-        from idp_common.extraction.agentic_idp import _accumulate_metering
+        from idp_common.assessment.batching import assess_results_batched
 
-        batch_size = self.config.extraction.confidence.list_batch_size
-        # Identify the single largest list field (the table being assessed).
-        list_fields = {
-            k: v
-            for k, v in extraction_results.items()
-            if isinstance(v, list) and len(v) > batch_size
-        }
-
-        def _one_call(results: dict[str, Any]) -> Any:
-            return assessment_service.assess_results(
-                class_label=class_label,
-                extraction_results=results,
-                document_text=document_text,
-                page_images=page_images,
-                ocr_text_confidence="",
-            )
-
-        if not list_fields:
-            core = _one_call(extraction_results)
-            return {
-                "assessment": self._reconcile_assessment_to_data(
-                    core.enhanced_assessment, extraction_results
-                ),
-                "alerts": core.confidence_threshold_alerts,
-                "metering": core.metering,
-            }
-
-        # Batch by the largest list field; other (smaller) list fields ride the
-        # first batch and are reconciled afterward.
-        big_field = max(list_fields, key=lambda k: len(list_fields[k]))
-        rows = extraction_results[big_field]
-        merged_assessment: dict[str, Any] = {}
-        merged_alerts: list[dict[str, Any]] = []
-        merged_metering: dict[str, Any] = {}
-        big_field_acc: list[Any] = []
-
-        for start in range(0, len(rows), batch_size):
-            chunk = rows[start : start + batch_size]
-            # Same scalars/context every batch; only the big list is sliced.
-            batch_results = dict(extraction_results)
-            batch_results[big_field] = chunk
-            core = _one_call(batch_results)
-            enhanced = self._reconcile_assessment_to_data(
-                core.enhanced_assessment, batch_results
-            )
-            # Accumulate the big list's per-row assessments in order.
-            big_field_acc.extend(
-                enhanced.get(big_field, [])
-                if isinstance(enhanced.get(big_field), list)
-                else []
-            )
-            _accumulate_metering(merged_metering, core.metering or {})
-            merged_alerts.extend(core.confidence_threshold_alerts or [])
-            # Scalars/other fields: keep the first batch's assessment.
-            if not merged_assessment:
-                merged_assessment = enhanced
-        merged_assessment[big_field] = big_field_acc
-        # Final alignment against the full extraction (pads any residual gap).
-        merged_assessment = self._reconcile_assessment_to_data(
-            merged_assessment, extraction_results
+        return assess_results_batched(
+            assessment_service,
+            class_label=class_label,
+            extraction_results=extraction_results,
+            document_text=document_text,
+            page_images=page_images,
+            batch_size=self.config.extraction.confidence.list_batch_size,
         )
-        return {
-            "assessment": merged_assessment,
-            "alerts": merged_alerts,
-            "metering": merged_metering,
-        }
 
     def _build_assess_runner(self, section_info: SectionInfo) -> "Any | None":
         """Build the per-shard assess_runner closure (or None when disabled).

@@ -1100,25 +1100,35 @@ class AssessmentService:
             logger.info(f"Time taken to read raw OCR results: {t4 - t3:.2f} seconds")
 
             # Run the pure inference + enhancement core (shared with the agentic
-            # in-shard assessment path). This builds the prompt, invokes Bedrock,
-            # parses the response, and enhances each field with its confidence
-            # threshold + alerts — all from the in-memory inputs gathered above.
+            # in-shard assessment path), batching large list fields so the model
+            # reliably enumerates every row. A single call over a big list (e.g. a
+            # 120-row statement) under-enumerates or omits it, leaving most rows
+            # unassessed — this was previously the job of the (now retired) granular
+            # service. ``assess_results_batched`` slices the largest oversized list
+            # by ``extraction.confidence.list_batch_size``, assesses each chunk
+            # sequentially with the shared scalars/context, and reconciles the
+            # per-row assessments to full per-cell coverage. Falls back to a single
+            # (still reconciled) call when no list exceeds the batch size.
             logger.info(
                 f"Assessing extraction confidence for {class_label} document, "
                 f"section {section_id}"
             )
-            core = self.assess_results(
+            from idp_common.assessment.batching import assess_results_batched
+
+            batched = assess_results_batched(
+                self,
                 class_label=class_label,
                 extraction_results=extraction_results,
                 document_text=document_text,
                 page_images=page_images,
+                batch_size=self.config.extraction.confidence.list_batch_size,
                 ocr_text_confidence=ocr_text_confidence,
             )
-            enhanced_assessment_data = core.enhanced_assessment
-            confidence_threshold_alerts = core.confidence_threshold_alerts
-            metering = core.metering
-            parsing_succeeded = core.parsing_succeeded
-            total_duration = core.duration_seconds
+            enhanced_assessment_data = batched["assessment"]
+            confidence_threshold_alerts = batched["alerts"]
+            metering = batched["metering"]
+            parsing_succeeded = batched["parsing_succeeded"]
+            total_duration = batched["duration_seconds"]
 
             # Ground field geometry from OCR. In 'ocr_only' (default) geometry is
             # derived purely from OCR value-matching (model boxes were never
