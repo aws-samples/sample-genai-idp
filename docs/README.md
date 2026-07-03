@@ -34,9 +34,7 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 ## Document Processing Features
 
 - [Classification](./classification.md) - Customizing document classification
-- [Extraction](./extraction.md) - Customizing information extraction
-- [Assessment](./assessment.md) - Extraction confidence evaluation using LLMs
-- [Assessment Bounding Boxes](./assessment-bounding-boxes.md) - Spatial localization of extracted fields
+- [Extraction & Confidence](./extraction-and-confidence.md) - Extraction configuration, per-field confidence scoring, and bounding-box geometry (consolidates the former Extraction, Assessment, and Assessment Bounding Boxes guides)
 - [Few-Shot Examples](./few-shot-examples.md) - Implementing few-shot examples for improved accuracy
 - [Human-in-the-Loop Review](./human-review.md) - Human review workflows with built-in review system
 - [Rule Validation](./rule-validation.md) - Business rule validation and compliance checking

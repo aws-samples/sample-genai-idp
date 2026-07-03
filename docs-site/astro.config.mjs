@@ -80,11 +80,9 @@ export default defineConfig({
           label: "Document Processing Features",
           items: [
             { label: "Classification", slug: "classification" },
-            { label: "Extraction", slug: "extraction" },
-            { label: "Assessment", slug: "assessment" },
             {
-              label: "Assessment Bounding Boxes",
-              slug: "assessment-bounding-boxes",
+              label: "Extraction & Confidence",
+              slug: "extraction-and-confidence",
             },
             { label: "Few-Shot Examples", slug: "few-shot-examples" },
             { label: "Human-in-the-Loop Review", slug: "human-review" },
@@ -215,6 +213,10 @@ export default defineConfig({
           label: "Migration",
           items: [
             { label: "v0.4 → v0.5 Migration", slug: "migration-v04-to-v05" },
+            {
+              label: "Granular Assessment Retirement",
+              slug: "migration-granular-retirement",
+            },
           ],
         },
         // AUTO-SIDEBAR-START
