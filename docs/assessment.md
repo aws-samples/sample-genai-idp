@@ -1032,7 +1032,7 @@ extraction:
 
 ## Granular Assessment
 
-> **Deprecation notice:** Granular assessment is being retired. Large-list assessment for the non-agentic path is now handled by the standalone batching described above (`extraction.confidence.list_batch_size`), which is cheaper and equally accurate. See the sequenced retirement plan in `docs/planning/retire-granular-assessment-plan.md`. The `granular.*` configuration keys continue to validate for backward compatibility.
+> **Deprecation notice:** Granular assessment is retired and now **defaults OFF**. Large-list assessment for the non-agentic path is handled by the standalone batching described above (`extraction.confidence.list_batch_size`), which is cheaper (−78% Bedrock cost on a 120-row statement) and gives full per-cell confidence **and** geometry. The `granular.*` configuration keys continue to validate for backward compatibility but are ignored at runtime; a config that still sets `granular.enabled: true` logs a one-line deprecation warning. See the sequenced retirement plan in `docs/planning/retire-granular-assessment-plan.md`.
 
 ### Overview
 

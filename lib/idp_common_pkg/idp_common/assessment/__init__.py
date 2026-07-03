@@ -74,16 +74,18 @@ def create_assessment_service(
         logger.info("No config provided, using original AssessmentService")
         return OriginalAssessmentService(region=region, config=config)
 
-    # Check if granular assessment is enabled (default: False for backward compatibility)
-
-    # Normalize the enabled value to handle both boolean and string values
-
-    logger.info(
-        f"Granular assessment enabled check: raw_value={config.extraction.confidence.granular.enabled} (type: {type(config.extraction.confidence.granular.enabled)})"
-    )
-
+    # Granular assessment is RETIRED (default: False). Large lists are now batched
+    # by the standalone AssessmentService via extraction.confidence.list_batch_size,
+    # which is cheaper and gives full per-cell confidence + geometry. If a config
+    # still sets granular.enabled true, log a one-line deprecation note; the granular
+    # branch is retained only until it is deleted in a follow-up PR.
     if config.extraction.confidence.granular.enabled:
-        logger.info("Granular assessment enabled, using GranularAssessmentService")
+        logger.warning(
+            "granular assessment is retired; large lists are batched by the "
+            "standalone assessment via confidence.list_batch_size. "
+            "granular.enabled=true is deprecated and will be ignored in a future "
+            "release. Using GranularAssessmentService for now."
+        )
         return GranularAssessmentService(region=region, config=config)
     else:
         logger.info("Using original AssessmentService")

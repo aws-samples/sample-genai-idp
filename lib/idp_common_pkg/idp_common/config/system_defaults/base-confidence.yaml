@@ -27,8 +27,12 @@ extraction:
     image:
       target_height: ""
       target_width: ""
+    # DEPRECATED / RETIRED: granular assessment is superseded by the standalone
+    # large-list batching (list_batch_size above), which is cheaper and gives full
+    # per-cell confidence + geometry. Defaulted OFF; these keys still validate for
+    # backward compatibility but are IGNORED at runtime. Slated for removal.
     granular:
-      enabled: true
+      enabled: false
       max_workers: "20"
       simple_batch_size: "3"
       list_batch_size: "1"
