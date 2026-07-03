@@ -2655,7 +2655,6 @@ Resources:
         ChatSessionsTableName: !Ref ChatSessionsTable
         IdHelperChatMemoryTableName: !Ref IdHelperChatMemoryTable
         DiscoveryTrackingTableName: !Ref DiscoveryTrackingTable
-        BootstrapTrackingTableName: !Ref BootstrapTrackingTable
 
         # S3 Buckets
         InputBucketName: !Ref InputBucket
