@@ -115,6 +115,35 @@ assessment:
 - Document processing continues to completion
 - Minimal performance impact (early return)
 
+## Large-list batching (`assessment/batching.py`)
+
+A single confidence inference over a large list field (e.g. a 120-row transaction
+table) is unreliable: the model under-enumerates or omits the list, leaving most
+rows unassessed. The standalone Assessment step handles this itself — it does **not**
+depend on granular assessment for large lists.
+
+`process_document_section` runs the assessment through the shared
+`idp_common.assessment.batching.assess_results_batched`, which:
+
+1. Finds the single largest list field whose length exceeds
+   `extraction.confidence.list_batch_size` (default 25).
+2. Slices that list into `list_batch_size` chunks and assesses each chunk
+   **sequentially**, passing the SAME scalars/context every time so scalar
+   assessments and the document context are preserved (scalars come from the first
+   batch). Sequential, not a thread pool, is intentional: the historical granular
+   path's 20-way fan-out caused a Bedrock prompt-cacheWrite storm — batching
+   sequentially avoids it and is why retiring granular is a net cost win.
+3. Concatenates the per-row assessments in order and calls
+   `reconcile_assessment_to_data` to force the assessment to index-align with the
+   extracted data — truncating over-long lists, padding short/omitted ones with
+   per-sub-field placeholders (so every un-assessed row is still groundable), and
+   fanning any per-row scalar confidence out to per-column leaves.
+
+Both `assess_results_batched` and `reconcile_assessment_to_data` are shared with
+the agentic in-shard assessment path (`ExtractionService`), so there is exactly one
+implementation of large-list assessment. When no list exceeds the batch size the
+helper makes a single (still reconciled) call — identical to the previous behavior.
+
 ## Prompt Template Placeholders
 
 The assessment service supports the following placeholders in prompt templates:
