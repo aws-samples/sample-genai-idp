@@ -745,6 +745,42 @@ class TestAssessmentReconciliation:
         assert out["group"] == {"k": {"c": 0.8}}
         assert len(out["txns"]) == 1  # truncated to data length
 
+    def test_expands_per_row_scalar_confidence_to_per_column(self):
+        # Integrated mode sometimes emits ONE confidence per row; reconcile must
+        # fan it out to per-column leaves so every list-item field is scored.
+        svc = self._svc()
+        data = {"txns": [{"date": "d0", "amt": "1"}, {"date": "d1", "amt": "2"}]}
+        assessment = {
+            "txns": [
+                {"confidence": 0.98, "confidence_reason": "clear"},
+                {"confidence": 0.90, "confidence_reason": "faint"},
+            ]
+        }
+        out = svc._reconcile_assessment_to_data(assessment, data)
+        assert len(out["txns"]) == 2
+        # each column now has its own leaf carrying the row's confidence/reason
+        assert set(out["txns"][0].keys()) == {"date", "amt"}
+        assert out["txns"][0]["date"]["confidence"] == 0.98
+        assert out["txns"][0]["amt"]["confidence"] == 0.98
+        assert out["txns"][0]["amt"]["confidence_reason"] == "clear"
+        assert out["txns"][1]["date"]["confidence"] == 0.90
+
+    def test_already_per_column_row_untouched(self):
+        # A properly per-column row (no top-level "confidence" key) passes through.
+        svc = self._svc()
+        data = {"txns": [{"date": "d0", "amt": "1"}]}
+        assessment = {
+            "txns": [
+                {
+                    "date": {"confidence": 0.9, "confidence_reason": "x"},
+                    "amt": {"confidence": 0.7, "confidence_reason": "y"},
+                }
+            ]
+        }
+        out = svc._reconcile_assessment_to_data(assessment, data)
+        assert out["txns"][0]["date"]["confidence"] == 0.9
+        assert out["txns"][0]["amt"]["confidence"] == 0.7
+
     def test_reconcile_fixes_large_merged_mismatch(self):
         # Reproduces the live e2e bug: merged data has 120 rows but the merged
         # assessment only 45. Post-merge reconcile aligns to 120, and the padded

@@ -3179,6 +3179,34 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             # Scalar row element (or all-null/nested row): single neutral leaf.
             return {"confidence": None, "confidence_reason": reason}
 
+        def _expand_row_to_per_column(row_assess: Any, data_row: Any) -> Any:
+            """Normalize a per-ROW confidence into per-COLUMN leaves.
+
+            Some models (esp. integrated mode) emit ONE ``{"confidence", ...}`` object
+            for an entire list row. Downstream (HITL, UI, grounding) index confidence
+            per sub-field, so when the data row is a dict but the assessment row is a
+            single confidence leaf, fan that one score out across the row's populated
+            scalar columns (preserving the model's confidence/reason on each). Rows
+            that already carry per-column leaves, or scalar row elements, pass through.
+            """
+            if (
+                isinstance(row_assess, dict)
+                and "confidence" in row_assess
+                and isinstance(data_row, dict)
+            ):
+                leaf = {
+                    "confidence": row_assess.get("confidence"),
+                    "confidence_reason": row_assess.get("confidence_reason"),
+                }
+                cols = {
+                    sub: dict(leaf)
+                    for sub, sv in data_row.items()
+                    if sv is not None and not isinstance(sv, (dict, list))
+                }
+                if cols:
+                    return cols
+            return row_assess
+
         for field, data_val in extraction_results.items():
             if not isinstance(data_val, list):
                 continue
@@ -3186,13 +3214,17 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             assessed = assessment.get(field)
             assessed = assessed if isinstance(assessed, list) else []
             if len(assessed) > target:
-                assessment[field] = assessed[:target]
+                assessed = assessed[:target]
             elif len(assessed) < target:
-                assessment[field] = assessed + [
+                assessed = assessed + [
                     _row_placeholder(data_val[i]) for i in range(len(assessed), target)
                 ]
-            else:
-                assessment[field] = assessed
+            # Normalize any per-row scalar confidence to per-column leaves so every
+            # list-item field gets its own confidence + geometry downstream.
+            assessment[field] = [
+                _expand_row_to_per_column(assessed[i], data_val[i])
+                for i in range(target)
+            ]
         return assessment
 
     def _assess_results_batched(

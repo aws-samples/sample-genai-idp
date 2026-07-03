@@ -62,7 +62,10 @@ extraction:
       GROUP:   {"grp": {"sub1": {"confidence": 0.9, "confidence_reason": "..."}}}
       LIST:    {"items": [ {"c1": {"confidence": 0.95, "confidence_reason": "..."}}, ... ]}
       IMPORTANT:
-      - For LIST attributes, assess EACH item separately (one object per row, in order)
+      - For LIST attributes, assess EACH row separately (one object per row, in order),
+        and within each row give EACH column its own {"confidence", "confidence_reason"}
+        leaf — mirror the row's column keys; do NOT emit a single confidence per row.
+        Nested lists follow the same rule recursively.
       - Include assessments for ALL attributes present in the extraction results
       - Match the exact structure of the extracted data
       </final-instructions>

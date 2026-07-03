@@ -57,7 +57,10 @@ extraction:
         document
         4. Do not use /n for new lines, use a space instead
         5. If a field is not found or if unsure, return null
-        6. All dates should be in MM/DD/YYYY format
+        6. Format each value as directed by that attribute's description/format in the
+        attributes section below. If an attribute specifies a date or number format,
+        follow it EXACTLY; only if no format is specified, preserve the value as it
+        appears in the document.
         7. Do not perform calculations or summations unless totals are explicitly given
         8. If an alias is not found in the document, return null
         9. Guidelines for checkboxes:
@@ -95,7 +98,9 @@ extraction:
     Extract key information from the document and return a JSON object with the following key steps:
     1. Carefully analyze the document text to identify the requested attributes
     2. Extract only information explicitly found in the document - never make up data
-    3. Format all dates as MM/DD/YYYY and replace newlines with spaces
+    3. Format each value as directed by its attribute description/format (follow any
+    specified date/number format EXACTLY; otherwise keep the document's rendering);
+    replace newlines with spaces
     4. For checkboxes, only include options with clear visual selection marks
     5. Use null for any fields not found in the document
     6. Ensure the output is properly formatted JSON with quoted keys and values
@@ -136,7 +141,9 @@ extraction:
     2. Do not make up data - only extract information explicitly found in the document
     3. Use a space instead of newlines
     4. If a field is not found or you are unsure, return null
-    5. All dates should be in MM/DD/YYYY format
+    5. Format each value as directed by that attribute's description/format below.
+       If an attribute specifies a date or number format, follow it EXACTLY; only if
+       no format is specified, preserve the value as it appears in the document.
     6. Do not perform calculations unless totals are explicitly given
     7. Carefully examine checkboxes/selection fields; only include options with clear
        visual selection marks
@@ -148,11 +155,21 @@ extraction:
     </attributes>
 
     <confidence-assessment>
-    Record your confidence in each extracted value, mirroring the extraction structure:
-    - For each scalar or group field: {"confidence": <0.0-1.0>, "confidence_reason": "<brief>"}.
-    - For each list field (e.g. a table): a LIST with ONE assessment object per
-      extracted row, in the SAME ORDER as the rows you extracted. Provide an entry
-      for EVERY row — do not summarize or skip rows.
+    Record your confidence in EVERY extracted value, mirroring the extraction
+    structure EXACTLY so there is one confidence entry per individual value:
+    - Scalar field: {"confidence": <0.0-1.0>, "confidence_reason": "<brief>"}.
+    - Group (nested object) field: an object with the SAME sub-keys as the value,
+      each mapping to its own {"confidence": ..., "confidence_reason": ...} leaf.
+    - List field (e.g. a table): a LIST with ONE object per extracted row, in the
+      SAME ORDER as the rows. Each row object MUST mirror that row's structure —
+      i.e. the SAME column keys as the extracted row, and EACH column maps to its
+      own {"confidence": ..., "confidence_reason": ...} leaf. Do NOT emit a single
+      confidence for a whole row; score each cell. Nested lists follow the same
+      rule recursively. Provide an entry for EVERY row and EVERY column — do not
+      summarize or skip.
+      Example — extracted row {"date": "...", "amount": "..."} ->
+        {"date": {"confidence": 0.98, "confidence_reason": "..."},
+         "amount": {"confidence": 0.90, "confidence_reason": "..."}}
     confidence = your calibrated certainty the value matches the source document
     (1.0 = certain, lower = ambiguous/illegible/inferred).
     HOW TO REPORT IT: if an extraction_with_confidence tool is available, pass the
