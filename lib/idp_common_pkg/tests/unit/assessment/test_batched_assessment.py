@@ -147,6 +147,7 @@ def test_batches_pad_when_model_underenumerates():
         document_text="...",
         page_images=[],
         batch_size=25,
+        max_retries=0,  # isolate reconcile/pad behavior from the retry pass
     )
 
     assessed = result["assessment"]["transactions"]
@@ -163,3 +164,75 @@ def test_reconcile_aligns_list_length():
     assert len(out["txns"]) == 3
     assert out["txns"][0]["date"]["confidence"] == 0.9  # fanned to per-column
     assert out["txns"][2]["date"]["confidence"] is None  # padded placeholder
+
+
+class DropLastFirstPass(FakeAssessmentService):
+    """Drops the last row on the FIRST full-list pass, scores everything it's
+    handed on any later (retry) call — a model that under-counts once but scores
+    a focused re-ask of just the missing rows."""
+
+    def __init__(self, list_field, full_len):
+        super().__init__(list_field)
+        self.full_len = full_len
+
+    def assess_results(self, **kw):
+        core = super().assess_results(**kw)
+        rows = kw["extraction_results"].get(self.list_field, [])
+        if len(rows) == self.full_len and len(self.calls) == 1:
+            core.enhanced_assessment[self.list_field] = core.enhanced_assessment[
+                self.list_field
+            ][:-1]
+        return core
+
+
+def test_missing_rows_are_retried_to_full_coverage():
+    """A row dropped on the first pass is recovered by the bounded retry → every
+    list cell ends with a real (non-null) confidence, no null placeholders."""
+    svc = DropLastFirstPass("transactions", full_len=10)
+    data = {"transactions": _rows(10)}
+    result = assess_results_batched(
+        svc,
+        class_label="bank-statement",
+        extraction_results=data,
+        document_text="...",
+        page_images=[],
+        batch_size=25,  # single-call path, then retry
+    )
+    assessed = result["assessment"]["transactions"]
+    assert len(assessed) == 10
+    for row in assessed:
+        for leaf in row.values():
+            assert leaf["confidence"] is not None
+    assert len(svc.calls) >= 2  # retry happened
+
+
+def test_retry_stops_when_no_progress():
+    """If the model can never score a row, retry stops after bounded rounds and
+    leaves the null placeholder (no infinite loop)."""
+
+    class NeverScoresLastRow(FakeAssessmentService):
+        def assess_results(self, **kw):
+            core = super().assess_results(**kw)
+            rows = kw["extraction_results"].get(self.list_field, [])
+            if len(rows) > 1:
+                core.enhanced_assessment[self.list_field] = core.enhanced_assessment[
+                    self.list_field
+                ][:-1]
+            else:
+                core.enhanced_assessment[self.list_field] = []
+            return core
+
+    svc = NeverScoresLastRow("transactions")
+    data = {"transactions": _rows(5)}
+    result = assess_results_batched(
+        svc,
+        class_label="bank-statement",
+        extraction_results=data,
+        document_text="...",
+        page_images=[],
+        batch_size=25,
+        max_retries=2,
+    )
+    assessed = result["assessment"]["transactions"]
+    assert len(assessed) == 5
+    assert assessed[-1]["date"]["confidence"] is None
