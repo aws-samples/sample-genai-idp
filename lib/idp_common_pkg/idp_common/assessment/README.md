@@ -351,7 +351,8 @@ Key behaviors:
   keep the LLM-estimated box (identical to prior behavior). `pageData.json` is read from S3, so
   the `{OCR_TEXT_CONFIDENCE}` prompt and token budget are unchanged.
 
-See `docs/assessment-bounding-boxes.md` for the user-facing description.
+See the *Geometry / Bounding Boxes* section of `docs/extraction-and-confidence.md`
+for the user-facing description.
 
 ## Multimodal Assessment
 
