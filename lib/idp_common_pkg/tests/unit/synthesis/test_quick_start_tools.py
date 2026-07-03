@@ -34,6 +34,47 @@ def _mock_bedrock(text):
     return mc
 
 
+class TestSearchCatalog:
+    def test_empty_when_no_config_classes_or_schemas(self, monkeypatch):
+        from idp_common.agents.quick_start.tools import bootstrap_tools as bt
+
+        monkeypatch.delenv("GENERATOR_SCHEMAS_ROOT", raising=False)
+        with patch.object(bt, "_all_config_classes", return_value=[]):
+            out = json.loads(bt.search_catalog_impl("employee paystub"))
+        assert out["matched"] is False
+
+    def test_indexes_config_classes(self, monkeypatch):
+        from idp_common.agents.quick_start.tools import bootstrap_tools as bt
+        from idp_common.synthesis import catalog as catalog_mod
+
+        monkeypatch.delenv("GENERATOR_SCHEMAS_ROOT", raising=False)
+
+        captured = {}
+
+        def _fake_match(prompt, entries, **_kw):
+            captured["entries"] = entries
+            return entries[0] if entries else None
+
+        with (
+            patch.object(bt, "_all_config_classes", return_value=[SCHEMA]),
+            patch.object(catalog_mod, "match_catalog", side_effect=_fake_match),
+        ):
+            out = json.loads(bt.search_catalog_impl("paystub"))
+
+        # The user's existing Paystub class was indexed into the catalog.
+        assert [e.name for e in captured["entries"]] == ["Paystub"]
+        assert out["matched"] is True
+        assert out["name"] == "Paystub"
+
+    def test_config_load_failure_degrades(self):
+        from idp_common.agents.quick_start.tools import bootstrap_tools as bt
+
+        # _all_config_classes swallows errors and returns [] -> empty catalog.
+        with patch.object(bt, "_all_config_classes", return_value=[]):
+            out = json.loads(bt.search_catalog_impl("anything"))
+        assert out["matched"] is False
+
+
 class TestEstimateAndAvailability:
     def test_estimate_returns_json(self):
         from idp_common.agents.quick_start.tools import bootstrap_tools as bt

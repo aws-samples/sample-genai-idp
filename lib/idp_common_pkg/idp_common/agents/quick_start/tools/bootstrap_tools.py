@@ -178,9 +178,32 @@ def list_sample_documents_impl() -> str:
     return json.dumps({"available": True, "samples": samples})
 
 
+def _all_config_classes() -> list:
+    """Collect document classes across the user's config versions for catalog
+    matching. Returns [] if the configuration is unavailable."""
+    try:
+        from idp_common.config.configuration_manager import ConfigurationManager
+
+        config_manager = ConfigurationManager()
+        seen: dict = {}
+        for v in config_manager.list_config_versions() or []:
+            raw = config_manager.get_raw_configuration("Config", v.get("versionName"))
+            for cls in (raw or {}).get("classes", []) or []:
+                key = _class_id(cls)
+                if key and key not in seen:
+                    seen[key] = cls
+        return list(seen.values())
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning("Could not load config classes for catalog: %s", e)
+        return []
+
+
 def search_catalog_impl(description: str) -> str:
     schemas_root = os.environ.get("GENERATOR_SCHEMAS_ROOT")
-    entries = catalog_mod.build_catalog(generator_schemas_root=schemas_root)
+    entries = catalog_mod.build_catalog(
+        generator_schemas_root=schemas_root,
+        config_classes=_all_config_classes(),
+    )
     if not entries:
         return json.dumps({"matched": False, "reason": "Catalog is empty"})
     match = catalog_mod.match_catalog(description, entries)
