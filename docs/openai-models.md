@@ -48,7 +48,7 @@ the model IDs carry no region prefix.
 | OCR (Bedrock backend) | ✅ | Image + text input |
 | Classification | ✅ | Page-level and holistic |
 | Extraction (standard) | ✅ | Text + page images |
-| Assessment | ✅ | Including granular assessment |
+| Confidence (assessment) | ✅ | `separate` and `integrated` modes on the simple (non-agentic) path |
 | Summarization | ✅ | |
 | Evaluation (LLM method) | ✅ | |
 | Chat-with-Document | ✅ | **Streaming** — token deltas stream to the UI via the Responses SSE stream |

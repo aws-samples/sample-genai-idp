@@ -619,7 +619,7 @@ qa_config = {
 ## Related Documentation
 
 - [Configuration Guide](./configuration.md) - General IDP configuration management
-- [Extraction Documentation](./extraction.md) - Information extraction capabilities
+- [Extraction & Confidence](./extraction-and-confidence.md) - Information extraction, confidence, and geometry capabilities
 - [Monitoring Guide](./monitoring.md) - System monitoring and alerting
 - [Troubleshooting Guide](./troubleshooting.md) - Common issues and solutions
 

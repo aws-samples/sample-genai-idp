@@ -807,7 +807,7 @@ separate downstream step, controlled by `extraction.confidence.mode`:
 extraction:
   confidence:
     enabled: true                     # master on/off — false disables confidence entirely
-    mode: separate                    # "separate" (default) | "integrated"
+    mode: separate                    # off | "separate" (default) | "integrated"
     model: us.anthropic.claude-haiku-4-5-20251001-v1:0
     list_batch_size: 25               # rows scored per inference (agentic in-shard)
   geometry:

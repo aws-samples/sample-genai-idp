@@ -122,9 +122,8 @@ Short key-value strings logged as MLflow params. These are filterable in the MLf
 | `extraction.top_p` | `0.0` | Extraction top_p |
 | `extraction.top_k` | `5.0` | Extraction top_k |
 | `extraction.max_tokens` | `65535` | Extraction max tokens |
-| `assessment.model` | `us.amazon.nova-lite-v1:0` | Assessment model ID |
-| `assessment.confidence_threshold` | `0.8` | Assessment confidence threshold |
-| `assessment.granular.enabled` | `True` | Granular assessment flag |
+| `assessment.confidence_threshold` | `0.8` | HITL confidence threshold (from top-level `hitl.confidence_threshold`) |
+| `assessment.list_batch_size` | `25` | Rows per confidence batch for large lists (from `extraction.confidence.list_batch_size`) |
 | `summarization.model` | `us.amazon.nova-pro-v1:0` | Summarization model ID |
 | `evaluation.model` | `us.amazon.nova-2-lite-v1:0` | Evaluation model ID |
 | `ocr.backend` | `textract` | OCR backend |
@@ -156,7 +155,7 @@ Complex data structures logged as JSON files under the `metrics/` artifact path.
 For a test run with the lending package sample configuration, a single MLflow run would contain:
 
 ```
-── Params (27) ──────────────────────────────────────
+── Params (23) ──────────────────────────────────────
 test_run_id                     = "run-2026-03-25-001"
 classification.model            = "us.amazon.nova-2-lite-v1:0"
 classification.temperature      = "0.0"
@@ -169,14 +168,8 @@ extraction.temperature          = "0.0"
 extraction.top_p                = "0.0"
 extraction.top_k                = "5.0"
 extraction.max_tokens           = "65535"
-assessment.model                = "us.amazon.nova-lite-v1:0"
-assessment.temperature          = "0.0"
-assessment.top_p                = "0.0"
-assessment.top_k                = "5.0"
-assessment.max_tokens           = "10000"
-assessment.enabled              = "True"
 assessment.confidence_threshold = "0.8"
-assessment.granular.enabled     = "True"
+assessment.list_batch_size      = "25"
 summarization.model             = "us.amazon.nova-pro-v1:0"
 summarization.temperature       = "0.0"
 summarization.top_p             = "0.0"

@@ -237,5 +237,5 @@ For comprehensive implementation guidance, use cases, and code examples, see [po
 ## Additional Documentation
 
 - [classification.md](./classification.md) - Details on document classification capabilities
-- [extraction.md](./extraction.md) - Details on data extraction capabilities
+- [extraction-and-confidence.md](./extraction-and-confidence.md) - Details on data extraction, confidence, and geometry capabilities
 - [troubleshooting.md](./troubleshooting.md) - Troubleshooting guidance and common issues
