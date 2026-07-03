@@ -31,7 +31,7 @@ extraction:
   model: us.anthropic.claude-sonnet-4-6
   temperature: "0.0"
   top_p: "0.0"
-  max_tokens: "64000"                       # Claude 4 maximum
+  max_tokens: "64000"                       # safe default; Sonnet/Opus 4.6+ support up to 128000
   top_k: "5"
   system_prompt: >-
     You are a document assistant. Respond only with JSON. Never make up data, only provide data found in the document being provided.
