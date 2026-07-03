@@ -35,13 +35,33 @@ model_limits:
     reference: "https://docs.anthropic.com/claude/docs/models-overview#model-comparison"
 
   # ---------------------------------------------------------------------------
-  # Anthropic Claude 4.x Models (Sonnet, Haiku, older Opus versions)
+  # Anthropic Claude Sonnet 4.6 / Opus 4.6 (extended output, 128K)
   # ---------------------------------------------------------------------------
+  # These 4.x models support 128K max output (same as Opus 4.7/4.8), NOT 64K.
+  # They MUST appear before the generic "claude-(opus|sonnet|haiku)-4" catch-all
+  # below, because pattern matching is first-match-wins.
+  # The :1m suffix (extended context) increases INPUT to 1M tokens; the output
+  # limit is unchanged regardless of context window size.
+  - pattern: "claude-sonnet-4-6"
+    max_output_tokens: 128000
+    description: "Claude Sonnet 4.6 with 128K max output tokens (all variants including :1m)"
+    reference: "https://docs.anthropic.com/claude/docs/models-overview#model-comparison"
+
+  - pattern: "claude-opus-4-6"
+    max_output_tokens: 128000
+    description: "Claude Opus 4.6 with 128K max output tokens (all variants including :1m)"
+    reference: "https://docs.anthropic.com/claude/docs/models-overview#model-comparison"
+
+  # ---------------------------------------------------------------------------
+  # Anthropic Claude 4.x Models (Haiku 4.5, Sonnet 4/4.5, older Opus versions)
+  # ---------------------------------------------------------------------------
+  # Catch-all for 4.x models that cap at 64K output (Haiku 4.5, Sonnet 4.0/4.5,
+  # Opus 4.0/4.1/4.5). Sonnet 4.6 and Opus 4.6 are handled above (128K).
   # Note: The :1m suffix (extended context) increases INPUT to 1M tokens.
   # Output token limit remains unchanged regardless of context window size.
   - pattern: "claude-(opus|sonnet|haiku)-4"
     max_output_tokens: 64000
-    description: "Claude 4.x models (Sonnet, Haiku, Opus 4.5/4.6) - all variants including :1m"
+    description: "Claude 4.x models (Haiku 4.5, Sonnet 4/4.5, Opus 4.0/4.1/4.5) - all variants including :1m"
     reference: "https://docs.anthropic.com/claude/docs/models-overview#model-comparison"
 
   # ---------------------------------------------------------------------------
