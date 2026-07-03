@@ -1,17 +1,20 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-import os
+import copy
 import json
-import time
 import logging
+import os
+import time
 
-from idp_common import get_config, assessment
-from idp_common.models import Document, Status
+from aws_xray_sdk.core import patch_all, xray_recorder
+from idp_common import assessment, get_config, s3
 from idp_common.docs_service import create_document_service
-from idp_common import s3
-from idp_common.utils import normalize_boolean_value, calculate_lambda_metering, merge_metering_data
-from aws_xray_sdk.core import xray_recorder, patch_all
+from idp_common.models import Document, Status
+from idp_common.utils import (
+    calculate_lambda_metering,
+    merge_metering_data,
+)
 
 patch_all()
 
@@ -180,7 +183,13 @@ def handler(event, context):
                     evaluation_report_uri=document.evaluation_report_uri,
                     evaluation_results_uri=document.evaluation_results_uri,
                     errors=document.errors,
-                    metering={}  # Empty metering for skipped processing
+                    # Preserve the incoming metering (esp. the Extraction step's
+                    # Bedrock token usage). Resetting to {} here dropped all
+                    # extraction cost for agentic sections — which always write
+                    # explainability_info during extraction and so hit this skip
+                    # branch — making advanced modes look ~free vs simple. Deep-copy
+                    # so later per-section metering merges never mutate the source.
+                    metering=copy.deepcopy(document.metering) if document.metering else {},
                 )
                 
                 # Add only the pages needed for this section
