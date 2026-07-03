@@ -178,6 +178,15 @@ class DocumentDynamoDBService:
             expression_names["#WorkflowExecutionArn"] = "WorkflowExecutionArn"
             expression_values[":WorkflowExecutionArn"] = document.workflow_execution_arn
 
+        # Persist the configuration version (read from the input object's
+        # `config-version` S3 metadata at queue time) so the UI/GSI can display
+        # which config each document was processed with. Without this the tracking
+        # item never carries ConfigVersion and the UI shows "N/A".
+        if document.config_version:
+            set_expressions.append("#ConfigVersion = :ConfigVersion")
+            expression_names["#ConfigVersion"] = "ConfigVersion"
+            expression_values[":ConfigVersion"] = document.config_version
+
         # Set workflow status based on document status
         if document.status == Status.FAILED:
             workflow_status = "FAILED"

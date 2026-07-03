@@ -67,6 +67,29 @@ class TestHITLPendingReviewGSI:
         assert "REMOVE HITLPendingReview" not in expr
 
 
+class TestConfigVersionPersistence:
+    """ConfigVersion (read from the input object's config-version S3 metadata)
+    must be written to the tracking item so the TypeDateIndex GSI projects it and
+    the UI shows it instead of 'N/A'."""
+
+    def setup_method(self):
+        self.service = DocumentDynamoDBService(dynamodb_client=Mock())
+
+    def test_config_version_is_persisted(self):
+        doc = Document(
+            id="test.pdf", input_key="test.pdf", config_version="ab7-adv-separate"
+        )
+        expr, names, values = self.service._document_to_update_expressions(doc)
+        assert "#ConfigVersion" in names
+        assert names["#ConfigVersion"] == "ConfigVersion"
+        assert values[":ConfigVersion"] == "ab7-adv-separate"
+
+    def test_absent_when_no_config_version(self):
+        doc = Document(id="test.pdf", input_key="test.pdf")
+        expr, names, values = self.service._document_to_update_expressions(doc)
+        assert ":ConfigVersion" not in values
+
+
 @pytest.mark.unit
 class TestConvertDecimalsToNative:
     """Tests for the shared convert_decimals_to_native utility."""
