@@ -36,6 +36,91 @@ from idp_common import utils
 logger = logging.getLogger(__name__)
 
 
+def _to_float(v: Any, default: float = 0.0) -> float:
+    try:
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return default
+        return float(v)
+    except (ValueError, TypeError):
+        return default
+
+
+def enrich_assessment_with_thresholds(
+    assessment: dict[str, Any],
+    class_schema: dict[str, Any],
+    default_confidence_threshold: float = 0.9,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Attach ``confidence_threshold`` to every confidence leaf and build alerts.
+
+    The *integrated* confidence paths (the extraction inference emits confidence
+    inline, whether via the simple free-text prompt or the agentic tool call)
+    produce raw ``{confidence, confidence_reason}`` leaves with NO threshold and
+    NO ``confidence_threshold_alerts`` — unlike the standalone/separate path,
+    which enriches them in ``AssessmentService.assess_results``. This helper adds
+    the same enrichment so all confidence modes share one output contract:
+    each leaf gains ``confidence_threshold`` (from the field's
+    ``x-aws-idp-confidence-threshold`` or the default), and a flat list of
+    threshold-violation alerts is returned.
+
+    Pure/importable (no S3/Bedrock). Mutates a copy; returns
+    ``(enriched_assessment, alerts)``. Scalars, groups, and list rows (per-column
+    leaves) are all handled recursively.
+    """
+    from idp_common.config.schema_constants import (
+        SCHEMA_PROPERTIES,
+        X_AWS_IDP_CONFIDENCE_THRESHOLD,
+    )
+
+    if not isinstance(assessment, dict):
+        return assessment, []
+    properties = (class_schema or {}).get(SCHEMA_PROPERTIES, {}) or {}
+    alerts: list[dict[str, Any]] = []
+
+    def _enrich_leaf_container(node: Any, threshold: float, path: str) -> Any:
+        """Recursively add threshold to every {confidence,...} leaf under node."""
+        if isinstance(node, dict):
+            if "confidence" in node:
+                conf = (
+                    _to_float(node.get("confidence"), None)
+                    if node.get("confidence") is not None
+                    else None
+                )
+                out = {**node, "confidence_threshold": threshold}
+                if conf is not None and conf < threshold:
+                    alerts.append(
+                        {
+                            "attribute_name": path,
+                            "confidence": conf,
+                            "confidence_threshold": threshold,
+                        }
+                    )
+                return out
+            return {
+                k: _enrich_leaf_container(v, threshold, f"{path}.{k}" if path else k)
+                for k, v in node.items()
+            }
+        if isinstance(node, list):
+            return [
+                _enrich_leaf_container(v, threshold, f"{path}[{i}]")
+                for i, v in enumerate(node)
+            ]
+        return node
+
+    enriched: dict[str, Any] = {}
+    for attr_name, attr_assessment in assessment.items():
+        prop_schema = properties.get(attr_name, {}) or {}
+        threshold = _to_float(
+            prop_schema.get(
+                X_AWS_IDP_CONFIDENCE_THRESHOLD, default_confidence_threshold
+            ),
+            default_confidence_threshold,
+        )
+        enriched[attr_name] = _enrich_leaf_container(
+            attr_assessment, threshold, attr_name
+        )
+    return enriched, alerts
+
+
 def reconcile_assessment_to_data(
     assessment: dict[str, Any], extraction_results: dict[str, Any]
 ) -> dict[str, Any]:
@@ -134,6 +219,29 @@ def reconcile_assessment_to_data(
     return assessment
 
 
+def _row_confidence_missing(row_assess: Any) -> bool:
+    """True if a reconciled list-row assessment still lacks a real confidence.
+
+    A row is 'missing' when it is the null placeholder or any of its per-column
+    leaves has ``confidence is None`` — i.e. the model didn't actually score it.
+    """
+    if isinstance(row_assess, dict):
+        if "confidence" in row_assess:
+            return row_assess.get("confidence") is None
+        leaves = [v for v in row_assess.values() if isinstance(v, dict)]
+        if not leaves:
+            return True
+        return any(leaf.get("confidence") is None for leaf in leaves)
+    return True
+
+
+def _missing_row_indices(assessment_list: Any, data_list: Any) -> list[int]:
+    if not isinstance(assessment_list, list) or not isinstance(data_list, list):
+        return []
+    n = min(len(assessment_list), len(data_list))
+    return [i for i in range(n) if _row_confidence_missing(assessment_list[i])]
+
+
 def assess_results_batched(
     assessment_service: Any,
     *,
@@ -143,6 +251,7 @@ def assess_results_batched(
     page_images: list[Any],
     batch_size: int,
     ocr_text_confidence: str = "",
+    max_retries: int = 2,
 ) -> dict[str, Any]:
     """Assess one scope, batching large list fields across multiple inferences.
 
@@ -183,16 +292,43 @@ def assess_results_batched(
             ocr_text_confidence=ocr_text_confidence,
         )
 
+    # All list fields (any size) — used to target missing-row retries even when
+    # no list is large enough to require batching.
+    all_list_fields = {
+        k: v for k, v in extraction_results.items() if isinstance(v, list) and v
+    }
+
     if not list_fields:
         core = _one_call(extraction_results)
+        merged_assessment = reconcile_assessment_to_data(
+            core.enhanced_assessment, extraction_results
+        )
+        merged_alerts = list(core.confidence_threshold_alerts or [])
+        merged_metering = core.metering or {}
+        duration_seconds = core.duration_seconds or 0.0
+        # Retry missing rows for the largest list (small lists can still drop
+        # rows — esp. agentic single-shot cramming values+confidence in one call).
+        if all_list_fields:
+            big = max(all_list_fields, key=lambda k: len(all_list_fields[k]))
+            merged_assessment, merged_alerts, merged_metering, dur = (
+                _retry_missing_rows(
+                    _one_call,
+                    extraction_results=extraction_results,
+                    big_field=big,
+                    merged_assessment=merged_assessment,
+                    merged_alerts=merged_alerts,
+                    merged_metering=merged_metering,
+                    batch_size=batch_size,
+                    max_retries=max_retries,
+                )
+            )
+            duration_seconds += dur
         return {
-            "assessment": reconcile_assessment_to_data(
-                core.enhanced_assessment, extraction_results
-            ),
-            "alerts": core.confidence_threshold_alerts,
-            "metering": core.metering,
+            "assessment": merged_assessment,
+            "alerts": merged_alerts,
+            "metering": merged_metering,
             "parsing_succeeded": core.parsing_succeeded,
-            "duration_seconds": core.duration_seconds,
+            "duration_seconds": duration_seconds,
         }
 
     # Batch by the largest list field; other (smaller) list fields ride the
@@ -233,6 +369,18 @@ def assess_results_batched(
     merged_assessment = reconcile_assessment_to_data(
         merged_assessment, extraction_results
     )
+    merged_assessment, merged_alerts, merged_metering, dur = _retry_missing_rows(
+        _one_call,
+        extraction_results=extraction_results,
+        big_field=big_field,
+        merged_assessment=merged_assessment,
+        merged_alerts=merged_alerts,
+        merged_metering=merged_metering,
+        batch_size=batch_size,
+        max_retries=max_retries,
+    )
+    duration_seconds += dur
+
     return {
         "assessment": merged_assessment,
         "alerts": merged_alerts,
@@ -240,3 +388,66 @@ def assess_results_batched(
         "parsing_succeeded": parsing_succeeded,
         "duration_seconds": duration_seconds,
     }
+
+
+def _retry_missing_rows(
+    one_call,
+    *,
+    extraction_results: dict[str, Any],
+    big_field: str,
+    merged_assessment: dict[str, Any],
+    merged_alerts: list[dict[str, Any]],
+    merged_metering: dict[str, Any],
+    batch_size: int,
+    max_retries: int,
+) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any], float]:
+    """Re-assess ONLY the list rows the model left unscored, splicing real scores
+    back by index so large-list confidence coverage reaches 100% (not just null
+    placeholders). Bounded by ``max_retries`` rounds; sequential (no fan-out); a
+    round that recovers nothing stops early. Best-effort — retry failures keep the
+    placeholder. Returns updated (assessment, alerts, metering, added_duration)."""
+    rows = extraction_results.get(big_field)
+    if not isinstance(rows, list):
+        return merged_assessment, merged_alerts, merged_metering, 0.0
+    added_duration = 0.0
+    for _round in range(max_retries):
+        missing = _missing_row_indices(merged_assessment.get(big_field), rows)
+        if not missing:
+            break
+        logger.info(
+            "assess_results_batched: retrying %d unscored '%s' rows (round %d)",
+            len(missing),
+            big_field,
+            _round + 1,
+        )
+        recovered_any = False
+        for start in range(0, len(missing), batch_size):
+            idx_chunk = missing[start : start + batch_size]
+            retry_results = dict(extraction_results)
+            retry_results[big_field] = [rows[i] for i in idx_chunk]
+            try:
+                core = one_call(retry_results)
+            except Exception as e:  # noqa: BLE001 - retry is best-effort
+                logger.warning("Missing-row retry call failed: %s", e)
+                continue
+            enhanced = reconcile_assessment_to_data(
+                core.enhanced_assessment, retry_results
+            )
+            retry_rows = enhanced.get(big_field)
+            if not isinstance(retry_rows, list):
+                continue
+            merged_metering = utils.merge_metering_data(
+                merged_metering, core.metering or {}
+            )
+            merged_alerts.extend(core.confidence_threshold_alerts or [])
+            added_duration += core.duration_seconds or 0.0
+            for local_i, orig_i in enumerate(idx_chunk):
+                if local_i < len(retry_rows) and not _row_confidence_missing(
+                    retry_rows[local_i]
+                ):
+                    merged_assessment[big_field][orig_i] = retry_rows[local_i]
+                    recovered_any = True
+        if not recovered_any:
+            logger.info("Missing-row retry made no progress; stopping retries.")
+            break
+    return merged_assessment, merged_alerts, merged_metering, added_duration

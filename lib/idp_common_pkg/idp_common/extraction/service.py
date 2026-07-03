@@ -2554,6 +2554,20 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     extracted_fields = {"raw_output": extracted_text}
                     parsing_succeeded = False
 
+            # Non-agentic INTEGRATED confidence: the single extraction inference
+            # was asked to return values AND inline confidence. Split the
+            # {"extraction": ..., "confidence": ...} envelope so inference_result
+            # holds only the values and the confidence rides in metering under the
+            # same marker the agentic path uses (lifted in _save_results). This
+            # both fixes the malformed {extraction,confidence} inference_result and
+            # lets the standalone Assessment step be skipped (no 2nd pass).
+            if self._integrated_assessment_enabled() and isinstance(
+                extracted_fields, dict
+            ):
+                extracted_fields = self._split_inline_confidence(
+                    extracted_fields, metering
+                )
+
         total_duration = time.time() - request_start_time
         logger.info(f"Time taken for extraction: {total_duration:.2f} seconds")
 
@@ -2568,6 +2582,53 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             schema_analysis=schema_analysis,
             ocr_analysis=ocr_analysis,
         )
+
+    def _split_inline_confidence(
+        self, parsed: dict[str, Any], metering: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Split a simple-path integrated response into values + confidence.
+
+        The integrated extraction prompt asks the model to return both the
+        extracted values and a parallel confidence structure. Models express this
+        two ways; handle both:
+
+        1. Envelope: ``{"extraction": {...values...}, "confidence": {...leaves...}}``
+           — the documented shape. Return the values, stash confidence in
+           ``metering["_integrated_field_assessment"]``.
+        2. Flat: just ``{...values...}`` with no separate confidence (the model
+           ignored the confidence instructions). Return as-is and stash nothing;
+           the standalone Assessment step then runs as the fallback (no regression).
+
+        Keys are matched case-insensitively and only when the envelope has EXACTLY
+        the two expected keys, so a real document field literally named
+        ``extraction`` can't trigger a false split.
+        """
+        keys = {k.lower(): k for k in parsed}
+        if set(keys) == {"extraction", "confidence"} and isinstance(
+            parsed.get(keys["extraction"]), dict
+        ):
+            values = parsed[keys["extraction"]]
+            confidence = parsed.get(keys["confidence"])
+            if isinstance(confidence, dict) and confidence:
+                metering["_integrated_field_assessment"] = confidence
+                logger.info(
+                    "Non-agentic integrated confidence: split inline confidence "
+                    "for %d fields from extraction response",
+                    len(confidence),
+                )
+            else:
+                logger.warning(
+                    "Non-agentic integrated mode: response had an 'extraction' "
+                    "envelope but no usable 'confidence'; falling back to the "
+                    "standalone Assessment step."
+                )
+            return values
+        # Flat response (no envelope) — no inline confidence to lift.
+        logger.info(
+            "Non-agentic integrated mode: response was flat (no extraction/"
+            "confidence envelope); standalone Assessment step will run."
+        )
+        return parsed
 
     def _apply_missing_field_handling(
         self,
@@ -2678,6 +2739,28 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             merged_assessment, extracted_fields
         )
 
+        # Robustness: INTEGRATED confidence comes inline from the extraction
+        # inference, which can silently drop some list rows (esp. single-shot,
+        # cramming values+confidence in one call). Those rows are currently
+        # null-confidence placeholders. Re-assess ONLY the missing rows with a
+        # focused standalone confidence call and splice real scores back, so
+        # integrated large-list coverage reaches 100% like the separate path
+        # (which retries inside assess_results_batched). No-op when nothing is
+        # missing. Best-effort: never fails extraction.
+        if self._integrated_assessment_enabled():
+            try:
+                merged_assessment, extra_alerts = self._retry_missing_integrated_rows(
+                    merged_assessment=merged_assessment,
+                    extracted_fields=extracted_fields,
+                    section_info=section_info,
+                )
+                if extra_alerts:
+                    merged_assessment_alerts = list(merged_assessment_alerts) + (
+                        extra_alerts
+                    )
+            except Exception as e:  # noqa: BLE001 - retry is advisory
+                logger.warning("Integrated missing-row retry failed: %s", e)
+
         grounded = merged_assessment
         geometry_mode = self.config.extraction.geometry.mode
         if geometry_mode not in ("llm", "off"):
@@ -2709,6 +2792,90 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         section.confidence_threshold_alerts = merged_assessment_alerts
         output_metadata["assessment_integrated_in_extraction"] = True
         output_metadata["assessment_alert_count"] = len(merged_assessment_alerts)
+
+    def _retry_missing_integrated_rows(
+        self,
+        *,
+        merged_assessment: dict[str, Any],
+        extracted_fields: dict[str, Any],
+        section_info: SectionInfo,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Re-score list rows the integrated extraction inference left unscored.
+
+        Integrated confidence rides inline on the extraction call, which can drop
+        rows on large tables (leaving null-confidence placeholders after reconcile).
+        For each list field with missing rows, run a focused standalone confidence
+        pass (``AssessmentService.assess_results``) over ONLY those rows + the
+        shared section context, then splice the recovered per-row scores back by
+        index. Bounded to 2 rounds; sequential. Returns the updated assessment and
+        any new threshold alerts. Best-effort — a failed retry keeps placeholders.
+        """
+        from idp_common.assessment.batching import (
+            _missing_row_indices,
+            _row_confidence_missing,
+            enrich_assessment_with_thresholds,
+            reconcile_assessment_to_data,
+        )
+        from idp_common.assessment.service import AssessmentService
+
+        # Which list fields still have unscored rows?
+        targets = {
+            f: _missing_row_indices(merged_assessment.get(f), v)
+            for f, v in extracted_fields.items()
+            if isinstance(v, list) and _missing_row_indices(merged_assessment.get(f), v)
+        }
+        if not targets:
+            return merged_assessment, []
+
+        assessment_service = AssessmentService(region=self.region, config=self.config)
+        default_threshold = self.config.hitl.confidence_threshold
+        new_alerts: list[dict[str, Any]] = []
+        batch_size = self.config.extraction.confidence.list_batch_size
+
+        for field, missing in targets.items():
+            rows = extracted_fields[field]
+            for _round in range(2):
+                if not missing:
+                    break
+                logger.info(
+                    "Integrated retry: re-scoring %d unscored '%s' rows (round %d)",
+                    len(missing),
+                    field,
+                    _round + 1,
+                )
+                recovered_any = False
+                for start in range(0, len(missing), batch_size):
+                    idx_chunk = missing[start : start + batch_size]
+                    retry_input = {field: [rows[i] for i in idx_chunk]}
+                    core = assessment_service.assess_results(
+                        class_label=section_info.class_label,
+                        extraction_results=retry_input,
+                        document_text=self._document_text,
+                        page_images=self._page_images,
+                        ocr_text_confidence="",
+                    )
+                    enhanced = reconcile_assessment_to_data(
+                        core.enhanced_assessment, retry_input
+                    )
+                    retry_rows = enhanced.get(field)
+                    if not isinstance(retry_rows, list):
+                        continue
+                    new_alerts.extend(core.confidence_threshold_alerts or [])
+                    for local_i, orig_i in enumerate(idx_chunk):
+                        if local_i < len(retry_rows) and not _row_confidence_missing(
+                            retry_rows[local_i]
+                        ):
+                            merged_assessment[field][orig_i] = retry_rows[local_i]
+                            recovered_any = True
+                missing = _missing_row_indices(merged_assessment.get(field), rows)
+                if not recovered_any:
+                    break
+
+        # Re-enrich so any spliced-in rows carry confidence_threshold like the rest.
+        merged_assessment, _ = enrich_assessment_with_thresholds(
+            merged_assessment, self._class_schema, default_threshold
+        )
+        return merged_assessment, new_alerts
 
     def _save_results(
         self,
@@ -2755,6 +2922,25 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             merged_assessment_alerts = result.metering.pop(
                 "_merged_assessment_alerts", None
             )
+        elif result.metering and self._integrated_assessment_enabled():
+            # Non-agentic INTEGRATED confidence: the extraction inference emitted
+            # confidence inline (split into this marker by _split_inline_confidence).
+            # Enrich the raw confidence leaves with per-field thresholds + alerts
+            # (same contract the standalone/separate path produces) and route it
+            # through the shared ground+emit path so explainability_info is written
+            # and the standalone Assessment step is skipped.
+            inline = result.metering.pop("_integrated_field_assessment", None)
+            if isinstance(inline, dict) and inline:
+                from idp_common.assessment.batching import (
+                    enrich_assessment_with_thresholds,
+                )
+
+                default_threshold = self.config.hitl.confidence_threshold
+                merged_assessment, merged_assessment_alerts = (
+                    enrich_assessment_with_thresholds(
+                        inline, self._class_schema, default_threshold
+                    )
+                )
 
         # Build base metadata
         metadata: dict[str, Any] = {

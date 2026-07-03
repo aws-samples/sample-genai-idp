@@ -832,16 +832,32 @@ hitl:
     Assessment step produces.
   - *Non-agentic*: unchanged — the pipeline flows to the standalone Assessment
     step exactly as before.
-- **`integrated`**: the extraction agent produces confidence **within its own
-  extraction turn** — the document is already in the agent's (cached) context, so
-  there is no separate assessment request and no re-sent document. The inline
-  result rides the **same** collation → post-merge reconcile → OCR grounding →
-  `explainability_info` path as `separate`, so the output contract is identical;
-  only the source of the confidence differs. The `extraction.confidence`
-  model/prompt settings are unused, and the standalone step is bypassed. Best for
-  cost/latency once you've confirmed your model produces well-calibrated inline
-  confidence; otherwise prefer `separate` (a dedicated assessment inference per
-  shard).
+- **`integrated`**: confidence is produced **within the extraction inference
+  itself** — the document is already in context, so there is no separate
+  assessment request and no re-sent document. The inline result rides the **same**
+  collation → post-merge reconcile → OCR grounding → `explainability_info` path as
+  `separate`, so the output contract is identical; only the source of the
+  confidence differs. The `extraction.confidence` model/prompt settings are unused,
+  and the standalone Assessment step is bypassed (auto-skips once
+  `explainability_info` is present).
+  - *Agentic*: the agent emits confidence via a tool call (see the strategy knob
+    below).
+  - *Non-agentic (simple)*: the single extraction inference is prompted to return
+    values **and** a parallel confidence structure as
+    `{"extraction": {...}, "confidence": {...}}`; the service splits that envelope
+    (values → `inference_result`, confidence → the same in-extraction marker),
+    enriches it with per-field `confidence_threshold` + alerts, reconciles, grounds,
+    and emits `explainability_info`. If the model returns a flat response with no
+    confidence envelope, the path **falls back to the standalone Assessment step**
+    (no data loss). Best for **smaller documents** where one inference comfortably
+    holds the whole doc; for large docs prefer agentic (sharded) or `separate`.
+  - **Missing-row robustness (both paths):** because integrated confidence rides on
+    the extraction call, a model can under-score a large table. After reconcile,
+    any list rows left unscored are **retried in focused, bounded re-assessment
+    calls** (only the missing rows) and spliced back — so large-list confidence
+    coverage reaches 100% rather than leaving null placeholders. Best for
+    cost/latency once you've confirmed your model produces well-calibrated inline
+    confidence; otherwise prefer `separate` (a dedicated assessment inference).
 
   <a id="integrated-confidence-strategy"></a>
   **Hidden setting — `extraction.agentic.integrated_confidence_strategy` (experimental).**
