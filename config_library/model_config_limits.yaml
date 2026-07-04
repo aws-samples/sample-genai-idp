@@ -35,6 +35,18 @@ model_limits:
     reference: "https://docs.anthropic.com/claude/docs/models-overview#model-comparison"
 
   # ---------------------------------------------------------------------------
+  # Anthropic Claude Sonnet 5 (extended output, 128K)
+  # ---------------------------------------------------------------------------
+  # Sonnet 5 supports 128K max output (1M context). It does NOT match the
+  # "claude-(opus|sonnet|haiku)-4" catch-all below (that is 4.x only), so it needs
+  # its own entry to avoid falling through to the generic default. Covers the :1m
+  # extended-context variant too.
+  - pattern: "claude-sonnet-5"
+    max_output_tokens: 128000
+    description: "Claude Sonnet 5 with 128K max output tokens (all variants including :1m)"
+    reference: "https://docs.anthropic.com/claude/docs/models-overview#model-comparison"
+
+  # ---------------------------------------------------------------------------
   # Anthropic Claude Sonnet 4.6 / Opus 4.6 (extended output, 128K)
   # ---------------------------------------------------------------------------
   # These 4.x models support 128K max output (same as Opus 4.7/4.8), NOT 64K.

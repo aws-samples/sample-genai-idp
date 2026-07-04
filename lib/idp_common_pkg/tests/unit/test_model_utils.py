@@ -212,6 +212,16 @@ class TestGetModelMaxOutputTokens:
         # With :1m suffix
         assert get_model_max_output_tokens("us.anthropic.claude-opus-4-8:1m") == 128_000
 
+    def test_sonnet_5_returns_128k(self):
+        """Claude Sonnet 5 returns 128,000 max tokens (1M context), incl. :1m.
+        Sonnet 5 does NOT match the claude-(opus|sonnet|haiku)-4 catch-all, so it
+        needs its own model_config_limits entry."""
+        assert get_model_max_output_tokens("us.anthropic.claude-sonnet-5") == 128_000
+        assert get_model_max_output_tokens("us.anthropic.claude-sonnet-5:1m") == 128_000
+        assert (
+            get_model_max_output_tokens("global.anthropic.claude-sonnet-5") == 128_000
+        )
+
     def test_older_opus_versions_return_64k(self):
         """Claude Opus 4.5 returns 64,000 max tokens. (Opus 4.6 is 128K — see
         test_claude46_models_return_128k.)"""

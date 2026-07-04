@@ -37,6 +37,8 @@ are migrated automatically on read — no manual edit is required.** See the
 
 ### Added
 
+- **Claude Sonnet 5 is selectable everywhere** (`us`/`eu`/`global.anthropic.claude-sonnet-5`, plus the `:1m` extended-context variants). Registered in the model picklists, pricing (`pricing.yaml`), output-token limits (128K), prompt-cache support, and Bedrock TPM quota codes. Sonnet 5 rejects non-default `temperature`/`top_p`/`top_k`, so IDP strips those sampling params automatically (as it already does for Opus 4.7+). **Request Anthropic Claude Sonnet 5 access in Bedrock before selecting it.**
+
 - **Integrated confidence works on both the Advanced (agentic) and Simple (non-agentic) paths.** `confidence.mode: integrated` produces each value's confidence in the extraction inference itself — no separate assessment pass. On the simple path the single inference returns values + inline confidence; the service splits them, enriches with per-field thresholds + alerts, reconciles to full per-cell coverage, grounds geometry, and emits `explainability_info` (the standalone Assessment step auto-skips). A hidden experimental `extraction.agentic.integrated_confidence_strategy` (`two_step` default | `single_shot`) lets operators A/B the agentic-path inference mechanics.
 
 - **`idp-cli deploy --tags "key=value,..."`** — applies CloudFormation stack-level tags at deploy time, propagated to the stack and all nested stacks/resources for governance and cost allocation. See [Resource tagging](docs/idp-cli.md#resource-tagging).

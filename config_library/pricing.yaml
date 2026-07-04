@@ -208,6 +208,9 @@ pricing:
   
   - name: bedrock/us.anthropic.claude-sonnet-4-6
     units:
+
+  - name: bedrock/us.anthropic.claude-sonnet-5
+    units:
       - name: inputTokens
         price: "3.3E-6"
       - name: outputTokens
@@ -218,6 +221,9 @@ pricing:
         price: "4.125E-6"
 
   - name: bedrock/us.anthropic.claude-sonnet-4-6:1m
+    units:
+
+  - name: bedrock/us.anthropic.claude-sonnet-5:1m
     units:
       - name: inputTokens
         price: "6.6E-6"
@@ -459,6 +465,9 @@ pricing:
   
   - name: bedrock/eu.anthropic.claude-sonnet-4-6
     units:
+
+  - name: bedrock/eu.anthropic.claude-sonnet-5
+    units:
       - name: inputTokens
         price: "3.3E-6"
       - name: outputTokens
@@ -469,6 +478,9 @@ pricing:
         price: "4.125E-6"
 
   - name: bedrock/eu.anthropic.claude-sonnet-4-6:1m
+    units:
+
+  - name: bedrock/eu.anthropic.claude-sonnet-5:1m
     units:
       - name: inputTokens
         price: "6.6E-6"
@@ -616,6 +628,9 @@ pricing:
   
   - name: bedrock/global.anthropic.claude-sonnet-4-6
     units:
+
+  - name: bedrock/global.anthropic.claude-sonnet-5
+    units:
       - name: inputTokens
         price: "3.0E-6"
       - name: outputTokens
@@ -626,6 +641,9 @@ pricing:
         price: "3.75E-6"
 
   - name: bedrock/global.anthropic.claude-sonnet-4-6:1m
+    units:
+
+  - name: bedrock/global.anthropic.claude-sonnet-5:1m
     units:
       - name: inputTokens
         price: "6.0E-6"
