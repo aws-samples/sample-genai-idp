@@ -270,7 +270,9 @@ In addition to the Memory Bank, I have access to **domain-specific skill files**
 | `.cline/skills/extraction.md` | Document processing pipeline, configuration, agentic extraction |
 | `.cline/skills/review.md` | Pre-commit code review checklist (supplements the QA Review above) |
 | `.cline/skills/pr-review.md` | Reviewing an external GitHub PR or GitLab MR at a URL (e.g. `review <url>`) |
+| `.cline/skills/hf-pr.md` | Contributing a data/label correction to an external HuggingFace dataset via a community PR |
 | `.cline/skills/testing.md` | Writing tests, pytest patterns, moto, conftest setup |
+| `.cline/skills/live-eval.md` | Live benchmark A/B, upgrade testing, reading accuracy/cost/confidence + prompt-cache/model cost facts |
 | `.cline/skills/docs.md` | Documentation standards, frontmatter, CHANGELOG, docs-site |
 
 ### How to Use Skills
