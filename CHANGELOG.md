@@ -51,6 +51,8 @@ are migrated automatically on read — no manual edit is required.** See the
 
 - **Model output-token limits corrected for Claude Sonnet 4.6 / Opus 4.6 (128K, not 64K).** A generic pattern in `model_config_limits.yaml` mis-capped these models at 64,000 output tokens, causing config validation to reject valid `max_tokens` up to their true 128,000 limit. Only Haiku 4.5 and Sonnet/Opus 4.0–4.5 cap at 64K.
 
+- **Claude Sonnet 4.6 pricing was missing (empty `units`).** The `bedrock/*.anthropic.claude-sonnet-4-6` entries (all regions, base + `:1m`) in `pricing.yaml` had no unit prices, so cost reports showed $0 for the **default extraction model** and — more critically — config validation rejected the pricing block (`units: Input should be a valid list`), which could deadlock a stack update/rollback via the `UpdateDefaultConfig` custom resource. Populated with the correct Sonnet-tier rates.
+
 - **Advanced (agentic) extraction cost is reported correctly.** The Assessment step's "intelligent skip" discarded the Extraction step's Bedrock/lambda metering, making advanced modes look nearly free in cost reports; the incoming metering is now preserved.
 
 - **Extraction prompts respect per-field date/number formats from the Document Schema** (previously a hardcoded MM/DD/YYYY instruction overrode per-field formats), and **every list/nested-list cell gets its own confidence + bounding box** (previously a single score could apply to a whole row).
