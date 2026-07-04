@@ -81,6 +81,11 @@ DEFAULT_MAX_BACKOFF = 300  # 5 minutes
 _CLAUDE_4_7_BASE_NAMES = {
     "anthropic.claude-opus-4-7",
     "anthropic.claude-opus-4-8",
+    # Claude Sonnet 5 shares the Opus-4.7+ request surface: it REJECTS non-default
+    # temperature/top_p/top_k (400). IDP's default decoding config sets top_k=5 /
+    # top_p=0.0, so Sonnet 5 must be treated like the sampling-param-stripped models
+    # (this is a deliberate deviation from Sonnet 4.6, which still accepts them).
+    "anthropic.claude-sonnet-5",
 }
 
 
@@ -138,6 +143,8 @@ CACHEPOINT_SUPPORTED_MODELS = [
     "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
     "us.anthropic.claude-sonnet-4-6",
     "us.anthropic.claude-sonnet-4-6:1m",
+    "us.anthropic.claude-sonnet-5",
+    "us.anthropic.claude-sonnet-5:1m",
     "us.anthropic.claude-haiku-4-5-20251001-v1:0",
     "us.amazon.nova-lite-v1:0",
     "us.amazon.nova-pro-v1:0",
@@ -148,6 +155,8 @@ CACHEPOINT_SUPPORTED_MODELS = [
     "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
     "eu.anthropic.claude-sonnet-4-6",
     "eu.anthropic.claude-sonnet-4-6:1m",
+    "eu.anthropic.claude-sonnet-5",
+    "eu.anthropic.claude-sonnet-5:1m",
     "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
     "eu.anthropic.claude-opus-4-5-20251101-v1:0",
     "eu.anthropic.claude-opus-4-6-v1",
@@ -168,6 +177,8 @@ CACHEPOINT_SUPPORTED_MODELS = [
     "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
     "global.anthropic.claude-sonnet-4-6",
     "global.anthropic.claude-sonnet-4-6:1m",
+    "global.anthropic.claude-sonnet-5",
+    "global.anthropic.claude-sonnet-5:1m",
     "global.anthropic.claude-opus-4-5-20251101-v1:0",
     "global.anthropic.claude-opus-4-6-v1",
     "global.anthropic.claude-opus-4-6-v1:1m",
