@@ -18,7 +18,18 @@
 extraction:
   confidence:
     mode: separate               # off | separate | integrated (enabled derived: mode != off)
-    model: us.anthropic.claude-sonnet-5
+    # Nova Lite is the default confidence model because the assessment pass is
+    # far cheaper on it. Live A/B on the OCR benchmark (identical prompt, only the
+    # confidence model swapped): ~$0.0011/doc on Nova Lite vs ~$0.145/doc on
+    # Sonnet 5 (~130x) — driven by Sonnet's higher per-token rate AND ~2x more
+    # (verbose) output tokens, which dominate assessment cost. Both models use the
+    # two <<CACHEPOINT>> boundaries below for prompt-prefix caching (static
+    # instructions cached across documents; the per-doc image+OCR block cached
+    # across the initial call, the missing-row retry, and every list batch), so
+    # caching is NOT the differentiator here — the model choice is. Note: Anthropic
+    # models decline to cache a prefix under ~2048 tokens, so on a short/text-only
+    # confidence prompt they may not cache at all; Nova caches at a lower floor.
+    model: us.amazon.nova-lite-v1:0
     top_p: "0.0"
     top_k: "5"
     temperature: "0.0"
