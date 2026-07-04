@@ -18,7 +18,7 @@
 extraction:
   confidence:
     mode: separate               # off | separate | integrated (enabled derived: mode != off)
-    model: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    model: us.anthropic.claude-sonnet-5
     top_p: "0.0"
     top_k: "5"
     temperature: "0.0"

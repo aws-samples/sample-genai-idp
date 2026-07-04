@@ -27,8 +27,8 @@ extraction:
   image:
     target_width: ""
     target_height: ""
-  # Claude Sonnet 4 for best agentic performance (was: Nova Lite)
-  model: us.anthropic.claude-sonnet-4-6
+  # Claude Sonnet 5 for best extraction quality (was: Sonnet 4.6, Nova Lite)
+  model: us.anthropic.claude-sonnet-5
   temperature: "0.0"
   top_p: "0.0"
   max_tokens: "64000"                       # safe default; Sonnet/Opus 4.6+ support up to 128000
