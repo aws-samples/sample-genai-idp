@@ -156,7 +156,8 @@ class TestConfigModelsIntegration:
         assert isinstance(config.extraction.temperature, float)
         assert isinstance(config.extraction.top_p, float)
         assert isinstance(config.extraction.top_k, float)
-        assert isinstance(config.extraction.max_tokens, int)
+        # max_tokens is no longer an extraction field (output = model maximum)
+        assert not hasattr(config.extraction, "max_tokens")
 
         # Validate ranges
         assert 0.0 <= config.extraction.temperature <= 1.0
@@ -218,7 +219,7 @@ class TestConfigModelsIntegration:
 
         # Check defaults are applied
         assert config.extraction.temperature == 0.0
-        assert config.extraction.max_tokens == 10000
+        assert not hasattr(config.extraction, "max_tokens")
         assert config.extraction.agentic.enabled is False
         # v0.6: assessment.enabled migrated to extraction.confidence.enabled
         assert config.extraction.confidence.enabled is True

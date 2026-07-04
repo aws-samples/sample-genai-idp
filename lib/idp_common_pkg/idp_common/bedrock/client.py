@@ -26,7 +26,11 @@ from botocore.exceptions import (
 )
 from urllib3.exceptions import ReadTimeoutError as Urllib3ReadTimeoutError
 
-from .model_utils import parse_model_id
+from .model_utils import (
+    get_model_max_output_tokens,
+    parse_max_tokens_limit_from_error,
+    parse_model_id,
+)
 from .openai_responses import invoke_responses_api, is_openai_responses_model
 from .session import get_bedrock_session
 
@@ -254,9 +258,7 @@ class BedrockClient:
         # Lambda invocations stay in the calling account, so this client
         # uses default credentials regardless of BEDROCK_ASSUME_ROLE_ARN.
         if self._lambda_client is None:
-            self._lambda_client = boto3.client(
-                "lambda", region_name=self.region
-            )
+            self._lambda_client = boto3.client("lambda", region_name=self.region)
         return self._lambda_client
 
     @property
@@ -272,9 +274,7 @@ class BedrockClient:
     def s3_client(self):
         """Lazy-loaded S3 client for LambdaHook image uploads."""
         if self._s3_client is None:
-            self._s3_client = boto3.client(
-                "s3", region_name=self.region
-            )
+            self._s3_client = boto3.client("s3", region_name=self.region)
         return self._s3_client
 
     def _is_model_cachepoint_supported(self, model_id: str) -> bool:
@@ -480,7 +480,9 @@ class BedrockClient:
                 content_type = (
                     "text"
                     if "text" in item
-                    else "image" if "image" in item else "other"
+                    else "image"
+                    if "image" in item
+                    else "other"
                 )
                 logger.debug(
                     f"No cachepoint tags in {content_type} content, passing through unchanged"
@@ -665,7 +667,9 @@ class BedrockClient:
                     inference_config["topP"] = top_p
                     # Remove temperature when using top_p to avoid conflicts
                     del inference_config["temperature"]
-                    logger.debug(f"Using top_p={top_p} for inference (temperature ignored)")
+                    logger.debug(
+                        f"Using top_p={top_p} for inference (temperature ignored)"
+                    )
                 else:
                     logger.debug(
                         f"Using temperature={temperature} for inference (top_p is 0 or None)"
@@ -683,9 +687,29 @@ class BedrockClient:
                     )
                     max_tokens = None
 
-            # Add to inferenceConfig as maxTokens for Nova models
-            if max_tokens is not None and "amazon" in model_id.lower():
-                inference_config["maxTokens"] = max_tokens
+        # Always request the model's maximum output when no explicit value is
+        # given. Bedrock's default-when-omitted is a small truncating value
+        # (measured 4096 for Claude, 2000 for Nova) — there is no "use model max"
+        # sentinel in the Converse API, so we set it explicitly from the single
+        # source of truth (model_config_limits.yaml). Completeness matters more
+        # than an output cap for this accelerator's extraction/confidence passes.
+        if max_tokens is None:
+            try:
+                max_tokens = get_model_max_output_tokens(model_id)
+            except (ValueError, FileNotFoundError):
+                # Unknown model, or limits file unavailable in this runtime: leave
+                # max_tokens unset. If Bedrock truncates or rejects, the over-limit
+                # retry below recovers the real cap.
+                logger.warning(
+                    "Could not resolve maxTokens for %s (missing entry or "
+                    "model_config_limits.yaml unavailable); Bedrock default "
+                    "applies.",
+                    model_id,
+                )
+
+        # Add to inferenceConfig as maxTokens for Nova models
+        if max_tokens is not None and "amazon" in model_id.lower():
+            inference_config["maxTokens"] = max_tokens
 
         # Add additional model fields if needed
         additional_model_fields = {}
@@ -801,6 +825,31 @@ class BedrockClient:
         )
 
         return result
+
+    @staticmethod
+    def _apply_max_tokens_limit(converse_params: Dict[str, Any], limit: int) -> bool:
+        """Clamp the request's maxTokens to `limit` in place, if it exceeds it.
+
+        Handles both carriers: Nova's ``inferenceConfig.maxTokens`` and Claude's
+        ``additionalModelRequestFields.max_tokens``. Returns True if a value was
+        actually lowered (so a retry is warranted), False otherwise — the False
+        case prevents an infinite retry when no maxTokens was set or it's already
+        at/below the limit.
+        """
+        changed = False
+        inference_config = converse_params.get("inferenceConfig")
+        if isinstance(inference_config, dict):
+            current = inference_config.get("maxTokens")
+            if isinstance(current, int) and current > limit:
+                inference_config["maxTokens"] = limit
+                changed = True
+        amrf = converse_params.get("additionalModelRequestFields")
+        if isinstance(amrf, dict):
+            current = amrf.get("max_tokens")
+            if isinstance(current, int) and current > limit:
+                amrf["max_tokens"] = limit
+                changed = True
+        return changed
 
     def _invoke_with_retry(
         self,
@@ -972,6 +1021,36 @@ class BedrockClient:
                     context=context,
                 )
             else:
+                # Self-heal an over-limit maxTokens request. There is no AWS API
+                # for the per-model output cap, so when model_config_limits.yaml
+                # is stale/missing for a model we requested too many tokens for,
+                # Bedrock's ValidationException states the true limit — parse it,
+                # clamp, and retry once. This keeps a newly-added model working
+                # before its YAML entry is corrected.
+                discovered_limit = (
+                    parse_max_tokens_limit_from_error(error_message)
+                    if error_code == "ValidationException"
+                    else None
+                )
+                if discovered_limit is not None and self._apply_max_tokens_limit(
+                    converse_params, discovered_limit
+                ):
+                    logger.warning(
+                        "maxTokens exceeded model limit for %s; Bedrock reports "
+                        "%d. Clamping and retrying. Update model_config_limits.yaml.",
+                        model_id,
+                        discovered_limit,
+                    )
+                    return self._invoke_with_retry(
+                        model_id=model_id,
+                        converse_params=converse_params,
+                        retry_count=retry_count,
+                        max_retries=max_retries,
+                        request_start_time=request_start_time,
+                        last_exception=e,
+                        context=context,
+                    )
+
                 logger.error(
                     f"Non-retryable Bedrock error: {error_code} - {error_message}"
                 )
@@ -1165,7 +1244,9 @@ class BedrockClient:
                 logger.warning(f"Failed to generate embedding for item {index}: {e}")
                 return (index, None)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent) as executor:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=max_concurrent
+        ) as executor:
             futures = {
                 executor.submit(_embed_single, i, item): i
                 for i, item in enumerate(items)
@@ -1607,7 +1688,9 @@ class BedrockClient:
         }
 
         # Invoke Lambda with retry logic
-        effective_max_retries = max_retries if max_retries is not None else self.max_retries
+        effective_max_retries = (
+            max_retries if max_retries is not None else self.max_retries
+        )
         request_start_time = time.time()
 
         return self._invoke_lambda_hook_with_retry(
@@ -1676,7 +1759,9 @@ class BedrockClient:
                 try:
                     img_bytes = base64.b64decode(img_bytes)
                 except Exception:
-                    logger.warning("Failed to decode base64 image data, passing through")
+                    logger.warning(
+                        "Failed to decode base64 image data, passing through"
+                    )
                     converted_content.append(item)
                     continue
 
@@ -1689,7 +1774,9 @@ class BedrockClient:
                     "gif": "image/gif",
                     "webp": "image/webp",
                 }
-                content_type = content_type_map.get(img_format, "application/octet-stream")
+                content_type = content_type_map.get(
+                    img_format, "application/octet-stream"
+                )
 
                 self.s3_client.put_object(
                     Bucket=working_bucket,
@@ -1708,14 +1795,16 @@ class BedrockClient:
                 if account_id and len(account_id) == 12:
                     s3_location["bucketOwner"] = account_id
 
-                converted_content.append({
-                    "image": {
-                        "format": img_format,
-                        "source": {
-                            "s3Location": s3_location,
-                        },
+                converted_content.append(
+                    {
+                        "image": {
+                            "format": img_format,
+                            "source": {
+                                "s3Location": s3_location,
+                            },
+                        }
                     }
-                })
+                )
 
                 logger.debug(f"Uploaded image to S3: {s3_uri} ({len(img_bytes)} bytes)")
 
@@ -1808,9 +1897,7 @@ class BedrockClient:
                     )
 
                 self._put_metric("LambdaHookRequestsFailed", 1)
-                raise RuntimeError(
-                    f"LambdaHook function error: {error_message}"
-                )
+                raise RuntimeError(f"LambdaHook function error: {error_message}")
 
             # Parse response payload
             response_payload = json.loads(response["Payload"].read().decode("utf-8"))
@@ -1832,10 +1919,14 @@ class BedrockClient:
 
             # Track metrics
             self._put_metric("LambdaHookRequestsSucceeded", 1)
-            self._put_metric("LambdaHookRequestLatency", duration * 1000, "Milliseconds")
+            self._put_metric(
+                "LambdaHookRequestLatency", duration * 1000, "Milliseconds"
+            )
 
             total_duration = time.time() - request_start_time
-            self._put_metric("LambdaHookTotalLatency", total_duration * 1000, "Milliseconds")
+            self._put_metric(
+                "LambdaHookTotalLatency", total_duration * 1000, "Milliseconds"
+            )
 
             # Build response in the same format as Bedrock responses
             response_with_metering = {
@@ -1878,9 +1969,7 @@ class BedrockClient:
                     context=context,
                 )
             else:
-                logger.error(
-                    f"LambdaHook error: {error_code} - {error_message}"
-                )
+                logger.error(f"LambdaHook error: {error_code} - {error_message}")
                 self._put_metric("LambdaHookRequestsFailed", 1)
                 raise
 
