@@ -106,8 +106,11 @@ extraction:
     temperature: 0
     top_k: 5
     top_p: 0.1
-    max_tokens: 4096
+    reasoning_effort: low               # only if a reasoning-capable model is selected
     list_batch_size: 25                 # rows per assessment batch for large lists
+    # NOTE: no max_tokens knob — the confidence pass always requests the model's
+    # maximum output (resolved from config_library/model_config_limits.yaml) so
+    # long list assessments are never truncated.
     system_prompt: "You are an expert document analyst..."
     task_prompt: |
       Assess the confidence of extraction results for this {DOCUMENT_CLASS} document.
@@ -780,7 +783,8 @@ def lambda_handler(event, context):
 
 ### Configuration
 - Set appropriate temperature (0 for deterministic assessment)
-- Configure max_tokens based on expected response length
+- Output tokens are not configurable — the confidence pass always requests the
+  model maximum (so long list assessments aren't truncated)
 - Use system prompts to establish assessment criteria
 
 ### Performance

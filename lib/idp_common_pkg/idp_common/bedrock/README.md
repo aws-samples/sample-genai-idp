@@ -354,6 +354,17 @@ Different Bedrock models implement these parameters with varying defaults, namin
   - Default values: temperature=1.0, top_p=0.999, top_k=250 (wide open)
   - Parameters use snake_case: `temperature`, `top_p`, `top_k`
   - Implementation: `top_k` is placed in `additionalModelRequestFields`
+  - **Reasoning effort** (Sonnet 5, Sonnet 4.6, Opus 4.5–4.8, Fable 5 — see
+    `is_claude_effort_model()`): `reasoning_effort` (`low`/`medium`/`high`/
+    `xhigh`/`max`) maps to `additionalModelRequestFields.output_config.effort`.
+    Ignored for Sonnet 4.5 / Haiku 4.5 (they 400 on it). `budget_tokens` is
+    rejected — use effort. Verified live: effort changes output-token spend.
+  - **max_tokens**: extraction/confidence pass `max_tokens=None`, so the client
+    resolves the model maximum from `get_model_max_output_tokens()`
+    (`config_library/model_config_limits.yaml`, bundled in-package). Omitting
+    `maxTokens` would let Bedrock apply a small truncating default. If a request
+    still exceeds the model cap, the client parses the true limit from the
+    `ValidationException` and retries once.
 
 - **Nova models**:
   - Default values: temperature=0.7, topP=0.9, topK≈50 (moderately constrained)

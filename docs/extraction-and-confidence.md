@@ -49,8 +49,23 @@ extraction:
     enabled: false            # Simple mode (default)
   model: anthropic.claude-3-haiku-20240307-v1:0
   temperature: 0.0
-  max_tokens: 4096
+  reasoning_effort: low       # reasoning-capable models only (see note below)
 ```
+
+> **Output tokens:** extraction and the confidence pass always request the
+> selected model's **maximum** output — there is no `max_tokens` config knob for
+> them. Bedrock's default-when-omitted truncates, so the client sets it
+> explicitly from `config_library/model_config_limits.yaml`; completeness matters
+> more than an output cap here. (`classification` / `summarization` keep their
+> `max_tokens` knob.)
+>
+> **Reasoning effort:** for reasoning-capable models — Claude Sonnet 5 / Sonnet
+> 4.6 / Opus 4.5–4.8 / Fable 5 (`low`|`medium`|`high`|`xhigh`|`max`) and OpenAI
+> GPT-5.x (`minimal`|`low`|`medium`|`high`) — `reasoning_effort` controls how much
+> the model reasons before answering. Extraction **defaults to `low`**: a full
+> effort sweep found higher effort adds output-token cost with negligible
+> extraction-accuracy gain. Raise it per-config for reasoning-heavy documents.
+> Ignored by Nova, Sonnet 4.5, and Haiku 4.5.
 
 ### Advanced (agentic) extraction
 
@@ -333,7 +348,7 @@ extraction:
   temperature: 0.0           # Keep low for consistency
   top_p: 0.1
   top_k: 5
-  max_tokens: 4096
+  reasoning_effort: low      # reasoning-capable models only; output is always model-max
 
   system_prompt: |
     You are an expert in extracting structured information from documents.
@@ -435,11 +450,11 @@ extraction:
   confidence:
     enabled: true             # false disables confidence entirely (zero LLM cost)
     mode: separate            # off | separate (default) | integrated
-    model: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    model: us.amazon.nova-lite-v1:0   # default; far cheaper for the confidence pass
     temperature: 0.0
     top_k: 5
     top_p: 0.1
-    max_tokens: 4096
+    reasoning_effort: low     # only used if a reasoning-capable model is selected here
     list_batch_size: 25       # rows per assessment batch for large lists
     system_prompt: |
       You are an expert document analyst specializing in assessing the confidence
