@@ -681,159 +681,103 @@ classes:
         description: The final amount to be paid including all charges. Look for 'total', 'grand total', or 'amount due', typically the last figure on the invoice.
 ```
 
-## Assessment Feature
+## Confidence (Assessment)
 
-Pattern 2 includes an optional assessment feature that evaluates the confidence of extraction results using LLMs. This feature provides automated quality assurance by analyzing extraction outputs against source documents.
+As of **config v0.6**, per-field **confidence** and **geometry** are **outputs of
+extraction**, not a separate downstream stage. Their settings live under
+`extraction.confidence.*` and `extraction.geometry.*` (there is no top-level
+`assessment.{model, geometry_mode, ...}` block anymore). This section is a Pattern
+2 (Pipeline mode) summary; the full reference is
+[Extraction & Confidence](./extraction-and-confidence.md).
 
 ### Overview
 
-The assessment feature runs after successful extraction and provides:
+Confidence assessment produces, for each extracted attribute:
 - **Confidence Scores**: Per-attribute confidence ratings (0.0-1.0)
 - **Explanatory Reasoning**: Human-readable explanations for each confidence score
 - **UI Integration**: Automatic display in the web interface visual editor
-- **Cost Optimization**: Optional deployment and efficient token usage
-- **Granular Assessment**: Advanced scalable approach for complex documents with many attributes
+- **Cost Optimization**: Can be disabled entirely for zero LLM cost
+- **Large-list batching**: Long list fields (hundreds of rows) are scored in sequential batches so every row is covered
 
-> **In-shard / integrated assessment.** With agentic extraction, assessment can
-> run **inside the extraction shards** instead of as a separate step, controlled by
-> `extraction.assessment_integration` (`separate` default, or `integrated`). The
-> output (`explainability_info`) is identical either way, and the standalone
-> Assessment step auto-skips when extraction already produced it. See
-> [Running Assessment Inside Extraction](assessment.md#running-assessment-inside-extraction-in-shard--integrated)
-> for the full matrix and rationale.
+### Confidence modes
 
-### Enabling Assessment
+`extraction.confidence.mode` controls *where* per-field confidence is produced:
 
-Assessment can now be controlled via the configuration file rather than CloudFormation stack parameters. This provides more flexibility and eliminates the need for stack redeployment when changing assessment behavior.
+- **`separate`** *(default)* — on the Simple (non-agentic) path, confidence runs
+  as the standalone Assessment step; on the Advanced (agentic) path, it runs as a
+  second inference inside each extraction shard and the standalone step auto-skips.
+- **`integrated`** — a single extraction inference returns values **and** inline
+  confidence together (works on **both** the simple and agentic paths); the
+  service splits the envelope, enriches with thresholds, and emits
+  `explainability_info`, so the standalone Assessment step auto-skips.
+- **`off`** — no confidence scoring (equivalent to `enabled: false`); zero LLM cost.
 
-**Configuration-based Control (Recommended):**
 ```yaml
-assessment:
-  enabled: true  # Set to false to disable assessment
-  model: us.amazon.nova-lite-v1:0
-  temperature: 0.0
-  # ... other assessment settings
+extraction:
+  confidence:
+    enabled: true             # false disables confidence entirely (zero LLM cost)
+    mode: separate            # off | separate (default) | integrated
+    model: us.amazon.nova-lite-v1:0
+    temperature: 0.0
+    list_batch_size: 25       # rows per assessment batch for large lists
+    system_prompt: "You are an expert document analyst..."
+    task_prompt: |
+      Assess the confidence of extraction results for this {DOCUMENT_CLASS} document.
+      Extraction Results: {EXTRACTION_RESULTS}
+      Attributes: {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+      Document Text: {DOCUMENT_TEXT}
+      OCR Confidence: {OCR_TEXT_CONFIDENCE}
+      {DOCUMENT_IMAGE}
 ```
 
-**Key Benefits:**
-- **Runtime Control**: Enable/disable without stack redeployment
-- **Cost Optimization**: Zero LLM costs when disabled (`enabled: false`)
-- **Simplified Architecture**: No conditional logic in state machines
-- **Backward Compatible**: Defaults to `enabled: true` when property is missing
+**Behavior when disabled** (`enabled: false` or `mode: off`): the assessment
+Lambda is still invoked (minimal overhead) but returns immediately with logging
+"Assessment is disabled via configuration" — no LLM calls, no S3 operations.
+Defaults to enabled when the property is missing.
 
-**Behavior When Disabled:**
-- Assessment lambda is still called (minimal overhead)
-- Service immediately returns with logging: "Assessment is disabled via configuration"
-- No LLM API calls or S3 operations are performed
-- Document processing continues to completion
+> **Migration note:** The previous `IsAssessmentEnabled` CloudFormation parameter
+> has been removed in favor of this configuration-based control.
 
-**Migration Note**: The previous `IsAssessmentEnabled` CloudFormation parameter has been removed in favor of this configuration-based approach.
+### Large lists (`list_batch_size`)
 
-The assessment step is always called in the state machine workflow, but the service itself handles the enablement decision:
+For documents with large lists (bank statements with hundreds of transactions,
+line-item tables, brokerage holdings), the standalone Assessment step **batches
+large lists automatically**: it slices the largest list field into
+`extraction.confidence.list_batch_size` chunks (default **25**), assesses each
+chunk sequentially with the shared scalars/context, then reconciles the results
+so **every** list cell gets its own confidence and bounding box. A bounded
+missing-row retry re-scores any rows the model dropped, so coverage reaches 100%.
+Lower `list_batch_size` if a model still struggles to enumerate a full chunk;
+raise it to reduce the number of inference calls.
 
-```
-OCRStep → ClassificationStep → ProcessPageGroups (Map State):
-  ExtractSection → AssessSection (if enabled)
-```
+> **Granular assessment is retired.** The former "granular assessment" service
+> (a thread-pool fan-out with DynamoDB caching, formerly configured under
+> `assessment.granular` / `extraction.confidence.granular`) has been **retired and
+> deleted**. Large-list batching is its full replacement. Any leftover
+> `granular.*` keys still validate but are ignored — no config edit required. See
+> [Granular Assessment Retirement](./migration-granular-retirement.md).
 
-### State Machine Integration
+### For large documents, prefer Advanced (agentic) extraction
 
-The assessment step integrates seamlessly into Pattern-2's ProcessSections map state:
-
-```json
-{
-  "AssessSection": {
-    "Type": "Task",
-    "Resource": "arn:aws:states:::lambda:invoke",
-    "Parameters": {
-      "FunctionName": "${AssessmentFunction}",
-      "Payload": {
-        "document.$": "$.document",
-        "section_id.$": "$.section_id"
-      }
-    },
-    "End": true
-  }
-}
-```
-
-### Configuration Options
-
-Pattern 2 supports both standard and granular assessment approaches:
-
-#### Standard Assessment
-For documents with moderate complexity:
-```yaml
-assessment:
-  model: "anthropic.claude-3-5-sonnet-20241022-v2:0"
-  temperature: 0
-  system_prompt: "You are an expert document analyst..."
-  task_prompt: |
-    Assess the confidence of extraction results for this {DOCUMENT_CLASS} document.
-    
-    Extraction Results: {EXTRACTION_RESULTS}
-    Attributes: {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-    Document Text: {DOCUMENT_TEXT}
-    OCR Confidence: {OCR_TEXT_CONFIDENCE}
-    {DOCUMENT_IMAGE}
-```
-
-#### Granular Assessment
-For complex documents with many attributes or large lists:
-```yaml
-assessment:
-  model: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
-  temperature: 0
-  system_prompt: "You are an expert document analyst..."
-  task_prompt: |
-    Assess the confidence of extraction results for this {DOCUMENT_CLASS} document.
-    
-    Attributes to assess: {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-    Extraction results: {EXTRACTION_RESULTS}
-    Document context: {DOCUMENT_TEXT}
-    {OCR_TEXT_CONFIDENCE}
-    {DOCUMENT_IMAGE}
-  
-  # Granular assessment configuration
-  granular:
-    max_workers: 6              # Parallel processing threads
-    simple_batch_size: 3        # Attributes per batch
-    list_batch_size: 1          # List items per batch
-```
-
-### When to Use Granular Assessment
-
-Consider granular assessment for:
-- **Bank statements** with hundreds of transactions
-- **Documents with 10+ attributes** requiring individual attention
-- **Complex nested structures** (group and list attributes)
-- **Performance-critical scenarios** where parallel processing helps
-- **Cost optimization** when prompt caching is available
-
-### Testing Assessment
-
-Use the provided assessment notebooks:
-
-```bash
-# Standard assessment testing
-jupyter notebook notebooks/e2e-example-with-assessment.ipynb
-
-# Granular assessment testing  
-jupyter notebook notebooks/examples/step4_assessment_granular.ipynb
-```
+For very large or complex documents, prefer **Advanced (agentic) extraction** —
+it shards both extraction and confidence assessment and produced the
+best-calibrated confidence in testing. Simple + `separate` remains fully viable
+for large lists via the batching above.
 
 ### Comprehensive Documentation
 
-For detailed information about assessment configuration, output formats, confidence thresholds, UI integration, cost optimization, and troubleshooting, see the [Assessment Documentation](./assessment.md).
-
-The assessment documentation covers:
+For detailed information about confidence and geometry configuration, output
+formats, confidence thresholds, UI integration, cost optimization, and
+troubleshooting, see [Extraction & Confidence](./extraction-and-confidence.md).
+That guide covers:
 - Complete configuration examples and placeholders
 - Attribute types and assessment formats (simple, group, list)
 - Confidence threshold configuration and UI integration
-- Granular assessment architecture and performance tuning
+- Confidence modes (`off` / `separate` / `integrated`) and geometry modes
+- Large-list batching and the missing-row retry
 - Cost optimization strategies and token reduction techniques
 - Multimodal assessment with image processing
-- Testing procedures and best practices
+- Best practices
 
 ## Best Practices
 

@@ -3,11 +3,25 @@ SPDX-License-Identifier: MIT-0
 
 # Assessment Service for IDP Accelerator
 
-This module provides assessment capabilities for evaluating document extraction confidence using LLMs within the IDP Accelerator project.
+This module provides the **standalone confidence assessment step** for the IDP
+Accelerator. As of config **v0.6**, confidence is an **output of extraction**:
+its settings live under `extraction.confidence.*` (and geometry under
+`extraction.geometry.*`), not a top-level `assessment.*` block. This service
+implements the standalone step that runs on the Simple (non-agentic) path when
+`extraction.confidence.mode: separate` (the default). On the agentic path, and
+for `integrated` mode, confidence is produced inside extraction and this
+standalone step auto-skips.
+
+> **Granular assessment is retired.** The former `GranularAssessmentService` /
+> `granular_service.py` and the `extraction.confidence.granular` config field
+> have been **deleted**. Large lists are handled by the standalone large-list
+> batching described below (plus a bounded missing-row retry). Any leftover
+> `granular.*` keys still validate but are ignored. See
+> `docs/migration-granular-retirement.md`.
 
 ## Overview
 
-The Assessment service is designed to assess the confidence and accuracy of extraction results by analyzing them against source documents using LLMs. It supports both text and image content analysis and provides detailed confidence scores and explanations for each extracted attribute.
+The Assessment service is designed to assess the confidence and accuracy of extraction results by analyzing them against source documents using LLMs. It supports both text and image content analysis and provides detailed confidence scores and explanations for each extracted attribute, applying configured confidence thresholds (threshold enrichment) to each field.
 
 ## Features
 
@@ -62,33 +76,37 @@ assessment_info = extraction_data.get("explainability_info", {})
 
 ## Configuration
 
-The assessment service uses configuration-driven prompts and model parameters:
+The assessment service uses configuration-driven prompts and model parameters,
+under `extraction.confidence` in v0.6:
 
 ```yaml
-assessment:
-  enabled: true                         # Enable/disable assessment processing
-  model: "us.amazon.nova-pro-v1:0"
-  temperature: 0
-  top_k: 5
-  top_p: 0.1
-  max_tokens: 4096
-  system_prompt: "You are an expert document analyst..."
-  task_prompt: |
-    Assess the confidence of extraction results for this {DOCUMENT_CLASS} document.
-    
-    Text Confidence Data:
-    {OCR_TEXT_CONFIDENCE}
-    
-    Extraction Results:
-    {EXTRACTION_RESULTS}
-    
-    Attributes Definition:
-    {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-    
-    Document Images:
-    {DOCUMENT_IMAGE}
-    
-    Respond with confidence assessments in JSON format.
+extraction:
+  confidence:
+    enabled: true                       # Enable/disable confidence processing
+    mode: separate                      # off | separate (default) | integrated
+    model: "us.amazon.nova-pro-v1:0"
+    temperature: 0
+    top_k: 5
+    top_p: 0.1
+    max_tokens: 4096
+    list_batch_size: 25                 # rows per assessment batch for large lists
+    system_prompt: "You are an expert document analyst..."
+    task_prompt: |
+      Assess the confidence of extraction results for this {DOCUMENT_CLASS} document.
+
+      Text Confidence Data:
+      {OCR_TEXT_CONFIDENCE}
+
+      Extraction Results:
+      {EXTRACTION_RESULTS}
+
+      Attributes Definition:
+      {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+
+      Document Images:
+      {DOCUMENT_IMAGE}
+
+      Respond with confidence assessments in JSON format.
 ```
 
 ### `enabled` Configuration Property
@@ -102,11 +120,12 @@ The assessment service supports runtime enable/disable control via the `enabled`
 
 **Example - Disabling Assessment:**
 ```yaml
-assessment:
-  enabled: false  # Disables all assessment processing
-  # Other properties can remain but will be ignored
-  model: us.amazon.nova-lite-v1:0
-  temperature: 0.0
+extraction:
+  confidence:
+    enabled: false  # Disables all confidence processing (equivalent to mode: off)
+    # Other properties can remain but will be ignored
+    model: us.amazon.nova-lite-v1:0
+    temperature: 0.0
 ```
 
 **Behavior When Disabled:**
@@ -138,6 +157,9 @@ depend on granular assessment for large lists.
    extracted data — truncating over-long lists, padding short/omitted ones with
    per-sub-field placeholders (so every un-assessed row is still groundable), and
    fanning any per-row scalar confidence out to per-column leaves.
+4. Runs a **bounded missing-row retry**: any rows the model dropped within a
+   batch are re-scored in a follow-up pass (missing rows only), so large-list
+   coverage reaches 100% without re-scoring rows that already have confidence.
 
 Both `assess_results_batched` and `reconcile_assessment_to_data` are shared with
 the agentic in-shard assessment path (`ExtractionService`), so there is exactly one
@@ -278,30 +300,33 @@ The assessment service now includes **automatic spatial localization** capabilit
 To enable spatial localization, include these instructions in your `task_prompt`:
 
 ```yaml
-assessment:
-  task_prompt: |
-    <spatial-localization-guidelines>
-    For each field, provide bounding box coordinates:
-    - bbox: [x1, y1, x2, y2] coordinates in normalized 0-1000 scale
-    - page: Page number where the field appears (starting from 1)
-    
-    Coordinate system:
-    - Use normalized scale 0-1000 for both x and y axes
-    - x1, y1 = top-left corner of bounding box
-    - x2, y2 = bottom-right corner of bounding box
-    - Ensure x2 > x1 and y2 > y1
-    - Make bounding boxes tight around the actual text content
-    </spatial-localization-guidelines>
-    
-    For each attribute, provide:
-    {
-      "attribute_name": {
-        "confidence": 0.95,
-        "confidence_reason": "Clear explanation",
-        "bbox": [100, 200, 300, 250],
-        "page": 1
+extraction:
+  geometry:
+    mode: llm_grounded
+  confidence:
+    task_prompt: |
+      <spatial-localization-guidelines>
+      For each field, provide bounding box coordinates:
+      - bbox: [x1, y1, x2, y2] coordinates in normalized 0-1000 scale
+      - page: Page number where the field appears (starting from 1)
+
+      Coordinate system:
+      - Use normalized scale 0-1000 for both x and y axes
+      - x1, y1 = top-left corner of bounding box
+      - x2, y2 = bottom-right corner of bounding box
+      - Ensure x2 > x1 and y2 > y1
+      - Make bounding boxes tight around the actual text content
+      </spatial-localization-guidelines>
+
+      For each attribute, provide:
+      {
+        "attribute_name": {
+          "confidence": 0.95,
+          "confidence_reason": "Clear explanation",
+          "bbox": [100, 200, 300, 250],
+          "page": 1
+        }
       }
-    }
 ```
 
 ### Benefits
@@ -346,7 +371,7 @@ Key behaviors:
 - **Additive output**: a matched field gets `geometry_source` (`"ocr"`/`"ocr-paragraph"`/
   `"llm"`) and, when available, `ocr_confidence` (0–1). The LLM `confidence`/`confidence_reason`
   are never modified, so HITL and confidence alerts are unaffected.
-- **Config gate**: `assessment.ground_geometry_in_ocr` (default `True`).
+- **Config gate**: `extraction.geometry.mode` (`ocr_only` default | `llm_grounded` | `llm` | `off`). The legacy `assessment.ground_geometry_in_ocr: false` maps to `llm`; old configs are migrated on read.
 - **Safe fallback**: absent `pageData.json`, `geometryAvailable: false`, or no value match →
   keep the LLM-estimated box (identical to prior behavior). `pageData.json` is read from S3, so
   the `{OCR_TEXT_CONFIDENCE}` prompt and token budget are unchanged.

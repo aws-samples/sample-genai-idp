@@ -137,7 +137,7 @@ By default, Bedrock usage appears in AWS Cost Explorer as a single line item per
 3. Find the `model` or `model_id` fields in the relevant processing step sections — for example:
    - **Classification**: `classification.model_id`
    - **Extraction**: `extraction.model_id`
-   - **Assessment**: `assessment.model`
+   - **Assessment (confidence)**: `extraction.confidence.model`
    - **Summarization**: `summarization.model`
 4. **Replace** the standard model ID or cross-region inference profile ID with the new **Application Inference Profile ARN**
 

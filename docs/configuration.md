@@ -159,10 +159,10 @@ notes: "Configuration with custom classification method"
 classification:
   classificationMethod: textbasedHolisticClassification
 
-# Override assessment to enable granular mode
-assessment:
-  granular:
-    enabled: true
+# Override confidence to use integrated mode
+extraction:
+  confidence:
+    mode: integrated
 
 classes:
   # ... your document classes
@@ -213,28 +213,38 @@ summarization:
 
 **Note:** Prior to v0.4.0, this feature was controlled by the `IsSummarizationEnabled` CloudFormation parameter. The configuration-based approach provides runtime control without requiring stack redeployment.
 
-## Assessment Configuration
+## Confidence (Assessment) Configuration
 
-### Enable/Disable Assessment
+As of **config v0.6**, per-field **confidence** and **geometry** are **outputs of
+extraction**, configured under `extraction.confidence.*` and
+`extraction.geometry.*` — there is no top-level `assessment.{model, geometry_mode,
+...}` block anymore. Human-in-the-loop review is configured under the top-level
+`hitl.*` block. See [Extraction & Confidence](./extraction-and-confidence.md) for
+the full reference.
 
-Similar to summarization, assessment can now be controlled via the configuration file rather than CloudFormation stack parameters. This provides more flexibility and eliminates the need for stack redeployment when changing assessment behavior.
+### Enable/Disable Confidence
+
+Confidence is controlled via the configuration file rather than CloudFormation
+stack parameters. This provides runtime control without stack redeployment.
 
 **Configuration-based Control (Recommended):**
 ```yaml
-assessment:
-  enabled: true  # Set to false to disable assessment
-  model: us.amazon.nova-lite-v1:0
-  temperature: 0.0
-  # ... other assessment settings
+extraction:
+  confidence:
+    enabled: true             # false disables confidence entirely (zero LLM cost)
+    mode: separate            # off | separate (default) | integrated
+    model: us.amazon.nova-lite-v1:0
+    temperature: 0.0
+    list_batch_size: 25       # rows per assessment batch for large lists
+    # ... other confidence settings
 ```
 
-**Key Benefits:**
-- **Runtime Control**: Enable/disable without stack redeployment
-- **Cost Optimization**: Zero LLM costs when disabled (`enabled: false`)
-- **Simplified Architecture**: No conditional logic in state machines
-- **Backward Compatible**: Defaults to `enabled: true` when property is missing
+**Confidence modes** (`extraction.confidence.mode`):
+- **`separate`** *(default)* — on the Simple path, confidence runs as the standalone Assessment step; on the Advanced (agentic) path it runs inside each extraction shard and the standalone step auto-skips.
+- **`integrated`** — a single extraction inference returns values **and** inline confidence together (works on **both** the simple and agentic paths); the standalone Assessment step auto-skips.
+- **`off`** — no confidence scoring (equivalent to `enabled: false`); zero LLM cost.
 
-**Behavior When Disabled:**
+**Behavior When Disabled** (`enabled: false` or `mode: off`):
 - Assessment lambda is still called (minimal overhead)
 - Service immediately returns with logging: "Assessment is disabled via configuration"
 - No LLM API calls or S3 operations are performed
@@ -242,33 +252,45 @@ assessment:
 
 **Note:** Prior to v0.4.0, this feature was controlled by the `IsAssessmentEnabled` CloudFormation parameter. The configuration-based approach provides runtime control without requiring stack redeployment.
 
-### Advanced Assessment Configuration
+### Large lists (`list_batch_size`)
 
-For complex documents with many attributes, enable granular assessment for improved accuracy and performance:
+For complex documents with large lists (bank statements with hundreds of
+transactions, line-item tables), the standalone Assessment step **batches large
+lists automatically**: it slices the largest list field into
+`extraction.confidence.list_batch_size` chunks (default **25**), scores each chunk
+sequentially, then reconciles so every list cell gets its own confidence and
+bounding box. A bounded missing-row retry re-scores any dropped rows so coverage
+reaches 100%. Lower `list_batch_size` if a chunk under-enumerates; raise it to cut
+inference count.
 
 ```yaml
-assessment:
-  enabled: true
-  model: us.amazon.nova-lite-v1:0
-  granular_mode: true  # Enable granular assessment
-  simple_batch_size: 5  # Group simple attributes (3-5 recommended)
-  list_batch_size: 1    # Process list items individually for accuracy
-  max_workers: 10       # Parallel processing threads
+extraction:
+  confidence:
+    enabled: true
+    mode: separate
+    list_batch_size: 25       # rows per assessment batch for large lists
 ```
 
-**Benefits:**
-- Better accuracy through focused prompts
-- Cost optimization via prompt caching
-- Reduced latency through parallel processing
-- Scalability for documents with 100+ attributes
+> **Granular assessment is retired.** The former "granular assessment" service
+> (parallel thread-pool fan-out with DynamoDB caching, formerly `assessment.granular`
+> / `extraction.confidence.granular` with `max_workers` / `simple_batch_size` / etc.)
+> has been **retired and deleted**. Large-list batching is its full replacement and
+> `list_batch_size` is the one knob. Any leftover `granular.*` keys still validate
+> but are ignored — no config edit required.
 
-**Ideal For:**
-- Bank statements with hundreds of transactions
-- Documents with 10+ attributes
-- Complex nested structures
-- Performance-critical scenarios
+**For large documents**, prefer **Advanced (agentic) extraction** — it shards both
+extraction and confidence assessment and yields the best-calibrated confidence.
 
-For detailed information, see [assessment.md](assessment.md).
+### v0.5 → v0.6 config migration
+
+- **Confidence and geometry moved under `extraction.*`** in v0.6: the former top-level `assessment.*` confidence settings are now `extraction.confidence.*`, and `assessment.geometry_mode` / `assessment.ground_geometry_in_ocr` are now `extraction.geometry.mode`. HITL moved to the top-level `hitl.*` block.
+- **Migrate-on-read handles old configs automatically** — pre-v0.6 configurations are migrated transparently when loaded; **no manual edit is required**.
+- **Granular assessment is retired** and its config keys are a **no-op** (they validate but are ignored).
+- **`list_batch_size`** is the knob for large lists; for large documents, Advanced (agentic) extraction is recommended.
+
+See [Granular Assessment Retirement](./migration-granular-retirement.md) for details.
+
+For detailed information, see [Extraction & Confidence](extraction-and-confidence.md).
 
 ## Stack Parameters
 
@@ -723,7 +745,7 @@ See `notebooks/examples/demo-lambda/` for:
 - SAM deployment template for example Lambda
 - Complete documentation and examples
 
-For more details, see [extraction.md](extraction.md).
+For more details, see [Extraction & Confidence](extraction-and-confidence.md).
 
 ### Tiered Models for Agentic Extraction (Validation + Escalation)
 
@@ -740,7 +762,7 @@ extraction:
       escalation_model: us.anthropic.claude-opus-4-8   # stronger tier, used only on failure
 ```
 
-When validation fails, only the failing top-level fields are re-extracted with `escalation_model` (a per-class `x-aws-idp-extraction-escalation-model` override takes precedence) and merged back — typically a small fraction of documents, so the stronger model's cost is incurred only where it's needed. See [Schema Validation and Model Escalation](extraction.md#schema-validation-and-model-escalation) for the full feature, including the deterministic table-parsing tool, the completeness heuristic, and sharding for large documents.
+When validation fails, only the failing top-level fields are re-extracted with `escalation_model` (a per-class `x-aws-idp-extraction-escalation-model` override takes precedence) and merged back — typically a small fraction of documents, so the stronger model's cost is incurred only where it's needed. See [Schema validation and model escalation](extraction-and-confidence.md#schema-validation-and-model-escalation) for the full feature, including the deterministic table-parsing tool, the completeness heuristic, and sharding for large documents.
 
 > The agentic options (validation, table parsing, sharding, escalation) are editable in the Web UI under **Configuration → Extraction → Agentic Extraction**, where sub-options are progressively revealed as you enable each feature.
 
