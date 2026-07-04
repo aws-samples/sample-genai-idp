@@ -60,21 +60,31 @@ extraction:
       For each attribute, provide:
       - A confidence score between 0.0 and 1.0 (1.0 = clear, unambiguous evidence;
         lower = weaker/ambiguous evidence)
-      - A clear explanation of the confidence reasoning
+      - A confidence_reason ONLY when the confidence is below 0.9 (see the output
+        rule below). Reasons exist to explain low/uncertain scores for human review;
+        a high-confidence value does not need one.
       Base assessments on actual document content and OCR quality; account for OCR
       confidence scores when provided; be objective and specific.
       </assessment-guidelines>
       <final-instructions>
       Return a JSON object mirroring the extracted data structure:
-      SIMPLE:  {"attr": {"confidence": 0.85, "confidence_reason": "..."}}
-      GROUP:   {"grp": {"sub1": {"confidence": 0.9, "confidence_reason": "..."}}}
-      LIST:    {"items": [ {"c1": {"confidence": 0.95, "confidence_reason": "..."}}, ... ]}
+      HIGH confidence (>= 0.9):  {"attr": {"confidence": 0.97}}
+      LOWER confidence (< 0.9):  {"attr": {"confidence": 0.72, "confidence_reason": "..."}}
+      GROUP:   {"grp": {"sub1": {"confidence": 0.95}}}
+      LIST:    {"items": [ {"c1": {"confidence": 0.72, "confidence_reason": "..."}}, ... ]}
+      OUTPUT RULE (keep responses compact — omit reasons for confident values):
+      - Emit "confidence_reason" for a leaf ONLY when its confidence is below 0.9.
+        For confidence >= 0.9, emit just {"confidence": <score>} with NO
+        confidence_reason key.
+      - When you do include a confidence_reason, keep it to at most 12 words and do
+        not restate the extracted value.
       IMPORTANT:
       - For LIST attributes, assess EACH row separately (one object per row, in order),
-        and within each row give EACH column its own {"confidence", "confidence_reason"}
-        leaf — mirror the row's column keys; do NOT emit a single confidence per row.
-        Nested lists follow the same rule recursively.
-      - Include assessments for ALL attributes present in the extraction results
+        and within each row give EACH column its own confidence leaf ({"confidence"},
+        plus "confidence_reason" only when below 0.9) — mirror the row's column keys;
+        do NOT emit a single confidence per row. Nested lists follow the same rule
+        recursively.
+      - Include a confidence assessment for ALL attributes present in the extraction results
       - Match the exact structure of the extracted data
       </final-instructions>
       <<CACHEPOINT>>

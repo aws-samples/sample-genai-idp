@@ -7,6 +7,9 @@ The simple extraction path, when ``confidence.mode == integrated``, asks the mod
 to return values + inline confidence in ONE inference. These lock in:
   - the {extraction, confidence} envelope is split (values -> inference_result,
     confidence -> metering marker), fixing the malformed inference_result bug;
+  - a ``field_assessment`` sibling key (the shape a non-tool model emits when told
+    to "call the provide_field_assessment tool") is lifted the same way, so the
+    standalone Assessment step is skipped instead of double-billing;
   - a flat response (model ignored confidence) passes through untouched so the
     standalone Assessment step runs as the fallback;
   - the shared threshold-enrichment attaches confidence_threshold + alerts.
@@ -60,6 +63,53 @@ def test_case_insensitive_envelope():
     values = svc._split_inline_confidence(parsed, metering)
     assert values == {"A": "1"}
     assert "_integrated_field_assessment" in metering
+
+
+def test_field_assessment_sibling_is_lifted():
+    # The shape a non-tool (simple) model emits given "call provide_field_assessment":
+    # confidence rides as a `field_assessment` sibling next to the real fields.
+    svc = _svc()
+    metering = {}
+    parsed = {
+        "Agency": "ACME",
+        "Total": "100",
+        "Items": [{"rate": "5"}],
+        "field_assessment": {
+            "Agency": {"confidence": 0.95},
+            "Total": {"confidence": 0.6, "confidence_reason": "faint"},
+            "Items": [{"rate": {"confidence": 0.8}}],
+        },
+    }
+    values = svc._split_inline_confidence(parsed, metering)
+    # field_assessment stripped from values (no leak into inference_result)...
+    assert values == {"Agency": "ACME", "Total": "100", "Items": [{"rate": "5"}]}
+    assert "field_assessment" not in values
+    # ...and lifted into the metering marker so the standalone step is skipped.
+    assert metering["_integrated_field_assessment"]["Agency"]["confidence"] == 0.95
+
+
+def test_confidence_sibling_is_lifted():
+    # Some models use "confidence" as the sibling key alongside the fields.
+    svc = _svc()
+    metering = {}
+    parsed = {
+        "Agency": "ACME",
+        "confidence": {"Agency": {"confidence": 0.9}},
+    }
+    values = svc._split_inline_confidence(parsed, metering)
+    assert values == {"Agency": "ACME"}
+    assert "_integrated_field_assessment" in metering
+
+
+def test_real_field_named_field_assessment_not_lifted():
+    # A genuine document field literally named "field_assessment" holding plain
+    # values (no {"confidence": ...} leaves) must NOT be mistaken for confidence.
+    svc = _svc()
+    metering = {}
+    parsed = {"Agency": "ACME", "field_assessment": "passed review"}
+    values = svc._split_inline_confidence(parsed, metering)
+    assert values == parsed
+    assert "_integrated_field_assessment" not in metering
 
 
 def test_flat_response_passes_through_no_marker():

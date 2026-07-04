@@ -2582,6 +2582,31 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             ocr_analysis=ocr_analysis,
         )
 
+    @staticmethod
+    def _looks_like_confidence_block(value: Any) -> bool:
+        """Heuristic: does ``value`` look like a per-field confidence structure?
+
+        A confidence block mirrors the extracted data and bottoms out in leaves
+        that carry a ``confidence`` key. We accept it if ANY leaf, at any depth,
+        is a dict containing ``confidence`` — enough to distinguish a genuine
+        confidence blob from a real document field that happens to be named
+        ``field_assessment`` / ``confidence`` (which would hold plain values, not
+        ``{"confidence": ...}`` leaves).
+        """
+        if not isinstance(value, dict) or not value:
+            return False
+
+        def has_confidence_leaf(o: Any) -> bool:
+            if isinstance(o, dict):
+                if "confidence" in o:
+                    return True
+                return any(has_confidence_leaf(v) for v in o.values())
+            if isinstance(o, list):
+                return any(has_confidence_leaf(v) for v in o)
+            return False
+
+        return has_confidence_leaf(value)
+
     def _split_inline_confidence(
         self, parsed: dict[str, Any], metering: dict[str, Any]
     ) -> dict[str, Any]:
@@ -2589,20 +2614,28 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
 
         The integrated extraction prompt asks the model to return both the
         extracted values and a parallel confidence structure. Models express this
-        two ways; handle both:
+        three ways; handle all so the standalone Assessment step can be skipped
+        (integrated mode's whole point is one inference, not two):
 
         1. Envelope: ``{"extraction": {...values...}, "confidence": {...leaves...}}``
            — the documented shape. Return the values, stash confidence in
            ``metering["_integrated_field_assessment"]``.
-        2. Flat: just ``{...values...}`` with no separate confidence (the model
+        2. Sibling: the values dict with a ``field_assessment`` (or ``confidence``)
+           key holding the confidence blob alongside the real fields — the shape a
+           non-tool (simple) model naturally emits when told to "call the
+           provide_field_assessment tool". Pop the confidence key, stash it, return
+           the remaining fields. Guarded by ``_looks_like_confidence_block`` so a
+           real field of that name isn't mistaken for confidence.
+        3. Flat: just ``{...values...}`` with no separate confidence (the model
            ignored the confidence instructions). Return as-is and stash nothing;
            the standalone Assessment step then runs as the fallback (no regression).
 
-        Keys are matched case-insensitively and only when the envelope has EXACTLY
+        Keys are matched case-insensitively. The envelope branch requires EXACTLY
         the two expected keys, so a real document field literally named
         ``extraction`` can't trigger a false split.
         """
         keys = {k.lower(): k for k in parsed}
+        # Case 1: the documented {extraction, confidence} envelope.
         if set(keys) == {"extraction", "confidence"} and isinstance(
             parsed.get(keys["extraction"]), dict
         ):
@@ -2622,10 +2655,32 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     "standalone Assessment step."
                 )
             return values
-        # Flat response (no envelope) — no inline confidence to lift.
+
+        # Case 2: confidence rides as a sibling key next to the real fields
+        # (e.g. {"Agency": ..., ..., "field_assessment": {...leaves...}}). This is
+        # what a non-tool model emits given the "call provide_field_assessment"
+        # instruction, since no such tool exists in simple mode.
+        for cand in ("field_assessment", "_field_assessment", "confidence"):
+            actual = keys.get(cand)
+            if actual is None:
+                continue
+            block = parsed.get(actual)
+            if self._looks_like_confidence_block(block):
+                values = {k: v for k, v in parsed.items() if k != actual}
+                metering["_integrated_field_assessment"] = block
+                logger.info(
+                    "Non-agentic integrated confidence: lifted '%s' sibling "
+                    "confidence block (%d entries) from extraction response",
+                    actual,
+                    len(block),
+                )
+                return values
+
+        # Case 3: flat response (no recognizable confidence) — nothing to lift.
         logger.info(
             "Non-agentic integrated mode: response was flat (no extraction/"
-            "confidence envelope); standalone Assessment step will run."
+            "confidence envelope or confidence sibling); standalone Assessment "
+            "step will run."
         )
         return parsed
 
