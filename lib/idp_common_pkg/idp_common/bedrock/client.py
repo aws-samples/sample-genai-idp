@@ -121,6 +121,50 @@ def is_claude_4_7_model(model_id: str) -> bool:
 _is_claude_4_7_model = is_claude_4_7_model
 
 
+# Claude models that accept the reasoning-effort control
+# (output_config.effort: low|medium|high|xhigh|max). Verified live on Bedrock
+# Converse: effort measurably changes output tokens on these; Sonnet 4.5 and
+# Haiku 4.5 REJECT effort (400). Kept as base names (region prefix + :1m stripped
+# by is_claude_effort_model). GPT-5.x reasoning models use the OpenAI Responses
+# `reasoning.effort` control instead (see openai_responses.py), not this path.
+_CLAUDE_EFFORT_BASE_NAMES = {
+    "anthropic.claude-sonnet-5",
+    "anthropic.claude-sonnet-4-6",
+    "anthropic.claude-opus-4-5",
+    "anthropic.claude-opus-4-6",
+    "anthropic.claude-opus-4-7",
+    "anthropic.claude-opus-4-8",
+    "anthropic.claude-fable-5",
+}
+
+# Effort levels accepted by Claude models (a superset of the OpenAI Responses
+# levels, which also allow "minimal"). "max"/"xhigh" are Claude-only.
+CLAUDE_EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+
+
+def _strip_region_and_1m(model_id: str) -> str:
+    """Normalize a model ID to its base name: strip us./eu./global. prefix and
+    the :1m suffix. Also tolerates Opus 4.5/4.6 dated/`-v1` foundation IDs by
+    matching on a prefix in is_claude_effort_model."""
+    parts = model_id.split(".", 1)
+    base = parts[1] if len(parts) == 2 and parts[0] in ("us", "eu", "global") else model_id
+    if base.endswith(":1m"):
+        base = base[:-3]
+    return base
+
+
+def is_claude_effort_model(model_id: str) -> bool:
+    """True if the Claude model accepts output_config.effort.
+
+    Handles region prefixes, :1m, and dated/versioned foundation IDs
+    (e.g. anthropic.claude-opus-4-6-v1, ...-4-5-20250514-v1:0) by prefix match.
+    """
+    if not model_id:
+        return False
+    base = _strip_region_and_1m(model_id)
+    return any(base.startswith(name) for name in _CLAUDE_EFFORT_BASE_NAMES)
+
+
 # Base model names that support cachePoint (without region prefix)
 # Used to check inference profiles by resolving their underlying foundation model
 _CACHEPOINT_BASE_MODELS = set()
@@ -740,6 +784,32 @@ class BedrockClient:
 
             if max_tokens is not None:
                 additional_model_fields["max_tokens"] = max_tokens
+
+            # Reasoning effort (output_config.effort) for effort-capable Claude
+            # models. Controls thinking depth / output-token spend
+            # (low|medium|high|xhigh|max). Ignored/omitted for models that don't
+            # support it (Sonnet 4.5, Haiku 4.5) to avoid a 400.
+            if reasoning_effort and is_claude_effort_model(model_id):
+                effort = str(reasoning_effort).lower().strip()
+                if effort in CLAUDE_EFFORT_LEVELS:
+                    additional_model_fields["output_config"] = {"effort": effort}
+                    logger.info(
+                        "Using reasoning effort '%s' for %s", effort, model_id
+                    )
+                else:
+                    logger.warning(
+                        "Ignoring unsupported Claude reasoning effort '%s' for %s "
+                        "(valid: %s)",
+                        reasoning_effort,
+                        model_id,
+                        ", ".join(CLAUDE_EFFORT_LEVELS),
+                    )
+            elif reasoning_effort and not is_claude_effort_model(model_id):
+                logger.debug(
+                    "Model %s does not support reasoning effort; ignoring '%s'",
+                    model_id,
+                    reasoning_effort,
+                )
 
         # Handle Nova-specific parameters
         elif "amazon" in model_id.lower():

@@ -31,6 +31,13 @@ extraction:
   model: us.anthropic.claude-sonnet-5
   temperature: "0.0"
   top_p: "0.0"
+  # Reasoning effort for reasoning-capable models (Claude Sonnet 5 / Sonnet 4.6 /
+  # Opus 4.5-4.8 / Fable 5 via output_config.effort; GPT-5.x via reasoning.effort).
+  # Default "low" keeps output-token cost/latency down for extraction — a largely
+  # structured-transcription task — without a dramatic cost jump on the Sonnet 5
+  # upgrade. Raise (medium|high|xhigh|max) for hard reasoning documents. Ignored
+  # by models without an effort control (Nova, Sonnet 4.5, Haiku 4.5).
+  reasoning_effort: "low"
   # max_tokens is not configurable: extraction always requests the model's
   # maximum output (resolved from config_library/model_config_limits.yaml).
   # Bedrock's default-when-omitted truncates, so it is set explicitly per call.

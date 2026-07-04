@@ -474,8 +474,11 @@ class ConfidenceConfig(BaseModel):
     reasoning_effort: str = Field(
         default="medium",
         description=(
-            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
-            "minimal, low, medium, or high. Ignored by other model families."
+            "Reasoning effort for reasoning-capable models. Claude Sonnet 5 / "
+            "Sonnet 4.6 / Opus 4.5-4.8 / Fable 5 accept low, medium, high, xhigh, "
+            "or max (via output_config.effort); OpenAI GPT-5.x accept minimal, "
+            "low, medium, or high (via reasoning.effort). Ignored by models "
+            "without an effort control (Nova, Sonnet 4.5, Haiku 4.5)."
         ),
     )
     # NOTE: max_tokens is intentionally NOT a field. Output is always requested at
@@ -656,8 +659,11 @@ class ExtractionConfig(BaseModel):
     reasoning_effort: str = Field(
         default="medium",
         description=(
-            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
-            "minimal, low, medium, or high. Ignored by other model families."
+            "Reasoning effort for reasoning-capable models. Claude Sonnet 5 / "
+            "Sonnet 4.6 / Opus 4.5-4.8 / Fable 5 accept low, medium, high, xhigh, "
+            "or max (via output_config.effort); OpenAI GPT-5.x accept minimal, "
+            "low, medium, or high (via reasoning.effort). Ignored by models "
+            "without an effort control (Nova, Sonnet 4.5, Haiku 4.5)."
         ),
     )
     # NOTE: max_tokens is intentionally NOT a field. Extraction output is always
@@ -781,8 +787,11 @@ class ClassificationConfig(BaseModel):
     reasoning_effort: str = Field(
         default="medium",
         description=(
-            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
-            "minimal, low, medium, or high. Ignored by other model families."
+            "Reasoning effort for reasoning-capable models. Claude Sonnet 5 / "
+            "Sonnet 4.6 / Opus 4.5-4.8 / Fable 5 accept low, medium, high, xhigh, "
+            "or max (via output_config.effort); OpenAI GPT-5.x accept minimal, "
+            "low, medium, or high (via reasoning.effort). Ignored by models "
+            "without an effort control (Nova, Sonnet 4.5, Haiku 4.5)."
         ),
     )
     max_tokens: int = Field(
@@ -944,8 +953,11 @@ class SummarizationConfig(BaseModel):
     reasoning_effort: str = Field(
         default="medium",
         description=(
-            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
-            "minimal, low, medium, or high. Ignored by other model families."
+            "Reasoning effort for reasoning-capable models. Claude Sonnet 5 / "
+            "Sonnet 4.6 / Opus 4.5-4.8 / Fable 5 accept low, medium, high, xhigh, "
+            "or max (via output_config.effort); OpenAI GPT-5.x accept minimal, "
+            "low, medium, or high (via reasoning.effort). Ignored by models "
+            "without an effort control (Nova, Sonnet 4.5, Haiku 4.5)."
         ),
     )
     max_tokens: int = Field(
@@ -1019,8 +1031,11 @@ class ChatConfig(BaseModel):
     reasoning_effort: str = Field(
         default="medium",
         description=(
-            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
-            "minimal, low, medium, or high. Ignored by other model families."
+            "Reasoning effort for reasoning-capable models. Claude Sonnet 5 / "
+            "Sonnet 4.6 / Opus 4.5-4.8 / Fable 5 accept low, medium, high, xhigh, "
+            "or max (via output_config.effort); OpenAI GPT-5.x accept minimal, "
+            "low, medium, or high (via reasoning.effort). Ignored by models "
+            "without an effort control (Nova, Sonnet 4.5, Haiku 4.5)."
         ),
     )
 
@@ -1074,8 +1089,11 @@ class OCRConfig(BaseModel):
     reasoning_effort: str = Field(
         default="medium",
         description=(
-            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
-            "minimal, low, medium, or high. Ignored by other model families."
+            "Reasoning effort for reasoning-capable models. Claude Sonnet 5 / "
+            "Sonnet 4.6 / Opus 4.5-4.8 / Fable 5 accept low, medium, high, xhigh, "
+            "or max (via output_config.effort); OpenAI GPT-5.x accept minimal, "
+            "low, medium, or high (via reasoning.effort). Ignored by models "
+            "without an effort control (Nova, Sonnet 4.5, Haiku 4.5)."
         ),
     )
     features: List[OCRFeature] = Field(
@@ -1791,8 +1809,11 @@ class EvaluationLLMMethodConfig(BaseModel):
     reasoning_effort: str = Field(
         default="medium",
         description=(
-            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
-            "minimal, low, medium, or high. Ignored by other model families."
+            "Reasoning effort for reasoning-capable models. Claude Sonnet 5 / "
+            "Sonnet 4.6 / Opus 4.5-4.8 / Fable 5 accept low, medium, high, xhigh, "
+            "or max (via output_config.effort); OpenAI GPT-5.x accept minimal, "
+            "low, medium, or high (via reasoning.effort). Ignored by models "
+            "without an effort control (Nova, Sonnet 4.5, Haiku 4.5)."
         ),
     )
     task_prompt: str = Field(
