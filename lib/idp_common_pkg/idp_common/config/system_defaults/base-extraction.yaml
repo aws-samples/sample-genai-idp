@@ -156,27 +156,37 @@ extraction:
 
     <confidence-assessment>
     Record your confidence in EVERY extracted value, mirroring the extraction
-    structure EXACTLY so there is one confidence entry per individual value:
-    - Scalar field: {"confidence": <0.0-1.0>, "confidence_reason": "<brief>"}.
+    structure EXACTLY so there is one confidence entry per individual value.
+    OUTPUT RULE (keep responses compact): include "confidence_reason" for a leaf
+    ONLY when its confidence is below 0.9. For confidence >= 0.9, emit just
+    {"confidence": <score>} with NO confidence_reason. When you do include one, keep
+    it to at most 12 words and do not restate the extracted value.
+    - Scalar field: {"confidence": <0.0-1.0>} (add "confidence_reason" only if < 0.9).
     - Group (nested object) field: an object with the SAME sub-keys as the value,
-      each mapping to its own {"confidence": ..., "confidence_reason": ...} leaf.
+      each mapping to its own {"confidence": ...} leaf (add "confidence_reason" if < 0.9).
     - List field (e.g. a table): a LIST with ONE object per extracted row, in the
       SAME ORDER as the rows. Each row object MUST mirror that row's structure —
       i.e. the SAME column keys as the extracted row, and EACH column maps to its
-      own {"confidence": ..., "confidence_reason": ...} leaf. Do NOT emit a single
-      confidence for a whole row; score each cell. Nested lists follow the same
-      rule recursively. Provide an entry for EVERY row and EVERY column — do not
-      summarize or skip.
+      own {"confidence": ...} leaf (add "confidence_reason" only if < 0.9). Do NOT
+      emit a single confidence for a whole row; score each cell. Nested lists follow
+      the same rule recursively. Provide an entry for EVERY row and EVERY column —
+      do not summarize or skip.
       Example — extracted row {"date": "...", "amount": "..."} ->
-        {"date": {"confidence": 0.98, "confidence_reason": "..."},
-         "amount": {"confidence": 0.90, "confidence_reason": "..."}}
+        {"date": {"confidence": 0.98},
+         "amount": {"confidence": 0.72, "confidence_reason": "figure partly illegible"}}
     confidence = your calibrated certainty the value matches the source document
     (1.0 = certain, lower = ambiguous/illegible/inferred).
-    HOW TO REPORT IT: if an extraction_with_confidence tool is available, pass the
-    values and this field_assessment together in that ONE call. Otherwise, after the
-    extraction is complete and correct, call the provide_field_assessment tool exactly
-    once. If you extracted in multiple steps (e.g. adding rows via patches), call
-    provide_field_assessment once at the very end so every row is assessed.
+    HOW TO REPORT IT:
+    - If an extraction_with_confidence or provide_field_assessment TOOL is available
+      to you, use it: pass the extracted values and this field_assessment together in
+      that ONE tool call. If you extracted in multiple steps (e.g. adding rows via
+      patches), call it once at the very end so every row is assessed.
+    - Otherwise (no such tool), return ONE JSON object with EXACTLY two top-level
+      keys: "extraction" (the extracted values object described above) and
+      "confidence" (the parallel confidence structure). Do NOT wrap it in any other
+      key and do NOT add a "field_assessment" key. Shape:
+        {"extraction": { ...extracted values... },
+         "confidence":  { ...one confidence leaf per value, mirroring structure... }}
     Do NOT include bounding boxes unless explicitly instructed below — field
     locations are derived automatically from OCR.
     </confidence-assessment>

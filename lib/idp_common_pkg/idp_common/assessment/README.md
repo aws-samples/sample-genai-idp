@@ -19,6 +19,24 @@ standalone step auto-skips.
 > `granular.*` keys still validate but are ignored. See
 > `docs/migration-granular-retirement.md`.
 
+> **Compact reasons (default prompts).** The shipped confidence prompts ask the
+> model to emit `confidence_reason` **only for leaves below 0.9 confidence**;
+> confident leaves emit just `{"confidence": <score>}`. Because output tokens
+> dominate assessment cost, this materially cuts cost with no effect on the
+> scores or threshold/alert logic (`_enhance_dict_assessment` spreads whatever
+> leaf keys are present). The many `confidence_reason`-on-every-field examples
+> below predate this and are illustrative of the *structure*, not the
+> reason-frequency. Widen the 0.9 threshold in the confidence `task_prompt` to
+> get a reason on every field.
+
+> **Integrated (simple-path) response shapes.** In `integrated` mode the single
+> extraction inference returns values **and** confidence. The service prefers a
+> `{"extraction": {...}, "confidence": {...}}` envelope, but also lifts a
+> `field_assessment` (or `confidence`) **sibling** key emitted next to the
+> extracted fields — stripping it from `inference_result` and promoting it to
+> `explainability_info` so the standalone step auto-skips (avoids a redundant
+> second Bedrock pass). See `ExtractionService._split_inline_confidence`.
+
 ## Overview
 
 The Assessment service is designed to assess the confidence and accuracy of extraction results by analyzing them against source documents using LLMs. It supports both text and image content analysis and provides detailed confidence scores and explanations for each extracted attribute, applying configured confidence thresholds (threshold enrichment) to each field.
