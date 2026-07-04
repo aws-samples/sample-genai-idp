@@ -735,7 +735,9 @@ class AssessmentService:
         top_k = confidence_cfg.top_k
         top_p = confidence_cfg.top_p
         reasoning_effort = confidence_cfg.reasoning_effort
-        max_tokens = confidence_cfg.max_tokens
+        # max_tokens is no longer a config knob — None lets the Bedrock client
+        # resolve the confidence model's maximum output (model_config_limits.yaml).
+        max_tokens = None
         system_prompt = confidence_cfg.system_prompt
 
         # Get schema for this document class

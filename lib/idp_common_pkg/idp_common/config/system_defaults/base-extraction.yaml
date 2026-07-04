@@ -31,7 +31,9 @@ extraction:
   model: us.anthropic.claude-sonnet-5
   temperature: "0.0"
   top_p: "0.0"
-  max_tokens: "64000"                       # safe default; Sonnet/Opus 4.6+ support up to 128000
+  # max_tokens is not configurable: extraction always requests the model's
+  # maximum output (resolved from config_library/model_config_limits.yaml).
+  # Bedrock's default-when-omitted truncates, so it is set explicitly per call.
   top_k: "5"
   system_prompt: >-
     You are a document assistant. Respond only with JSON. Never make up data, only provide data found in the document being provided.

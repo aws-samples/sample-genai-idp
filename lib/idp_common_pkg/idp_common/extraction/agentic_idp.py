@@ -12,7 +12,6 @@ import io
 import json
 import logging
 import os
-import re
 import threading
 from pathlib import Path
 from typing import (
@@ -39,6 +38,7 @@ from strands.types.media import (
 )
 
 from idp_common.bedrock.client import CACHEPOINT_SUPPORTED_MODELS, is_claude_4_7_model
+from idp_common.bedrock.model_utils import get_model_max_output_tokens
 from idp_common.bedrock.openai_responses import is_openai_responses_model
 from idp_common.config.models import IDPConfig
 from idp_common.utils.bedrock_utils import (
@@ -1013,43 +1013,33 @@ def _build_model_config(
         model_id = model_id[:-3]
         additional_request_fields = {"anthropic_beta": ["context-1m-2025-08-07"]}
 
-    # Determine model-specific maximum token limits
-    model_max = 4_096  # Default fallback
-    model_id_lower = model_id.lower()
-
-    # Check Claude Opus 4.7+ first (extended 128K output, more specific than
-    # the generic claude-4 pattern below).
-    if re.search(r"claude-opus-4-(7|8)", model_id_lower):
-        model_max = 128_000
-    # Check Claude 4 patterns (64K output)
-    elif re.search(r"claude-(opus|sonnet|haiku)-4", model_id_lower):
+    # Resolve the model's true max output tokens from the single source of truth
+    # (config_library/model_config_limits.yaml via get_model_max_output_tokens).
+    # Agentic extraction always requests the model maximum — its multi-step tool
+    # loop needs full output headroom, and Bedrock's default-when-omitted is a
+    # small truncating value (measured 4096 for Claude, 2000 for Nova). A stale
+    # per-model regex ladder here previously left new models (e.g. Sonnet 5) at a
+    # 4096 fallback, causing MaxTokensReachedException on ordinary documents.
+    try:
+        model_max = get_model_max_output_tokens(model_id)
+    except (ValueError, FileNotFoundError):
+        # Model not in model_config_limits.yaml, or the file is unavailable in
+        # this runtime. Don't truncate or crash extraction; use a conservative
+        # Claude-class headroom and log loudly. Bedrock will reject an over-limit
+        # request with a ValidationException naming the real cap if too high.
         model_max = 64_000
-    # Check Nova models
-    elif any(
-        nova in model_id_lower
-        for nova in ["nova-premier", "nova-pro", "nova-lite", "nova-micro"]
-    ):
-        model_max = 10_000
-    # Check Claude 3 models
-    elif "claude-3" in model_id_lower:
-        model_max = 8_192
+        logger.error(
+            "Could not resolve max output tokens for %s (missing entry or "
+            "model_config_limits.yaml unavailable); falling back to %d.",
+            model_id,
+            model_max,
+        )
 
-    # Use config value if provided, but cap at model's maximum
-    if max_tokens is not None:
-        if max_tokens > model_max:
-            logger.warning(
-                "Config max_tokens exceeds model limit, capping at model maximum",
-                extra={
-                    "config_max_tokens": max_tokens,
-                    "model_max_tokens": model_max,
-                    "model_id": model_id,
-                },
-            )
-            max_output_tokens = model_max
-        else:
-            max_output_tokens = max_tokens
+    # A config max_tokens (if still provided by a caller) is only ever an upper
+    # bound below the model max; never exceed the model's true limit.
+    if max_tokens is not None and max_tokens < model_max:
+        max_output_tokens = max_tokens
     else:
-        # No config value - use model maximum for agentic extraction
         max_output_tokens = model_max
 
     # Build base model config

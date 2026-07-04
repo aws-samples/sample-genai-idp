@@ -65,6 +65,8 @@ class TestConfigModels:
             "temperature": "0.5",
             "top_p": "0.1",
             "top_k": "5",
+            # max_tokens is no longer an ExtractionConfig field (extra="ignore"):
+            # output is always requested at the model maximum.
             "max_tokens": "10000",
             "agentic": {"enabled": False, "review_agent": False},
         }
@@ -74,13 +76,12 @@ class TestConfigModels:
         assert config.temperature == 0.5
         assert config.top_p == 0.1
         assert config.top_k == 5.0
-        assert config.max_tokens == 10000
+        assert not hasattr(config, "max_tokens")
 
         # Types should be correct
         assert isinstance(config.temperature, float)
         assert isinstance(config.top_p, float)
         assert isinstance(config.top_k, float)
-        assert isinstance(config.max_tokens, int)
 
     def test_extraction_config_with_native_numbers(self):
         """Test ExtractionConfig with native numeric values"""
@@ -89,7 +90,6 @@ class TestConfigModels:
             "temperature": 0.5,
             "top_p": 0.1,
             "top_k": 5.0,
-            "max_tokens": 10000,
             "agentic": {"enabled": False, "review_agent": False},
         }
         config = ExtractionConfig.model_validate(config_dict)
@@ -97,7 +97,7 @@ class TestConfigModels:
         assert config.temperature == 0.5
         assert config.top_p == 0.1
         assert config.top_k == 5.0
-        assert config.max_tokens == 10000
+        assert not hasattr(config, "max_tokens")
 
     def test_full_config_with_mixed_types(self):
         """Test full IDPConfig with mixed type representations"""
@@ -118,7 +118,6 @@ class TestConfigModels:
                 "temperature": 0.0,
                 "top_p": 0.1,
                 "top_k": 5,
-                "max_tokens": 10000,
                 "agentic": {"enabled": False, "review_agent": True},
             },
             "assessment": {
@@ -143,7 +142,7 @@ class TestConfigModels:
 
         # Numbers from natives
         assert config.extraction.top_p == 0.1
-        assert config.extraction.max_tokens == 10000
+        assert not hasattr(config.extraction, "max_tokens")
 
     def test_classification_valid_class_enforcement_defaults(self):
         """New class-enforcement fields default to enabled with sane values."""
@@ -228,7 +227,7 @@ class TestConfigModels:
         assert config.agentic.enabled is False
         assert config.agentic.review_agent is False
         assert config.temperature == 0.0
-        assert config.max_tokens == 10000
+        assert not hasattr(config, "max_tokens")
 
 
 class TestChatConfig:

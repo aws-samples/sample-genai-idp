@@ -478,11 +478,11 @@ class ConfidenceConfig(BaseModel):
             "minimal, low, medium, or high. Ignored by other model families."
         ),
     )
-    max_tokens: int = Field(
-        default=10000,
-        gt=0,
-        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit.",
-    )
+    # NOTE: max_tokens is intentionally NOT a field. Output is always requested at
+    # the model's maximum (resolved from model_config_limits.yaml in the Bedrock
+    # client) — Bedrock's default-when-omitted truncates, and capping confidence
+    # output risks incomplete per-field scoring. A leftover max_tokens in a stored
+    # config is ignored (extra="ignore" default).
     list_batch_size: int = Field(
         default=25,
         gt=0,
@@ -506,7 +506,7 @@ class ConfidenceConfig(BaseModel):
             return float(v) if v else 0.0
         return float(v)
 
-    @field_validator("max_tokens", "list_batch_size", mode="before")
+    @field_validator("list_batch_size", mode="before")
     @classmethod
     def parse_int(cls, v: Any) -> int:
         """Parse int from string or number"""
@@ -660,11 +660,11 @@ class ExtractionConfig(BaseModel):
             "minimal, low, medium, or high. Ignored by other model families."
         ),
     )
-    max_tokens: int = Field(
-        default=10000,
-        gt=0,
-        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
-    )
+    # NOTE: max_tokens is intentionally NOT a field. Extraction output is always
+    # requested at the model's maximum (resolved from model_config_limits.yaml in
+    # the Bedrock client / agentic path) — Bedrock's default-when-omitted
+    # truncates, and completeness matters more than an output cap for extraction.
+    # A leftover max_tokens in a stored config is ignored (extra="ignore" default).
     image: ImageConfig = Field(default_factory=ImageConfig)
     mode: Optional[str] = Field(
         default=None,
@@ -715,14 +715,6 @@ class ExtractionConfig(BaseModel):
         if isinstance(v, str):
             return float(v) if v else 0.0
         return float(v)
-
-    @field_validator("max_tokens", mode="before")
-    @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
 
     @field_validator("mode", mode="before")
     @classmethod

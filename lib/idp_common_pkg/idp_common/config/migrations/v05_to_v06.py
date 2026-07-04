@@ -56,7 +56,9 @@ _CONFIDENCE_PASSTHROUGH_KEYS = (
     "top_p",
     "top_k",
     "reasoning_effort",
-    "max_tokens",
+    # max_tokens intentionally dropped in v0.6 — output is always requested at the
+    # model maximum (config_library/model_config_limits.yaml), so a stale
+    # assessment.max_tokens is not carried into extraction.confidence.
     "image",
 )
 

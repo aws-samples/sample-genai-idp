@@ -4,7 +4,86 @@
 """Unit tests for model_utils module."""
 
 import pytest
-from idp_common.bedrock.model_utils import get_model_max_output_tokens, parse_model_id
+from idp_common.bedrock.model_utils import (
+    get_model_max_output_tokens,
+    parse_max_tokens_limit_from_error,
+    parse_model_id,
+)
+
+
+@pytest.mark.unit
+class TestParseMaxTokensLimitFromError:
+    """Test extracting the model limit from a Bedrock over-limit ValidationException.
+
+    There is no AWS API for the per-model output cap, so this error text is the
+    authoritative fallback source. Messages captured live from Bedrock Converse.
+    """
+
+    def test_claude_over_limit_message(self):
+        msg = (
+            "The model returned the following errors: max_tokens: 999999 > 128000, "
+            "which is the maximum allowed number of output tokens for "
+            "anthropic.claude-sonnet-5"
+        )
+        assert parse_max_tokens_limit_from_error(msg) == 128000
+
+    def test_nova_over_limit_message(self):
+        msg = (
+            "The maximum tokens you requested exceeds the model limit of 10000. "
+            "Try again with a maximum tokens value that is lower than 10000."
+        )
+        assert parse_max_tokens_limit_from_error(msg) == 10000
+
+    def test_unrelated_message_returns_none(self):
+        assert parse_max_tokens_limit_from_error("some other validation error") is None
+
+    def test_empty_message_returns_none(self):
+        assert parse_max_tokens_limit_from_error("") is None
+
+
+@pytest.mark.unit
+class TestModelConfigLimitsBundled:
+    """The limits file is bundled in-package so it resolves at runtime in Lambda.
+
+    Guards against the two failure modes we hit: (1) the file only existing at the
+    repo root (not deployed to Lambda), and (2) the two copies drifting apart.
+    """
+
+    def test_resolves_without_repo_root(self, monkeypatch, tmp_path):
+        """get_model_max_output_tokens works from a cwd with no config_library/."""
+        from idp_common.bedrock import model_utils
+
+        monkeypatch.delenv("IDP_PROJECT_ROOT", raising=False)
+        monkeypatch.chdir(tmp_path)  # no config_library here
+        model_utils._load_model_limits.cache_clear()
+        try:
+            assert get_model_max_output_tokens("us.anthropic.claude-sonnet-5") == 128000
+        finally:
+            model_utils._load_model_limits.cache_clear()
+
+    def test_bundled_copy_matches_repo_root(self):
+        """The in-package copy must stay byte-identical to config_library/."""
+        from pathlib import Path
+
+        import idp_common.bedrock.model_utils as mu
+
+        bundled = (
+            Path(mu.__file__).parent.parent / "config" / "model_config_limits.yaml"
+        )
+        repo_root = (
+            Path(mu.__file__).parent.parent.parent.parent.parent
+            / "config_library"
+            / "model_config_limits.yaml"
+        )
+        assert bundled.exists(), f"bundled limits file missing: {bundled}"
+        # repo_root only exists in the dev tree, not in an installed wheel; only
+        # assert equality when both are present.
+        if repo_root.exists():
+            assert bundled.read_text() == repo_root.read_text(), (
+                "config_library/model_config_limits.yaml and the bundled "
+                "idp_common/config/model_config_limits.yaml have drifted — "
+                "re-copy so they stay identical."
+            )
 
 
 @pytest.mark.unit

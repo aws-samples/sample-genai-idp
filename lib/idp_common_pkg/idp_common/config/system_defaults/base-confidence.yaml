@@ -33,7 +33,9 @@ extraction:
     top_p: "0.0"
     top_k: "5"
     temperature: "0.0"
-    max_tokens: "10000"
+    # max_tokens is not configurable: the confidence pass always requests the
+    # model's maximum output (config_library/model_config_limits.yaml) so long
+    # list assessments are never truncated.
     list_batch_size: "25"
     image:
       target_height: ""

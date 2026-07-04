@@ -16,6 +16,11 @@ ocr:
   
   # Textract features to enable
   # Options: LAYOUT, TABLES, FORMS, SIGNATURES, QUERIES
+  # LAYOUT-only by default (~$0.004/page). Add TABLES for advanced/agentic
+  # extraction of table-heavy documents — it makes Textract emit structured
+  # Table blocks that linearize into markdown pipe-tables for the table parser —
+  # but TABLES+LAYOUT is ~$0.065/page (~16x), so enable it per-config where
+  # tabular extraction is needed rather than globally.
   features:
     - name: LAYOUT
   

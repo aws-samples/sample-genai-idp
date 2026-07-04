@@ -2102,11 +2102,10 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         top_k = self.config.extraction.top_k
         top_p = self.config.extraction.top_p
         reasoning_effort = self.config.extraction.reasoning_effort
-        max_tokens = (
-            self.config.extraction.max_tokens
-            if self.config.extraction.max_tokens
-            else None
-        )
+        # max_tokens is no longer a config knob — pass None so the Bedrock client
+        # resolves the model's maximum output (model_config_limits.yaml). Bedrock's
+        # default-when-omitted truncates, so the client always sets it explicitly.
+        max_tokens = None
 
         # Time the model invocation
         request_start_time = time.time()
