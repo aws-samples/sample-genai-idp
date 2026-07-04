@@ -81,7 +81,7 @@ class TestBedrockClientEmptyContent:
         assert result == ""
 
     def test_extract_text_with_multiple_content_items(self):
-        """Should extract text from first content item."""
+        """Should concatenate text across all text blocks."""
         client = BedrockClient()
         response = {
             "output": {
@@ -95,7 +95,47 @@ class TestBedrockClientEmptyContent:
         }
 
         result = client.extract_text_from_response(response)
-        assert result == "first item"
+        assert result == "first itemsecond item"
+
+    def test_extract_text_skips_leading_reasoning_block(self):
+        """Reasoning models (Claude Sonnet 5 / 4.6+, extended thinking on) emit a
+        reasoningContent block BEFORE the answer text block. The parser must skip
+        the reasoning block and return the text, not content[0] (regression: an
+        empty string caused every extraction/classification to fail)."""
+        client = BedrockClient()
+        response = {
+            "output": {
+                "message": {
+                    "content": [
+                        {
+                            "reasoningContent": {
+                                "reasoningText": {"text": "let me think about this"}
+                            }
+                        },
+                        {"text": '{"result": "ok"}'},
+                    ]
+                }
+            }
+        }
+
+        result = client.extract_text_from_response(response)
+        assert result == '{"result": "ok"}'
+
+    def test_extract_text_reasoning_only_returns_empty(self):
+        """A response with only a reasoning block (no text) returns empty string."""
+        client = BedrockClient()
+        response = {
+            "output": {
+                "message": {
+                    "content": [
+                        {"reasoningContent": {"reasoningText": {"text": "thinking"}}}
+                    ]
+                }
+            }
+        }
+
+        result = client.extract_text_from_response(response)
+        assert result == ""
 
 
 class TestEmptyContentArrayDetection:

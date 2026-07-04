@@ -212,7 +212,14 @@ class SummarizationService:
                 )
                 raise ValueError("Summarization failed: LLM returned empty response")
 
-            summary_text = content[0].get("text", "")
+            # Reasoning models (Claude Sonnet 5 / 4.6+, extended thinking on) emit
+            # one or more `reasoningContent` blocks before the answer `text` block,
+            # so content[0] may not be the text. Concatenate all `text` blocks.
+            summary_text = "".join(
+                item["text"]
+                for item in content
+                if isinstance(item, dict) and isinstance(item.get("text"), str)
+            )
 
             # Try to extract JSON from the response
             try:

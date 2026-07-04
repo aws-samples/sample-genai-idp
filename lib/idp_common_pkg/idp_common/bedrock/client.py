@@ -1427,7 +1427,18 @@ class BedrockClient:
                 extra={"response": response_obj},
             )
             return ""
-        return content[0].get("text", "")
+        # Reasoning models (Claude Sonnet 5 / 4.6+, and any model with extended
+        # thinking on) prepend one or more `reasoningContent` blocks BEFORE the
+        # answer `text` block, so content[0] is often not the text. Concatenate
+        # every `text` block (skipping reasoningContent) so we return the actual
+        # answer regardless of block ordering. Falls back to the old behavior for
+        # single-block responses.
+        text_parts = [
+            item["text"]
+            for item in content
+            if isinstance(item, dict) and isinstance(item.get("text"), str)
+        ]
+        return "".join(text_parts)
 
     def format_prompt(
         self,
