@@ -37,7 +37,12 @@ from strands.types.media import (
     ImageSource,
 )
 
-from idp_common.bedrock.client import CACHEPOINT_SUPPORTED_MODELS, is_claude_4_7_model
+from idp_common.bedrock.client import (
+    CACHEPOINT_SUPPORTED_MODELS,
+    CLAUDE_EFFORT_LEVELS,
+    is_claude_4_7_model,
+    is_claude_effort_model,
+)
 from idp_common.bedrock.model_utils import get_model_max_output_tokens
 from idp_common.bedrock.openai_responses import is_openai_responses_model
 from idp_common.config.models import IDPConfig
@@ -962,6 +967,7 @@ def _build_model_config(
     max_retries: int,
     connect_timeout: float,
     read_timeout: float,
+    reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     """
     Build model configuration with token limits and caching settings.
@@ -1012,6 +1018,18 @@ def _build_model_config(
     if model_id.endswith(":1m"):
         model_id = model_id[:-3]
         additional_request_fields = {"anthropic_beta": ["context-1m-2025-08-07"]}
+
+    # Reasoning effort (output_config.effort) for effort-capable Claude models.
+    # Maps to ConverseStream additionalModelRequestFields, controlling thinking
+    # depth / output-token spend. Verified live: effort measurably changes output
+    # tokens on Sonnet 5. Skipped for models that reject it (Sonnet 4.5 / Haiku).
+    if reasoning_effort and is_claude_effort_model(model_id):
+        effort = str(reasoning_effort).lower().strip()
+        if effort in CLAUDE_EFFORT_LEVELS:
+            if additional_request_fields is None:
+                additional_request_fields = {}
+            additional_request_fields["output_config"] = {"effort": effort}
+            logger.info("Agentic extraction using reasoning effort '%s'", effort)
 
     # Resolve the model's true max output tokens from the single source of truth
     # (config_library/model_config_limits.yaml via get_model_max_output_tokens).
@@ -1812,6 +1830,7 @@ async def structured_output_async(
         max_retries=max_retries,
         connect_timeout=connect_timeout,
         read_timeout=read_timeout,
+        reasoning_effort=config.extraction.reasoning_effort,
     )
 
     # Prepare prompt content

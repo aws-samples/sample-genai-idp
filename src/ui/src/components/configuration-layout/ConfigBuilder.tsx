@@ -44,6 +44,31 @@ function getFieldLabel(key: string, property: { title?: unknown }): string {
   return typeof title === 'string' && title.trim() ? title : humanizeKey(key);
 }
 
+// Whether a model ID exposes a reasoning-effort control. Mirrors the backend
+// gate (idp_common/bedrock/client.py::is_claude_effort_model + the OpenAI
+// Responses path): OpenAI GPT-5.x, and Claude Sonnet 5 / Sonnet 4.6 / Opus
+// 4.5-4.8 / Fable 5 (NOT Sonnet 4.5 or Haiku 4.5). Handles us./eu./global.
+// prefixes, the :1m suffix, and dated/versioned foundation IDs via substring.
+const _CLAUDE_EFFORT_TOKENS = [
+  'claude-sonnet-5',
+  'claude-sonnet-4-6',
+  'claude-opus-4-5',
+  'claude-opus-4-6',
+  'claude-opus-4-7',
+  'claude-opus-4-8',
+  'claude-fable-5',
+];
+function modelSupportsReasoningEffort(modelId: unknown): boolean {
+  if (typeof modelId !== 'string' || !modelId) {
+    return false;
+  }
+  const id = modelId.toLowerCase();
+  if (id.includes('openai.gpt-5')) {
+    return true;
+  }
+  return _CLAUDE_EFFORT_TOKENS.some((t) => id.includes(t));
+}
+
 // Type for schema property definitions used throughout the config builder
 interface SchemaProperty {
   type?: string;
@@ -54,7 +79,17 @@ interface SchemaProperty {
   default?: unknown;
   order?: string | number;
   description?: string;
-  dependsOn?: { field: string; values?: unknown[]; value?: unknown; valuePrefix?: string };
+  dependsOn?: {
+    field: string;
+    values?: unknown[];
+    value?: unknown;
+    valuePrefix?: string;
+    // Show only when the dependency field holds a model ID that supports a
+    // reasoning-effort control (OpenAI GPT-5.x or effort-capable Claude). Used
+    // by the reasoning_effort selector, which applies to more than one model
+    // family and therefore can't be gated by a single valuePrefix.
+    reasoningCapable?: boolean;
+  };
   sectionLabel?: string;
   // For nested sectionLabel objects: auto-expand the collapsible section when a
   // sibling field matches (e.g. expand "Agentic Extraction" when enabled=true).
@@ -844,10 +879,17 @@ const ConfigBuilder = ({
         });
       }
 
-      // Prefix-based dependency: show only when the dependency value starts with
-      // a given string (e.g. show reasoning_effort only for "openai.*" models).
-      const valuePrefix = property.dependsOn.valuePrefix;
-      if (typeof valuePrefix === 'string') {
+      // Capability-based dependency: show only when the dependency model ID
+      // supports a reasoning-effort control (OpenAI GPT-5.x or effort-capable
+      // Claude). Used for reasoning_effort, which spans multiple model families.
+      if (property.dependsOn.reasoningCapable) {
+        if (!modelSupportsReasoningEffort(dependencyValue)) {
+          return null; // Don't render this field
+        }
+      } else if (typeof property.dependsOn.valuePrefix === 'string') {
+        // Prefix-based dependency: show only when the dependency value starts
+        // with a given string.
+        const valuePrefix = property.dependsOn.valuePrefix;
         if (typeof dependencyValue !== 'string' || !dependencyValue.startsWith(valuePrefix)) {
           return null; // Don't render this field
         }
