@@ -1599,7 +1599,14 @@ class ClassificationService:
                         f"Classification failed for page {page_id}: LLM returned empty response"
                     )
 
-                classification_text = content_array[0].get("text", "")
+                # Reasoning models (Claude Sonnet 5 / 4.6+, extended thinking on)
+                # emit reasoningContent block(s) before the answer text block, so
+                # content[0] may not be the text. Concatenate all text blocks.
+                classification_text = "".join(
+                    item["text"]
+                    for item in content_array
+                    if isinstance(item, dict) and isinstance(item.get("text"), str)
+                )
 
                 # Try to extract structured data (JSON or YAML) from the response
                 try:
@@ -2964,7 +2971,14 @@ class ClassificationService:
                     "Holistic classification failed: LLM returned empty response"
                 )
 
-            classification_text = content_array[0].get("text", "")
+            # Reasoning models (Claude Sonnet 5 / 4.6+, extended thinking on) emit
+            # reasoningContent block(s) before the answer text block, so content[0]
+            # may not be the text. Concatenate all text blocks.
+            classification_text = "".join(
+                item["text"]
+                for item in content_array
+                if isinstance(item, dict) and isinstance(item.get("text"), str)
+            )
 
             # Try to extract JSON from the response
             try:
