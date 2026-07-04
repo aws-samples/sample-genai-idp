@@ -12,7 +12,10 @@ assessment refactor could introduce:
      env with idp_common installed.
 
 Run:  python3 notebooks/_validate_notebooks.py
-Exit code is nonzero if any notebook has a hard problem.
+Exit code is nonzero if any notebook has a hard problem. Notebooks in
+KNOWN_DEPRECATED reference removed symbols on purpose (they carry an in-notebook
+deprecation banner); their known failures are reported as warnings, so a clean
+tree exits 0 and only *new* API drift fails the run.
 """
 
 from __future__ import annotations
@@ -25,6 +28,15 @@ import sys
 from pathlib import Path
 
 NB_ROOT = Path(__file__).resolve().parent
+
+# Notebooks intentionally kept for historical reference that still reference
+# removed symbols on purpose (they carry an in-notebook deprecation banner
+# pointing at the supported replacement). Their known failures are demoted to
+# warnings so a clean tree exits 0 and any *new* drift still surfaces as HARD.
+KNOWN_DEPRECATED = {
+    "misc/criteria-validation-test.ipynb",
+    "misc/e2e-holistic-packet-classification-summarization.ipynb",
+}
 
 # --- Patterns that would be HARD failures after the v0.6 refactor -----------
 # Removed Python symbols / modules.
@@ -118,8 +130,13 @@ def main() -> int:
     warnings: list[str] = []
     checked_imports: dict[str, list[str]] = {}
 
+    # Track which import statements come *only* from deprecated notebooks, so a
+    # failure to resolve them is demoted to a warning rather than a HARD.
+    deprecated_only_imports: dict[str, bool] = {}
+
     for nb in notebooks:
         rel = nb.relative_to(NB_ROOT)
+        is_deprecated = rel.as_posix() in KNOWN_DEPRECATED
         for idx, src in iter_code(nb):
             if REMOVED_IMPORT_RE.search(src):
                 # A logger-name STRING or metering-key string is not a hard
@@ -132,18 +149,34 @@ def main() -> int:
                             or re.search(r"['\"][^'\"]*granular_service", ln)
                             or re.search(r"['\"][^'\"]*GranularAssessment", ln)
                         )
-                        tag = "WARN(string-ref)" if is_string_only else "HARD"
+                        if is_string_only:
+                            tag = "WARN(string-ref)"
+                        elif is_deprecated:
+                            tag = "WARN(deprecated-nb)"
+                        else:
+                            tag = "HARD"
                         msg = f"[{tag}] {rel} cell {idx}: {stripped}"
-                        (warnings if is_string_only else hard_failures).append(msg)
+                        bucket = warnings if tag != "HARD" else hard_failures
+                        bucket.append(msg)
             if REMOVED_ATTR_RE.search(src):
                 for ln in src.splitlines():
                     if REMOVED_ATTR_RE.search(ln):
-                        hard_failures.append(
-                            f"[HARD] {rel} cell {idx}: typed .assessment attr "
-                            f"access -> {ln.strip()}"
-                        )
+                        if is_deprecated:
+                            warnings.append(
+                                f"[WARN(deprecated-nb)] {rel} cell {idx}: typed "
+                                f".assessment attr access -> {ln.strip()}"
+                            )
+                        else:
+                            hard_failures.append(
+                                f"[HARD] {rel} cell {idx}: typed .assessment attr "
+                                f"access -> {ln.strip()}"
+                            )
             for stmt in extract_imports(src):
                 checked_imports.setdefault(stmt, []).append(str(rel))
+                # An import stays "deprecated-only" until a non-deprecated
+                # notebook is seen using it.
+                prev = deprecated_only_imports.get(stmt, True)
+                deprecated_only_imports[stmt] = prev and is_deprecated
 
     # Resolve every unique idp_common import once.
     import_errors: list[str] = []
@@ -151,9 +184,18 @@ def main() -> int:
         err = check_import_resolves(stmt)
         if err:
             where = ", ".join(sorted(set(checked_imports[stmt])))
-            import_errors.append(
-                f"[HARD] import fails: {stmt}  -->  {err}\n         used in: {where}"
-            )
+            if deprecated_only_imports.get(stmt, False):
+                # Only deprecated notebooks reference this removed symbol; the
+                # banner in those notebooks documents it. Warn, don't fail.
+                warnings.append(
+                    f"[WARN(deprecated-nb)] import fails: {stmt}  -->  {err}\n"
+                    f"         used only in: {where}"
+                )
+            else:
+                import_errors.append(
+                    f"[HARD] import fails: {stmt}  -->  {err}\n"
+                    f"         used in: {where}"
+                )
 
     print(f"Scanned {len(notebooks)} notebooks; "
           f"{len(checked_imports)} unique idp_common imports.\n")
