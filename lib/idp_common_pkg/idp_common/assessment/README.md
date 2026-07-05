@@ -201,9 +201,14 @@ placeholders for every row — with no signal that anything went wrong.
 The core now detects truncation (`AssessmentCoreResult.truncated`) and the
 batcher recovers automatically: any slice the model truncates is **recursively
 halved and re-assessed** until it parses or bottoms out at a single row —
-instead of accepting the placeholder. This runs in both the initial batch loop
-and the missing-row retry, so it protects the standalone, single-agent, and
-sharded paths alike (all share `assess_results_batched`).
+instead of accepting the placeholder. The recursive splitter
+(`_assess_slice_adaptive`) runs in the initial batch loop and in **every**
+missing-row retry, so it protects all four confidence code paths uniformly:
+the standalone Assessment step (`separate`), the agentic single-agent and
+sharded in-shard passes, and the simple/agentic `integrated` path's inline-row
+retry (`ExtractionService._retry_missing_integrated_rows`). Simple `separate`
+extraction — the granular-assessment replacement — goes through the standalone
+step and is fully covered.
 
 The activity is surfaced for visibility (only when a run actually had to shrink):
 

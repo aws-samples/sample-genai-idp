@@ -2813,15 +2813,23 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         # missing. Best-effort: never fails extraction.
         if self._integrated_assessment_enabled():
             try:
-                merged_assessment, extra_alerts = self._retry_missing_integrated_rows(
-                    merged_assessment=merged_assessment,
-                    extracted_fields=extracted_fields,
-                    section_info=section_info,
+                merged_assessment, extra_alerts, split_stats = (
+                    self._retry_missing_integrated_rows(
+                        merged_assessment=merged_assessment,
+                        extracted_fields=extracted_fields,
+                        section_info=section_info,
+                    )
                 )
                 if extra_alerts:
                     merged_assessment_alerts = list(merged_assessment_alerts) + (
                         extra_alerts
                     )
+                # Surface adaptive batch-splitting activity (only when the
+                # confidence model truncated and batches had to shrink).
+                from idp_common.assessment.batching import split_stats_are_notable
+
+                if split_stats_are_notable(split_stats):
+                    output_metadata["assessment_batch_split_stats"] = split_stats
             except Exception as e:  # noqa: BLE001 - retry is advisory
                 logger.warning("Integrated missing-row retry failed: %s", e)
 
@@ -2863,19 +2871,29 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         merged_assessment: dict[str, Any],
         extracted_fields: dict[str, Any],
         section_info: SectionInfo,
-    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any] | None]:
         """Re-score list rows the integrated extraction inference left unscored.
 
         Integrated confidence rides inline on the extraction call, which can drop
         rows on large tables (leaving null-confidence placeholders after reconcile).
         For each list field with missing rows, run a focused standalone confidence
-        pass (``AssessmentService.assess_results``) over ONLY those rows + the
-        shared section context, then splice the recovered per-row scores back by
-        index. Bounded to 2 rounds; sequential. Returns the updated assessment and
-        any new threshold alerts. Best-effort — a failed retry keeps placeholders.
+        pass over ONLY those rows + the shared section context, then splice the
+        recovered per-row scores back by index. Bounded to 2 rounds; sequential.
+
+        Each retry chunk goes through the shared ``_assess_slice_adaptive`` helper,
+        so a chunk the confidence model TRUNCATES (e.g. Nova Lite over an
+        ``llm``-geometry batch too large for its output cap) is recursively halved
+        and re-assessed until it fits — the same recovery the ``separate`` path
+        gets inside ``assess_results_batched`` — instead of being left unscored.
+
+        Returns ``(merged_assessment, new_alerts, split_stats)`` where
+        ``split_stats`` records any adaptive-splitting activity (None when nothing
+        was retried). Best-effort — a failed retry keeps placeholders.
         """
         from idp_common.assessment.batching import (
+            _assess_slice_adaptive,
             _missing_row_indices,
+            _new_split_stats,
             _row_confidence_missing,
             enrich_assessment_with_thresholds,
             reconcile_assessment_to_data,
@@ -2889,15 +2907,26 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             if isinstance(v, list) and _missing_row_indices(merged_assessment.get(f), v)
         }
         if not targets:
-            return merged_assessment, []
+            return merged_assessment, [], None
 
         assessment_service = AssessmentService(region=self.region, config=self.config)
         default_threshold = self.config.hitl.confidence_threshold
         new_alerts: list[dict[str, Any]] = []
         batch_size = self.config.extraction.confidence.list_batch_size
+        split_stats = _new_split_stats()
+
+        def _one_call(results: dict[str, Any]) -> Any:
+            return assessment_service.assess_results(
+                class_label=section_info.class_label,
+                extraction_results=results,
+                document_text=self._document_text,
+                page_images=self._page_images,
+                ocr_text_confidence="",
+            )
 
         for field, missing in targets.items():
             rows = extracted_fields[field]
+            base_results = {k: v for k, v in extracted_fields.items() if k != field}
             for _round in range(2):
                 if not missing:
                     break
@@ -2910,36 +2939,35 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                 recovered_any = False
                 for start in range(0, len(missing), batch_size):
                     idx_chunk = missing[start : start + batch_size]
-                    retry_input = {field: [rows[i] for i in idx_chunk]}
-                    core = assessment_service.assess_results(
-                        class_label=section_info.class_label,
-                        extraction_results=retry_input,
-                        document_text=self._document_text,
-                        page_images=self._page_images,
-                        ocr_text_confidence="",
+                    sliced = _assess_slice_adaptive(
+                        _one_call,
+                        base_results=base_results,
+                        big_field=field,
+                        rows=[rows[i] for i in idx_chunk],
+                        reconcile=reconcile_assessment_to_data,
+                        stats=split_stats,
                     )
-                    enhanced = reconcile_assessment_to_data(
-                        core.enhanced_assessment, retry_input
-                    )
-                    retry_rows = enhanced.get(field)
-                    if not isinstance(retry_rows, list):
-                        continue
-                    new_alerts.extend(core.confidence_threshold_alerts or [])
+                    retry_rows = sliced["rows"]
+                    new_alerts.extend(sliced["alerts"])
                     for local_i, orig_i in enumerate(idx_chunk):
                         if local_i < len(retry_rows) and not _row_confidence_missing(
                             retry_rows[local_i]
                         ):
                             merged_assessment[field][orig_i] = retry_rows[local_i]
                             recovered_any = True
+                            split_stats["rows_recovered_by_retry"] += 1
                 missing = _missing_row_indices(merged_assessment.get(field), rows)
                 if not recovered_any:
                     break
+            split_stats["unrecoverable_rows"] += len(
+                _missing_row_indices(merged_assessment.get(field), rows)
+            )
 
         # Re-enrich so any spliced-in rows carry confidence_threshold like the rest.
         merged_assessment, _ = enrich_assessment_with_thresholds(
             merged_assessment, self._class_schema, default_threshold
         )
-        return merged_assessment, new_alerts
+        return merged_assessment, new_alerts, split_stats
 
     def _save_results(
         self,
@@ -3116,16 +3144,14 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             section_info,
         )
 
-        # Generate user-friendly processing report
-        processing_report = self._generate_processing_report(metadata)
-        logger.info(f"Processing Report:\n{processing_report}")
-
         # In-shard assessment (integrated-assessment feature): ground the merged
         # per-field assessment in real OCR geometry over the WHOLE section (one
         # pass, identical to the standalone Assessment step) and emit it as
         # explainability_info — the same output contract the standalone path
         # produces, so all downstream consumers (HITL, UI, evaluation) are
-        # unchanged. No-op when in-shard assessment did not run.
+        # unchanged. No-op when in-shard assessment did not run. Runs BEFORE the
+        # processing report so any adaptive batch-splitting it records
+        # (assessment_batch_split_stats) is reflected in the report too.
         if merged_assessment:
             # Align against fields_for_output (what becomes inference_result), so
             # explainability_info[field][i] matches inference_result[field][i]
@@ -3139,6 +3165,10 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                 section=section,
                 section_info=section_info,
             )
+
+        # Generate user-friendly processing report
+        processing_report = self._generate_processing_report(metadata)
+        logger.info(f"Processing Report:\n{processing_report}")
 
         # Write to S3 with processing report
         output: dict[str, Any] = {
