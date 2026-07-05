@@ -245,6 +245,12 @@ results (list rows concatenated in page order; scalars resolved first-non-null).
 This bounds each agent's context — preventing read-timeout / context-overflow
 failures a single huge request would hit — and runs shards in parallel.
 
+> **"Shard," not "chunk."** A *shard* is a non-overlapping page range handed to
+> one concurrent extraction agent — the term carries the distributed-systems
+> sense of *partitioning for parallelism*. It is intentionally distinct from
+> *chunking*, which elsewhere in IDP means overlapping text windows (RAG-style)
+> or sequential list sub-batches; shards do not overlap and run in parallel.
+
 ```yaml
 extraction:
   agentic:
