@@ -1349,7 +1349,7 @@ Resources:
                 type: string
                 enum: ["minimal", "low", "medium", "high", "xhigh", "max"]
                 default: "low"
-                description: "Reasoning effort for reasoning-capable models: OpenAI GPT-5.x (minimal|low|medium|high) and Claude Sonnet 5 / Sonnet 4.6 / Opus 4.5-4.8 / Fable 5 (low|medium|high|xhigh|max). Controls how much the model reasons before answering. Defaults to low: a full effort sweep (5 methods x 4 levels x 2 datasets) showed higher effort adds output-token cost with negligible extraction-accuracy gain. Raise for genuinely reasoning-heavy documents. Ignored by Nova, Sonnet 4.5, and Haiku 4.5."
+                description: "Reasoning effort for reasoning-caa full effort sweep pable models: OpenAI GPT-5.x (minimal|low|medium|high) and Claude Sonnet 5 / Sonnet 4.6 / Opus 4.5-4.8 / Fable 5 (low|medium|high|xhigh|max). Controls how much the model reasons before answering. Defaults to low. Raise for reasoning-heavy documents. Ignored by Nova, Sonnet 4.5, and Haiku 4.5."
                 order: 7
                 dependsOn: { field: "model", reasoningCapable: true }
               temperature:
