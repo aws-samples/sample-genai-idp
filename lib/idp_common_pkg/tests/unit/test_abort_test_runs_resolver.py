@@ -371,3 +371,45 @@ def test_abort_rejects_viewer(mock_env, mock_dynamodb):
     with pytest.raises(PermissionError, match="Admin or Author"):
         index.lambda_handler(event, None)
     assert not mock_dynamodb.update_item.called
+
+
+@pytest.mark.unit
+def test_abort_allows_direct_lambda_invocation(mock_env, mock_dynamodb):
+    """Direct Lambda invocations (no 'identity') bypass Cognito RBAC.
+
+    Internal/automation callers (e.g. the IDP SDK / autotune agent) invoke this
+    resolver directly with a payload that has no 'identity' field. Those callers
+    are gated by IAM (lambda:InvokeFunction), not Cognito groups, so the RBAC
+    check must not reject them.
+    """
+    import importlib.util
+    import os
+    import sys
+
+    spec = importlib.util.spec_from_file_location(
+        "index",
+        os.path.join(
+            os.path.dirname(__file__),
+            "../../../../nested/api-resolvers/src/lambda/abort_test_runs/index.py",
+        ),
+    )
+    index = importlib.util.module_from_spec(spec)
+    sys.modules["index"] = index
+    spec.loader.exec_module(index)
+
+    # Test run in an abortable state so the handler proceeds past auth into abort.
+    mock_dynamodb.get_item.return_value = {
+        "Item": {"Status": "RUNNING", "Files": ["file1.pdf"], "FilesCount": 1}
+    }
+
+    # No 'identity' field -> direct invoke; must NOT raise PermissionError.
+    event = {
+        "info": {"fieldName": "abortTestRuns"},
+        "arguments": {"testRunIds": ["test-run-1"]},
+    }
+    with patch.object(index, "_wait_for_documents_terminal_state"):
+        result = index.lambda_handler(event, None)
+
+    assert result["success"] is True
+    assert result["abortedCount"] == 1
+    assert mock_dynamodb.update_item.called
