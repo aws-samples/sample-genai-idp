@@ -61,6 +61,8 @@ are migrated automatically on read — no manual edit is required.** See the
 
 ### Fixed
 
+- **Evaluation no longer fails a whole document when a `required` field is correctly null.** If an explicit config marked a field `required` (e.g. RealKIE Invoice: `required: [Agency, Advertiser, LineItems]`) and a document genuinely had no value for it, the Stickler/Pydantic model raised `Field required [type=missing]` after null-stripping, producing an `__EVALUATION_FAILURE__` that zero-scored **every** attribute in the section (deflating reported accuracy and inflating failure counts). Evaluation now clears `required` arrays on all objects (matching the auto-generated-schema path), so a missing/null field is scored as a normal miss on that one attribute. Model-agnostic; affected any config with `required` fields.
+
 - **Config v0.6 import/upgrade no longer silently reverts customizations to defaults.** A v0.5-shaped config was deep-merged onto the v0.6 defaults *before* migration ran, so v0.6 default values could beat the user's migrated customizations (e.g. a pinned model or batch size reverted) — silent data loss on in-place stack update and on importing older config files. Both paths now migrate the incoming config to v0.6 *first*, then merge. Regression tests added.
 
 - **Model output-token limits corrected for Claude Sonnet 4.6 / Opus 4.6 (128K, not 64K).** A generic pattern in `model_config_limits.yaml` mis-capped these models at 64,000 output tokens, causing config validation to reject valid `max_tokens` up to their true 128,000 limit. Only Haiku 4.5 and Sonnet/Opus 4.0–4.5 cap at 64K.

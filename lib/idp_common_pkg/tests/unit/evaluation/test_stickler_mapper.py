@@ -395,3 +395,53 @@ class TestUSPatentTableSchema:
         assert "DataType" in tables_items["properties"]
         # TableData should have been removed because its items are free-form objects
         assert "TableData" not in tables_items["properties"]
+
+
+class TestRequiredFieldsClearedForEvaluation:
+    """Explicit-config `required` arrays must be cleared so a correctly-null field
+    is scored as a miss, not a whole-document schema failure.
+
+    Regression: RealKIE Invoice marks `required: [Agency, Advertiser, LineItems]`.
+    A document where Agency is genuinely absent (extracted null) previously crashed
+    the entire doc with 'Field required [type=missing]' -> __EVALUATION_FAILURE__ and
+    a 0 score. All fields must be optional during evaluation.
+    """
+
+    def test_top_level_required_cleared(self):
+        schema = {
+            "$id": "Invoice",
+            "x-aws-idp-document-type": "Invoice",
+            "type": "object",
+            "required": ["Agency", "Advertiser", "LineItems"],
+            "properties": {
+                "Agency": {
+                    "type": "string",
+                    "x-aws-idp-evaluation-method": "LEVENSHTEIN",
+                },
+                "Advertiser": {
+                    "type": "string",
+                    "x-aws-idp-evaluation-method": "FUZZY",
+                },
+                "LineItems": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["LineItemRate"],
+                        "properties": {
+                            "LineItemRate": {
+                                "type": "number",
+                                "x-aws-idp-evaluation-method": "NUMERIC_EXACT",
+                            }
+                        },
+                    },
+                },
+            },
+        }
+        config = SticklerConfigMapper.build_stickler_model_config(schema)
+        result = config["schema"]
+
+        # Top-level required must be emptied (not left as the original 3 fields).
+        assert result.get("required") == []
+        # Nested object inside the list items must also be emptied.
+        nested = result["properties"]["LineItems"]["items"]
+        assert nested.get("required") == []
