@@ -242,6 +242,189 @@ def _missing_row_indices(assessment_list: Any, data_list: Any) -> list[int]:
     return [i for i in range(n) if _row_confidence_missing(assessment_list[i])]
 
 
+def _new_split_stats() -> dict[str, Any]:
+    """Accumulator recording adaptive batch-split activity for visibility.
+
+    Surfaced in extraction/assessment metadata + the processing report so a run
+    that had to shrink its assessment batches (because the model truncated at its
+    max-output-token ceiling) is observable rather than silent.
+    """
+    return {
+        "truncated_calls": 0,  # assessment calls that hit max_tokens
+        "splits": 0,  # times a slice was halved and re-assessed
+        "min_batch_size_used": None,  # smallest row-slice actually assessed
+        "rows_recovered_by_retry": 0,  # unscored rows rescued in the retry phase
+        "unrecoverable_rows": 0,  # rows still unscored after all recovery
+    }
+
+
+def _record_min_batch(stats: dict[str, Any], size: int) -> None:
+    cur = stats.get("min_batch_size_used")
+    stats["min_batch_size_used"] = size if cur is None else min(cur, size)
+
+
+def split_stats_are_notable(stats: dict[str, Any] | None) -> bool:
+    """True when the run actually had to shrink batches (worth surfacing).
+
+    A clean run (no truncation, no splits, no leftover unscored rows) is not
+    notable — callers omit the metadata block entirely in that case to avoid
+    noise.
+    """
+    if not stats:
+        return False
+    return bool(
+        stats.get("truncated_calls")
+        or stats.get("splits")
+        or stats.get("unrecoverable_rows")
+    )
+
+
+def merge_split_stats(
+    a: dict[str, Any] | None, b: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Additively merge two split-stats accumulators (for the sharded path, where
+    each shard produces its own). Counters sum; ``min_batch_size_used`` takes the
+    smaller non-null. Returns None only when both inputs are None."""
+    if not a and not b:
+        return None
+    a = a or _new_split_stats()
+    b = b or _new_split_stats()
+    merged = _new_split_stats()
+    for key in (
+        "truncated_calls",
+        "splits",
+        "rows_recovered_by_retry",
+        "unrecoverable_rows",
+    ):
+        merged[key] = a.get(key, 0) + b.get(key, 0)
+    mins = [
+        v
+        for v in (a.get("min_batch_size_used"), b.get("min_batch_size_used"))
+        if v is not None
+    ]
+    merged["min_batch_size_used"] = min(mins) if mins else None
+    return merged
+
+
+def format_split_stats_report(stats: dict[str, Any] | None) -> str:
+    """Human-readable processing-report block for adaptive batch splitting.
+
+    Returns an empty string when nothing notable happened.
+    """
+    if not split_stats_are_notable(stats):
+        return ""
+    assert stats is not None
+    lines = [
+        "Assessment Batch Splitting (model truncated output):",
+        f"  - Truncated assessment calls: {stats.get('truncated_calls', 0)}",
+        f"  - Batch splits performed: {stats.get('splits', 0)}",
+        f"  - Smallest batch assessed: {stats.get('min_batch_size_used')}",
+        f"  - Rows recovered on retry: {stats.get('rows_recovered_by_retry', 0)}",
+        f"  - Rows still unscored: {stats.get('unrecoverable_rows', 0)}",
+    ]
+    return "\n".join(lines)
+
+
+def _assess_slice_adaptive(
+    one_call,
+    *,
+    base_results: dict[str, Any],
+    big_field: str,
+    rows: list[Any],
+    reconcile,
+    stats: dict[str, Any],
+    min_slice: int = 1,
+) -> dict[str, Any]:
+    """Assess ``rows`` for ``big_field`` and, if the model TRUNCATES the response
+    (``AssessmentCoreResult.truncated``), recursively halve the slice and retry
+    until it parses or the slice reaches ``min_slice`` rows.
+
+    A truncated call yields unparseable JSON → default/placeholder scores for the
+    whole slice, so retrying the *same* size is futile; the output is too big for
+    the model's cap (common with ``geometry.mode: llm``, which adds a bounding box
+    per cell). Halving shrinks the output until it fits. Records activity in
+    ``stats`` for downstream visibility. Sequential (no fan-out), consistent with
+    the batcher's cost model.
+
+    Returns ``{"rows": [per-row assessment...], "scalars": {enhanced non-big
+    fields}, "alerts": [...], "metering": {...}, "duration": float}`` where
+    ``rows`` is index-aligned to the input ``rows``.
+    """
+    slice_results = dict(base_results)
+    slice_results[big_field] = rows
+    core = one_call(slice_results)
+    _record_min_batch(stats, len(rows))
+
+    should_split = (
+        getattr(core, "truncated", False) and len(rows) > min_slice and len(rows) > 1
+    )
+    if getattr(core, "truncated", False):
+        stats["truncated_calls"] += 1
+
+    if not should_split:
+        enhanced = reconcile(core.enhanced_assessment, slice_results)
+        enhanced_rows = (
+            enhanced.get(big_field) if isinstance(enhanced.get(big_field), list) else []
+        )
+        # Pad/truncate to exactly len(rows) so indices stay aligned.
+        enhanced_rows = list(enhanced_rows)[: len(rows)]
+        scalars = {k: v for k, v in enhanced.items() if k != big_field}
+        return {
+            "rows": enhanced_rows,
+            "scalars": scalars,
+            "alerts": list(core.confidence_threshold_alerts or []),
+            "metering": core.metering or {},
+            "duration": core.duration_seconds or 0.0,
+        }
+
+    # Truncated with room to shrink: split in half and recurse.
+    stats["splits"] += 1
+    mid = len(rows) // 2
+    logger.warning(
+        "Assessment truncated for '%s' over %d rows; splitting into %d + %d "
+        "and retrying with smaller batches.",
+        big_field,
+        len(rows),
+        mid,
+        len(rows) - mid,
+    )
+    left = _assess_slice_adaptive(
+        one_call,
+        base_results=base_results,
+        big_field=big_field,
+        rows=rows[:mid],
+        reconcile=reconcile,
+        stats=stats,
+        min_slice=min_slice,
+    )
+    right = _assess_slice_adaptive(
+        one_call,
+        base_results=base_results,
+        big_field=big_field,
+        rows=rows[mid:],
+        reconcile=reconcile,
+        stats=stats,
+        min_slice=min_slice,
+    )
+    # The truncated parent call still consumed real output tokens (and wall
+    # time) before we decided to split — fold its metering/duration in so cost
+    # dashboards reflect the TRUE spend, including the wasted truncated attempt.
+    # (Discarding it would under-report cost by exactly the wasted work this
+    # feature exists to make visible.)
+    merged_metering = utils.merge_metering_data(left["metering"], right["metering"])
+    merged_metering = utils.merge_metering_data(merged_metering, core.metering or {})
+    # Scalars come from the first (left) sub-slice; both carry the same context.
+    return {
+        "rows": left["rows"] + right["rows"],
+        "scalars": left["scalars"] or right["scalars"],
+        "alerts": left["alerts"] + right["alerts"],
+        "metering": merged_metering,
+        "duration": left["duration"]
+        + right["duration"]
+        + (core.duration_seconds or 0.0),
+    }
+
+
 def assess_results_batched(
     assessment_service: Any,
     *,
@@ -272,10 +455,18 @@ def assess_results_batched(
     ``assess_results(class_label, extraction_results, document_text, page_images,
     ocr_text_confidence) -> AssessmentCoreResult``.
 
+    If a batch's response is TRUNCATED at the model's max-output-token ceiling
+    (e.g. ``geometry.mode: llm`` makes per-row output too large for a small-cap
+    model like Nova Lite), that slice is recursively halved and re-assessed until
+    it fits — instead of accepting default 0.5 / null-placeholder scores. This
+    activity is recorded and returned under ``split_stats`` for visibility.
+
     Returns ``{"assessment", "alerts", "metering", "parsing_succeeded",
-    "duration_seconds"}``. Falls back to a single call (still reconciled) when no
-    list field exceeds the batch size.
+    "duration_seconds", "split_stats"}``. Falls back to a single call (still
+    reconciled) when no list field exceeds the batch size.
     """
+    split_stats = _new_split_stats()
+
     # Identify list fields large enough to warrant batching.
     list_fields = {
         k: v
@@ -308,6 +499,8 @@ def assess_results_batched(
         duration_seconds = core.duration_seconds or 0.0
         # Retry missing rows for the largest list (small lists can still drop
         # rows — esp. agentic single-shot cramming values+confidence in one call).
+        if core.truncated:
+            split_stats["truncated_calls"] += 1
         if all_list_fields:
             big = max(all_list_fields, key=lambda k: len(all_list_fields[k]))
             merged_assessment, merged_alerts, merged_metering, dur = (
@@ -320,15 +513,22 @@ def assess_results_batched(
                     merged_metering=merged_metering,
                     batch_size=batch_size,
                     max_retries=max_retries,
+                    split_stats=split_stats,
                 )
             )
             duration_seconds += dur
+            split_stats["unrecoverable_rows"] = len(
+                _missing_row_indices(
+                    merged_assessment.get(big), extraction_results.get(big)
+                )
+            )
         return {
             "assessment": merged_assessment,
             "alerts": merged_alerts,
             "metering": merged_metering,
             "parsing_succeeded": core.parsing_succeeded,
             "duration_seconds": duration_seconds,
+            "split_stats": split_stats,
         }
 
     # Batch by the largest list field; other (smaller) list fields ride the
@@ -344,26 +544,25 @@ def assess_results_batched(
 
     for start in range(0, len(rows), batch_size):
         chunk = rows[start : start + batch_size]
-        # Same scalars/context every batch; only the big list is sliced.
-        batch_results = dict(extraction_results)
-        batch_results[big_field] = chunk
-        core = _one_call(batch_results)
-        enhanced = reconcile_assessment_to_data(core.enhanced_assessment, batch_results)
+        # Same scalars/context every batch; only the big list is sliced. If the
+        # model truncates the chunk's response, _assess_slice_adaptive halves it
+        # and retries until it fits (recording the activity in split_stats).
+        sliced = _assess_slice_adaptive(
+            _one_call,
+            base_results=extraction_results,
+            big_field=big_field,
+            rows=chunk,
+            reconcile=reconcile_assessment_to_data,
+            stats=split_stats,
+        )
         # Accumulate the big list's per-row assessments in order.
-        big_field_acc.extend(
-            enhanced.get(big_field, [])
-            if isinstance(enhanced.get(big_field), list)
-            else []
-        )
-        merged_metering = utils.merge_metering_data(
-            merged_metering, core.metering or {}
-        )
-        merged_alerts.extend(core.confidence_threshold_alerts or [])
-        parsing_succeeded = parsing_succeeded and core.parsing_succeeded
-        duration_seconds += core.duration_seconds or 0.0
+        big_field_acc.extend(sliced["rows"])
+        merged_metering = utils.merge_metering_data(merged_metering, sliced["metering"])
+        merged_alerts.extend(sliced["alerts"])
+        duration_seconds += sliced["duration"]
         # Scalars/other fields: keep the first batch's assessment.
-        if not merged_assessment:
-            merged_assessment = enhanced
+        if not merged_assessment and sliced["scalars"]:
+            merged_assessment = dict(sliced["scalars"])
     merged_assessment[big_field] = big_field_acc
     # Final alignment against the full extraction (pads any residual gap).
     merged_assessment = reconcile_assessment_to_data(
@@ -378,8 +577,14 @@ def assess_results_batched(
         merged_metering=merged_metering,
         batch_size=batch_size,
         max_retries=max_retries,
+        split_stats=split_stats,
     )
     duration_seconds += dur
+
+    # Count rows still unscored after all recovery, for visibility.
+    split_stats["unrecoverable_rows"] = len(
+        _missing_row_indices(merged_assessment.get(big_field), rows)
+    )
 
     return {
         "assessment": merged_assessment,
@@ -387,6 +592,7 @@ def assess_results_batched(
         "metering": merged_metering,
         "parsing_succeeded": parsing_succeeded,
         "duration_seconds": duration_seconds,
+        "split_stats": split_stats,
     }
 
 
@@ -400,15 +606,20 @@ def _retry_missing_rows(
     merged_metering: dict[str, Any],
     batch_size: int,
     max_retries: int,
+    split_stats: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any], float]:
     """Re-assess ONLY the list rows the model left unscored, splicing real scores
     back by index so large-list confidence coverage reaches 100% (not just null
     placeholders). Bounded by ``max_retries`` rounds; sequential (no fan-out); a
     round that recovers nothing stops early. Best-effort — retry failures keep the
-    placeholder. Returns updated (assessment, alerts, metering, added_duration)."""
+    placeholder. Each retry chunk goes through the adaptive splitter, so a chunk
+    the model truncates is halved rather than left unscored. Returns updated
+    (assessment, alerts, metering, added_duration)."""
     rows = extraction_results.get(big_field)
     if not isinstance(rows, list):
         return merged_assessment, merged_alerts, merged_metering, 0.0
+    stats = split_stats if split_stats is not None else _new_split_stats()
+    base_results = {k: v for k, v in extraction_results.items() if k != big_field}
     added_duration = 0.0
     for _round in range(max_retries):
         missing = _missing_row_indices(merged_assessment.get(big_field), rows)
@@ -423,30 +634,31 @@ def _retry_missing_rows(
         recovered_any = False
         for start in range(0, len(missing), batch_size):
             idx_chunk = missing[start : start + batch_size]
-            retry_results = dict(extraction_results)
-            retry_results[big_field] = [rows[i] for i in idx_chunk]
             try:
-                core = one_call(retry_results)
+                sliced = _assess_slice_adaptive(
+                    one_call,
+                    base_results=base_results,
+                    big_field=big_field,
+                    rows=[rows[i] for i in idx_chunk],
+                    reconcile=reconcile_assessment_to_data,
+                    stats=stats,
+                )
             except Exception as e:  # noqa: BLE001 - retry is best-effort
                 logger.warning("Missing-row retry call failed: %s", e)
                 continue
-            enhanced = reconcile_assessment_to_data(
-                core.enhanced_assessment, retry_results
-            )
-            retry_rows = enhanced.get(big_field)
-            if not isinstance(retry_rows, list):
-                continue
+            retry_rows = sliced["rows"]
             merged_metering = utils.merge_metering_data(
-                merged_metering, core.metering or {}
+                merged_metering, sliced["metering"]
             )
-            merged_alerts.extend(core.confidence_threshold_alerts or [])
-            added_duration += core.duration_seconds or 0.0
+            merged_alerts.extend(sliced["alerts"])
+            added_duration += sliced["duration"]
             for local_i, orig_i in enumerate(idx_chunk):
                 if local_i < len(retry_rows) and not _row_confidence_missing(
                     retry_rows[local_i]
                 ):
                     merged_assessment[big_field][orig_i] = retry_rows[local_i]
                     recovered_any = True
+                    stats["rows_recovered_by_retry"] += 1
         if not recovered_any:
             logger.info("Missing-row retry made no progress; stopping retries.")
             break

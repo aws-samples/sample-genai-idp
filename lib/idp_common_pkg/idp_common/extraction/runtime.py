@@ -528,6 +528,7 @@ async def extract_one_shard(
                 shard_assessment = {
                     "assessment": assess_out.get("assessment", {}),
                     "alerts": assess_out.get("alerts", []),
+                    "split_stats": assess_out.get("split_stats"),
                     "page_start": page_start,
                     "page_end": page_end,
                 }
@@ -567,6 +568,8 @@ async def extract_one_shard(
         if shard_assessment is not None:
             persisted["assessment"] = shard_assessment["assessment"]
             persisted["alerts"] = shard_assessment["alerts"]
+            if shard_assessment.get("split_stats"):
+                persisted["split_stats"] = shard_assessment["split_stats"]
         persistence.save(section_id, page_start, page_end, persisted)
 
     if shard_assessment is not None:
@@ -614,6 +617,7 @@ def merge_shard_dicts(
             response["_shard_assessment"] = {
                 "assessment": d.get("assessment"),
                 "alerts": d.get("alerts", []),
+                "split_stats": d.get("split_stats"),
                 "page_start": d.get("page_start", 0),
                 "page_end": d.get("page_end", 0),
             }
@@ -627,6 +631,9 @@ def merge_shard_dicts(
         merged_assessment, merged_alerts = collated
         merged_metering["_merged_assessment"] = merged_assessment
         merged_metering["_merged_assessment_alerts"] = merged_alerts
+        agg_split = _aggregate_shard_split_stats(tuples)
+        if agg_split is not None:
+            merged_metering["_merged_assessment_split_stats"] = agg_split
     return merged_dict, merged_metering, conflicts
 
 
@@ -757,6 +764,23 @@ def collate_shard_assessments(
     return merge_assessment_dicts(shard_assessments, list_fields)
 
 
+def _aggregate_shard_split_stats(
+    results: list[tuple[Any, dict[str, Any]]],
+) -> dict[str, Any] | None:
+    """Sum per-shard assessment ``split_stats`` (adaptive batch-splitting activity)
+    across all shards, for visibility. None when no shard recorded any."""
+    from idp_common.assessment.batching import merge_split_stats
+
+    merged: dict[str, Any] | None = None
+    for _data, resp in results:
+        if not isinstance(resp, dict):
+            continue
+        sa = resp.get("_shard_assessment")
+        if isinstance(sa, dict) and sa.get("split_stats"):
+            merged = merge_split_stats(merged, sa["split_stats"])
+    return merged
+
+
 def _finalize_merge(
     results: list[tuple[BaseModel, dict[str, Any]]],
     data_format: type[BaseModel],
@@ -799,6 +823,9 @@ def _finalize_merge(
         merged_assessment, merged_alerts = collated
         merged_metering["_merged_assessment"] = merged_assessment
         merged_metering["_merged_assessment_alerts"] = merged_alerts
+        agg_split = _aggregate_shard_split_stats(results)
+        if agg_split is not None:
+            merged_metering["_merged_assessment_split_stats"] = agg_split
     return merged_result, response
 
 

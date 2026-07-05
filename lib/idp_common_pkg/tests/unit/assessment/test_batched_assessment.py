@@ -16,7 +16,10 @@ from __future__ import annotations
 import pytest
 from idp_common.assessment.batching import (
     assess_results_batched,
+    format_split_stats_report,
+    merge_split_stats,
     reconcile_assessment_to_data,
+    split_stats_are_notable,
 )
 from idp_common.assessment.service import AssessmentCoreResult
 
@@ -236,3 +239,171 @@ def test_retry_stops_when_no_progress():
     assessed = result["assessment"]["transactions"]
     assert len(assessed) == 5
     assert assessed[-1]["date"]["confidence"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Truncation hardening: a model that hits its max-output-token ceiling returns
+# unparseable JSON (default/placeholder scores) with ``truncated=True``. The
+# batcher must SHRINK the row slice and retry — not accept the placeholders —
+# and record the activity in ``split_stats`` for visibility.
+# --------------------------------------------------------------------------- #
+class TruncateOverNRows(FakeAssessmentService):
+    """Mimics a small-cap model (e.g. Nova Lite) whose per-row output (incl. LLM
+    bounding boxes) overflows the token ceiling once a call carries more than
+    ``max_rows`` rows: it returns ``truncated=True`` with only default 0.5
+    placeholders. Calls with <= ``max_rows`` rows score cleanly."""
+
+    def __init__(self, list_field: str, max_rows: int):
+        super().__init__(list_field)
+        self.max_rows = max_rows
+
+    def assess_results(self, **kw):
+        rows = kw["extraction_results"].get(self.list_field, [])
+        self.calls.append(len(rows))
+        if len(rows) > self.max_rows:
+            return AssessmentCoreResult(
+                enhanced_assessment={
+                    k: {"confidence": 0.5, "confidence_reason": "default"}
+                    for k in kw["extraction_results"]
+                },
+                parsing_succeeded=False,
+                truncated=True,
+                duration_seconds=1.0,
+                metering={"Assessment/bedrock/model": {"outputTokens": 10000}},
+            )
+        enhanced = {
+            self.list_field: [{"amount": {"confidence": 0.9}} for _ in rows],
+            "account_holder": {"confidence": 0.95},
+        }
+        return AssessmentCoreResult(
+            enhanced_assessment=enhanced,
+            parsing_succeeded=True,
+            truncated=False,
+            duration_seconds=1.0,
+            metering={"Assessment/bedrock/model": {"outputTokens": 50}},
+        )
+
+
+def test_truncated_batch_is_split_until_it_fits():
+    """A batch the model truncates is recursively halved until every row is
+    scored — no null/default placeholders survive — and split_stats records it."""
+    svc = TruncateOverNRows("transactions", max_rows=2)
+    data = {"transactions": _rows(5), "account_holder": "Jane Doe"}
+
+    result = assess_results_batched(
+        svc,
+        class_label="bank-statement",
+        extraction_results=data,
+        document_text="...",
+        page_images=[],
+        batch_size=5,  # one batch of 5 -> truncates -> must split down to <=2
+    )
+
+    assessed = result["assessment"]["transactions"]
+    assert len(assessed) == 5
+    # Every row recovered a real confidence via shrinking (no leftover 0.5/null).
+    for row in assessed:
+        assert row["amount"]["confidence"] == 0.9
+
+    stats = result["split_stats"]
+    assert stats["truncated_calls"] >= 1
+    assert stats["splits"] >= 1
+    assert stats["min_batch_size_used"] <= 2
+    assert stats["unrecoverable_rows"] == 0
+    # The smallest successful calls carried <= max_rows rows.
+    assert any(c <= 2 for c in svc.calls)
+
+
+def test_truncated_calls_are_counted_in_metering():
+    """A truncated call still burns output tokens before we split — its metering
+    must be folded in so cost reflects the wasted work, not just the successful
+    sub-slices. The fake emits 10000 output tokens per truncated call and 50 per
+    clean call; total must include the truncated attempts."""
+    svc = TruncateOverNRows("transactions", max_rows=2)
+    data = {"transactions": _rows(5), "account_holder": "Jane Doe"}
+
+    result = assess_results_batched(
+        svc,
+        class_label="bank-statement",
+        extraction_results=data,
+        document_text="...",
+        page_images=[],
+        batch_size=5,
+    )
+
+    truncated = sum(1 for c in svc.calls if c > 2)
+    clean = sum(1 for c in svc.calls if c <= 2)
+    assert truncated >= 1  # at least the initial 5-row call truncated
+    expected = truncated * 10000 + clean * 50
+    got = result["metering"]["Assessment/bedrock/model"]["outputTokens"]
+    assert got == expected, (
+        f"metering must count truncated calls: expected {expected}, got {got}"
+    )
+
+
+def test_truncation_that_never_fits_is_bounded_and_visible():
+    """If even a single row truncates, splitting bottoms out at 1 row without
+    infinite recursion, leaves placeholders, and reports unrecoverable rows."""
+    svc = TruncateOverNRows("transactions", max_rows=0)  # everything truncates
+    data = {"transactions": _rows(3)}
+
+    result = assess_results_batched(
+        svc,
+        class_label="bank-statement",
+        extraction_results=data,
+        document_text="...",
+        page_images=[],
+        batch_size=3,
+        max_retries=1,
+    )
+
+    assessed = result["assessment"]["transactions"]
+    assert len(assessed) == 3  # still aligned, just unscored
+    stats = result["split_stats"]
+    assert stats["truncated_calls"] >= 1
+    assert stats["min_batch_size_used"] == 1  # bottomed out at a single row
+    assert stats["unrecoverable_rows"] == 3
+    assert split_stats_are_notable(stats)
+
+
+def test_clean_run_reports_no_split_stats():
+    """A run with no truncation is not 'notable' — callers omit the metadata."""
+    svc = FakeAssessmentService("transactions")
+    data = {"transactions": _rows(10), "account_holder": "Jane Doe"}
+    result = assess_results_batched(
+        svc,
+        class_label="bank-statement",
+        extraction_results=data,
+        document_text="...",
+        page_images=[],
+        batch_size=25,
+    )
+    assert split_stats_are_notable(result["split_stats"]) is False
+    assert format_split_stats_report(result["split_stats"]) == ""
+
+
+def test_merge_split_stats_sums_across_shards():
+    """Sharded path aggregates per-shard split_stats additively; min takes the
+    smaller non-null batch size."""
+    a = {
+        "truncated_calls": 2,
+        "splits": 1,
+        "min_batch_size_used": 4,
+        "rows_recovered_by_retry": 3,
+        "unrecoverable_rows": 0,
+    }
+    b = {
+        "truncated_calls": 1,
+        "splits": 2,
+        "min_batch_size_used": 2,
+        "rows_recovered_by_retry": 5,
+        "unrecoverable_rows": 1,
+    }
+    merged = merge_split_stats(a, b)
+    assert merged is not None
+    assert merged["truncated_calls"] == 3
+    assert merged["splits"] == 3
+    assert merged["min_batch_size_used"] == 2
+    assert merged["rows_recovered_by_retry"] == 8
+    assert merged["unrecoverable_rows"] == 1
+    assert merge_split_stats(None, None) is None

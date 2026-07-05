@@ -28,9 +28,47 @@ its confidence, and its location together.
 
 ---
 
+## 0. Choosing a configuration (start here)
+
+Two independent choices drive everything below:
+
+1. **Extraction mode** — how values are pulled from the document: **Simple** (one inference) or **Advanced/agentic** (a tool-using agent that can shard, validate, and self-correct).
+2. **Confidence mode** — how per-field confidence + bounding boxes are produced: **`separate`** (a dedicated confidence pass), **`integrated`** (confidence rides on the extraction inference), or **`off`**.
+
+They combine freely. The tables below give pros/cons and a recommendation; the rest of the guide is the detail.
+
+### Extraction mode: Simple vs Advanced
+
+| | **Simple** (non-agentic) — *default* | **Advanced** (agentic) |
+|---|---|---|
+| **How it works** | One Bedrock inference returns the structured result | Strands agent with a structured-output tool; can shard large sections, validate against the schema, and self-correct |
+| **Pros** | Cheapest & fastest; fewest moving parts; works with every model incl. OpenAI GPT-5.x | Highest accuracy on complex/nested schemas; guaranteed schema compliance; deterministic **table parsing** for big tables; **sharding** for long docs; model **escalation** on validation failure |
+| **Cons** | No built-in validation/retry; a single huge document must fit one inference (context-overflow / read-timeout risk); weaker on deeply nested structures | More inferences → higher per-doc cost & latency; requires a tool-use model (no OpenAI GPT-5.x); still in **preview** |
+| **Choose when** | Most documents; small–medium size; simple/flat schemas; lowest cost matters | Complex/nested schemas, strict validation needs, **large documents or big multi-row tables**, business-critical accuracy |
+
+> **Rule of thumb:** start Simple. Move to Advanced when you hit nested-schema accuracy limits, need schema-format validation, or the document is large enough that one inference can't hold it (long tables, 20+ dense pages).
+
+### Confidence mode: separate vs integrated vs off
+
+| | **`separate`** — *default* | **`integrated`** | **`off`** |
+|---|---|---|---|
+| **How it works** | A dedicated confidence inference (Simple: the standalone Assessment step; Advanced: one pass **inside each shard**) | Confidence rides on the extraction inference — no separate pass | No confidence produced |
+| **Inferences added** | +1 (Simple) / +1 per shard (Advanced) | 0 (Simple, single-shot) / 0–1 (Advanced) | 0 |
+| **Pros** | Best-calibrated (a fresh look at finalized values); can use a **cheaper model** than extraction (default Nova Lite); large lists batched reliably | Fewest inferences → lowest confidence cost; one round-trip on the simple path | Zero confidence cost |
+| **Cons** | Extra inference(s) → more cost/latency than `integrated` | On the **Simple** path everything (context + values + all confidence) must fit **one** response → truncation risk on large docs/tables; can't use a separate cheaper model | No confidence → no HITL routing, no UI confidence/threshold signals |
+| **Choose when** | **Default for almost everyone** — the calibration and cheap-model economics usually win | Small documents where one inference comfortably holds values **and** confidence, and you want to minimize round-trips | Confidence genuinely not needed (no HITL, no reliability signal) |
+
+> **Recommended defaults:** **Simple + `separate`** for most workloads; **Advanced + `separate`** for complex or large documents. Reach for `integrated` only on small docs where minimizing inferences matters, and `off` only when you don't consume confidence at all.
+
+> **Large lists & truncation are handled on every path.** Whichever combination you pick, long list fields are assessed in sequential batches (`list_batch_size`), and if the confidence model truncates a batch at its output-token ceiling the batch is **recursively split until it fits** — so you get complete per-cell coverage without tuning. See [Large-list batching](#large-list-batching-list_batch_size). For documents that are large because of a *very large single section* (not just a long list), prefer **Advanced sharding** — see [Large-Document Guidance](#8-large-document-guidance).
+
+---
+
 ## 1. Extraction Configuration
 
-The extraction service supports two modes:
+The extraction service supports two modes (see
+[§0 Choosing a configuration](#0-choosing-a-configuration-start-here) for
+pros/cons and a recommendation):
 
 | Mode | Also called | Default | Best for |
 |---|---|---|---|
@@ -435,7 +473,9 @@ is configured under `extraction.confidence`.
 ### The three confidence modes
 
 `extraction.confidence.mode` controls *where* per-field confidence and bounding
-boxes are produced:
+boxes are produced. For **pros/cons and a recommendation**, see
+[§0 Choosing a configuration](#0-choosing-a-configuration-start-here); the table
+below is the mechanical reference for *where each combination runs*:
 
 | `confidence.mode` | Extraction mode | Where confidence runs | Standalone Assessment step |
 |---|---|---|---|
@@ -561,8 +601,9 @@ extraction:
 For documents with large lists (bank statements with hundreds of transactions,
 line-item tables, brokerage holdings), a single confidence inference over the
 whole section under-enumerates or omits the list, leaving most rows unassessed.
-The standalone Assessment step (Simple + `separate`) **batches large lists
-automatically**:
+**Every confidence path batches large lists automatically** — the standalone
+Assessment step (Simple + `separate`), the in-shard pass (Advanced + `separate`),
+and the inline-confidence retry (`integrated`) all share one implementation:
 
 1. It slices the largest list field into `extraction.confidence.list_batch_size`
    chunks (default **25**).
@@ -571,10 +612,10 @@ automatically**:
    receives its own confidence and (in an OCR-backed geometry mode) its own
    bounding box.
 
-This means Simple extraction with `separate` confidence handles large lists with
-no extra configuration. The one knob is `list_batch_size` — **lower** it if a
-model still struggles to enumerate a full chunk; **raise** it to reduce the
-number of inference calls.
+So large lists are handled with no extra configuration regardless of the
+Simple/Advanced or separate/integrated choice. The one knob is `list_batch_size`
+— **lower** it if a model still struggles to enumerate a full chunk; **raise** it
+to reduce the number of inference calls.
 
 ```yaml
 extraction:
@@ -583,6 +624,21 @@ extraction:
     mode: separate            # separate (default) | integrated | off
     list_batch_size: 25       # rows per assessment batch for large lists
 ```
+
+> **Automatic recovery when the model truncates.** `list_batch_size` is a *row*
+> count, but the model's real limit is its **max output tokens**. When per-row
+> output is large — most notably with `geometry.mode: llm` (a bounding box per
+> cell) — a batch can overflow a small-cap model's ceiling (e.g. Amazon Nova
+> Lite caps at 10,000 output tokens). A truncated response is unparseable, which
+> used to silently assign a default `0.5` to every field and leave list rows
+> unscored. The assessment step now **detects truncation and recursively halves
+> the batch until it fits**, so coverage is preserved automatically. When this
+> happens it is recorded in the section's
+> `metadata.assessment_batch_split_stats` and (for agentic) an
+> `⚠ Assessment Batch Splitting` block in the processing report. If rows are
+> still unscored at a single-row batch, the durable fix is to reduce per-row
+> output — e.g. set `geometry.mode: ocr_only` (the default) so boxes come from
+> OCR value-matching rather than the model.
 
 > **This replaces granular assessment.** The former "granular assessment"
 > service (a separate thread-pool fan-out with DynamoDB caching) has been

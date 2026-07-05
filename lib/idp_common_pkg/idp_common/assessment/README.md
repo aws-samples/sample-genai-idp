@@ -187,6 +187,42 @@ the agentic in-shard assessment path (`ExtractionService`), so there is exactly 
 implementation of large-list assessment. When no list exceeds the batch size the
 helper makes a single (still reconciled) call — identical to the previous behavior.
 
+### Truncation-aware adaptive batch splitting
+
+A configured `list_batch_size` is a *row* count, but the model's real limit is
+its **max output tokens**. When per-row output is large — most notably with
+`extraction.geometry.mode: llm`, which asks the model to emit a bounding box for
+every cell — even a modest batch can exceed a small-cap model's ceiling (e.g.
+Amazon Nova Lite caps at 10,000 output tokens). A truncated response
+(`stopReason == "max_tokens"`) is unparseable JSON, and previously the service
+silently fell back to a default `0.5` for every field / null-confidence
+placeholders for every row — with no signal that anything went wrong.
+
+The core now detects truncation (`AssessmentCoreResult.truncated`) and the
+batcher recovers automatically: any slice the model truncates is **recursively
+halved and re-assessed** until it parses or bottoms out at a single row —
+instead of accepting the placeholder. The recursive splitter
+(`_assess_slice_adaptive`) runs in the initial batch loop and in **every**
+missing-row retry, so it protects all four confidence code paths uniformly:
+the standalone Assessment step (`separate`), the agentic single-agent and
+sharded in-shard passes, and the simple/agentic `integrated` path's inline-row
+retry (`ExtractionService._retry_missing_integrated_rows`). Simple `separate`
+extraction — the granular-assessment replacement — goes through the standalone
+step and is fully covered.
+
+The activity is surfaced for visibility (only when a run actually had to shrink):
+
+- **`metadata.assessment_batch_split_stats`** on the section result — a dict with
+  `truncated_calls`, `splits`, `min_batch_size_used`, `rows_recovered_by_retry`,
+  and `unrecoverable_rows`.
+- An **`⚠ Assessment Batch Splitting`** block in the agentic extraction
+  **processing report**.
+
+If rows remain unscored even at a single-row batch, `unrecoverable_rows` is
+non-zero — the practical fix then is to reduce per-row output, e.g. switch
+`extraction.geometry.mode` from `llm` to `ocr_only` (the default), which derives
+boxes from OCR value-matching instead of the model.
+
 ## Prompt Template Placeholders
 
 The assessment service supports the following placeholders in prompt templates:
