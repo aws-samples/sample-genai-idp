@@ -174,7 +174,12 @@ class _TruncateOverN:
         self.calls: list[int] = []
 
     def assess_results(
-        self, *, class_label, extraction_results, document_text, page_images,
+        self,
+        *,
+        class_label,
+        extraction_results,
+        document_text,
+        page_images,
         ocr_text_confidence="",
     ):
         (field,) = [k for k, v in extraction_results.items() if isinstance(v, list)]
@@ -211,9 +216,7 @@ def test_integrated_retry_splits_on_truncation():
     }
 
     fake = _TruncateOverN(max_rows=2)
-    with patch(
-        "idp_common.assessment.service.AssessmentService", return_value=fake
-    ):
+    with patch("idp_common.assessment.service.AssessmentService", return_value=fake):
         out, alerts, split_stats = svc._retry_missing_integrated_rows(
             merged_assessment=merged,
             extracted_fields=extracted,
@@ -241,9 +244,7 @@ def test_integrated_retry_noop_when_nothing_missing():
     merged = {"Items": [{"rate": {"confidence": 0.95}}]}
 
     fake = _TruncateOverN()
-    with patch(
-        "idp_common.assessment.service.AssessmentService", return_value=fake
-    ):
+    with patch("idp_common.assessment.service.AssessmentService", return_value=fake):
         out, alerts, split_stats = svc._retry_missing_integrated_rows(
             merged_assessment=merged,
             extracted_fields=extracted,
