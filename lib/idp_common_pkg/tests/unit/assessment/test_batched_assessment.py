@@ -314,6 +314,33 @@ def test_truncated_batch_is_split_until_it_fits():
     assert any(c <= 2 for c in svc.calls)
 
 
+def test_truncated_calls_are_counted_in_metering():
+    """A truncated call still burns output tokens before we split — its metering
+    must be folded in so cost reflects the wasted work, not just the successful
+    sub-slices. The fake emits 10000 output tokens per truncated call and 50 per
+    clean call; total must include the truncated attempts."""
+    svc = TruncateOverNRows("transactions", max_rows=2)
+    data = {"transactions": _rows(5), "account_holder": "Jane Doe"}
+
+    result = assess_results_batched(
+        svc,
+        class_label="bank-statement",
+        extraction_results=data,
+        document_text="...",
+        page_images=[],
+        batch_size=5,
+    )
+
+    truncated = sum(1 for c in svc.calls if c > 2)
+    clean = sum(1 for c in svc.calls if c <= 2)
+    assert truncated >= 1  # at least the initial 5-row call truncated
+    expected = truncated * 10000 + clean * 50
+    got = result["metering"]["Assessment/bedrock/model"]["outputTokens"]
+    assert got == expected, (
+        f"metering must count truncated calls: expected {expected}, got {got}"
+    )
+
+
 def test_truncation_that_never_fits_is_bounded_and_visible():
     """If even a single row truncates, splitting bottoms out at 1 row without
     infinite recursion, leaves placeholders, and reports unrecoverable rows."""

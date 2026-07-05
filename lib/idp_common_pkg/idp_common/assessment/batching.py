@@ -406,14 +406,22 @@ def _assess_slice_adaptive(
         stats=stats,
         min_slice=min_slice,
     )
-    # Scalars come from the first (left) sub-slice; both carry the same context.
+    # The truncated parent call still consumed real output tokens (and wall
+    # time) before we decided to split — fold its metering/duration in so cost
+    # dashboards reflect the TRUE spend, including the wasted truncated attempt.
+    # (Discarding it would under-report cost by exactly the wasted work this
+    # feature exists to make visible.)
     merged_metering = utils.merge_metering_data(left["metering"], right["metering"])
+    merged_metering = utils.merge_metering_data(merged_metering, core.metering or {})
+    # Scalars come from the first (left) sub-slice; both carry the same context.
     return {
         "rows": left["rows"] + right["rows"],
         "scalars": left["scalars"] or right["scalars"],
         "alerts": left["alerts"] + right["alerts"],
         "metering": merged_metering,
-        "duration": left["duration"] + right["duration"],
+        "duration": left["duration"]
+        + right["duration"]
+        + (core.duration_seconds or 0.0),
     }
 
 
