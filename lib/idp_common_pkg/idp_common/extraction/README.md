@@ -685,6 +685,17 @@ contains **only that shard's OCR text and images** — not the whole document. T
 shards run concurrently (up to `max_concurrent_batches` at a time) and their
 results are merged. This serves two purposes:
 
+> **Why "shard" and not "chunk"?** A *shard* here is a **non-overlapping page
+> range fanned out to a concurrent extraction agent** — the term is chosen for
+> its distributed-systems connotation of *partition-for-parallelism/scale*,
+> which is exactly this feature's purpose. We deliberately avoid "chunk" because
+> it already denotes several *other*, unrelated concepts elsewhere in the
+> codebase: RAG-style overlapping text windows (`max_chunk_size`,
+> `chunk_overlap_percentage`), sequential assessment list sub-batches
+> (`assessment/batching.py`), rule-validation `chunking_occurred`, and streaming
+> byte reads. Reusing "chunk" for agentic-extraction shards would collide with
+> all of those; "shard" keeps this concept unambiguous.
+
 1. **Bounds the context window.** Because each agent sees only its pages, a long
    or dense section that would overflow a single agent's context (the failure
    mode behind `ContextWindowOverflowException`) is split until each shard fits.
