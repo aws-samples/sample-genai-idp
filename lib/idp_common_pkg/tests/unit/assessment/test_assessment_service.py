@@ -215,6 +215,63 @@ class TestAssessmentService:
         invoice_schema_upper = service._get_class_schema("INVOICE")
         assert invoice_schema_upper.get("x-aws-idp-document-type") == "invoice"
 
+    @patch("idp_common.assessment.service.bedrock.extract_text_from_response")
+    @patch("idp_common.assessment.service.bedrock.invoke_model")
+    @patch("idp_common.image.prepare_image")
+    def test_assess_results_flags_truncation(
+        self, mock_prepare_image, mock_invoke_model, mock_extract_text, service
+    ):
+        """A Converse stopReason of 'max_tokens' marks the core result truncated
+        (so the batcher knows to retry over a smaller slice) and does NOT let the
+        default 0.5 fallback masquerade as a real score."""
+        mock_prepare_image.return_value = b"img"
+        # Truncated response: stopReason=max_tokens + an incomplete JSON body.
+        mock_invoke_model.return_value = {
+            "response": {
+                "stopReason": "max_tokens",
+                "output": {"message": {"content": [{"text": "```json\n{"}]}},
+            },
+            "metering": {"Assessment/bedrock/m": {"outputTokens": 10000}},
+        }
+        mock_extract_text.return_value = "```json\n{"
+
+        core = service.assess_results(
+            class_label="invoice",
+            extraction_results={"invoice_number": "INV-1"},
+            document_text="text",
+            page_images=[b"img"],
+        )
+
+        assert core.truncated is True
+        assert core.parsing_succeeded is False
+
+    @patch("idp_common.assessment.service.bedrock.extract_text_from_response")
+    @patch("idp_common.assessment.service.bedrock.invoke_model")
+    @patch("idp_common.image.prepare_image")
+    def test_assess_results_not_truncated_on_normal_stop(
+        self, mock_prepare_image, mock_invoke_model, mock_extract_text, service
+    ):
+        """A normal (end_turn) response with valid JSON is not flagged truncated."""
+        mock_prepare_image.return_value = b"img"
+        mock_invoke_model.return_value = {
+            "response": {
+                "stopReason": "end_turn",
+                "output": {"message": {"content": [{"text": "{}"}]}},
+            },
+            "metering": {"Assessment/bedrock/m": {"outputTokens": 50}},
+        }
+        mock_extract_text.return_value = '{"invoice_number": {"confidence": 0.9}}'
+
+        core = service.assess_results(
+            class_label="invoice",
+            extraction_results={"invoice_number": "INV-1"},
+            document_text="text",
+            page_images=[b"img"],
+        )
+
+        assert core.truncated is False
+        assert core.parsing_succeeded is True
+
     def test_format_property_descriptions(self, service):
         """Test formatting property descriptions from JSON Schema."""
         # Get invoice schema

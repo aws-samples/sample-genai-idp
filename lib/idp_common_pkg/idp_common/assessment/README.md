@@ -187,6 +187,37 @@ the agentic in-shard assessment path (`ExtractionService`), so there is exactly 
 implementation of large-list assessment. When no list exceeds the batch size the
 helper makes a single (still reconciled) call — identical to the previous behavior.
 
+### Truncation-aware adaptive batch splitting
+
+A configured `list_batch_size` is a *row* count, but the model's real limit is
+its **max output tokens**. When per-row output is large — most notably with
+`extraction.geometry.mode: llm`, which asks the model to emit a bounding box for
+every cell — even a modest batch can exceed a small-cap model's ceiling (e.g.
+Amazon Nova Lite caps at 10,000 output tokens). A truncated response
+(`stopReason == "max_tokens"`) is unparseable JSON, and previously the service
+silently fell back to a default `0.5` for every field / null-confidence
+placeholders for every row — with no signal that anything went wrong.
+
+The core now detects truncation (`AssessmentCoreResult.truncated`) and the
+batcher recovers automatically: any slice the model truncates is **recursively
+halved and re-assessed** until it parses or bottoms out at a single row —
+instead of accepting the placeholder. This runs in both the initial batch loop
+and the missing-row retry, so it protects the standalone, single-agent, and
+sharded paths alike (all share `assess_results_batched`).
+
+The activity is surfaced for visibility (only when a run actually had to shrink):
+
+- **`metadata.assessment_batch_split_stats`** on the section result — a dict with
+  `truncated_calls`, `splits`, `min_batch_size_used`, `rows_recovered_by_retry`,
+  and `unrecoverable_rows`.
+- An **`⚠ Assessment Batch Splitting`** block in the agentic extraction
+  **processing report**.
+
+If rows remain unscored even at a single-row batch, `unrecoverable_rows` is
+non-zero — the practical fix then is to reduce per-row output, e.g. switch
+`extraction.geometry.mode` from `llm` to `ocr_only` (the default), which derives
+boxes from OCR value-matching instead of the model.
+
 ## Prompt Template Placeholders
 
 The assessment service supports the following placeholders in prompt templates:

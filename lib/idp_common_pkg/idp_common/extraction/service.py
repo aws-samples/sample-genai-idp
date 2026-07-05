@@ -1733,6 +1733,16 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     report_lines.append(f"    {w}")
                 report_lines.append("")
 
+        # Assessment batch-splitting (only present when the confidence model
+        # truncated its output and batches had to shrink to recover coverage).
+        if "assessment_batch_split_stats" in metadata:
+            from idp_common.assessment.batching import format_split_stats_report
+
+            block = format_split_stats_report(metadata["assessment_batch_split_stats"])
+            if block:
+                report_lines.append("⚠ " + block)
+                report_lines.append("")
+
         report_lines.append("=" * 40)
 
         return "\n".join(report_lines)
@@ -2962,6 +2972,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         shard_conflicts = None
         merged_assessment = None
         merged_assessment_alerts = None
+        assessment_split_stats = None
         if extraction_method == "agentic" and result.metering:
             table_stats = result.metering.pop("_table_parsing_stats", None)
             tool_used = table_stats is not None
@@ -2975,6 +2986,12 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             merged_assessment = result.metering.pop("_merged_assessment", None)
             merged_assessment_alerts = result.metering.pop(
                 "_merged_assessment_alerts", None
+            )
+            # Adaptive batch-splitting activity from the in-shard assessment
+            # (present only when the confidence model truncated its output and
+            # batches had to shrink). Popped so it doesn't leak into metering.
+            assessment_split_stats = result.metering.pop(
+                "_merged_assessment_split_stats", None
             )
         elif result.metering and self._integrated_assessment_enabled():
             # Non-agentic INTEGRATED confidence: the extraction inference emitted
@@ -3067,6 +3084,13 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             and self.config.extraction.agentic.table_parsing.enabled
         ):
             metadata["table_parsing_tool_used"] = False
+
+        # Surface adaptive assessment batch-splitting activity (only when the
+        # confidence model truncated output and batches had to shrink).
+        from idp_common.assessment.batching import split_stats_are_notable
+
+        if split_stats_are_notable(assessment_split_stats):
+            metadata["assessment_batch_split_stats"] = assessment_split_stats
 
         # Add truncation/repair metadata when relevant
         if result.output_truncated:
@@ -3495,6 +3519,8 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             )
             metering["_merged_assessment"] = batched["assessment"]
             metering["_merged_assessment_alerts"] = batched["alerts"]
+            if batched.get("split_stats"):
+                metering["_merged_assessment_split_stats"] = batched["split_stats"]
             _accumulate_metering(metering, batched["metering"])
         except Exception as e:  # noqa: BLE001 - assessment is advisory
             logger.warning(

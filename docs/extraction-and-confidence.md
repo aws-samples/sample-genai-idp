@@ -584,6 +584,21 @@ extraction:
     list_batch_size: 25       # rows per assessment batch for large lists
 ```
 
+> **Automatic recovery when the model truncates.** `list_batch_size` is a *row*
+> count, but the model's real limit is its **max output tokens**. When per-row
+> output is large — most notably with `geometry.mode: llm` (a bounding box per
+> cell) — a batch can overflow a small-cap model's ceiling (e.g. Amazon Nova
+> Lite caps at 10,000 output tokens). A truncated response is unparseable, which
+> used to silently assign a default `0.5` to every field and leave list rows
+> unscored. The assessment step now **detects truncation and recursively halves
+> the batch until it fits**, so coverage is preserved automatically. When this
+> happens it is recorded in the section's
+> `metadata.assessment_batch_split_stats` and (for agentic) an
+> `⚠ Assessment Batch Splitting` block in the processing report. If rows are
+> still unscored at a single-row batch, the durable fix is to reduce per-row
+> output — e.g. set `geometry.mode: ocr_only` (the default) so boxes come from
+> OCR value-matching rather than the model.
+
 > **This replaces granular assessment.** The former "granular assessment"
 > service (a separate thread-pool fan-out with DynamoDB caching) has been
 > **retired and deleted**. Large-list batching is its full replacement: complete
