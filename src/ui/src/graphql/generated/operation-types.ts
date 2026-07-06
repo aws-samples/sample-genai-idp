@@ -1318,6 +1318,7 @@ export type QueryListBucketFilesArgs = {
 export type QueryListChatSessionsArgs = {
   limit?: InputMaybe<Scalars['Int']['input']>;
   nextToken?: InputMaybe<Scalars['String']['input']>;
+  surface?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -2221,6 +2222,7 @@ export type ListBucketFilesQuery = { listBucketFiles?: Array<string | null> | nu
 export type ListChatSessionsQueryVariables = Exact<{
   limit?: InputMaybe<Scalars['Int']['input']>;
   nextToken?: InputMaybe<Scalars['String']['input']>;
+  surface?: InputMaybe<Scalars['String']['input']>;
 }>;
 
 

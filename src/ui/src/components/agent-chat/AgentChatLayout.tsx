@@ -673,6 +673,7 @@ const AgentChatLayout = ({
                 onSessionSelect={handleSessionSelect}
                 onSessionDeleted={handleSessionDeleted}
                 disabled={waitingForResponse || isLoadingSession}
+                surface={mode === 'quick_start' ? 'quick_start' : 'chat'}
               />
             </Box>
             {messages.length > 0 && (

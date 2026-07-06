@@ -666,8 +666,8 @@ export const listBucketFiles = /* GraphQL */ `
 ` as GeneratedQuery<ListBucketFilesQueryVariables, ListBucketFilesQuery>;
 
 export const listChatSessions = /* GraphQL */ `
-  query ListChatSessions($limit: Int, $nextToken: String) {
-    listChatSessions(limit: $limit, nextToken: $nextToken) {
+  query ListChatSessions($limit: Int, $nextToken: String, $surface: String) {
+    listChatSessions(limit: $limit, nextToken: $nextToken, surface: $surface) {
       items {
         sessionId
         title

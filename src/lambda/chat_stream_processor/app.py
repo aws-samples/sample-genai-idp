@@ -169,6 +169,7 @@ async def chat_document(request: Request) -> StreamingResponse:
 async def chat_agent(request: Request) -> StreamingResponse:
     body = await request.json()
     session_id = str(body.get("sessionId") or "")
+    caller_sub = str(body.get("callerSub") or "") or _caller_sub(request)
 
     q: "queue.Queue" = queue.Queue()
 
@@ -205,6 +206,7 @@ async def chat_agent(request: Request) -> StreamingResponse:
                     "enableCodeIntelligence": bool(
                         body.get("enableCodeIntelligence", True)
                     ),
+                    "callerSub": caller_sub,
                     "timestamp": now_iso(),
                 },
                 None,
