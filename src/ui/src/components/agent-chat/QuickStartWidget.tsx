@@ -48,7 +48,6 @@ interface Size {
 
 const PIN_KEY = 'idp-qs-widget-pin';
 const SIZE_KEY = 'idp-qs-widget-size';
-const OPENED_KEY = 'idp-qs-widget-opened';
 
 const loadSize = (): Size | null => {
   try {
@@ -78,14 +77,6 @@ const savePin = (key: string, pin: Pin): void => {
   }
 };
 
-const hasOpenedBefore = (): boolean => {
-  try {
-    return localStorage.getItem(OPENED_KEY) === 'true';
-  } catch {
-    return false;
-  }
-};
-
 const toPin = (x: number, y: number, w: number, h: number): Pin => {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
@@ -112,7 +103,6 @@ const QuickStartWidget = (): React.JSX.Element | null => {
   const location = useLocation();
   const [view, setView] = useState<View>('closed');
   const [mounted, setMounted] = useState(false);
-  const [initialMode, setInitialMode] = useState<'chat' | 'quick_start'>('quick_start');
 
   const [pin, setPin] = useState<Pin>(() => loadPin(PIN_KEY) ?? DEFAULT_PIN);
   const [dragPos, setDragPos] = useState<AbsPos | null>(null);
@@ -133,24 +123,15 @@ const QuickStartWidget = (): React.JSX.Element | null => {
   const suppressNextClick = useRef(false);
   const resizeState = useRef<{ startX: number; startY: number; startW: number; startH: number; signX: number; signY: number } | null>(null);
 
-  const doOpen = useCallback(
-    (mode: 'chat' | 'quick_start') => {
-      if (!mounted) {
-        setInitialMode(hasOpenedBefore() ? mode : 'quick_start');
-        try {
-          localStorage.setItem(OPENED_KEY, 'true');
-        } catch {
-          /* ignore */
-        }
-        setMounted(true);
-      }
-      setView('open');
-    },
-    [mounted],
-  );
+  const doOpen = useCallback(() => {
+    if (!mounted) {
+      setMounted(true);
+    }
+    setView('open');
+  }, [mounted]);
 
   useEffect(() => {
-    const handleOpen = () => doOpen('quick_start');
+    const handleOpen = () => doOpen();
     window.addEventListener('openQuickStart', handleOpen);
     return () => window.removeEventListener('openQuickStart', handleOpen);
   }, [doOpen]);
@@ -260,7 +241,7 @@ const QuickStartWidget = (): React.JSX.Element | null => {
       suppressNextClick.current = false;
       return;
     }
-    doOpen('chat');
+    doOpen();
   }, [doOpen]);
 
   if (!isWidgetEnabled() || location.pathname === WELCOME_PATH) {
@@ -300,7 +281,7 @@ const QuickStartWidget = (): React.JSX.Element | null => {
       </div>
       <div ref={panelRef} className="quick-start-widget-panel" role="dialog" aria-label="Assistant" style={panelStyle}>
         {mounted && (
-          <AgentChatProvider initialMode={initialMode}>
+          <AgentChatProvider initialMode="quick_start">
             <div className="quick-start-widget-header" onPointerDown={startDrag('panel', panelRef)}>
               <WidgetHeaderTitle />
               <span className="quick-start-widget-header-actions">

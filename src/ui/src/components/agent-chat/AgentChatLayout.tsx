@@ -17,7 +17,6 @@ import {
   FileTokenGroup,
   StatusIndicator,
   Link,
-  SegmentedControl,
 } from '@cloudscape-design/components';
 import { DISCOVERY_JOB_PATH } from '../../routes/constants';
 import { SupportPromptGroup, LoadingBar } from '@cloudscape-design/chat-components';
@@ -36,7 +35,7 @@ import AgentToolComponent from './AgentToolComponent';
 import BedrockErrorMessage from './BedrockErrorMessage';
 import './AgentChatLayout.css';
 
-import type { ChatMessage, ChatMode } from '../../types/agent-chat';
+import type { ChatMessage } from '../../types/agent-chat';
 
 interface AgentConfig {
   agentType?: string;
@@ -52,7 +51,6 @@ interface AgentChatLayoutProps {
   className?: string;
   showHeader?: boolean;
   customStyles?: React.CSSProperties;
-  showModeSelector?: boolean;
   welcomeName?: string;
 }
 
@@ -63,7 +61,6 @@ const AgentChatLayout = ({
   className = '',
   showHeader = true,
   customStyles = {},
-  showModeSelector = true,
   welcomeName,
 }: AgentChatLayoutProps): React.JSX.Element => {
   const [welcomeAnimated, setWelcomeAnimated] = useState(false);
@@ -238,15 +235,6 @@ const AgentChatLayout = ({
   const handleInputChange = (event: { detail: { value: string } }) => {
     updateAgentChatState({ inputValue: event.detail.value });
   };
-
-  const handleModeChange = useCallback(
-    (nextMode: ChatMode) => {
-      if (nextMode !== mode) {
-        updateAgentChatState({ mode: nextMode });
-      }
-    },
-    [mode, updateAgentChatState],
-  );
 
   const effectiveTitle = title ?? (mode === 'quick_start' ? 'Quick Start' : 'IDP Agent Companion Chat');
   const effectivePlaceholder =
@@ -685,17 +673,6 @@ const AgentChatLayout = ({
             </SpaceBetween>
           </Box>
           <SpaceBetween direction="horizontal" size="s" alignItems="center">
-            {showModeSelector && (
-              <SegmentedControl
-                selectedId={mode}
-                onChange={({ detail }) => handleModeChange(detail.selectedId as ChatMode)}
-                label="Chat mode"
-                options={[
-                  { id: 'chat', text: 'Companion' },
-                  { id: 'quick_start', text: 'Quick Start' },
-                ]}
-              />
-            )}
             <Box {...({ flex: '1' } as Record<string, unknown>)}>
               <AgentChatHistoryDropdown
                 onSessionSelect={handleSessionSelect}
