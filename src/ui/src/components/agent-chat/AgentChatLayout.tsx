@@ -18,6 +18,7 @@ import {
   StatusIndicator,
   Link,
 } from '@cloudscape-design/components';
+import { ConsoleLogger } from 'aws-amplify/utils';
 import { DISCOVERY_JOB_PATH } from '../../routes/constants';
 import { SupportPromptGroup, LoadingBar } from '@cloudscape-design/chat-components';
 import SafeMarkdown from '../common/SafeMarkdown';
@@ -36,6 +37,8 @@ import BedrockErrorMessage from './BedrockErrorMessage';
 import './AgentChatLayout.css';
 
 import type { ChatMessage } from '../../types/agent-chat';
+
+const logger = new ConsoleLogger('AgentChatLayout');
 
 interface AgentConfig {
   agentType?: string;
@@ -109,7 +112,7 @@ const AgentChatLayout = ({
       if (result.configVersion === 'quickstart' && !versions.some((v) => v.versionName === 'quickstart' && v.isActive)) {
         setActiveVersion('quickstart')
           .then(() => fetchVersions())
-          .catch((e) => console.error('Failed to activate quickstart version:', e));
+          .catch((e) => logger.error('Failed to activate quickstart version:', e));
       }
       sendMessage(summary, { enableCodeIntelligence });
     },
@@ -149,20 +152,12 @@ const AgentChatLayout = ({
       updateAgentChatState({ inputValue: query });
     };
 
-    const handleOpenQuickStart = () => {
-      if (mode !== 'quick_start') {
-        updateAgentChatState({ mode: 'quick_start' });
-      }
-    };
-
     window.addEventListener('insertSampleQuery', handleSampleQueryInsert as EventListener);
-    window.addEventListener('openQuickStart', handleOpenQuickStart as EventListener);
 
     return () => {
       window.removeEventListener('insertSampleQuery', handleSampleQueryInsert as EventListener);
-      window.removeEventListener('openQuickStart', handleOpenQuickStart as EventListener);
     };
-  }, [updateAgentChatState, mode]);
+  }, [updateAgentChatState]);
 
   // Track new messages and scroll to new assistant messages (but not while streaming)
   useEffect(() => {

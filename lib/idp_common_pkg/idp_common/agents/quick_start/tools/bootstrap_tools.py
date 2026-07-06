@@ -122,13 +122,21 @@ def _generation_queue_url() -> Optional[str]:
 
 
 def _queue_url_from_arn(arn: str) -> Optional[str]:
-    """arn:aws:sqs:<region>:<account>:<name> -> https SQS queue URL."""
+    """arn:<partition>:sqs:<region>:<account>:<name> -> https SQS queue URL.
+
+    Derives the endpoint from the boto3 client so the URL suffix is
+    partition-aware (amazonaws.com, amazonaws.com.cn, GovCloud) rather than
+    hardcoded.
+    """
+    import boto3
+
     parts = arn.split(":")
     if len(parts) != 6 or parts[2] != "sqs":
         logger.warning("Unrecognized SQS ARN: %s", arn)
         return None
     _, _, _, region, account, name = parts
-    return f"https://sqs.{region}.amazonaws.com/{account}/{name}"
+    endpoint = boto3.client("sqs", region_name=region).meta.endpoint_url
+    return f"{endpoint}/{account}/{name}"
 
 
 def _enqueue_generation(queue_url: str, message: dict) -> None:
