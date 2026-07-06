@@ -118,12 +118,8 @@ const inertSubscription = (field: string) => ({
   },
 });
 
-const doGraphql = async ({ query, variables }: GraphqlRequest): Promise<GraphqlResult> => {
-  const { kind, field, argMap } = parseOperation(query);
-
-  if (kind === 'subscription') {
-    return inertSubscription(field) as unknown as GraphqlResult;
-  }
+const doGraphqlRequest = async ({ query, variables }: GraphqlRequest): Promise<GraphqlResult> => {
+  const { field, argMap } = parseOperation(query);
 
   if (!apiBaseUrl) {
     throw new Error('restClient: VITE_API_BASE_URL is not configured');
@@ -169,6 +165,20 @@ const doGraphql = async ({ query, variables }: GraphqlRequest): Promise<GraphqlR
 
   // Success: wrap under the field name to match Amplify's res.data.<field>.
   return { data: { [field]: body } };
+};
+
+// Synchronous dispatcher. Amplify's client.graphql() returns an Observable
+// (with .subscribe()) *synchronously* for subscription ops and a Promise for
+// queries/mutations. Subscription call sites do `client.graphql(...).subscribe(...)`
+// with no await, so we MUST return the inert subscription synchronously here —
+// returning a Promise (e.g. from an async function) would make `.subscribe`
+// undefined and throw "subscribe is not a function", crashing the page render.
+const doGraphql = (req: GraphqlRequest): Promise<GraphqlResult> | ReturnType<typeof inertSubscription> => {
+  const { kind, field } = parseOperation(req.query);
+  if (kind === 'subscription') {
+    return inertSubscription(field);
+  }
+  return doGraphqlRequest(req);
 };
 
 // Brand types emitted by the codegen for each operation. We extract the result

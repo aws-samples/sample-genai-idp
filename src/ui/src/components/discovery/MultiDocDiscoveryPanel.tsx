@@ -15,7 +15,7 @@
  * discovers document types, generates JSON Schemas, and saves to config.
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Button,
   Container,
@@ -43,13 +43,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { generateClient } from '../../api/client-shim';
 
-import {
-  startMultiDocDiscovery,
-  uploadMultiDocDiscoveryZip,
-  listDiscoveryJobs,
-  onDiscoveryJobStatusChange,
-  deleteDiscoveryJob,
-} from '../../graphql/generated';
+import { startMultiDocDiscovery, uploadMultiDocDiscoveryZip, listDiscoveryJobs, deleteDiscoveryJob } from '../../graphql/generated';
 import { useNavigate } from 'react-router-dom';
 import { DISCOVERY_JOB_PATH } from '../../routes/constants';
 import useSettingsContext from '../../contexts/settings';
@@ -189,57 +183,13 @@ const MultiDocDiscoveryPanel = () => {
     visibleContent: ['source', 'status', 'currentStep', 'totalDocuments', 'clustersFound', 'version', 'createdAt', 'duration', 'result'],
   });
 
-  // Subscriptions
-  const subscriptionsRef = useRef<Map<string, { unsubscribe: () => void }>>(new Map());
   // Timer for elapsed time
   const [, setTick] = useState(0);
 
-  // Load jobs on mount
-  useEffect(() => {
-    loadJobs();
-    // Tick timer for live elapsed time
-    const timer = setInterval(() => setTick((t) => t + 1), 5000);
-    return () => {
-      clearInterval(timer);
-      // Clean up subscriptions
-      subscriptionsRef.current.forEach((sub) => sub.unsubscribe());
-    };
-  }, []);
-
-  // Set up subscriptions for active jobs
-  useEffect(() => {
-    const activeJobs = jobs.filter((j) => !['COMPLETED', 'FAILED'].includes(j.status));
-    activeJobs.forEach((job) => {
-      if (!subscriptionsRef.current.has(job.jobId)) {
-        try {
-          const observable = client.graphql({
-            query: onDiscoveryJobStatusChange,
-            variables: { jobId: job.jobId },
-          });
-          const sub = (observable as any).subscribe({
-            next: ({ data }: any) => {
-              const update = data?.onDiscoveryJobStatusChange;
-              if (update) {
-                setJobs((prev) => prev.map((j) => (j.jobId === update.jobId ? { ...j, ...update } : j)));
-                // Clean up subscription if terminal
-                if (['COMPLETED', 'FAILED'].includes(update.status)) {
-                  subscriptionsRef.current.get(update.jobId)?.unsubscribe();
-                  subscriptionsRef.current.delete(update.jobId);
-                }
-              }
-            },
-            error: (err: any) => console.error('Subscription error:', err),
-          });
-          subscriptionsRef.current.set(job.jobId, sub);
-        } catch (err) {
-          console.error('Failed to subscribe:', err);
-        }
-      }
-    });
-  }, [jobs]);
-
-  const loadJobs = useCallback(async () => {
-    setLoading(true);
+  // `silent` skips the loading spinner so the status poll doesn't flicker the
+  // table on every tick.
+  const loadJobs = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const response = await client.graphql({ query: listDiscoveryJobs });
       const allJobs = (response as any)?.data?.listDiscoveryJobs?.DiscoveryJobs || [];
@@ -248,11 +198,30 @@ const MultiDocDiscoveryPanel = () => {
       setJobs(multiDocJobs);
     } catch (err: any) {
       console.error('Failed to load jobs:', err);
-      setError('Failed to load discovery jobs');
+      if (!silent) setError('Failed to load discovery jobs');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
+
+  // Load jobs on mount
+  useEffect(() => {
+    loadJobs();
+  }, [loadJobs]);
+
+  // Poll for status updates + refresh the elapsed-time display while any job is
+  // active. Real-time GraphQL subscriptions were removed with AppSync (the REST
+  // transport has no push channel), so polling is the only way active jobs
+  // advance past PENDING here.
+  useEffect(() => {
+    const hasActiveJobs = jobs.some((j) => !['COMPLETED', 'FAILED'].includes(j.status));
+    if (!hasActiveJobs) return;
+    const timer = setInterval(() => {
+      setTick((t) => t + 1);
+      loadJobs(true);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [jobs, loadJobs]);
 
   const handleStartDiscovery = async () => {
     if (!selectedVersion) {
@@ -915,7 +884,7 @@ const MultiDocDiscoveryPanel = () => {
                   options={TIME_RANGE_OPTIONS}
                   triggerVariant="option"
                 />
-                <Button iconName="refresh" variant="icon" onClick={loadJobs} loading={loading} ariaLabel="Refresh discovery jobs" />
+                <Button iconName="refresh" variant="icon" onClick={() => loadJobs()} loading={loading} ariaLabel="Refresh discovery jobs" />
                 <Button
                   iconName="remove"
                   variant="icon"
