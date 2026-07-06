@@ -2177,6 +2177,8 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref ChatMessagesTable
         - DynamoDBCrudPolicy:
+            TableName: !Ref ChatSessionsTable
+        - DynamoDBCrudPolicy:
             TableName: !Ref IdHelperChatMemoryTable
         - DynamoDBReadPolicy:
             TableName: !Ref ConfigurationTable
@@ -7022,6 +7024,7 @@ Resources:
           STRANDS_LOG_LEVEL: !Ref LogLevel
           BEDROCK_REGION: !Ref AWS::Region
           CHAT_MESSAGES_TABLE: !Ref ChatMessagesTable
+          CHAT_SESSIONS_TABLE: !Ref ChatSessionsTable
           ID_HELPER_CHAT_MEMORY_TABLE: !Ref IdHelperChatMemoryTable
           MEMORY_METHOD: dynamodb
           STREAMING_ENABLED: true
@@ -7073,6 +7076,8 @@ Resources:
               Resource: !GetAtt CustomerManagedEncryptionKey.Arn
         - DynamoDBCrudPolicy:
             TableName: !Ref ChatMessagesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ChatSessionsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdHelperChatMemoryTable
         - DynamoDBCrudPolicy:
@@ -7308,6 +7313,7 @@ Resources:
           STRANDS_LOG_LEVEL: !Ref LogLevel
           BEDROCK_REGION: !Ref AWS::Region
           CHAT_MESSAGES_TABLE: !Ref ChatMessagesTable
+          CHAT_SESSIONS_TABLE: !Ref ChatSessionsTable
           ID_HELPER_CHAT_MEMORY_TABLE: !Ref IdHelperChatMemoryTable
           MEMORY_METHOD: dynamodb
           STREAMING_ENABLED: true
@@ -7345,6 +7351,8 @@ Resources:
             TableName: !Ref TrackingTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ChatMessagesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ChatSessionsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdHelperChatMemoryTable
         - Statement:

@@ -1075,7 +1075,7 @@ type Query @aws_cognito_user_pools @aws_iam {
   # and session scoping (users only see their own sessions).
   listAvailableAgents: [Agent] @aws_cognito_user_pools @aws_iam
   getAgentChatMessages(sessionId: ID!): [AgentChatMessage] @aws_cognito_user_pools @aws_iam
-  listChatSessions(limit: Int, nextToken: String): ChatSessionConnection @aws_cognito_user_pools @aws_iam
+  listChatSessions(limit: Int, nextToken: String, surface: String): ChatSessionConnection @aws_cognito_user_pools @aws_iam
   getChatMessages(sessionId: ID!): [AgentChatMessage] @aws_cognito_user_pools @aws_iam
 
   # Knowledge base query
