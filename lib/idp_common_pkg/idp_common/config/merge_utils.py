@@ -624,12 +624,6 @@ def validate_config(
             "No document classes defined - you must add at least one class"
         )
 
-    assessment = merged.get("assessment", {})
-    if assessment.get("granular", {}).get("enabled") and not assessment.get("enabled"):
-        result["warnings"].append(
-            "assessment.granular.enabled=true but assessment.enabled=false - granular assessment won't run"
-        )
-
     # Enhanced validation checks
     _validate_model_ids(merged, result)
     _validate_max_tokens(merged, result)
@@ -1140,11 +1134,12 @@ def _validate_max_tokens(merged_config: Dict[str, Any], result: Dict[str, Any]) 
     This prevents runtime failures when the Bedrock API rejects requests
     with max_tokens values that exceed model limits.
     """
-    # Services that have both model and max_tokens configurations
+    # Services that still expose a max_tokens knob. extraction + confidence
+    # (assessment) no longer do — their output is always requested at the model
+    # maximum and clamped at request time — so they cannot be over-limit and are
+    # excluded here.
     sections_with_tokens = {
         "classification": {"model_field": "model", "max_tokens_field": "max_tokens"},
-        "extraction": {"model_field": "model", "max_tokens_field": "max_tokens"},
-        "assessment": {"model_field": "model", "max_tokens_field": "max_tokens"},
         "summarization": {"model_field": "model", "max_tokens_field": "max_tokens"},
     }
 

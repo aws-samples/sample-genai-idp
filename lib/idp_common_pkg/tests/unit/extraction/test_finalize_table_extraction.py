@@ -80,7 +80,9 @@ class SimpleDoc(BaseModel):
 
 def _get_finalize_tool(model_class):
     """Extract finalize_table_extraction from the factory tuple."""
-    _, _, _, finalize_tool = create_dynamic_extraction_tool_and_patch_tool(model_class)
+    _, _, _, _, finalize_tool = create_dynamic_extraction_tool_and_patch_tool(
+        model_class
+    )
     return finalize_tool
 
 

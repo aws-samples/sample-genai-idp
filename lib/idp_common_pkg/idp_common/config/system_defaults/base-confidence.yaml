@@ -18,20 +18,28 @@
 extraction:
   confidence:
     mode: separate               # off | separate | integrated (enabled derived: mode != off)
-    model: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    # Nova Lite is the default confidence model because the assessment pass is
+    # far cheaper on it. Live A/B on the OCR benchmark (identical prompt, only the
+    # confidence model swapped): ~$0.0011/doc on Nova Lite vs ~$0.145/doc on
+    # Sonnet 5 (~130x) — driven by Sonnet's higher per-token rate AND ~2x more
+    # (verbose) output tokens, which dominate assessment cost. Both models use the
+    # two <<CACHEPOINT>> boundaries below for prompt-prefix caching (static
+    # instructions cached across documents; the per-doc image+OCR block cached
+    # across the initial call, the missing-row retry, and every list batch), so
+    # caching is NOT the differentiator here — the model choice is. Note: Anthropic
+    # models decline to cache a prefix under ~2048 tokens, so on a short/text-only
+    # confidence prompt they may not cache at all; Nova caches at a lower floor.
+    model: us.amazon.nova-lite-v1:0
     top_p: "0.0"
     top_k: "5"
     temperature: "0.0"
-    max_tokens: "10000"
+    # max_tokens is not configurable: the confidence pass always requests the
+    # model's maximum output (config_library/model_config_limits.yaml) so long
+    # list assessments are never truncated.
     list_batch_size: "25"
     image:
       target_height: ""
       target_width: ""
-    granular:
-      enabled: true
-      max_workers: "20"
-      simple_batch_size: "3"
-      list_batch_size: "1"
     system_prompt: >-
       You are a document analysis assessment expert. Your role is to evaluate the confidence and accuracy of data extraction results by analyzing them against source documents.
       Provide accurate confidence scores for each assessment.
@@ -52,18 +60,31 @@ extraction:
       For each attribute, provide:
       - A confidence score between 0.0 and 1.0 (1.0 = clear, unambiguous evidence;
         lower = weaker/ambiguous evidence)
-      - A clear explanation of the confidence reasoning
+      - A confidence_reason ONLY when the confidence is below 0.9 (see the output
+        rule below). Reasons exist to explain low/uncertain scores for human review;
+        a high-confidence value does not need one.
       Base assessments on actual document content and OCR quality; account for OCR
       confidence scores when provided; be objective and specific.
       </assessment-guidelines>
       <final-instructions>
       Return a JSON object mirroring the extracted data structure:
-      SIMPLE:  {"attr": {"confidence": 0.85, "confidence_reason": "..."}}
-      GROUP:   {"grp": {"sub1": {"confidence": 0.9, "confidence_reason": "..."}}}
-      LIST:    {"items": [ {"c1": {"confidence": 0.95, "confidence_reason": "..."}}, ... ]}
+      HIGH confidence (>= 0.9):  {"attr": {"confidence": 0.97}}
+      LOWER confidence (< 0.9):  {"attr": {"confidence": 0.72, "confidence_reason": "..."}}
+      GROUP:   {"grp": {"sub1": {"confidence": 0.95}}}
+      LIST:    {"items": [ {"c1": {"confidence": 0.72, "confidence_reason": "..."}}, ... ]}
+      OUTPUT RULE (keep responses compact — omit reasons for confident values):
+      - Emit "confidence_reason" for a leaf ONLY when its confidence is below 0.9.
+        For confidence >= 0.9, emit just {"confidence": <score>} with NO
+        confidence_reason key.
+      - When you do include a confidence_reason, keep it to at most 12 words and do
+        not restate the extracted value.
       IMPORTANT:
-      - For LIST attributes, assess EACH item separately (one object per row, in order)
-      - Include assessments for ALL attributes present in the extraction results
+      - For LIST attributes, assess EACH row separately (one object per row, in order),
+        and within each row give EACH column its own confidence leaf ({"confidence"},
+        plus "confidence_reason" only when below 0.9) — mirror the row's column keys;
+        do NOT emit a single confidence per row. Nested lists follow the same rule
+        recursively.
+      - Include a confidence assessment for ALL attributes present in the extraction results
       - Match the exact structure of the extracted data
       </final-instructions>
       <<CACHEPOINT>>

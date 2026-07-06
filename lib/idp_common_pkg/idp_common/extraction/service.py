@@ -1733,6 +1733,16 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     report_lines.append(f"    {w}")
                 report_lines.append("")
 
+        # Assessment batch-splitting (only present when the confidence model
+        # truncated its output and batches had to shrink to recover coverage).
+        if "assessment_batch_split_stats" in metadata:
+            from idp_common.assessment.batching import format_split_stats_report
+
+            block = format_split_stats_report(metadata["assessment_batch_split_stats"])
+            if block:
+                report_lines.append("⚠ " + block)
+                report_lines.append("")
+
         report_lines.append("=" * 40)
 
         return "\n".join(report_lines)
@@ -2102,11 +2112,10 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         top_k = self.config.extraction.top_k
         top_p = self.config.extraction.top_p
         reasoning_effort = self.config.extraction.reasoning_effort
-        max_tokens = (
-            self.config.extraction.max_tokens
-            if self.config.extraction.max_tokens
-            else None
-        )
+        # max_tokens is no longer a config knob — pass None so the Bedrock client
+        # resolves the model's maximum output (model_config_limits.yaml). Bedrock's
+        # default-when-omitted truncates, so the client always sets it explicitly.
+        max_tokens = None
 
         # Time the model invocation
         request_start_time = time.time()
@@ -2554,6 +2563,20 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     extracted_fields = {"raw_output": extracted_text}
                     parsing_succeeded = False
 
+            # Non-agentic INTEGRATED confidence: the single extraction inference
+            # was asked to return values AND inline confidence. Split the
+            # {"extraction": ..., "confidence": ...} envelope so inference_result
+            # holds only the values and the confidence rides in metering under the
+            # same marker the agentic path uses (lifted in _save_results). This
+            # both fixes the malformed {extraction,confidence} inference_result and
+            # lets the standalone Assessment step be skipped (no 2nd pass).
+            if self._integrated_assessment_enabled() and isinstance(
+                extracted_fields, dict
+            ):
+                extracted_fields = self._split_inline_confidence(
+                    extracted_fields, metering
+                )
+
         total_duration = time.time() - request_start_time
         logger.info(f"Time taken for extraction: {total_duration:.2f} seconds")
 
@@ -2568,6 +2591,108 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             schema_analysis=schema_analysis,
             ocr_analysis=ocr_analysis,
         )
+
+    @staticmethod
+    def _looks_like_confidence_block(value: Any) -> bool:
+        """Heuristic: does ``value`` look like a per-field confidence structure?
+
+        A confidence block mirrors the extracted data and bottoms out in leaves
+        that carry a ``confidence`` key. We accept it if ANY leaf, at any depth,
+        is a dict containing ``confidence`` — enough to distinguish a genuine
+        confidence blob from a real document field that happens to be named
+        ``field_assessment`` / ``confidence`` (which would hold plain values, not
+        ``{"confidence": ...}`` leaves).
+        """
+        if not isinstance(value, dict) or not value:
+            return False
+
+        def has_confidence_leaf(o: Any) -> bool:
+            if isinstance(o, dict):
+                if "confidence" in o:
+                    return True
+                return any(has_confidence_leaf(v) for v in o.values())
+            if isinstance(o, list):
+                return any(has_confidence_leaf(v) for v in o)
+            return False
+
+        return has_confidence_leaf(value)
+
+    def _split_inline_confidence(
+        self, parsed: dict[str, Any], metering: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Split a simple-path integrated response into values + confidence.
+
+        The integrated extraction prompt asks the model to return both the
+        extracted values and a parallel confidence structure. Models express this
+        three ways; handle all so the standalone Assessment step can be skipped
+        (integrated mode's whole point is one inference, not two):
+
+        1. Envelope: ``{"extraction": {...values...}, "confidence": {...leaves...}}``
+           — the documented shape. Return the values, stash confidence in
+           ``metering["_integrated_field_assessment"]``.
+        2. Sibling: the values dict with a ``field_assessment`` (or ``confidence``)
+           key holding the confidence blob alongside the real fields — the shape a
+           non-tool (simple) model naturally emits when told to "call the
+           provide_field_assessment tool". Pop the confidence key, stash it, return
+           the remaining fields. Guarded by ``_looks_like_confidence_block`` so a
+           real field of that name isn't mistaken for confidence.
+        3. Flat: just ``{...values...}`` with no separate confidence (the model
+           ignored the confidence instructions). Return as-is and stash nothing;
+           the standalone Assessment step then runs as the fallback (no regression).
+
+        Keys are matched case-insensitively. The envelope branch requires EXACTLY
+        the two expected keys, so a real document field literally named
+        ``extraction`` can't trigger a false split.
+        """
+        keys = {k.lower(): k for k in parsed}
+        # Case 1: the documented {extraction, confidence} envelope.
+        if set(keys) == {"extraction", "confidence"} and isinstance(
+            parsed.get(keys["extraction"]), dict
+        ):
+            values = parsed[keys["extraction"]]
+            confidence = parsed.get(keys["confidence"])
+            if isinstance(confidence, dict) and confidence:
+                metering["_integrated_field_assessment"] = confidence
+                logger.info(
+                    "Non-agentic integrated confidence: split inline confidence "
+                    "for %d fields from extraction response",
+                    len(confidence),
+                )
+            else:
+                logger.warning(
+                    "Non-agentic integrated mode: response had an 'extraction' "
+                    "envelope but no usable 'confidence'; falling back to the "
+                    "standalone Assessment step."
+                )
+            return values
+
+        # Case 2: confidence rides as a sibling key next to the real fields
+        # (e.g. {"Agency": ..., ..., "field_assessment": {...leaves...}}). This is
+        # what a non-tool model emits given the "call provide_field_assessment"
+        # instruction, since no such tool exists in simple mode.
+        for cand in ("field_assessment", "_field_assessment", "confidence"):
+            actual = keys.get(cand)
+            if actual is None:
+                continue
+            block = parsed.get(actual)
+            if self._looks_like_confidence_block(block):
+                values = {k: v for k, v in parsed.items() if k != actual}
+                metering["_integrated_field_assessment"] = block
+                logger.info(
+                    "Non-agentic integrated confidence: lifted '%s' sibling "
+                    "confidence block (%d entries) from extraction response",
+                    actual,
+                    len(block),
+                )
+                return values
+
+        # Case 3: flat response (no recognizable confidence) — nothing to lift.
+        logger.info(
+            "Non-agentic integrated mode: response was flat (no extraction/"
+            "confidence envelope or confidence sibling); standalone Assessment "
+            "step will run."
+        )
+        return parsed
 
     def _apply_missing_field_handling(
         self,
@@ -2678,6 +2803,36 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             merged_assessment, extracted_fields
         )
 
+        # Robustness: INTEGRATED confidence comes inline from the extraction
+        # inference, which can silently drop some list rows (esp. single-shot,
+        # cramming values+confidence in one call). Those rows are currently
+        # null-confidence placeholders. Re-assess ONLY the missing rows with a
+        # focused standalone confidence call and splice real scores back, so
+        # integrated large-list coverage reaches 100% like the separate path
+        # (which retries inside assess_results_batched). No-op when nothing is
+        # missing. Best-effort: never fails extraction.
+        if self._integrated_assessment_enabled():
+            try:
+                merged_assessment, extra_alerts, split_stats = (
+                    self._retry_missing_integrated_rows(
+                        merged_assessment=merged_assessment,
+                        extracted_fields=extracted_fields,
+                        section_info=section_info,
+                    )
+                )
+                if extra_alerts:
+                    merged_assessment_alerts = list(merged_assessment_alerts) + (
+                        extra_alerts
+                    )
+                # Surface adaptive batch-splitting activity (only when the
+                # confidence model truncated and batches had to shrink).
+                from idp_common.assessment.batching import split_stats_are_notable
+
+                if split_stats_are_notable(split_stats):
+                    output_metadata["assessment_batch_split_stats"] = split_stats
+            except Exception as e:  # noqa: BLE001 - retry is advisory
+                logger.warning("Integrated missing-row retry failed: %s", e)
+
         grounded = merged_assessment
         geometry_mode = self.config.extraction.geometry.mode
         if geometry_mode not in ("llm", "off"):
@@ -2710,6 +2865,110 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         output_metadata["assessment_integrated_in_extraction"] = True
         output_metadata["assessment_alert_count"] = len(merged_assessment_alerts)
 
+    def _retry_missing_integrated_rows(
+        self,
+        *,
+        merged_assessment: dict[str, Any],
+        extracted_fields: dict[str, Any],
+        section_info: SectionInfo,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any] | None]:
+        """Re-score list rows the integrated extraction inference left unscored.
+
+        Integrated confidence rides inline on the extraction call, which can drop
+        rows on large tables (leaving null-confidence placeholders after reconcile).
+        For each list field with missing rows, run a focused standalone confidence
+        pass over ONLY those rows + the shared section context, then splice the
+        recovered per-row scores back by index. Bounded to 2 rounds; sequential.
+
+        Each retry chunk goes through the shared ``_assess_slice_adaptive`` helper,
+        so a chunk the confidence model TRUNCATES (e.g. Nova Lite over an
+        ``llm``-geometry batch too large for its output cap) is recursively halved
+        and re-assessed until it fits — the same recovery the ``separate`` path
+        gets inside ``assess_results_batched`` — instead of being left unscored.
+
+        Returns ``(merged_assessment, new_alerts, split_stats)`` where
+        ``split_stats`` records any adaptive-splitting activity (None when nothing
+        was retried). Best-effort — a failed retry keeps placeholders.
+        """
+        from idp_common.assessment.batching import (
+            _assess_slice_adaptive,
+            _missing_row_indices,
+            _new_split_stats,
+            _row_confidence_missing,
+            enrich_assessment_with_thresholds,
+            reconcile_assessment_to_data,
+        )
+        from idp_common.assessment.service import AssessmentService
+
+        # Which list fields still have unscored rows?
+        targets = {
+            f: _missing_row_indices(merged_assessment.get(f), v)
+            for f, v in extracted_fields.items()
+            if isinstance(v, list) and _missing_row_indices(merged_assessment.get(f), v)
+        }
+        if not targets:
+            return merged_assessment, [], None
+
+        assessment_service = AssessmentService(region=self.region, config=self.config)
+        default_threshold = self.config.hitl.confidence_threshold
+        new_alerts: list[dict[str, Any]] = []
+        batch_size = self.config.extraction.confidence.list_batch_size
+        split_stats = _new_split_stats()
+
+        def _one_call(results: dict[str, Any]) -> Any:
+            return assessment_service.assess_results(
+                class_label=section_info.class_label,
+                extraction_results=results,
+                document_text=self._document_text,
+                page_images=self._page_images,
+                ocr_text_confidence="",
+            )
+
+        for field, missing in targets.items():
+            rows = extracted_fields[field]
+            base_results = {k: v for k, v in extracted_fields.items() if k != field}
+            for _round in range(2):
+                if not missing:
+                    break
+                logger.info(
+                    "Integrated retry: re-scoring %d unscored '%s' rows (round %d)",
+                    len(missing),
+                    field,
+                    _round + 1,
+                )
+                recovered_any = False
+                for start in range(0, len(missing), batch_size):
+                    idx_chunk = missing[start : start + batch_size]
+                    sliced = _assess_slice_adaptive(
+                        _one_call,
+                        base_results=base_results,
+                        big_field=field,
+                        rows=[rows[i] for i in idx_chunk],
+                        reconcile=reconcile_assessment_to_data,
+                        stats=split_stats,
+                    )
+                    retry_rows = sliced["rows"]
+                    new_alerts.extend(sliced["alerts"])
+                    for local_i, orig_i in enumerate(idx_chunk):
+                        if local_i < len(retry_rows) and not _row_confidence_missing(
+                            retry_rows[local_i]
+                        ):
+                            merged_assessment[field][orig_i] = retry_rows[local_i]
+                            recovered_any = True
+                            split_stats["rows_recovered_by_retry"] += 1
+                missing = _missing_row_indices(merged_assessment.get(field), rows)
+                if not recovered_any:
+                    break
+            split_stats["unrecoverable_rows"] += len(
+                _missing_row_indices(merged_assessment.get(field), rows)
+            )
+
+        # Re-enrich so any spliced-in rows carry confidence_threshold like the rest.
+        merged_assessment, _ = enrich_assessment_with_thresholds(
+            merged_assessment, self._class_schema, default_threshold
+        )
+        return merged_assessment, new_alerts, split_stats
+
     def _save_results(
         self,
         document: Document,
@@ -2741,6 +3000,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         shard_conflicts = None
         merged_assessment = None
         merged_assessment_alerts = None
+        assessment_split_stats = None
         if extraction_method == "agentic" and result.metering:
             table_stats = result.metering.pop("_table_parsing_stats", None)
             tool_used = table_stats is not None
@@ -2755,6 +3015,31 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             merged_assessment_alerts = result.metering.pop(
                 "_merged_assessment_alerts", None
             )
+            # Adaptive batch-splitting activity from the in-shard assessment
+            # (present only when the confidence model truncated its output and
+            # batches had to shrink). Popped so it doesn't leak into metering.
+            assessment_split_stats = result.metering.pop(
+                "_merged_assessment_split_stats", None
+            )
+        elif result.metering and self._integrated_assessment_enabled():
+            # Non-agentic INTEGRATED confidence: the extraction inference emitted
+            # confidence inline (split into this marker by _split_inline_confidence).
+            # Enrich the raw confidence leaves with per-field thresholds + alerts
+            # (same contract the standalone/separate path produces) and route it
+            # through the shared ground+emit path so explainability_info is written
+            # and the standalone Assessment step is skipped.
+            inline = result.metering.pop("_integrated_field_assessment", None)
+            if isinstance(inline, dict) and inline:
+                from idp_common.assessment.batching import (
+                    enrich_assessment_with_thresholds,
+                )
+
+                default_threshold = self.config.hitl.confidence_threshold
+                merged_assessment, merged_assessment_alerts = (
+                    enrich_assessment_with_thresholds(
+                        inline, self._class_schema, default_threshold
+                    )
+                )
 
         # Build base metadata
         metadata: dict[str, Any] = {
@@ -2828,6 +3113,13 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         ):
             metadata["table_parsing_tool_used"] = False
 
+        # Surface adaptive assessment batch-splitting activity (only when the
+        # confidence model truncated output and batches had to shrink).
+        from idp_common.assessment.batching import split_stats_are_notable
+
+        if split_stats_are_notable(assessment_split_stats):
+            metadata["assessment_batch_split_stats"] = assessment_split_stats
+
         # Add truncation/repair metadata when relevant
         if result.output_truncated:
             metadata["output_truncated"] = True
@@ -2852,16 +3144,14 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             section_info,
         )
 
-        # Generate user-friendly processing report
-        processing_report = self._generate_processing_report(metadata)
-        logger.info(f"Processing Report:\n{processing_report}")
-
         # In-shard assessment (integrated-assessment feature): ground the merged
         # per-field assessment in real OCR geometry over the WHOLE section (one
         # pass, identical to the standalone Assessment step) and emit it as
         # explainability_info — the same output contract the standalone path
         # produces, so all downstream consumers (HITL, UI, evaluation) are
-        # unchanged. No-op when in-shard assessment did not run.
+        # unchanged. No-op when in-shard assessment did not run. Runs BEFORE the
+        # processing report so any adaptive batch-splitting it records
+        # (assessment_batch_split_stats) is reflected in the report too.
         if merged_assessment:
             # Align against fields_for_output (what becomes inference_result), so
             # explainability_info[field][i] matches inference_result[field][i]
@@ -2875,6 +3165,10 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                 section=section,
                 section_info=section_info,
             )
+
+        # Generate user-friendly processing report
+        processing_report = self._generate_processing_report(metadata)
+        logger.info(f"Processing Report:\n{processing_report}")
 
         # Write to S3 with processing report
         output: dict[str, Any] = {
@@ -3134,66 +3428,14 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
     ) -> dict[str, Any]:
         """Force per-field assessment to index-align with the extracted data.
 
-        The assessment LLM frequently emits a *different* number of list-item
-        assessments than the data has rows (a 120-row table may come back with
-        only 44 row assessments). Downstream consumers (HITL, UI) index
-        ``explainability_info[0][field][i]`` against ``inference_result[field][i]``,
-        so a length mismatch silently misattributes confidence to the wrong row —
-        and in the sharded path the drift compounds across shards on merge.
-
-        For every list-valued data field this truncates an over-long assessment
-        list and pads a too-short one so ``len(assessment[field]) ==
-        len(data[field])`` exactly — including the case where the model OMITTED
-        the list field entirely (common for large tables: the shard extracted N
-        rows but the assessment response left the field out, so without this every
-        such row would be unassessed AND ungroundable).
-
-        Crucially, each padded row is a **per-sub-field placeholder mirroring the
-        data row's structure** — a ``{"confidence": null, ...}`` leaf for each
-        sub-field the data row populated (e.g. ``date``, ``description``,
-        ``amount``). This gives OCR geometry grounding a real value to match per
-        sub-field, so an un-assessed row still gets a correct bounding box from its
-        extracted values; only the LLM ``confidence`` is null. A scalar/non-dict
-        row element falls back to a single neutral leaf.
-
-        Scalar/group fields are left untouched. Mutates and returns ``assessment``.
+        Thin delegate to the shared
+        :func:`idp_common.assessment.batching.reconcile_assessment_to_data` so the
+        agentic in-shard path and the standalone Assessment step share one
+        implementation. See that function for the full contract.
         """
-        if not isinstance(assessment, dict):
-            return assessment
+        from idp_common.assessment.batching import reconcile_assessment_to_data
 
-        def _row_placeholder(data_row: Any) -> dict[str, Any]:
-            reason = (
-                "Not individually assessed (assessment returned fewer items "
-                "than were extracted)."
-            )
-            # Mirror the data row's sub-fields so grounding can attach a box per
-            # populated sub-field from its actual value.
-            if isinstance(data_row, dict):
-                leaves = {
-                    sub: {"confidence": None, "confidence_reason": reason}
-                    for sub, sv in data_row.items()
-                    if sv is not None and not isinstance(sv, (dict, list))
-                }
-                if leaves:
-                    return leaves
-            # Scalar row element (or all-null/nested row): single neutral leaf.
-            return {"confidence": None, "confidence_reason": reason}
-
-        for field, data_val in extraction_results.items():
-            if not isinstance(data_val, list):
-                continue
-            target = len(data_val)
-            assessed = assessment.get(field)
-            assessed = assessed if isinstance(assessed, list) else []
-            if len(assessed) > target:
-                assessment[field] = assessed[:target]
-            elif len(assessed) < target:
-                assessment[field] = assessed + [
-                    _row_placeholder(data_val[i]) for i in range(len(assessed), target)
-                ]
-            else:
-                assessment[field] = assessed
-        return assessment
+        return reconcile_assessment_to_data(assessment, extraction_results)
 
     def _assess_results_batched(
         self,
@@ -3206,85 +3448,23 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
     ) -> dict[str, Any]:
         """Assess one scope, batching large list fields across multiple inferences.
 
-        A single assessment call over a large list (e.g. 75 transaction rows) is
-        unreliable — the model under-enumerates or omits the list, leaving rows
-        unassessed. When the largest list field exceeds
-        ``assessment.inshard_list_batch_size``, the list is sliced into batches; each
-        batch is assessed with the SAME scalars/context (so scalar assessments and
-        the document context are preserved) but only that batch's rows, and the
-        per-row assessments are concatenated in order. Scalar/group assessments come
-        from the first batch. Returns ``{"assessment", "alerts", "metering"}``.
-
-        Falls back to a single call when no list field exceeds the batch size.
+        Thin delegate to the shared
+        :func:`idp_common.assessment.batching.assess_results_batched` (the same
+        implementation the standalone Assessment step now uses) with the batch size
+        read from ``extraction.confidence.list_batch_size``. Returns
+        ``{"assessment", "alerts", "metering", "parsing_succeeded",
+        "duration_seconds"}``.
         """
-        from idp_common.extraction.agentic_idp import _accumulate_metering
+        from idp_common.assessment.batching import assess_results_batched
 
-        batch_size = self.config.extraction.confidence.list_batch_size
-        # Identify the single largest list field (the table being assessed).
-        list_fields = {
-            k: v
-            for k, v in extraction_results.items()
-            if isinstance(v, list) and len(v) > batch_size
-        }
-
-        def _one_call(results: dict[str, Any]) -> Any:
-            return assessment_service.assess_results(
-                class_label=class_label,
-                extraction_results=results,
-                document_text=document_text,
-                page_images=page_images,
-                ocr_text_confidence="",
-            )
-
-        if not list_fields:
-            core = _one_call(extraction_results)
-            return {
-                "assessment": self._reconcile_assessment_to_data(
-                    core.enhanced_assessment, extraction_results
-                ),
-                "alerts": core.confidence_threshold_alerts,
-                "metering": core.metering,
-            }
-
-        # Batch by the largest list field; other (smaller) list fields ride the
-        # first batch and are reconciled afterward.
-        big_field = max(list_fields, key=lambda k: len(list_fields[k]))
-        rows = extraction_results[big_field]
-        merged_assessment: dict[str, Any] = {}
-        merged_alerts: list[dict[str, Any]] = []
-        merged_metering: dict[str, Any] = {}
-        big_field_acc: list[Any] = []
-
-        for start in range(0, len(rows), batch_size):
-            chunk = rows[start : start + batch_size]
-            # Same scalars/context every batch; only the big list is sliced.
-            batch_results = dict(extraction_results)
-            batch_results[big_field] = chunk
-            core = _one_call(batch_results)
-            enhanced = self._reconcile_assessment_to_data(
-                core.enhanced_assessment, batch_results
-            )
-            # Accumulate the big list's per-row assessments in order.
-            big_field_acc.extend(
-                enhanced.get(big_field, [])
-                if isinstance(enhanced.get(big_field), list)
-                else []
-            )
-            _accumulate_metering(merged_metering, core.metering or {})
-            merged_alerts.extend(core.confidence_threshold_alerts or [])
-            # Scalars/other fields: keep the first batch's assessment.
-            if not merged_assessment:
-                merged_assessment = enhanced
-        merged_assessment[big_field] = big_field_acc
-        # Final alignment against the full extraction (pads any residual gap).
-        merged_assessment = self._reconcile_assessment_to_data(
-            merged_assessment, extraction_results
+        return assess_results_batched(
+            assessment_service,
+            class_label=class_label,
+            extraction_results=extraction_results,
+            document_text=document_text,
+            page_images=page_images,
+            batch_size=self.config.extraction.confidence.list_batch_size,
         )
-        return {
-            "assessment": merged_assessment,
-            "alerts": merged_alerts,
-            "metering": merged_metering,
-        }
 
     def _build_assess_runner(self, section_info: SectionInfo) -> "Any | None":
         """Build the per-shard assess_runner closure (or None when disabled).
@@ -3369,6 +3549,8 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             )
             metering["_merged_assessment"] = batched["assessment"]
             metering["_merged_assessment_alerts"] = batched["alerts"]
+            if batched.get("split_stats"):
+                metering["_merged_assessment_split_stats"] = batched["split_stats"]
             _accumulate_metering(metering, batched["metering"])
         except Exception as e:  # noqa: BLE001 - assessment is advisory
             logger.warning(

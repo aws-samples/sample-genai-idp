@@ -4,7 +4,86 @@
 """Unit tests for model_utils module."""
 
 import pytest
-from idp_common.bedrock.model_utils import get_model_max_output_tokens, parse_model_id
+from idp_common.bedrock.model_utils import (
+    get_model_max_output_tokens,
+    parse_max_tokens_limit_from_error,
+    parse_model_id,
+)
+
+
+@pytest.mark.unit
+class TestParseMaxTokensLimitFromError:
+    """Test extracting the model limit from a Bedrock over-limit ValidationException.
+
+    There is no AWS API for the per-model output cap, so this error text is the
+    authoritative fallback source. Messages captured live from Bedrock Converse.
+    """
+
+    def test_claude_over_limit_message(self):
+        msg = (
+            "The model returned the following errors: max_tokens: 999999 > 128000, "
+            "which is the maximum allowed number of output tokens for "
+            "anthropic.claude-sonnet-5"
+        )
+        assert parse_max_tokens_limit_from_error(msg) == 128000
+
+    def test_nova_over_limit_message(self):
+        msg = (
+            "The maximum tokens you requested exceeds the model limit of 10000. "
+            "Try again with a maximum tokens value that is lower than 10000."
+        )
+        assert parse_max_tokens_limit_from_error(msg) == 10000
+
+    def test_unrelated_message_returns_none(self):
+        assert parse_max_tokens_limit_from_error("some other validation error") is None
+
+    def test_empty_message_returns_none(self):
+        assert parse_max_tokens_limit_from_error("") is None
+
+
+@pytest.mark.unit
+class TestModelConfigLimitsBundled:
+    """The limits file is bundled in-package so it resolves at runtime in Lambda.
+
+    Guards against the two failure modes we hit: (1) the file only existing at the
+    repo root (not deployed to Lambda), and (2) the two copies drifting apart.
+    """
+
+    def test_resolves_without_repo_root(self, monkeypatch, tmp_path):
+        """get_model_max_output_tokens works from a cwd with no config_library/."""
+        from idp_common.bedrock import model_utils
+
+        monkeypatch.delenv("IDP_PROJECT_ROOT", raising=False)
+        monkeypatch.chdir(tmp_path)  # no config_library here
+        model_utils._load_model_limits.cache_clear()
+        try:
+            assert get_model_max_output_tokens("us.anthropic.claude-sonnet-5") == 128000
+        finally:
+            model_utils._load_model_limits.cache_clear()
+
+    def test_bundled_copy_matches_repo_root(self):
+        """The in-package copy must stay byte-identical to config_library/."""
+        from pathlib import Path
+
+        import idp_common.bedrock.model_utils as mu
+
+        bundled = (
+            Path(mu.__file__).parent.parent / "config" / "model_config_limits.yaml"
+        )
+        repo_root = (
+            Path(mu.__file__).parent.parent.parent.parent.parent
+            / "config_library"
+            / "model_config_limits.yaml"
+        )
+        assert bundled.exists(), f"bundled limits file missing: {bundled}"
+        # repo_root only exists in the dev tree, not in an installed wheel; only
+        # assert equality when both are present.
+        if repo_root.exists():
+            assert bundled.read_text() == repo_root.read_text(), (
+                "config_library/model_config_limits.yaml and the bundled "
+                "idp_common/config/model_config_limits.yaml have drifted — "
+                "re-copy so they stay identical."
+            )
 
 
 @pytest.mark.unit
@@ -78,27 +157,50 @@ class TestGetModelMaxOutputTokens:
     """Test model max output token detection."""
 
     def test_claude4_models_return_64k(self):
-        """Test Claude 4 Sonnet/Haiku and older Opus versions return 64,000 max tokens."""
-        # Sonnet 4.x
+        """Claude 4 models that cap at 64,000 output tokens: Sonnet 4.0/4.5,
+        Haiku 4.5, and Opus 4.0/4.1/4.5. (Sonnet 4.6 and Opus 4.6 are 128K —
+        see test_claude46_models_return_128k.)"""
+        # Sonnet 4.0
         assert (
             get_model_max_output_tokens("us.anthropic.claude-sonnet-4-20250514-v1:0")
             == 64_000
         )
-        assert get_model_max_output_tokens("eu.anthropic.claude-sonnet-4-6") == 64_000
-        # Haiku 4.x
+        # Sonnet 4.5
+        assert (
+            get_model_max_output_tokens("us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+            == 64_000
+        )
+        # Haiku 4.5
         assert (
             get_model_max_output_tokens("us.anthropic.claude-haiku-4-5-20251001-v1:0")
             == 64_000
         )
-        # Older Opus versions (4.5, 4.6)
+        # Opus 4.5
         assert (
             get_model_max_output_tokens("us.anthropic.claude-opus-4-5-20250514-v1:0")
             == 64_000
         )
+
+    def test_claude46_models_return_128k(self):
+        """Sonnet 4.6 and Opus 4.6 support 128,000 output tokens (like Opus 4.7/4.8),
+        including the :1m extended-context variants. Regression: the generic
+        'claude-(opus|sonnet|haiku)-4' catch-all previously mis-capped these at 64K."""
+        assert get_model_max_output_tokens("us.anthropic.claude-sonnet-4-6") == 128_000
         assert (
-            get_model_max_output_tokens("us.anthropic.claude-opus-4-6-20250514-v1:0")
-            == 64_000
+            get_model_max_output_tokens("us.anthropic.claude-sonnet-4-6:1m") == 128_000
         )
+        assert get_model_max_output_tokens("eu.anthropic.claude-sonnet-4-6") == 128_000
+        assert get_model_max_output_tokens("us.anthropic.claude-opus-4-6") == 128_000
+        assert (
+            get_model_max_output_tokens("us.anthropic.claude-opus-4-6-v1:1m") == 128_000
+        )
+
+    def test_claude_opus_47_48_return_128k(self):
+        """Opus 4.7 and 4.8 support 128,000 output tokens, incl. :1m variants."""
+        assert get_model_max_output_tokens("us.anthropic.claude-opus-4-7") == 128_000
+        assert get_model_max_output_tokens("us.anthropic.claude-opus-4-7:1m") == 128_000
+        assert get_model_max_output_tokens("us.anthropic.claude-opus-4-8") == 128_000
+        assert get_model_max_output_tokens("us.anthropic.claude-opus-4-8:1m") == 128_000
 
     def test_claude3_models_return_8k(self):
         """Test Claude 3 models return 8,192 max tokens."""
@@ -189,13 +291,20 @@ class TestGetModelMaxOutputTokens:
         # With :1m suffix
         assert get_model_max_output_tokens("us.anthropic.claude-opus-4-8:1m") == 128_000
 
+    def test_sonnet_5_returns_128k(self):
+        """Claude Sonnet 5 returns 128,000 max tokens (1M context), incl. :1m.
+        Sonnet 5 does NOT match the claude-(opus|sonnet|haiku)-4 catch-all, so it
+        needs its own model_config_limits entry."""
+        assert get_model_max_output_tokens("us.anthropic.claude-sonnet-5") == 128_000
+        assert get_model_max_output_tokens("us.anthropic.claude-sonnet-5:1m") == 128_000
+        assert (
+            get_model_max_output_tokens("global.anthropic.claude-sonnet-5") == 128_000
+        )
+
     def test_older_opus_versions_return_64k(self):
-        """Test Claude Opus 4.5/4.6 return 64,000 max tokens."""
+        """Claude Opus 4.5 returns 64,000 max tokens. (Opus 4.6 is 128K — see
+        test_claude46_models_return_128k.)"""
         assert (
             get_model_max_output_tokens("us.anthropic.claude-opus-4-5-20250514-v1:0")
-            == 64_000
-        )
-        assert (
-            get_model_max_output_tokens("us.anthropic.claude-opus-4-6-20250514-v1:0")
             == 64_000
         )

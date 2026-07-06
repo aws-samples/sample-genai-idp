@@ -425,7 +425,7 @@ For configuration issues, the agent directs users to the UI:
 Recommendations:
 • Navigate to Configuration panel in the Web UI
 • Update 'extraction.model' to use a higher-capacity model
-• Adjust 'assessment.granular.max_workers' from 4 to 2 to reduce memory pressure
+• Lower 'extraction.confidence.list_batch_size' from 25 to 10 to reduce per-inference load
 ```
 
 #### Operational Recommendations

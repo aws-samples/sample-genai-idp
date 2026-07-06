@@ -685,6 +685,17 @@ contains **only that shard's OCR text and images** — not the whole document. T
 shards run concurrently (up to `max_concurrent_batches` at a time) and their
 results are merged. This serves two purposes:
 
+> **Why "shard" and not "chunk"?** A *shard* here is a **non-overlapping page
+> range fanned out to a concurrent extraction agent** — the term is chosen for
+> its distributed-systems connotation of *partition-for-parallelism/scale*,
+> which is exactly this feature's purpose. We deliberately avoid "chunk" because
+> it already denotes several *other*, unrelated concepts elsewhere in the
+> codebase: RAG-style overlapping text windows (`max_chunk_size`,
+> `chunk_overlap_percentage`), sequential assessment list sub-batches
+> (`assessment/batching.py`), rule-validation `chunking_occurred`, and streaming
+> byte reads. Reusing "chunk" for agentic-extraction shards would collide with
+> all of those; "shard" keeps this concept unambiguous.
+
 1. **Bounds the context window.** Because each agent sees only its pages, a long
    or dense section that would overflow a single agent's context (the failure
    mode behind `ContextWindowOverflowException`) is split until each shard fits.
@@ -807,7 +818,7 @@ separate downstream step, controlled by `extraction.confidence.mode`:
 extraction:
   confidence:
     enabled: true                     # master on/off — false disables confidence entirely
-    mode: separate                    # "separate" (default) | "integrated"
+    mode: separate                    # off | "separate" (default) | "integrated"
     model: us.anthropic.claude-haiku-4-5-20251001-v1:0
     list_batch_size: 25               # rows scored per inference (agentic in-shard)
   geometry:
@@ -832,18 +843,59 @@ hitl:
     Assessment step produces.
   - *Non-agentic*: unchanged — the pipeline flows to the standalone Assessment
     step exactly as before.
-- **`integrated`**: the extraction agent emits each value's confidence and
-  bounding box **in its own inference** — the document is already in the agent's
-  (cached) context, so there is no second model pass and no re-sent document. The
-  agent calls a `provide_field_assessment` tool as its final step (one assessment
-  object per scalar/group field; a list with one entry per row, in row order, for
-  list fields). The inline result rides the **same** collation → post-merge
-  reconcile → OCR grounding → `explainability_info` path as `separate`, so the
-  output contract is identical; only the source of the confidence differs. The
-  `extraction.confidence` model/prompt settings are unused, and the standalone
-  step is bypassed. Best for cost/latency once you've confirmed your model produces
-  well-calibrated inline confidence; otherwise prefer `separate` (a dedicated
-  assessment inference per shard).
+- **`integrated`**: confidence is produced **within the extraction inference
+  itself** — the document is already in context, so there is no separate
+  assessment request and no re-sent document. The inline result rides the **same**
+  collation → post-merge reconcile → OCR grounding → `explainability_info` path as
+  `separate`, so the output contract is identical; only the source of the
+  confidence differs. The `extraction.confidence` model/prompt settings are unused,
+  and the standalone Assessment step is bypassed (auto-skips once
+  `explainability_info` is present).
+  - *Agentic*: the agent emits confidence via a tool call (see the strategy knob
+    below).
+  - *Non-agentic (simple)*: the single extraction inference is prompted to return
+    values **and** a parallel confidence structure as
+    `{"extraction": {...}, "confidence": {...}}`; the service splits that envelope
+    (values → `inference_result`, confidence → the same in-extraction marker),
+    enriches it with per-field `confidence_threshold` + alerts, reconciles, grounds,
+    and emits `explainability_info`. If the model returns a flat response with no
+    confidence envelope, the path **falls back to the standalone Assessment step**
+    (no data loss). Best for **smaller documents** where one inference comfortably
+    holds the whole doc; for large docs prefer agentic (sharded) or `separate`.
+  - **Missing-row robustness (both paths):** because integrated confidence rides on
+    the extraction call, a model can under-score a large table. After reconcile,
+    any list rows left unscored are **retried in focused, bounded re-assessment
+    calls** (only the missing rows) and spliced back — so large-list confidence
+    coverage reaches 100% rather than leaving null placeholders. Best for
+    cost/latency once you've confirmed your model produces well-calibrated inline
+    confidence; otherwise prefer `separate` (a dedicated assessment inference).
+
+  <a id="integrated-confidence-strategy"></a>
+  **Hidden setting — `extraction.agentic.integrated_confidence_strategy` (experimental).**
+  For the *agentic* path, integrated confidence can be produced two ways. This knob
+  is **not surfaced in the config UI** — it exists so operators can A/B the
+  cost/latency-vs-calibration trade-off before we pick a default. Set it via
+  `idp-cli config-upload` on a throwaway config version; both values produce
+  identical `explainability_info` downstream (only the inference mechanics differ):
+
+  | value | how confidence is produced | inferences per turn/shard (happy path) |
+  |---|---|---|
+  | `two_step` *(default)* | the agent extracts via the extraction tool, then calls `provide_field_assessment` in a **follow-up inference** within the same turn — a dedicated reflection pass over the finalized values | 3 (extract → assess → close) |
+  | `single_shot` | the agent emits values **and** per-field confidence in **one combined tool call** (`extraction_with_confidence_tool`), saving the follow-up inference | 2 (extract+confidence → close) |
+
+  Why it is not one inference either way: agentic extraction is delivered via a
+  *tool call*, and the tool-use protocol ends an inference at each tool call, so a
+  final "close the turn" inference is always required after the last tool result.
+  `single_shot` removes the *middle* (assessment) inference, not the close. It
+  reuses the same prompt cache as `two_step` (the document/system/tools prefix is
+  written once and read by the closing inference). Trade-off: `two_step` gives the
+  model a dedicated look at the finalized extraction before scoring (often
+  better-calibrated confidence); `single_shot` is cheaper/faster but scores inline
+  as it extracts. For large/multi-step (patched) extractions where rows are added
+  after the combined call, the agent may still call `provide_field_assessment` once
+  at the end to (re)assess every row (rows never assessed are padded with neutral
+  `confidence: null`, same as today). Non-agentic (simple) integrated is always a
+  true single inference and is unaffected by this knob.
 
 **Standalone Assessment step bypass.** When in-shard (or integrated) assessment
 has already written `explainability_info` to the section result, the downstream

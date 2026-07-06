@@ -12,7 +12,7 @@ import logging
 import os
 import sys
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Dict, Optional
 
 _SETUP_HELP = """\
 Error: Required packages not found.
@@ -236,6 +236,39 @@ TEMPLATE_URLS = {
 }
 
 
+def _parse_tags(tags: Optional[str]) -> Dict[str, str]:
+    """Parse a --tags string (key=value,key2=value2) into a dict.
+
+    Unlike --parameters, tag keys may contain spaces and characters like
+    . : / + - _, so we split on commas then on the first '=' rather than
+    using a key-name regex. Commas are not supported inside tag values.
+
+    Raises click.BadParameter on malformed input (missing '=' or empty key).
+    """
+    result: Dict[str, str] = {}
+    if not tags:
+        return result
+    for pair in tags.split(","):
+        pair = pair.strip()
+        if not pair:
+            continue
+        if "=" not in pair:
+            raise click.BadParameter(
+                f"Invalid tag '{pair}'. Expected key=value,key2=value2.",
+                param_hint="--tags",
+            )
+        key, value = pair.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            raise click.BadParameter(
+                f"Invalid tag '{pair}': empty key.",
+                param_hint="--tags",
+            )
+        result[key] = value
+    return result
+
+
 @click.group()
 @click.version_option(version="0.5.16")
 def cli():
@@ -299,6 +332,14 @@ def cli():
     help="Path to local config file or S3 URI (e.g., ./config.yaml or s3://bucket/config.yaml)",
 )
 @click.option("--parameters", help="Additional parameters as key=value,key2=value2")
+@click.option(
+    "--tags",
+    help=(
+        "Stack tags as key=value,key2=value2. Propagated by CloudFormation "
+        "to all taggable resources and nested stacks. On update, providing "
+        "tags replaces the stack's tag set; omitting them preserves existing tags."
+    ),
+)
 @click.option("--wait", is_flag=True, help="Wait for stack operation to complete")
 @click.option(
     "--no-rollback", is_flag=True, help="Disable rollback on stack creation failure"
@@ -352,6 +393,7 @@ def deploy(
     enable_hitl: str,
     custom_config: Optional[str],
     parameters: Optional[str],
+    tags: Optional[str],
     wait: bool,
     no_rollback: bool,
     region: Optional[str],
@@ -627,6 +669,10 @@ def deploy(
                 value = match.group(2).strip().rstrip(",")
                 additional_params[key] = value
 
+        # Parse stack tags (key=value,key2=value2), propagated by CloudFormation
+        # to all taggable resources and nested stacks.
+        tags_dict = _parse_tags(tags)
+
         # Note: --headless (the CLI flag) controls TEMPLATE TRANSFORMATION
         # — strip UI / AppSync / Cognito / WAF / Agents / HITL / KB from the
         # template. The CFN parameter `EnableHeadless=true` is a separate
@@ -651,6 +697,7 @@ def deploy(
                 enable_hitl=enable_hitl == "true" if enable_hitl != "false" else None,
                 custom_config=custom_config,
                 parameters=additional_params,
+                tags=tags_dict or None,
                 wait=wait,
                 no_rollback=no_rollback,
                 role_arn=role_arn,

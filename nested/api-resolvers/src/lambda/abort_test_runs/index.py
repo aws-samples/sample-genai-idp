@@ -58,9 +58,14 @@ def lambda_handler(event, context):
         Dict with abort results including counts and errors
     """
     try:
-        # Defense-in-depth: abortTestRuns is an Admin+Author operation. Raise
-        # (not return a 200 dict) so the dispatcher maps it to 403/Unauthorized.
-        if not _caller_in_groups(event, ("Admin", "Author")):
+        # Defense-in-depth: abortTestRuns is an Admin+Author operation.
+        # Allow direct Lambda invocations (no 'identity' field or identity=None) for CI/automation.
+        # AppSync invocations always have 'identity' with non-None value, so RBAC is still enforced for UI users.
+        # Security: Direct invocation path is gated by IAM (lambda:InvokeFunction permission on this ARN),
+        # not Cognito groups. CI/automation uses IAM credentials; UI users go through AppSync + Cognito.
+        # Raise (not return a 200 dict) so the dispatcher maps it to 403/Unauthorized.
+        is_appsync_invoke = event.get('identity') is not None
+        if is_appsync_invoke and not _caller_in_groups(event, ("Admin", "Author")):
             raise PermissionError(
                 "Unauthorized: abortTestRuns requires Admin or Author group"
             )

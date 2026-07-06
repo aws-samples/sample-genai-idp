@@ -16,7 +16,6 @@ from idp_common.config.configuration_manager import ConfigurationManager
 from idp_common.config.models import (
     ConfidenceConfig,
     ExtractionConfig,
-    GranularAssessmentConfig,
     IDPConfig,
     ImageConfig,
 )
@@ -36,7 +35,7 @@ class TestSyncCustomWithNewDefault:
 
         # New default has updated values
         new_default = IDPConfig(
-            extraction=ExtractionConfig(temperature=0.5, top_p=0.2, max_tokens=5000)
+            extraction=ExtractionConfig(temperature=0.5, top_p=0.2, top_k=20.0)
         )
 
         # Sync
@@ -47,7 +46,7 @@ class TestSyncCustomWithNewDefault:
         # User should get ALL new defaults
         assert new_custom.extraction.temperature == 0.5
         assert new_custom.extraction.top_p == 0.2
-        assert new_custom.extraction.max_tokens == 5000
+        assert new_custom.extraction.top_k == 20.0
 
     def test_preserves_user_customization(self):
         """User's temperature customization should be preserved when Default updates top_p."""
@@ -55,17 +54,17 @@ class TestSyncCustomWithNewDefault:
 
         # Old default
         old_default = IDPConfig(
-            extraction=ExtractionConfig(temperature=0.0, top_p=0.1, max_tokens=1000)
+            extraction=ExtractionConfig(temperature=0.0, top_p=0.1, top_k=10.0)
         )
 
         # User customized temperature only
         old_custom = IDPConfig(
-            extraction=ExtractionConfig(temperature=0.8, top_p=0.1, max_tokens=1000)
+            extraction=ExtractionConfig(temperature=0.8, top_p=0.1, top_k=10.0)
         )
 
         # New default changes multiple fields
         new_default = IDPConfig(
-            extraction=ExtractionConfig(temperature=0.5, top_p=0.2, max_tokens=2000)
+            extraction=ExtractionConfig(temperature=0.5, top_p=0.2, top_k=20.0)
         )
 
         # Sync
@@ -78,7 +77,7 @@ class TestSyncCustomWithNewDefault:
 
         # But user should get new defaults for fields they didn't customize
         assert new_custom.extraction.top_p == 0.2
-        assert new_custom.extraction.max_tokens == 2000
+        assert new_custom.extraction.top_k == 20.0
 
     def test_multiple_customizations_at_different_levels(self):
         """Multiple user customizations across different config sections."""
@@ -192,9 +191,9 @@ class TestSyncCustomWithNewDefault:
                 model="us.amazon.nova-pro-v1:0",
                 temperature=0.0,
                 top_p=0.1,
-                max_tokens=10000,
+                top_k=10.0,
                 confidence=ConfidenceConfig(
-                    enabled=True, temperature=0.0, granular={"enabled": False}
+                    enabled=True, temperature=0.0, list_batch_size=25
                 ),
             ),
             classes=[],
@@ -209,11 +208,11 @@ class TestSyncCustomWithNewDefault:
                 model="us.amazon.nova-pro-v1:0",
                 temperature=0.8,  # CUSTOM
                 top_p=0.1,
-                max_tokens=10000,
+                top_k=10.0,
                 confidence=ConfidenceConfig(
                     enabled=False,  # CUSTOM
                     temperature=0.0,
-                    granular=GranularAssessmentConfig(enabled=False),
+                    list_batch_size=25,
                 ),
             ),
             classes=[{"$id": "Invoice", "properties": {}}],  # CUSTOM
@@ -222,18 +221,18 @@ class TestSyncCustomWithNewDefault:
         # New system default (v2):
         # - New model
         # - Different defaults for temp/top_p
-        # - Increased max_tokens
-        # - Enabled granular confidence assessment
+        # - Increased top_k
+        # - Larger confidence list_batch_size
         new_default = IDPConfig(
             extraction=ExtractionConfig(
                 model="us.amazon.nova-premier-v1:0",  # NEW
                 temperature=0.5,  # NEW
                 top_p=0.2,  # NEW
-                max_tokens=15000,  # NEW
+                top_k=20.0,  # NEW
                 confidence=ConfidenceConfig(
                     enabled=True,
                     temperature=0.5,  # NEW
-                    granular=GranularAssessmentConfig(enabled=True),  # NEW
+                    list_batch_size=50,  # NEW
                 ),
             ),
             classes=[],
@@ -253,9 +252,9 @@ class TestSyncCustomWithNewDefault:
         # New defaults APPLIED to non-customized fields:
         assert new_custom.extraction.model == "us.amazon.nova-premier-v1:0"
         assert new_custom.extraction.top_p == 0.2
-        assert new_custom.extraction.max_tokens == 15000
+        assert new_custom.extraction.top_k == 20.0
         assert new_custom.extraction.confidence.temperature == 0.5
-        assert new_custom.extraction.confidence.granular.enabled
+        assert new_custom.extraction.confidence.list_batch_size == 50
 
 
 @pytest.mark.unit

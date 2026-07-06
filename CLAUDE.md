@@ -458,7 +458,9 @@ that domain:
 | `.claude/skills/extraction-pipeline.md` | Document processing pipeline, configuration, agentic extraction |
 | `.claude/skills/code-review.md` | Pre-commit self-review checklist for your own changes |
 | `.claude/skills/pr-review.md` | Reviewing an external GitHub PR or GitLab MR at a URL (e.g. `review <url>`) |
+| `.claude/skills/create-hf-dataset-pr.md` | Contributing a data/label correction to an external HuggingFace dataset via a community PR (parquet key-order gotcha, verification, review artifacts) |
 | `.claude/skills/testing-qa.md` | Writing tests, pytest patterns, moto, conftest setup |
+| `.claude/skills/live-eval-and-cost.md` | Live benchmark A/B, upgrade testing, reading accuracy/cost/confidence + prompt-cache/model cost facts |
 | `.claude/skills/documentation.md` | Documentation standards, two doc tiers, CHANGELOG, docs-site, and the "adding a Bedrock model" checklist |
 
 > **Note:** `.claude/skills/` is canonical. The Cline assistant's

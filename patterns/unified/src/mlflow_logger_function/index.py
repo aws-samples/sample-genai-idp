@@ -168,8 +168,8 @@ def _extract_config_params(config):
         if cls_method:
             params["classification.method"] = str(cls_method)
 
-    # HITL threshold (v0.6: top-level hitl) + confidence granular (v0.6:
-    # extraction.confidence.granular)
+    # HITL threshold (v0.6: top-level hitl) + confidence list batching (v0.6:
+    # extraction.confidence.list_batch_size — granular assessment is retired)
     hitl_cfg = config.get("hitl")
     if isinstance(hitl_cfg, dict):
         threshold = hitl_cfg.get("confidence_threshold")
@@ -180,11 +180,9 @@ def _extract_config_params(config):
         extraction_cfg.get("confidence") if isinstance(extraction_cfg, dict) else None
     )
     if isinstance(confidence_cfg, dict):
-        granular = confidence_cfg.get("granular")
-        if isinstance(granular, dict):
-            gran_enabled = granular.get("enabled")
-            if gran_enabled is not None:
-                params["assessment.granular.enabled"] = str(gran_enabled)
+        list_batch_size = confidence_cfg.get("list_batch_size")
+        if list_batch_size is not None:
+            params["assessment.list_batch_size"] = str(list_batch_size)
 
     # Class definitions (log as artifact)
     classes_data = config.get("classes")

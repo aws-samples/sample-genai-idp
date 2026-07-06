@@ -145,7 +145,11 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
 
   /**
    * Fetch full document details for specific documents by ObjectKey.
-   * Used only when navigating to document detail view, NOT for list loading.
+   * Used both when navigating to the document detail view and by the detail-view
+   * poll (which refreshes an open, still-processing document). The rich getDocument
+   * responses (including Sections/Pages/Metering) are merged into shared list state
+   * via setDocumentsDeduped so the fresh data flows back through the `item` prop and
+   * re-renders the detail view — not just returned to the caller.
    */
   const getDocumentDetailsFromIds = useCallback(
     async (objectKeys: string[]): Promise<Document[]> => {
@@ -160,9 +164,16 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
         .map((r) => (r as PromiseFulfilledResult<GetDocumentResolved>).value?.data?.getDocument)
         .filter((doc): doc is NonNullable<typeof doc> => doc != null) as Document[];
 
+      // Merge the rich detail into shared list state so the open detail view picks
+      // up the latest Sections/Pages/Metering (e.g. when a document finishes
+      // processing while its detail page is open).
+      if (documentValues.length > 0) {
+        setDocumentsDeduped(documentValues);
+      }
+
       return documentValues;
     },
-    [setErrorMessage],
+    [setDocumentsDeduped, setErrorMessage],
   );
 
   // ── Subscriptions ──────────────────────────────────────────────────────

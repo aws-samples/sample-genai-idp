@@ -48,7 +48,7 @@ the model IDs carry no region prefix.
 | OCR (Bedrock backend) | ✅ | Image + text input |
 | Classification | ✅ | Page-level and holistic |
 | Extraction (standard) | ✅ | Text + page images |
-| Assessment | ✅ | Including granular assessment |
+| Confidence (assessment) | ✅ | `separate` and `integrated` modes on the simple (non-agentic) path |
 | Summarization | ✅ | |
 | Evaluation (LLM method) | ✅ | |
 | Chat-with-Document | ✅ | **Streaming** — token deltas stream to the UI via the Responses SSE stream |
@@ -75,14 +75,34 @@ the model IDs carry no region prefix.
 GPT-5.x are reasoning models — they reject `temperature` / `top_p` / `top_k` and
 are instead tuned with **reasoning effort**. Each model-selectable service (OCR,
 classification, extraction, assessment, summarization, evaluation, and
-Chat-with-Document) exposes a `reasoning_effort` config field. Allowed values:
-`minimal`, `low`, `medium`, `high` (default `medium`). It is an **OpenAI-only**
-parameter — ignored by Anthropic / Nova and other model families.
+Chat-with-Document) exposes a `reasoning_effort` config field.
+
+`reasoning_effort` applies to **any reasoning-capable model**, not just OpenAI:
+
+| Model family | Allowed values | Mechanism |
+|---|---|---|
+| OpenAI GPT-5.x | `minimal`, `low`, `medium`, `high` | Responses API `reasoning.effort` |
+| Claude Sonnet 5 / Sonnet 4.6 / Opus 4.5–4.8 / Fable 5 | `low`, `medium`, `high`, `xhigh`, `max` | Bedrock Converse `output_config.effort` |
+
+It is **ignored** by models without an effort control — Amazon Nova, Claude
+Sonnet 4.5, and Claude Haiku 4.5. In the config UI, the **Reasoning effort**
+selector appears only when the section's selected model supports it.
+
+**Extraction defaults to `low`.** A full effort sweep (5 extraction methods ×
+{low, medium, high, xhigh} × 2 datasets × 20 docs) found higher effort adds
+output-token cost with negligible extraction-accuracy gain, so `low` keeps the
+Claude Sonnet 5 default affordable. Raise it per-config for genuinely
+reasoning-heavy documents. Other services default to `medium`.
 
 ```yaml
 extraction:
   model: "openai.gpt-5.4"
-  reasoning_effort: "high"   # minimal | low | medium | high
+  reasoning_effort: "high"   # OpenAI: minimal | low | medium | high
+
+# or, for a reasoning-capable Claude model:
+extraction:
+  model: "us.anthropic.claude-sonnet-5"
+  reasoning_effort: "low"    # Claude: low | medium | high | xhigh | max
 ```
 
 ## Regional availability and routing

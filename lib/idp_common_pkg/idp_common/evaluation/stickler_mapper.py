@@ -711,11 +711,17 @@ class SticklerConfigMapper:
         # Coerce types FIRST, before any other processing
         cls._coerce_json_schema_types(schema, field_path)
 
-        # If this is an object with properties but no required array, add empty one
-        # This makes all fields optional, allowing None values
+        # Force all fields optional for evaluation by clearing any 'required' array.
+        # For evaluation a field that is present in the baseline but correctly
+        # extracted as null (or vice versa) is a scored MISS, not a hard schema
+        # failure. If an explicit config marks a field required (e.g. RealKIE
+        # Invoice: required: [Agency, Advertiser, LineItems]) and a document
+        # genuinely has no value for it, Stickler/Pydantic would otherwise raise
+        # "Field required [type=missing]" after None-stripping and fail-score the
+        # WHOLE document. Overwriting (not just adding-when-missing) makes explicit
+        # configs behave like the genson auto-schema path (_strip_required).
         if schema.get(SCHEMA_TYPE) == TYPE_OBJECT and SCHEMA_PROPERTIES in schema:
-            if "required" not in schema:
-                schema["required"] = []
+            schema["required"] = []
 
         # Check if this is an array with structured items
         is_structured_array = False

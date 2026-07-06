@@ -8,9 +8,9 @@ This module provides a service for assessing the confidence and accuracy of
 extraction results by analyzing them against source documents using LLMs,
 with support for text and image content.
 
-The service supports both:
-1. Original approach: Single inference for all attributes in a section
-2. Granular approach: Multiple focused inferences with caching and parallelization
+Large list fields (e.g. hundreds of transaction rows) are assessed in batches of
+``extraction.confidence.list_batch_size`` rows via
+``idp_common.assessment.batching`` so the model reliably enumerates every row.
 """
 
 import json
@@ -100,6 +100,12 @@ class AssessmentCoreResult:
     metering: Dict[str, Any] = field(default_factory=dict)
     parsing_succeeded: bool = True
     duration_seconds: float = 0.0
+    # True when the model response hit its max-output-tokens ceiling
+    # (Converse ``stopReason == "max_tokens"``). A truncated response is usually
+    # unparseable JSON, so callers must NOT treat the resulting default 0.5 /
+    # null-placeholder scores as real — the batcher retries such a call over a
+    # smaller row slice instead of accepting the placeholder.
+    truncated: bool = False
 
 
 class AssessmentService:
@@ -735,7 +741,9 @@ class AssessmentService:
         top_k = confidence_cfg.top_k
         top_p = confidence_cfg.top_p
         reasoning_effort = confidence_cfg.reasoning_effort
-        max_tokens = confidence_cfg.max_tokens
+        # max_tokens is no longer a config knob — None lets the Bedrock client
+        # resolve the confidence model's maximum output (model_config_limits.yaml).
+        max_tokens = None
         system_prompt = confidence_cfg.system_prompt
 
         # Get schema for this document class
@@ -798,6 +806,26 @@ class AssessmentService:
         assessment_text = bedrock.extract_text_from_response(response_with_metering)
         metering = response_with_metering.get("metering", {})
 
+        # Did the model hit its max-output-tokens ceiling? A truncated response
+        # is almost always unparseable JSON; detecting it lets the batcher retry
+        # over a smaller row slice instead of silently falling back to a
+        # meaningless default 0.5 for every field. Recognize both the Bedrock
+        # Converse signal (``stopReason == "max_tokens"``) and the OpenAI
+        # Responses adapter's mapped ``status`` (``incomplete`` /
+        # ``max_output_tokens``) so the guard holds across model families.
+        raw_response = response_with_metering.get("response", response_with_metering)
+        stop_reason = (
+            raw_response.get("stopReason") if isinstance(raw_response, dict) else None
+        )
+        truncated = stop_reason in ("max_tokens", "max_output_tokens", "incomplete")
+        if truncated:
+            logger.warning(
+                "Assessment response truncated at max output tokens "
+                "(stopReason=max_tokens) — %d field(s) in this call will be "
+                "retried over smaller batches by the caller.",
+                len(extraction_results),
+            )
+
         # Parse response into JSON
         assessment_data: Dict[str, Any] = {}
         parsing_succeeded = True
@@ -821,10 +849,19 @@ class AssessmentService:
                         "instead of single object"
                     )
         except Exception as e:
-            logger.error(
-                f"Error parsing assessment LLM output - invalid JSON?: "
-                f"{assessment_text} - {e}"
-            )
+            if truncated:
+                logger.error(
+                    "Assessment output was TRUNCATED at the model's max output "
+                    "tokens, producing incomplete JSON. Assigning temporary "
+                    "default scores; the caller retries this call over a smaller "
+                    "row batch. Error: %s",
+                    e,
+                )
+            else:
+                logger.error(
+                    f"Error parsing assessment LLM output - invalid JSON?: "
+                    f"{assessment_text} - {e}"
+                )
             logger.info("Using default confidence scores.")
             assessment_data = {}
             for attr_name in extraction_results.keys():
@@ -945,6 +982,7 @@ class AssessmentService:
             metering=metering or {},
             parsing_succeeded=parsing_succeeded,
             duration_seconds=total_duration,
+            truncated=truncated,
         )
 
     def process_document_section(self, document: Document, section_id: str) -> Document:
@@ -1100,25 +1138,36 @@ class AssessmentService:
             logger.info(f"Time taken to read raw OCR results: {t4 - t3:.2f} seconds")
 
             # Run the pure inference + enhancement core (shared with the agentic
-            # in-shard assessment path). This builds the prompt, invokes Bedrock,
-            # parses the response, and enhances each field with its confidence
-            # threshold + alerts — all from the in-memory inputs gathered above.
+            # in-shard assessment path), batching large list fields so the model
+            # reliably enumerates every row. A single call over a big list (e.g. a
+            # 120-row statement) under-enumerates or omits it, leaving most rows
+            # unassessed — this was previously the job of the (now retired) granular
+            # service. ``assess_results_batched`` slices the largest oversized list
+            # by ``extraction.confidence.list_batch_size``, assesses each chunk
+            # sequentially with the shared scalars/context, and reconciles the
+            # per-row assessments to full per-cell coverage. Falls back to a single
+            # (still reconciled) call when no list exceeds the batch size.
             logger.info(
                 f"Assessing extraction confidence for {class_label} document, "
                 f"section {section_id}"
             )
-            core = self.assess_results(
+            from idp_common.assessment.batching import assess_results_batched
+
+            batched = assess_results_batched(
+                self,
                 class_label=class_label,
                 extraction_results=extraction_results,
                 document_text=document_text,
                 page_images=page_images,
+                batch_size=self.config.extraction.confidence.list_batch_size,
                 ocr_text_confidence=ocr_text_confidence,
             )
-            enhanced_assessment_data = core.enhanced_assessment
-            confidence_threshold_alerts = core.confidence_threshold_alerts
-            metering = core.metering
-            parsing_succeeded = core.parsing_succeeded
-            total_duration = core.duration_seconds
+            enhanced_assessment_data = batched["assessment"]
+            confidence_threshold_alerts = batched["alerts"]
+            metering = batched["metering"]
+            parsing_succeeded = batched["parsing_succeeded"]
+            total_duration = batched["duration_seconds"]
+            batched_split_stats = batched.get("split_stats")
 
             # Ground field geometry from OCR. In 'ocr_only' (default) geometry is
             # derived purely from OCR value-matching (model boxes were never
@@ -1156,6 +1205,14 @@ class AssessmentService:
             extraction_data["metadata"]["assessment_parsing_succeeded"] = (
                 parsing_succeeded
             )
+            # Surface adaptive batch-splitting activity (only when the model
+            # truncated output and batches had to shrink) for visibility.
+            from idp_common.assessment.batching import split_stats_are_notable
+
+            if split_stats_are_notable(batched_split_stats):
+                extraction_data["metadata"]["assessment_batch_split_stats"] = (
+                    batched_split_stats
+                )
 
             # Write the updated result back to S3
             bucket, key = utils.parse_s3_uri(section.extraction_result_uri)

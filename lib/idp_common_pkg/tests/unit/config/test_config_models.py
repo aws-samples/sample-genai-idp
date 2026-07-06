@@ -65,6 +65,8 @@ class TestConfigModels:
             "temperature": "0.5",
             "top_p": "0.1",
             "top_k": "5",
+            # max_tokens is no longer an ExtractionConfig field (extra="ignore"):
+            # output is always requested at the model maximum.
             "max_tokens": "10000",
             "agentic": {"enabled": False, "review_agent": False},
         }
@@ -74,13 +76,12 @@ class TestConfigModels:
         assert config.temperature == 0.5
         assert config.top_p == 0.1
         assert config.top_k == 5.0
-        assert config.max_tokens == 10000
+        assert not hasattr(config, "max_tokens")
 
         # Types should be correct
         assert isinstance(config.temperature, float)
         assert isinstance(config.top_p, float)
         assert isinstance(config.top_k, float)
-        assert isinstance(config.max_tokens, int)
 
     def test_extraction_config_with_native_numbers(self):
         """Test ExtractionConfig with native numeric values"""
@@ -89,7 +90,6 @@ class TestConfigModels:
             "temperature": 0.5,
             "top_p": 0.1,
             "top_k": 5.0,
-            "max_tokens": 10000,
             "agentic": {"enabled": False, "review_agent": False},
         }
         config = ExtractionConfig.model_validate(config_dict)
@@ -97,7 +97,7 @@ class TestConfigModels:
         assert config.temperature == 0.5
         assert config.top_p == 0.1
         assert config.top_k == 5.0
-        assert config.max_tokens == 10000
+        assert not hasattr(config, "max_tokens")
 
     def test_full_config_with_mixed_types(self):
         """Test full IDPConfig with mixed type representations"""
@@ -118,14 +118,12 @@ class TestConfigModels:
                 "temperature": 0.0,
                 "top_p": 0.1,
                 "top_k": 5,
-                "max_tokens": 10000,
                 "agentic": {"enabled": False, "review_agent": True},
             },
             "assessment": {
                 "model": "us.amazon.nova-lite-v1:0",
                 "enabled": True,
                 "temperature": "0.0",
-                "granular": {"enabled": False, "list_batch_size": "1"},
             },
             "classes": [],
         }
@@ -144,7 +142,7 @@ class TestConfigModels:
 
         # Numbers from natives
         assert config.extraction.top_p == 0.1
-        assert config.extraction.max_tokens == 10000
+        assert not hasattr(config.extraction, "max_tokens")
 
     def test_classification_valid_class_enforcement_defaults(self):
         """New class-enforcement fields default to enabled with sane values."""
@@ -190,25 +188,21 @@ class TestConfigModels:
         result = process_config(config)
         assert result is True
 
-    def test_confidence_granular_config(self):
-        """Test granular confidence configuration (v0.6: extraction.confidence)"""
+    def test_confidence_list_batch_size_config(self):
+        """Confidence list batching config (v0.6: extraction.confidence). Any
+        leftover retired ``granular.*`` keys are ignored, not errors."""
         from idp_common.config import ConfidenceConfig
 
         config_dict = {
             "model": "us.amazon.nova-lite-v1:0",
-            "granular": {
-                "enabled": True,
-                "list_batch_size": "5",
-                "simple_batch_size": "10",
-                "max_workers": "20",
-            },
+            "list_batch_size": "5",
+            # Retired granular sub-config: tolerated (ignored) for back-compat.
+            "granular": {"enabled": True, "max_workers": "20"},
         }
         config = ConfidenceConfig.model_validate(config_dict)
 
-        assert config.granular.enabled is True
-        assert config.granular.list_batch_size == 5
-        assert config.granular.simple_batch_size == 10
-        assert config.granular.max_workers == 20
+        assert config.list_batch_size == 5
+        assert not hasattr(config, "granular")
 
     def test_config_validation_range_checks(self):
         """Test that validation enforces ranges"""
@@ -233,7 +227,7 @@ class TestConfigModels:
         assert config.agentic.enabled is False
         assert config.agentic.review_agent is False
         assert config.temperature == 0.0
-        assert config.max_tokens == 10000
+        assert not hasattr(config, "max_tokens")
 
 
 class TestChatConfig:

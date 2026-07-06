@@ -238,6 +238,22 @@ class AgenticConfig(BaseModel):
     """Agentic extraction configuration"""
 
     enabled: bool = Field(default=False, description="Enable agentic extraction")
+    integrated_confidence_strategy: str = Field(
+        default="two_step",
+        description=(
+            "HIDDEN/EXPERIMENTAL (not surfaced in the config UI). How the agentic "
+            "extractor produces confidence when confidence.mode == 'integrated'. "
+            "'two_step' (default): the agent extracts via the extraction tool, then "
+            "calls provide_field_assessment in a follow-up inference within the same "
+            "turn (a dedicated reflection pass over the finalized values). "
+            "'single_shot': the agent emits values AND per-field confidence together "
+            "in ONE combined tool call, saving the follow-up inference. Both produce "
+            "identical explainability_info downstream; this only changes inference "
+            "mechanics. Provided so cost/latency vs. confidence-calibration can be "
+            "A/B tested before choosing a default. Ignored unless "
+            "confidence.mode == 'integrated' AND agentic extraction is active."
+        ),
+    )
     review_agent: bool = Field(default=False, description="Enable review agent")
     review_agent_model: str | None = Field(
         default=None,
@@ -308,6 +324,24 @@ class AgenticConfig(BaseModel):
         "Distributed Map (one Lambda per shard, native per-shard retry/resume). "
         "Selection only affects orchestration; shard/merge logic is shared.",
     )
+
+    @field_validator("integrated_confidence_strategy", mode="before")
+    @classmethod
+    def _validate_integrated_confidence_strategy(cls, v: Any) -> str:
+        """Normalize/validate the (hidden) integrated-confidence strategy.
+
+        Empty/None falls back to the default 'two_step' so a blanked config value
+        never breaks the runtime; unknown values are rejected loudly.
+        """
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return "two_step"
+        v = str(v).strip().lower()
+        if v not in ("two_step", "single_shot"):
+            raise ValueError(
+                "integrated_confidence_strategy must be 'two_step' or 'single_shot', "
+                f"got {v!r}"
+            )
+        return v
 
 
 class MissingFieldHandlingConfig(BaseModel):
@@ -381,40 +415,15 @@ class PipelineHook(BaseModel):
     enabled: bool = Field(default=True, description="Whether this hook is active")
 
 
-class GranularAssessmentConfig(BaseModel):
-    """Granular assessment configuration (large-document batching for the
-    standalone Assessment step). Nested under ``extraction.confidence``.
-
-    NOTE: slated for removal in a follow-up PR (superseded by
-    ``confidence.list_batch_size`` + a capable confidence model). Retained here
-    so the standalone AssessmentService keeps working until that PR lands.
-    """
-
-    enabled: bool = Field(default=False, description="Enable granular assessment")
-    list_batch_size: int = Field(default=1, gt=0)
-    simple_batch_size: int = Field(default=3, gt=0)
-    max_workers: int = Field(default=20, gt=0)
-
-    @field_validator(
-        "list_batch_size", "simple_batch_size", "max_workers", mode="before"
-    )
-    @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
-
-
 class ConfidenceConfig(BaseModel):
     """Per-field confidence configuration (v0.6).
 
     Confidence is an optional OUTPUT of extraction, not a separate stage. This
     block (nested as ``extraction.confidence``) is the single home for every knob
     that used to live under the top-level ``assessment`` block — the confidence
-    model, its prompts/image/decoding params, the integration mode, list
-    batching, and the granular sub-config. HITL (human review) is its own
-    top-level ``hitl`` block; geometry is ``extraction.geometry``.
+    model, its prompts/image/decoding params, the integration mode, and list
+    batching (``list_batch_size``). HITL (human review) is its own top-level
+    ``hitl`` block; geometry is ``extraction.geometry``.
     """
 
     mode: str = Field(
@@ -465,15 +474,18 @@ class ConfidenceConfig(BaseModel):
     reasoning_effort: str = Field(
         default="medium",
         description=(
-            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
-            "minimal, low, medium, or high. Ignored by other model families."
+            "Reasoning effort for reasoning-capable models. Claude Sonnet 5 / "
+            "Sonnet 4.6 / Opus 4.5-4.8 / Fable 5 accept low, medium, high, xhigh, "
+            "or max (via output_config.effort); OpenAI GPT-5.x accept minimal, "
+            "low, medium, or high (via reasoning.effort). Ignored by models "
+            "without an effort control (Nova, Sonnet 4.5, Haiku 4.5)."
         ),
     )
-    max_tokens: int = Field(
-        default=10000,
-        gt=0,
-        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit.",
-    )
+    # NOTE: max_tokens is intentionally NOT a field. Output is always requested at
+    # the model's maximum (resolved from model_config_limits.yaml in the Bedrock
+    # client) — Bedrock's default-when-omitted truncates, and capping confidence
+    # output risks incomplete per-field scoring. A leftover max_tokens in a stored
+    # config is ignored (extra="ignore" default).
     list_batch_size: int = Field(
         default=25,
         gt=0,
@@ -488,7 +500,6 @@ class ConfidenceConfig(BaseModel):
         ),
     )
     image: ImageConfig = Field(default_factory=ImageConfig)
-    granular: GranularAssessmentConfig = Field(default_factory=GranularAssessmentConfig)
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
     @classmethod
@@ -498,7 +509,7 @@ class ConfidenceConfig(BaseModel):
             return float(v) if v else 0.0
         return float(v)
 
-    @field_validator("max_tokens", "list_batch_size", mode="before")
+    @field_validator("list_batch_size", mode="before")
     @classmethod
     def parse_int(cls, v: Any) -> int:
         """Parse int from string or number"""
@@ -648,15 +659,18 @@ class ExtractionConfig(BaseModel):
     reasoning_effort: str = Field(
         default="medium",
         description=(
-            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
-            "minimal, low, medium, or high. Ignored by other model families."
+            "Reasoning effort for reasoning-capable models. Claude Sonnet 5 / "
+            "Sonnet 4.6 / Opus 4.5-4.8 / Fable 5 accept low, medium, high, xhigh, "
+            "or max (via output_config.effort); OpenAI GPT-5.x accept minimal, "
+            "low, medium, or high (via reasoning.effort). Ignored by models "
+            "without an effort control (Nova, Sonnet 4.5, Haiku 4.5)."
         ),
     )
-    max_tokens: int = Field(
-        default=10000,
-        gt=0,
-        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
-    )
+    # NOTE: max_tokens is intentionally NOT a field. Extraction output is always
+    # requested at the model's maximum (resolved from model_config_limits.yaml in
+    # the Bedrock client / agentic path) — Bedrock's default-when-omitted
+    # truncates, and completeness matters more than an output cap for extraction.
+    # A leftover max_tokens in a stored config is ignored (extra="ignore" default).
     image: ImageConfig = Field(default_factory=ImageConfig)
     mode: Optional[str] = Field(
         default=None,
@@ -707,14 +721,6 @@ class ExtractionConfig(BaseModel):
         if isinstance(v, str):
             return float(v) if v else 0.0
         return float(v)
-
-    @field_validator("max_tokens", mode="before")
-    @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -781,8 +787,11 @@ class ClassificationConfig(BaseModel):
     reasoning_effort: str = Field(
         default="medium",
         description=(
-            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
-            "minimal, low, medium, or high. Ignored by other model families."
+            "Reasoning effort for reasoning-capable models. Claude Sonnet 5 / "
+            "Sonnet 4.6 / Opus 4.5-4.8 / Fable 5 accept low, medium, high, xhigh, "
+            "or max (via output_config.effort); OpenAI GPT-5.x accept minimal, "
+            "low, medium, or high (via reasoning.effort). Ignored by models "
+            "without an effort control (Nova, Sonnet 4.5, Haiku 4.5)."
         ),
     )
     max_tokens: int = Field(
@@ -944,8 +953,11 @@ class SummarizationConfig(BaseModel):
     reasoning_effort: str = Field(
         default="medium",
         description=(
-            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
-            "minimal, low, medium, or high. Ignored by other model families."
+            "Reasoning effort for reasoning-capable models. Claude Sonnet 5 / "
+            "Sonnet 4.6 / Opus 4.5-4.8 / Fable 5 accept low, medium, high, xhigh, "
+            "or max (via output_config.effort); OpenAI GPT-5.x accept minimal, "
+            "low, medium, or high (via reasoning.effort). Ignored by models "
+            "without an effort control (Nova, Sonnet 4.5, Haiku 4.5)."
         ),
     )
     max_tokens: int = Field(
@@ -1019,8 +1031,11 @@ class ChatConfig(BaseModel):
     reasoning_effort: str = Field(
         default="medium",
         description=(
-            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
-            "minimal, low, medium, or high. Ignored by other model families."
+            "Reasoning effort for reasoning-capable models. Claude Sonnet 5 / "
+            "Sonnet 4.6 / Opus 4.5-4.8 / Fable 5 accept low, medium, high, xhigh, "
+            "or max (via output_config.effort); OpenAI GPT-5.x accept minimal, "
+            "low, medium, or high (via reasoning.effort). Ignored by models "
+            "without an effort control (Nova, Sonnet 4.5, Haiku 4.5)."
         ),
     )
 
@@ -1074,8 +1089,11 @@ class OCRConfig(BaseModel):
     reasoning_effort: str = Field(
         default="medium",
         description=(
-            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
-            "minimal, low, medium, or high. Ignored by other model families."
+            "Reasoning effort for reasoning-capable models. Claude Sonnet 5 / "
+            "Sonnet 4.6 / Opus 4.5-4.8 / Fable 5 accept low, medium, high, xhigh, "
+            "or max (via output_config.effort); OpenAI GPT-5.x accept minimal, "
+            "low, medium, or high (via reasoning.effort). Ignored by models "
+            "without an effort control (Nova, Sonnet 4.5, Haiku 4.5)."
         ),
     )
     features: List[OCRFeature] = Field(
@@ -1791,8 +1809,11 @@ class EvaluationLLMMethodConfig(BaseModel):
     reasoning_effort: str = Field(
         default="medium",
         description=(
-            "Reasoning effort for OpenAI Responses models (GPT-5.x) only: "
-            "minimal, low, medium, or high. Ignored by other model families."
+            "Reasoning effort for reasoning-capable models. Claude Sonnet 5 / "
+            "Sonnet 4.6 / Opus 4.5-4.8 / Fable 5 accept low, medium, high, xhigh, "
+            "or max (via output_config.effort); OpenAI GPT-5.x accept minimal, "
+            "low, medium, or high (via reasoning.effort). Ignored by models "
+            "without an effort control (Nova, Sonnet 4.5, Haiku 4.5)."
         ),
     )
     task_prompt: str = Field(

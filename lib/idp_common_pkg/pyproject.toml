@@ -16,6 +16,7 @@ exclude = [
 
 # Include YAML and MD files for system defaults configuration
 [tool.setuptools.package-data]
+"idp_common.config" = ["model_config_limits.yaml"]
 "idp_common.config.system_defaults" = ["*.yaml", "*.md"]
 "idp_common.discovery.prompts" = ["*.jinja2"]
 

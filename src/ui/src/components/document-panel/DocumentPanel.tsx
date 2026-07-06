@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   ButtonDropdown,
@@ -685,8 +685,8 @@ export const DocumentPanel = ({
   // subscription pushed live Sections/Pages updates into the open document.
   // With the HTTP API there are no subscriptions, so while the open document is
   // still processing we re-fetch its rich detail (getDocument via the parent's
-  // getDocumentDetailsFromIds, which merges into list state and flows back as
-  // the `item` prop). Stops once the document reaches a terminal status.
+  // getDocumentDetailsFromIds, which merges into shared list state and flows back
+  // as the `item` prop). Stops once the document reaches a terminal status.
   const detailStatus = (localItem?.objectStatus || '').toUpperCase();
   const isTerminalStatus = ['COMPLETED', 'FAILED', 'ABORTED'].includes(detailStatus);
   const pollDetail = useCallback(() => {
@@ -699,6 +699,19 @@ export const DocumentPanel = ({
     enabled: USE_POLLING && !!localItem?.objectKey && !isTerminalStatus,
     intervalMs: DOCUMENT_DETAIL_POLL_INTERVAL_MS,
   });
+
+  // When the open document transitions to a terminal status (typically detected
+  // by the lightweight list poll, which carries no Sections/Pages/Metering), the
+  // detail poll above stops firing. Do one final rich getDocument fetch on that
+  // transition so the completed sections, pages, and estimated cost are pulled in.
+  const objectKey = localItem?.objectKey;
+  const wasTerminalRef = useRef(isTerminalStatus);
+  useEffect(() => {
+    if (isTerminalStatus && !wasTerminalRef.current && objectKey && getDocumentDetailsFromIds) {
+      void getDocumentDetailsFromIds([objectKey]);
+    }
+    wasTerminalRef.current = isTerminalStatus;
+  }, [isTerminalStatus, objectKey, getDocumentDetailsFromIds]);
 
   // Fetch active configuration for dynamic confidence threshold (used by sections panel, etc.)
   const { mergedConfig } = useConfiguration();
