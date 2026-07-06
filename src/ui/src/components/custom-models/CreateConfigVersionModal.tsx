@@ -260,11 +260,13 @@ const CreateConfigVersionModal = ({
     }
   };
 
-  const versionOptions: SelectOption[] = configVersions.map((v) => ({
-    label: v.isActive ? `${v.versionName} (Active)` : v.versionName,
-    value: v.versionName,
-    description: v.description || undefined,
-  }));
+  const versionOptions: SelectOption[] = [...configVersions]
+    .sort((a, b) => a.versionName.localeCompare(b.versionName, undefined, { numeric: true, sensitivity: 'base' }))
+    .map((v) => ({
+      label: v.isActive ? `${v.versionName} (Active)` : v.versionName,
+      value: v.versionName,
+      description: v.description || undefined,
+    }));
 
   const atLeastOneChecked = useForExtraction || useForClassification;
 
