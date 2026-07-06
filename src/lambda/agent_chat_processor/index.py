@@ -815,6 +815,8 @@ def handler(event, context):
                 "falling back to full agent list"
             )
         elif method != "quick_start":
+            if QUICK_START_AGENT_ID in agent_ids:
+                agent_ids.remove(QUICK_START_AGENT_ID)
             # Filter out Code Intelligence Agent if not enabled by user
             CODE_INTELLIGENCE_AGENT_ID = "Code-Intelligence-Agent"
             if not enable_code_intelligence and CODE_INTELLIGENCE_AGENT_ID in agent_ids:

@@ -244,6 +244,11 @@ const QuickStartWidget = (): React.JSX.Element | null => {
     doOpen();
   }, [doOpen]);
 
+  const handleClose = useCallback(() => {
+    setView('closed');
+    setMounted(false);
+  }, []);
+
   if (!isWidgetEnabled() || location.pathname === WELCOME_PATH) {
     return null;
   }
@@ -286,7 +291,7 @@ const QuickStartWidget = (): React.JSX.Element | null => {
               <WidgetHeaderTitle />
               <span className="quick-start-widget-header-actions">
                 <Button variant="icon" iconName="treeview-collapse" ariaLabel="Minimize" onClick={() => setView('minimized')} />
-                <Button variant="icon" iconName="close" ariaLabel="Close" onClick={() => setView('closed')} />
+                <Button variant="icon" iconName="close" ariaLabel="Close" onClick={handleClose} />
               </span>
             </div>
             <div className="quick-start-widget-chat">
