@@ -32,7 +32,7 @@ import {
 import type { SelectProps } from '@cloudscape-design/components';
 import { generateClient } from '../../api/client-shim';
 
-import { uploadDiscoveryDocument, listDiscoveryJobs, onDiscoveryJobStatusChange, deleteDiscoveryJob, autoDetectSections } from '../../graphql/generated';
+import { uploadDiscoveryDocument, listDiscoveryJobs, deleteDiscoveryJob, autoDetectSections } from '../../graphql/generated';
 import useSettingsContext from '../../contexts/settings';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import { getJsonValidationError } from '../common/utilities';
@@ -174,8 +174,10 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
     }, 50);
   }, []);
 
-  const loadDiscoveryJobs = async () => {
-    setIsLoadingJobs(true);
+  // `silent` skips the loading spinner so the 5s status poll doesn't flicker
+  // the table / refresh button on every tick.
+  const loadDiscoveryJobs = async (silent = false) => {
+    if (!silent) setIsLoadingJobs(true);
     try {
       const response = await client.graphql({ query: listDiscoveryJobs });
       type ListJobsResp = Record<string, Record<string, Record<string, DiscoveryJob[]>>>;
@@ -185,9 +187,9 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
       setDiscoveryJobs(singleDocJobs);
     } catch (err) {
       console.error('Error loading discovery jobs:', err);
-      setError(`Failed to load discovery jobs: ${(err as Error).message}`);
+      if (!silent) setError(`Failed to load discovery jobs: ${(err as Error).message}`);
     } finally {
-      setIsLoadingJobs(false);
+      if (!silent) setIsLoadingJobs(false);
     }
   };
 
@@ -233,12 +235,16 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
     loadDiscoveryJobs();
   }, []);
 
-  // Timer for elapsed time display on active jobs (subscriptions handle status updates)
+  // Poll for status updates + refresh the elapsed-time display while any job is
+  // active. Real-time GraphQL subscriptions were removed with AppSync (the REST
+  // transport has no push channel), so polling is the only way active jobs
+  // advance past PENDING here.
   useEffect(() => {
     const hasActiveJobs = discoveryJobs.some((j) => j.status === 'PENDING' || j.status === 'IN_PROGRESS' || j.status === 'OPTIMIZATION_IN_PROGRESS');
     if (hasActiveJobs && !tickRef.current) {
       tickRef.current = setInterval(() => {
         setTick((t) => t + 1);
+        loadDiscoveryJobs(true);
       }, 5000);
     } else if (!hasActiveJobs && tickRef.current) {
       clearInterval(tickRef.current);
@@ -252,91 +258,6 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
     };
   }, [discoveryJobs]);
 
-  // Update a specific job in the list — FIX: spread ALL fields from the update, not just status
-  const updateDiscoveryJob = useCallback((updatedJob: DiscoveryJob) => {
-    console.log('Updating discovery job status:', updatedJob);
-    setDiscoveryJobs((currentJobs) => {
-      const jobIndex = currentJobs.findIndex((job) => job.jobId === updatedJob.jobId);
-      if (jobIndex >= 0) {
-        const newJobs = [...currentJobs];
-        const oldJob = newJobs[jobIndex];
-        // Merge ALL updated fields from subscription (not just status)
-        // Set updatedAt to now when terminal status arrives via subscription
-        // (subscription doesn't include updatedAt, so we capture it client-side)
-        const merged = { ...oldJob, ...updatedJob };
-        if (updatedJob.status === 'COMPLETED' || updatedJob.status === 'FAILED' || updatedJob.status === 'OPTIMIZATION_COMPLETED' || updatedJob.status === 'OPTIMIZATION_FAILED') {
-          merged.updatedAt = new Date().toISOString();
-        }
-        newJobs[jobIndex] = merged;
-        console.log(`Updated job ${updatedJob.jobId}: ${oldJob.status} -> ${updatedJob.status}`);
-
-        return newJobs;
-      }
-      console.warn(`Job ${updatedJob.jobId} not found in current jobs list, adding it`);
-      return [...currentJobs, updatedJob];
-    });
-  }, []);
-
-  // Set up subscriptions for active discovery jobs
-  // Use a ref to track active subscriptions and avoid teardown/recreation on status changes
-  const subscriptionsRef = useRef(new Map<string, { unsubscribe: () => void }>());
-
-  useEffect(() => {
-    const terminalStatuses = new Set(['COMPLETED', 'FAILED', 'OPTIMIZATION_COMPLETED', 'OPTIMIZATION_FAILED']);
-    const activeJobIds = new Set<string>();
-
-    discoveryJobs.forEach((job) => {
-      if (!terminalStatuses.has(job.status)) {
-        activeJobIds.add(job.jobId);
-
-        // Only create a subscription if we don't already have one for this jobId
-        if (!subscriptionsRef.current.has(job.jobId)) {
-          type GqlSubscription = {
-            subscribe: (callbacks: Record<string, unknown>) => { unsubscribe: () => void };
-          };
-          const observable = client.graphql({
-            query: onDiscoveryJobStatusChange,
-            variables: { jobId: job.jobId },
-          }) as unknown as GqlSubscription;
-          const subscription = observable.subscribe({
-              next: (data: { data?: { onDiscoveryJobStatusChange?: DiscoveryJob } }) => {
-                console.log('Discovery job status changed:', data);
-                const changedJob = data?.data?.onDiscoveryJobStatusChange;
-                if (changedJob) {
-                  updateDiscoveryJob(changedJob);
-                  return;
-                }
-                console.warn('Received subscription update but no job data, falling back to refresh');
-                loadDiscoveryJobs();
-              },
-              error: (subscriptionError: unknown) => {
-                console.error('Discovery job subscription error:', subscriptionError);
-              },
-            });
-
-          subscriptionsRef.current.set(job.jobId, subscription);
-        }
-      }
-    });
-
-    // Clean up subscriptions for jobs that reached terminal state
-    subscriptionsRef.current.forEach((subscription, jobId) => {
-      if (!activeJobIds.has(jobId)) {
-        subscription.unsubscribe();
-        subscriptionsRef.current.delete(jobId);
-      }
-    });
-  }, [JSON.stringify(discoveryJobs.map((job) => ({ jobId: job.jobId, status: job.status }))), updateDiscoveryJob]);
-
-  // Clean up all subscriptions on unmount
-  useEffect(() => {
-    return () => {
-      subscriptionsRef.current.forEach((subscription) => {
-        subscription.unsubscribe();
-      });
-      subscriptionsRef.current.clear();
-    };
-  }, []);
 
   if (!settings.DiscoveryBucket) {
     return (
@@ -1106,7 +1027,7 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
                 <Button
                   iconName="refresh"
                   variant="icon"
-                  onClick={loadDiscoveryJobs}
+                  onClick={() => loadDiscoveryJobs()}
                   loading={isLoadingJobs}
                   ariaLabel="Refresh discovery jobs"
                 />
