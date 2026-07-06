@@ -7298,6 +7298,7 @@ Resources:
           # --- Shared / doc-chat processor env (mirrors ChatWithDocumentProcessorFunction) ---
           OUTPUT_BUCKET: !Ref OutputBucket
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          CONFIGURATION_BUCKET: !Ref ConfigurationBucket
           TRACKING_TABLE_NAME: !Ref TrackingTable
           USERS_TABLE_NAME: !Ref UsersTable
           GUARDRAIL_ID_AND_VERSION:
@@ -7346,6 +7347,10 @@ Resources:
             TableName: !Ref ChatMessagesTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdHelperChatMemoryTable
+        - Statement:
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${ConfigurationBucket}/config_library/*"
         - S3CrudPolicy:
             BucketName: !If
               - ShouldCreateReportingBucket
