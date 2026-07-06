@@ -2457,6 +2457,7 @@ Resources:
             "uploadDiscoveryDocument": "${DiscoveryUploadResolverFunction}",
             "uploadDocument": "${UploadResolverFunction}",
             "uploadMultiDocDiscoveryZip": "${DiscoveryUploadResolverFunction}",
+            "validateTestFileName": "${TestSetResolverFunction}",
             "claimReview": "${CompleteSectionReviewFunctionArn}",
             "completeSectionReview": "${CompleteSectionReviewFunctionArn}",
             "releaseReview": "${CompleteSectionReviewFunctionArn}",
