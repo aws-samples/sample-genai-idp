@@ -7338,7 +7338,7 @@ Resources:
             BucketName: !Ref OutputBucket
         - S3WritePolicy:
             BucketName: !Ref OutputBucket
-        - DynamoDBReadPolicy:
+        - DynamoDBCrudPolicy:
             TableName: !Ref ConfigurationTable
         - DynamoDBReadPolicy:
             TableName: !Ref TrackingTable
