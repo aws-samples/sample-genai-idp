@@ -82,10 +82,12 @@ const UserManagementLayout = (): React.JSX.Element => {
   ];
 
   const configVersionOptions = useMemo(() => {
-    return versions.map((v) => ({
-      label: v.versionName + (v.isActive ? ' (active)' : ''),
-      value: v.versionName,
-    }));
+    return [...versions]
+      .sort((a, b) => a.versionName.localeCompare(b.versionName, undefined, { numeric: true, sensitivity: 'base' }))
+      .map((v) => ({
+        label: v.versionName + (v.isActive ? ' (active)' : ''),
+        value: v.versionName,
+      }));
   }, [versions]);
 
   const validateEmail = useCallback(
