@@ -1,13 +1,15 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { generateClient } from 'aws-amplify/api';
 import JSZip from 'jszip';
 import { ConsoleLogger } from 'aws-amplify/utils';
-import { uploadMultiDocDiscoveryZip, startMultiDocDiscovery, onDiscoveryJobStatusChange } from '../../graphql/generated';
+import { generateClient } from '../../api/client-shim';
+import { uploadMultiDocDiscoveryZip, startMultiDocDiscovery, listDiscoveryJobs } from '../../graphql/generated';
 
 const logger = new ConsoleLogger('useQuickStartUpload');
 const client = generateClient();
+
+const POLL_INTERVAL_MS = 5000;
 
 export interface QuickStartUploadStatus {
   jobId: string | null;
@@ -61,28 +63,35 @@ const parseClassNames = (discoveredClasses?: string): string[] => {
 const useQuickStartUpload = ({ onComplete, onError }: UseQuickStartUploadArgs = {}) => {
   const [uploading, setUploading] = useState(false);
   const [status, setStatus] = useState<QuickStartUploadStatus | null>(null);
-  const subscriptionRef = useRef<{ unsubscribe: () => void } | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const configVersionRef = useRef<string>('');
 
-  useEffect(
-    () => () => {
-      subscriptionRef.current?.unsubscribe();
-    },
-    [],
-  );
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current !== null) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
 
-  const subscribe = useCallback(
+  useEffect(() => () => stopPolling(), [stopPolling]);
+
+  // AppSync subscriptions were removed with the REST migration, so status is
+  // tracked by polling listDiscoveryJobs and matching our jobId, mirroring
+  // MultiDocDiscoveryPanel.
+  const startPolling = useCallback(
     (jobId: string) => {
-      subscriptionRef.current?.unsubscribe();
-      const observable = client.graphql({ query: onDiscoveryJobStatusChange, variables: { jobId } });
-      subscriptionRef.current = (observable as unknown as { subscribe: (h: unknown) => { unsubscribe: () => void } }).subscribe({
-        next: ({ data }: { data?: { onDiscoveryJobStatusChange?: QuickStartUploadStatus } }) => {
-          const update = data?.onDiscoveryJobStatusChange;
+      stopPolling();
+      const poll = async () => {
+        try {
+          const resp = await client.graphql({ query: listDiscoveryJobs });
+          const jobs =
+            (resp as { data?: { listDiscoveryJobs?: { DiscoveryJobs?: (QuickStartUploadStatus & { jobId: string })[] } } })?.data
+              ?.listDiscoveryJobs?.DiscoveryJobs || [];
+          const update = jobs.find((j) => j.jobId === jobId);
           if (!update) return;
           setStatus((prev) => ({ ...(prev || { jobId, status: 'QUEUED' }), ...update }));
           if (TERMINAL.includes(update.status)) {
-            subscriptionRef.current?.unsubscribe();
-            subscriptionRef.current = null;
+            stopPolling();
             if (update.status === 'COMPLETED') {
               onComplete?.({
                 jobId,
@@ -95,14 +104,14 @@ const useQuickStartUpload = ({ onComplete, onError }: UseQuickStartUploadArgs = 
               onError?.(update.errorMessage || 'Document discovery failed');
             }
           }
-        },
-        error: (err: unknown) => {
-          logger.error('Subscription error', err);
-          onError?.('Lost connection to discovery job updates');
-        },
-      });
+        } catch (err) {
+          logger.error('Discovery status poll failed', err);
+        }
+      };
+      pollTimerRef.current = setInterval(poll, POLL_INTERVAL_MS);
+      void poll();
     },
-    [onComplete, onError],
+    [onComplete, onError, stopPolling],
   );
 
   const startUpload = useCallback(
@@ -147,7 +156,7 @@ const useQuickStartUpload = ({ onComplete, onError }: UseQuickStartUploadArgs = 
           throw new Error('Failed to start document discovery');
         }
         setStatus({ ...job });
-        subscribe(job.jobId);
+        startPolling(job.jobId);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Upload failed';
         logger.error('startUpload failed', err);
@@ -157,14 +166,13 @@ const useQuickStartUpload = ({ onComplete, onError }: UseQuickStartUploadArgs = 
         setUploading(false);
       }
     },
-    [subscribe, onError],
+    [startPolling, onError],
   );
 
   const reset = useCallback(() => {
-    subscriptionRef.current?.unsubscribe();
-    subscriptionRef.current = null;
+    stopPolling();
     setStatus(null);
-  }, []);
+  }, [stopPolling]);
 
   return { startUpload, uploading, status, reset };
 };
