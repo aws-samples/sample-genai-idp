@@ -9,6 +9,7 @@ import { Notification } from '../types/common';
 const logger = new ConsoleLogger('useNotifications');
 
 const dismissedInitialNotificationsStorageKey = 'dismissedInitialNotifications';
+
 const initialNotifications: Omit<Notification, 'onDismiss'>[] = [
   {
     type: 'info',

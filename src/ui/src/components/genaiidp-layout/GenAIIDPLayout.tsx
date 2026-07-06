@@ -10,6 +10,7 @@ import { DocumentsContext } from '../../contexts/documents';
 import { Document } from '../../types/documents';
 
 import useNotifications from '../../hooks/use-notifications';
+import { mapNotificationsToFlashbar } from '../common/notification-flashbar';
 import useGraphQlApi from '../../hooks/use-graphql-api';
 import useAppContext from '../../contexts/app';
 
@@ -115,7 +116,7 @@ const GenAIIDPLayout = ({ children, tools }: GenAIIDPLayoutProps): React.JSX.Ele
         navigationOpen={navigationOpen}
         onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
         breadcrumbs={<Breadcrumbs />}
-        notifications={<Flashbar items={notifications as import('@cloudscape-design/components').FlashbarProps.MessageDefinition[]} />}
+        notifications={<Flashbar items={mapNotificationsToFlashbar(notifications)} />}
         tools={tools ?? <ToolsPanel />}
         toolsOpen={toolsOpen}
         onToolsChange={({ detail }) => setToolsOpen(detail.open)}

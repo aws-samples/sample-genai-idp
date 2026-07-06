@@ -473,6 +473,15 @@ type DiscoveryJob @aws_cognito_user_pools @aws_iam {
   reflectionReport: String
 }
 
+type ConfigBootstrapJob @aws_cognito_user_pools @aws_iam {
+  jobId: ID!
+  status: String!
+  statusMessage: String
+  errorMessage: String
+  configVersion: String
+  testSetId: String
+}
+
 type MultiDocDiscoveryJob @aws_cognito_user_pools @aws_iam {
   jobId: ID!
   status: String!
@@ -757,6 +766,14 @@ type Mutation {
     discoveredClasses: String
     reflectionReport: String
   ): DiscoveryJob @aws_iam
+  updateConfigBootstrapJobStatus(
+    jobId: ID!
+    status: String!
+    statusMessage: String
+    errorMessage: String
+    configVersion: String
+    testSetId: String
+  ): ConfigBootstrapJob @aws_iam
   updateFinetuningJobStatus(jobId: ID!, status: FinetuningJobStatus!, errorMessage: String): FinetuningJob @aws_iam
 
   # Admin-only operations
@@ -1133,8 +1150,10 @@ type Query @aws_cognito_user_pools @aws_iam {
   # all coerce null → empty list / sensible default.
   # -----------------------------------------------------------------------
   """List all features currently installed in this IDP stack.
-  Returns null when EnableFeaturePlatform=false (no resolver attached)."""
-  listInstalledFeatures: [InstalledFeature!] @aws_cognito_user_pools
+  Returns null when EnableFeaturePlatform=false (no resolver attached).
+  Also @aws_iam so backend Lambdas (e.g. the Quick Start agent) can discover
+  installed extensions via SigV4 — the InstalledFeature type is already @aws_iam."""
+  listInstalledFeatures: [InstalledFeature!] @aws_cognito_user_pools @aws_iam
 
   """List all features published to the feature bucket (the catalog), whether
   installed or not. The UI takes the union of this + listInstalledFeatures to
@@ -1159,6 +1178,8 @@ type Subscription @aws_cognito_user_pools @aws_iam {
     @aws_subscribe(mutations: ["updateAgentJobStatus"])
   onDiscoveryJobStatusChange(jobId: ID!): DiscoveryJob
     @aws_subscribe(mutations: ["updateDiscoveryJobStatus"])
+  onConfigBootstrapJobStatusChange(jobId: ID!): ConfigBootstrapJob
+    @aws_subscribe(mutations: ["updateConfigBootstrapJobStatus"])
   onAgentChatMessageUpdate(sessionId: String!): AgentChatMessage
     @aws_subscribe(mutations: ["sendAgentChatMessage"])
   onChatDocumentMessageUpdate(sessionId: String!): ChatDocumentMessage
@@ -1289,6 +1310,7 @@ type InstalledFeature @aws_iam @aws_cognito_user_pools {
   stackId: String
   uiBundlePath: String!
   featureApiEndpoint: String
+  generationQueueArn: String
   iconUrl: String
   installedAt: AWSDateTime!
   installedBy: String
@@ -1367,6 +1389,7 @@ input RegisterFeatureInput {
   stackRegion: String!
   uiBundlePath: String!
   featureApiEndpoint: String
+  generationQueueArn: String
   iconUrl: String
   installedBy: String
   productCode: String

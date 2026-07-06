@@ -1,0 +1,8 @@
+[class*='awsui_stepCounter_'] {
+  margin-inline-end: 0px !important;
+  white-space: nowrap;
+}
+
+[class*='awsui_step-counter-content_'] {
+  white-space: nowrap;
+}

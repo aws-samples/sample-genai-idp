@@ -46,6 +46,7 @@ _REQUIRED_FIELDS = (
 # Optional fields that will be copied through if present.
 _OPTIONAL_FIELDS = (
     "featureApiEndpoint",
+    "generationQueueArn",
     "iconUrl",
     "installedBy",
     # Marketplace identity, baked from the feature manifest at publish time and
@@ -111,6 +112,7 @@ def _register(payload: Dict[str, Any]) -> Dict[str, Any]:
         "stackId": item["stackId"],
         "uiBundlePath": item["uiBundlePath"],
         "featureApiEndpoint": item.get("featureApiEndpoint"),
+        "generationQueueArn": item.get("generationQueueArn"),
         "iconUrl": item.get("iconUrl"),
         "installedAt": item["installedAt"],
         "installedBy": item.get("installedBy"),

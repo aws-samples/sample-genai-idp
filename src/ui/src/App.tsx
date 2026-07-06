@@ -9,6 +9,7 @@ import '@aws-amplify/ui-react/styles.css';
 import { AppContext, type AppActiveTestRun } from './contexts/app';
 import { AnalyticsProvider } from './contexts/analytics';
 import { AgentChatProvider } from './contexts/agentChat';
+import { GuidedTourProvider } from './contexts/guidedTour';
 import useAwsConfig from './hooks/use-aws-config';
 import useCurrentSessionCreds from './hooks/use-current-session-creds';
 
@@ -56,7 +57,9 @@ const AppContent = (): React.JSX.Element => {
         <AnalyticsProvider>
           <AgentChatProvider>
             <HashRouter>
-              <Routes />
+              <GuidedTourProvider>
+                <Routes />
+              </GuidedTourProvider>
             </HashRouter>
           </AgentChatProvider>
         </AnalyticsProvider>

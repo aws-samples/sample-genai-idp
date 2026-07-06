@@ -5996,6 +5996,161 @@ def abort_test_run(
         sys.exit(1)
 
 
+@cli.command(name="bootstrap")
+@click.option(
+    "--prompt",
+    "-p",
+    required=True,
+    help="Natural-language description of the document type to bootstrap",
+)
+@click.option(
+    "--stack-name",
+    help="CloudFormation stack name (omit for local mode: print schema, no save)",
+)
+@click.option("--class-name", help="Document class name to use as $id / document type")
+@click.option(
+    "--field-hint",
+    multiple=True,
+    help="A field the schema must include. Repeatable: --field-hint X --field-hint Y",
+)
+@click.option(
+    "--config-version",
+    help="Existing config version to source catalog classes from / merge into",
+)
+@click.option(
+    "--target-version",
+    help="Name of the config version to create (default: bootstrap-<class>)",
+)
+@click.option(
+    "--count", "-c", default=3, show_default=True, help="Documents to generate"
+)
+@click.option(
+    "--threshold",
+    default=7,
+    show_default=True,
+    help="Generation quality threshold (1-10)",
+)
+@click.option(
+    "--augment", is_flag=True, help="Apply image augmentation to generated docs"
+)
+@click.option("--model-id", help="Bedrock model id override for authoring/generation")
+@click.option("--region", help="AWS region (optional)")
+def bootstrap(
+    prompt,
+    stack_name,
+    class_name,
+    field_hint,
+    config_version,
+    target_version,
+    count,
+    threshold,
+    augment,
+    model_id,
+    region,
+):
+    """Bootstrap a config (and test set) from a prompt
+
+    Authors a document-class schema from your description (reusing a catalog
+    match when one fits), creates a config version, and — when the document
+    generator is available — generates a labeled synthetic test set.
+
+    Local mode (no --stack-name) authors and prints the schema without saving.
+    """
+    import os as _os
+
+    from idp_common.synthesis import bootstrap as bootstrap_mod
+    from idp_common.synthesis import engine as synthesis_engine
+
+    console.print("[bold blue]IDP Config Bootstrap[/bold blue]")
+    console.print(f"Prompt: {prompt}")
+    if stack_name:
+        console.print(f"Stack: {stack_name}")
+    else:
+        console.print("[yellow]Local mode — schema will not be saved[/yellow]")
+
+    available, reason = synthesis_engine.generator_available()
+    if not available:
+        console.print(
+            f"[yellow]Note: document generator unavailable ({reason}).[/yellow]"
+        )
+        console.print(f"[yellow]{synthesis_engine.INSTALL_HINT}[/yellow]")
+
+    request = bootstrap_mod.BootstrapRequest(
+        prompt=prompt,
+        class_name=class_name,
+        field_hints=list(field_hint),
+        config_version=config_version,
+        target_version=target_version,
+        doc_count=count,
+        quality_threshold=threshold,
+        augment=augment,
+        model_id=model_id,
+    )
+
+    def _status(pct, msg):
+        console.print(f"  [{pct:3.0f}%] {msg}")
+
+    try:
+        if not stack_name:
+            schema, tier, matched = bootstrap_mod.resolve_schema(
+                request, status_cb=_status
+            )
+            if schema is None:
+                console.print("[red]✗ Failed to author a schema[/red]")
+                sys.exit(1)
+            import json as _json
+
+            console.print(f"[green]✓ Schema authored (tier: {tier})[/green]")
+            if matched:
+                console.print(f"  Catalog match: {matched}")
+            console.print(_json.dumps(schema, indent=2))
+            return
+
+        from idp_sdk import IDPClient
+
+        client = IDPClient(stack_name=stack_name, region=region)
+        config_table = client.discovery._get_config_table(stack_name)
+        _os.environ["CONFIGURATION_TABLE_NAME"] = config_table
+
+        from idp_common.config.configuration_manager import ConfigurationManager
+
+        config_manager = ConfigurationManager()
+        test_set_bucket = _os.environ.get("TEST_SET_BUCKET")
+
+        result = bootstrap_mod.run_bootstrap(
+            request,
+            config_manager=config_manager,
+            test_set_bucket=test_set_bucket,
+            status_cb=_status,
+        )
+
+        if not result.success:
+            console.print(f"[red]✗ Bootstrap failed: {result.error}[/red]")
+            sys.exit(1)
+
+        console.print(f"[green]✓ Config version: {result.config_version}[/green]")
+        console.print(f"  Resolution tier: {result.resolution_tier}")
+        if result.catalog_match:
+            console.print(f"  Catalog match: {result.catalog_match}")
+        if result.test_set_id:
+            console.print(
+                f"[green]✓ Test set: {result.test_set_id} "
+                f"({result.docs_generated} doc(s))[/green]"
+            )
+        elif not result.generator_available:
+            console.print(
+                "[yellow]Test set skipped (generator unavailable). "
+                "Config is ready; upload your own docs to build a test set.[/yellow]"
+            )
+        if result.error:
+            console.print(f"[yellow]Note: {result.error}[/yellow]")
+
+    except Exception as e:
+        logger.error(f"Error in bootstrap: {e}", exc_info=True)
+        console.print(f"[red]✗ Error: {e}[/red]")
+        sys.exit(1)
+
+
 def main():
     """Main entry point for the CLI"""
     # Pre-flight check: verify core dependencies are importable

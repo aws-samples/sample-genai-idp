@@ -787,6 +787,7 @@ def handler(event, context):
         prompt = event.get("prompt", "")
         session_id = event.get("sessionId")
         enable_code_intelligence = event.get("enableCodeIntelligence", True)
+        method = event.get("method", "chat")
         
         # Validate required parameters
         if not prompt or not session_id:
@@ -802,23 +803,45 @@ def handler(event, context):
         # No user selection needed - orchestrator has access to all agents
         all_agents = agent_factory.list_available_agents()
         agent_ids = [agent["agent_id"] for agent in all_agents]
-        
-        # Filter out Code Intelligence Agent if not enabled by user
-        CODE_INTELLIGENCE_AGENT_ID = "Code-Intelligence-Agent"
-        if not enable_code_intelligence and CODE_INTELLIGENCE_AGENT_ID in agent_ids:
-            agent_ids.remove(CODE_INTELLIGENCE_AGENT_ID)
-            logger.info("Code Intelligence Agent disabled by user, excluding from orchestrator")
-        
-        logger.info(f"Creating orchestrator with {len(agent_ids)} agents: {agent_ids}")
-        
-        # Create conversational orchestrator with memory and streaming support
-        orchestrator = agent_factory.create_conversational_orchestrator(
-            agent_ids=agent_ids,
-            session_id=session_id,
-            config=config,
-            session=session
+
+        QUICK_START_AGENT_ID = "Quick-Start-Agent"
+        use_direct_quick_start = (
+            method == "quick_start" and QUICK_START_AGENT_ID in agent_ids
         )
-        logger.info(f"Conversational orchestrator created for session {session_id}")
+
+        if method == "quick_start" and not use_direct_quick_start:
+            logger.warning(
+                "Quick Start mode requested but Quick-Start-Agent not registered; "
+                "falling back to full agent list"
+            )
+        elif method != "quick_start":
+            if QUICK_START_AGENT_ID in agent_ids:
+                agent_ids.remove(QUICK_START_AGENT_ID)
+            # Filter out Code Intelligence Agent if not enabled by user
+            CODE_INTELLIGENCE_AGENT_ID = "Code-Intelligence-Agent"
+            if not enable_code_intelligence and CODE_INTELLIGENCE_AGENT_ID in agent_ids:
+                agent_ids.remove(CODE_INTELLIGENCE_AGENT_ID)
+                logger.info(f"Code Intelligence Agent disabled by user, excluding from orchestrator")
+
+        if use_direct_quick_start:
+            logger.info("Quick Start mode: running Quick-Start-Agent directly with memory")
+            orchestrator = agent_factory.create_conversational_agent(
+                agent_id=QUICK_START_AGENT_ID,
+                session_id=session_id,
+                config=config,
+                session=session,
+            )
+            logger.info(f"Conversational Quick Start agent created for session {session_id}")
+        else:
+            logger.info(f"Creating orchestrator with {len(agent_ids)} agents: {agent_ids}")
+            # Create conversational orchestrator with memory and streaming support
+            orchestrator = agent_factory.create_conversational_orchestrator(
+                agent_ids=agent_ids,
+                session_id=session_id,
+                config=config,
+                session=session
+            )
+            logger.info(f"Conversational orchestrator created for session {session_id}")
         
         # Set up async event loop for streaming
         loop = asyncio.new_event_loop()

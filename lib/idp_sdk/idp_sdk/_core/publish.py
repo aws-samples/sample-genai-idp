@@ -1584,6 +1584,164 @@ STDERR:
     # no ListObjectsV2, no post-deploy artifacts-bucket dependency).
     _CATALOG_OUTPUT_FILE = "config_library/catalog.json"
 
+    # Self-updating sample-document manifest. Generated at publish time by
+    # scanning samples/, written into config_library/ so the existing
+    # ConfigurationCopyFunction copies it into the stack's ConfigurationBucket;
+    # the Quick Start agent's list_sample_documents tool reads it from there
+    # (GetObject, no bucket listing). Mirrors the catalog.json mechanism.
+    _SAMPLES_MANIFEST_FILE = "config_library/samples-manifest.json"
+    _SAMPLES_DIR = "samples"
+    # Document extensions that make sense as Discovery input.
+    _SAMPLE_DOC_EXTS = (".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".webp")
+    # Subdirectories of samples/ that hold batches of documents (indexed as a
+    # single "batch" entry). Other subdirs (code samples, hooks) are skipped.
+    _SAMPLE_DOC_SUBDIRS = ("w2", "rule-validation")
+    # Curated names/descriptions for well-known samples; anything not listed
+    # falls back to a filename-derived name + generic description, so newly
+    # added samples are still indexed automatically.
+    _SAMPLE_OVERRIDES = {
+        "lending_package.pdf": (
+            "Lending Package",
+            "Multi-page mortgage loan packet (application, pay stubs, W-2, bank "
+            "statements) — a multi-class packet for testing classification + extraction.",
+        ),
+        "lending_package-long.pdf": (
+            "Lending Package (long)",
+            "Longer multi-page mortgage loan packet variant.",
+        ),
+        "insurance_package.pdf": (
+            "Insurance Package",
+            "Multi-section insurance claim packet for multi-class processing.",
+        ),
+        "insurance_package_single.pdf": (
+            "Insurance Package (single)",
+            "Single-section insurance document sample.",
+        ),
+        "bank-statement-multipage.pdf": (
+            "Bank Statement (multi-page)",
+            "Multi-page bank statement with transaction tables — good for agentic "
+            "table extraction.",
+        ),
+        "healthcare-multisection-package.pdf": (
+            "Healthcare Package",
+            "Multi-section healthcare document packet.",
+        ),
+        "rvl_cdip_package.pdf": (
+            "RVL-CDIP Package",
+            "Mixed-document packet from the RVL-CDIP set for classification testing.",
+        ),
+        "DS11-USPassportApplication.pdf": (
+            "US Passport Application (DS-11)",
+            "US passport application form.",
+        ),
+        "old_cal_license.png": (
+            "California Driver License",
+            "Driver license image sample.",
+        ),
+        "w2": (
+            "W-2 Forms",
+            "Batch of W-2 tax form documents.",
+        ),
+        "rule-validation": (
+            "Rule Validation Samples",
+            "Documents for the rule-validation pipeline.",
+        ),
+    }
+
+    def _sample_label(self, key):
+        """(name, description) for a sample key, from overrides or filename."""
+        override = self._SAMPLE_OVERRIDES.get(key)
+        if override:
+            return override
+        base = os.path.splitext(os.path.basename(key))[0]
+        name = base.replace("_", " ").replace("-", " ").strip().title()
+        return name, f"Sample document: {name}."
+
+    def generate_samples_manifest(self):
+        """Scan samples/ and write config_library/samples-manifest.json.
+
+        Self-updating: indexes top-level sample documents plus the known
+        document subdirectories (as single "batch" entries). Other subdirs
+        (code samples, lambda hooks) are skipped. Called alongside
+        write_catalog_file so it rides the same config_library sync to the
+        ConfigurationBucket. The ``s3Key`` is recorded relative to a future
+        samples/ prefix; wiring samples into a Discovery-readable bucket is a
+        follow-up (the agent lists them today; one-click launch comes later).
+        """
+        samples_dir = Path(self._SAMPLES_DIR)
+        if not samples_dir.is_dir():
+            self.log_verbose(
+                f"{self._SAMPLES_DIR}/ not found — skipping samples manifest"
+            )
+            return None
+
+        samples = []
+        for entry in sorted(os.listdir(samples_dir)):
+            path = samples_dir / entry
+            if path.is_file() and entry.lower().endswith(self._SAMPLE_DOC_EXTS):
+                name, desc = self._sample_label(entry)
+                samples.append(
+                    {
+                        "id": os.path.splitext(entry)[0],
+                        "name": name,
+                        "description": desc,
+                        "s3Key": f"samples/{entry}",
+                        "kind": "document",
+                        "fileCount": 1,
+                    }
+                )
+            elif path.is_dir() and entry in self._SAMPLE_DOC_SUBDIRS:
+                docs = [
+                    f
+                    for f in sorted(os.listdir(path))
+                    if f.lower().endswith(self._SAMPLE_DOC_EXTS)
+                ]
+                if not docs:
+                    continue
+                name, desc = self._sample_label(entry)
+                samples.append(
+                    {
+                        "id": entry,
+                        "name": name,
+                        "description": desc,
+                        "s3Key": f"samples/{entry}/",
+                        "kind": "batch",
+                        "fileCount": len(docs),
+                    }
+                )
+
+        manifest = {"schemaVersion": "1.0", "samples": samples}
+        out_path = Path(self._SAMPLES_MANIFEST_FILE)
+        out_path.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
+        )
+        self.log_success(f"Wrote {out_path} ({len(samples)} sample documents)")
+        return manifest
+
+    def _upload_samples_manifest_to_artifacts(self):
+        """Upload config_library/samples-manifest.json to the artifacts bucket.
+
+        Mirrors _upload_catalog_to_artifacts: upload_config_library already
+        bulk-synced config_library/ before this freshly-written file existed, so
+        upload it on its own under the same prefix; the deploy-time copy FileList
+        (generate_config_file_list walks the local config_library/ dir) then
+        includes it and ConfigurationCopyFunction copies it into the stack's
+        ConfigurationBucket.
+        """
+        out_path = Path(self._SAMPLES_MANIFEST_FILE)
+        if not out_path.is_file():
+            return
+        s3_key = f"{self.prefix_and_version}/config_library/samples-manifest.json"
+        self.s3_client.upload_file(
+            str(out_path),
+            self.bucket,
+            s3_key,
+            ExtraArgs={"ContentType": "application/json"},
+        )
+        self.log_verbose(
+            f"Uploaded samples-manifest.json to s3://{self.bucket}/{s3_key}"
+        )
+
     def _load_marketplace_features(self):
         """Load + normalize the curated marketplace extension list.
 
@@ -2156,12 +2314,6 @@ STDERR:
                     "<MULTI_DOC_DISCOVERY_BUILD_HASH_TOKEN>": self.get_directory_checksum(
                         "src/lambda/multi_doc_discovery"
                     )[:16],
-                    # Feature Platform: the bundled extension(s) uploaded to the
-                    # artifact bucket under <prefix>/extensions/<id>/. These
-                    # tokens carry the build hash + uploaded file list for
-                    # change detection; OSS extensions install directly from the
-                    # artifacts bucket (no host-side copy resource). Empty when
-                    # no bundled features were built.
                     "<SAMPLE_FEATURES_HASH_TOKEN>": sample_features_hash,
                     "<SAMPLE_FEATURES_LIST_TOKEN>": json.dumps(
                         sample_features_list or []
@@ -3693,6 +3845,17 @@ STDERR:
             self.write_catalog_file(oss_catalog_entries)
             self._upload_catalog_to_artifacts()
             timing_breakdown["Write & upload catalog.json"] = time.time() - step_start
+
+            # Self-updating sample-document manifest (config_library/samples-manifest.json),
+            # generated by scanning samples/. Rides the same config_library copy
+            # into the ConfigurationBucket; the Quick Start agent's
+            # list_sample_documents tool reads it at runtime.
+            step_start = time.time()
+            self.generate_samples_manifest()
+            self._upload_samples_manifest_to_artifacts()
+            timing_breakdown["Write & upload samples-manifest.json"] = (
+                time.time() - step_start
+            )
 
             # Build main template
             step_start = time.time()
