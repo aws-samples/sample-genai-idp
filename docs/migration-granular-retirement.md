@@ -79,6 +79,7 @@ are still migrated automatically on read.
 
 ## Related Documentation
 
+- [v0.5 → v0.6 Migration](migration-v05-to-v06.md) — the `assessment` block merge into `extraction.confidence` / `extraction.geometry` / `hitl`, with the full old→new setting map
 - [Extraction & Confidence](extraction-and-confidence.md) — consolidated extraction, confidence, and geometry guide
 - [Configuration Guide](configuration.md) — configuration schema details
 - [Human Review](human-review.md) — HITL workflow
