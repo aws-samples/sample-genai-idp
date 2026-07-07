@@ -305,6 +305,10 @@ ui-build: ## Build UI for production
 	@echo "Checking UI build"
 	cd src/ui && npm ci --prefer-offline --no-audit && npm run build
 
+ui-test: ## Run UI unit tests (Vitest, jsdom — no browser required)
+	@echo "Running UI unit tests..."
+	cd src/ui && npm ci --prefer-offline --no-audit && npx vitest run
+
 ##@ Code Generation
 codegen: ## Regenerate GraphQL types and operations
 	@cd src/ui && npm run codegen
