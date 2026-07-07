@@ -3,10 +3,6 @@ recursive-include idp_common/config/system_defaults *.yaml
 include idp_common/config/system_defaults/*.yaml
 include idp_common/config/system_defaults/*.md
 
-# Model output-token limits (bundled so it resolves at runtime in Lambda, not
-# just from the repo root at publish time)
-include idp_common/config/model_config_limits.yaml
-
 # Exclude build artifacts
 global-exclude build/*
 global-exclude build/lib/*
