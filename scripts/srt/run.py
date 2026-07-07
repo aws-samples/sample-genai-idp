@@ -3,6 +3,7 @@
 
 import sys
 import subprocess
+import json
 from pathlib import Path
 
 
@@ -25,6 +26,53 @@ def run_command(cmd, cwd=None, capture_output=False):
         return None if capture_output else False
 
 
+def print_high_priority_issues_table(issues_file):
+    """Print high priority issues in a table format."""
+    if not issues_file.exists():
+        return
+
+    try:
+        with open(issues_file, 'r') as f:
+            issues = json.load(f)
+    except Exception as e:
+        print(f"Warning: Could not read issues file: {e}")
+        return
+
+    # Filter for high priority issues that are not suppressed or resolved
+    high_priority_issues = [
+        i for i in issues
+        if i.get('priority', '').upper() == 'HIGH'
+        and i.get('status') not in ['suppressed', 'resolved']
+    ]
+
+    if not high_priority_issues:
+        return
+
+    print("\n" + "="*120)
+    print("HIGH PRIORITY ISSUES FOUND")
+    print("="*120)
+    print(f"{'Source':<15} {'Priority':<10} {'Path':<50} {'Issue':<45}")
+    print("-"*120)
+
+    for issue in high_priority_issues:
+        source = issue.get('source', 'Unknown')[:14]
+        priority = issue.get('priority', 'Unknown')[:9]
+        path = issue.get('path', 'Unknown')[:49]
+        issue_text = issue.get('issue', 'No description')[:44]
+        line = issue.get('line', '')
+
+        if line:
+            path_with_line = f"{path}:{line}"[:49]
+        else:
+            path_with_line = path
+
+        print(f"{source:<15} {priority:<10} {path_with_line:<50} {issue_text:<45}")
+
+    print("-"*120)
+    print(f"Total HIGH priority issues: {len(high_priority_issues)}")
+    print("="*120 + "\n")
+
+
 def main():
     """Run SRT security assessment."""
     import os
@@ -32,6 +80,7 @@ def main():
     project_root = Path(__file__).parent.parent.parent
     srt_dir = project_root / ".srt"
     srt_executable = srt_dir / "srt"
+    issues_file = srt_dir / "issues.json"
 
     # Check if running in CI/CD environment
     is_ci = bool(os.getenv("CI") or os.getenv("GITLAB_CI") or os.getenv("GITHUB_ACTIONS"))
@@ -71,6 +120,9 @@ def main():
 
     # Print the output
     print(result.stdout)
+
+    # Print high priority issues table
+    print_high_priority_issues_table(issues_file)
 
     # Check if there are any open security issues
     # SRT output includes "Open: N" where N is the number of open issues
