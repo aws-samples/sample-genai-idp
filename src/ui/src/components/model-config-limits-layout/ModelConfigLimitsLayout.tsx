@@ -17,12 +17,17 @@ import {
   Modal,
   FormField,
   RadioGroup,
+  Autosuggest,
+  ExpandableSection,
+  StatusIndicator,
 } from '@cloudscape-design/components';
 import Editor from '@monaco-editor/react';
 
 import yaml from 'js-yaml';
 import useModelConfigLimits from '../../hooks/use-model-config-limits';
+import usePricing from '../../hooks/use-pricing';
 import useUserRole from '../../hooks/use-user-role';
+import { PricingData } from '../../graphql/awsjson-types';
 
 interface ModelLimitEntry {
   pattern: string;
@@ -44,6 +49,59 @@ interface LimitsTableItem extends ModelLimitEntry {
   index: number;
 }
 
+interface MatchResult {
+  matched: boolean;
+  index?: number;
+  entry?: ModelLimitEntry;
+  invalidPatternIndexes: number[];
+}
+
+/**
+ * Resolve which limit entry wins for a model ID, mirroring the backend
+ * (idp_common.bedrock.model_utils.get_model_max_output_tokens): the model ID is
+ * lowercased and each pattern is applied with regex "search" semantics
+ * (unanchored, case-sensitive against the lowered ID) in order — the first
+ * match wins. Malformed patterns are skipped, not matched. Uses the JS RegExp
+ * engine, which matches Python `re` for the pattern styles used here; exotic
+ * constructs could differ, so this is a strong preview, not a guarantee.
+ */
+const findMatchingEntry = (modelId: string, entries: ModelLimitEntry[]): MatchResult => {
+  const idLower = modelId.trim().toLowerCase();
+  const invalidPatternIndexes: number[] = [];
+  for (let i = 0; i < entries.length; i += 1) {
+    const pattern = String(entries[i].pattern ?? '');
+    if (!pattern) continue;
+    let re: RegExp;
+    try {
+      re = new RegExp(pattern);
+    } catch {
+      invalidPatternIndexes.push(i);
+      continue;
+    }
+    if (re.test(idLower)) {
+      return { matched: true, index: i, entry: entries[i], invalidPatternIndexes };
+    }
+  }
+  return { matched: false, invalidPatternIndexes };
+};
+
+/**
+ * Derive the model-ID picklist from the pricing keys (the single, auto-syncing
+ * source of real Bedrock model IDs). Pricing entries are named
+ * "bedrock/<model-id>"; strip the prefix. Non-bedrock entries (textract/bda)
+ * are ignored.
+ */
+const modelIdsFromPricing = (pricing: unknown): string[] => {
+  const list = (pricing as PricingData | null)?.pricing;
+  if (!Array.isArray(list)) return [];
+  const ids = list
+    .map((e) => String(e?.name ?? ''))
+    .filter((name) => name.startsWith('bedrock/'))
+    .map((name) => name.slice('bedrock/'.length))
+    .filter(Boolean);
+  return Array.from(new Set(ids)).sort();
+};
+
 const ModelConfigLimitsLayout = (): React.JSX.Element => {
   const {
     modelConfigLimits,
@@ -56,7 +114,9 @@ const ModelConfigLimitsLayout = (): React.JSX.Element => {
     restoreDefaultModelConfigLimits,
   } = useModelConfigLimits();
   const { isAdmin } = useUserRole();
+  const { pricing } = usePricing();
 
+  const [testModelId, setTestModelId] = useState('');
   const [formValues, setFormValues] = useState<ModelConfigLimitsFormValues>({ model_limits: [] });
   const [jsonContent, setJsonContent] = useState('');
   const [yamlContent, setYamlContent] = useState('');
@@ -397,6 +457,12 @@ const ModelConfigLimitsLayout = (): React.JSX.Element => {
 
   const items: LimitsTableItem[] = (formValues.model_limits || []).map((entry, index) => ({ ...entry, index }));
 
+  // Model-ID tester: picklist sourced from the pricing keys (real Bedrock IDs),
+  // matched against the CURRENT (possibly unsaved) list using the backend logic.
+  const modelIdOptions = modelIdsFromPricing(pricing).map((id) => ({ value: id }));
+  const trimmedTestId = testModelId.trim();
+  const testResult = trimmedTestId ? findMatchingEntry(trimmedTestId, formValues.model_limits || []) : null;
+
   return (
     <>
       {/* Add Pattern Modal */}
@@ -620,6 +686,61 @@ const ModelConfigLimitsLayout = (): React.JSX.Element => {
           )}
 
           <Box padding="s">
+            <ExpandableSection
+              headerText="Test a model ID"
+              headerDescription="Check which limit entry a Bedrock model ID resolves to, using the same first-match logic as the runtime. Reflects the current (unsaved) list."
+              variant="container"
+            >
+              <SpaceBetween size="s">
+                <FormField label="Model ID" description="Pick a known model or type any Bedrock model ID (including future/unlisted IDs).">
+                  <Autosuggest
+                    value={testModelId}
+                    onChange={({ detail }) => setTestModelId(detail.value)}
+                    options={modelIdOptions}
+                    enteredTextLabel={(value) => `Use: "${value}"`}
+                    placeholder="us.anthropic.claude-sonnet-5"
+                    filteringType="auto"
+                    empty="No matching models in the pricing list — type any model ID to test it"
+                    ariaLabel="Model ID to test"
+                  />
+                </FormField>
+
+                {testResult && testResult.matched && testResult.entry && (
+                  <Alert type="success" header={`Matched entry #${(testResult.index ?? 0) + 1}`}>
+                    <SpaceBetween size="xxs">
+                      <div>
+                        Pattern: <code>{testResult.entry.pattern}</code>
+                      </div>
+                      <div>
+                        Max output tokens: <strong>{String(testResult.entry.max_output_tokens)}</strong>
+                        {testResult.entry.max_input_tokens != null && String(testResult.entry.max_input_tokens).trim() !== '' && (
+                          <>
+                            {'  ·  '}Max input tokens: <strong>{String(testResult.entry.max_input_tokens)}</strong>
+                          </>
+                        )}
+                      </div>
+                      {testResult.entry.description && <Box color="text-body-secondary">{String(testResult.entry.description)}</Box>}
+                    </SpaceBetween>
+                  </Alert>
+                )}
+
+                {testResult && !testResult.matched && (
+                  <Alert type="info" header="No matching pattern">
+                    No entry matches this model ID. At runtime the Bedrock client omits an explicit max-tokens cap and relies on the model
+                    default (self-correcting if the request exceeds the real limit).
+                  </Alert>
+                )}
+
+                {testResult && testResult.invalidPatternIndexes.length > 0 && (
+                  <StatusIndicator type="warning">
+                    Skipped {testResult.invalidPatternIndexes.length} entr
+                    {testResult.invalidPatternIndexes.length === 1 ? 'y' : 'ies'} with an invalid regex (rows{' '}
+                    {testResult.invalidPatternIndexes.map((i) => i + 1).join(', ')}) — fix before saving.
+                  </StatusIndicator>
+                )}
+              </SpaceBetween>
+            </ExpandableSection>
+
             {viewMode === 'table' && (
               <SpaceBetween size="l">
                 {items.length === 0 ? (

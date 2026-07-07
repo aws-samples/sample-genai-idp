@@ -22,6 +22,14 @@ const ToolsPanel = (): React.JSX.Element => (
         </li>
         <li>Keep more specific patterns (e.g., long-context variants) above broader ones</li>
       </ul>
+      <h3>Test a model ID</h3>
+      <ul>
+        <li>
+          Use <strong>Test a model ID</strong> to check which entry a Bedrock model ID resolves to — pick a known model or type any ID,
+          including future/unlisted ones
+        </li>
+        <li>It applies the same first-match logic as the runtime against the current (unsaved) list, and flags invalid patterns</li>
+      </ul>
       <h3>Notes</h3>
       <ul>
         <li>Each pattern must be a valid regular expression, or the save is rejected</li>
