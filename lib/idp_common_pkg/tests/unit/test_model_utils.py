@@ -304,6 +304,31 @@ class TestGetModelMaxOutputTokens:
             == 8_192
         )
 
+    def test_invalid_regex_pattern_is_skipped_not_raised(self, monkeypatch):
+        """A malformed regex in a limit entry must not crash the hot path.
+
+        ModelLimitEntry rejects bad patterns at save time, but data written via
+        a bypass path or hand-edited YAML could still be invalid. The resolver
+        loop must skip such an entry and continue matching, never raising
+        re.error (which callers don't catch as ValueError).
+        """
+        from idp_common.bedrock import model_utils
+
+        model_utils._clear_model_limits_cache()
+        monkeypatch.setattr(
+            model_utils,
+            "_load_model_limits_from_dynamodb",
+            lambda: [
+                {"pattern": "claude-(", "max_output_tokens": 999},  # invalid regex
+                {"pattern": "claude-sonnet-5", "max_output_tokens": 77_000},
+            ],
+        )
+        try:
+            # The invalid entry is skipped; the next valid entry matches.
+            assert get_model_max_output_tokens("us.anthropic.claude-sonnet-5") == 77_000
+        finally:
+            model_utils._clear_model_limits_cache()
+
     def test_extended_context_1m_suffix(self):
         """Test that :1m extended context suffix doesn't change output token limit."""
         # Claude 4 with :1m suffix should still be 64K output (Sonnet, Haiku)
@@ -357,3 +382,30 @@ class TestGetModelMaxOutputTokens:
             get_model_max_output_tokens("us.anthropic.claude-opus-4-5-20250514-v1:0")
             == 64_000
         )
+
+
+@pytest.mark.unit
+class TestModelLimitEntryPatternValidation:
+    """The user-editable pattern must be validated as a compilable regex at save
+    time so a bad value is rejected with a clear message rather than raising
+    re.error deep on the Bedrock hot path."""
+
+    def test_valid_pattern_accepted(self):
+        from idp_common.config.models import ModelLimitEntry
+
+        entry = ModelLimitEntry(pattern="claude-sonnet-5.*", max_output_tokens=128000)
+        assert entry.pattern == "claude-sonnet-5.*"
+
+    def test_invalid_regex_rejected(self):
+        from idp_common.config.models import ModelLimitEntry
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="valid regular expression"):
+            ModelLimitEntry(pattern="claude-(", max_output_tokens=128000)
+
+    def test_empty_pattern_rejected(self):
+        from idp_common.config.models import ModelLimitEntry
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="non-empty"):
+            ModelLimitEntry(pattern="   ", max_output_tokens=128000)

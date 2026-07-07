@@ -22,6 +22,14 @@ const ToolsPanel = (): React.JSX.Element => (
         </li>
         <li>Keep more specific patterns (e.g., long-context variants) above broader ones</li>
       </ul>
+      <h3>Notes</h3>
+      <ul>
+        <li>Each pattern must be a valid regular expression, or the save is rejected</li>
+        <li>
+          Saving an <strong>empty list</strong> (deleting all rows) does not disable limits — it falls back to the built-in defaults, the
+          same as &ldquo;Restore Defaults&rdquo;
+        </li>
+      </ul>
       <p>Saved changes are picked up by running document-processing workers within about a minute.</p>
     </div>
   </HelpPanel>

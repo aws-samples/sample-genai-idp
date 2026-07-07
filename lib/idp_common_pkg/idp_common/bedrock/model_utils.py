@@ -258,7 +258,19 @@ def get_model_max_output_tokens(model_id: str) -> int:
             )
             continue
 
-        if re.search(pattern, model_id_lower):
+        try:
+            matched = re.search(pattern, model_id_lower)
+        except re.error:
+            # A malformed regex should never crash the Bedrock hot path.
+            # ModelLimitEntry validates patterns at save time, but data written
+            # through a bypass path or hand-edited YAML could still be invalid.
+            logger.warning(
+                "Skipping model limit entry with invalid regex pattern",
+                extra={"pattern": pattern},
+            )
+            continue
+
+        if matched:
             logger.debug(
                 "Matched model limit pattern",
                 extra={

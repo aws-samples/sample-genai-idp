@@ -18,6 +18,7 @@ Usage:
         model = config.extraction.model
 """
 
+import re
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import (
@@ -1698,6 +1699,24 @@ class ModelLimitEntry(BaseModel):
     reference: Optional[str] = Field(
         default=None, description="Documentation URL for the limit values"
     )
+
+    @field_validator("pattern")
+    @classmethod
+    def _pattern_must_compile(cls, v: str) -> str:
+        """Reject a pattern that isn't a valid regex.
+
+        Patterns are user-editable (via the Model Limits UI) and are later
+        passed to ``re.search`` on the Bedrock hot path. Validating at save
+        time surfaces a clear error instead of letting a bad pattern raise
+        ``re.error`` deep inside model-limit resolution.
+        """
+        if not v or not v.strip():
+            raise ValueError("pattern must be a non-empty string")
+        try:
+            re.compile(v)
+        except re.error as e:
+            raise ValueError(f"pattern is not a valid regular expression: {e}") from e
+        return v
 
 
 class ModelConfigLimitsConfig(BaseModel):
