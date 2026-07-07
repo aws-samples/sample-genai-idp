@@ -16,6 +16,7 @@ import type {
   ConfigSettingValues,
   ConfigurationData,
   PricingData,
+  ModelConfigLimitsData,
   StepFunctionStepPayload,
   BedrockModelsQuota,
 } from './awsjson-types';
@@ -113,6 +114,10 @@ export function parseConfigurationData(json: unknown): ConfigurationData | null 
 
 export function parsePricingData(json: unknown): PricingData | null {
   return safeParse<PricingData | null>(json, null);
+}
+
+export function parseModelConfigLimitsData(json: unknown): ModelConfigLimitsData | null {
+  return safeParse<ModelConfigLimitsData | null>(json, null);
 }
 
 export function parseStepFunctionPayload(json: unknown): StepFunctionStepPayload | null {

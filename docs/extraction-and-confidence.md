@@ -93,9 +93,10 @@ extraction:
 > **Output tokens:** extraction and the confidence pass always request the
 > selected model's **maximum** output — there is no `max_tokens` config knob for
 > them. Bedrock's default-when-omitted truncates, so the client sets it
-> explicitly from `config_library/model_config_limits.yaml`; completeness matters
-> more than an output cap here. (`classification` / `summarization` keep their
-> `max_tokens` knob.)
+> explicitly from the per-model limits (seeded from
+> `config_library/model_config_limits.yaml` and editable in the web UI under
+> **View / Edit Model Limits**); completeness matters more than an output cap
+> here. (`classification` / `summarization` keep their `max_tokens` knob.)
 >
 > **Reasoning effort:** for reasoning-capable models — Claude Sonnet 5 / Sonnet
 > 4.6 / Opus 4.5–4.8 / Fable 5 (`low`|`medium`|`high`|`xhigh`|`max`) and OpenAI
