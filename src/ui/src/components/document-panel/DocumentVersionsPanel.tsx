@@ -18,7 +18,7 @@ import {
 } from '@cloudscape-design/components';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from '../../api/client-shim';
-import { listDocumentVersions, compareDocumentVersions, deleteDocumentVersion } from '../../graphql/generated';
+import { listDocumentVersions, getDocumentVersion, compareDocumentVersions, deleteDocumentVersion } from '../../graphql/generated';
 import useUserRole from '../../hooks/use-user-role';
 
 const logger = new ConsoleLogger('DocumentVersionsPanel');
@@ -61,6 +61,26 @@ interface CompareResult {
 
 interface DocumentVersionsPanelProps {
   objectKey: string;
+  /** RunId currently being viewed on the page, or null when viewing current. */
+  viewingRunId?: string | null;
+  /**
+   * Select a version to view on the page. Passes the full run detail
+   * (Sections/Pages snapshot + manifest Files with per-object VersionId) so the
+   * page can render that run's structure and fetch its exact bytes, or null to
+   * return to the current version.
+   */
+  onViewVersion?: (runId: string | null, detail: DocumentVersionDetail | null) => void;
+}
+
+/** Full run detail returned by getDocumentVersion (Sections/Pages + Files). */
+export interface DocumentVersionDetail {
+  RunId?: string;
+  Sections?: Record<string, unknown>[] | null;
+  Pages?: Record<string, unknown>[] | null;
+  Files?: { Key?: string | null; VersionId?: string | null }[] | null;
+  SummaryReportUri?: string | null;
+  EvaluationReportUri?: string | null;
+  Metering?: string | null;
 }
 
 const formatValue = (v: unknown): string => {
@@ -82,11 +102,12 @@ const statusIndicator = (status: string): React.JSX.Element => {
   }
 };
 
-const DocumentVersionsPanel = ({ objectKey }: DocumentVersionsPanelProps): React.JSX.Element => {
+const DocumentVersionsPanel = ({ objectKey, viewingRunId = null, onViewVersion }: DocumentVersionsPanelProps): React.JSX.Element => {
   const { isAdmin } = useUserRole();
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadingVersionId, setLoadingVersionId] = useState<string | null>(null);
 
   // Compare state
   const [selectedForCompare, setSelectedForCompare] = useState<DocumentVersion[]>([]);
@@ -148,6 +169,10 @@ const DocumentVersionsPanel = ({ objectKey }: DocumentVersionsPanelProps): React
         query: deleteDocumentVersion,
         variables: { objectKey, runId: deleteTarget.RunId },
       });
+      // If the version being viewed was just deleted, return to current.
+      if (viewingRunId === deleteTarget.RunId) {
+        onViewVersion?.(null, null);
+      }
       setDeleteTarget(null);
       await loadVersions();
     } catch (err) {
@@ -160,6 +185,32 @@ const DocumentVersionsPanel = ({ objectKey }: DocumentVersionsPanelProps): React
 
   // The newest run is the one currently reflected in the live document view.
   const currentRunId = versions.length > 0 ? versions[0].RunId : null;
+
+  // Fetch a version's manifest (Files: Key + VersionId) and hand it to the
+  // parent so the page renders that run's pinned bytes. Passing the newest
+  // run returns to the live/current view (null).
+  const handleView = async (version: DocumentVersion) => {
+    if (!onViewVersion) return;
+    if (version.RunId === currentRunId) {
+      onViewVersion(null, null);
+      return;
+    }
+    setLoadingVersionId(version.RunId);
+    setError(null);
+    try {
+      const result = await client.graphql({
+        query: getDocumentVersion,
+        variables: { objectKey, runId: version.RunId },
+      });
+      const detail = result.data.getDocumentVersion as DocumentVersionDetail | null;
+      onViewVersion(version.RunId, detail);
+    } catch (err) {
+      logger.error('Error loading version for viewing', err);
+      setError('Failed to load version');
+    } finally {
+      setLoadingVersionId(null);
+    }
+  };
 
   return (
     <Container
@@ -187,6 +238,11 @@ const DocumentVersionsPanel = ({ objectKey }: DocumentVersionsPanelProps): React
         {error && (
           <Alert type="error" dismissible onDismiss={() => setError(null)}>
             {error}
+          </Alert>
+        )}
+        {viewingRunId && (
+          <Alert type="info" action={<Button onClick={() => onViewVersion?.(null, null)}>Return to current version</Button>}>
+            Viewing a previous version (read-only). Extraction results and page text shown below reflect this version&apos;s output.
           </Alert>
         )}
         <Table
@@ -239,26 +295,38 @@ const DocumentVersionsPanel = ({ objectKey }: DocumentVersionsPanelProps): React
             {
               id: 'actions',
               header: 'Actions',
-              cell: (item: DocumentVersion) =>
-                isAdmin ? (
-                  <ButtonDropdown
-                    variant="inline-icon"
-                    ariaLabel={`Actions for version ${item.RunId}`}
-                    items={[
-                      {
-                        id: 'delete',
-                        text: 'Delete version',
-                        disabled: item.RunId === currentRunId,
-                        disabledReason: 'Cannot delete the current version',
-                      },
-                    ]}
-                    onItemClick={({ detail }) => {
-                      if (detail.id === 'delete') setDeleteTarget(item);
-                    }}
-                  />
-                ) : (
-                  <Box color="text-status-inactive">—</Box>
-                ),
+              cell: (item: DocumentVersion) => {
+                const isViewing = viewingRunId === item.RunId || (viewingRunId === null && item.RunId === currentRunId);
+                return (
+                  <SpaceBetween direction="horizontal" size="xs">
+                    <Button
+                      variant="inline-link"
+                      loading={loadingVersionId === item.RunId}
+                      disabled={isViewing || !onViewVersion}
+                      onClick={() => handleView(item)}
+                    >
+                      {isViewing ? 'Viewing' : 'View'}
+                    </Button>
+                    {isAdmin && (
+                      <ButtonDropdown
+                        variant="inline-icon"
+                        ariaLabel={`Actions for version ${item.RunId}`}
+                        items={[
+                          {
+                            id: 'delete',
+                            text: 'Delete version',
+                            disabled: item.RunId === currentRunId,
+                            disabledReason: 'Cannot delete the current version',
+                          },
+                        ]}
+                        onItemClick={({ detail }) => {
+                          if (detail.id === 'delete') setDeleteTarget(item);
+                        }}
+                      />
+                    )}
+                  </SpaceBetween>
+                );
+              },
             },
           ]}
           items={versions}

@@ -6,6 +6,7 @@ import { Box, Button, Spinner } from '@cloudscape-design/components';
 import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { getFileContents, uploadDocument } from '../../graphql/generated';
+import { useDocumentVersion } from '../../contexts/document-version';
 
 // Lazy load VisualEditorModal for better performance
 const VisualEditorModal = React.lazy(
@@ -46,6 +47,11 @@ const JSONViewer = ({
   // External control props for navigation
   isExternallyOpen = false,
 }: JSONViewerProps): React.JSX.Element => {
+  // When viewing a past document version, fetch that run's pinned bytes for
+  // this URI and force read-only (editing a historical snapshot is disallowed).
+  const { isHistorical, versionIdForUri } = useDocumentVersion();
+  const effectiveReadOnly = isReadOnly || isHistorical;
+
   const [jsonData, setJsonData] = useState<Record<string, unknown> | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,7 +87,7 @@ const JSONViewer = ({
 
       const response = await client.graphql({
         query: getFileContents,
-        variables: { s3Uri: fileUri },
+        variables: { s3Uri: fileUri, versionId: versionIdForUri(fileUri) },
       });
 
       const result = response.data?.getFileContents;
@@ -248,7 +254,7 @@ const JSONViewer = ({
             jsonData={jsonData}
             onChange={handleJsonChange}
             onSave={handleSave}
-            isReadOnly={isReadOnly}
+            isReadOnly={effectiveReadOnly}
             sectionData={memoizedSectionData}
             allSections={allSections}
             currentSectionIndex={currentSectionIndex}

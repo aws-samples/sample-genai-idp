@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: MIT-0
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Box,
   ButtonDropdown,
@@ -35,6 +35,8 @@ import { renderHitlStatus } from '../common/hitl-status-renderer';
 import StepFunctionFlowViewer from '../step-function-flow/StepFunctionFlowViewer';
 import TroubleshootModal from './TroubleshootModal';
 import DocumentVersionsPanel from './DocumentVersionsPanel';
+import type { DocumentVersionDetail } from './DocumentVersionsPanel';
+import { DocumentVersionProvider } from '../../contexts/document-version';
 import { claimReview } from '../../graphql/generated';
 import usePolling from '../../hooks/use-polling';
 import { exportDocument, triggerBrowserDownload } from './document-export';
@@ -677,10 +679,29 @@ export const DocumentPanel = ({
   // Local state for document item to enable real-time updates
   const [localItem, setLocalItem] = useState(item);
 
+  // Document version viewing: when set, the page renders a past run's snapshot
+  // (read-only). versionFiles maps each output S3 key -> pinned VersionId so
+  // viewers fetch that run's exact bytes.
+  const [viewingRunId, setViewingRunId] = useState<string | null>(null);
+  const [versionDetail, setVersionDetail] = useState<DocumentVersionDetail | null>(null);
+
+  const handleViewVersion = useCallback((runId: string | null, detail: DocumentVersionDetail | null) => {
+    setViewingRunId(runId);
+    setVersionDetail(detail);
+  }, []);
+
   // Update local item when prop changes
   useEffect(() => {
     setLocalItem(item);
   }, [item]);
+
+  // If the underlying document changes (navigated to a different doc), drop any
+  // historical-version view so we don't show a stale snapshot for the new doc.
+  const itemObjectKey = item?.objectKey;
+  useEffect(() => {
+    setViewingRunId(null);
+    setVersionDetail(null);
+  }, [itemObjectKey]);
 
   // Detail-view polling (httpapi transport). Under AppSync the onUpdateDocument
   // subscription pushed live Sections/Pages updates into the open document.
@@ -697,7 +718,9 @@ export const DocumentPanel = ({
   }, [localItem?.objectKey, isTerminalStatus, getDocumentDetailsFromIds]);
 
   usePolling(pollDetail, {
-    enabled: USE_POLLING && !!localItem?.objectKey && !isTerminalStatus,
+    // Suspend live polling while viewing a historical version so the snapshot
+    // isn't overwritten by a live re-fetch.
+    enabled: USE_POLLING && !!localItem?.objectKey && !isTerminalStatus && viewingRunId === null,
     intervalMs: DOCUMENT_DETAIL_POLL_INTERVAL_MS,
   });
 
@@ -842,163 +865,196 @@ export const DocumentPanel = ({
     downloadMenuItems.push({ id: 'baselines', text: 'Download Baselines (ZIP)', iconName: 'download' });
   }
 
+  // When viewing a past version, render that run's snapshot (sections, pages,
+  // metering, report URIs) instead of the live document. The section/page
+  // shapes from getDocumentVersion match what the sub-panels consume
+  // (Id/Class/OutputJSONUri/ImageUri/...), and the DocumentVersionProvider
+  // supplies the per-object VersionIds so file fetches read the run's bytes.
+  const displayedItem = useMemo(() => {
+    if (!viewingRunId || !versionDetail) return localItem;
+    let parsedMetering = null;
+    if (versionDetail.Metering) {
+      try {
+        parsedMetering = JSON.parse(versionDetail.Metering);
+      } catch {
+        parsedMetering = null;
+      }
+    }
+    return {
+      ...localItem,
+      sections: (versionDetail.Sections ?? []) as Record<string, unknown>[],
+      pages: (versionDetail.Pages ?? []) as Record<string, unknown>[],
+      summaryReportUri: versionDetail.SummaryReportUri ?? '',
+      evaluationReportUri: versionDetail.EvaluationReportUri ?? '',
+      // Rule validation isn't versioned; hide it for historical views.
+      ruleValidationResultUri: '',
+      metering: parsedMetering,
+    } as typeof localItem;
+  }, [viewingRunId, versionDetail, localItem]);
+
   // Create enhanced item with configuration
   const enhancedItem = {
-    ...localItem,
+    ...displayedItem,
     mergedConfig: mergedConfig ?? undefined,
   };
 
   return (
-    <SpaceBetween size="s">
-      <Container
-        header={
-          <Header
-            variant="h2"
-            actions={
-              <SpaceBetween direction="horizontal" size="xs">
-                {showStartReview && (
+    <DocumentVersionProvider runId={viewingRunId} files={versionDetail?.Files}>
+      <SpaceBetween size="s">
+        <Container
+          header={
+            <Header
+              variant="h2"
+              actions={
+                <SpaceBetween direction="horizontal" size="xs">
+                  {showStartReview && (
+                    <Button
+                      iconName="user-profile"
+                      variant="primary"
+                      onClick={handleStartReview}
+                      loading={isClaimingReview}
+                      disabled={isClaimingReview}
+                    >
+                      Start Review
+                    </Button>
+                  )}
                   <Button
-                    iconName="user-profile"
-                    variant="primary"
-                    onClick={handleStartReview}
-                    loading={isClaimingReview}
-                    disabled={isClaimingReview}
-                  >
-                    Start Review
-                  </Button>
-                )}
-                <Button
-                  iconName="gen-ai"
-                  variant="normal"
-                  onClick={() => {
-                    logger.info('Opening troubleshoot modal for document:', localItem.objectKey);
-                    setIsTroubleshootModalVisible(true);
-                  }}
-                >
-                  Troubleshoot
-                </Button>
-                {localItem?.executionArn && (
-                  <Button
-                    iconName="status-positive"
-                    variant={isFlowViewerVisible ? 'primary' : 'normal'}
+                    iconName="gen-ai"
+                    variant="normal"
                     onClick={() => {
-                      console.log('Execution ARN:', localItem.executionArn);
-                      logger.info('Opening flow viewer with execution ARN:', localItem.executionArn);
-                      setIsFlowViewerVisible(true);
+                      logger.info('Opening troubleshoot modal for document:', localItem.objectKey);
+                      setIsTroubleshootModalVisible(true);
                     }}
                   >
-                    View Processing Flow
+                    Troubleshoot
                   </Button>
-                )}
-                {onAbort && canAbort && (
-                  <Button iconName="status-stopped" variant="normal" onClick={onAbort}>
-                    Abort
-                  </Button>
-                )}
-                {onReprocess && (
-                  <Button iconName="redo" variant="normal" onClick={onReprocess}>
-                    Reprocess
-                  </Button>
-                )}
-                <ButtonDropdown
-                  items={downloadMenuItems}
-                  onItemClick={({ detail }) => handleDownloadMenuItemClick(detail.id)}
-                  disabled={isDownloadInProgress}
-                  loading={isDownloadInProgress}
-                  variant="normal"
-                  expandToViewport
-                >
-                  Download
-                </ButtonDropdown>
-                {onDelete && (
-                  <Button iconName="remove" variant="normal" onClick={onDelete}>
-                    Delete
-                  </Button>
-                )}
-              </SpaceBetween>
-            }
-          >
-            Document Details
-          </Header>
-        }
-      >
-        <SpaceBetween size="l">
-          <DocumentAttributes
-            item={enhancedItem}
-            versions={versions}
-            setToolsOpen={setToolsOpen}
-            getDocumentDetailsFromIds={getDocumentDetailsFromIds}
-          />
+                  {localItem?.executionArn && (
+                    <Button
+                      iconName="status-positive"
+                      variant={isFlowViewerVisible ? 'primary' : 'normal'}
+                      onClick={() => {
+                        console.log('Execution ARN:', localItem.executionArn);
+                        logger.info('Opening flow viewer with execution ARN:', localItem.executionArn);
+                        setIsFlowViewerVisible(true);
+                      }}
+                    >
+                      View Processing Flow
+                    </Button>
+                  )}
+                  {onAbort && canAbort && (
+                    <Button iconName="status-stopped" variant="normal" onClick={onAbort}>
+                      Abort
+                    </Button>
+                  )}
+                  {onReprocess && (
+                    <Button iconName="redo" variant="normal" onClick={onReprocess}>
+                      Reprocess
+                    </Button>
+                  )}
+                  <ButtonDropdown
+                    items={downloadMenuItems}
+                    onItemClick={({ detail }) => handleDownloadMenuItemClick(detail.id)}
+                    disabled={isDownloadInProgress}
+                    loading={isDownloadInProgress}
+                    variant="normal"
+                    expandToViewport
+                  >
+                    Download
+                  </ButtonDropdown>
+                  {onDelete && (
+                    <Button iconName="remove" variant="normal" onClick={onDelete}>
+                      Delete
+                    </Button>
+                  )}
+                </SpaceBetween>
+              }
+            >
+              Document Details
+            </Header>
+          }
+        >
+          <SpaceBetween size="l">
+            <DocumentAttributes
+              item={enhancedItem}
+              versions={versions}
+              setToolsOpen={setToolsOpen}
+              getDocumentDetailsFromIds={getDocumentDetailsFromIds}
+            />
 
-          {localItem.metering && (
-            <div>
-              <MeteringExpandableSection meteringData={localItem.metering} documentItem={localItem} />
-            </div>
-          )}
-        </SpaceBetween>
-      </Container>
-      <DocumentViewers
-        objectKey={localItem.objectKey}
-        evaluationReportUri={localItem.evaluationReportUri}
-        summaryReportUri={localItem.summaryReportUri}
-        ruleValidationResultUri={localItem.ruleValidationResultUri}
-      />
-      <SectionsPanel
-        {...({
-          sections: localItem.sections,
-          pages: localItem.pages,
-          documentItem: localItem,
-          mergedConfig,
-          onDocumentUpdate: setLocalItem,
-        } as Record<string, unknown>)}
-      />
-      <PagesPanel {...({ pages: localItem.pages, documentItem: localItem } as Record<string, unknown>)} />
-      <DocumentVersionsPanel objectKey={localItem.objectKey} />
-      <ChatPanel objectKey={localItem.objectKey} configVersion={docConfigVersion} />
-
-      {/* Step Function Flow Viewer - uses the document's config version, not the active stack config */}
-      {localItem?.executionArn && (
-        <StepFunctionFlowViewer
-          executionArn={localItem.executionArn}
-          visible={isFlowViewerVisible}
-          onDismiss={() => setIsFlowViewerVisible(false)}
-          mergedConfig={documentVersionConfig}
+            {displayedItem.metering && (
+              <div>
+                <MeteringExpandableSection meteringData={displayedItem.metering} documentItem={displayedItem} />
+              </div>
+            )}
+          </SpaceBetween>
+        </Container>
+        <DocumentViewers
+          objectKey={displayedItem.objectKey}
+          evaluationReportUri={displayedItem.evaluationReportUri}
+          summaryReportUri={displayedItem.summaryReportUri}
+          ruleValidationResultUri={displayedItem.ruleValidationResultUri}
         />
-      )}
+        <SectionsPanel
+          {...({
+            sections: displayedItem.sections,
+            pages: displayedItem.pages,
+            documentItem: displayedItem,
+            mergedConfig,
+            // Editing is disabled for a historical snapshot (read-only view).
+            onDocumentUpdate: viewingRunId ? undefined : setLocalItem,
+            readOnly: viewingRunId !== null,
+          } as Record<string, unknown>)}
+        />
+        <PagesPanel
+          {...({ pages: displayedItem.pages, documentItem: displayedItem, readOnly: viewingRunId !== null } as Record<string, unknown>)}
+        />
+        <DocumentVersionsPanel objectKey={localItem.objectKey} viewingRunId={viewingRunId} onViewVersion={handleViewVersion} />
+        <ChatPanel objectKey={localItem.objectKey} configVersion={docConfigVersion} />
 
-      {/* Troubleshoot Modal */}
-      <TroubleshootModal
-        visible={isTroubleshootModalVisible}
-        onDismiss={() => setIsTroubleshootModalVisible(false)}
-        documentItem={localItem}
-        existingJob={troubleshootJobs[localItem?.objectKey] as unknown as { jobId: string; status: string }}
-        onJobUpdate={(jobData: TroubleshootJobData) => {
-          setTroubleshootJobs((prev) => ({
-            ...prev,
-            [localItem.objectKey]: jobData,
-          }));
-        }}
-      />
+        {/* Step Function Flow Viewer - uses the document's config version, not the active stack config */}
+        {localItem?.executionArn && (
+          <StepFunctionFlowViewer
+            executionArn={localItem.executionArn}
+            visible={isFlowViewerVisible}
+            onDismiss={() => setIsFlowViewerVisible(false)}
+            mergedConfig={documentVersionConfig}
+          />
+        )}
 
-      {/* Document-level download UX */}
-      <DownloadOptionsModal
-        visible={isDownloadOptionsOpen}
-        includePageImages={includePageImages}
-        includeSourceDocument={includeSourceDocument}
-        onIncludePageImagesChange={setIncludePageImages}
-        onIncludeSourceDocumentChange={setIncludeSourceDocument}
-        onConfirm={handleConfirmDownloadAll}
-        onDismiss={() => setIsDownloadOptionsOpen(false)}
-      />
-      <DownloadProgressModal
-        visible={(isDownloadInProgress || isDownloadFinished) && downloadScope !== null}
-        progress={downloadProgress}
-        errors={downloadErrors}
-        isFinished={isDownloadFinished}
-        onCancel={handleCancelDownload}
-        onClose={handleCloseDownloadProgress}
-      />
-    </SpaceBetween>
+        {/* Troubleshoot Modal */}
+        <TroubleshootModal
+          visible={isTroubleshootModalVisible}
+          onDismiss={() => setIsTroubleshootModalVisible(false)}
+          documentItem={localItem}
+          existingJob={troubleshootJobs[localItem?.objectKey] as unknown as { jobId: string; status: string }}
+          onJobUpdate={(jobData: TroubleshootJobData) => {
+            setTroubleshootJobs((prev) => ({
+              ...prev,
+              [localItem.objectKey]: jobData,
+            }));
+          }}
+        />
+
+        {/* Document-level download UX */}
+        <DownloadOptionsModal
+          visible={isDownloadOptionsOpen}
+          includePageImages={includePageImages}
+          includeSourceDocument={includeSourceDocument}
+          onIncludePageImagesChange={setIncludePageImages}
+          onIncludeSourceDocumentChange={setIncludeSourceDocument}
+          onConfirm={handleConfirmDownloadAll}
+          onDismiss={() => setIsDownloadOptionsOpen(false)}
+        />
+        <DownloadProgressModal
+          visible={(isDownloadInProgress || isDownloadFinished) && downloadScope !== null}
+          progress={downloadProgress}
+          errors={downloadErrors}
+          isFinished={isDownloadFinished}
+          onCancel={handleCancelDownload}
+          onClose={handleCloseDownloadProgress}
+        />
+      </SpaceBetween>
+    </DocumentVersionProvider>
   );
 };
 
