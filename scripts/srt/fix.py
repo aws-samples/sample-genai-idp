@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """SRT fix script to run interactive issue fixing."""
 
-import sys
+import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -33,7 +34,9 @@ def main():
     project_path = str(project_root)
     print(f"Fixing issues in project: {project_path}")
 
-    if not run_command(f"./srt fix -p {project_path}", cwd=srt_dir):
+    # Properly quote the project path to prevent command injection
+    quoted_path = shlex.quote(project_path)
+    if not run_command(f"./srt fix -p {quoted_path}", cwd=srt_dir):
         print("SRT fix completed with some issues remaining")
         sys.exit(0)
 
@@ -46,23 +49,31 @@ def main():
         import json
 
         # Load full scan results
-        with open(issues_source) as f:
+        with open(issues_source, encoding="utf-8") as f:
             all_issues = json.load(f)
 
-        # Filter: keep only high-priority issues that are NOT Open
-        # This preserves suppressions, resolutions, and reopened issues
+        # Filter: keep only HIGH priority issues that are NOT Open
+        # This preserves suppressions, resolutions, and reopened HIGH issues
+        # Rationale: Only HIGH priority issues gate CI/CD, so we only persist those
+        # suppressions to minimize the committed file size. Medium/Low findings are
+        # informational only and don't need to be tracked across runs.
         filtered_issues = [
-            issue for issue in all_issues
-            if issue.get('priority') in ['High', 'HIGH']
-            and issue.get('status') != 'Open'
+            issue
+            for issue in all_issues
+            if issue.get("priority") in ["High", "HIGH"]
+            and issue.get("status") != "Open"
         ]
 
         # Save filtered version
-        with open(issues_target, 'w') as f:
+        with open(issues_target, "w", encoding="utf-8") as f:
             json.dump(filtered_issues, f, indent=2)
 
-        print(f"✅ Updated issues.json in scripts/srt/ (saved {len(filtered_issues)} high-priority suppressions)")
-        print(f"   Filtered from {len(all_issues)} total issues to {len(filtered_issues)} (removed all Open and Low/Medium priority)")
+        print(
+            f"✅ Updated issues.json in scripts/srt/ (saved {len(filtered_issues)} high-priority suppressions)"
+        )
+        print(
+            f"   Filtered from {len(all_issues)} total issues to {len(filtered_issues)} (removed all Open and Low/Medium priority)"
+        )
     else:
         print("⚠️  Warning: issues.json not found in .srt/ directory")
 

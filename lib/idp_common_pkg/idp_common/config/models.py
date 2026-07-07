@@ -18,6 +18,7 @@ Usage:
         model = config.extraction.model
 """
 
+import re
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
 
 from pydantic import (
@@ -1676,6 +1677,80 @@ class PricingConfig(BaseModel):
         return self.model_dump(mode="python")
 
 
+class ModelLimitEntry(BaseModel):
+    """Single model-limit entry.
+
+    Entries form an ORDERED list matched by case-insensitive regex against the
+    model ID — first match wins, so list order is semantically meaningful.
+    """
+
+    pattern: str = Field(
+        description="Case-insensitive regex matched against the model ID (order matters; first match wins)"
+    )
+    max_output_tokens: int = Field(
+        gt=0, description="Maximum output tokens for matching models"
+    )
+    max_input_tokens: Optional[int] = Field(
+        default=None, gt=0, description="Model input/context window in tokens"
+    )
+    description: Optional[str] = Field(
+        default=None, description="Human-readable description of the model family"
+    )
+    reference: Optional[str] = Field(
+        default=None, description="Documentation URL for the limit values"
+    )
+
+    @field_validator("pattern")
+    @classmethod
+    def _pattern_must_compile(cls, v: str) -> str:
+        """Reject a pattern that isn't a valid regex.
+
+        Patterns are user-editable (via the Model Limits UI) and are later
+        passed to ``re.search`` on the Bedrock hot path. Validating at save
+        time surfaces a clear error instead of letting a bad pattern raise
+        ``re.error`` deep inside model-limit resolution.
+        """
+        if not v or not v.strip():
+            raise ValueError("pattern must be a non-empty string")
+        try:
+            re.compile(v)
+        except re.error as e:
+            raise ValueError(f"pattern is not a valid regular expression: {e}") from e
+        return v
+
+
+class ModelConfigLimitsConfig(BaseModel):
+    """
+    Model config limits configuration model.
+
+    Represents the DefaultModelConfigLimits / CustomModelConfigLimits config
+    types stored in DynamoDB (mirroring the DefaultPricing/CustomPricing
+    pattern). Seeded from config_library/model_config_limits.yaml at deploy.
+
+    Unlike pricing, CustomModelConfigLimits stores the FULL replacement list,
+    not deltas: model_limits is an ordered first-match-wins list, so a partial
+    merge cannot preserve ordering intent.
+    """
+
+    config_type: Literal["DefaultModelConfigLimits", "CustomModelConfigLimits"] = Field(
+        default="DefaultModelConfigLimits", description="Discriminator for config type"
+    )
+
+    model_limits: List[ModelLimitEntry] = Field(
+        default_factory=list,
+        description="Ordered list of model limit entries (first pattern match wins)",
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",  # Strict validation - only 'model_limits' field allowed
+        validate_assignment=True,
+    )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to a mutable dictionary."""
+        return self.model_dump(mode="python")
+
+
 class FactExtractionConfig(BaseModel):
     """Fact extraction configuration for rule validation"""
 
@@ -2373,9 +2448,10 @@ class ConfigurationRecord(BaseModel):
 
     description: Optional[str] = Field(default=None, description="Version description")
     config: Annotated[
-        Union[SchemaConfig, IDPConfig, PricingConfig], Discriminator("config_type")
+        Union[SchemaConfig, IDPConfig, PricingConfig, ModelConfigLimitsConfig],
+        Discriminator("config_type"),
     ] = Field(
-        description="The configuration - SchemaConfig for Schema type, PricingConfig for Pricing type, IDPConfig for Default/Custom"
+        description="The configuration - SchemaConfig for Schema type, PricingConfig for Pricing type, ModelConfigLimitsConfig for ModelConfigLimits type, IDPConfig for Default/Custom"
     )
     metadata: Optional[ConfigMetadata] = Field(
         default=None, description="Optional metadata about the configuration"
@@ -2503,6 +2579,7 @@ class ConfigurationRecord(BaseModel):
         # - "Schema" -> SchemaConfig
         # - "Config#version" -> IDPConfig
         # - "DefaultPricing", "CustomPricing" -> PricingConfig
+        # - "DefaultModelConfigLimits", "CustomModelConfigLimits" -> ModelConfigLimitsConfig
         # Legacy non-versioned "Default" / "Custom" keys map to IDPConfig
         if config_type in ("Default", "Custom"):
             config_data["config_type"] = "Config"

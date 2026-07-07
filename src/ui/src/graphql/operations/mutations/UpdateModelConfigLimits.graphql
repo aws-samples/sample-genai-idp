@@ -1,0 +1,10 @@
+mutation UpdateModelConfigLimits($modelConfigLimits: AWSJSON!) {
+  updateModelConfigLimits(modelConfigLimits: $modelConfigLimits) {
+    success
+    message
+    error {
+      type
+      message
+    }
+  }
+}

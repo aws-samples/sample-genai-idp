@@ -591,6 +591,13 @@ export type MessageContent = {
   text?: Maybe<Scalars['String']['output']>;
 };
 
+export type ModelConfigLimitsResponse = {
+  defaultModelConfigLimits?: Maybe<Scalars['AWSJSON']['output']>;
+  error?: Maybe<ConfigurationError>;
+  modelConfigLimits?: Maybe<Scalars['AWSJSON']['output']>;
+  success: Scalars['Boolean']['output'];
+};
+
 export type ModifiedPageInput = {
   classReset: Scalars['Boolean']['input'];
   newConfidenceUri?: InputMaybe<Scalars['String']['input']>;
@@ -681,6 +688,7 @@ export type Mutation = {
    */
   removeFeatureConfigPreset: Scalars['Boolean']['output'];
   reprocessDocument: Scalars['Boolean']['output'];
+  restoreDefaultModelConfigLimits?: Maybe<UpdateModelConfigLimitsResponse>;
   restoreDefaultPricing?: Maybe<UpdatePricingResponse>;
   resumeCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   sendAgentChatMessage?: Maybe<AgentChatMessage>;
@@ -727,6 +735,7 @@ export type Mutation = {
   updateDocumentSection?: Maybe<Document>;
   updateDocumentStatus?: Maybe<Document>;
   updateFinetuningJobStatus?: Maybe<FinetuningJob>;
+  updateModelConfigLimits?: Maybe<UpdateModelConfigLimitsResponse>;
   updatePricing?: Maybe<UpdatePricingResponse>;
   updateTestSet?: Maybe<TestSet>;
   updateUser?: Maybe<User>;
@@ -1078,6 +1087,11 @@ export type MutationUpdateFinetuningJobStatusArgs = {
 };
 
 
+export type MutationUpdateModelConfigLimitsArgs = {
+  modelConfigLimits: Scalars['AWSJSON']['input'];
+};
+
+
 export type MutationUpdatePricingArgs = {
   pricingConfig: Scalars['AWSJSON']['input'];
 };
@@ -1205,6 +1219,7 @@ export type Query = {
   getFileContents?: Maybe<FileContentsResponse>;
   getFinetuningJob?: Maybe<FinetuningJob>;
   getLatestPublishedVersion?: Maybe<LatestPublishedVersion>;
+  getModelConfigLimits?: Maybe<ModelConfigLimitsResponse>;
   getMyProfile?: Maybe<User>;
   getPricing?: Maybe<PricingResponse>;
   getStepFunctionExecution?: Maybe<StepFunctionExecutionResponse>;
@@ -1730,6 +1745,12 @@ export type UpdateDocumentStatusInput = {
   WorkflowStatus?: InputMaybe<Scalars['String']['input']>;
 };
 
+export type UpdateModelConfigLimitsResponse = {
+  error?: Maybe<ConfigurationError>;
+  message?: Maybe<Scalars['String']['output']>;
+  success: Scalars['Boolean']['output'];
+};
+
 export type UpdatePricingResponse = {
   error?: Maybe<ConfigurationError>;
   message?: Maybe<Scalars['String']['output']>;
@@ -1970,6 +1991,11 @@ export type ReprocessDocumentMutationVariables = Exact<{
 
 export type ReprocessDocumentMutation = { reprocessDocument: boolean };
 
+export type RestoreDefaultModelConfigLimitsMutationVariables = Exact<{ [key: string]: never; }>;
+
+
+export type RestoreDefaultModelConfigLimitsMutation = { restoreDefaultModelConfigLimits?: { success: boolean, message?: string | null, error?: { type?: string | null, message?: string | null } | null } | null };
+
 export type RestoreDefaultPricingMutationVariables = Exact<{ [key: string]: never; }>;
 
 
@@ -2068,6 +2094,13 @@ export type UpdateConfigurationMutationVariables = Exact<{
 
 
 export type UpdateConfigurationMutation = { updateConfiguration?: { success: boolean, message?: string | null, error?: { type?: string | null, message?: string | null, validationErrors?: Array<{ field?: string | null, message?: string | null, type?: string | null } | null> | null } | null } | null };
+
+export type UpdateModelConfigLimitsMutationVariables = Exact<{
+  modelConfigLimits: Scalars['AWSJSON']['input'];
+}>;
+
+
+export type UpdateModelConfigLimitsMutation = { updateModelConfigLimits?: { success: boolean, message?: string | null, error?: { type?: string | null, message?: string | null } | null } | null };
 
 export type UpdatePricingMutationVariables = Exact<{
   pricingConfig: Scalars['AWSJSON']['input'];
@@ -2232,6 +2265,11 @@ export type GetLatestPublishedVersionQueryVariables = Exact<{ [key: string]: nev
 
 
 export type GetLatestPublishedVersionQuery = { getLatestPublishedVersion?: { checkEnabled: boolean, latestVersion?: string | null, templateUrl?: string | null, errorMessage?: string | null } | null };
+
+export type GetModelConfigLimitsQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type GetModelConfigLimitsQuery = { getModelConfigLimits?: { success: boolean, modelConfigLimits?: string | null, defaultModelConfigLimits?: string | null, error?: { type?: string | null, message?: string | null } | null } | null };
 
 export type GetMyProfileQueryVariables = Exact<{ [key: string]: never; }>;
 

@@ -15,14 +15,42 @@
 
 # Model limits are matched by pattern (case-insensitive regex)
 # Patterns are evaluated in order - first match wins
-# Each entry has a 'pattern' (regex) and 'max_output_tokens' (integer)
+# Each entry has a 'pattern' (regex), 'max_output_tokens' (integer), and
+# 'max_input_tokens' (integer — the model's context/input window).
+#
+# max_input_tokens drives MODEL-AWARE AUTO-SIZING (idp_common.bedrock.sizing):
+# shard token/page budgets and confidence list-batch sizes are derived from the
+# model's input+output windows minus a configurable context buffer, so a user
+# never has to hand-set these (they'd need per-model knowledge). The ':1m'
+# extended-context Claude variants have a 1,000,000-token input window and MUST
+# be matched by a dedicated pattern placed BEFORE the base pattern (first match
+# wins) — otherwise a ':1m' model would inherit the base 200K window and shard
+# far smaller than necessary.
 
 model_limits:
+  # ===========================================================================
+  # 1M extended-context ( ':1m' ) Claude variants — MUST precede base patterns.
+  # Input window = 1,000,000; output unchanged from the base model.
+  # ===========================================================================
+  # NOTE patterns use '.*:1m' (not a bare ':1m') because real inference-profile
+  # IDs carry a version segment between the family and the suffix, e.g.
+  # 'claude-opus-4-7-20250514-v1:0:1m'. First match wins, so the 128K-output
+  # families are listed before the 64K catch-all.
+  - pattern: "claude-(opus-4-(6|7|8)|sonnet-5|sonnet-4-6).*:1m"
+    max_output_tokens: 128000
+    max_input_tokens: 1000000
+    description: "Claude Opus 4.6/4.7/4.8, Sonnet 5, Sonnet 4.6 extended-context (:1m) — 1M input"
+  - pattern: "claude-(opus|sonnet|haiku)-4.*:1m"
+    max_output_tokens: 64000
+    max_input_tokens: 1000000
+    description: "Other Claude 4.x extended-context (:1m) — 1M input"
+
   # ---------------------------------------------------------------------------
   # Anthropic Claude Opus 4.7 (extended output)
   # ---------------------------------------------------------------------------
   - pattern: "claude-opus-4-7"
     max_output_tokens: 128000
+    max_input_tokens: 200000
     description: "Claude Opus 4.7 with 128K max output tokens"
     reference: "https://docs.anthropic.com/claude/docs/models-overview#model-comparison"
 
@@ -31,49 +59,43 @@ model_limits:
   # ---------------------------------------------------------------------------
   - pattern: "claude-opus-4-8"
     max_output_tokens: 128000
+    max_input_tokens: 200000
     description: "Claude Opus 4.8 with 128K max output tokens"
     reference: "https://docs.anthropic.com/claude/docs/models-overview#model-comparison"
 
   # ---------------------------------------------------------------------------
   # Anthropic Claude Sonnet 5 (extended output, 128K)
   # ---------------------------------------------------------------------------
-  # Sonnet 5 supports 128K max output (1M context). It does NOT match the
-  # "claude-(opus|sonnet|haiku)-4" catch-all below (that is 4.x only), so it needs
-  # its own entry to avoid falling through to the generic default. Covers the :1m
-  # extended-context variant too.
+  # Sonnet 5 supports 128K max output. Base context window is 200K; the :1m
+  # variant (matched above) is 1M.
   - pattern: "claude-sonnet-5"
     max_output_tokens: 128000
-    description: "Claude Sonnet 5 with 128K max output tokens (all variants including :1m)"
+    max_input_tokens: 200000
+    description: "Claude Sonnet 5 with 128K max output tokens (base 200K context)"
     reference: "https://docs.anthropic.com/claude/docs/models-overview#model-comparison"
 
   # ---------------------------------------------------------------------------
   # Anthropic Claude Sonnet 4.6 / Opus 4.6 (extended output, 128K)
   # ---------------------------------------------------------------------------
-  # These 4.x models support 128K max output (same as Opus 4.7/4.8), NOT 64K.
-  # They MUST appear before the generic "claude-(opus|sonnet|haiku)-4" catch-all
-  # below, because pattern matching is first-match-wins.
-  # The :1m suffix (extended context) increases INPUT to 1M tokens; the output
-  # limit is unchanged regardless of context window size.
   - pattern: "claude-sonnet-4-6"
     max_output_tokens: 128000
-    description: "Claude Sonnet 4.6 with 128K max output tokens (all variants including :1m)"
+    max_input_tokens: 200000
+    description: "Claude Sonnet 4.6 with 128K max output tokens (base 200K context)"
     reference: "https://docs.anthropic.com/claude/docs/models-overview#model-comparison"
 
   - pattern: "claude-opus-4-6"
     max_output_tokens: 128000
-    description: "Claude Opus 4.6 with 128K max output tokens (all variants including :1m)"
+    max_input_tokens: 200000
+    description: "Claude Opus 4.6 with 128K max output tokens (base 200K context)"
     reference: "https://docs.anthropic.com/claude/docs/models-overview#model-comparison"
 
   # ---------------------------------------------------------------------------
   # Anthropic Claude 4.x Models (Haiku 4.5, Sonnet 4/4.5, older Opus versions)
   # ---------------------------------------------------------------------------
-  # Catch-all for 4.x models that cap at 64K output (Haiku 4.5, Sonnet 4.0/4.5,
-  # Opus 4.0/4.1/4.5). Sonnet 4.6 and Opus 4.6 are handled above (128K).
-  # Note: The :1m suffix (extended context) increases INPUT to 1M tokens.
-  # Output token limit remains unchanged regardless of context window size.
   - pattern: "claude-(opus|sonnet|haiku)-4"
     max_output_tokens: 64000
-    description: "Claude 4.x models (Haiku 4.5, Sonnet 4/4.5, Opus 4.0/4.1/4.5) - all variants including :1m"
+    max_input_tokens: 200000
+    description: "Claude 4.x models (Haiku 4.5, Sonnet 4/4.5, Opus 4.0/4.1/4.5) - base 200K context"
     reference: "https://docs.anthropic.com/claude/docs/models-overview#model-comparison"
 
   # ---------------------------------------------------------------------------
@@ -81,26 +103,28 @@ model_limits:
   # ---------------------------------------------------------------------------
   - pattern: "claude-3"
     max_output_tokens: 8192
+    max_input_tokens: 200000
     description: "Claude 3.x models (3.5 Sonnet, 3.7 Sonnet, 3 Opus, 3 Haiku)"
     reference: "https://docs.anthropic.com/claude/docs/models-overview#model-comparison"
 
   # ---------------------------------------------------------------------------
   # OpenAI GPT-5.x (bedrock-mantle Responses API)
   # ---------------------------------------------------------------------------
-  # GPT-5.4 / GPT-5.5 are served via the bedrock-mantle endpoint (OpenAI
-  # Responses API), 272K context window. Used to cap max_output_tokens for the
-  # 'max_output_tokens' request field.
   - pattern: "openai\\.gpt-5"
     max_output_tokens: 128000
-    description: "OpenAI GPT-5.4 / GPT-5.5 via Bedrock Mantle Responses API"
+    max_input_tokens: 272000
+    description: "OpenAI GPT-5.4 / GPT-5.5 via Bedrock Mantle Responses API (272K context)"
     reference: "https://docs.aws.amazon.com/bedrock/latest/userguide/model-cards-openai.html"
 
   # ---------------------------------------------------------------------------
   # Amazon Nova Models (all generations)
   # ---------------------------------------------------------------------------
+  # Nova Pro/Lite: 300K context; Nova Micro: 128K; Nova 2: 300K. Use the
+  # conservative 300K for the family (the context buffer adds further safety).
   - pattern: "nova-(premier|pro|lite|micro|2)"
     max_output_tokens: 10000
-    description: "Amazon Nova models (Premier, Pro, Lite, Micro, Nova 2)"
+    max_input_tokens: 300000
+    description: "Amazon Nova models (Premier, Pro, Lite, Micro, Nova 2) - ~300K context"
     reference: "https://docs.aws.amazon.com/nova/latest/userguide/what-is-nova.html"
 
   # ---------------------------------------------------------------------------

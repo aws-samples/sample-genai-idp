@@ -273,6 +273,19 @@ type UpdatePricingResponse @aws_cognito_user_pools @aws_iam {
   error: ConfigurationError
 }
 
+type ModelConfigLimitsResponse @aws_cognito_user_pools @aws_iam {
+  success: Boolean!
+  modelConfigLimits: AWSJSON
+  defaultModelConfigLimits: AWSJSON
+  error: ConfigurationError
+}
+
+type UpdateModelConfigLimitsResponse @aws_cognito_user_pools @aws_iam {
+  success: Boolean!
+  message: String
+  error: ConfigurationError
+}
+
 type ConfigurationLibraryItem @aws_cognito_user_pools @aws_iam {
   name: String!
   hasReadme: Boolean!
@@ -822,6 +835,10 @@ type Mutation {
     @aws_cognito_user_pools(cognito_groups: ["Admin"])
   restoreDefaultPricing: UpdatePricingResponse
     @aws_cognito_user_pools(cognito_groups: ["Admin"])
+  updateModelConfigLimits(modelConfigLimits: AWSJSON!): UpdateModelConfigLimitsResponse
+    @aws_cognito_user_pools(cognito_groups: ["Admin"])
+  restoreDefaultModelConfigLimits: UpdateModelConfigLimitsResponse
+    @aws_cognito_user_pools(cognito_groups: ["Admin"])
 
   # Admin-only: permanently deletes a document version's pinned S3 object
   # versions (irreversible), so it is more restrictive than deleteDocument.
@@ -1103,6 +1120,8 @@ type Query @aws_cognito_user_pools @aws_iam {
   getConfigVersion(versionName: String!): ConfigurationResponse
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
   getPricing: PricingResponse
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
+  getModelConfigLimits: ModelConfigLimitsResponse
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
   calculateCapacity(input: String!): CapacityResult
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])

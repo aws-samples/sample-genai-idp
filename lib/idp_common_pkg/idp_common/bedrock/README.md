@@ -360,11 +360,14 @@ Different Bedrock models implement these parameters with varying defaults, namin
     Ignored for Sonnet 4.5 / Haiku 4.5 (they 400 on it). `budget_tokens` is
     rejected — use effort. Verified live: effort changes output-token spend.
   - **max_tokens**: extraction/confidence pass `max_tokens=None`, so the client
-    resolves the model maximum from `get_model_max_output_tokens()`
-    (`config_library/model_config_limits.yaml`, bundled in-package). Omitting
-    `maxTokens` would let Bedrock apply a small truncating default. If a request
-    still exceeds the model cap, the client parses the true limit from the
-    `ValidationException` and retries once.
+    resolves the model maximum from `get_model_max_output_tokens()`. The limits
+    come from the DynamoDB Configuration Table when `CONFIGURATION_TABLE_NAME`
+    is set (seeded from `config_library/model_config_limits.yaml` at deploy and
+    editable in the web UI under "View / Edit Model Limits"; cached ~60s per
+    container), falling back to the on-disk `config_library/` YAML offline.
+    Omitting `maxTokens` would let Bedrock apply a small truncating default.
+    If a request still exceeds the model cap, the client parses the true limit
+    from the `ValidationException` and retries once.
 
 - **Nova models**:
   - Default values: temperature=0.7, topP=0.9, topK≈50 (moderately constrained)

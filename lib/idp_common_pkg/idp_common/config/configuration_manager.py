@@ -12,7 +12,7 @@ from botocore.exceptions import ClientError
 import logging
 from boto3.dynamodb.types import Binary
 
-from .models import IDPConfig, SchemaConfig, PricingConfig, ConfigurationRecord, ConfigMetadata
+from .models import IDPConfig, SchemaConfig, PricingConfig, ModelConfigLimitsConfig, ConfigurationRecord, ConfigMetadata
 from .merge_utils import (
     deep_update,
     get_diff_dict,
@@ -20,6 +20,8 @@ from .merge_utils import (
 from .constants import (
     CONFIG_TYPE_CUSTOM_PRICING,
     CONFIG_TYPE_DEFAULT_PRICING,
+    CONFIG_TYPE_CUSTOM_MODEL_CONFIG_LIMITS,
+    CONFIG_TYPE_DEFAULT_MODEL_CONFIG_LIMITS,
     CONFIG_TYPE_SCHEMA,
     CONFIG_TYPE_CONFIG,
     VALID_CONFIG_TYPES,
@@ -123,7 +125,7 @@ class ConfigurationManager:
 
     def get_configuration(
         self, config_type: str, version: Optional[str] = None
-    ) -> Optional[Union[SchemaConfig, IDPConfig, PricingConfig]]:
+    ) -> Optional[Union[SchemaConfig, IDPConfig, PricingConfig, ModelConfigLimitsConfig]]:
         """
         Retrieve configuration from DynamoDB.
 
@@ -301,7 +303,7 @@ class ConfigurationManager:
     def save_configuration(
         self,
         config_type: str,
-        config: Union[SchemaConfig, IDPConfig, PricingConfig, Dict[str, Any]],
+        config: Union[SchemaConfig, IDPConfig, PricingConfig, ModelConfigLimitsConfig, Dict[str, Any]],
         version: Optional[str] = None,
         description: Optional[str] = None,
         skip_sync: bool = False,
@@ -336,6 +338,11 @@ class ConfigurationManager:
                 CONFIG_TYPE_CUSTOM_PRICING,
             ):
                 config = PricingConfig(**config)
+            elif config_type in (
+                CONFIG_TYPE_DEFAULT_MODEL_CONFIG_LIMITS,
+                CONFIG_TYPE_CUSTOM_MODEL_CONFIG_LIMITS,
+            ):
+                config = ModelConfigLimitsConfig(**config)
             else:
                 config = IDPConfig(**config)
 
@@ -649,6 +656,67 @@ class ConfigurationManager:
         except ClientError as e:
             if e.response.get("Error", {}).get("Code") == "ResourceNotFoundException":
                 logger.info("CustomPricing already deleted or never existed")
+                return True
+            raise
+
+    # ===== Model Config Limits Methods =====
+
+    def get_merged_model_config_limits(self) -> Optional[ModelConfigLimitsConfig]:
+        """
+        Get the effective model config limits (Custom if present, else Default).
+
+        Unlike pricing, Custom is a FULL replacement list rather than deltas:
+        model_limits is an ordered first-match-wins list, so deep_update (which
+        wholesale-replaces lists anyway) cannot express a partial merge that
+        preserves ordering intent.
+
+        Returns:
+            Effective ModelConfigLimitsConfig, or None if no Default is seeded
+        """
+        default_config = self.get_configuration(CONFIG_TYPE_DEFAULT_MODEL_CONFIG_LIMITS)
+        if default_config is None:
+            logger.info("DefaultModelConfigLimits not found in DynamoDB")
+            return None
+
+        if not isinstance(default_config, ModelConfigLimitsConfig):
+            logger.warning(
+                f"Expected ModelConfigLimitsConfig but got {type(default_config).__name__}"
+            )
+            return None
+
+        custom_config = self.get_configuration(CONFIG_TYPE_CUSTOM_MODEL_CONFIG_LIMITS)
+        if custom_config is None:
+            logger.info("No CustomModelConfigLimits found, returning DefaultModelConfigLimits")
+            return default_config
+
+        if not isinstance(custom_config, ModelConfigLimitsConfig):
+            logger.warning("CustomModelConfigLimits is not ModelConfigLimitsConfig, returning DefaultModelConfigLimits")
+            return default_config
+
+        logger.info("Returning CustomModelConfigLimits (full replacement list)")
+        return custom_config
+
+    def save_custom_model_config_limits(
+        self, limits: Union[ModelConfigLimitsConfig, Dict[str, Any]]
+    ) -> bool:
+        """Save custom model config limits (full replacement list) to DynamoDB."""
+        if isinstance(limits, dict):
+            limits = ModelConfigLimitsConfig(**limits)
+        # Force the discriminator so a payload lacking config_type stores as Custom
+        limits.config_type = "CustomModelConfigLimits"
+        self.save_configuration(CONFIG_TYPE_CUSTOM_MODEL_CONFIG_LIMITS, limits)
+        logger.info("Saved CustomModelConfigLimits configuration")
+        return True
+
+    def delete_custom_model_config_limits(self) -> bool:
+        """Delete custom model config limits, effectively resetting to defaults."""
+        try:
+            self.delete_configuration(CONFIG_TYPE_CUSTOM_MODEL_CONFIG_LIMITS)
+            logger.info("Deleted CustomModelConfigLimits, limits reset to defaults")
+            return True
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") == "ResourceNotFoundException":
+                logger.info("CustomModelConfigLimits already deleted or never existed")
                 return True
             raise
 

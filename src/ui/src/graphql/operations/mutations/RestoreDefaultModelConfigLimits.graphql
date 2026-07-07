@@ -1,0 +1,10 @@
+mutation RestoreDefaultModelConfigLimits {
+  restoreDefaultModelConfigLimits {
+    success
+    message
+    error {
+      type
+      message
+    }
+  }
+}
