@@ -933,7 +933,6 @@ export const DocumentPanel = ({
                       iconName="status-positive"
                       variant={isFlowViewerVisible ? 'primary' : 'normal'}
                       onClick={() => {
-                        console.log('Execution ARN:', localItem.executionArn);
                         logger.info('Opening flow viewer with execution ARN:', localItem.executionArn);
                         setIsFlowViewerVisible(true);
                       }}
@@ -1000,14 +999,12 @@ export const DocumentPanel = ({
             pages: displayedItem.pages,
             documentItem: displayedItem,
             mergedConfig,
-            // Editing is disabled for a historical snapshot (read-only view).
+            // Editing is disabled for a historical snapshot; the panels also
+            // gate their own edit affordances via useDocumentVersion().isHistorical.
             onDocumentUpdate: viewingRunId ? undefined : setLocalItem,
-            readOnly: viewingRunId !== null,
           } as Record<string, unknown>)}
         />
-        <PagesPanel
-          {...({ pages: displayedItem.pages, documentItem: displayedItem, readOnly: viewingRunId !== null } as Record<string, unknown>)}
-        />
+        <PagesPanel {...({ pages: displayedItem.pages, documentItem: displayedItem } as Record<string, unknown>)} />
         <DocumentVersionsPanel objectKey={localItem.objectKey} viewingRunId={viewingRunId} onViewVersion={handleViewVersion} />
         <ChatPanel objectKey={localItem.objectKey} configVersion={docConfigVersion} />
 

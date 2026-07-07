@@ -159,6 +159,10 @@ def _diff_values(path: str, a: Any, b: Any, changes: List[Dict[str, Any]]) -> No
             else:
                 _diff_values(child, a[k], b[k], changes)
     elif isinstance(a, list) and isinstance(b, list):
+        # Intentional shallow list handling: emit a single length_changed marker
+        # and diff only the common prefix (zip stops at the shorter list). This
+        # keeps the version-comparison summary concise; elements beyond the
+        # shorter length are not itemized by design.
         if len(a) != len(b):
             changes.append(
                 {"path": path, "type": "length_changed", "a": len(a), "b": len(b)}
