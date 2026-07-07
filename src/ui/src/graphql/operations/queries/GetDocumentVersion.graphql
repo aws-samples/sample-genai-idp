@@ -1,0 +1,35 @@
+query GetDocumentVersion($objectKey: ID!, $runId: String!) {
+  getDocumentVersion(objectKey: $objectKey, runId: $runId) {
+    RunId
+    ObjectKey
+    CompletionTime
+    QueuedTime
+    WorkflowStartTime
+    WorkflowExecutionArn
+    ConfigVersion
+    PageCount
+    FileCount
+    ManifestUri
+    SummaryReportUri
+    EvaluationReportUri
+    Metering
+    Sections {
+      Id
+      PageIds
+      Class
+      OutputJSONUri
+    }
+    Pages {
+      Id
+      Class
+      ImageUri
+      TextUri
+      OcrPageDataUri
+    }
+    Files {
+      Key
+      VersionId
+      Size
+    }
+  }
+}

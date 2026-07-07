@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 import boto3
 from boto3.dynamodb.conditions import Key as DDBKey
 from idp_common.docs_service import create_document_service
+from idp_common.document_versions import runs_prefix
 
 # Import IDP Common modules
 from idp_common.models import Document, Status
@@ -101,11 +102,20 @@ def _delete_output_data(input_key):
     goes through a different code path that preserves OCR data intentionally.
     """
     prefix = f"{input_key}/"
+    # Preserve the reserved runs/ prefix: it holds prior document-version
+    # manifests. Deleting the current output objects (below) only creates S3
+    # delete markers on a versioned bucket, so the noncurrent versions those
+    # manifests pin remain retrievable — the version history survives reprocess.
+    preserved_prefix = runs_prefix(input_key)
     try:
         paginator = s3_client.get_paginator("list_objects_v2")
         deleted = 0
         for page in paginator.paginate(Bucket=output_bucket, Prefix=prefix):
-            objects = page.get("Contents", [])
+            objects = [
+                obj
+                for obj in page.get("Contents", [])
+                if not obj["Key"].startswith(preserved_prefix)
+            ]
             if objects:
                 # delete_objects accepts up to 1000 keys per call
                 for i in range(0, len(objects), 1000):

@@ -34,6 +34,7 @@ import { getDocumentConfidenceAlertCount } from '../common/confidence-alerts-uti
 import { renderHitlStatus } from '../common/hitl-status-renderer';
 import StepFunctionFlowViewer from '../step-function-flow/StepFunctionFlowViewer';
 import TroubleshootModal from './TroubleshootModal';
+import DocumentVersionsPanel from './DocumentVersionsPanel';
 import { claimReview } from '../../graphql/generated';
 import usePolling from '../../hooks/use-polling';
 import { exportDocument, triggerBrowserDownload } from './document-export';
@@ -952,6 +953,7 @@ export const DocumentPanel = ({
         } as Record<string, unknown>)}
       />
       <PagesPanel {...({ pages: localItem.pages, documentItem: localItem } as Record<string, unknown>)} />
+      <DocumentVersionsPanel objectKey={localItem.objectKey} />
       <ChatPanel objectKey={localItem.objectKey} configVersion={docConfigVersion} />
 
       {/* Step Function Flow Viewer - uses the document's config version, not the active stack config */}

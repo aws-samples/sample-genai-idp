@@ -62,12 +62,18 @@ class DynamoDBClient:
             logger.error(f"Failed to initialize DynamoDB client: {str(e)}")
             raise DynamoDBError(f"Failed to initialize DynamoDB client: {str(e)}")
 
-    def put_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
+    def put_item(
+        self, item: Dict[str, Any], condition_expression: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Put an item into the DynamoDB table.
 
         Args:
             item: The item to put into the table
+            condition_expression: Optional ConditionExpression (e.g.
+                ``attribute_not_exists(PK)`` for idempotent create-if-absent).
+                Raises DynamoDBError with error_code
+                ``ConditionalCheckFailedException`` if the condition fails.
 
         Returns:
             Dict containing the response from DynamoDB
@@ -76,7 +82,10 @@ class DynamoDBClient:
             DynamoDBError: If the DynamoDB operation fails
         """
         try:
-            response = self.table.put_item(Item=item)
+            kwargs: Dict[str, Any] = {"Item": item}
+            if condition_expression:
+                kwargs["ConditionExpression"] = condition_expression
+            response = self.table.put_item(**kwargs)
             logger.debug(f"Successfully put item with PK: {item.get('PK')}")
             return response
         except ClientError as e:

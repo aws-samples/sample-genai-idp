@@ -362,6 +362,7 @@ export type Document = DynamoDbBase & {
   Sections?: Maybe<Array<Maybe<Section>>>;
   SummaryReportUri?: Maybe<Scalars['String']['output']>;
   TraceId?: Maybe<Scalars['String']['output']>;
+  VersionCount?: Maybe<Scalars['Int']['output']>;
   WorkflowExecutionArn?: Maybe<Scalars['String']['output']>;
   WorkflowStartTime?: Maybe<Scalars['AWSDateTime']['output']>;
   WorkflowStatus?: Maybe<Scalars['String']['output']>;
@@ -396,6 +397,31 @@ export type DocumentListItem = DynamoDbBase & {
 export type DocumentPage = {
   Documents?: Maybe<Array<Maybe<Document>>>;
   nextToken?: Maybe<Scalars['String']['output']>;
+};
+
+export type DocumentVersion = {
+  CompletionTime?: Maybe<Scalars['AWSDateTime']['output']>;
+  ConfigVersion?: Maybe<Scalars['String']['output']>;
+  EvaluationReportUri?: Maybe<Scalars['String']['output']>;
+  FileCount?: Maybe<Scalars['Int']['output']>;
+  Files?: Maybe<Array<Maybe<DocumentVersionFile>>>;
+  ManifestUri?: Maybe<Scalars['String']['output']>;
+  Metering?: Maybe<Scalars['AWSJSON']['output']>;
+  ObjectKey?: Maybe<Scalars['ID']['output']>;
+  PageCount?: Maybe<Scalars['Int']['output']>;
+  Pages?: Maybe<Array<Maybe<Page>>>;
+  QueuedTime?: Maybe<Scalars['AWSDateTime']['output']>;
+  RunId: Scalars['String']['output'];
+  Sections?: Maybe<Array<Maybe<Section>>>;
+  SummaryReportUri?: Maybe<Scalars['String']['output']>;
+  WorkflowExecutionArn?: Maybe<Scalars['String']['output']>;
+  WorkflowStartTime?: Maybe<Scalars['AWSDateTime']['output']>;
+};
+
+export type DocumentVersionFile = {
+  Key?: Maybe<Scalars['String']['output']>;
+  Size?: Maybe<Scalars['Float']['output']>;
+  VersionId?: Maybe<Scalars['String']['output']>;
 };
 
 export type DynamoDbBase = {
@@ -624,6 +650,7 @@ export type Mutation = {
   deleteConfigVersion?: Maybe<UpdateConfigurationResponse>;
   deleteDiscoveryJob: Scalars['Boolean']['output'];
   deleteDocument: Scalars['Boolean']['output'];
+  deleteDocumentVersion: Scalars['Boolean']['output'];
   deleteFinetuningJob?: Maybe<Scalars['Boolean']['output']>;
   deleteTestSets: Scalars['Boolean']['output'];
   deleteTests: Scalars['Boolean']['output'];
@@ -817,6 +844,12 @@ export type MutationDeleteDiscoveryJobArgs = {
 
 export type MutationDeleteDocumentArgs = {
   objectKeys: Array<Scalars['String']['input']>;
+};
+
+
+export type MutationDeleteDocumentVersionArgs = {
+  objectKey: Scalars['ID']['input'];
+  runId: Scalars['String']['input'];
 };
 
 
@@ -1152,6 +1185,7 @@ export type Query = {
    * Returns null when EnableFeaturePlatform=false (no resolver attached).
    */
   checkFeatureEntitlement?: Maybe<FeatureEntitlement>;
+  compareDocumentVersions?: Maybe<Scalars['AWSJSON']['output']>;
   compareTestRuns?: Maybe<TestRunComparison>;
   getAgentChatMessages?: Maybe<Array<Maybe<AgentChatMessage>>>;
   getAgentJobStatus?: Maybe<AgentJob>;
@@ -1162,6 +1196,7 @@ export type Query = {
   getConfigurationLibraryFile?: Maybe<ConfigurationLibraryFileResponse>;
   getDocument?: Maybe<Document>;
   getDocumentCount?: Maybe<DocumentCount>;
+  getDocumentVersion?: Maybe<DocumentVersion>;
   /**
    * Admin-only: get a CloudFormation Console quick-create URL for installing or updating a feature.
    * Returns null when EnableFeaturePlatform=false (no resolver attached).
@@ -1191,6 +1226,7 @@ export type Query = {
   listChatSessions?: Maybe<ChatSessionConnection>;
   listConfigurationLibrary?: Maybe<ConfigurationLibraryResponse>;
   listDiscoveryJobs?: Maybe<DiscoveryJobList>;
+  listDocumentVersions?: Maybe<Array<Maybe<DocumentVersion>>>;
   listDocuments?: Maybe<DocumentPage>;
   listDocumentsByDateRange?: Maybe<DocumentPage>;
   listDocumentsDateHour?: Maybe<DocumentList>;
@@ -1218,6 +1254,13 @@ export type QueryCalculateCapacityArgs = {
 
 export type QueryCheckFeatureEntitlementArgs = {
   featureId: Scalars['String']['input'];
+};
+
+
+export type QueryCompareDocumentVersionsArgs = {
+  objectKey: Scalars['ID']['input'];
+  runIdA: Scalars['String']['input'];
+  runIdB: Scalars['String']['input'];
 };
 
 
@@ -1264,6 +1307,12 @@ export type QueryGetDocumentCountArgs = {
 };
 
 
+export type QueryGetDocumentVersionArgs = {
+  objectKey: Scalars['ID']['input'];
+  runId: Scalars['String']['input'];
+};
+
+
 export type QueryGetFeatureLaunchUrlArgs = {
   featureId: Scalars['String']['input'];
   version?: InputMaybe<Scalars['String']['input']>;
@@ -1272,6 +1321,7 @@ export type QueryGetFeatureLaunchUrlArgs = {
 
 export type QueryGetFileContentsArgs = {
   s3Uri: Scalars['String']['input'];
+  versionId?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -1324,6 +1374,11 @@ export type QueryListChatSessionsArgs = {
 
 export type QueryListConfigurationLibraryArgs = {
   pattern: Scalars['String']['input'];
+};
+
+
+export type QueryListDocumentVersionsArgs = {
+  objectKey: Scalars['ID']['input'];
 };
 
 
