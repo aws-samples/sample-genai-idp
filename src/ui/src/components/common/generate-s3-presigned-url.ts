@@ -16,6 +16,11 @@ interface S3ParsedUrl {
 
 interface PresignedUrlOptions {
   forceInline?: boolean;
+  /**
+   * S3 object VersionId. When set, the presigned URL targets that specific
+   * object version (used to view a past document version's page images).
+   */
+  versionId?: string;
 }
 
 const parseS3Url = (s3Url: string): S3ParsedUrl | null => {
@@ -110,6 +115,14 @@ const generateS3PresignedUrl = async (
       if (fileExtension === 'pdf') {
         s3ObjectUrl.query['response-content-type'] = 'application/pdf';
       }
+    }
+
+    // Pin a specific object version (document version history). versionId is a
+    // request parameter S3 accepts and SigV4 signs, so the presigned URL
+    // resolves to that exact version even after the object is overwritten.
+    if (options.versionId && options.versionId !== 'null') {
+      s3ObjectUrl.query = s3ObjectUrl.query || {};
+      s3ObjectUrl.query.versionId = options.versionId;
     }
 
     logger.debug('Canonical URL:', newUrl);

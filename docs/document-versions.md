@@ -82,12 +82,12 @@ retained version newest-first, with the current version badged. From there you
 can:
 
 - **View a past version** — choose *View* on any row to render that run's
-  snapshot on the page (read-only): its sections, page text, extraction
+  snapshot on the page (read-only): its sections, page text/images, extraction
   results, and summary/evaluation reports are all fetched from the run's pinned
-  S3 object versions, so you see exactly what that run produced even after later
-  runs overwrote the outputs. A banner indicates you're viewing a previous
-  version; *Return to current version* switches back. Editing is disabled while
-  viewing history.
+  S3 object versions (page images via version-pinned presigned URLs), so you see
+  exactly what that run produced even after later runs overwrote the outputs. A
+  banner indicates you're viewing a previous version; *Return to current
+  version* switches back. Editing is disabled while viewing history.
 - **Compare any two versions** — select two rows and choose *Compare selected*
   to see a section-by-section, field-level diff of their extraction results
   (values are read from each run's pinned S3 versions, so the comparison is

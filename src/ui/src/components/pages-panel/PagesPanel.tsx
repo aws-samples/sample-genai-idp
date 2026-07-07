@@ -22,6 +22,7 @@ import useUserRole from '../../hooks/use-user-role';
 import generateS3PresignedUrl from '../common/generate-s3-presigned-url';
 import PageTextEditorModal from './PageTextEditorModal';
 import { processChanges } from '../../graphql/generated';
+import { useDocumentVersion } from '../../contexts/document-version';
 
 const client = generateClient();
 const logger = new ConsoleLogger('PagesPanel');
@@ -203,6 +204,8 @@ const PagesPanel = ({ pages, documentItem }: PagesPanelProps): React.JSX.Element
   const { currentCredentials } = useAppContext();
   const { settings } = useSettingsContext();
   const { isReviewerOnly, canWrite, canReview } = useUserRole();
+  // When viewing a past version, pin page images to that run's object versions.
+  const { versionIdForUri, runId: viewingRunId } = useDocumentVersion();
 
   // Edit Mode should be disabled for reviewers until they click Start Review (claim the document)
   const hasReviewOwner = !!(documentItem?.hitlReviewOwner || documentItem?.hitlReviewOwnerEmail);
@@ -254,7 +257,9 @@ const PagesPanel = ({ pages, documentItem }: PagesPanelProps): React.JSX.Element
       pages.map(async (page) => {
         if (page.ImageUri) {
           try {
-            const url = await generateS3PresignedUrl(page.ImageUri, currentCredentials as Record<string, unknown>);
+            const url = await generateS3PresignedUrl(page.ImageUri, currentCredentials as Record<string, unknown>, {
+              versionId: versionIdForUri(page.ImageUri),
+            });
             urls[page.Id] = url;
           } catch (err) {
             logger.error('Error generating presigned URL for thumbnail:', err);
@@ -283,7 +288,7 @@ const PagesPanel = ({ pages, documentItem }: PagesPanelProps): React.JSX.Element
 
   useEffect(() => {
     loadThumbnails();
-  }, [pages]);
+  }, [pages, viewingRunId]);
 
   // Check if current pattern is Pattern-1
   const isPattern1 = () => {

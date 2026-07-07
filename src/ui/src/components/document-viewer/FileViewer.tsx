@@ -170,7 +170,9 @@ const FileViewer = ({ objectKey }: FileViewerProps): React.JSX.Element => {
       // Generate presigned URL only if needed
       if (needsPresignedUrl) {
         logger.info('Generating presigned URL for:', s3Url);
-        const url = await generateS3PresignedUrl(s3Url, currentCredentials as Record<string, unknown>);
+        const url = await generateS3PresignedUrl(s3Url, currentCredentials as Record<string, unknown>, {
+          versionId: versionIdForUri(s3Url),
+        });
         setPresignedUrl(url);
       } else {
         logger.info('Using content-based viewing, no presigned URL needed');

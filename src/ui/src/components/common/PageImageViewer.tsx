@@ -6,6 +6,7 @@ import { Box, Spinner, Button } from '@cloudscape-design/components';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import generateS3PresignedUrl from './generate-s3-presigned-url';
 import useAppContext from '../../contexts/app';
+import { useDocumentVersion } from '../../contexts/document-version';
 
 const logger = new ConsoleLogger('PageImageViewer');
 
@@ -230,6 +231,8 @@ const PageImageViewer = ({
   boundingBoxes = [],
 }: PageImageViewerProps): React.JSX.Element => {
   const { currentCredentials } = useAppContext();
+  // Pin page images to the selected run's object versions when viewing history.
+  const { versionIdForUri, runId: viewingRunId } = useDocumentVersion();
   const [pageImages, setPageImages] = useState<Record<string, string>>({});
   const [loadingImages, setLoadingImages] = useState(true);
   const [currentPage, setCurrentPage] = useState<string | null>(initialPage || (pageIds.length > 0 ? pageIds[0] : null));
@@ -261,7 +264,9 @@ const PageImageViewer = ({
             if (page?.ImageUri) {
               try {
                 logger.debug(`PageImageViewer - generating presigned URL for page ${pageId}`);
-                const url = await generateS3PresignedUrl(page.ImageUri, currentCredentials as Record<string, unknown>);
+                const url = await generateS3PresignedUrl(page.ImageUri, currentCredentials as Record<string, unknown>, {
+                  versionId: versionIdForUri(page.ImageUri),
+                });
                 images[pageId] = url;
               } catch (err) {
                 logger.error(`Error generating presigned URL for page ${pageId}:`, err);
@@ -284,7 +289,7 @@ const PageImageViewer = ({
     };
 
     loadImages();
-  }, [pageIds, documentPages, currentCredentials]);
+  }, [pageIds, documentPages, currentCredentials, viewingRunId]);
 
   // Handle geometry-based page switching
   useEffect(() => {
