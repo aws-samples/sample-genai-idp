@@ -2929,6 +2929,7 @@ Resources:
       ServiceToken: !Ref UpdateConfigurationFunctionArn
       Default: !Ref ConfigurationDefaultS3Uri
       DefaultPricing: !Sub "s3://${ConfigurationBucket}/config_library/pricing.yaml"
+      DefaultModelConfigLimits: !Sub "s3://${ConfigurationBucket}/config_library/model_config_limits.yaml"
       ConfigLibraryHash: !Ref ConfigLibraryHash
       CustomClassificationModelARN: !Ref CustomClassificationModelARN
       CustomExtractionModelARN: !Ref CustomExtractionModelARN

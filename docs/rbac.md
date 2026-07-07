@@ -86,6 +86,10 @@ PRICING
   View pricing                    ✅      ✅       ❌        ✅
   Edit pricing                    ✅      ❌       ❌        ❌
 
+MODEL LIMITS
+  View model limits               ✅      ✅       ❌        ✅
+  Edit model limits               ✅      ❌       ❌        ❌
+
 ✅* = Reviewer sees only HITL-pending docs + their own completed reviews (server-side filtered)
 ✅† = Scoped by allowedConfigVersions if set (see Config-Version Scoping below)
 ```
@@ -181,6 +185,7 @@ Every GraphQL **mutation** and many **queries** have `@aws_cognito_user_pools(co
 | `deleteConfigVersion` | Admin |
 | `createUser`, `updateUser`, `deleteUser` | Admin |
 | `updatePricing`, `restoreDefaultPricing` | Admin |
+| `updateModelConfigLimits`, `restoreDefaultModelConfigLimits` | Admin |
 | `deleteDocument`, `updateConfiguration`, `setActiveVersion` | Admin, Author |
 | `uploadDocument`, `reprocessDocument`, `abortWorkflow` | Admin, Author |
 | `startTestRun`, `addTestSet`, `addTestSetFromUpload`, `deleteTests`, `deleteTestSets` | Admin, Author |
@@ -199,7 +204,7 @@ Every GraphQL **mutation** and many **queries** have `@aws_cognito_user_pools(co
 |-------|---------------|
 | `getDocument`, `listDocuments`, `listDocumentsByDateRange`, etc. | All authenticated (server-side filtering in resolvers) |
 | `getFileContents`, `getStepFunctionExecution` | All authenticated |
-| `getConfigVersions`, `getConfigVersion`, `getPricing`, `calculateCapacity` | Admin, Author, Viewer |
+| `getConfigVersions`, `getConfigVersion`, `getPricing`, `getModelConfigLimits`, `calculateCapacity` | Admin, Author, Viewer |
 | `listAvailableAgents`, `listChatSessions`, `getChatMessages`, `getAgentChatMessages` | All authenticated (UI-enforced, see AppSync limitation above) |
 | `submitAgentQuery`, `getAgentJobStatus`, `listAgentJobs` | Admin, Author, Viewer |
 | `listConfigurationLibrary`, `getConfigurationLibraryFile` | Admin, Author, Viewer |
@@ -247,8 +252,9 @@ The UI adapts based on the user's role and scope:
 - Action buttons (delete, reprocess, upload, save, import) are hidden for roles that can't perform those actions
 - Version dropdowns are automatically filtered to show only scoped versions
 - The top navigation badge shows the user's role with color coding (blue=Admin, green=Author, grey=Reviewer/Viewer)
-- **Admin-only buttons**: "Save as Version", "Save as Default" in Configuration; Import/Restore/Save in Pricing
+- **Admin-only buttons**: "Save as Version", "Save as Default" in Configuration; Import/Restore/Save in Pricing and Model Limits
 - **Pricing page**: Shows "View Pricing" (read-only) for non-admin; "Pricing Configuration" (editable) for admin
+- **Model Limits page**: Shows "View Model Limits" (read-only) for non-admin; "Model Limits Configuration" (editable) for admin
 
 **This layer is NOT a security boundary** — it's purely for user experience. Security is enforced at Layers 1 & 2.
 

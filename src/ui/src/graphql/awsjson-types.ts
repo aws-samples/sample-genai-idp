@@ -133,6 +133,19 @@ export interface PricingData {
   [key: string]: unknown;
 }
 
+/** Parsed model config limits from ModelConfigLimitsResponse AWSJSON fields */
+export interface ModelConfigLimitsData {
+  model_limits?: Array<{
+    pattern: string;
+    max_output_tokens: number;
+    max_input_tokens?: number;
+    description?: string;
+    reference?: string;
+    [key: string]: unknown;
+  }>;
+  [key: string]: unknown;
+}
+
 /** Parsed step function step input/output from AWSJSON fields */
 export interface StepFunctionStepPayload {
   [key: string]: unknown;

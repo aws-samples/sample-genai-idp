@@ -565,6 +565,13 @@ export type MessageContent = {
   text?: Maybe<Scalars['String']['output']>;
 };
 
+export type ModelConfigLimitsResponse = {
+  defaultModelConfigLimits?: Maybe<Scalars['AWSJSON']['output']>;
+  error?: Maybe<ConfigurationError>;
+  modelConfigLimits?: Maybe<Scalars['AWSJSON']['output']>;
+  success: Scalars['Boolean']['output'];
+};
+
 export type ModifiedPageInput = {
   classReset: Scalars['Boolean']['input'];
   newConfidenceUri?: InputMaybe<Scalars['String']['input']>;
@@ -654,6 +661,7 @@ export type Mutation = {
    */
   removeFeatureConfigPreset: Scalars['Boolean']['output'];
   reprocessDocument: Scalars['Boolean']['output'];
+  restoreDefaultModelConfigLimits?: Maybe<UpdateModelConfigLimitsResponse>;
   restoreDefaultPricing?: Maybe<UpdatePricingResponse>;
   resumeCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   sendAgentChatMessage?: Maybe<AgentChatMessage>;
@@ -700,6 +708,7 @@ export type Mutation = {
   updateDocumentSection?: Maybe<Document>;
   updateDocumentStatus?: Maybe<Document>;
   updateFinetuningJobStatus?: Maybe<FinetuningJob>;
+  updateModelConfigLimits?: Maybe<UpdateModelConfigLimitsResponse>;
   updatePricing?: Maybe<UpdatePricingResponse>;
   updateTestSet?: Maybe<TestSet>;
   updateUser?: Maybe<User>;
@@ -1045,6 +1054,11 @@ export type MutationUpdateFinetuningJobStatusArgs = {
 };
 
 
+export type MutationUpdateModelConfigLimitsArgs = {
+  modelConfigLimits: Scalars['AWSJSON']['input'];
+};
+
+
 export type MutationUpdatePricingArgs = {
   pricingConfig: Scalars['AWSJSON']['input'];
 };
@@ -1170,6 +1184,7 @@ export type Query = {
   getFileContents?: Maybe<FileContentsResponse>;
   getFinetuningJob?: Maybe<FinetuningJob>;
   getLatestPublishedVersion?: Maybe<LatestPublishedVersion>;
+  getModelConfigLimits?: Maybe<ModelConfigLimitsResponse>;
   getMyProfile?: Maybe<User>;
   getPricing?: Maybe<PricingResponse>;
   getStepFunctionExecution?: Maybe<StepFunctionExecutionResponse>;
@@ -1673,6 +1688,12 @@ export type UpdateDocumentStatusInput = {
   ObjectStatus: Scalars['String']['input'];
   WorkflowExecutionArn?: InputMaybe<Scalars['String']['input']>;
   WorkflowStatus?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type UpdateModelConfigLimitsResponse = {
+  error?: Maybe<ConfigurationError>;
+  message?: Maybe<Scalars['String']['output']>;
+  success: Scalars['Boolean']['output'];
 };
 
 export type UpdatePricingResponse = {

@@ -42,27 +42,16 @@ class TestParseMaxTokensLimitFromError:
 
 
 @pytest.mark.unit
-class TestModelConfigLimitsBundled:
-    """The limits file is bundled in-package so it resolves at runtime in Lambda.
+class TestModelConfigLimitsSources:
+    """config_library/model_config_limits.yaml is the single source file.
 
-    Guards against the two failure modes we hit: (1) the file only existing at the
-    repo root (not deployed to Lambda), and (2) the two copies drifting apart.
+    At runtime the DynamoDB Configuration Table (merged Default/Custom, editable
+    in the UI) is authoritative; the disk YAML is the offline fallback — the
+    same split pricing.yaml uses. Nothing is bundled into the wheel anymore.
     """
 
-    def test_resolves_without_repo_root(self, monkeypatch, tmp_path):
-        """get_model_max_output_tokens works from a cwd with no config_library/."""
-        from idp_common.bedrock import model_utils
-
-        monkeypatch.delenv("IDP_PROJECT_ROOT", raising=False)
-        monkeypatch.chdir(tmp_path)  # no config_library here
-        model_utils._load_model_limits.cache_clear()
-        try:
-            assert get_model_max_output_tokens("us.anthropic.claude-sonnet-5") == 128000
-        finally:
-            model_utils._load_model_limits.cache_clear()
-
-    def test_bundled_copy_matches_repo_root(self):
-        """The in-package copy must stay byte-identical to config_library/."""
+    def test_no_wheel_bundled_copy(self):
+        """The old in-package duplicate must not come back (drift hazard)."""
         from pathlib import Path
 
         import idp_common.bedrock.model_utils as mu
@@ -70,20 +59,80 @@ class TestModelConfigLimitsBundled:
         bundled = (
             Path(mu.__file__).parent.parent / "config" / "model_config_limits.yaml"
         )
-        repo_root = (
-            Path(mu.__file__).parent.parent.parent.parent.parent
-            / "config_library"
-            / "model_config_limits.yaml"
+        assert not bundled.exists(), (
+            "idp_common/config/model_config_limits.yaml has reappeared — "
+            "config_library/model_config_limits.yaml is the single source "
+            "(seeded to DynamoDB at deploy); do not bundle a copy in the wheel."
         )
-        assert bundled.exists(), f"bundled limits file missing: {bundled}"
-        # repo_root only exists in the dev tree, not in an installed wheel; only
-        # assert equality when both are present.
-        if repo_root.exists():
-            assert bundled.read_text() == repo_root.read_text(), (
-                "config_library/model_config_limits.yaml and the bundled "
-                "idp_common/config/model_config_limits.yaml have drifted — "
-                "re-copy so they stay identical."
-            )
+
+    def test_offline_resolves_from_repo_config_library(self, monkeypatch, tmp_path):
+        """No table env: limits resolve from config_library/ on disk (dev tree).
+
+        The repo copy is found 5-parents-up from model_utils.py even when the
+        cwd has no config_library/ — same resolution pricing.yaml uses.
+        """
+        from idp_common.bedrock import model_utils
+
+        monkeypatch.delenv("IDP_PROJECT_ROOT", raising=False)
+        monkeypatch.delenv("CONFIGURATION_TABLE_NAME", raising=False)
+        monkeypatch.chdir(tmp_path)  # no config_library here
+        model_utils._clear_model_limits_cache()
+        try:
+            assert get_model_max_output_tokens("us.anthropic.claude-sonnet-5") == 128000
+        finally:
+            model_utils._clear_model_limits_cache()
+
+    def test_dynamodb_limits_take_precedence(self, monkeypatch):
+        """A merged DynamoDB list overrides the disk YAML."""
+        from idp_common.bedrock import model_utils
+
+        model_utils._clear_model_limits_cache()
+        monkeypatch.setattr(
+            model_utils,
+            "_load_model_limits_from_dynamodb",
+            lambda: [{"pattern": "claude-sonnet-5", "max_output_tokens": 50000}],
+        )
+        try:
+            assert get_model_max_output_tokens("us.anthropic.claude-sonnet-5") == 50000
+            # Unmatched models still raise so client.py self-heal works
+            with pytest.raises(ValueError, match="Unsupported model ID"):
+                get_model_max_output_tokens("us.amazon.nova-lite-v1:0")
+        finally:
+            model_utils._clear_model_limits_cache()
+
+    def test_dynamodb_failure_falls_back_to_disk(self, monkeypatch):
+        """CONFIGURATION_TABLE_NAME set but unreachable -> disk YAML, no error."""
+        from idp_common.bedrock import model_utils
+
+        model_utils._clear_model_limits_cache()
+        monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "no-such-table-xyz")
+        monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+        try:
+            assert get_model_max_output_tokens("us.anthropic.claude-sonnet-5") == 128000
+        finally:
+            model_utils._clear_model_limits_cache()
+
+    def test_ttl_cache_avoids_repeat_reads(self, monkeypatch):
+        """Within the TTL the DynamoDB loader is consulted only once."""
+        from idp_common.bedrock import model_utils
+
+        calls = {"n": 0}
+
+        def fake_ddb():
+            calls["n"] += 1
+            return [{"pattern": "claude-sonnet-5", "max_output_tokens": 42}]
+
+        model_utils._clear_model_limits_cache()
+        monkeypatch.setattr(model_utils, "_load_model_limits_from_dynamodb", fake_ddb)
+        try:
+            assert get_model_max_output_tokens("claude-sonnet-5") == 42
+            assert get_model_max_output_tokens("claude-sonnet-5") == 42
+            assert calls["n"] == 1
+            model_utils._clear_model_limits_cache()
+            assert get_model_max_output_tokens("claude-sonnet-5") == 42
+            assert calls["n"] == 2
+        finally:
+            model_utils._clear_model_limits_cache()
 
 
 @pytest.mark.unit
@@ -255,6 +304,31 @@ class TestGetModelMaxOutputTokens:
             == 8_192
         )
 
+    def test_invalid_regex_pattern_is_skipped_not_raised(self, monkeypatch):
+        """A malformed regex in a limit entry must not crash the hot path.
+
+        ModelLimitEntry rejects bad patterns at save time, but data written via
+        a bypass path or hand-edited YAML could still be invalid. The resolver
+        loop must skip such an entry and continue matching, never raising
+        re.error (which callers don't catch as ValueError).
+        """
+        from idp_common.bedrock import model_utils
+
+        model_utils._clear_model_limits_cache()
+        monkeypatch.setattr(
+            model_utils,
+            "_load_model_limits_from_dynamodb",
+            lambda: [
+                {"pattern": "claude-(", "max_output_tokens": 999},  # invalid regex
+                {"pattern": "claude-sonnet-5", "max_output_tokens": 77_000},
+            ],
+        )
+        try:
+            # The invalid entry is skipped; the next valid entry matches.
+            assert get_model_max_output_tokens("us.anthropic.claude-sonnet-5") == 77_000
+        finally:
+            model_utils._clear_model_limits_cache()
+
     def test_extended_context_1m_suffix(self):
         """Test that :1m extended context suffix doesn't change output token limit."""
         # Claude 4 with :1m suffix should still be 64K output (Sonnet, Haiku)
@@ -308,3 +382,30 @@ class TestGetModelMaxOutputTokens:
             get_model_max_output_tokens("us.anthropic.claude-opus-4-5-20250514-v1:0")
             == 64_000
         )
+
+
+@pytest.mark.unit
+class TestModelLimitEntryPatternValidation:
+    """The user-editable pattern must be validated as a compilable regex at save
+    time so a bad value is rejected with a clear message rather than raising
+    re.error deep on the Bedrock hot path."""
+
+    def test_valid_pattern_accepted(self):
+        from idp_common.config.models import ModelLimitEntry
+
+        entry = ModelLimitEntry(pattern="claude-sonnet-5.*", max_output_tokens=128000)
+        assert entry.pattern == "claude-sonnet-5.*"
+
+    def test_invalid_regex_rejected(self):
+        from idp_common.config.models import ModelLimitEntry
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="valid regular expression"):
+            ModelLimitEntry(pattern="claude-(", max_output_tokens=128000)
+
+    def test_empty_pattern_rejected(self):
+        from idp_common.config.models import ModelLimitEntry
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="non-empty"):
+            ModelLimitEntry(pattern="   ", max_output_tokens=128000)

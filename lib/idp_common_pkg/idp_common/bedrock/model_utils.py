@@ -11,6 +11,7 @@ service tier information from model ID suffixes.
 import logging
 import os
 import re
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional, Tuple
@@ -70,7 +71,13 @@ def parse_model_id(model_id: str) -> Tuple[str, Optional[str]]:
 @lru_cache(maxsize=1)
 def _load_model_limits() -> list[dict]:
     """
-    Load model limits from model_config_limits.yaml.
+    Load model limits from config_library/model_config_limits.yaml on disk.
+
+    This is the OFFLINE fallback (dev checkouts, idp-cli, notebooks). At runtime
+    in a deployed stack the DynamoDB Configuration Table is authoritative — see
+    _get_effective_model_limits(). Mirrors how config_library/pricing.yaml is
+    resolved by merge_utils._load_valid_bedrock_models: a single source file in
+    config_library/, nothing bundled into the wheel.
 
     Returns:
         List of model limit entries with pattern and max_output_tokens.
@@ -79,19 +86,12 @@ def _load_model_limits() -> list[dict]:
         FileNotFoundError: If model_config_limits.yaml cannot be found.
         ValueError: If the YAML file is malformed or missing required fields.
     """
-    # Resolution order. The file is BUNDLED into the package
-    # (idp_common/config/model_config_limits.yaml) so it resolves at runtime in
-    # Lambda, notebooks, and pip installs — the same pattern as system_defaults.
-    # The repo-root config_library/ copy is the source of truth for editing and
-    # is used as a dev/publish-time fallback.
     limit_paths = [
-        # 1. Bundled in-package copy (sibling of this file's config package).
-        Path(__file__).parent.parent / "config" / "model_config_limits.yaml",
-        # 2. Development / publish: repo-root config_library/ (5 parents up).
+        # 1. Development / publish: repo-root config_library/ (5 parents up).
         Path(__file__).parent.parent.parent.parent.parent
         / "config_library"
         / "model_config_limits.yaml",
-        # 3. Fallback: IDP_PROJECT_ROOT or current working directory.
+        # 2. Fallback: IDP_PROJECT_ROOT or current working directory.
         Path(os.environ.get("IDP_PROJECT_ROOT", "."))
         / "config_library"
         / "model_config_limits.yaml",
@@ -130,16 +130,89 @@ def _load_model_limits() -> list[dict]:
         raise ValueError(f"Failed to parse model_config_limits.yaml: {e}") from e
 
 
+# Effective-limits cache. Model limits are consulted on every Bedrock call, so
+# a per-call DynamoDB read is too slow, but caching forever would require a
+# cold start to pick up UI edits. A 60s TTL bounds staleness after an admin
+# saves in the UI while collapsing thousands of hot-path calls to ~1 read/min
+# per warm container (same TTL the configuration_resolver uses for user scopes).
+_LIMITS_CACHE: dict = {"data": None, "ts": 0.0}
+_LIMITS_CACHE_TTL_SECONDS = 60
+
+
+def _clear_model_limits_cache() -> None:
+    """Reset both limit caches (for tests and tooling)."""
+    _LIMITS_CACHE["data"] = None
+    _LIMITS_CACHE["ts"] = 0.0
+    _load_model_limits.cache_clear()
+
+
+def _load_model_limits_from_dynamodb() -> Optional[list[dict]]:
+    """
+    Load merged model limits (Default + Custom) from the Configuration Table.
+
+    Returns None — never raises — when the table is unavailable so callers fall
+    back to the on-disk config_library/ YAML: no CONFIGURATION_TABLE_NAME env
+    var (offline/idp-cli/notebooks), missing records, or any read/validation
+    error. ConfigurationManager is imported lazily because config/merge_utils
+    already imports this module (a top-level import would create a cycle).
+    """
+    if not os.environ.get("CONFIGURATION_TABLE_NAME"):
+        return None
+    try:
+        from idp_common.config.configuration_manager import (  # noqa: PLC0415
+            ConfigurationManager,
+        )
+
+        merged = ConfigurationManager().get_merged_model_config_limits()
+        if merged is None or not merged.model_limits:
+            return None
+        return [
+            entry.model_dump(mode="python", exclude_none=True)
+            for entry in merged.model_limits
+        ]
+    except Exception as e:  # fallback must be total — never break a Bedrock call
+        logger.debug(
+            "Model limits unavailable from DynamoDB, using config_library YAML: %s",
+            e,
+        )
+        return None
+
+
+def _get_effective_model_limits() -> list[dict]:
+    """
+    Return the model limits in effect: DynamoDB (merged Default/Custom) when a
+    Configuration Table is reachable, else the config_library/ YAML on disk.
+    Results are cached for _LIMITS_CACHE_TTL_SECONDS.
+    """
+    now = time.time()
+    if (
+        _LIMITS_CACHE["data"] is not None
+        and (now - _LIMITS_CACHE["ts"]) < _LIMITS_CACHE_TTL_SECONDS
+    ):
+        return _LIMITS_CACHE["data"]
+
+    limits = _load_model_limits_from_dynamodb()
+    if limits is None:
+        limits = _load_model_limits()
+
+    _LIMITS_CACHE["data"] = limits
+    _LIMITS_CACHE["ts"] = now
+    return limits
+
+
 def get_model_max_output_tokens(model_id: str) -> int:
     """
     Get the maximum output tokens supported by a Bedrock model.
 
-    This function determines model-specific maximum token limits by loading
-    patterns from config_library/model_config_limits.yaml. Patterns are matched
-    in order (first match wins). There is no AWS API that exposes the per-model
-    output limit, so this file is the source of truth; an unmatched model raises
-    ValueError (callers can fall back to parse_max_tokens_limit_from_error on a
-    Bedrock over-limit ValidationException to self-heal a missing entry).
+    This function determines model-specific maximum token limits from the
+    effective limits list: the DynamoDB Configuration Table (merged
+    DefaultModelConfigLimits + CustomModelConfigLimits, editable in the UI) when
+    available, else config_library/model_config_limits.yaml on disk. Patterns
+    are matched in order (first match wins). There is no AWS API that exposes
+    the per-model output limit, so these limits are the source of truth; an
+    unmatched model raises ValueError (callers can fall back to
+    parse_max_tokens_limit_from_error on a Bedrock over-limit
+    ValidationException to self-heal a missing entry).
 
     Token Limits by Model Family (from model_config_limits.yaml):
         - Claude Sonnet 5 / Opus 4.6-4.8 / Sonnet 4.6: 128,000 tokens
@@ -169,8 +242,9 @@ def get_model_max_output_tokens(model_id: str) -> int:
     """
     model_id_lower = model_id.lower()
 
-    # Load from config file (raises if file not found or malformed)
-    model_limits = _load_model_limits()
+    # DynamoDB (UI-editable) when available, else disk YAML (raises if the
+    # file is also unavailable or malformed)
+    model_limits = _get_effective_model_limits()
 
     # Match against patterns in order (first match wins)
     for limit_entry in model_limits:
@@ -184,7 +258,19 @@ def get_model_max_output_tokens(model_id: str) -> int:
             )
             continue
 
-        if re.search(pattern, model_id_lower):
+        try:
+            matched = re.search(pattern, model_id_lower)
+        except re.error:
+            # A malformed regex should never crash the Bedrock hot path.
+            # ModelLimitEntry validates patterns at save time, but data written
+            # through a bypass path or hand-edited YAML could still be invalid.
+            logger.warning(
+                "Skipping model limit entry with invalid regex pattern",
+                extra={"pattern": pattern},
+            )
+            continue
+
+        if matched:
             logger.debug(
                 "Matched model limit pattern",
                 extra={

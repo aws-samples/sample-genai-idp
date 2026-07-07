@@ -25,6 +25,7 @@ import {
   UPLOAD_DOCUMENT_PATH,
   CONFIGURATION_PATH,
   PRICING_PATH,
+  MODEL_CONFIG_LIMITS_PATH,
   DISCOVERY_PATH,
   USER_MANAGEMENT_PATH,
   AGENT_CHAT_PATH,
@@ -93,6 +94,7 @@ export const adminNavItems = [
       { type: 'link', text: 'Capacity Planning', href: `#${CAPACITY_PLANNING_PATH}` },
       { type: 'link', text: 'User Management', href: `#${USER_MANAGEMENT_PATH}` },
       { type: 'link', text: 'View / Edit Pricing', href: `#${PRICING_PATH}` },
+      { type: 'link', text: 'View / Edit Model Limits', href: `#${MODEL_CONFIG_LIMITS_PATH}` },
     ],
   },
   {
@@ -148,6 +150,7 @@ export const authorNavItems = [
       { type: 'link', text: 'Custom Models', href: `#${CUSTOM_MODELS_PATH}` },
       { type: 'link', text: 'Capacity Planning', href: `#${CAPACITY_PLANNING_PATH}` },
       { type: 'link', text: 'View Pricing', href: `#${PRICING_PATH}` },
+      { type: 'link', text: 'View Model Limits', href: `#${MODEL_CONFIG_LIMITS_PATH}` },
     ],
   },
   {
@@ -200,6 +203,7 @@ export const viewerNavItems = [
       { type: 'link', text: 'View Configuration', href: `#${CONFIGURATION_PATH}` },
       { type: 'link', text: 'Capacity Planning', href: `#${CAPACITY_PLANNING_PATH}` },
       { type: 'link', text: 'View Pricing', href: `#${PRICING_PATH}` },
+      { type: 'link', text: 'View Model Limits', href: `#${MODEL_CONFIG_LIMITS_PATH}` },
     ],
   },
   {
@@ -398,6 +402,8 @@ const Navigation = ({
   // Determine active link based on current path
   if (path.includes(PRICING_PATH)) {
     activeHref = `#${PRICING_PATH}`;
+  } else if (path.includes(MODEL_CONFIG_LIMITS_PATH)) {
+    activeHref = `#${MODEL_CONFIG_LIMITS_PATH}`;
   } else if (path.includes(CONFIGURATION_PATH)) {
     activeHref = `#${CONFIGURATION_PATH}`;
   } else if (path.includes(DOCUMENTS_KB_QUERY_PATH)) {

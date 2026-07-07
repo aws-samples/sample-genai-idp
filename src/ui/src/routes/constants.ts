@@ -10,6 +10,7 @@ export const DOCUMENTS_KB_QUERY_PATH = `${DOCUMENTS_PATH}/query`;
 export const DOCUMENTS_ANALYTICS_PATH = `${DOCUMENTS_PATH}/agents`;
 export const CONFIGURATION_PATH = `${DOCUMENTS_PATH}/config`;
 export const PRICING_PATH = `${DOCUMENTS_PATH}/pricing`;
+export const MODEL_CONFIG_LIMITS_PATH = `${DOCUMENTS_PATH}/model-limits`;
 export const UPLOAD_DOCUMENT_PATH = `${DOCUMENTS_PATH}/upload`;
 export const DISCOVERY_PATH = `${DOCUMENTS_PATH}/discovery`;
 export const DISCOVERY_JOB_PATH = `${DOCUMENTS_PATH}/discovery/job`;
