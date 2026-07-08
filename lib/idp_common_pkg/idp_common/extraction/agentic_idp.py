@@ -46,6 +46,7 @@ from idp_common.bedrock.client import (
 from idp_common.bedrock.model_utils import get_model_max_output_tokens
 from idp_common.bedrock.openai_responses import is_openai_responses_model
 from idp_common.config.models import IDPConfig
+from idp_common.extraction.topk_resolver import resolve_candidates
 from idp_common.utils.bedrock_utils import (
     async_exponential_backoff_retry,
 )
@@ -502,6 +503,44 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
         return "Extraction and confidence recorded; the data format is correct"
 
     @tool
+    def extraction_with_topk_tool(
+        candidates: dict[str, Any],
+        agent: Agent,  # pyright: ignore[reportInvalidTypeForm]
+    ) -> str:
+        """Return your top-K guesses with probabilities for EVERY field in ONE call.
+
+        Use this INSTEAD of a plain extraction tool + assessment tool (1S-TopK
+        integrated confidence). For each field, provide a nested object with your
+        ranked guesses and their probabilities — the top guess (G1) becomes the
+        extracted value and its probability (P1) becomes the confidence:
+          - Scalar/group field ->
+            {"G1": "<best guess>", "P1": 0.0-1.0, "G2": "...", "P2": ..., ...}
+          - List field -> a LIST with ONE object per extracted row, IN THE SAME
+            ORDER, where each sub-attribute is itself a {G1, P1, ...} object.
+        Provide as many guesses (K) as are meaningful; G1/P1 alone is valid.
+        Ranking alternatives yields better-calibrated confidence than a single
+        value + single score. This overwrites any previous extraction/assessment.
+        """
+        # Resolve G1 -> value and P1 -> confidence using the shared resolver.
+        schema = model_class.model_json_schema()
+        inference_result, assessment_data, _candidates_meta = resolve_candidates(
+            candidates, schema
+        )
+        error = _record_extraction(inference_result, agent)
+        if error is not None:
+            return error
+        agent.state.set("field_assessment", assessment_data)
+        logger.info(
+            "extraction_with_topk_tool called (1S-TopK integrated)",
+            extra={
+                "field_count": len(assessment_data)
+                if isinstance(assessment_data, dict)
+                else 0
+            },
+        )
+        return "TopK extraction and confidence recorded; the data format is correct"
+
+    @tool
     def apply_json_patches(
         patches: list[dict[str, Any]],
         agent: Agent,
@@ -625,6 +664,7 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
     return (
         extraction_tool,
         extraction_with_confidence_tool,
+        extraction_with_topk_tool,
         apply_json_patches,
         make_buffer_data_final_extraction,
         finalize_table_extraction,
@@ -1779,6 +1819,7 @@ async def structured_output_async(
     (
         extraction_tool,
         extraction_with_confidence_tool,
+        extraction_with_topk_tool,
         apply_json_patches,
         make_buffer_data_final_extraction,
         finalize_table_extraction,
@@ -1790,19 +1831,21 @@ async def structured_output_async(
     #     pass over the finalized values).
     #   single_shot: extract + confidence in ONE combined tool call
     #     (extraction_with_confidence_tool), saving the follow-up inference.
-    # Both write agent.state["field_assessment"], so the downstream collation /
-    # reconcile / grounding / explainability_info path is identical. The choice is
-    # a hidden experimental knob (extraction.agentic.integrated_confidence_strategy)
+    #   topk: extract + confidence in ONE combined tool call
+    #     (extraction_with_topk_tool) where the agent emits its top-K guesses with
+    #     probabilities per field; the shared topk_resolver takes G1 as the value
+    #     and P1 as the confidence. Better-calibrated than single_shot.
+    # All three write agent.state["field_assessment"], so the downstream collation
+    # / reconcile / grounding / explainability_info path is identical. The choice
+    # is a hidden experimental knob (extraction.agentic.integrated_confidence_strategy)
     # so cost/latency vs. confidence-calibration can be A/B tested; it is NOT in the
     # config UI schema. The instructions telling the agent which call to make live
-    # in the selected extraction TASK prompt (task_prompt_extraction_with_confidence).
-    single_shot_integrated = (
-        emit_field_assessment
-        and config.extraction.agentic.integrated_confidence_strategy == "single_shot"
-    )
-
-    if single_shot_integrated:
+    # in the selected extraction TASK prompt.
+    strategy = config.extraction.agentic.integrated_confidence_strategy
+    if emit_field_assessment and strategy == "single_shot":
         primary_extraction_tool = extraction_with_confidence_tool
+    elif emit_field_assessment and strategy == "topk":
+        primary_extraction_tool = extraction_with_topk_tool
     else:
         primary_extraction_tool = extraction_tool
 

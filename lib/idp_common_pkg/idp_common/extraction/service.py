@@ -43,6 +43,10 @@ from idp_common.extraction.sharding import (
     estimate_tokens,
     plan_shards,
 )
+from idp_common.extraction.topk_resolver import (
+    is_topk_response,
+    resolve_candidates,
+)
 from idp_common.extraction.validation import (
     ValidationReport,
     build_subset_schema,
@@ -3132,12 +3136,13 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     parsing_succeeded = False
 
             # Non-agentic INTEGRATED confidence: the single extraction inference
-            # was asked to return values AND inline confidence. Split the
-            # {"extraction": ..., "confidence": ...} envelope so inference_result
-            # holds only the values and the confidence rides in metering under the
-            # same marker the agentic path uses (lifted in _save_results). This
-            # both fixes the malformed {extraction,confidence} inference_result and
-            # lets the standalone Assessment step be skipped (no 2nd pass).
+            # was asked (via the 1S-TopK prompt) to return, per field, its top-K
+            # guesses with probabilities (G1/P1 … GK/PK). Split it so
+            # inference_result holds only the values (G1) and the confidence (P1)
+            # rides in metering under the same marker the agentic path uses
+            # (lifted in _save_results). This lets the standalone Assessment step
+            # be skipped (no 2nd pass); a flat response with no candidates passes
+            # through untouched so the standalone step runs as the fallback.
             if self._integrated_assessment_enabled() and isinstance(
                 extracted_fields, dict
             ):
@@ -3160,105 +3165,53 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             ocr_analysis=ocr_analysis,
         )
 
-    @staticmethod
-    def _looks_like_confidence_block(value: Any) -> bool:
-        """Heuristic: does ``value`` look like a per-field confidence structure?
-
-        A confidence block mirrors the extracted data and bottoms out in leaves
-        that carry a ``confidence`` key. We accept it if ANY leaf, at any depth,
-        is a dict containing ``confidence`` — enough to distinguish a genuine
-        confidence blob from a real document field that happens to be named
-        ``field_assessment`` / ``confidence`` (which would hold plain values, not
-        ``{"confidence": ...}`` leaves).
-        """
-        if not isinstance(value, dict) or not value:
-            return False
-
-        def has_confidence_leaf(o: Any) -> bool:
-            if isinstance(o, dict):
-                if "confidence" in o:
-                    return True
-                return any(has_confidence_leaf(v) for v in o.values())
-            if isinstance(o, list):
-                return any(has_confidence_leaf(v) for v in o)
-            return False
-
-        return has_confidence_leaf(value)
-
     def _split_inline_confidence(
         self, parsed: dict[str, Any], metering: dict[str, Any]
     ) -> dict[str, Any]:
         """Split a simple-path integrated response into values + confidence.
 
-        The integrated extraction prompt asks the model to return both the
-        extracted values and a parallel confidence structure. Models express this
-        three ways; handle all so the standalone Assessment step can be skipped
-        (integrated mode's whole point is one inference, not two):
+        The simple (non-agentic) integrated prompt is the 1S-TopK prompt: it asks
+        the model to return, per field, its top-K guesses with probabilities
+        (``G1/P1`` … ``GK/PK``). Two shapes result:
 
-        1. Envelope: ``{"extraction": {...values...}, "confidence": {...leaves...}}``
-           — the documented shape. Return the values, stash confidence in
-           ``metering["_integrated_field_assessment"]``.
-        2. Sibling: the values dict with a ``field_assessment`` (or ``confidence``)
-           key holding the confidence blob alongside the real fields — the shape a
-           non-tool (simple) model naturally emits when told to "call the
-           provide_field_assessment tool". Pop the confidence key, stash it, return
-           the remaining fields. Guarded by ``_looks_like_confidence_block`` so a
-           real field of that name isn't mistaken for confidence.
-        3. Flat: just ``{...values...}`` with no separate confidence (the model
-           ignored the confidence instructions). Return as-is and stash nothing;
-           the standalone Assessment step then runs as the fallback (no regression).
-
-        Keys are matched case-insensitively. The envelope branch requires EXACTLY
-        the two expected keys, so a real document field literally named
-        ``extraction`` can't trigger a false split.
+        1. 1S-TopK: each field value is a ``{G1, P1, G2, P2, ...}`` candidate
+           object (or, for arrays, per-row/per-column candidates).
+           ``resolve_candidates()`` takes ``G1`` as the value and ``P1`` as the
+           confidence, splitting the response into ``inference_result`` + raw
+           per-field confidence leaves. The confidence is stashed in
+           ``metering["_integrated_field_assessment"]`` (enriched with thresholds
+           and emitted as ``explainability_info`` by ``_save_results``, so the
+           standalone Assessment step is skipped — integrated mode's whole point
+           is one inference, not two). The full candidate set is preserved in
+           ``metering["_topk_candidates"]`` for auditability.
+        2. Flat: no ``G1``/``P1`` candidates recognized (the model ignored the
+           TopK contract). Return as-is and stash nothing; the standalone
+           Assessment step then runs as the fallback (no regression).
         """
-        keys = {k.lower(): k for k in parsed}
-        # Case 1: the documented {extraction, confidence} envelope.
-        if set(keys) == {"extraction", "confidence"} and isinstance(
-            parsed.get(keys["extraction"]), dict
-        ):
-            values = parsed[keys["extraction"]]
-            confidence = parsed.get(keys["confidence"])
-            if isinstance(confidence, dict) and confidence:
-                metering["_integrated_field_assessment"] = confidence
+        # 1S-TopK candidate format — each field is {G1, P1, G2, P2, ...} (or,
+        # for arrays, candidates nested per row/column). resolve_candidates()
+        # splits into values (G1) + raw confidence (P1); thresholds/alerts are
+        # attached later by the shared enricher in _save_results.
+        if is_topk_response(parsed):
+            inference_result, assessment_data, candidates_meta = resolve_candidates(
+                parsed, self._class_schema
+            )
+            if assessment_data:
+                metering["_integrated_field_assessment"] = assessment_data
                 logger.info(
-                    "Non-agentic integrated confidence: split inline confidence "
-                    "for %d fields from extraction response",
-                    len(confidence),
+                    "Non-agentic integrated confidence (1S-TopK): resolved "
+                    "%d fields from candidate format",
+                    len(assessment_data),
                 )
-            else:
-                logger.warning(
-                    "Non-agentic integrated mode: response had an 'extraction' "
-                    "envelope but no usable 'confidence'; falling back to the "
-                    "standalone Assessment step."
-                )
-            return values
+            # Stash raw candidates for auditability in metadata.
+            metering["_topk_candidates"] = candidates_meta
+            return inference_result
 
-        # Case 2: confidence rides as a sibling key next to the real fields
-        # (e.g. {"Agency": ..., ..., "field_assessment": {...leaves...}}). This is
-        # what a non-tool model emits given the "call provide_field_assessment"
-        # instruction, since no such tool exists in simple mode.
-        for cand in ("field_assessment", "_field_assessment", "confidence"):
-            actual = keys.get(cand)
-            if actual is None:
-                continue
-            block = parsed.get(actual)
-            if self._looks_like_confidence_block(block):
-                values = {k: v for k, v in parsed.items() if k != actual}
-                metering["_integrated_field_assessment"] = block
-                logger.info(
-                    "Non-agentic integrated confidence: lifted '%s' sibling "
-                    "confidence block (%d entries) from extraction response",
-                    actual,
-                    len(block),
-                )
-                return values
-
-        # Case 3: flat response (no recognizable confidence) — nothing to lift.
+        # Flat response (no recognizable TopK candidates) — nothing to lift; the
+        # standalone Assessment step will run as the fallback.
         logger.info(
-            "Non-agentic integrated mode: response was flat (no extraction/"
-            "confidence envelope or confidence sibling); standalone Assessment "
-            "step will run."
+            "Non-agentic integrated mode: response was flat (no TopK "
+            "candidates); standalone Assessment step will run."
         )
         return parsed
 
@@ -3648,12 +3601,26 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     )
                 )
 
+        # Pop 1S-TopK raw candidates (all K guesses per field) for metadata
+        # auditability. Present only on the simple integrated (TopK) path; popped
+        # here so it does not leak into metering.
+        topk_candidates = (
+            result.metering.pop("_topk_candidates", None) if result.metering else None
+        )
+
         # Build base metadata
         metadata: dict[str, Any] = {
             "parsing_succeeded": result.parsing_succeeded,
             "extraction_time_seconds": result.total_duration,
             "extraction_method": extraction_method,
         }
+
+        # Record 1S-TopK raw candidates for auditability (all K guesses per
+        # field). assessment_method is an audit breadcrumb only — the downstream
+        # Assessment Lambda skips on explainability_info presence, not this field.
+        if topk_candidates:
+            metadata["topk_candidates"] = topk_candidates
+            metadata["assessment_method"] = "1s_topk"
 
         # Audit: which model actually ran this section, and whether it came from
         # a per-class override vs the global extraction model.

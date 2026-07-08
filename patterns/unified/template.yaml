@@ -1407,11 +1407,20 @@ Resources:
                 hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
               task_prompt_extraction_with_confidence:
                 type: string
-                title: Task prompt (extraction + confidence)
+                title: Task prompt (extraction + confidence — advanced/agentic)
                 format: textarea
-                description: "INTEGRATED task prompt — used when Confidence Assessment mode is 'integrated' (one inference emits each value AND its confidence). Instruct the model to call provide_field_assessment. The bounding-box block (Bounding-box Geometry section) is appended automatically when Geometry mode is 'llm' or 'llm_grounded'."
+                description: "INTEGRATED task prompt for ADVANCED (agentic) mode — used when Confidence Assessment mode is 'integrated' and Extraction mode is 'advanced'. Instructs the agent to call the provide_field_assessment tool after extracting. The bounding-box block (Bounding-box Geometry section) is appended automatically when Geometry mode is 'llm' or 'llm_grounded'."
                 order: 14
                 dependsOn: { field: "extraction.confidence.mode", value: "integrated" }
+                hideWhen: { field: "extraction.mode", value: "simple" }
+              task_prompt_extraction_with_confidence_topk:
+                type: string
+                title: Task prompt (1-Stage TopK extraction + confidence — simple)
+                format: textarea
+                description: "1-Stage TopK INTEGRATED task prompt for SIMPLE (non-agentic) mode — used when Confidence Assessment mode is 'integrated' and Extraction mode is 'simple'. A single LLM call emits its top-K guesses with probabilities per field (G1/P1 … GK/PK); the top guess becomes the value and its probability the confidence. Requesting ranked alternatives yields better-calibrated confidence than single-value self-assessment."
+                order: 15
+                dependsOn: { field: "extraction.confidence.mode", value: "integrated" }
+                hideWhen: { field: "extraction.mode", value: "advanced" }
               custom_prompt_lambda_arn:
                 type: string
                 title: Custom Prompt Lambda ARN
