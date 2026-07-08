@@ -24,6 +24,7 @@ _The GenAIIDP Web Interface showing the document tracking dashboard with status 
 - Accuracy evaluation reports when baseline data is provided
 - View and edit pattern configuration, including document classes, prompt engineering, and model settings
 - Manage multiple configuration versions — create, compare, activate, and delete versions (see [configuration-versions.md](configuration-versions.md))
+- Retain, view, compare, and delete **document versions** — every processing run of a document is kept and viewable read-only (see [document-versions.md](document-versions.md))
 - **Confidence threshold configuration** for HITL (Human-in-the-Loop) triggering through the Assessment & HITL Configuration section
 - Document upload from local computer
 - Knowledge base querying for document collections
@@ -315,6 +316,18 @@ A self-describing `manifest.json` is written at the ZIP root capturing the expor
 ### Fetching mechanics
 
 Every file in the archive is fetched directly from S3 using a short-lived presigned URL generated client-side with your browser's Cognito credentials, preserving binary content byte-for-byte. A progress modal reports status during the download and offers a **Cancel** button for large documents. The per-section **Download Data** / **Download Baseline** buttons in the Sections panel remain available for single-file downloads.
+
+## Document Versions
+
+The Document Details page includes a **Version History** panel listing every retained processing run of the document, newest first (with the current run badged). Re-uploading a document under the same key — or reprocessing it — no longer discards the prior results; each successful run is kept as an immutable version whose exact output bytes are pinned by S3 object version.
+
+From the panel you can:
+
+- **View** any past version's outputs read-only — its sections, page text/images, extraction results, and summary/evaluation reports are fetched from that run's pinned S3 versions, so you see exactly what that run produced even after later runs overwrote the outputs. Editing is disabled while viewing history; a banner offers **Return to current version**.
+- **Compare** any two versions — a section-by-section, field-level diff of their extraction results.
+- **Delete** a version (Admin only) — permanently removes that run's pinned object versions; the current version cannot be deleted, and versions still referenced by another retained run are preserved.
+
+See the [Document Versions guide](document-versions.md) for how versioning works, retention, the CLI/API surfaces, and caveats.
 
 ## Chat with Document
 
