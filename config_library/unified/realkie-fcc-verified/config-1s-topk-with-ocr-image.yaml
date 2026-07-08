@@ -1,0 +1,487 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# All settings not explicitly defined here are inherited from system defaults.
+
+notes: RealKIE-FCC-Verified dataset settings for Pattern2 (Bedrock LLM). Assessment and summarization disabled by default.
+
+agents:
+  chat_companion:
+    model_id: us.anthropic.claude-haiku-4-5-20251001-v1:0
+  error_analyzer:
+    model_id: us.anthropic.claude-sonnet-4-20250514-v1:0
+    parameters:
+      max_log_events: 5
+      time_range_hours_default: 24
+    system_prompt: "You are an intelligent error analysis agent for the GenAI IDP\
+      \ system with access to specialized diagnostic tools.\n\nGENERAL TROUBLESHOOTING\
+      \ WORKFLOW:\n1. Identify document status from DynamoDB\n2. Find any errors reported\
+      \ during Step Function execution\n3. Collect relevant logs from CloudWatch\n\
+      4. Identify any performance issues from X-Ray traces\n5. Provide root cause\
+      \ analysis based on the collected information\n\nTOOL SELECTION STRATEGY:\n\
+      - If user provides a filename: Use cloudwatch_document_logs and dynamodb_status\
+      \ for document-specific analysis\n- For system-wide issues: Use cloudwatch_logs\
+      \ and dynamodb_query\n- For execution context: Use lambda_lookup or stepfunction_details\n\
+      - For distributed tracing: Use xray_trace or xray_performance_analysis\n\nALWAYS\
+      \ format your response with exactly these three sections in this order:\n\n\
+      ## Root Cause\nIdentify the specific underlying technical reason why the error\
+      \ occurred. Focus on the primary cause, not symptoms.\n\n## Recommendations\n\
+      Provide specific, actionable steps to resolve the issue. Limit to top three\
+      \ recommendations only.\n\n<details>\n<summary><strong>Evidence</strong></summary>\n\
+      \nFormat evidence with source information. Include relevant data from tool responses:\n\
+      \n**For CloudWatch logs:**\n**Log Group:** [full log_group name]\n**Log Stream:**\
+      \ [full log_stream name]\n```\n[ERROR] timestamp message\n```\n\n**For other\
+      \ sources (DynamoDB, Step Functions, X-Ray):**\n**Source:** [service name and\
+      \ resource]\n```\nRelevant data from tool response\n```\n\n</details>\n\nFORMATTING\
+      \ RULES:\n- Use the exact three-section structure above\n- Make Evidence section\
+      \ collapsible using HTML details tags\n- Include relevant data from all tool\
+      \ responses (CloudWatch, DynamoDB, Step Functions, X-Ray)\n- For CloudWatch:\
+      \ Show complete log group and log stream names without truncation\n- Present\
+      \ evidence data in code blocks with appropriate source labels\n  \nANALYSIS\
+      \ GUIDELINES:\n- Use multiple tools for comprehensive analysis when needed\n\
+      - Start with document-specific tools for targeted queries\n- Use system-wide\
+      \ tools for pattern analysis\n- Combine DynamoDB status with CloudWatch logs\
+      \ for complete picture\n- Leverage X-Ray for distributed system issues\n\nROOT\
+      \ CAUSE DETERMINATION:\n1. Document Status: Check dynamodb_status first\n2.\
+      \ Execution Details: Use stepfunction_details for workflow failures\n3. Log\
+      \ Analysis: Use cloudwatch_document_logs or cloudwatch_logs for error details\n\
+      4. Distributed Tracing: Use xray_performance_analysis for service interaction\
+      \ issues\n5. Context: Use lambda_lookup for execution environment\n\nRECOMMENDATION\
+      \ GUIDELINES:\nFor code-related issues or system bugs:\n- Do not suggest code\
+      \ modifications\n- Include error details, timestamps, and context\n\nFor configuration-related\
+      \ issues:\n- Direct users to UI configuration panel\n- Specify exact configuration\
+      \ section and parameter names\n\nFor operational issues:\n- Provide immediate\
+      \ troubleshooting steps\n- Include preventive measures\n\nTIME RANGE PARSING:\n\
+      - recent: 1 hour\n- last week: 168 hours  \n- last day: 24 hours\n- No time\
+      \ specified: 24 hours (default)\n\nIMPORTANT: Do not include any search quality\
+      \ reflections, search quality scores, or meta-analysis sections in your response.\
+      \ Only provide the three required sections: Root Cause, Recommendations, and\
+      \ Evidence."
+classes:
+- $schema: https://json-schema.org/draft/2020-12/schema
+  $defs:
+    LineItem:
+      type: object
+      properties:
+        LineItemStartDate:
+          description: "The date marking the beginning of the 
+           scheduled airing period for a line item. May appear 
+           as a standalone column (e.g., \"Start Date\"), as the first part of 
+           a date range (e.g., \"10/13/14 to 10/19/14\"), or embedded 
+           within a \"Schedule Days to Run\" or \"Airtime\" or \"Scheduled\" field. 
+           Formats include MM/DD/YY, MM/DD/YYYY etc. In some documents, this 
+           appears at the line-item level; in others, it appears at a 
+           sub-line/week level beneath the main line entry. Output null if not shown."
+          x-aws-idp-confidence-threshold: '0.8'
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          type: string
+        LineItemDays:
+          description: "The days of the week on which the spot is scheduled to air. 
+           This field has highly variable formatting. 
+           Example 1, dash-letter pattern (7-character positional):Each position 
+           represents M-T-W-T-F-S-S, with a letter indicating the day is 
+           active and a dash indicating it's not. 
+           Example 1: \"-TWTF--\" (Tue to Fri), 
+           \"1------\" (Mon only), \"------1\" (Sun only), \"-----S-\" (Sat), \"----1--\" (Fri).
+           Example 2: Abbreviated day names on sublines:Individual spot lines may list 
+           days as \"Tu\", \"W\", \"Th\", \"Mon\", \"Tue\", etc.
+           Example 3: Comma-separated compact codes such as \"Day,Th-1\", \"Day,F-2\".
+           Example 4: It may also appear as descriptive prefixes in the description field, 
+           e.g., \"M-F\" indicating Monday through Friday.
+           You MUST extract exactly as given in the document."
+
+          x-aws-idp-confidence-threshold: '0.8'
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          type: string
+        
+        LineItemEndDate:
+          description: "The date marking the end of the scheduled airing period for a line item. 
+           Appears as a standalone column (\"End Date\"), or as the second part of a date range 
+           (e.g., \"10/13/14 to 10/19/14\", \"2/1/2016 - 2/28/2016\"). Formats mirror those 
+           of LineItemStartDate. The end date may be identical to the 
+           start date when a line item covers a single day. Output null if not explicitly stated."
+          x-aws-idp-confidence-threshold: '0.8'
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          type: string
+        LineItemDescription:
+          description: "The name or title of the program, show, or time slot in which the 
+           advertisement is scheduled to air. Examples include program names 
+           (\"People's Court\", \"Dr. Phil\", \"Rachael Ray\", \"NFL on FOX 3p\"), newscast identifiers 
+           (\"M-F 10P-1035P NEWS\", \"SA 6P-630P NEWS\", \"SU 10P-1035P NEWS\"), time-slot descriptions 
+           (\"M-F 1135p-1205a\", \"Su 1205p-1235a\"), or simulcast/edition names 
+           (\"Noticias 45 Ed Nocturna\", \"C-News Simulcast\"). May include channel prefixes, 
+           day prefixes (e.g., \"SA\", \"SU\", \"M-F\"). Can also contain supplementary qualifiers 
+           like \"65572-[LCL]\". Output null if not shown."
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          type: string
+        LineItemRate:
+          description: The rate in dollars per show in the line entry. Only extract the number. 
+           E.g. if the rate is "$800.15", extract 800.15. Output null if not shown.
+          x-aws-idp-confidence-threshold: '0.8'
+          x-aws-idp-evaluation-method: NUMERIC_EXACT
+          type: number
+  description: Invoice document
+  type: object
+  x-aws-idp-document-type: Invoice
+  properties:
+    Agency:
+      description: The agency the invoice is addressed to
+      x-aws-idp-confidence-threshold: '0.8'
+      x-aws-idp-evaluation-weight: '2'
+      x-aws-idp-evaluation-method: LEVENSHTEIN
+      x-aws-idp-evaluation-threshold: '0.7'
+      type: string
+    Advertiser:
+      description: The name of the advertiser
+      x-aws-idp-confidence-threshold: '0.8'
+      x-aws-idp-evaluation-weight: '2'
+      x-aws-idp-evaluation-method: FUZZY
+      x-aws-idp-evaluation-threshold: '0.8'
+      type: string
+    GrossTotal:
+      description: The gross total amount. Output null if not shown.
+      x-aws-idp-evaluation-weight: '2'
+      x-aws-idp-confidence-threshold: '0.8'
+      x-aws-idp-evaluation-method: NUMERIC_EXACT
+      type: number
+    PaymentTerms:
+      description: Terms of payment. Output null if not shown.
+      x-aws-idp-evaluation-weight: '0.2'
+      x-aws-idp-evaluation-method: FUZZY
+      x-aws-idp-evaluation-threshold: '0.7'
+      type: string
+    AgencyCommission:
+      description: The agency commission amount. Output null if not shown.
+      x-aws-idp-evaluation-weight: '0.2'
+      x-aws-idp-confidence-threshold: '0.8'
+      x-aws-idp-evaluation-method: NUMERIC_EXACT
+      type: number
+    NetAmountDue:
+      description: The net amount due after commission. Output null if not shown.
+      x-aws-idp-evaluation-weight: '2'
+      x-aws-idp-confidence-threshold: '0.8'
+      x-aws-idp-evaluation-method: NUMERIC_EXACT
+      type: number
+    LineItems:
+      type: array
+      description: List of line item details on the invoice; each item has several
+        possible elements
+      items:
+        $ref: '#/$defs/LineItem'
+  required:
+  - Agency
+  - Advertiser
+  - LineItems
+  $id: Invoice
+rule_validation:
+  enabled: false
+classification:
+  classificationMethod: multimodalPageLevelClassification
+  contextPagesCount: '0'
+  image:
+    target_height: ''
+    target_width: ''
+  maxPagesForClassification: ALL
+  max_tokens: '4096'
+  model: us.amazon.nova-pro-v1:0
+  sectionSplitting: llm_determined
+  system_prompt: 'You are a multimodal document classification expert that analyzes
+    business documents using both visual layout and textual content. Your task is
+    to classify single-page documents into predefined categories based on their structural
+    patterns, visual features, and text content. Your output must be valid JSON according
+    to the requested format. <variables> <document-ocr-data>: OCR-extracted text content
+    from the document page that provides textual information for classification <document-image>:
+    Visual representation of the document page that provides layout, formatting, and
+    visual structure information <document-types>: List of valid document types with
+    their descriptions that the document must be classified into </variables>'
+  task_prompt: "<task-description> Analyze the provided document using both its visual\
+    \ layout and textual content to determine its document type and whether this page\
+    \ begins a new document or continues the previous one. </task-description>\n<document-types>\
+    \ {CLASS_NAMES_AND_DESCRIPTIONS} </document-types>\n<classification-instructions>\
+    \ Follow these steps to classify the document: 1. Examine the visual layout: headers,\
+    \ logos, formatting, structure, and visual organization 2. Analyze the textual\
+    \ content: key phrases, terminology, purpose, and information type 3. Identify\
+    \ distinctive features that match the document type descriptions 4. Decide if\
+    \ this page starts a new document (output \"start\") or continues the previous\
+    \ document (output \"continue\") 5. Consider both visual and textual evidence\
+    \ together to determine the best match 6. CRITICAL: Only use document types explicitly\
+    \ listed in the <document-types> section </classification-instructions>\n<output-format>\
+    \ {\n  \"classification_reason\": \"Detailed reasoning including specific visual\
+    \ and textual evidence that led to this classification\",\n  \"class\": \"exact_document_type_from_list\"\
+    ,\n  \"document_boundary\": \"start or continue\"\n} </output-format>\n<<CACHEPOINT>>\n\
+    <document-ocr-data> {DOCUMENT_TEXT} </document-ocr-data>\n<document-image> {DOCUMENT_IMAGE}\
+    \ </document-image>\n<final-instructions> Analyze the document above by: 1. Applying\
+    \ the <classification-instructions> to examine both visual and textual features\
+    \ 2. Selecting ONLY from document types in <document-types> 3. Providing clear\
+    \ reasoning with specific evidence 4. Outputting in the exact JSON format specified\
+    \ in <output-format> </final-instructions>"
+  temperature: '0.0'
+  top_k: '5'
+  top_p: '0.0'
+criteria_validation:
+  criteria: []
+  max_chunk_size: 180000
+  max_tokens: 4096
+  model: us.anthropic.claude-3-5-sonnet-20240620-v1:0
+  overlap_percentage: 10
+  response_prefix: <response>
+  semaphore: 3
+  system_prompt: ''
+  task_prompt: ''
+  temperature: 0.0
+  token_size: 4
+  top_k: 20
+  top_p: 0.01
+discovery:
+  output_format:
+    sample_json: "{\n    \"document_class\" : \"Form-1040\",\n    \"document_description\"\
+      \ : \"Brief summary of the document\",\n    \"groups\" : [\n        {\n    \
+      \        \"name\" : \"PersonalInformation\",\n            \"description\" :\
+      \ \"Personal information of Tax payer\",\n            \"attributeType\" : \"\
+      group\",\n            \"groupAttributes\" : [\n                {\n         \
+      \           \"name\": \"FirstName\",\n                    \"dataType\" : \"\
+      string\",\n                    \"description\" : \"First Name of Taxpayer\"\n\
+      \                },\n                {\n                    \"name\": \"Age\"\
+      ,\n                    \"dataType\" : \"number\",\n                    \"description\"\
+      \ : \"Age of Taxpayer\"\n                }\n            ]\n        },\n    \
+      \    {\n            \"name\" : \"Dependents\",\n            \"description\"\
+      \ : \"Dependents of taxpayer\",\n            \"attributeType\" : \"list\",\n\
+      \            \"listItemTemplate\": {\n                \"itemAttributes\" : [\n\
+      \                    {\n                        \"name\": \"FirstName\",\n \
+      \                       \"dataType\" : \"string\",\n                       \
+      \ \"description\" : \"Dependent first name\"\n                    },\n     \
+      \               {\n                        \"name\": \"Age\",\n            \
+      \            \"dataType\" : \"number\",\n                        \"description\"\
+      \ : \"Dependent Age\"\n                    }\n                ]\n          \
+      \  }\n        }\n    ]\n}"
+  with_ground_truth:
+    max_tokens: '10000'
+    model_id: us.amazon.nova-pro-v1:0
+    system_prompt: You are an expert in processing forms. Extracting data from images
+      and documents. Use provided ground truth data as reference to optimize field
+      extraction and ensure consistency with expected document structure and field
+      definitions.
+    temperature: '0.0'
+    top_p: '0.0'
+    user_prompt: 'This image contains unstructured data. Analyze the data line by
+      line using the provided ground truth as reference.                         <GROUND_TRUTH_REFERENCE>
+      {ground_truth_json} </GROUND_TRUTH_REFERENCE> Ground truth reference JSON has
+      the fields we are interested in extracting from the document/image. Use the
+      ground truth to optimize field extraction. Match field names, data types, and
+      groupings from the reference. Image may contain multiple pages, process all
+      pages. Extract all field names including those without values. Do not change
+      the group name and field name from ground truth in the extracted data json.
+      Add field_description field for every field which will contain instruction to
+      LLM to extract the field data from the image/document. Add data_type field for
+      every field.  Add two fields document_class and document_description.  For document_class
+      generate a short name based on the document content like W4, I-9, Paystub.  For
+      document_description generate a description about the document in less than
+      50 words. If the group repeats and follows table format, update the attributeType
+      as "list".                          Do not extract the values. Format the extracted
+      data using the below JSON format: Format the extracted groups and fields using
+      the below JSON format:'
+  without_ground_truth:
+    max_tokens: '10000'
+    model_id: us.amazon.nova-pro-v1:0
+    system_prompt: You are an expert in processing forms. Extracting data from images
+      and documents. Analyze forms line by line to identify field names, data types,
+      and organizational structure. Focus on creating comprehensive blueprints for
+      document processing without extracting actual values.
+    temperature: '0.0'
+    top_p: '0.0'
+    user_prompt: 'This image contains forms data. Analyze the form line by line. Image
+      may contains multiple pages, process all the pages.  Form may contain multiple
+      name value pair in one line.  Extract all the names in the form including the
+      name value pair which doesn''t have value.  Organize them into groups, extract
+      field_name, data_type and field description Field_name should be less than 60
+      characters, should not have space use ''-'' instead of space. field_description
+      is a brief description of the field and the location of the field like box number
+      or line number in the form and section of the form. Field_name should be unique
+      within the group. Add two fields document_class and document_description.  For
+      document_class generate a short name based on the document content like W4,
+      I-9, Paystub.  For document_description generate a description about the document
+      in less than 50 words.  Group the fields based on the section they are grouped
+      in the form. Group should have attributeType as "group". If the group repeats
+      and follows table format, update the attributeType as "list". Do not extract
+      the values. Return the extracted data in JSON format. Format the extracted data
+      using the below JSON format: Format the extracted groups and fields using the
+      below JSON format:'
+evaluation:
+  enabled: true
+  llm_method:
+    max_tokens: '4096'
+    model: us.anthropic.claude-sonnet-4-20250514-v1:0
+    system_prompt: You are an evaluator that helps determine if the predicted and
+      expected values match for document attribute extraction. You will consider the
+      context and meaning rather than just exact string matching.
+    task_prompt: "I need to evaluate attribute extraction for a document of class:\
+      \ {DOCUMENT_CLASS}. For the attribute named \"{ATTRIBUTE_NAME}\" described as\
+      \ \"{ATTRIBUTE_DESCRIPTION}\": - Expected value: {EXPECTED_VALUE} - Actual value:\
+      \ {ACTUAL_VALUE} Do these values match in meaning, taking into account formatting\
+      \ differences, word order, abbreviations, and semantic equivalence? Provide\
+      \ your assessment as a JSON with three fields: - \"match\": boolean (true if\
+      \ they match, false if not) - \"score\": number between 0 and 1 representing\
+      \ the confidence/similarity score - \"reason\": brief explanation of your decision\
+      \ Respond ONLY with the JSON and nothing else. Here's the exact format: {\n\
+      \  \"match\": true or false,\n  \"score\": 0.0 to 1.0,\n  \"reason\": \"Your\
+      \ explanation here\"\n}"
+    temperature: '0.0'
+    top_k: '5'
+    top_p: '0.0'
+extraction:
+  agentic:
+    enabled: false
+    review_agent: false
+  image:
+    target_height: 1200
+    target_width: 1000
+  max_tokens: '40000'
+  model: us.anthropic.claude-haiku-4-5-20251001-v1:0
+  system_prompt: You are a document assistant. Respond only with JSON. Never make
+    up data, only provide data found in the document being provided.
+  task_prompt: "<background> You are an expert in document analysis and information\
+    \ extraction. You can understand and extract key information from documents classified\
+    \ as type: \n{DOCUMENT_CLASS}. </background>\n<task> Provide your 4 best guesses 
+    and the probability that each is correct (0.0 to 1.0) for each attribute listed below. 
+    Give ONLY the guesses and probabilities, no other words or explanation.</task>
+    \n<extraction-guidelines> Guidelines:\n 1. All dates should be in\
+    \ MM/DD/YY format\n 2. Only consider values that are present in the provided document. Do not invent attribute values.\
+    3. Exract each entity candidate exactly how it is presented in the document. E.g. do not change \"M\" to \"Monday\" 
+    or change the date from \"01/04\" to \"1/04\".\
+    4. For each extracted attribute key, the value MUST be a nested object formatted\
+    \ exactly like this:\n        {\n          \"G1\": \"<1st most likely guess, as\
+    \ short as possible>\",\n          \"P1\": <probability between 0.0 and 1.0>,\n\
+    \          \"G2\": \"<2nd most likely guess, as short as possible>\",\n       \
+    \   \"P2\": <probability between 0.0 and 1.0>,\n          \"G3\": \"<3rd most\
+    \ likely guess, as short as possible>\",\n          \"P3\": <probability between\
+    \ 0.0 and 1.0>,\n          \"G4\": \"<4th most likely guess, as short as possible>\"\
+    ,\n          \"P4\": <probability between 0.0 and 1.0>\n        }\n</extraction-guidelines>\n\
+    If the attributes section below contains a list of attribute names and descriptions,\
+    \ then output only those attributes, using the provided descriptions as guidance\
+    \ for finding the correct values. \n<attributes> {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}\
+    \ </attributes>\n<<CACHEPOINT>>\n\
+    <document_image> {DOCUMENT_IMAGE} </document_image>\n<output-format>\n\
+    <ocr-text-confidence-results> {OCR_TEXT_CONFIDENCE} </ocr-text-confidence-results>\n\
+    Give ONLY the JSON object containing the guesses and probabilities. 
+    Do not think step-by-step, do not show your work, and do not provide 
+    any reasoning, justifications, or extra commentary whatsoever.
+
+    For SIMPLE attributes:
+    {
+      \"simple_attribute_name\": {
+        \"G1\": \"<1st most likely guess, as short as possible>\",
+        \"P1\": <probability between 0.0 and 1.0>,
+        \"G2\": \"<2nd most likely guess, as short as possible>\",
+        \"P2\": <probability between 0.0 and 1.0>,
+        \"G3\": \"<3rd most likely guess, as short as possible>\",
+        \"P3\": <probability between 0.0 and 1.0>,
+        \"G4\": \"<4th most likely guess, as short as possible>\",
+        \"P4\": <probability between 0.0 and 1.0>
+      }
+    }
+    
+    For LIST attributes (assess EACH item individually):
+    {
+      \"list_attribute_name\": [
+        {
+          \"item_attribute_1\": {
+            \"G1\": \"<1st guess>\",
+            \"P1\": <probability>,
+            \"G2\": \"<2nd guess>\",
+            \"P2\": <probability>,
+            \"G3\": \"<3rd guess>\",
+            \"P3\": <probability>,
+            \"G4\": \"<4th guess>\",
+            \"P4\": <probability>
+          },
+          \"item_attribute_2\": {
+            \"G1\": \"<1st guess>\",
+            \"P1\": <probability>,
+            \"G2\": \"<2nd guess>\",
+            \"P2\": <probability>,
+            \"G3\": \"<3rd guess>\",
+            \"P3\": <probability>,
+            \"G4\": \"<4th guess>\",
+            \"P4\": <probability>
+          }
+        }
+      ]
+    }
+    </output-format>"
+  temperature: '0.0'
+  top_k: '5'
+  top_p: '0.0'
+ocr:
+  backend: textract
+  features:
+  - name: LAYOUT
+  image:
+    dpi: null
+    preprocessing: null
+    target_height: '800'
+    target_width: '800'
+  max_workers: 20
+  model_id: us.amazon.nova-2-lite-v1:0
+  system_prompt: You are an expert OCR system. Extract all text from the provided
+    image accurately, preserving layout where possible.
+  task_prompt: Extract all text from this document image. Preserve the layout, including
+    paragraphs, tables, and formatting.
+summarization:
+  enabled: false
+  max_tokens: '4096'
+  model: us.amazon.nova-pro-v1:0
+  system_prompt: 'You are a document summarization expert who can analyze and summarize
+    documents from various domains including medical, financial, legal, and general
+    business documents. Your task is to create a summary that captures the key information,
+    main points, and important details from the document. Your output must be in valid
+    JSON format. \nSummarization Style: Balanced\\nCreate a balanced summary that
+    provides a moderate level of detail. Include the main points and key supporting
+    information, while maintaining the document''s overall structure. Aim for a comprehensive
+    yet concise summary.\n Your output MUST be in valid JSON format with markdown
+    content. You MUST strictly adhere to the output format specified in the instructions.'
+  task_prompt: "<document-text> {DOCUMENT_TEXT} </document-text>\n<extracted-attributes>\
+    \ {EXTRACTION_RESULTS} </extracted-attributes>\nAnalyze the provided document\
+    \ (<document-text>) along with the extracted attributes (<extracted-attributes>)\
+    \ to create a comprehensive and accurate summary.\nCRITICAL INSTRUCTION: You MUST\
+    \ return your response as valid JSON with the EXACT structure shown at the end\
+    \ of these instructions. Do not include any explanations, notes, or text outside\
+    \ of the JSON structure.\nCreate a summary that captures the essential information\
+    \ from the document. Your summary should:\n1. **Integrate Extracted Attributes**:\
+    \ Begin with a \"Key Information\" section that highlights the most important\
+    \ extracted attributes in a structured format (use tables or lists as appropriate)\n\
+    2. **Validate and Reference**: Cross-reference the document text with extracted\
+    \ values to ensure accuracy. When mentioning specific values, prefer the extracted\
+    \ attributes when they are available\n3. **Maintain Document Structure**: Preserve\
+    \ the original document's organizational structure where appropriate, using the\
+    \ extracted attributes to enhance each section\n4. **Highlight Critical Data**:\
+    \ Emphasize important extracted values such as:\n   - Names, addresses, and identification\
+    \ numbers\n   - Dates and time periods\n   - Monetary amounts and financial figures\n\
+    \   - Status indicators and classifications\n   - Any calculated or derived values\n\
+    \n5. **Use Markdown Formatting**: Apply markdown for better readability:\n   -\
+    \ Use headers (##, ###) for sections\n   - Create tables for structured data from\
+    \ extracted attributes\n   - Use **bold** for important values and *italics* for\
+    \ emphasis\n   - Create lists (bullet or numbered) for multiple items\n\n6. **Provide\
+    \ Context**: For each extracted value mentioned, provide brief context from the\
+    \ document text to explain its significance\n7. **Citation System**: Cite all\
+    \ facts using inline citations in the format [Cite-X, Page-Y] where X is a sequential\
+    \ citation number and Y is the page number. Format citations as markdown links:\
+    \ [[Cite-1, Page-3]](#cite-1-page-3)\n8. **Data Completeness**: If extracted attributes\
+    \ are missing or empty, note this in the summary and rely more heavily on the\
+    \ document text\n9. **References Section**: At the end, include a \"References\"\
+    \ section listing all citations with their exact text from the source document\n\
+    Structure your summary as follows: - **Key Information** (from extracted attributes)\
+    \ - **Document Overview** - **Detailed Sections** (based on document structure)\
+    \ - **Summary and Conclusions** - **References**\nOutput Format:\nYou MUST return\
+    \ ONLY valid JSON with the following structure and nothing else:\n```json {\n\
+    \  \"summary\": \"A comprehensive summary in markdown format that integrates extracted\
+    \ attributes with document text, includes inline citations linked to a references\
+    \ section at the bottom\"\n} ```\nDo not include any text, explanations, or notes\
+    \ outside of this JSON structure. The JSON must be properly formatted and parseable."
+  temperature: '0.0'
+  top_k: '5'
+  top_p: '0.0'
+

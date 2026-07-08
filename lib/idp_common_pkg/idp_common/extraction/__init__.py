@@ -27,6 +27,12 @@ from idp_common.extraction.runtime import (
     shard_result_key,
 )
 from idp_common.extraction.service import ExtractionService
+from idp_common.extraction.topk_resolver import (
+    CandidateGuesses,
+    build_extraction_model,
+    is_topk_response,
+    resolve_candidates,
+)
 
 __all__ = [
     "ExtractionService",
@@ -47,4 +53,9 @@ __all__ = [
     "merge_shard_dicts",
     "shard_result_key",
     "select_runtime",
+    # 1S-TopK candidate resolution
+    "CandidateGuesses",
+    "build_extraction_model",
+    "is_topk_response",
+    "resolve_candidates",
 ]

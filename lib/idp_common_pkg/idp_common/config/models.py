@@ -647,8 +647,20 @@ class ExtractionConfig(BaseModel):
         default="",
         description=(
             "Task prompt template for INTEGRATED extraction+confidence — used when "
-            "extraction.confidence.mode == 'integrated', where a single inference "
-            "emits each value AND its confidence. Populated from system defaults."
+            "extraction.confidence.mode == 'integrated' in AGENTIC (advanced) mode, "
+            "where the agent calls the provide_field_assessment tool after extracting. "
+            "Populated from system defaults."
+        ),
+    )
+    task_prompt_extraction_with_confidence_topk: str = Field(
+        default="",
+        description=(
+            "Task prompt template for 1-Stage TopK integrated extraction+confidence "
+            "— used when extraction.confidence.mode == 'integrated' in SIMPLE "
+            "(non-agentic) mode. A single LLM call emits top-4 guesses with "
+            "probabilities (G1/P1 through G4/P4) per field. Produces better- "
+            "calibrated confidence than single-value self-assessment. "
+            "Populated from system defaults."
         ),
     )
     # NOTE (v0.6): the confidence-only prompt lives at extraction.confidence.task_prompt

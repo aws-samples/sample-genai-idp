@@ -1384,11 +1384,20 @@ Resources:
                 hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
               task_prompt_extraction_with_confidence:
                 type: string
-                title: Task prompt (extraction + confidence)
+                title: Task prompt (extraction + confidence — advanced/agentic)
                 format: textarea
-                description: "INTEGRATED task prompt — used when Confidence Assessment mode is 'integrated' (one inference emits each value AND its confidence). Instruct the model to call provide_field_assessment. The bounding-box block (Bounding-box Geometry section) is appended automatically when Geometry mode is 'llm' or 'llm_grounded'."
+                description: "INTEGRATED task prompt for ADVANCED (agentic) mode — used when Confidence Assessment mode is 'integrated' and Extraction mode is 'advanced'. Instructs the agent to call provide_field_assessment tool after extracting."
                 order: 14
                 dependsOn: { field: "extraction.confidence.mode", value: "integrated" }
+                hideWhen: { field: "extraction.mode", value: "simple" }
+              task_prompt_extraction_with_confidence_topk:
+                type: string
+                title: Task prompt (1-Stage TopK extraction + confidence)
+                format: textarea
+                description: "1-Stage TopK INTEGRATED prompt for SIMPLE (non-agentic) mode — used when Confidence Assessment mode is 'integrated' and Extraction mode is 'simple'. A single LLM call emits top-K guesses with probabilities per field, making the LLM think about alternative candidates and choose the best one together with its probability."
+                order: 15
+                dependsOn: { field: "extraction.confidence.mode", value: "integrated" }
+                hideWhen: { field: "extraction.mode", value: "advanced" }
               custom_prompt_lambda_arn:
                 type: string
                 title: Custom Prompt Lambda ARN

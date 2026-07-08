@@ -67,16 +67,32 @@ def select_extraction_task_prompt(extraction_cfg: Any) -> str:
 
     Integrated confidence -> task_prompt_extraction_with_confidence (+ bbox for
     LLM-box geometry); otherwise the plain extraction task_prompt.
+
+    For non-agentic (simple mode) integrated, the 1S-TopK prompt is used
+    (task_prompt_extraction_with_confidence_topk) which asks the model to emit
+    G1/P1/.../G4/P4 candidates per field. For agentic (advanced mode) integrated,
+    the standard tool-based prompt is used.
+
     ``extraction_cfg`` is an ExtractionConfig (has .confidence, .geometry, and the
     task_prompt* fields).
     """
     confidence = extraction_cfg.confidence
     geometry_mode = extraction_cfg.geometry.mode
     if confidence.mode == "integrated":
-        core = (
-            extraction_cfg.task_prompt_extraction_with_confidence
-            or extraction_cfg.task_prompt
-        )
+        # Non-agentic (simple) uses 1S-TopK prompt; agentic uses tool-based prompt.
+        if not extraction_cfg.agentic.enabled:
+            core = (
+                getattr(
+                    extraction_cfg, "task_prompt_extraction_with_confidence_topk", None
+                )
+                or extraction_cfg.task_prompt_extraction_with_confidence
+                or extraction_cfg.task_prompt
+            )
+        else:
+            core = (
+                extraction_cfg.task_prompt_extraction_with_confidence
+                or extraction_cfg.task_prompt
+            )
         if geometry_requires_llm_boxes(geometry_mode):
             core = _append_bbox_block(core, extraction_cfg.geometry.task_prompt_bbox)
         return core
