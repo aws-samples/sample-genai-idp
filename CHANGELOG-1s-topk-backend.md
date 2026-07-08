@@ -28,4 +28,4 @@
 
   See the [sample config](config_library/unified/realkie-fcc-verified/config-1s-topk-with-ocr-image.yaml) and [demo notebook](notebooks/misc/e2e-example-with-1s-topk.ipynb) for usage examples.
 
-  **Known issue:** The UI Configuration form validates that `extraction.max_tokens` is set (marked as required in the template schema). The system defaults intentionally omit `max_tokens` (it is resolved dynamically per model at runtime). When creating a new config version via the UI with `simple + integrated` mode, manually set `max_tokens` (e.g., `40000`) in the Extraction section to pass validation.
+  **Known issue:** The UI Configuration form validates that `extraction.max_tokens` is set (marked as required in the template schema). The system defaults intentionally omit `max_tokens` (it is resolved dynamically per model at runtime). So, this validation check should probably be removed.
