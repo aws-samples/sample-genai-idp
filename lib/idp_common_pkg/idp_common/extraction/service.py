@@ -3136,12 +3136,13 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     parsing_succeeded = False
 
             # Non-agentic INTEGRATED confidence: the single extraction inference
-            # was asked to return values AND inline confidence. Split the
-            # {"extraction": ..., "confidence": ...} envelope so inference_result
-            # holds only the values and the confidence rides in metering under the
-            # same marker the agentic path uses (lifted in _save_results). This
-            # both fixes the malformed {extraction,confidence} inference_result and
-            # lets the standalone Assessment step be skipped (no 2nd pass).
+            # was asked (via the 1S-TopK prompt) to return, per field, its top-K
+            # guesses with probabilities (G1/P1 … GK/PK). Split it so
+            # inference_result holds only the values (G1) and the confidence (P1)
+            # rides in metering under the same marker the agentic path uses
+            # (lifted in _save_results). This lets the standalone Assessment step
+            # be skipped (no 2nd pass); a flat response with no candidates passes
+            # through untouched so the standalone step runs as the fallback.
             if self._integrated_assessment_enabled() and isinstance(
                 extracted_fields, dict
             ):

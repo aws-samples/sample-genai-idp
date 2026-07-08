@@ -600,6 +600,10 @@ flexible — `G1`/`P1` alone is valid; the default prompt requests K=4. Only `G1
 are consumed; `G2..GK`/`P2..PK` are preserved verbatim in `topk_candidates`. If the
 model returns a flat response with no `G1`/`P1` candidates, the values pass through
 unchanged and the standalone Assessment step runs as the fallback (no regression).
+Under `geometry.mode: llm`/`llm_grounded` the bbox block is appended to the TopK
+prompt, so a candidate may also carry `bbox`/`page`; the resolver carries those onto
+the confidence leaf for the shared grounding path (under pure `llm` — no OCR
+grounding — this is the only box source).
 
 Advanced (agentic) integrated mode can opt into the same top-K elicitation via the
 hidden experimental knob `extraction.agentic.integrated_confidence_strategy: topk`

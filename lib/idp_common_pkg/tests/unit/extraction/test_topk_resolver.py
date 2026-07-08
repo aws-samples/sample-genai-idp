@@ -100,6 +100,23 @@ def test_non_candidate_field_passes_through():
     assert "Note" not in assess  # no confidence leaf for a passthrough field
 
 
+def test_scalar_bbox_and_page_carried_onto_leaf():
+    # Under llm/llm_grounded geometry the model emits bbox/page alongside the
+    # candidate; the resolver carries them onto the confidence leaf so the shared
+    # grounding path can consume them (the agentic tool preserves them the same way).
+    schema = {"properties": {"Agency": {}}}
+    raw = {"Agency": {"G1": "ACME", "P1": 0.9, "bbox": [1, 2, 3, 4], "page": 2}}
+    _v, assess, _c = resolve_candidates(raw, schema)
+    assert assess["Agency"] == {"confidence": 0.9, "bbox": [1, 2, 3, 4], "page": 2}
+
+
+def test_scalar_leaf_omits_geometry_when_absent():
+    # No bbox/page emitted -> leaf stays confidence-only (no empty geometry keys).
+    schema = {"properties": {"Agency": {}}}
+    _v, assess, _c = resolve_candidates({"Agency": {"G1": "ACME", "P1": 0.9}}, schema)
+    assert assess["Agency"] == {"confidence": 0.9}
+
+
 # --- resolve_candidates: arrays --------------------------------------------
 
 _LIST_SCHEMA = {
@@ -154,3 +171,14 @@ def test_non_dict_array_item_preserved():
     assert values["Items"][0] == "not-a-dict"
     assert assess["Items"][0] == {}
     assert values["Items"][1] == {"rate": 5.0}
+
+
+def test_array_item_bbox_and_page_carried_onto_leaf():
+    # Per-row candidates may also carry bbox/page under LLM-box geometry modes.
+    raw = {"Items": [{"rate": {"G1": "5", "P1": 0.8, "bbox": [0, 0, 9, 9], "page": 1}}]}
+    _v, assess, _c = resolve_candidates(raw, _LIST_SCHEMA)
+    assert assess["Items"][0]["rate"] == {
+        "confidence": 0.8,
+        "bbox": [0, 0, 9, 9],
+        "page": 1,
+    }

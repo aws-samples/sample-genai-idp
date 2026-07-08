@@ -25,6 +25,13 @@ also reused by the agentic ``integrated_confidence_strategy: topk`` path.
 The number of candidates (K) is flexible — ``G1``/``P1`` alone is valid. Only
 ``G1``/``P1`` are consumed here; ``G2..GK``/``P2..PK`` are preserved verbatim in
 the returned candidates metadata for auditability.
+
+When ``geometry.mode`` is ``llm`` or ``llm_grounded`` the extraction prompt also
+appends the bounding-box block, so the model may emit ``bbox``/``page`` alongside
+the candidates. Those keys are carried through onto the confidence leaf (exactly
+as the agentic ``provide_field_assessment`` tool preserves them), so the shared
+grounding path can consume them — under pure ``llm`` geometry (no OCR grounding)
+this is the only source of a box.
 """
 
 from __future__ import annotations
@@ -33,6 +40,16 @@ import logging
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Optional geometry keys the model emits alongside candidates when the bbox block
+# is appended to the prompt (geometry.mode in {llm, llm_grounded}). Carried onto
+# the confidence leaf so the shared grounding path can consume them.
+_GEOMETRY_KEYS = ("bbox", "page")
+
+
+def _geometry_from_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Extract any ``bbox``/``page`` the model emitted alongside a candidate."""
+    return {k: candidate[k] for k in _GEOMETRY_KEYS if k in candidate}
 
 
 def is_topk_response(extracted_fields: dict[str, Any]) -> bool:
@@ -75,6 +92,8 @@ def resolve_candidates(
     and alerts are attached by the shared
     :func:`idp_common.assessment.batching.enrich_assessment_with_thresholds` so
     there is a single source of truth for thresholds across all confidence modes.
+    Any ``bbox``/``page`` the model emitted alongside a candidate (LLM-box
+    geometry modes) is carried through onto the leaf for the grounding path.
 
     Args:
         raw_result: the parsed LLM response (field -> candidate object / list).
@@ -117,6 +136,7 @@ def resolve_candidates(
                 inference_result[attr_name] = _coerce_value(inner, attr_schema)
                 assessment_data[attr_name] = {
                     "confidence": _safe_prob(value.get("P1", 0.0)),
+                    **_geometry_from_candidate(value),
                 }
             candidates_metadata[attr_name] = value
 
@@ -158,7 +178,10 @@ def _resolve_list_items(
             sub_schema = item_props.get(key, {})
             if isinstance(val, dict) and "G1" in val:
                 resolved_item[key] = _coerce_value(val.get("G1"), sub_schema)
-                item_assess[key] = {"confidence": _safe_prob(val.get("P1", 0.0))}
+                item_assess[key] = {
+                    "confidence": _safe_prob(val.get("P1", 0.0)),
+                    **_geometry_from_candidate(val),
+                }
             else:
                 resolved_item[key] = val
         resolved_items.append(resolved_item)
