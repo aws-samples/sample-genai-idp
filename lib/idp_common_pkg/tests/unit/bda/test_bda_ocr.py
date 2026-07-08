@@ -18,6 +18,7 @@ from idp_common.bda.bda_ocr import (
     bda_standard_output_to_textract_blocks,
     build_ocr_project_override_config,
     build_ocr_project_standard_output_config,
+    build_profile_arn,
     extract_markdown,
     resolve_ocr_project_arn,
 )
@@ -300,6 +301,55 @@ def test_resolve_reuses_project_without_update_when_routing_present():
     result = resolve_ocr_project_arn(bda_control_client=client)
     assert result == arn
     client.update_data_automation_project.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "region,expected_geo",
+    [
+        ("us-west-2", "us"),
+        ("eu-central-1", "eu"),
+        ("ap-southeast-2", "apac"),  # NOT "ap" — the real profile is apac.*
+        ("ca-central-1", "ca"),
+        ("sa-east-1", "sa"),
+    ],
+)
+def test_build_profile_arn_geo_prefix(region, expected_geo):
+    arn = build_profile_arn(region, "111122223333")
+    assert arn.endswith(f":data-automation-profile/{expected_geo}.data-automation-v1")
+    assert arn.startswith(f"arn:aws:bedrock:{region}:111122223333:")
+
+
+@pytest.mark.unit
+def test_build_profile_arn_honors_partition():
+    arn = build_profile_arn("us-gov-west-1", "111122223333", partition="aws-us-gov")
+    assert arn.startswith("arn:aws-us-gov:bedrock:us-gov-west-1:")
+
+
+@pytest.mark.unit
+def test_bda_metering_key_maps_to_pricing_entry():
+    """The metering key must resolve to bda/documents-standard in pricing.yaml."""
+    from idp_common.ocr.service import OcrService
+
+    svc = OcrService.__new__(OcrService)
+    svc.bda_project_arn = "arn:aws:bedrock:us-west-2:1:data-automation-project/x"
+    svc._bda_profile_arn = "arn:aws:bedrock:us-west-2:1:data-automation-profile/y"
+    svc.bda_runtime_client = MagicMock()
+    svc.bda_runtime_client.invoke_data_automation.return_value = {
+        "outputSegments": [{"standardOutput": json.dumps(_sample_standard_output())}]
+    }
+
+    blocks, tc, text, metering = svc._run_bda_ocr("s3://b/pages/1/image.jpg")
+
+    # Cost calculator strips the OCR/ context -> service_api "bda/documents-standard".
+    assert "OCR/bda/documents-standard" in metering
+    assert metering["OCR/bda/documents-standard"]["pages"] == 1
+    # Response contract: standardOutput is a JSON string inside outputSegments[0].
+    svc.bda_runtime_client.invoke_data_automation.assert_called_once()
+    call = svc.bda_runtime_client.invoke_data_automation.call_args.kwargs
+    assert call["inputConfiguration"] == {"s3Uri": "s3://b/pages/1/image.jpg"}
+    assert "| Title | 99.0 |" in tc["text"]
+    assert text == "# Title\n\n| a | b |"
 
 
 @pytest.mark.unit

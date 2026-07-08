@@ -361,10 +361,12 @@ def resolve_ocr_project_arn(
         )
         project_arn = resp["projectArn"]
     except client.exceptions.ConflictException:
-        # Another concurrent worker created it first; re-fetch by name.
+        # Another concurrent worker created it first; re-fetch by name and route
+        # through the same routing-override repair check as the primary reuse path.
         logger.info("BDA OCR project already created concurrently; re-fetching")
         for proj in client.list_data_automation_projects().get("projects", []):
             if proj.get("projectName") == OCR_PROJECT_NAME:
+                _ensure_project_routing_override(client, proj["projectArn"])
                 return proj["projectArn"]
         raise
 
@@ -376,13 +378,40 @@ def resolve_ocr_project_arn(
         if status == "COMPLETED":
             break
         time.sleep(2)
+    else:
+        # Loop exhausted without COMPLETED: surface a diagnosable warning rather
+        # than returning an ARN whose first invocation fails confusingly.
+        logger.warning(
+            "BDA OCR project %s not COMPLETED after ~120s (last status: %s); "
+            "first invocations may fail until it finishes provisioning",
+            project_arn,
+            status,
+        )
     return project_arn
 
 
-def build_profile_arn(region: str, account_id: str) -> str:
-    """Construct the standard data-automation profile ARN for a region/account."""
-    region_prefix = region.split("-")[0]
+# Geo prefixes used by BDA cross-region data-automation profiles. The naive
+# region.split("-")[0] is wrong for Asia Pacific (ap-* -> "apac", not "ap").
+_PROFILE_GEO_PREFIXES = {
+    "us": "us",
+    "eu": "eu",
+    "ap": "apac",
+    "ca": "ca",
+    "sa": "sa",
+}
+
+
+def build_profile_arn(region: str, account_id: str, partition: str = "aws") -> str:
+    """Construct the standard data-automation profile ARN for a region/account.
+
+    Args:
+        region: AWS region (e.g. ``us-west-2``, ``ap-southeast-2``).
+        account_id: AWS account id.
+        partition: AWS partition (``aws``, ``aws-us-gov``, ``aws-cn``); derived
+            by the caller from the session so the ARN is partition-correct.
+    """
+    geo = _PROFILE_GEO_PREFIXES.get(region.split("-")[0], region.split("-")[0])
     return (
-        f"arn:aws:bedrock:{region}:{account_id}:data-automation-profile/"
-        f"{region_prefix}.data-automation-v1"
+        f"arn:{partition}:bedrock:{region}:{account_id}:data-automation-profile/"
+        f"{geo}.data-automation-v1"
     )

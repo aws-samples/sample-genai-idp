@@ -1971,11 +1971,15 @@ class OcrService:
                     region=self.region
                 )
             if not self._bda_profile_arn:
-                account_id = boto3.client(
+                identity = boto3.client(
                     "sts", region_name=self.region
-                ).get_caller_identity()["Account"]
+                ).get_caller_identity()
+                account_id = identity["Account"]
+                # Derive the partition from the caller ARN (arn:<partition>:...)
+                # so the profile ARN is correct in GovCloud / China partitions.
+                partition = identity["Arn"].split(":")[1]
                 self._bda_profile_arn = bda_ocr.build_profile_arn(
-                    self.region, account_id
+                    self.region, account_id, partition
                 )
 
     def _run_bda_ocr(
@@ -2019,7 +2023,9 @@ class OcrService:
         raw_ocr_blocks = bda_ocr.bda_standard_output_to_textract_blocks(standard_output)
         parsed_text = bda_ocr.extract_markdown(standard_output)
         text_confidence_data = self._generate_text_confidence_data(raw_ocr_blocks)
-        metering = {"OCR/bda/standard_output": {"pages": 1}}
+        # Metering key maps to the pricing.yaml entry `bda/documents-standard`
+        # ($0.01/page) via reporting/save_reporting_data.py::_get_unit_cost.
+        metering = {"OCR/bda/documents-standard": {"pages": 1}}
 
         return raw_ocr_blocks, text_confidence_data, parsed_text, metering
 
