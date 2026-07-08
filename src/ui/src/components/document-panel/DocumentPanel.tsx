@@ -992,6 +992,7 @@ export const DocumentPanel = ({
           evaluationReportUri={displayedItem.evaluationReportUri}
           summaryReportUri={displayedItem.summaryReportUri}
           ruleValidationResultUri={displayedItem.ruleValidationResultUri}
+          evaluationStatus={displayedItem.evaluationStatus}
         />
         <SectionsPanel
           {...({

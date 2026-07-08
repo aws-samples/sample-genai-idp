@@ -19,6 +19,16 @@ class BaselineResult:
 
 
 @dataclass
+class UseAsBaselineResult:
+    """Result from promoting a processed document's output to the baseline."""
+
+    document_id: str
+    files_copied: int
+    evaluation_status: str  # "BASELINE_AVAILABLE" on success
+    timestamp: Optional[str] = None
+
+
+@dataclass
 class BaselineInfo:
     """Information about a baseline."""
 

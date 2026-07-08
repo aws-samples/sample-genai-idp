@@ -775,6 +775,12 @@ Resources:
               - ShouldCreateEvaluationBaselineBucket
               - !Ref EvaluationBaselineBucketName
               - !Ref EvaluationBaselineBucketName
+        # update_document_copy_status() writes EvaluationStatus (BASELINE_COPYING
+        # -> BASELINE_AVAILABLE/BASELINE_ERROR) to the tracking record. Without
+        # this the status write fails with AccessDeniedException (swallowed by
+        # the handler), so the UI never leaves NO_BASELINE/COMPLETED.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTableName
         - Statement:
             - Effect: Allow
               Action:
