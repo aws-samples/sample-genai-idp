@@ -39,6 +39,8 @@ interface ToolUsageDecision {
   actual?: boolean;
   mismatch?: boolean;
   explanation?: string;
+  tool_enabled?: boolean;
+  ocr_had_markdown_tables?: boolean;
 }
 
 interface CompletenessCheck {
@@ -89,6 +91,54 @@ interface PopulationCheck {
   empty_fields?: string[];
 }
 
+interface SizingPlan {
+  model_id?: string;
+  context_buffer?: number;
+  max_input_tokens?: number;
+  max_output_tokens?: number;
+  shard_token_budget?: number;
+  max_pages_per_shard?: number;
+  list_batch_size?: number;
+  overrides?: Record<string, unknown>;
+}
+
+interface AssessmentBatchSplitStats {
+  batch_count?: number;
+  concurrent_batches?: number;
+  derived_batch_size?: number;
+  configured_batch_size?: number;
+  escalation_model?: string;
+  truncated_calls?: number;
+  splits?: number;
+  rows_recovered_by_retry?: number;
+  rows_recovered_by_escalation?: number;
+  unrecoverable_rows?: number;
+}
+
+interface FlowStage {
+  key?: string;
+  label?: string;
+  detail?: string;
+  status?: string; // ok | info | warning | skipped
+  fanout?: number;
+  model?: string;
+}
+
+interface FlowRecovery {
+  truncated_calls?: number;
+  splits?: number;
+  rows_recovered_by_retry?: number;
+  rows_recovered_by_escalation?: number;
+  escalation_model?: string;
+  unrecoverable_rows?: number;
+  deadline_reached?: boolean;
+}
+
+interface ProcessingFlow {
+  stages?: FlowStage[];
+  recovery?: FlowRecovery | null;
+}
+
 interface ProcessingMetadata {
   extraction_method?: string;
   extraction_time_seconds?: number;
@@ -103,12 +153,29 @@ interface ProcessingMetadata {
   table_parsing_stats?: TableParsingStats;
   validation?: ValidationInfo;
   population_check?: PopulationCheck;
+  sizing_plan?: SizingPlan;
+  assessment_batch_split_stats?: AssessmentBatchSplitStats;
+  processing_flow?: ProcessingFlow;
+}
+
+interface ProcessingIssue {
+  stage?: string;
+  severity?: string; // "error" | "warning" | "info"
+  code?: string;
+  message?: string;
+  // GraphQL delivers camelCase (rootCause); the section result.json metadata
+  // delivers snake_case (root_cause). Accept both.
+  rootCause?: string;
+  root_cause?: string;
 }
 
 interface ProcessingReportTabProps {
   metadata?: ProcessingMetadata;
   processingReport?: string;
   inferenceResult?: Record<string, unknown>;
+  // Structured self-healing issues for this section (from the backend
+  // ProcessingIssue spine), surfaced at the top of the report.
+  processingIssues?: ProcessingIssue[];
 }
 
 // Count the items the extraction actually produced: total list rows across all
@@ -136,7 +203,115 @@ function pct(n: number | undefined): string {
   return `${Math.round(n * 100)}%`;
 }
 
-const ProcessingReportTab: React.FC<ProcessingReportTabProps> = ({ metadata, processingReport, inferenceResult }) => {
+/**
+ * Data-driven process-flow visual for the Processing Path section. Renders the
+ * backend's `processing_flow.stages` left-to-right (works for both simple and
+ * advanced), colors each stage by status, and stacks fanned-out stages (sharded
+ * extract / concurrent confidence) to convey parallelism. Uses recorded counts
+ * only (no fabricated per-inference timings).
+ */
+// Per-status flow-stage styling. Uses Cloudscape CSS custom properties (with hex
+// fallbacks, the established pattern in this app) so the boxes adapt to dark /
+// high-contrast modes, and pairs each status with a text MARK so status is never
+// conveyed by color alone (accessibility). `ok` is neutral (no mark).
+const STAGE_TONE: Record<string, { border: string; bg: string; mark: string }> = {
+  ok: {
+    border: 'var(--color-border-divider-default, #b6bec9)',
+    bg: 'var(--color-background-container-content, #ffffff)',
+    mark: '',
+  },
+  info: {
+    border: 'var(--color-border-status-info, #0972d3)',
+    bg: 'var(--color-background-status-info, #f0f8ff)',
+    mark: '● ',
+  },
+  warning: {
+    border: 'var(--color-border-status-warning, #f89256)',
+    bg: 'var(--color-background-status-warning, #fff7f0)',
+    mark: '⚠ ',
+  },
+  skipped: {
+    border: 'var(--color-border-divider-secondary, #d5dbdb)',
+    bg: 'var(--color-background-container-content, #fbfbfb)',
+    mark: '– ',
+  },
+};
+
+const StageBox: React.FC<{ label: string; sub?: string; status?: string; fanout?: number }> = ({ label, sub, status = 'ok', fanout }) => {
+  const tone = STAGE_TONE[status] || STAGE_TONE.ok;
+  const parallel = fanout && fanout > 1;
+  return (
+    <div style={{ position: 'relative' }}>
+      {/* Stacked "shadow" cards convey fan-out (sharded extract / concurrent confidence). */}
+      {parallel && (
+        <>
+          <div
+            style={{
+              position: 'absolute',
+              top: 4,
+              left: 4,
+              right: -4,
+              bottom: -4,
+              border: `1px solid ${tone.border}`,
+              borderRadius: 8,
+              background: tone.bg,
+              opacity: 0.5,
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              top: 2,
+              left: 2,
+              right: -2,
+              bottom: -2,
+              border: `1px solid ${tone.border}`,
+              borderRadius: 8,
+              background: tone.bg,
+              opacity: 0.75,
+            }}
+          />
+        </>
+      )}
+      <div
+        style={{
+          position: 'relative',
+          border: `1px solid ${tone.border}`,
+          borderRadius: 8,
+          padding: '6px 10px',
+          background: tone.bg,
+          minWidth: 96,
+          textAlign: 'center',
+          opacity: status === 'skipped' ? 0.6 : 1,
+        }}
+      >
+        <div style={{ fontSize: 12, fontWeight: 600 }}>
+          {tone.mark}
+          {label}
+          {parallel ? ` ×${fanout}` : ''}
+        </div>
+        {sub && <div style={{ fontSize: 11, color: '#5f6b7a' }}>{sub}</div>}
+      </div>
+    </div>
+  );
+};
+
+const Arrow: React.FC = () => <div style={{ alignSelf: 'center', color: '#5f6b7a' }}>→</div>;
+
+// Data-driven flow: renders whatever stages the backend recorded (works for both
+// simple and advanced), coloring each by status and stacking fanned-out stages.
+const ProcessFlow: React.FC<{ stages: FlowStage[] }> = ({ stages }) => (
+  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'stretch', paddingTop: 4 }}>
+    {stages.map((st, i) => (
+      <React.Fragment key={st.key || i}>
+        {i > 0 && <Arrow />}
+        <StageBox label={st.label || '?'} sub={st.detail} status={st.status} fanout={st.fanout} />
+      </React.Fragment>
+    ))}
+  </div>
+);
+
+const ProcessingReportTab: React.FC<ProcessingReportTabProps> = ({ metadata, processingReport, inferenceResult, processingIssues }) => {
   if (!metadata) {
     return (
       <Box padding="l" textAlign="center" color="text-status-inactive">
@@ -154,6 +329,14 @@ const ProcessingReportTab: React.FC<ProcessingReportTabProps> = ({ metadata, pro
   const tableToolUsed = metadata.table_parsing_tool_used === true;
 
   const { listRows, scalarFields, listFields } = summarizeResult(inferenceResult);
+
+  // Item 3: how the document was sized/split/batched (model-aware auto-sizing).
+  const sizing = metadata.sizing_plan;
+  const batchStats = metadata.assessment_batch_split_stats;
+  // Systematic flow (both simple and advanced) + explicit auto-recovery detail.
+  const flow = metadata.processing_flow;
+  const flowStages = flow?.stages || [];
+  const recovery = flow?.recovery;
 
   // ---- Build the list of issues to surface up top (plain language) ----
   const issues: { label: string; detail: string }[] = [];
@@ -188,8 +371,15 @@ const ProcessingReportTab: React.FC<ProcessingReportTabProps> = ({ metadata, pro
     });
   }
 
+  // Structured self-healing issues (backend ProcessingIssue spine). Worst
+  // severity drives the block's Alert type.
+  const structuredIssues = processingIssues || [];
+  const hasStructuredError = structuredIssues.some((i) => (i.severity || 'info').toLowerCase() === 'error');
+  const hasStructuredWarning = structuredIssues.some((i) => (i.severity || 'info').toLowerCase() === 'warning');
+  const structuredAlertType: 'error' | 'warning' | 'info' = hasStructuredError ? 'error' : hasStructuredWarning ? 'warning' : 'info';
+
   // Overall verdict
-  const allClear = issues.length === 0 && succeeded;
+  const allClear = issues.length === 0 && structuredIssues.length === 0 && succeeded;
 
   return (
     <SpaceBetween size="l">
@@ -258,6 +448,110 @@ const ProcessingReportTab: React.FC<ProcessingReportTabProps> = ({ metadata, pro
           )}
         </SpaceBetween>
       </Container>
+
+      {/* ---- Processing path: how the doc was sized / split / batched ---- */}
+      {(sizing || batchStats || flowStages.length > 0) && (
+        <Container header={<Header variant="h2">Processing Path</Header>}>
+          <SpaceBetween size="m">
+            {/* Systematic flow graph (rendered for BOTH simple and advanced):
+                OCR → Classify → Extract(→shards) → [Table tool] → [Escalation] →
+                Confidence(→batches) → Geometry — each stage colored by status. */}
+            {flowStages.length > 0 && <ProcessFlow stages={flowStages} />}
+            {/* Explicit "what failed and was recovered by retry" callout. */}
+            {recovery && (
+              <Box fontSize="body-s" padding="xs" color="text-body-secondary" variant="p">
+                <strong>⚠ Confidence auto-recovery:</strong>{' '}
+                {(recovery.truncated_calls || 0) > 0
+                  ? `${recovery.truncated_calls} confidence call(s) truncated at the model's output limit (batches split ${recovery.splits || 0}×). `
+                  : ''}
+                Recovered <strong>{(recovery.rows_recovered_by_retry || 0) + (recovery.rows_recovered_by_escalation || 0)}</strong> row(s)
+                {(recovery.rows_recovered_by_retry || 0) > 0 ? ` — ${recovery.rows_recovered_by_retry} by same-model retry` : ''}
+                {(recovery.rows_recovered_by_escalation || 0) > 0
+                  ? `, ${recovery.rows_recovered_by_escalation} by escalation to ${recovery.escalation_model || 'a stronger model'}`
+                  : ''}
+                .{' '}
+                {(recovery.unrecoverable_rows || 0) > 0 ? (
+                  <StatusIndicator type="error">{recovery.unrecoverable_rows} row(s) remained unscored</StatusIndicator>
+                ) : (
+                  <StatusIndicator type="success">All rows scored</StatusIndicator>
+                )}
+                {recovery.deadline_reached ? ' Stopped early on the Lambda wall-clock guard.' : ''}
+              </Box>
+            )}
+            {sizing && (
+              <ColumnLayout columns={4} variant="text-grid">
+                <div>
+                  <Box variant="awsui-key-label">Model window</Box>
+                  <Box>
+                    in {((sizing.max_input_tokens || 0) / 1000).toLocaleString()}K / out{' '}
+                    {((sizing.max_output_tokens || 0) / 1000).toLocaleString()}K
+                  </Box>
+                </div>
+                <div>
+                  <Box variant="awsui-key-label">Context buffer</Box>
+                  <Box>{Math.round((sizing.context_buffer || 0) * 100)}% kept free</Box>
+                </div>
+                <div>
+                  <Box variant="awsui-key-label">Shard budget (auto)</Box>
+                  <Box>
+                    ~{(sizing.shard_token_budget || 0).toLocaleString()} tok · {sizing.max_pages_per_shard} pg/shard
+                  </Box>
+                </div>
+                <div>
+                  <Box variant="awsui-key-label">Confidence batch (auto)</Box>
+                  <Box>{sizing.list_batch_size} rows/batch</Box>
+                </div>
+              </ColumnLayout>
+            )}
+            {batchStats && batchStats.batch_count ? (
+              <Box fontSize="body-s" color="text-body-secondary">
+                Confidence assessment ran in <strong>{batchStats.batch_count}</strong> batch(es)
+                {batchStats.concurrent_batches && batchStats.concurrent_batches > 1
+                  ? ` — ${batchStats.concurrent_batches}-way concurrent after a cache-warming call`
+                  : ' — sequential'}
+                {batchStats.derived_batch_size
+                  ? `; token-aware batch size ${batchStats.derived_batch_size} (configured ${batchStats.configured_batch_size ?? 'n/a'})`
+                  : ''}
+                {batchStats.escalation_model ? `; escalated to ${batchStats.escalation_model}` : ''}.
+              </Box>
+            ) : null}
+            {sizing?.overrides && Object.keys(sizing.overrides).length > 0 && (
+              <Box fontSize="body-s" color="text-status-inactive">
+                Manual size overrides in effect: {JSON.stringify(sizing.overrides)}
+              </Box>
+            )}
+          </SpaceBetween>
+        </Container>
+      )}
+
+      {/* ---- Structured self-healing issues (ProcessingIssue spine) ---- */}
+      {structuredIssues.length > 0 && (
+        <Alert type={structuredAlertType} header={`${structuredIssues.length} processing issue(s)`}>
+          <SpaceBetween size="xs">
+            {structuredIssues.map((iss, idx) => (
+              <Box key={`${iss.code ?? 'issue'}-${iss.message?.slice(0, 24) ?? idx}`}>
+                <StatusIndicator
+                  type={
+                    (iss.severity || 'info').toLowerCase() === 'error'
+                      ? 'error'
+                      : (iss.severity || 'info').toLowerCase() === 'warning'
+                        ? 'warning'
+                        : 'info'
+                  }
+                >
+                  {iss.code || iss.stage || 'issue'}
+                </StatusIndicator>{' '}
+                {iss.message}
+                {(iss.rootCause || iss.root_cause) && (
+                  <Box fontSize="body-s" color="text-body-secondary">
+                    Root cause: {iss.rootCause || iss.root_cause}
+                  </Box>
+                )}
+              </Box>
+            ))}
+          </SpaceBetween>
+        </Alert>
+      )}
 
       {/* ---- Issues / all-clear ---- */}
       {issues.length > 0 ? (
@@ -355,13 +649,35 @@ const ProcessingReportTab: React.FC<ProcessingReportTabProps> = ({ metadata, pro
           {isAgentic && (metadata.ocr_analysis || stats) && (
             <div>
               <Box variant="awsui-key-label">Table Extraction</Box>
-              <Box fontSize="body-s" padding={{ bottom: 'xs' }} color="text-body-secondary">
-                {tableToolUsed
-                  ? 'The deterministic table parser was used (parses tables from OCR text instead of having the model regenerate every row).'
-                  : metadata.ocr_analysis?.tool_usage_recommended || metadata.ocr_analysis?.recommendation_strength === 'MANDATORY'
-                    ? 'Large tables were detected but the deterministic table parser was not used for this section.'
-                    : 'No large tables detected; the deterministic table parser was not needed.'}
-              </Box>
+              {(() => {
+                const decision = metadata.tool_usage_decision;
+                const recommended =
+                  metadata.ocr_analysis?.tool_usage_recommended || metadata.ocr_analysis?.recommendation_strength === 'MANDATORY';
+                // Prefer the backend's explicit, reasoned explanation when the tool
+                // was recommended but not used — it states WHY (disabled / no
+                // Markdown tables in OCR / agent declined) rather than just "not used".
+                let text: string;
+                let warn = false;
+                if (tableToolUsed) {
+                  text =
+                    'The deterministic table parser was used (parses tables from OCR text instead of having the model regenerate every row).';
+                } else if (recommended && decision?.explanation) {
+                  text = decision.explanation;
+                  // Only a genuine "agent declined an available tool" is worth a warning tint.
+                  warn = decision.tool_enabled !== false && decision.ocr_had_markdown_tables !== false;
+                } else if (recommended) {
+                  text = 'Large tables were detected but the deterministic table parser was not used for this section.';
+                  warn = true;
+                } else {
+                  text = 'No large tables detected in the OCR text; the deterministic table parser was not needed.';
+                }
+                return (
+                  <Box fontSize="body-s" padding={{ bottom: 'xs' }} color={warn ? 'text-status-warning' : 'text-body-secondary'}>
+                    {warn ? '⚠ ' : ''}
+                    {text}
+                  </Box>
+                );
+              })()}
               <ColumnLayout columns={3} variant="text-grid">
                 {metadata.ocr_analysis?.estimated_row_count !== undefined && (
                   <div>

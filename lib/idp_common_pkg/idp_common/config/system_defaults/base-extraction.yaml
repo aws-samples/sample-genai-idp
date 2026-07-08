@@ -12,6 +12,16 @@ extraction:
   # Agentic extraction with table parsing (the "advanced" engine).
   agentic:
     enabled: false
+    # Sharding defaults: run agentic extraction on the Step Functions Distributed
+    # Map with token/page-budgeted shards so LARGE sections never hit the 900s
+    # single-agent Lambda timeout. The sharded path is idempotent (each shard
+    # persists to S3; an SFN retry re-runs only the failed shard), so advanced
+    # mode "always works" on big documents. Sharding engages only when a section
+    # actually exceeds one shard's budget; small sections still run single-pass.
+    runtime: step_functions
+    max_concurrent_batches: 10            # >1 enables sharding (upper bound on parallelism & shard count)
+    shard_token_budget: 0                 # 0 = auto-size from model context window (minus context_buffer)
+    max_pages_per_shard: 5                # page ceiling/shard (timeout-critical; fixed, not model-derived)
     table_parsing:
       enabled: true                         # Enable deterministic table parser tool
       max_empty_line_gap: 3                 # Tolerate page breaks and OCR noise
@@ -23,7 +33,11 @@ extraction:
       enabled: false                        # Full JSON-Schema validation of result (off by default)
       check_formats: true                   # Enforce 'format' keywords (date/email/uuid). ISO-8601 dates.
       fail_action: escalate                 # warn | escalate | reject
-      escalation_model: ""                  # Stronger model for re-extraction (empty = retry with same model)
+      # Stronger model for re-extraction on validation failure. Sonnet 5 with the
+      # 1M-context beta (:1m) is the default escalation target: top-tier quality,
+      # 128K output cap, and a 1M input window that helps re-extraction on large
+      # documents. (Empty = retry with the same extraction model.)
+      escalation_model: "us.anthropic.claude-sonnet-5:1m"
   image:
     target_width: ""
     target_height: ""

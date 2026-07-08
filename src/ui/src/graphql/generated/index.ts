@@ -400,6 +400,13 @@ export const getDocument = /* GraphQL */ `
           confidence
           confidenceThreshold
         }
+        ProcessingIssues {
+          stage
+          severity
+          code
+          message
+          rootCause
+        }
       }
       Pages {
         Id
@@ -428,6 +435,7 @@ export const getDocument = /* GraphQL */ `
       HITLReviewHistory
       ConfigVersion
       HITLCompleted
+      ProcessingIssueCount
       TraceId
     }
   }
@@ -756,6 +764,7 @@ export const listDocuments = /* GraphQL */ `
         HITLReviewedBy
         PageCount
         ConfidenceAlertCount
+        ProcessingIssueCount
       }
       nextToken
     }

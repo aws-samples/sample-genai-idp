@@ -355,6 +355,7 @@ export type Document = DynamoDbBase & {
   PK: Scalars['ID']['output'];
   PageCount?: Maybe<Scalars['Int']['output']>;
   Pages?: Maybe<Array<Maybe<Page>>>;
+  ProcessingIssueCount?: Maybe<Scalars['Int']['output']>;
   QueuedTime?: Maybe<Scalars['AWSDateTime']['output']>;
   RuleValidationResult?: Maybe<Scalars['AWSJSON']['output']>;
   RuleValidationResultUri?: Maybe<Scalars['String']['output']>;
@@ -390,6 +391,7 @@ export type DocumentListItem = DynamoDbBase & {
   InitialEventTime?: Maybe<Scalars['AWSDateTime']['output']>;
   ObjectKey?: Maybe<Scalars['ID']['output']>;
   PK: Scalars['ID']['output'];
+  ProcessingIssueCount?: Maybe<Scalars['Int']['output']>;
   SK: Scalars['ID']['output'];
 };
 
@@ -1159,6 +1161,14 @@ export type ProcessChangesResponse = {
   success: Scalars['Boolean']['output'];
 };
 
+export type ProcessingIssue = {
+  code?: Maybe<Scalars['String']['output']>;
+  message?: Maybe<Scalars['String']['output']>;
+  rootCause?: Maybe<Scalars['String']['output']>;
+  severity?: Maybe<Scalars['String']['output']>;
+  stage?: Maybe<Scalars['String']['output']>;
+};
+
 export type Query = {
   calculateCapacity?: Maybe<CapacityResult>;
   /**
@@ -1444,6 +1454,7 @@ export type Section = {
   Id?: Maybe<Scalars['String']['output']>;
   OutputJSONUri?: Maybe<Scalars['String']['output']>;
   PageIds?: Maybe<Array<Maybe<Scalars['Int']['output']>>>;
+  ProcessingIssues?: Maybe<Array<Maybe<ProcessingIssue>>>;
 };
 
 export type SectionInput = {

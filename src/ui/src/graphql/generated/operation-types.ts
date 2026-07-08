@@ -355,6 +355,7 @@ export type Document = DynamoDbBase & {
   PK: Scalars['ID']['output'];
   PageCount?: Maybe<Scalars['Int']['output']>;
   Pages?: Maybe<Array<Maybe<Page>>>;
+  ProcessingIssueCount?: Maybe<Scalars['Int']['output']>;
   QueuedTime?: Maybe<Scalars['AWSDateTime']['output']>;
   RuleValidationResult?: Maybe<Scalars['AWSJSON']['output']>;
   RuleValidationResultUri?: Maybe<Scalars['String']['output']>;
@@ -390,6 +391,7 @@ export type DocumentListItem = DynamoDbBase & {
   InitialEventTime?: Maybe<Scalars['AWSDateTime']['output']>;
   ObjectKey?: Maybe<Scalars['ID']['output']>;
   PK: Scalars['ID']['output'];
+  ProcessingIssueCount?: Maybe<Scalars['Int']['output']>;
   SK: Scalars['ID']['output'];
 };
 
@@ -1159,6 +1161,14 @@ export type ProcessChangesResponse = {
   success: Scalars['Boolean']['output'];
 };
 
+export type ProcessingIssue = {
+  code?: Maybe<Scalars['String']['output']>;
+  message?: Maybe<Scalars['String']['output']>;
+  rootCause?: Maybe<Scalars['String']['output']>;
+  severity?: Maybe<Scalars['String']['output']>;
+  stage?: Maybe<Scalars['String']['output']>;
+};
+
 export type Query = {
   calculateCapacity?: Maybe<CapacityResult>;
   /**
@@ -1444,6 +1454,7 @@ export type Section = {
   Id?: Maybe<Scalars['String']['output']>;
   OutputJSONUri?: Maybe<Scalars['String']['output']>;
   PageIds?: Maybe<Array<Maybe<Scalars['Int']['output']>>>;
+  ProcessingIssues?: Maybe<Array<Maybe<ProcessingIssue>>>;
 };
 
 export type SectionInput = {
@@ -2156,7 +2167,7 @@ export type GetDocumentQueryVariables = Exact<{
 }>;
 
 
-export type GetDocumentQuery = { getDocument?: { ObjectKey?: string | null, ObjectStatus?: string | null, InitialEventTime?: string | null, QueuedTime?: string | null, WorkflowStartTime?: string | null, CompletionTime?: string | null, WorkflowExecutionArn?: string | null, WorkflowStatus?: string | null, PageCount?: number | null, Metering?: string | null, EvaluationReportUri?: string | null, EvaluationStatus?: string | null, SummaryReportUri?: string | null, RuleValidationResultUri?: string | null, ExpiresAfter?: number | null, HITLStatus?: string | null, HITLTriggered?: boolean | null, HITLReviewURL?: string | null, HITLSectionsPending?: Array<string | null> | null, HITLSectionsCompleted?: Array<string | null> | null, HITLSectionsSkipped?: Array<string | null> | null, HITLReviewOwner?: string | null, HITLReviewOwnerEmail?: string | null, HITLReviewedBy?: string | null, HITLReviewedByEmail?: string | null, HITLReviewHistory?: string | null, ConfigVersion?: string | null, HITLCompleted?: boolean | null, TraceId?: string | null, Sections?: Array<{ Id?: string | null, PageIds?: Array<number | null> | null, Class?: string | null, OutputJSONUri?: string | null, Excluded?: boolean | null, ExclusionReason?: string | null, ConfidenceThresholdAlerts?: Array<{ attributeName?: string | null, confidence?: number | null, confidenceThreshold?: number | null } | null> | null } | null> | null, Pages?: Array<{ Id?: number | null, Class?: string | null, ImageUri?: string | null, TextUri?: string | null, TextConfidenceUri?: string | null, OcrPageDataUri?: string | null } | null> | null } | null };
+export type GetDocumentQuery = { getDocument?: { ObjectKey?: string | null, ObjectStatus?: string | null, InitialEventTime?: string | null, QueuedTime?: string | null, WorkflowStartTime?: string | null, CompletionTime?: string | null, WorkflowExecutionArn?: string | null, WorkflowStatus?: string | null, PageCount?: number | null, Metering?: string | null, EvaluationReportUri?: string | null, EvaluationStatus?: string | null, SummaryReportUri?: string | null, RuleValidationResultUri?: string | null, ExpiresAfter?: number | null, HITLStatus?: string | null, HITLTriggered?: boolean | null, HITLReviewURL?: string | null, HITLSectionsPending?: Array<string | null> | null, HITLSectionsCompleted?: Array<string | null> | null, HITLSectionsSkipped?: Array<string | null> | null, HITLReviewOwner?: string | null, HITLReviewOwnerEmail?: string | null, HITLReviewedBy?: string | null, HITLReviewedByEmail?: string | null, HITLReviewHistory?: string | null, ConfigVersion?: string | null, HITLCompleted?: boolean | null, ProcessingIssueCount?: number | null, TraceId?: string | null, Sections?: Array<{ Id?: string | null, PageIds?: Array<number | null> | null, Class?: string | null, OutputJSONUri?: string | null, Excluded?: boolean | null, ExclusionReason?: string | null, ConfidenceThresholdAlerts?: Array<{ attributeName?: string | null, confidence?: number | null, confidenceThreshold?: number | null } | null> | null, ProcessingIssues?: Array<{ stage?: string | null, severity?: string | null, code?: string | null, message?: string | null, rootCause?: string | null } | null> | null } | null> | null, Pages?: Array<{ Id?: number | null, Class?: string | null, ImageUri?: string | null, TextUri?: string | null, TextConfidenceUri?: string | null, OcrPageDataUri?: string | null } | null> | null } | null };
 
 export type GetDocumentCountQueryVariables = Exact<{
   startDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
@@ -2286,7 +2297,7 @@ export type ListDocumentsQueryVariables = Exact<{
 }>;
 
 
-export type ListDocumentsQuery = { listDocuments?: { nextToken?: string | null, Documents?: Array<{ PK: string, SK: string, ObjectKey?: string | null, ObjectStatus?: string | null, InitialEventTime?: string | null, CompletionTime?: string | null, ConfigVersion?: string | null, EvaluationStatus?: string | null, HITLStatus?: string | null, HITLTriggered?: boolean | null, HITLCompleted?: boolean | null, HITLReviewOwner?: string | null, HITLReviewedBy?: string | null, PageCount?: number | null, ConfidenceAlertCount?: number | null } | null> | null } | null };
+export type ListDocumentsQuery = { listDocuments?: { nextToken?: string | null, Documents?: Array<{ PK: string, SK: string, ObjectKey?: string | null, ObjectStatus?: string | null, InitialEventTime?: string | null, CompletionTime?: string | null, ConfigVersion?: string | null, EvaluationStatus?: string | null, HITLStatus?: string | null, HITLTriggered?: boolean | null, HITLCompleted?: boolean | null, HITLReviewOwner?: string | null, HITLReviewedBy?: string | null, PageCount?: number | null, ConfidenceAlertCount?: number | null, ProcessingIssueCount?: number | null } | null> | null } | null };
 
 export type ListDocumentsByDateRangeQueryVariables = Exact<{
   startDateTime: Scalars['AWSDateTime']['input'];

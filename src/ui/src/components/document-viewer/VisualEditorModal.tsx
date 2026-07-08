@@ -3535,6 +3535,11 @@ const VisualEditorModal = ({
                     | Record<string, unknown>
                     | undefined
                 }
+                processingIssues={
+                  (localJsonData?.metadata as Record<string, unknown> | undefined)?.processing_issues as
+                    | { stage?: string; severity?: string; code?: string; message?: string; rootCause?: string }[]
+                    | undefined
+                }
               />
             ),
           },

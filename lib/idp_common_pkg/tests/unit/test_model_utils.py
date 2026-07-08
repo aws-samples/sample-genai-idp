@@ -5,6 +5,7 @@
 
 import pytest
 from idp_common.bedrock.model_utils import (
+    get_model_max_input_tokens,
     get_model_max_output_tokens,
     parse_max_tokens_limit_from_error,
     parse_model_id,
@@ -49,6 +50,22 @@ class TestModelConfigLimitsSources:
     in the UI) is authoritative; the disk YAML is the offline fallback — the
     same split pricing.yaml uses. Nothing is bundled into the wheel anymore.
     """
+
+    def test_input_window_base_vs_1m(self):
+        """get_model_max_input_tokens resolves the base 200K window and the :1m
+        1M window distinctly (the :1m pattern must win, being listed first)."""
+        assert get_model_max_input_tokens("us.anthropic.claude-sonnet-5") == 200000
+        assert get_model_max_input_tokens("us.anthropic.claude-sonnet-5:1m") == 1000000
+        assert get_model_max_input_tokens("us.amazon.nova-lite-v1:0") == 300000
+        # Other Claude 4.x :1m still gets 1M input (64K output family).
+        assert (
+            get_model_max_input_tokens("us.anthropic.claude-sonnet-4-20250514-v1:0:1m")
+            == 1000000
+        )
+
+    def test_input_window_unknown_model_raises(self):
+        with pytest.raises(ValueError):
+            get_model_max_input_tokens("some.unknown.model-v9:0")
 
     def test_no_wheel_bundled_copy(self):
         """The old in-package duplicate must not come back (drift hazard)."""

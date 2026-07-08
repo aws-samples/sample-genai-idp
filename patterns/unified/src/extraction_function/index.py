@@ -317,12 +317,22 @@ def handler(event, context):
     metrics.put_metric('InputDocuments', 1)
     metrics.put_metric('InputDocumentPages', len(section.page_ids))
     
+    # Wall-clock deadline for the in-shard assessment self-healing ladder (1.5):
+    # convert the Lambda's remaining-time budget into an absolute epoch so the
+    # assessment escalation ladder stops before a hard task timeout.
+    deadline_epoch = None
+    try:
+        deadline_epoch = time.time() + (context.get_remaining_time_in_millis() / 1000.0)
+    except Exception:  # noqa: BLE001 - context may be absent in local/test runs
+        deadline_epoch = None
+
     # Process the section in our focused document
     t0 = time.time()
     section_document = extraction_service.process_document_section(
         document=section_document,
         section_id=section_id,
         checkpoint_data=checkpoint_data,
+        deadline_epoch=deadline_epoch,
     )
     t1 = time.time()
     logger.info(f"Total extraction time: {t1-t0:.2f} seconds")

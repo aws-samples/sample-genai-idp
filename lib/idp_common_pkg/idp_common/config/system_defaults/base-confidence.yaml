@@ -36,7 +36,20 @@ extraction:
     # max_tokens is not configurable: the confidence pass always requests the
     # model's maximum output (config_library/model_config_limits.yaml) so long
     # list assessments are never truncated.
+    # UPPER bound on rows per assessment batch. The self-healing ladder derives a
+    # smaller token-aware first-pass size when the confidence model's output cap
+    # would truncate this many rows (e.g. Nova Lite + llm_grounded geometry).
     list_batch_size: "25"
+    # Self-healing ladder (make advanced mode complete first-time). When rows come
+    # back unscored after token-aware batch shrinking + same-model retries, the
+    # still-missing rows are re-assessed on a stronger confidence model (bigger
+    # output cap). ON by default. Sonnet 5 (1M-context beta, :1m) is the default
+    # escalation target: its 128K output cap fixes the small-cap truncation that
+    # Nova Lite (10K) hits, and it matches the extraction escalation model. Empty
+    # = skip the model step (per-class override: x-aws-idp-confidence-escalation-model).
+    escalation_enabled: true
+    escalation_model: "us.anthropic.claude-sonnet-5:1m"
+    max_escalation_rounds: "2"
     image:
       target_height: ""
       target_width: ""

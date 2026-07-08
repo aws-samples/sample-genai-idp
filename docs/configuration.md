@@ -687,12 +687,42 @@ Patterns 2 and 3 support multiple OCR backend engines for flexible document proc
 ```yaml
 ocr:
   backend: textract  # or "bedrock", "none"
-  
+
+  # Textract features. DEFAULT: TABLES + LAYOUT (see trade-off below).
+  features:
+    - name: TABLES
+    - name: LAYOUT
+
   # For Bedrock backend:
   bedrock_model: us.anthropic.claude-3-5-sonnet-20241022-v2:0
   system_prompt: "You are an OCR expert..."
   task_prompt: "Extract all text from this document..."
 ```
+
+### Textract features & the TABLES cost/accuracy trade-off
+
+`ocr.features` selects which Amazon Textract analysis features run. The default is
+**`TABLES` + `LAYOUT`**.
+
+- **`TABLES` is on by default because tables are common and the accuracy gain is
+  large.** It makes Textract emit structured Table/Cell blocks (with per-cell text,
+  confidence, and geometry) that linearize into clean Markdown pipe-tables for the
+  agentic table parser — yielding more complete extraction *and* more accurate
+  confidence/geometry on table-heavy documents. In validation on a 24-page
+  brokerage statement, `TABLES` extracted **all 1,440 rows (every page)** while
+  `LAYOUT`-only silently dropped ~5 pages (~300 rows) where the plain-text
+  linearization mis-segmented the table.
+- **Cost trade-off** (`TABLES`+`LAYOUT` ≈ **$0.065/page** vs `LAYOUT`-only ≈
+  **$0.004/page**, ~16× on the Textract line item):
+  - **Documents *with* tables:** the extra OCR cost is typically *more*
+    cost-effective and scalable end-to-end — cleaner cell structure means fewer LLM
+    extraction retries, fewer confidence truncations/re-batches, and less downstream
+    correction than fighting a mis-linearized plain-text table.
+  - **Documents *without* tables:** `TABLES` adds cost with no benefit. If your
+    corpus is table-free (forms, prose, single-value docs), **remove the `TABLES`
+    entry** to fall back to cheaper `LAYOUT`-only OCR.
+
+Set `ocr.features` per configuration to match the documents each stack processes.
 
 ### Bedrock OCR Benefits
 
