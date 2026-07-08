@@ -35,6 +35,7 @@ https://github.com/user-attachments/assets/3d448a74-ba5b-4a4a-96ad-ec03ac0b4d7d
   - [reprocess](#reprocess--rerun-inference)
   - [status](#status)
   - [download-results](#download-results)
+  - [use-as-baseline](#use-as-baseline)
   - [delete-documents](#delete-documents)
   - [generate-manifest](#generate-manifest)
   - [validate-manifest](#validate-manifest)
@@ -1131,6 +1132,41 @@ idp-cli download-results \
             ├── report.json              # Detailed metrics
             └── report.md                # Human-readable report
 ```
+
+---
+
+### `use-as-baseline`
+
+Promote a processed document's output to the evaluation baseline — the
+scriptable equivalent of the web UI's **Use as Evaluation Baseline** button.
+Copies every output object for the document into the evaluation baseline bucket
+and sets the document's `EvaluationStatus` to `BASELINE_AVAILABLE`. Runs
+synchronously (returns once the copy is complete).
+
+Use this to capture a manually validated result as the "ground truth" that
+future re-runs of the same document are evaluated against.
+
+**Usage:**
+```bash
+idp-cli use-as-baseline [OPTIONS]
+```
+
+**Options:**
+- `--stack-name` (required): CloudFormation stack name
+- `--document-id` (required): Document object key (S3 key) of a processed document, e.g. `loan-12345/package.pdf`
+- `--region`: AWS region (optional)
+
+**Example:**
+
+```bash
+idp-cli use-as-baseline \
+    --stack-name my-stack \
+    --document-id loan-12345/package.pdf
+```
+
+The document must have finished processing (its output prefix must exist); the
+caller's IAM credentials need read on the output bucket and write on the
+evaluation baseline bucket and tracking table.
 
 ---
 
