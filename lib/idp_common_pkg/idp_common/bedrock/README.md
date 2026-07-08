@@ -359,8 +359,14 @@ Different Bedrock models implement these parameters with varying defaults, namin
     `xhigh`/`max`) maps to `additionalModelRequestFields.output_config.effort`.
     Ignored for Sonnet 4.5 / Haiku 4.5 (they 400 on it). `budget_tokens` is
     rejected — use effort. Verified live: effort changes output-token spend.
-  - **max_tokens**: extraction/confidence pass `max_tokens=None`, so the client
-    resolves the model maximum from `get_model_max_output_tokens()`. The limits
+  - **max_tokens**: an OPTIONAL cap. It is `Optional[int]` in every service
+    config (default `None`; an empty string in stored config also parses to
+    `None`), and each service passes the value straight through. When `None`
+    the client resolves the model maximum from `get_model_max_output_tokens()`
+    — so leaving it unset (the default everywhere) means "use the model's max
+    output". Set a positive value only to cap output below the model max. OCR
+    passes `None` (no config knob); extraction/confidence have no `max_tokens`
+    field at all and always request the model maximum. The limits
     come from the DynamoDB Configuration Table when `CONFIGURATION_TABLE_NAME`
     is set (seeded from `config_library/model_config_limits.yaml` at deploy and
     editable in the web UI under "View / Edit Model Limits"; cached ~60s per

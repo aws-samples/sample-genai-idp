@@ -38,6 +38,25 @@ from typing_extensions import Self
 CONFIG_FORMAT_VERSION = "0.6"
 
 
+def _parse_optional_max_tokens(v: Any) -> Optional[int]:
+    """Parse an optional max_tokens value from config.
+
+    max_tokens is an optional cap on model output. An empty string, ``None``,
+    or a value that coerces to 0 means "unset" — the Bedrock client then
+    resolves the selected model's maximum output limit
+    (model_config_limits.yaml). A positive int/string is used as an upper cap.
+    """
+    if v is None:
+        return None
+    if isinstance(v, str):
+        v = v.strip()
+        if not v:
+            return None
+        v = int(v)
+    v = int(v)
+    return v if v > 0 else None
+
+
 class ImageConfig(BaseModel):
     """Image processing configuration"""
 
@@ -795,10 +814,10 @@ class ClassificationConfig(BaseModel):
             "without an effort control (Nova, Sonnet 4.5, Haiku 4.5)."
         ),
     )
-    max_tokens: int = Field(
-        default=4096,
+    max_tokens: Optional[int] = Field(
+        default=None,
         gt=0,
-        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+        description="Optional cap on output tokens. Leave empty to use the selected model's maximum output limit (recommended). If set, it must not exceed the model's limit.",
     )
     maxPagesForClassification: str = Field(
         default="ALL",
@@ -846,11 +865,9 @@ class ClassificationConfig(BaseModel):
 
     @field_validator("max_tokens", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any) -> Optional[int]:
+        """Parse optional max_tokens (empty/0 -> None = use model max)."""
+        return _parse_optional_max_tokens(v)
 
     @field_validator("maxPagesForClassification", mode="before")
     @classmethod
@@ -961,10 +978,10 @@ class SummarizationConfig(BaseModel):
             "without an effort control (Nova, Sonnet 4.5, Haiku 4.5)."
         ),
     )
-    max_tokens: int = Field(
-        default=4096,
+    max_tokens: Optional[int] = Field(
+        default=None,
         gt=0,
-        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+        description="Optional cap on output tokens. Leave empty to use the selected model's maximum output limit (recommended). If set, it must not exceed the model's limit.",
     )
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
@@ -977,11 +994,9 @@ class SummarizationConfig(BaseModel):
 
     @field_validator("max_tokens", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any) -> Optional[int]:
+        """Parse optional max_tokens (empty/0 -> None = use model max)."""
+        return _parse_optional_max_tokens(v)
 
 
 class ChatConfig(BaseModel):
@@ -1021,12 +1036,13 @@ class ChatConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
-    max_tokens: int = Field(
-        default=4096,
+    max_tokens: Optional[int] = Field(
+        default=None,
         gt=0,
         description=(
-            "Maximum number of output (response) tokens. Ensure this does "
-            "not exceed the selected model's limit."
+            "Optional cap on output (response) tokens. Leave empty to use the "
+            "selected model's maximum output limit (recommended). If set, it "
+            "must not exceed the model's limit."
         ),
     )
     reasoning_effort: str = Field(
@@ -1050,11 +1066,9 @@ class ChatConfig(BaseModel):
 
     @field_validator("max_tokens", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any) -> Optional[int]:
+        """Parse optional max_tokens (empty/0 -> None = use model max)."""
+        return _parse_optional_max_tokens(v)
 
 
 class OCRFeature(BaseModel):
@@ -1765,10 +1779,10 @@ class FactExtractionConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.01, ge=0.0, le=1.0)
     top_k: float = Field(default=20.0, ge=0.0)
-    max_tokens: int = Field(
-        default=4096,
+    max_tokens: Optional[int] = Field(
+        default=None,
         gt=0,
-        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+        description="Optional cap on output tokens. Leave empty to use the selected model's maximum output limit (recommended). If set, it must not exceed the model's limit.",
     )
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
@@ -1780,10 +1794,9 @@ class FactExtractionConfig(BaseModel):
 
     @field_validator("max_tokens", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any) -> Optional[int]:
+        """Parse optional max_tokens (empty/0 -> None = use model max)."""
+        return _parse_optional_max_tokens(v)
 
 
 class RuleValidationOrchestratorConfig(BaseModel):
@@ -1800,10 +1813,10 @@ class RuleValidationOrchestratorConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.01, ge=0.0, le=1.0)
     top_k: float = Field(default=20.0, ge=0.0)
-    max_tokens: int = Field(
-        default=4096,
+    max_tokens: Optional[int] = Field(
+        default=None,
         gt=0,
-        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+        description="Optional cap on output tokens. Leave empty to use the selected model's maximum output limit (recommended). If set, it must not exceed the model's limit.",
     )
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
@@ -1815,10 +1828,9 @@ class RuleValidationOrchestratorConfig(BaseModel):
 
     @field_validator("max_tokens", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any) -> Optional[int]:
+        """Parse optional max_tokens (empty/0 -> None = use model max)."""
+        return _parse_optional_max_tokens(v)
 
 
 class RuleValidationConfig(BaseModel):
@@ -1875,10 +1887,10 @@ class EvaluationLLMMethodConfig(BaseModel):
     """Evaluation LLM method configuration"""
 
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
-    max_tokens: int = Field(
-        default=4096,
+    max_tokens: Optional[int] = Field(
+        default=None,
         gt=0,
-        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+        description="Optional cap on output tokens. Leave empty to use the selected model's maximum output limit (recommended). If set, it must not exceed the model's limit.",
     )
     top_k: float = Field(default=5.0, ge=0.0)
     reasoning_effort: str = Field(
@@ -1938,11 +1950,9 @@ class EvaluationLLMMethodConfig(BaseModel):
 
     @field_validator("max_tokens", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any) -> Optional[int]:
+        """Parse optional max_tokens (empty/0 -> None = use model max)."""
+        return _parse_optional_max_tokens(v)
 
 
 class EvaluationConfig(BaseModel):
@@ -1964,10 +1974,10 @@ class DiscoveryModelConfig(BaseModel):
     system_prompt: str = Field(default="", description="System prompt for discovery")
     temperature: float = Field(default=1.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
-    max_tokens: int = Field(
-        default=10000,
+    max_tokens: Optional[int] = Field(
+        default=None,
         gt=0,
-        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+        description="Optional cap on output tokens. Leave empty to use the selected model's maximum output limit (recommended). If set, it must not exceed the model's limit.",
     )
     user_prompt: str = Field(
         default="", description="User prompt template for discovery"
@@ -1983,11 +1993,9 @@ class DiscoveryModelConfig(BaseModel):
 
     @field_validator("max_tokens", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any) -> Optional[int]:
+        """Parse optional max_tokens (empty/0 -> None = use model max)."""
+        return _parse_optional_max_tokens(v)
 
 
 class MultiDocumentDiscoveryConfig(BaseModel):
@@ -2011,11 +2019,12 @@ class MultiDocumentDiscoveryConfig(BaseModel):
         le=1.0,
         description="Temperature for cluster analysis model",
     )
-    max_tokens: int = Field(
-        default=10000,
+    max_tokens: Optional[int] = Field(
+        default=None,
         gt=0,
-        description="Maximum output tokens for cluster analysis. "
-        "Ensure this does not exceed the selected model's limit.",
+        description="Optional cap on output tokens for cluster analysis. Leave "
+        "empty to use the selected model's maximum output limit (recommended). "
+        "If set, it must not exceed the model's limit.",
     )
     max_documents: int = Field(
         default=500,
@@ -2061,7 +2070,6 @@ class MultiDocumentDiscoveryConfig(BaseModel):
         return float(v)
 
     @field_validator(
-        "max_tokens",
         "max_documents",
         "min_cluster_size",
         "num_sample_documents",
@@ -2076,6 +2084,12 @@ class MultiDocumentDiscoveryConfig(BaseModel):
         if isinstance(v, str):
             return int(v) if v else 0
         return int(v)
+
+    @field_validator("max_tokens", mode="before")
+    @classmethod
+    def parse_max_tokens(cls, v: Any) -> Optional[int]:
+        """Parse optional max_tokens (empty/0 -> None = use model max)."""
+        return _parse_optional_max_tokens(v)
 
 
 class RuleDiscoveryAgenticConfig(BaseModel):
@@ -2107,7 +2121,11 @@ class RuleDiscoveryConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.0, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
-    max_tokens: int = Field(default=64000, gt=0)
+    max_tokens: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Optional cap on output tokens. Leave empty to use the selected model's maximum output limit (recommended). If set, it must not exceed the model's limit.",
+    )
     agentic: RuleDiscoveryAgenticConfig = Field(
         default_factory=RuleDiscoveryAgenticConfig,
         description="Agentic rule discovery configuration",
@@ -2123,11 +2141,9 @@ class RuleDiscoveryConfig(BaseModel):
 
     @field_validator("max_tokens", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any) -> Optional[int]:
+        """Parse optional max_tokens (empty/0 -> None = use model max)."""
+        return _parse_optional_max_tokens(v)
 
     @model_validator(mode="after")
     def set_default_review_agent_model(self) -> Self:

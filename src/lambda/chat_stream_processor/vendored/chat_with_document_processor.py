@@ -247,11 +247,32 @@ def _resolve_chat_settings(config_version: str | None):
         except (TypeError, ValueError):
             return default
 
+    # max_tokens is an optional cap. When unset (empty/None) resolve the
+    # selected model's maximum output limit — the streaming path below needs a
+    # concrete int for the Converse ``inferenceConfig.maxTokens`` field (there
+    # is no "use model max" sentinel in the API). Fall back to 4096 only if the
+    # model is unknown to the limits table.
+    def _resolve_max_tokens() -> int:
+        raw = chat_cfg.get("max_tokens")
+        if raw not in (None, ""):
+            return _to_int(raw, 4096)
+        try:
+            from idp_common.bedrock.model_utils import get_model_max_output_tokens
+
+            return get_model_max_output_tokens(model_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Could not resolve model max output tokens for %s: %s; using 4096",
+                model_id,
+                e,
+            )
+            return 4096
+
     return {
         "model_id": model_id,
         "system_prompt": system_prompt,
         "temperature": _to_float(chat_cfg.get("temperature"), 0.0),
-        "max_tokens": _to_int(chat_cfg.get("max_tokens"), 4096),
+        "max_tokens": _resolve_max_tokens(),
         "reasoning_effort": chat_cfg.get("reasoning_effort") or "medium",
     }
 
