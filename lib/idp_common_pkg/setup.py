@@ -88,6 +88,15 @@ extras_require = {
         "strands-agents-tools==0.2.22",  # Pin to exact working version
         "bedrock-agentcore>=0.1.1",  # Specifically for the code interpreter tool
         "regex>=2024.0.0,<2026.0.0",  # Pin regex version to avoid conflicts
+        "jsonschema>=4.0.0",  # Quick-Start agent synthesis tools (schema authoring)
+    ],
+    # Synthesis / cold-start bootstrap. The schema bridge, prompt->schema
+    # authoring, catalog match and orchestration use only core deps. The heavy
+    # SEED document generator is an optional add-on whose packaging mechanism
+    # (pip package vs git submodule) is owned by the SEED team; declare it here
+    # once that contract is finalized.
+    "synthesis": [
+        "jsonschema>=4.0.0",
     ],
     # Full package with all dependencies
     "all": [
@@ -107,6 +116,7 @@ extras_require = {
         "strands-agents-tools==0.2.22",  # Pin to exact working version
         "bedrock-agentcore>=0.1.1",
         "regex>=2024.0.0,<2026.0.0",
+        "jsonschema>=4.0.0",
     ],
 }
 

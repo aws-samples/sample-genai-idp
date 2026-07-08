@@ -16,7 +16,6 @@ exclude = [
 
 # Include YAML and MD files for system defaults configuration
 [tool.setuptools.package-data]
-"idp_common.config" = ["model_config_limits.yaml"]
 "idp_common.config.system_defaults" = ["*.yaml", "*.md"]
 "idp_common.discovery.prompts" = ["*.jinja2"]
 
@@ -113,6 +112,7 @@ agents = [
   "strands-agents==1.14.0; python_version>='3.10'",
   "strands-agents-tools==0.2.22; python_version>='3.10'",
   "bedrock-agentcore>=0.1.1; python_version>='3.10'",    # Specifically for the code interpreter tool
+  "jsonschema>=4.0.0",
 ]
 
 # Multi-document discovery dependencies (clustering + agent analysis)
@@ -124,6 +124,11 @@ multi_document_discovery = [
   "pypdfium2>=5.5.0",          # PDF page rendering
   "jinja2>=3.1.0",             # Prompt template rendering
   "strands-agents==1.14.0; python_version>='3.10'",  # Agentic schema generation
+]
+
+# Synthesis / cold-start bootstrap dependencies
+synthesis = [
+  "jsonschema>=4.0.0",
 ]
 
 # Code intelligence module dependencies
@@ -191,6 +196,7 @@ all = [
   "strands-agents==1.14.0; python_version>='3.10'",
   "strands-agents-tools==0.2.22; python_version>='3.10'",
   "bedrock-agentcore>=0.1.1; python_version>='3.10'",
+  "jsonschema>=4.0.0",
   # "s3fs==2023.12.2" - - disabled till we fix package dependencies
 ]
 agentic-extraction = [

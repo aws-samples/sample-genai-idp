@@ -115,19 +115,10 @@ Both datasets share these deployment characteristics:
 - **Smart Updates**: Skips re-download on stack updates unless version changes
 - **Single Public Source**: Everything from HuggingFace - fully reproducible anywhere
 
-- **First Deployment**: Adds ~5-10 minutes to stack deployment (downloads PDFs and metadata)
-- **Stack Updates**: Near-instant (skips if version unchanged)
->>>>>>> develop
-- **Version Updates**: Re-downloads and re-processes when DatasetVersion changes
 ### Deployment Time
 
 - **First Deployment**: Adds ~15-20 minutes to stack deployment (downloads all three datasets)
 - **Stack Updates**: Near-instant (skips if versions unchanged)
-- **Version Updates**: Re-downloads and re-processes when DatasetVersion changes
-=======
-- **First Deployment**: Adds ~5-10 minutes to stack deployment (downloads PDFs and metadata)
-- **Stack Updates**: Near-instant (skips if version unchanged)
->>>>>>> develop
 - **Version Updates**: Re-downloads and re-processes when DatasetVersion changes
 
 ### Usage

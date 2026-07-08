@@ -36,22 +36,10 @@ model_limits:
   # IDs carry a version segment between the family and the suffix, e.g.
   # 'claude-opus-4-7-20250514-v1:0:1m'. First match wins, so the 128K-output
   # families are listed before the 64K catch-all.
-  - pattern: "claude-opus-4-(7|8).*:1m"
+  - pattern: "claude-(opus-4-(6|7|8)|sonnet-5|sonnet-4-6).*:1m"
     max_output_tokens: 128000
     max_input_tokens: 1000000
-    description: "Claude Opus 4.7/4.8 extended-context (:1m) — 1M input"
-  - pattern: "claude-opus-4-6.*:1m"
-    max_output_tokens: 128000
-    max_input_tokens: 1000000
-    description: "Claude Opus 4.6 extended-context (:1m) — 1M input"
-  - pattern: "claude-sonnet-5.*:1m"
-    max_output_tokens: 128000
-    max_input_tokens: 1000000
-    description: "Claude Sonnet 5 extended-context (:1m) — 1M input"
-  - pattern: "claude-sonnet-4-6.*:1m"
-    max_output_tokens: 128000
-    max_input_tokens: 1000000
-    description: "Claude Sonnet 4.6 extended-context (:1m) — 1M input"
+    description: "Claude Opus 4.6/4.7/4.8, Sonnet 5, Sonnet 4.6 extended-context (:1m) — 1M input"
   - pattern: "claude-(opus|sonnet|haiku)-4.*:1m"
     max_output_tokens: 64000
     max_input_tokens: 1000000

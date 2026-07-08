@@ -212,6 +212,7 @@ export default defineConfig({
         {
           label: "Migration",
           items: [
+            { label: "v0.5 → v0.6 Migration", slug: "migration-v05-to-v06" },
             { label: "v0.4 → v0.5 Migration", slug: "migration-v04-to-v05" },
             {
               label: "Granular Assessment Retirement",

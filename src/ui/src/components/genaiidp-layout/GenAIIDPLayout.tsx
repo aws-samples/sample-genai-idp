@@ -10,6 +10,7 @@ import { DocumentsContext } from '../../contexts/documents';
 import { Document } from '../../types/documents';
 
 import useNotifications from '../../hooks/use-notifications';
+import { mapNotificationsToFlashbar } from '../common/notification-flashbar';
 import useGraphQlApi from '../../hooks/use-graphql-api';
 import useAppContext from '../../contexts/app';
 
@@ -28,6 +29,7 @@ import Breadcrumbs from './breadcrumbs';
 import ToolsPanel from './tools-panel';
 import ConfigurationLayout from '../configuration-layout';
 import PricingLayout from '../pricing-layout';
+import ModelConfigLimitsLayout from '../model-config-limits-layout';
 import CapacityPlanningLayout from '../capacity-planning/CapacityPlanningLayout';
 import CustomModelsLayout from '../custom-models/CustomModelsLayout';
 import { FinetuningJobDetail } from '../custom-models';
@@ -115,7 +117,7 @@ const GenAIIDPLayout = ({ children, tools }: GenAIIDPLayoutProps): React.JSX.Ele
         navigationOpen={navigationOpen}
         onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
         breadcrumbs={<Breadcrumbs />}
-        notifications={<Flashbar items={notifications as import('@cloudscape-design/components').FlashbarProps.MessageDefinition[]} />}
+        notifications={<Flashbar items={mapNotificationsToFlashbar(notifications)} />}
         tools={tools ?? <ToolsPanel />}
         toolsOpen={toolsOpen}
         onToolsChange={({ detail }) => setToolsOpen(detail.open)}
@@ -127,6 +129,7 @@ const GenAIIDPLayout = ({ children, tools }: GenAIIDPLayoutProps): React.JSX.Ele
               <Route path="agents" element={<DocumentsAgentsLayout />} />
               <Route path="config" element={<ConfigurationLayout />} />
               <Route path="pricing" element={<PricingLayout />} />
+              <Route path="model-limits" element={<ModelConfigLimitsLayout />} />
               <Route path="capacity-planning" element={<CapacityPlanningLayout />} />
               <Route path="custom-models" element={<CustomModelsLayout />} />
               <Route path="custom-models/:jobId" element={<FinetuningJobDetail />} />

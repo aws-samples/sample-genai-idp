@@ -89,6 +89,7 @@ const TestStudioLayout = (): React.JSX.Element => {
 
   return (
     <AppLayout
+      headerSelector="#top-navigation"
       ariaLabels={appLayoutLabels}
       navigation={<Navigation />}
       navigationOpen={navigationOpen}

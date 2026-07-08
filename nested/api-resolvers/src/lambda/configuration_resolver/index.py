@@ -12,11 +12,12 @@ from boto3.dynamodb.conditions import Key as DDBKey
 from idp_common.config.configuration_manager import ConfigurationManager
 from idp_common.config.constants import (
     CONFIG_TYPE_CONFIG,
+    CONFIG_TYPE_DEFAULT_MODEL_CONFIG_LIMITS,
     CONFIG_TYPE_DEFAULT_PRICING,
     CONFIG_TYPE_SCHEMA,
     DEFAULT_VERSION,
 )
-from idp_common.config.models import IDPConfig, PricingConfig
+from idp_common.config.models import IDPConfig, ModelConfigLimitsConfig, PricingConfig
 from idp_common.utils.log_sanitizer import sanitize_event_for_logging
 
 from pydantic import ValidationError
@@ -63,6 +64,8 @@ _OPERATION_REQUIRED_GROUPS = {
     "deleteConfigVersion": {"Admin"},
     "updatePricing": {"Admin"},
     "restoreDefaultPricing": {"Admin"},
+    "updateModelConfigLimits": {"Admin"},
+    "restoreDefaultModelConfigLimits": {"Admin"},
     # Admin + Author writes
     "updateConfiguration": {"Admin", "Author"},
     "setActiveVersion": {"Admin", "Author"},
@@ -70,6 +73,7 @@ _OPERATION_REQUIRED_GROUPS = {
     "getConfigVersions": {"Admin", "Author", "Viewer"},
     "getConfigVersion": {"Admin", "Author", "Viewer"},
     "getPricing": {"Admin", "Author", "Viewer"},
+    "getModelConfigLimits": {"Admin", "Author", "Viewer"},
     "listConfigurationLibrary": {"Admin", "Author", "Viewer"},
     "getConfigurationLibraryFile": {"Admin", "Author", "Viewer"},
 }
@@ -307,6 +311,14 @@ def handler(event, context):
             return handle_update_pricing(manager, pricing_config)
         elif operation == "restoreDefaultPricing":
             return handle_restore_default_pricing(manager)
+        elif operation == "getModelConfigLimits":
+            return handle_get_model_config_limits(manager)
+        elif operation == "updateModelConfigLimits":
+            args = event["arguments"]
+            model_config_limits = args.get("modelConfigLimits")
+            return handle_update_model_config_limits(manager, model_config_limits)
+        elif operation == "restoreDefaultModelConfigLimits":
+            return handle_restore_default_model_config_limits(manager)
         elif operation == "listConfigurationLibrary":
             return handle_list_config_library(event["arguments"])
         elif operation == "getConfigurationLibraryFile":
@@ -788,6 +800,195 @@ def handle_restore_default_pricing(manager):
             "error": {
                 "type": "Error",
                 "message": f"Failed to restore default pricing: {str(e)}",
+            },
+        }
+
+
+def handle_get_model_config_limits(manager):
+    """
+    Handle the getModelConfigLimits GraphQL query
+    Returns both effective and default model limits for UI diff/restore features
+
+    Mirrors the DefaultPricing/CustomPricing pattern, except Custom stores the
+    FULL replacement list (model_limits is ordered, first-match-wins):
+    - DefaultModelConfigLimits: baseline seeded from config_library/model_config_limits.yaml
+    - CustomModelConfigLimits: complete user-edited replacement list
+    - Returns:
+      - modelConfigLimits: Effective result (Custom if present, else Default)
+      - defaultModelConfigLimits: Original defaults for diff highlighting and restore
+
+    Returns: { success: bool, modelConfigLimits: {...}, defaultModelConfigLimits: {...}, error: {...} }
+    """
+    try:
+        limits_config = manager.get_merged_model_config_limits()
+
+        # Also get defaults for UI diff/restore features
+        default_limits_config = manager.get_configuration(
+            CONFIG_TYPE_DEFAULT_MODEL_CONFIG_LIMITS
+        )
+
+        empty_limits = {"model_limits": []}
+
+        if limits_config and isinstance(limits_config, ModelConfigLimitsConfig):
+            limits_dict = limits_config.model_dump(
+                mode="python", exclude={"config_type"}, exclude_none=True
+            )
+            logger.info("Returning effective model config limits from DynamoDB")
+        else:
+            # No DefaultModelConfigLimits in DynamoDB - stack predates the seed
+            logger.warning("No DefaultModelConfigLimits found in DynamoDB")
+            limits_dict = empty_limits
+
+        if default_limits_config and isinstance(
+            default_limits_config, ModelConfigLimitsConfig
+        ):
+            default_limits_dict = default_limits_config.model_dump(
+                mode="python", exclude={"config_type"}, exclude_none=True
+            )
+            logger.info("Returning default model config limits for UI diff/restore")
+        else:
+            logger.warning("No DefaultModelConfigLimits found for diff/restore")
+            default_limits_dict = empty_limits
+
+        return {
+            "success": True,
+            "modelConfigLimits": limits_dict,
+            "defaultModelConfigLimits": default_limits_dict,
+        }
+
+    except Exception as e:
+        logger.error(f"Error in getModelConfigLimits: {str(e)}")
+        return {
+            "success": False,
+            "error": {
+                "type": "Error",
+                "message": f"Failed to get model config limits: {str(e)}",
+            },
+        }
+
+
+def handle_update_model_config_limits(manager, model_config_limits_json):
+    """
+    Handle the updateModelConfigLimits GraphQL mutation
+    Saves the complete user-edited limits list to CustomModelConfigLimits
+
+    Unlike pricing (deltas), the payload must be the FULL ordered list —
+    model_limits is matched first-pattern-wins, so order is semantic.
+
+    Args:
+        manager: ConfigurationManager instance
+        model_config_limits_json: JSON string or dict with the full model_limits list
+
+    Returns: { success: bool, message: str, error: {...} }
+    """
+    try:
+        # Parse JSON if it's a string
+        if isinstance(model_config_limits_json, str):
+            limits_data = json.loads(model_config_limits_json)
+        else:
+            limits_data = model_config_limits_json
+
+        # Validate and create ModelConfigLimitsConfig
+        limits_config = ModelConfigLimitsConfig(**limits_data)
+
+        # Save to CustomModelConfigLimits (full replacement list)
+        success = manager.save_custom_model_config_limits(limits_config)
+
+        if success:
+            logger.info("Custom model config limits updated successfully")
+            return {
+                "success": True,
+                "message": (
+                    "Model config limits updated successfully. Running workers "
+                    "pick up the change within about a minute."
+                ),
+            }
+        else:
+            return {
+                "success": False,
+                "message": "Failed to save model config limits",
+                "error": {
+                    "type": "SaveError",
+                    "message": "Failed to save model config limits to database",
+                },
+            }
+
+    except ValidationError as e:
+        logger.error(f"Model config limits validation error: {e}")
+        validation_errors = []
+        for error in e.errors():
+            field_path = " -> ".join(str(loc) for loc in error["loc"])
+            validation_errors.append(
+                {"field": field_path, "message": error["msg"], "type": error["type"]}
+            )
+        return {
+            "success": False,
+            "error": {
+                "type": "ValidationError",
+                "message": "Model config limits validation failed",
+                "validationErrors": validation_errors,
+            },
+        }
+
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error in model config limits: {e}")
+        return {
+            "success": False,
+            "error": {
+                "type": "JSONDecodeError",
+                "message": f"Invalid JSON format: {str(e)}",
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Error in updateModelConfigLimits: {str(e)}")
+        return {
+            "success": False,
+            "error": {
+                "type": "Error",
+                "message": f"Failed to update model config limits: {str(e)}",
+            },
+        }
+
+
+def handle_restore_default_model_config_limits(manager):
+    """
+    Handle the restoreDefaultModelConfigLimits GraphQL mutation
+    Restores limits to defaults by deleting CustomModelConfigLimits
+
+    After deletion, get_merged_model_config_limits() returns
+    DefaultModelConfigLimits only.
+
+    Returns: { success: bool, message: str, error: {...} }
+    """
+    try:
+        success = manager.delete_custom_model_config_limits()
+
+        if success:
+            logger.info(
+                "Model config limits restored to default by deleting CustomModelConfigLimits"
+            )
+            return {
+                "success": True,
+                "message": "Model config limits restored to default values",
+            }
+        else:
+            return {
+                "success": False,
+                "message": "Failed to restore default model config limits",
+                "error": {
+                    "type": "DeleteError",
+                    "message": "Failed to delete custom model config limits from database",
+                },
+            }
+
+    except Exception as e:
+        logger.error(f"Error in restoreDefaultModelConfigLimits: {str(e)}")
+        return {
+            "success": False,
+            "error": {
+                "type": "Error",
+                "message": f"Failed to restore default model config limits: {str(e)}",
             },
         }
 

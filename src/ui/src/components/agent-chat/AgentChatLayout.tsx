@@ -1,6 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Container,
   Alert,
@@ -12,13 +13,22 @@ import {
   ExpandableSection,
   Button,
   Checkbox,
+  FileInput,
+  FileTokenGroup,
+  StatusIndicator,
+  Link,
 } from '@cloudscape-design/components';
+import { ConsoleLogger } from 'aws-amplify/utils';
+import { DISCOVERY_JOB_PATH } from '../../routes/constants';
 import { SupportPromptGroup, LoadingBar } from '@cloudscape-design/chat-components';
 import SafeMarkdown from '../common/SafeMarkdown';
 
 import useAgentChat from '../../hooks/use-agent-chat';
 import useAppContext from '../../contexts/app';
 import { useAgentChatContext } from '../../contexts/agentChat';
+import useConfigurationVersions from '../../hooks/use-configuration-versions';
+import useQuickStartUpload from './useQuickStartUpload';
+import type { QuickStartUploadResult } from './useQuickStartUpload';
 import PlotDisplay from '../document-agents-layout/PlotDisplay';
 import TableDisplay from '../document-agents-layout/TableDisplay';
 import AgentChatHistoryDropdown from './AgentChatHistoryDropdown';
@@ -27,6 +37,8 @@ import BedrockErrorMessage from './BedrockErrorMessage';
 import './AgentChatLayout.css';
 
 import type { ChatMessage } from '../../types/agent-chat';
+
+const logger = new ConsoleLogger('AgentChatLayout');
 
 interface AgentConfig {
   agentType?: string;
@@ -42,29 +54,83 @@ interface AgentChatLayoutProps {
   className?: string;
   showHeader?: boolean;
   customStyles?: React.CSSProperties;
+  welcomeName?: string;
 }
 
 const AgentChatLayout = ({
-  title = 'AI Assistant',
+  title,
   placeholder = 'Ask me anything about documents, errors, or IDP code base',
   agentConfig = {},
   className = '',
   showHeader = true,
   customStyles = {},
+  welcomeName,
 }: AgentChatLayoutProps): React.JSX.Element => {
   const [welcomeAnimated, setWelcomeAnimated] = useState(false);
   const [isLoadingSession, setIsLoadingSession] = useState(false);
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const chatMessagesRef = useRef<HTMLDivElement>(null);
 
-  // Get persistent state from context
   const { agentChatState, updateAgentChatState } = useAgentChatContext();
-  const { inputValue, lastMessageCount, enableCodeIntelligence } = agentChatState;
+  const { inputValue, lastMessageCount, enableCodeIntelligence, mode } = agentChatState;
+
+  const effectiveAgentConfig = useMemo(
+    () => (mode === 'quick_start' ? { ...agentConfig, method: 'quick_start' } : { ...agentConfig, method: 'chat' }),
+    [agentConfig, mode],
+  );
 
   const { messages, isLoading, waitingForResponse, error, sendMessage, clearError, clearChat, loadChatSession } = useAgentChat(
-    agentConfig as Record<string, unknown>,
+    effectiveAgentConfig as Record<string, unknown>,
   );
   const { user } = useAppContext();
+
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const [completedJobId, setCompletedJobId] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const { versions, setActiveVersion, fetchVersions } = useConfigurationVersions();
+  const navigate = useNavigate();
+
+  const targetConfigVersion = useMemo(() => {
+    const active = versions.find((v) => v.isActive);
+    if (active && active.versionName !== 'default') {
+      return active.versionName;
+    }
+    const existingNonDefault = versions.find((v) => v.versionName !== 'default');
+    return existingNonDefault?.versionName || 'quickstart';
+  }, [versions]);
+
+  const handleUploadComplete = useCallback(
+    (result: QuickStartUploadResult) => {
+      const names = result.classNames.length ? result.classNames.join(', ') : 'document type(s)';
+      const summary =
+        `I uploaded ${result.totalDocuments} document(s). Multi-document discovery inferred ` +
+        `${result.clustersFound} document type(s): ${names}. These were added to my configuration. ` +
+        `Please summarize what was discovered and ask whether I want to refine the schema.`;
+      setAttachedFiles([]);
+      setUploadError(null);
+      setCompletedJobId(result.jobId);
+      if (result.configVersion === 'quickstart' && !versions.some((v) => v.versionName === 'quickstart' && v.isActive)) {
+        setActiveVersion('quickstart')
+          .then(() => fetchVersions())
+          .catch((e) => logger.error('Failed to activate quickstart version:', e));
+      }
+      sendMessage(summary, { enableCodeIntelligence });
+    },
+    [sendMessage, enableCodeIntelligence, setActiveVersion, fetchVersions, versions],
+  );
+
+  const handleUploadError = useCallback((message: string) => {
+    setUploadError(message);
+  }, []);
+
+  const {
+    startUpload,
+    uploading,
+    status: uploadStatus,
+  } = useQuickStartUpload({
+    onComplete: handleUploadComplete,
+    onError: handleUploadError,
+  });
 
   const userInitial = useMemo(() => {
     if (!user?.username) return 'U';
@@ -118,11 +184,34 @@ const AgentChatLayout = ({
 
   const handlePromptSubmit = async () => {
     const prompt = inputValue;
-    if (!prompt.trim()) return;
+    const hasFiles = mode === 'quick_start' && attachedFiles.length > 0;
+    if (!prompt.trim() && !hasFiles) return;
+
+    const filesAttachedCount = attachedFiles.length;
+
+    if (hasFiles) {
+      const filesToProcess = attachedFiles;
+      const version = targetConfigVersion || `bootstrap-${Date.now().toString(36)}`;
+      setCompletedJobId(null);
+      setUploadError(null);
+      setAttachedFiles([]);
+      startUpload(filesToProcess, version);
+    }
+
+    let messageToSend: string;
+    if (hasFiles) {
+      const note =
+        `[${filesAttachedCount} document(s) attached — multi-document Discovery is now running on them ` +
+        `in the background. Acknowledge it's processing and that you'll summarize the results when they ` +
+        `arrive; do not ask me to upload again.]`;
+      messageToSend = prompt.trim() ? `${prompt.trim()}\n\n${note}` : note;
+    } else {
+      messageToSend = prompt;
+    }
 
     updateAgentChatState({ inputValue: '' });
     try {
-      await sendMessage(prompt, { enableCodeIntelligence });
+      await sendMessage(messageToSend, { enableCodeIntelligence });
       // Scroll to the latest user message after sending
       setTimeout(() => {
         if (chatMessagesRef.current) {
@@ -141,6 +230,12 @@ const AgentChatLayout = ({
   const handleInputChange = (event: { detail: { value: string } }) => {
     updateAgentChatState({ inputValue: event.detail.value });
   };
+
+  const effectiveTitle = title ?? (mode === 'quick_start' ? 'Quick Start' : 'IDP Agent Companion Chat');
+  const effectivePlaceholder =
+    mode === 'quick_start' ? 'Describe the documents you want to process, or attach examples to get started' : placeholder;
+
+  const uploadInProgress = uploading || (!!uploadStatus && !['COMPLETED', 'FAILED'].includes(uploadStatus.status));
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleKeyDown = (event: any) => {
@@ -194,8 +289,7 @@ const AgentChatLayout = ({
     // The dropdown component handles the UI state, so we don't need to do anything here
   };
 
-  // Hardcoded sample prompts from different agents
-  const supportPrompts = [
+  const chatSupportPrompts = [
     {
       id: 'GeneralAgent',
       prompt: 'What capabilities do you have?',
@@ -213,6 +307,27 @@ const AgentChatLayout = ({
       prompt: 'Analyze recent errors in document processing',
     },
   ];
+
+  const quickStartSupportPrompts = [
+    {
+      id: 'QuickStartInsurance',
+      prompt: 'Help me set up IDP for processing auto insurance claims',
+    },
+    {
+      id: 'QuickStartInvoice',
+      prompt: 'I have invoices with vendor, amount, and due date — get me started',
+    },
+    {
+      id: 'QuickStartPaystub',
+      prompt: 'Bootstrap a config for employee paystubs',
+    },
+    {
+      id: 'QuickStartAddType',
+      prompt: 'Add a new document type to my existing configuration',
+    },
+  ];
+
+  const supportPrompts = mode === 'quick_start' ? quickStartSupportPrompts : chatSupportPrompts;
 
   const renderedMessages = useMemo(() => {
     return messages.map((message: ChatMessage) => {
@@ -418,8 +533,13 @@ const AgentChatLayout = ({
           {messages.length === 0 ? (
             <div className={`welcome-text ${welcomeAnimated ? 'animate-in' : ''}`}>
               <h2>
-                Welcome to <span>Agent Companion Chat</span>
+                Welcome to <span>{welcomeName || (mode === 'quick_start' ? 'Quick Start' : 'Agent Companion Chat')}</span>
               </h2>
+              {mode === 'quick_start' && (
+                <Box variant="p" color="text-body-secondary">
+                  Describe the documents you want to process and I&apos;ll help you set up a configuration — no prior setup needed.
+                </Box>
+              )}
             </div>
           ) : (
             <>
@@ -458,24 +578,93 @@ const AgentChatLayout = ({
                 value={inputValue}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
-                placeholder={placeholder}
+                placeholder={effectivePlaceholder}
                 disabled={isLoading || isLoadingSession || waitingForResponse}
                 actionButtonIconName="send"
                 onAction={handlePromptSubmit}
                 minRows={3}
+                secondaryActions={
+                  mode === 'quick_start' ? (
+                    <Box padding={{ left: 'xxs', top: 'xs' }}>
+                      <FileInput
+                        variant="icon"
+                        multiple
+                        accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif,.webp,.zip"
+                        value={attachedFiles}
+                        onChange={({ detail }) => setAttachedFiles(detail.value)}
+                      >
+                        Attach documents
+                      </FileInput>
+                    </Box>
+                  ) : undefined
+                }
+                secondaryContent={
+                  mode === 'quick_start' && (attachedFiles.length > 0 || uploadStatus || completedJobId || uploadError) ? (
+                    <SpaceBetween size="xs">
+                      {uploadError && (
+                        <Alert type="error" dismissible onDismiss={() => setUploadError(null)} header="Document analysis failed">
+                          {uploadError}
+                        </Alert>
+                      )}
+                      {attachedFiles.length > 0 && (
+                        <FileTokenGroup
+                          alignment="horizontal"
+                          items={attachedFiles.map((file) => ({ file }))}
+                          showFileSize
+                          onDismiss={({ detail }) => setAttachedFiles((prev) => prev.filter((_, i) => i !== detail.fileIndex))}
+                          i18nStrings={{
+                            removeFileAriaLabel: (idx) => `Remove file ${idx + 1}`,
+                            limitShowFewer: 'Show fewer',
+                            limitShowMore: 'Show more',
+                            errorIconAriaLabel: 'Error',
+                          }}
+                        />
+                      )}
+                      {attachedFiles.length > 0 && !uploadInProgress && (
+                        <Box fontSize="body-s" color="text-body-secondary">
+                          {attachedFiles.length} document(s) attached — send your message to analyze them.
+                        </Box>
+                      )}
+                      {uploadStatus && uploadInProgress && (
+                        <StatusIndicator type="in-progress">
+                          {uploadStatus.currentStep || uploadStatus.status}
+                          {uploadStatus.totalDocuments ? ` (${uploadStatus.totalDocuments} docs)` : ''}
+                        </StatusIndicator>
+                      )}
+                      {completedJobId && !uploadInProgress && (
+                        <SpaceBetween direction="horizontal" size="xs" alignItems="center">
+                          <StatusIndicator type="success">Documents analyzed</StatusIndicator>
+                          <Link
+                            onFollow={() => navigate(`${DISCOVERY_JOB_PATH}/${completedJobId}`)}
+                            ariaLabel="View full discovery details"
+                          >
+                            View full discovery details
+                          </Link>
+                        </SpaceBetween>
+                      )}
+                    </SpaceBetween>
+                  ) : undefined
+                }
               />
-              <SpaceBetween direction="horizontal" size="m" alignItems="center">
+              {mode === 'quick_start' ? (
                 <Box {...({ fontSize: 'body-s', color: 'text-status-info', flex: '1' } as Record<string, unknown>)}>
-                  Avoid sharing sensitive information, the Code Intelligence Agent may use third-party services.
+                  Quick Start helps you author a configuration for your document type. Describe your documents or attach examples to get
+                  started.
                 </Box>
-                <Checkbox
-                  checked={enableCodeIntelligence}
-                  onChange={({ detail }) => updateAgentChatState({ enableCodeIntelligence: detail.checked })}
-                  disabled={waitingForResponse}
-                >
-                  <Box fontSize="body-s">Enable Code Intelligence Agent</Box>
-                </Checkbox>
-              </SpaceBetween>
+              ) : (
+                <SpaceBetween direction="horizontal" size="m" alignItems="center">
+                  <Box {...({ fontSize: 'body-s', color: 'text-status-info', flex: '1' } as Record<string, unknown>)}>
+                    Avoid sharing sensitive information, the Code Intelligence Agent may use third-party services.
+                  </Box>
+                  <Checkbox
+                    checked={enableCodeIntelligence}
+                    onChange={({ detail }) => updateAgentChatState({ enableCodeIntelligence: detail.checked })}
+                    disabled={waitingForResponse}
+                  >
+                    <Box fontSize="body-s">Enable Code Intelligence Agent</Box>
+                  </Checkbox>
+                </SpaceBetween>
+              )}
             </SpaceBetween>
           </Box>
           <SpaceBetween direction="horizontal" size="s" alignItems="center">
@@ -484,6 +673,7 @@ const AgentChatLayout = ({
                 onSessionSelect={handleSessionSelect}
                 onSessionDeleted={handleSessionDeleted}
                 disabled={waitingForResponse || isLoadingSession}
+                surface={mode === 'quick_start' ? 'quick_start' : 'chat'}
               />
             </Box>
             {messages.length > 0 && (
@@ -511,7 +701,7 @@ const AgentChatLayout = ({
   if (showHeader) {
     return (
       <div className={`agent-chat-layout ${className}`} style={customStyles}>
-        <Container header={<Header variant="h2">{title}</Header>}>{chatContent}</Container>
+        <Container header={<Header variant="h2">{effectiveTitle}</Header>}>{chatContent}</Container>
       </div>
     );
   }

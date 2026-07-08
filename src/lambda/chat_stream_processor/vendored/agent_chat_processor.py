@@ -11,8 +11,11 @@ and streams responses in real-time via AppSync subscriptions.
 import asyncio
 import json
 import logging
+import os
 import re
+import time
 import uuid
+from datetime import datetime
 
 import boto3
 import botocore.exceptions
@@ -37,6 +40,86 @@ configure_logging()
 logger = logging.getLogger(__name__)
 
 # Sub-agent streaming is always enabled
+
+_CHAT_MESSAGES_TABLE = os.environ.get("CHAT_MESSAGES_TABLE")
+_CHAT_SESSIONS_TABLE = os.environ.get("CHAT_SESSIONS_TABLE")
+_DATA_RETENTION_DAYS = int(os.environ.get("DATA_RETENTION_DAYS", "30"))
+
+
+def _persist_chat_turn(session_id, user_id, surface, prompt, assistant_text):
+    if not session_id or not user_id:
+        return
+    if not _CHAT_MESSAGES_TABLE or not _CHAT_SESSIONS_TABLE:
+        logger.warning("Chat persistence tables not configured; skipping history write")
+        return
+    try:
+        dynamodb = boto3.resource("dynamodb")
+        messages_table = dynamodb.Table(_CHAT_MESSAGES_TABLE)
+        sessions_table = dynamodb.Table(_CHAT_SESSIONS_TABLE)
+        expires_after = int(time.time()) + (_DATA_RETENTION_DAYS * 24 * 60 * 60)
+        user_ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        messages_table.put_item(
+            Item={
+                "PK": session_id,
+                "SK": user_ts,
+                "role": "user",
+                "content": prompt,
+                "timestamp": user_ts,
+                "isProcessing": False,
+                "ExpiresAfter": expires_after,
+            }
+        )
+        if assistant_text:
+            assistant_ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            messages_table.put_item(
+                Item={
+                    "PK": session_id,
+                    "SK": assistant_ts,
+                    "role": "assistant",
+                    "content": assistant_text,
+                    "timestamp": assistant_ts,
+                    "isProcessing": False,
+                    "ExpiresAfter": expires_after,
+                }
+            )
+        last_message = prompt[:100] + "..." if len(prompt) > 100 else prompt
+        existing = sessions_table.get_item(
+            Key={"userId": user_id, "sessionId": session_id}
+        ).get("Item")
+        if existing:
+            sessions_table.update_item(
+                Key={"userId": user_id, "sessionId": session_id},
+                UpdateExpression=(
+                    "SET updatedAt = :ts, messageCount = messageCount + :inc, "
+                    "lastMessage = :last, surface = :surface"
+                ),
+                ExpressionAttributeValues={
+                    ":ts": user_ts,
+                    ":inc": 2 if assistant_text else 1,
+                    ":last": last_message,
+                    ":surface": surface,
+                },
+            )
+        else:
+            title = prompt.strip()
+            if len(title) > 50:
+                title = title[:47] + "..."
+            sessions_table.put_item(
+                Item={
+                    "userId": user_id,
+                    "sessionId": session_id,
+                    "title": title,
+                    "createdAt": user_ts,
+                    "updatedAt": user_ts,
+                    "messageCount": 2 if assistant_text else 1,
+                    "lastMessage": last_message,
+                    "surface": surface,
+                    "ExpiresAfter": expires_after,
+                }
+            )
+    except Exception as e:
+        logger.error(f"Failed to persist chat turn for session {session_id}: {e}")
+
 
 # Track Lambda cold/warm starts for debugging
 _lambda_invocation_count = 0
@@ -787,6 +870,8 @@ def handler(event, context):
         prompt = event.get("prompt", "")
         session_id = event.get("sessionId")
         enable_code_intelligence = event.get("enableCodeIntelligence", True)
+        method = event.get("method", "chat")
+        caller_sub = event.get("callerSub", "")
         
         # Validate required parameters
         if not prompt or not session_id:
@@ -802,23 +887,45 @@ def handler(event, context):
         # No user selection needed - orchestrator has access to all agents
         all_agents = agent_factory.list_available_agents()
         agent_ids = [agent["agent_id"] for agent in all_agents]
-        
-        # Filter out Code Intelligence Agent if not enabled by user
-        CODE_INTELLIGENCE_AGENT_ID = "Code-Intelligence-Agent"
-        if not enable_code_intelligence and CODE_INTELLIGENCE_AGENT_ID in agent_ids:
-            agent_ids.remove(CODE_INTELLIGENCE_AGENT_ID)
-            logger.info("Code Intelligence Agent disabled by user, excluding from orchestrator")
-        
-        logger.info(f"Creating orchestrator with {len(agent_ids)} agents: {agent_ids}")
-        
-        # Create conversational orchestrator with memory and streaming support
-        orchestrator = agent_factory.create_conversational_orchestrator(
-            agent_ids=agent_ids,
-            session_id=session_id,
-            config=config,
-            session=session
+
+        QUICK_START_AGENT_ID = "Quick-Start-Agent"
+        use_direct_quick_start = (
+            method == "quick_start" and QUICK_START_AGENT_ID in agent_ids
         )
-        logger.info(f"Conversational orchestrator created for session {session_id}")
+
+        if method == "quick_start" and not use_direct_quick_start:
+            logger.warning(
+                "Quick Start mode requested but Quick-Start-Agent not registered; "
+                "falling back to full agent list"
+            )
+        elif method != "quick_start":
+            if QUICK_START_AGENT_ID in agent_ids:
+                agent_ids.remove(QUICK_START_AGENT_ID)
+            # Filter out Code Intelligence Agent if not enabled by user
+            CODE_INTELLIGENCE_AGENT_ID = "Code-Intelligence-Agent"
+            if not enable_code_intelligence and CODE_INTELLIGENCE_AGENT_ID in agent_ids:
+                agent_ids.remove(CODE_INTELLIGENCE_AGENT_ID)
+                logger.info("Code Intelligence Agent disabled by user, excluding from orchestrator")
+
+        if use_direct_quick_start:
+            logger.info("Quick Start mode: running Quick-Start-Agent directly with memory")
+            orchestrator = agent_factory.create_conversational_agent(
+                agent_id=QUICK_START_AGENT_ID,
+                session_id=session_id,
+                config=config,
+                session=session,
+            )
+            logger.info(f"Conversational Quick Start agent created for session {session_id}")
+        else:
+            logger.info(f"Creating orchestrator with {len(agent_ids)} agents: {agent_ids}")
+            # Create conversational orchestrator with memory and streaming support
+            orchestrator = agent_factory.create_conversational_orchestrator(
+                agent_ids=agent_ids,
+                session_id=session_id,
+                config=config,
+                session=session
+            )
+            logger.info(f"Conversational orchestrator created for session {session_id}")
         
         # Set up async event loop for streaming
         loop = asyncio.new_event_loop()
@@ -833,10 +940,12 @@ def handler(event, context):
                 )
 
             # Stream the agent response
-            loop.run_until_complete(
+            final_text = loop.run_until_complete(
                 stream_agent_response(None, orchestrator, prompt, session_id)
             )
             logger.info(f"Streaming completed successfully for session {session_id}")
+            surface = "quick_start" if method == "quick_start" else "chat"
+            _persist_chat_turn(session_id, caller_sub, surface, prompt, final_text)
         finally:
             # Clean up orchestrator resources (MCP clients, etc.)
             try:

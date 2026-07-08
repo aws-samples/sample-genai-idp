@@ -176,6 +176,15 @@ export type ConfidenceThresholdAlertInput = {
   confidenceThreshold?: InputMaybe<Scalars['Float']['input']>;
 };
 
+export type ConfigBootstrapJob = {
+  configVersion?: Maybe<Scalars['String']['output']>;
+  errorMessage?: Maybe<Scalars['String']['output']>;
+  jobId: Scalars['ID']['output'];
+  status: Scalars['String']['output'];
+  statusMessage?: Maybe<Scalars['String']['output']>;
+  testSetId?: Maybe<Scalars['String']['output']>;
+};
+
 export type ConfigSetting = {
   setting: Scalars['String']['output'];
   values: Scalars['AWSJSON']['output'];
@@ -511,6 +520,7 @@ export type InstalledFeature = {
   displayName: Scalars['String']['output'];
   featureApiEndpoint?: Maybe<Scalars['String']['output']>;
   featureId: Scalars['String']['output'];
+  generationQueueArn?: Maybe<Scalars['String']['output']>;
   iconUrl?: Maybe<Scalars['String']['output']>;
   installedAt: Scalars['AWSDateTime']['output'];
   installedBy?: Maybe<Scalars['String']['output']>;
@@ -555,6 +565,13 @@ export type LatestPublishedVersion = {
 
 export type MessageContent = {
   text?: Maybe<Scalars['String']['output']>;
+};
+
+export type ModelConfigLimitsResponse = {
+  defaultModelConfigLimits?: Maybe<Scalars['AWSJSON']['output']>;
+  error?: Maybe<ConfigurationError>;
+  modelConfigLimits?: Maybe<Scalars['AWSJSON']['output']>;
+  success: Scalars['Boolean']['output'];
 };
 
 export type ModifiedPageInput = {
@@ -646,6 +663,7 @@ export type Mutation = {
    */
   removeFeatureConfigPreset: Scalars['Boolean']['output'];
   reprocessDocument: Scalars['Boolean']['output'];
+  restoreDefaultModelConfigLimits?: Maybe<UpdateModelConfigLimitsResponse>;
   restoreDefaultPricing?: Maybe<UpdatePricingResponse>;
   resumeCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   sendAgentChatMessage?: Maybe<AgentChatMessage>;
@@ -685,12 +703,14 @@ export type Mutation = {
   updateAgentChatMessage?: Maybe<AgentChatMessage>;
   updateAgentJobStatus?: Maybe<Scalars['Boolean']['output']>;
   updateChatSessionTitle?: Maybe<ChatSession>;
+  updateConfigBootstrapJobStatus?: Maybe<ConfigBootstrapJob>;
   updateConfiguration?: Maybe<UpdateConfigurationResponse>;
   updateDiscoveryJobStatus?: Maybe<DiscoveryJob>;
   updateDocument?: Maybe<Document>;
   updateDocumentSection?: Maybe<Document>;
   updateDocumentStatus?: Maybe<Document>;
   updateFinetuningJobStatus?: Maybe<FinetuningJob>;
+  updateModelConfigLimits?: Maybe<UpdateModelConfigLimitsResponse>;
   updatePricing?: Maybe<UpdatePricingResponse>;
   updateTestSet?: Maybe<TestSet>;
   updateUser?: Maybe<User>;
@@ -982,6 +1002,16 @@ export type MutationUpdateChatSessionTitleArgs = {
 };
 
 
+export type MutationUpdateConfigBootstrapJobStatusArgs = {
+  configVersion?: InputMaybe<Scalars['String']['input']>;
+  errorMessage?: InputMaybe<Scalars['String']['input']>;
+  jobId: Scalars['ID']['input'];
+  status: Scalars['String']['input'];
+  statusMessage?: InputMaybe<Scalars['String']['input']>;
+  testSetId?: InputMaybe<Scalars['String']['input']>;
+};
+
+
 export type MutationUpdateConfigurationArgs = {
   customConfig: Scalars['AWSJSON']['input'];
   description?: InputMaybe<Scalars['String']['input']>;
@@ -1023,6 +1053,11 @@ export type MutationUpdateFinetuningJobStatusArgs = {
   errorMessage?: InputMaybe<Scalars['String']['input']>;
   jobId: Scalars['ID']['input'];
   status: FinetuningJobStatus;
+};
+
+
+export type MutationUpdateModelConfigLimitsArgs = {
+  modelConfigLimits: Scalars['AWSJSON']['input'];
 };
 
 
@@ -1159,6 +1194,7 @@ export type Query = {
   getFileContents?: Maybe<FileContentsResponse>;
   getFinetuningJob?: Maybe<FinetuningJob>;
   getLatestPublishedVersion?: Maybe<LatestPublishedVersion>;
+  getModelConfigLimits?: Maybe<ModelConfigLimitsResponse>;
   getMyProfile?: Maybe<User>;
   getPricing?: Maybe<PricingResponse>;
   getStepFunctionExecution?: Maybe<StepFunctionExecutionResponse>;
@@ -1188,6 +1224,8 @@ export type Query = {
   /**
    * List all features currently installed in this IDP stack.
    * Returns null when EnableFeaturePlatform=false (no resolver attached).
+   * Also @aws_iam so backend Lambdas (e.g. the Quick Start agent) can discover
+   * installed extensions via SigV4 — the InstalledFeature type is already @aws_iam.
    */
   listInstalledFeatures?: Maybe<Array<InstalledFeature>>;
   listUsers?: Maybe<UserList>;
@@ -1305,6 +1343,7 @@ export type QueryListBucketFilesArgs = {
 export type QueryListChatSessionsArgs = {
   limit?: InputMaybe<Scalars['Int']['input']>;
   nextToken?: InputMaybe<Scalars['String']['input']>;
+  surface?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -1395,6 +1434,7 @@ export type RegisterFeatureInput = {
   displayName: Scalars['String']['input'];
   featureApiEndpoint?: InputMaybe<Scalars['String']['input']>;
   featureId: Scalars['String']['input'];
+  generationQueueArn?: InputMaybe<Scalars['String']['input']>;
   iconUrl?: InputMaybe<Scalars['String']['input']>;
   installedBy?: InputMaybe<Scalars['String']['input']>;
   installedVersion: Scalars['String']['input'];
@@ -1456,6 +1496,7 @@ export type Subscription = {
   onAgentJobComplete?: Maybe<Scalars['Boolean']['output']>;
   onChatDocumentMessageUpdate?: Maybe<ChatDocumentMessage>;
   onCircuitBreakerStatusChange?: Maybe<CircuitBreakerStatus>;
+  onConfigBootstrapJobStatusChange?: Maybe<ConfigBootstrapJob>;
   onCreateDocument?: Maybe<CreateDocumentOutput>;
   onDiscoveryJobStatusChange?: Maybe<DiscoveryJob>;
   onUpdateDocument?: Maybe<Document>;
@@ -1474,6 +1515,11 @@ export type SubscriptionOnAgentJobCompleteArgs = {
 
 export type SubscriptionOnChatDocumentMessageUpdateArgs = {
   sessionId: Scalars['String']['input'];
+};
+
+
+export type SubscriptionOnConfigBootstrapJobStatusChangeArgs = {
+  jobId: Scalars['ID']['input'];
 };
 
 
@@ -1653,6 +1699,12 @@ export type UpdateDocumentStatusInput = {
   ObjectStatus: Scalars['String']['input'];
   WorkflowExecutionArn?: InputMaybe<Scalars['String']['input']>;
   WorkflowStatus?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type UpdateModelConfigLimitsResponse = {
+  error?: Maybe<ConfigurationError>;
+  message?: Maybe<Scalars['String']['output']>;
+  success: Scalars['Boolean']['output'];
 };
 
 export type UpdatePricingResponse = {

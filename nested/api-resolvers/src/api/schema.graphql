@@ -254,6 +254,19 @@ type UpdatePricingResponse @aws_cognito_user_pools @aws_iam {
   error: ConfigurationError
 }
 
+type ModelConfigLimitsResponse @aws_cognito_user_pools @aws_iam {
+  success: Boolean!
+  modelConfigLimits: AWSJSON
+  defaultModelConfigLimits: AWSJSON
+  error: ConfigurationError
+}
+
+type UpdateModelConfigLimitsResponse @aws_cognito_user_pools @aws_iam {
+  success: Boolean!
+  message: String
+  error: ConfigurationError
+}
+
 type ConfigurationLibraryItem @aws_cognito_user_pools @aws_iam {
   name: String!
   hasReadme: Boolean!
@@ -485,6 +498,15 @@ type DiscoveryJob @aws_cognito_user_pools @aws_iam {
   clustersFound: Int
   discoveredClasses: String
   reflectionReport: String
+}
+
+type ConfigBootstrapJob @aws_cognito_user_pools @aws_iam {
+  jobId: ID!
+  status: String!
+  statusMessage: String
+  errorMessage: String
+  configVersion: String
+  testSetId: String
 }
 
 type MultiDocDiscoveryJob @aws_cognito_user_pools @aws_iam {
@@ -771,6 +793,14 @@ type Mutation {
     discoveredClasses: String
     reflectionReport: String
   ): DiscoveryJob @aws_iam
+  updateConfigBootstrapJobStatus(
+    jobId: ID!
+    status: String!
+    statusMessage: String
+    errorMessage: String
+    configVersion: String
+    testSetId: String
+  ): ConfigBootstrapJob @aws_iam
   updateFinetuningJobStatus(jobId: ID!, status: FinetuningJobStatus!, errorMessage: String): FinetuningJob @aws_iam
 
   # Admin-only operations
@@ -785,6 +815,10 @@ type Mutation {
   updatePricing(pricingConfig: AWSJSON!): UpdatePricingResponse
     @aws_cognito_user_pools(cognito_groups: ["Admin"])
   restoreDefaultPricing: UpdatePricingResponse
+    @aws_cognito_user_pools(cognito_groups: ["Admin"])
+  updateModelConfigLimits(modelConfigLimits: AWSJSON!): UpdateModelConfigLimitsResponse
+    @aws_cognito_user_pools(cognito_groups: ["Admin"])
+  restoreDefaultModelConfigLimits: UpdateModelConfigLimitsResponse
     @aws_cognito_user_pools(cognito_groups: ["Admin"])
 
   # Admin + Author operations
@@ -1057,6 +1091,8 @@ type Query @aws_cognito_user_pools @aws_iam {
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
   getPricing: PricingResponse
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
+  getModelConfigLimits: ModelConfigLimitsResponse
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
   calculateCapacity(input: String!): CapacityResult
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
 
@@ -1072,7 +1108,7 @@ type Query @aws_cognito_user_pools @aws_iam {
   # and session scoping (users only see their own sessions).
   listAvailableAgents: [Agent] @aws_cognito_user_pools @aws_iam
   getAgentChatMessages(sessionId: ID!): [AgentChatMessage] @aws_cognito_user_pools @aws_iam
-  listChatSessions(limit: Int, nextToken: String): ChatSessionConnection @aws_cognito_user_pools @aws_iam
+  listChatSessions(limit: Int, nextToken: String, surface: String): ChatSessionConnection @aws_cognito_user_pools @aws_iam
   getChatMessages(sessionId: ID!): [AgentChatMessage] @aws_cognito_user_pools @aws_iam
 
   # Knowledge base query
@@ -1147,8 +1183,10 @@ type Query @aws_cognito_user_pools @aws_iam {
   # all coerce null → empty list / sensible default.
   # -----------------------------------------------------------------------
   """List all features currently installed in this IDP stack.
-  Returns null when EnableFeaturePlatform=false (no resolver attached)."""
-  listInstalledFeatures: [InstalledFeature!] @aws_cognito_user_pools
+  Returns null when EnableFeaturePlatform=false (no resolver attached).
+  Also @aws_iam so backend Lambdas (e.g. the Quick Start agent) can discover
+  installed extensions via SigV4 — the InstalledFeature type is already @aws_iam."""
+  listInstalledFeatures: [InstalledFeature!] @aws_cognito_user_pools @aws_iam
 
   """List all features published to the feature bucket (the catalog), whether
   installed or not. The UI takes the union of this + listInstalledFeatures to
@@ -1173,6 +1211,8 @@ type Subscription @aws_cognito_user_pools @aws_iam {
     @aws_subscribe(mutations: ["updateAgentJobStatus"])
   onDiscoveryJobStatusChange(jobId: ID!): DiscoveryJob
     @aws_subscribe(mutations: ["updateDiscoveryJobStatus"])
+  onConfigBootstrapJobStatusChange(jobId: ID!): ConfigBootstrapJob
+    @aws_subscribe(mutations: ["updateConfigBootstrapJobStatus"])
   onAgentChatMessageUpdate(sessionId: String!): AgentChatMessage
     @aws_subscribe(mutations: ["sendAgentChatMessage"])
   onChatDocumentMessageUpdate(sessionId: String!): ChatDocumentMessage
@@ -1303,6 +1343,7 @@ type InstalledFeature @aws_iam @aws_cognito_user_pools {
   stackId: String
   uiBundlePath: String!
   featureApiEndpoint: String
+  generationQueueArn: String
   iconUrl: String
   installedAt: AWSDateTime!
   installedBy: String
@@ -1381,6 +1422,7 @@ input RegisterFeatureInput {
   stackRegion: String!
   uiBundlePath: String!
   featureApiEndpoint: String
+  generationQueueArn: String
   iconUrl: String
   installedBy: String
   productCode: String

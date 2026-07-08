@@ -25,6 +25,10 @@ import { FEATURES_PATH_PREFIX, featureDetailHref } from '../../routes/constants'
 
 export const FEATURES_SECTION_ID = 'idp-feature-platform';
 
+export const COMING_SOON_HREF = '#extension-coming-soon';
+
+const COMING_SOON_EXTENSIONS: { displayName: string; description: string }[] = [];
+
 /**
  * Lifecycle status of a feature, used to choose the nav badge:
  *   - 'subscribe' — marketplace feature, not yet subscribed (no entitlement
@@ -156,6 +160,30 @@ function buildStatusInfo(entry: NavEntry): React.ReactNode {
  *     [installed, catalog],
  *   );
  */
+function comingSoonItems(installed: InstalledFeature[]): SideNavigationProps.Link[] {
+  const installedIds = new Set(installed.map((f) => f.featureId));
+  return COMING_SOON_EXTENSIONS.filter((c) => !installedIds.has(c.displayName)).map(
+    (c) =>
+      ({
+        type: 'link',
+        text: c.displayName,
+        href: COMING_SOON_HREF,
+        info: React.createElement(
+          Popover,
+          {
+            header: c.displayName,
+            content: c.description,
+            triggerType: 'text',
+            dismissButton: false,
+            position: 'right',
+            size: 'small',
+          },
+          React.createElement(Badge, { color: 'grey' }, 'Coming soon'),
+        ),
+      }) as SideNavigationProps.Link,
+  );
+}
+
 export function buildFeaturesNavSection(installed: InstalledFeature[], catalog: CatalogFeature[] = []): SideNavigationProps.Section {
   const entries = mergeEntries(installed, catalog);
 
@@ -192,6 +220,6 @@ export function buildFeaturesNavSection(installed: InstalledFeature[], catalog: 
     // "(Preview)" signals that the extension framework is still being built out —
     // there are no production extensions to install yet beyond the bundled demo.
     text: 'Extensions (Preview)',
-    items,
+    items: [...items, ...comingSoonItems(installed)],
   };
 }

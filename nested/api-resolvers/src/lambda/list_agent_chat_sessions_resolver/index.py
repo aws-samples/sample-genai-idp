@@ -70,6 +70,7 @@ def handler(event, context):
         arguments = event.get("arguments", {})
         limit = arguments.get("limit", 20)  # Default limit
         next_token = arguments.get("nextToken")
+        surface = arguments.get("surface")
         
         # Get user identity from context
         identity = event.get("identity", {})
@@ -98,7 +99,17 @@ def handler(event, context):
             "ScanIndexForward": False,  # Sort by sessionId descending (most recent first)
             "Limit": limit
         }
-        
+
+        # Scope to a surface (Companion "chat" vs "quick_start") when requested.
+        # Legacy rows written before the surface attribute existed are treated as
+        # "chat" so they remain visible in the Companion history.
+        if surface == "chat":
+            query_params["FilterExpression"] = "attribute_not_exists(surface) OR surface = :surface"
+            query_params["ExpressionAttributeValues"][":surface"] = surface
+        elif surface:
+            query_params["FilterExpression"] = "surface = :surface"
+            query_params["ExpressionAttributeValues"][":surface"] = surface
+
         if next_token:
             try:
                 query_params["ExclusiveStartKey"] = json.loads(next_token)

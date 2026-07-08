@@ -223,6 +223,8 @@ test: ## Run all tests (idp_common, cli, sdk, feature platform, capacity, circui
 	$(PYTHON) -m pytest -v \
 	    src/lambda/chat_with_document_processor/tests \
 	    nested/api-resolvers/src/lambda/send_chat_document_message_resolver/tests
+	@echo "Running Chat-stream processor tests (incl. vendored-in-sync guard)..."
+	cd src/lambda/chat_stream_processor && $(PYTHON) -m pytest tests -v
 	@echo "Validating config library files..."
 	$(PYTHON) -m pytest config_library/test_config_library.py -v
 
@@ -412,7 +414,15 @@ docs-deploy: docs-build ## Deploy docs to GitHub Pages (from local build)
 	@echo -e "$(GREEN)✅ Docs deployed to GitHub Pages!$(NC)"
 
 ##@ Security (SRT)
-srt: ## Run full SRT workflow (setup → scan → optional fix)
+srt-clean: ## Remove gitignored build/temp dirs that pollute local SRT scans
+	@echo "Removing build artifacts that pollute SRT scans..."
+	find . -name node_modules -prune -o -name .venv -prune -o \
+		-type d \( -name .aws-sam -o -path '*/layer/python' \) -prune -print \
+		| xargs -r rm -rf
+	@echo -e "$(GREEN)✅ Scan-polluting artifacts removed (CI checkouts are already clean)$(NC)"
+
+srt: ## Run full SRT workflow (clean → setup → scan → optional fix)
+	@$(MAKE) srt-clean
 	@$(MAKE) srt-setup
 	@$(MAKE) srt-scan
 	@echo ""
