@@ -592,7 +592,9 @@ class DiscoveryAgent:
             system_prompt="You are an expert document processing engineer providing quality review.",
             content=[{"text": prompt_text}],
             temperature=0.3,
-            max_tokens=4096,
+            # None => Bedrock client resolves the model's max output tokens
+            # (model_config_limits.yaml); Bedrock's default-when-omitted truncates.
+            max_tokens=None,
             context="discovery/reflection",
         )
 

@@ -111,7 +111,8 @@ rule_validation:
     temperature: 0
     top_p: 0
     top_k: 20
-    max_tokens: 4096
+    # Empty => use the selected model's maximum output limit (model_config_limits.yaml).
+    max_tokens: ""
   rule_validation_orchestrator:
     model: us.anthropic.claude-sonnet-4-5-20250929-v1:0
     system_prompt: |-
@@ -213,4 +214,5 @@ rule_validation:
     temperature: 0
     top_p: 0
     top_k: 20
-    max_tokens: 4096
+    # Empty => use the selected model's maximum output limit (model_config_limits.yaml).
+    max_tokens: ""

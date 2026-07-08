@@ -996,25 +996,25 @@ top_k: 3      # Fewer candidates
 
 ### Max Tokens Sizing
 
-**Classification:**
+`max_tokens` is an **optional cap** on model output. Leave it empty (the
+default everywhere) and the service uses the selected model's maximum output
+limit — resolved at request time from the model limits list (editable in the
+web UI under **View / Edit Model Limits**). This avoids silent truncation when
+you switch to a larger-context model. Set a positive value only when you
+deliberately want to cap output *below* the model maximum (e.g. to bound cost
+or latency on a task with short responses).
+
 ```yaml
-max_tokens: 4096  # Sufficient for classification responses
+# Recommended: leave empty to use the model's full output budget
+max_tokens: ""
+
+# Or set an explicit cap (must not exceed the model's limit)
+max_tokens: 4096
 ```
 
-**Extraction:**
-```yaml
-max_tokens: 10000  # Larger for complex structured data
-```
-
-**Assessment:**
-```yaml
-max_tokens: 10000  # Detailed confidence explanations
-```
-
-**Summarization:**
-```yaml
-max_tokens: 4096   # Comprehensive summaries
-```
+Extraction and the confidence pass have no `max_tokens` knob at all — they
+always request the model's maximum output so long lists and large documents are
+never truncated.
 
 ## Token Efficiency and Cost Optimization
 
