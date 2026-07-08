@@ -431,6 +431,8 @@ class DocumentDynamoDBService:
             evaluation_report_uri=item.get("EvaluationReportUri"),
             summary_report_uri=item.get("SummaryReportUri"),
             trace_id=item.get("TraceId"),
+            initial_event_time=item.get("InitialEventTime"),
+            config_version=item.get("ConfigVersion"),
         )
 
         # Convert status
@@ -1054,6 +1056,217 @@ class DocumentDynamoDBService:
             f"Updated section {section_index} ({section.section_id}) for document: {document_id}"
         )
         return response.get("Attributes", {})
+
+    # ------------------------------------------------------------------ #
+    # Document runs (versions)
+    #
+    # Each successful processing run is recorded as an immutable item under
+    # the document's partition: PK = doc#<key>, SK = run#<run_id>. The run_id
+    # is timestamp-prefixed (see idp_common.document_versions.build_run_id)
+    # so a SK-descending query returns newest-first.
+    #
+    # Run items intentionally carry RecordType="run" and NO ItemType /
+    # InitialEventTime attributes: the TypeDateIndex GSI keys on
+    # (ItemType, InitialEventTime), so omitting ItemType keeps run items out
+    # of the GSI entirely — no index schema change, no re-hydration, no GSI
+    # write amplification. Likewise the VersionCount counter maintained on
+    # the doc item is NOT in the GSI's INCLUDE projection, so adding it never
+    # touches the index definition.
+    # ------------------------------------------------------------------ #
+
+    def create_document_run(
+        self,
+        document: Document,
+        run_id: str,
+        manifest_uri: str,
+        file_count: int = 0,
+        expires_after: Optional[int] = None,
+    ) -> str:
+        """
+        Record an immutable run (version) item for a completed document and
+        increment the document's VersionCount.
+
+        Args:
+            document: The completed Document (post-processing state)
+            run_id: Run identifier (timestamp-prefixed, unique per execution)
+            manifest_uri: S3 URI of the run's output-version manifest
+            file_count: Number of output objects pinned by the manifest
+            expires_after: Optional TTL timestamp (should match the doc item's)
+
+        Returns:
+            The run_id of the created run item
+        """
+        item: Dict[str, Any] = {
+            "PK": f"doc#{document.input_key}",
+            "SK": f"run#{run_id}",
+            "RecordType": "run",
+            "RunId": run_id,
+            "ObjectKey": document.input_key,
+            "ManifestUri": manifest_uri,
+            "FileCount": file_count,
+        }
+
+        # Snapshot of the run's metadata (mirrors the doc item's attributes so
+        # the UI can render a prior version with the same code paths).
+        if document.completion_time:
+            item["CompletionTime"] = document.completion_time
+        if document.queued_time:
+            item["QueuedTime"] = document.queued_time
+        if document.start_time:
+            item["WorkflowStartTime"] = document.start_time
+        if document.initial_event_time:
+            # NB: attribute is safe on run items because ItemType is absent;
+            # both GSI keys are required for an item to be indexed.
+            item["RunInitialEventTime"] = document.initial_event_time
+        if document.workflow_execution_arn:
+            item["WorkflowExecutionArn"] = document.workflow_execution_arn
+        if document.config_version:
+            item["ConfigVersion"] = document.config_version
+        if document.num_pages > 0:
+            item["PageCount"] = document.num_pages
+        if document.metering:
+            item["Metering"] = json.dumps(document.metering, default=str)
+        if document.summary_report_uri:
+            item["SummaryReportUri"] = document.summary_report_uri
+        if document.evaluation_report_uri:
+            item["EvaluationReportUri"] = document.evaluation_report_uri
+
+        if document.sections:
+            sections_data = []
+            for section in document.sections:
+                page_ids = []
+                for page_id in section.page_ids:
+                    try:
+                        page_ids.append(int(page_id))
+                    except ValueError:
+                        continue
+                sections_data.append(
+                    {
+                        "Id": section.section_id,
+                        "PageIds": page_ids,
+                        "Class": section.classification,
+                        "OutputJSONUri": section.extraction_result_uri or "",
+                    }
+                )
+            item["Sections"] = sections_data
+
+        if document.pages:
+            pages_data = []
+            for page_id, page in document.pages.items():
+                try:
+                    page_id_int = int(page_id)
+                except ValueError:
+                    continue
+                pages_data.append(
+                    {
+                        "Id": page_id_int,
+                        "Class": page.classification or "",
+                        "ImageUri": page.image_uri or "",
+                        "TextUri": page.parsed_text_uri or page.raw_text_uri or "",
+                        "OcrPageDataUri": page.ocr_page_data_uri or "",
+                    }
+                )
+            if pages_data:
+                item["Pages"] = pages_data
+
+        if expires_after:
+            item["ExpiresAfter"] = expires_after
+
+        item = convert_floats_to_decimal(item)  # type: ignore[assignment]
+        # Idempotent create: EventBridge delivers Step Functions events
+        # at-least-once, so the same (stable) run_id can arrive twice. Only the
+        # first write should land — and only it should bump VersionCount — so a
+        # redelivery does not create a phantom duplicate version or over-count.
+        try:
+            self.client.put_item(item, condition_expression="attribute_not_exists(PK)")
+        except Exception as e:
+            error_code = getattr(e, "error_code", None)
+            if error_code == "ConditionalCheckFailedException":
+                logger.info(
+                    f"Run {run_id} already recorded for {document.input_key}; "
+                    "skipping duplicate (at-least-once redelivery)"
+                )
+                return run_id
+            raise
+
+        # Maintain a version counter on the doc item (detail-page display).
+        # Not projected into the TypeDateIndex GSI, so this is a plain
+        # attribute update with no index implications.
+        try:
+            self.client.update_item(
+                key={"PK": f"doc#{document.input_key}", "SK": "none"},
+                update_expression="ADD #VersionCount :one",
+                expression_attribute_names={"#VersionCount": "VersionCount"},
+                expression_attribute_values={":one": 1},
+                return_values="NONE",
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to increment VersionCount for {document.input_key}: {e}"
+            )
+
+        logger.info(
+            f"Created run record for {document.input_key}: run_id={run_id}, "
+            f"{file_count} files pinned"
+        )
+        return run_id
+
+    def list_document_runs(self, object_key: str) -> List[Dict[str, Any]]:
+        """
+        List all run (version) items for a document, newest first.
+
+        Returns:
+            List of run items (native Python types)
+        """
+        runs: List[Dict[str, Any]] = []
+        exclusive_start_key = None
+        while True:
+            kwargs: Dict[str, Any] = {
+                "key_condition_expression": "PK = :pk AND begins_with(SK, :run)",
+                "expression_attribute_values": {
+                    ":pk": f"doc#{object_key}",
+                    ":run": "run#",
+                },
+            }
+            if exclusive_start_key:
+                kwargs["exclusive_start_key"] = exclusive_start_key
+            response = self.client.query(**kwargs)
+            runs.extend(response.get("Items", []))
+            exclusive_start_key = response.get("LastEvaluatedKey")
+            if not exclusive_start_key:
+                break
+        # run_id is timestamp-prefixed, so SK order is chronological.
+        runs.sort(key=lambda r: r.get("SK", ""), reverse=True)
+        return convert_decimals_to_native(runs)  # type: ignore[return-value]
+
+    def get_document_run(
+        self, object_key: str, run_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get a single run (version) item for a document."""
+        item = self.client.get_item({"PK": f"doc#{object_key}", "SK": f"run#{run_id}"})
+        return convert_decimals_to_native(item) if item else None  # type: ignore[return-value]
+
+    def delete_document_run(self, object_key: str, run_id: str) -> bool:
+        """
+        Delete a run (version) item and decrement the doc's VersionCount.
+
+        S3 artifact cleanup (the pinned object versions and the manifest) is
+        the caller's responsibility — see
+        idp_common.document_versions.delete_run_artifacts.
+        """
+        self.client.delete_item({"PK": f"doc#{object_key}", "SK": f"run#{run_id}"})
+        try:
+            self.client.update_item(
+                key={"PK": f"doc#{object_key}", "SK": "none"},
+                update_expression="ADD #VersionCount :neg",
+                expression_attribute_names={"#VersionCount": "VersionCount"},
+                expression_attribute_values={":neg": -1},
+                return_values="NONE",
+            )
+        except Exception as e:
+            logger.warning(f"Failed to decrement VersionCount for {object_key}: {e}")
+        logger.info(f"Deleted run record for {object_key}: run_id={run_id}")
+        return True
 
     def calculate_ttl(self, days: int = 30) -> int:
         """

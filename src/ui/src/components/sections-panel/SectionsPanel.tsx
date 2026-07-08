@@ -30,6 +30,7 @@ import { getSectionIssueStatus, type ProcessingIssue } from '../common/processin
 import useConfiguration from '../../hooks/use-configuration';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
+import { useDocumentVersion } from '../../contexts/document-version';
 import { processChanges, getFileContents, skipAllSectionsReview } from '../../graphql/generated';
 import { parseHITLReviewHistory } from '../../graphql/awsjson-parsers';
 
@@ -819,6 +820,9 @@ const SectionsPanel = ({ sections, pages = [], documentItem, mergedConfig, onDoc
   const { mergedConfig: configuration } = useConfiguration();
   const { settings: settings2 } = useSettingsContext();
   const { isReviewerOnly, canWrite, canReview } = useUserRole();
+  // When viewing a past document version, all edits are disabled — the panels
+  // write to the *current* output objects, not the historical snapshot.
+  const { isHistorical } = useDocumentVersion();
 
   // Check if current pattern is Pattern-1 (for data-only edit mode)
   const isPattern1 = () => {
@@ -832,7 +836,8 @@ const SectionsPanel = ({ sections, pages = [], documentItem, mergedConfig, onDoc
   const isHitlCompleted = hitlStatusLower === 'completed' || hitlStatusLower === 'reviewcompleted';
   const hasPendingHITL = documentItem?.hitlTriggered && !isHitlCompleted && !isHitlSkipped;
   // Show skip button only if HITL pending and not already completed/skipped
-  const showSkipAllButton = canReview && hasPendingHITL;
+  // (never while viewing a historical version — it mutates current state).
+  const showSkipAllButton = canReview && hasPendingHITL && !isHistorical;
 
   // Log for debugging
   logger.debug('HITL Status Check:', {
@@ -858,19 +863,26 @@ const SectionsPanel = ({ sections, pages = [], documentItem, mergedConfig, onDoc
   // - User has no write or review permissions (Viewer role), OR
   // - REVIEWER only: HITL triggered but not claimed, document processing, or HITL completed/skipped
   // Admins and Authors can always edit
+  // - Viewing a historical version (read-only snapshot)
   const isEditModeDisabled =
+    isHistorical ||
     (!canWrite && !canReview) ||
     (isReviewerOnly && ((hitlTriggered && !hasReviewOwner) || isDocumentProcessing || isHitlCompleted || isHitlSkipped));
 
   logger.debug('Edit Mode Check:', { isReviewerOnly, isEditModeDisabled, isHitlCompleted, isHitlSkipped });
 
-  // Auto-exit edit mode for reviewers when document starts processing or HITL is completed/skipped
+  // Auto-exit edit mode when switching to a historical version, or (for
+  // reviewers) when the document starts processing or HITL is completed/skipped.
   useEffect(() => {
+    if (isHistorical && isEditMode) {
+      setIsEditMode(false);
+      return;
+    }
     if (isReviewerOnly && isEditMode && (isDocumentProcessing || isHitlCompleted || isHitlSkipped)) {
       logger.info('Auto-exiting edit mode due to status change');
       setIsEditMode(false);
     }
-  }, [isReviewerOnly, isDocumentProcessing, isHitlCompleted, isHitlSkipped, isEditMode]);
+  }, [isHistorical, isReviewerOnly, isDocumentProcessing, isHitlCompleted, isHitlSkipped, isEditMode]);
 
   // Handle skip all sections review (Admin only)
   const handleSkipAllSections = async () => {

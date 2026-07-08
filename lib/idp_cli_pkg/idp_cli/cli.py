@@ -2336,7 +2336,19 @@ def list_batches(stack_name: str, limit: int, region: Optional[str]):
 
 @cli.command()
 @click.option("--stack-name", required=True, help="CloudFormation stack name")
-@click.option("--batch-id", required=True, help="Batch identifier")
+@click.option(
+    "--batch-id",
+    help="Batch identifier (mutually exclusive with --document-id/--run-id)",
+)
+@click.option(
+    "--document-id",
+    help="Document object key — required with --run-id to download a specific version",
+)
+@click.option(
+    "--run-id",
+    help="Version run id (from `idp-cli list-versions`). Downloads the exact "
+    "pinned bytes of that processing run. Requires --document-id.",
+)
 @click.option(
     "--output-dir",
     required=True,
@@ -2351,7 +2363,9 @@ def list_batches(stack_name: str, limit: int, region: Optional[str]):
 @click.option("--region", help="AWS region (optional)")
 def download_results(
     stack_name: str,
-    batch_id: str,
+    batch_id: Optional[str],
+    document_id: Optional[str],
+    run_id: Optional[str],
     output_dir: str,
     file_types: str,
     region: Optional[str],
@@ -2361,23 +2375,48 @@ def download_results(
 
     Examples:
 
-      # Download all results
+      # Download all results for a batch
       idp-cli download-results --stack-name my-stack --batch-id cli-batch-20251015-143000 --output-dir ./results/
 
       # Download only extraction results (sections)
       idp-cli download-results --stack-name my-stack --batch-id <id> --output-dir ./results/ --file-types sections
 
-      # Download evaluations only
-      idp-cli download-results --stack-name my-stack --batch-id <id> --output-dir ./results/ --file-types evaluation
+      # Download a specific document VERSION (exact bytes of one processing run)
+      idp-cli download-results --stack-name my-stack --document-id loan-123/package.pdf \\
+          --run-id 20250707T141530Z-exec-abc --output-dir ./results/
     """
     try:
         from idp_sdk import IDPClient
 
+        client = IDPClient(stack_name=stack_name, region=region)
+
+        # Version download path: pinned S3 object versions from a run manifest.
+        if run_id:
+            if not document_id:
+                console.print("[red]✗ --run-id requires --document-id[/red]")
+                sys.exit(1)
+            console.print(
+                f"[bold blue]Downloading version {run_id} of {document_id}[/bold blue]"
+            )
+            result = client.batch.download_version(
+                document_id=document_id, run_id=run_id, output_dir=output_dir
+            )
+            console.print(
+                f"\n[green]✓ Downloaded {result.files_downloaded} files to "
+                f"{result.output_dir}[/green]"
+            )
+            console.print()
+            return
+
+        if not batch_id:
+            console.print(
+                "[red]✗ Provide either --batch-id or --document-id/--run-id[/red]"
+            )
+            sys.exit(1)
+
         console.print(
             f"[bold blue]Downloading results for batch: {batch_id}[/bold blue]"
         )
-
-        client = IDPClient(stack_name=stack_name, region=region)
 
         # Parse file types
         if file_types == "all":
@@ -2399,6 +2438,61 @@ def download_results(
 
     except Exception as e:
         logger.error(f"Error downloading results: {e}", exc_info=True)
+        console.print(f"[red]✗ Error: {e}[/red]")
+        sys.exit(1)
+
+
+@cli.command()
+@click.option("--stack-name", required=True, help="CloudFormation stack name")
+@click.option(
+    "--document-id", required=True, help="Document object key (its tracking id)"
+)
+@click.option("--region", help="AWS region (optional)")
+def list_versions(stack_name: str, document_id: str, region: Optional[str]):
+    """
+    List retained processing-run versions for a document, newest first.
+
+    Each successful processing run of a document is retained as a version whose
+    output bytes are pinned by S3 object VersionId. Use the RunId with
+    `download-results --run-id` to fetch that exact version.
+
+    Example:
+
+      idp-cli list-versions --stack-name my-stack --document-id loan-123/package.pdf
+    """
+    try:
+        from idp_sdk import IDPClient
+        from rich.table import Table
+
+        client = IDPClient(stack_name=stack_name, region=region)
+        versions = client.batch.list_versions(document_id=document_id)
+
+        if not versions:
+            console.print(f"[yellow]No versions found for {document_id}[/yellow]")
+            return
+
+        table = Table(title=f"Versions for {document_id}")
+        table.add_column("Run ID")
+        table.add_column("Completed")
+        table.add_column("Config Version")
+        table.add_column("Pages", justify="right")
+        table.add_column("Files", justify="right")
+
+        for v in versions:
+            table.add_row(
+                str(v.get("RunId", "")),
+                str(v.get("CompletionTime", ""))[:19],
+                str(v.get("ConfigVersion", "N/A")),
+                str(v.get("PageCount", "-")),
+                str(v.get("FileCount", "-")),
+            )
+
+        console.print()
+        console.print(table)
+        console.print()
+
+    except Exception as e:
+        logger.error(f"Error listing versions: {e}", exc_info=True)
         console.print(f"[red]✗ Error: {e}[/red]")
         sys.exit(1)
 

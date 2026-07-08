@@ -7,6 +7,7 @@ import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import SafeMarkdown from '../common/SafeMarkdown';
 import { getFileContents } from '../../graphql/generated';
+import { useDocumentVersion } from '../../contexts/document-version';
 
 import './MarkdownViewer.css';
 
@@ -267,6 +268,7 @@ const MarkdownViewer = ({
 };
 
 const MarkdownReport = ({ reportUri, documentId, title = 'Report', emptyMessage }: MarkdownReportProps): React.JSX.Element | null => {
+  const { versionIdForUri, runId } = useDocumentVersion();
   const [reportContent, setReportContent] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -282,7 +284,7 @@ const MarkdownReport = ({ reportUri, documentId, title = 'Report', emptyMessage 
 
         const response = await client.graphql({
           query: getFileContents,
-          variables: { s3Uri: reportUri },
+          variables: { s3Uri: reportUri, versionId: versionIdForUri(reportUri) },
         });
 
         // Get content from the updated response structure
@@ -308,7 +310,7 @@ const MarkdownReport = ({ reportUri, documentId, title = 'Report', emptyMessage 
     };
 
     fetchReport();
-  }, [reportUri, title]);
+  }, [reportUri, title, runId]);
 
   if (!reportUri) {
     return (

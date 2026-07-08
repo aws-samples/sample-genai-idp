@@ -129,7 +129,12 @@ def handler(event, context):
         
         # Extract S3 URI from arguments
         s3_uri = event['arguments']['s3Uri']
-        logger.info(f"Processing S3 URI: {s3_uri}")
+        # Optional S3 object VersionId — used to fetch the exact bytes of a
+        # prior document version (see document version history). None fetches
+        # the current object.
+        version_id = event['arguments'].get('versionId')
+        logger.info(f"Processing S3 URI: {s3_uri}"
+                    + (f" (versionId={version_id})" if version_id else ""))
         
         # Parse S3 URI to get bucket and key. The URI must be of the
         # form `s3://<bucket>/<key>`. We intentionally do NOT accept
@@ -150,11 +155,11 @@ def handler(event, context):
 
         logger.info(f"Fetching from bucket: {bucket}, key: {key}")
 
-        # Get object from S3
-        response = s3_client.get_object(
-            Bucket=bucket,
-            Key=key
-        )
+        # Get object from S3 (optionally a specific version)
+        get_kwargs = {"Bucket": bucket, "Key": key}
+        if version_id and version_id != "null":
+            get_kwargs["VersionId"] = version_id
+        response = s3_client.get_object(**get_kwargs)
 
         
         # Get content type from S3 response or infer from file extension

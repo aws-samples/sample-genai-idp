@@ -1310,6 +1310,13 @@ Resources:
             BucketName: !Ref ConfigurationBucketName
         - S3ReadPolicy:
             BucketName: !Ref OutputBucketName
+        # Read specific object versions (document version history: fetch the
+        # exact bytes of a prior run's file via its S3 VersionId).
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObjectVersion
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${OutputBucketName}/*"
         - Statement:
             - Effect: Allow
               Action:
@@ -1775,6 +1782,96 @@ Resources:
               Resource:
                 - !Ref UsersTableArn
                 - !Sub "${UsersTableArn}/index/*"
+
+  DocumentVersionsResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      RetentionInDays: !Ref LogRetentionDays
+
+
+  ##########################################################################
+  # DocumentVersionsResolverFunction
+  #
+  # Serves document version-history fields: listDocumentVersions,
+  # getDocumentVersion, compareDocumentVersions, deleteDocumentVersion.
+  # Reads run records (PK=doc#<key>, SK=run#<id>) and manifest-pinned S3
+  # object versions from the output bucket.
+  ##########################################################################
+  DocumentVersionsResolverFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+          - id: W12
+            reason: "Lambda requires CloudWatch logs permissions"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ./src/lambda/document_versions_resolver
+      Description: Lambda function serving document version-history API fields
+      MemorySize: 512
+      Timeout: 60
+      VpcConfig: !If
+        - IsPrivateApi
+        - SubnetIds: !Ref LambdaSubnetIds
+          SecurityGroupIds:
+            - !Ref LambdaSecurityGroupId
+        - !Ref AWS::NoValue
+      Layers:
+        - !Ref IDPCommonBaseLayerArn
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          OUTPUT_BUCKET: !Ref OutputBucketName
+          TRACKING_TABLE: !Ref TrackingTableName
+      LoggingConfig:
+        LogGroup: !Ref DocumentVersionsResolverFunctionLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTableName
+        # Read manifest-pinned output object versions; delete a version's
+        # pinned S3 objects + manifest on deleteDocumentVersion.
+        - Statement:
+            - Effect: Allow
+              Action:
+                # ListBucketVersions: enumerate object versions for the manifest.
+                # ListBucket: list_run_ids() enumerates run manifests under the
+                # runs/ prefix via ListObjectsV2 (reference-counting on delete).
+                - s3:ListBucketVersions
+                - s3:ListBucket
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${OutputBucketName}"
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:GetObjectVersion
+                - s3:DeleteObject
+                - s3:DeleteObjectVersion
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${OutputBucketName}/*"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+
   SyncBdaIdpResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -2414,8 +2511,12 @@ Resources:
             "compareTestRuns": "${TestResultsResolverFunction}",
             "copyToBaseline": "${CopyToBaselineResolverFunction}",
             "deleteChatSession": "${DeleteAgentChatSessionFunction}",
+            "compareDocumentVersions": "${DocumentVersionsResolverFunction}",
             "deleteConfigVersion": "${ConfigurationResolverFunction}",
             "deleteDocument": "${DeleteDocumentResolverFunction}",
+            "deleteDocumentVersion": "${DocumentVersionsResolverFunction}",
+            "getDocumentVersion": "${DocumentVersionsResolverFunction}",
+            "listDocumentVersions": "${DocumentVersionsResolverFunction}",
             "deleteTestSets": "${TestSetResolverFunction}",
             "deleteTests": "${DeleteTestsResolverFunction}",
             "getChatMessages": "${GetAgentChatMessagesFunction}",

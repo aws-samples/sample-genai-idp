@@ -109,6 +109,39 @@ type Document implements DynamoDbBase @aws_cognito_user_pools @aws_iam {
   ProcessingIssueCount: Int
   ConfigVersion: String
   TraceId: String
+  # Number of retained processing runs (versions) for this document. Maintained
+  # as a counter on the doc item; intentionally NOT part of the TypeDateIndex
+  # GSI projection so document versioning required no GSI schema change.
+  VersionCount: Int
+}
+
+# An immutable record of one successful processing run of a document. Output
+# artifacts are pinned by S3 VersionId in a per-run manifest, so a version's
+# exact bytes survive later re-runs that overwrite the output objects.
+type DocumentVersion @aws_cognito_user_pools @aws_iam {
+  RunId: String!
+  ObjectKey: ID
+  CompletionTime: AWSDateTime
+  QueuedTime: AWSDateTime
+  WorkflowStartTime: AWSDateTime
+  WorkflowExecutionArn: String
+  ConfigVersion: String
+  PageCount: Int
+  FileCount: Int
+  ManifestUri: String
+  SummaryReportUri: String
+  EvaluationReportUri: String
+  Metering: AWSJSON
+  Sections: [Section]
+  Pages: [Page]
+  # Populated by getDocumentVersion: the manifest's pinned output objects.
+  Files: [DocumentVersionFile]
+}
+
+type DocumentVersionFile @aws_cognito_user_pools @aws_iam {
+  Key: String
+  VersionId: String
+  Size: Float
 }
 
 type Section @aws_cognito_user_pools @aws_iam {
@@ -821,6 +854,11 @@ type Mutation {
   restoreDefaultModelConfigLimits: UpdateModelConfigLimitsResponse
     @aws_cognito_user_pools(cognito_groups: ["Admin"])
 
+  # Admin-only: permanently deletes a document version's pinned S3 object
+  # versions (irreversible), so it is more restrictive than deleteDocument.
+  deleteDocumentVersion(objectKey: ID!, runId: String!): Boolean!
+    @aws_cognito_user_pools(cognito_groups: ["Admin"])
+
   # Admin + Author operations
   deleteDocument(objectKeys: [String!]!): Boolean!
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
@@ -1081,8 +1119,14 @@ type Query @aws_cognito_user_pools @aws_iam {
     limit: Int
     nextToken: String
   ): DocumentPage
-  getFileContents(s3Uri: String!): FileContentsResponse
+  getFileContents(s3Uri: String!, versionId: String): FileContentsResponse
   getStepFunctionExecution(executionArn: String!): StepFunctionExecutionResponse
+
+  # Document version history (processing runs). All authenticated users may
+  # view/list/compare; deleteDocumentVersion (a Mutation) is Admin-only.
+  listDocumentVersions(objectKey: ID!): [DocumentVersion]
+  getDocumentVersion(objectKey: ID!, runId: String!): DocumentVersion
+  compareDocumentVersions(objectKey: ID!, runIdA: String!, runIdB: String!): AWSJSON
 
   # Configuration & pricing queries - Admin, Author, Viewer (not Reviewer)
   getConfigVersions: ConfigurationVersionsResponse

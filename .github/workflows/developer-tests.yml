@@ -88,6 +88,12 @@ jobs:
         run: make test-cicd -C lib/idp_common_pkg
         continue-on-error: false
 
+      - name: Run UI unit tests
+        id: run-ui-tests
+        # Vitest + jsdom (no browser). Node 22 is installed above.
+        run: cd src/ui && npm ci --prefer-offline --no-audit && npx vitest run
+        continue-on-error: false
+
       - name: Upload coverage reports
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         if: always() && steps.run-tests.outcome != 'skipped'

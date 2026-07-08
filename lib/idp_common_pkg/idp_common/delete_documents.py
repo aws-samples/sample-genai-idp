@@ -284,6 +284,39 @@ def delete_list_entries_robust(
     return deleted_any
 
 
+def _delete_run_records(tracking_table, object_key: str) -> int:
+    """
+    Delete all document version (run) items for a document.
+
+    Run items are keyed PK=doc#<key>, SK=run#<run_id>. Returns the number of
+    run items deleted. Idempotent — safe on documents with no runs.
+    """
+    doc_pk = f"doc#{object_key}"
+    deleted = 0
+    exclusive_start_key = None
+    while True:
+        query_kwargs: Dict[str, Any] = {
+            "KeyConditionExpression": Key("PK").eq(doc_pk)
+            & Key("SK").begins_with("run#"),
+            "ProjectionExpression": "PK, SK",
+        }
+        if exclusive_start_key:
+            query_kwargs["ExclusiveStartKey"] = exclusive_start_key
+        response = tracking_table.query(**query_kwargs)
+        for item in response.get("Items", []):
+            try:
+                tracking_table.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+                deleted += 1
+            except Exception as e:
+                logger.error(f"Error deleting run item {item.get('SK')}: {str(e)}")
+        exclusive_start_key = response.get("LastEvaluatedKey")
+        if not exclusive_start_key:
+            break
+    if deleted:
+        logger.info(f"Deleted {deleted} run records for {object_key}")
+    return deleted
+
+
 def delete_single_document(
     object_key: str,
     tracking_table,
@@ -318,6 +351,7 @@ def delete_single_document(
             "output_files": 0,
             "list_entries": False,
             "document_record": False,
+            "run_records": 0,
         },
         "errors": [],
     }
@@ -351,19 +385,32 @@ def delete_single_document(
         logger.error(error_msg)
         result["errors"].append(error_msg)
 
-    # Delete from output bucket
+    # Delete from output bucket. The output bucket is versioning-enabled, and
+    # document version history pins prior runs' output bytes as noncurrent
+    # object versions. A versionless delete_object would only add delete markers
+    # and leak those pinned bytes forever, so on a full document delete we purge
+    # ALL versions (and any delete markers) under the prefix to reclaim storage.
     try:
-        paginator = s3_client.get_paginator("list_objects_v2")
+        paginator = s3_client.get_paginator("list_object_versions")
         deleted_output_count = 0
 
         for page in paginator.paginate(Bucket=output_bucket, Prefix=object_key):
-            if "Contents" in page:
-                for obj in page["Contents"]:
-                    s3_client.delete_object(Bucket=output_bucket, Key=obj["Key"])
-                    deleted_output_count += 1
+            entries = page.get("Versions", []) + page.get("DeleteMarkers", [])
+            objects = [
+                {"Key": e["Key"], "VersionId": e["VersionId"]}
+                for e in entries
+                if e.get("VersionId")
+            ]
+            # delete_objects accepts up to 1000 keys per call
+            for i in range(0, len(objects), 1000):
+                batch = objects[i : i + 1000]
+                s3_client.delete_objects(
+                    Bucket=output_bucket, Delete={"Objects": batch, "Quiet": True}
+                )
+                deleted_output_count += len(batch)
 
         result["deleted"]["output_files"] = deleted_output_count
-        logger.debug(f"Deleted {deleted_output_count} output files")
+        logger.debug(f"Deleted {deleted_output_count} output object versions")
     except Exception as e:
         error_msg = f"Error deleting from output bucket: {str(e)}"
         logger.error(error_msg)
@@ -377,6 +424,18 @@ def delete_single_document(
         result["deleted"]["list_entries"] = deletion_success
     except Exception as e:
         error_msg = f"Error in list entry deletion: {str(e)}"
+        logger.error(error_msg)
+        result["errors"].append(error_msg)
+
+    # Delete document version (run) records. The pinned output object versions
+    # and run manifests they reference were already purged above (the
+    # all-versions prefix delete covers the runs/ prefix too), so only the run
+    # tracking items remain.
+    try:
+        run_count = _delete_run_records(tracking_table, object_key)
+        result["deleted"]["run_records"] = run_count
+    except Exception as e:
+        error_msg = f"Error deleting run records: {str(e)}"
         logger.error(error_msg)
         result["errors"].append(error_msg)
 
