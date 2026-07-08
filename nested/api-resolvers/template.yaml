@@ -1849,7 +1849,11 @@ Resources:
         - Statement:
             - Effect: Allow
               Action:
+                # ListBucketVersions: enumerate object versions for the manifest.
+                # ListBucket: list_run_ids() enumerates run manifests under the
+                # runs/ prefix via ListObjectsV2 (reference-counting on delete).
                 - s3:ListBucketVersions
+                - s3:ListBucket
               Resource: !Sub "arn:${AWS::Partition}:s3:::${OutputBucketName}"
             - Effect: Allow
               Action:
