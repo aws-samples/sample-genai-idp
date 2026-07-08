@@ -615,10 +615,11 @@ def compare_values(
 
     elif method == EvaluationMethod.DATE:
         # Use Stickler's DateComparator for format-insensitive date matching.
-        # DateComparator scores exact-day matches as 1.0, so default to a
-        # threshold of 1.0 when the caller left the generic 0.8 default.
-        date_threshold = 1.0 if threshold == 0.8 else threshold
-        matched, score = compare_date(expected, actual, date_threshold)
+        # DATE is a binary method (not in METHODS_REQUIRING_THRESHOLD): a match
+        # means "same calendar day", so we use compare_date's own 1.0 default
+        # rather than the generic similarity `threshold` (which defaults to 0.8
+        # and is not meaningful for dates).
+        matched, score = compare_date(expected, actual)
 
     elif method == EvaluationMethod.LLM:
         # Use the compare_llm function directly
