@@ -744,6 +744,7 @@ export type Mutation = {
   uploadDiscoveryDocument: DisPresignedUrlResponse;
   uploadDocument: PresignedUrlResponse;
   uploadMultiDocDiscoveryZip?: Maybe<TestSetUploadResponse>;
+  uploadSampleDocument: SampleDocumentUploadResponse;
 };
 
 
@@ -1139,6 +1140,13 @@ export type MutationUploadMultiDocDiscoveryZipArgs = {
   fileSize: Scalars['Int']['input'];
 };
 
+
+export type MutationUploadSampleDocumentArgs = {
+  prefix?: InputMaybe<Scalars['String']['input']>;
+  sampleId: Scalars['String']['input'];
+  version?: InputMaybe<Scalars['String']['input']>;
+};
+
 export type Page = {
   Class?: Maybe<Scalars['String']['output']>;
   Id?: Maybe<Scalars['Int']['output']>;
@@ -1264,6 +1272,7 @@ export type Query = {
    * installed extensions via SigV4 — the InstalledFeature type is already @aws_iam.
    */
   listInstalledFeatures?: Maybe<Array<InstalledFeature>>;
+  listSampleDocuments?: Maybe<SampleDocumentListResponse>;
   listUsers?: Maybe<UserList>;
   queryKnowledgeBase?: Maybe<Scalars['String']['output']>;
   submitAgentQuery?: Maybe<AgentJob>;
@@ -1499,6 +1508,28 @@ export type RegisterFeatureInput = {
   stackName: Scalars['String']['input'];
   stackRegion: Scalars['String']['input'];
   uiBundlePath: Scalars['String']['input'];
+};
+
+export type SampleDocument = {
+  configId?: Maybe<Scalars['String']['output']>;
+  description?: Maybe<Scalars['String']['output']>;
+  fileCount?: Maybe<Scalars['Int']['output']>;
+  id: Scalars['String']['output'];
+  kind: Scalars['String']['output'];
+  name: Scalars['String']['output'];
+  s3Key: Scalars['String']['output'];
+};
+
+export type SampleDocumentListResponse = {
+  error?: Maybe<Scalars['String']['output']>;
+  samples?: Maybe<Array<Maybe<SampleDocument>>>;
+  success: Scalars['Boolean']['output'];
+};
+
+export type SampleDocumentUploadResponse = {
+  error?: Maybe<Scalars['String']['output']>;
+  objectKeys?: Maybe<Array<Maybe<Scalars['String']['output']>>>;
+  success: Scalars['Boolean']['output'];
 };
 
 export type Section = {

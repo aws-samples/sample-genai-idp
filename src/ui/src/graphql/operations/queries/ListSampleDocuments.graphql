@@ -1,0 +1,15 @@
+query ListSampleDocuments {
+  listSampleDocuments {
+    success
+    samples {
+      id
+      name
+      description
+      s3Key
+      kind
+      fileCount
+      configId
+    }
+    error
+  }
+}
