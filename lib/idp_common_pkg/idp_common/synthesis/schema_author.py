@@ -128,7 +128,7 @@ def _sample_output_format() -> str:
                     "type": "string",
                     "format": "date",
                     "description": "Date the loss occurred",
-                    "x-aws-idp-evaluation-method": "FUZZY",
+                    "x-aws-idp-evaluation-method": "DATE",
                 },
                 "AmountClaimed": {
                     "type": "number",
@@ -195,8 +195,9 @@ def build_author_prompt(
         '  - Each leaf field needs "type", "description", and '
         '"x-aws-idp-evaluation-method"\n'
         f"  - Evaluation method must be one of: {methods}. Use EXACT for "
-        "codes/IDs/exact values, NUMERIC_EXACT for amounts, FUZZY for names/"
-        "dates/addresses, SEMANTIC for free-text descriptions\n"
+        "codes/IDs/exact values, NUMERIC_EXACT for amounts, DATE for dates and "
+        "date ranges, FUZZY for names/addresses, SEMANTIC for free-text "
+        "descriptions\n"
         "  - Field names < 30 chars; no leading digit; no special characters\n"
         "Return ONLY the JSON Schema in exactly this shape:\n"
         f"{_sample_output_format()}"

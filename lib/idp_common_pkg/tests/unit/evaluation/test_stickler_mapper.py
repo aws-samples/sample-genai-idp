@@ -445,3 +445,103 @@ class TestRequiredFieldsClearedForEvaluation:
         # Nested object inside the list items must also be emptied.
         nested = result["properties"]["LineItems"]["items"]
         assert nested.get("required") == []
+
+
+@pytest.mark.unit
+class TestDateMethodMapping:
+    """The DATE evaluation method maps to Stickler's DateComparator (v0.5.0+)
+    and passes any x-aws-idp-evaluation-method-config through verbatim as
+    x-aws-stickler-comparator-config.
+    """
+
+    def test_date_method_maps_to_date_comparator(self):
+        schema = {
+            "$id": "Invoice",
+            "x-aws-idp-document-type": "Invoice",
+            "type": "object",
+            "properties": {
+                "InvoiceDate": {
+                    "type": "string",
+                    "format": "date",
+                    "x-aws-idp-evaluation-method": "DATE",
+                },
+            },
+        }
+        result = SticklerConfigMapper.build_stickler_model_config(schema)["schema"]
+        prop = result["properties"]["InvoiceDate"]
+        assert prop["x-aws-stickler-comparator"] == "DateComparator"
+        # No config provided -> no comparator-config extension emitted.
+        assert "x-aws-stickler-comparator-config" not in prop
+
+    def test_date_method_config_passed_through(self):
+        schema = {
+            "$id": "Invoice",
+            "x-aws-idp-document-type": "Invoice",
+            "type": "object",
+            "properties": {
+                "InvoiceDate": {
+                    "type": "string",
+                    "x-aws-idp-evaluation-method": "DATE",
+                    "x-aws-idp-evaluation-method-config": {
+                        "dayfirst": False,
+                        "range_mode": "contains",
+                    },
+                },
+            },
+        }
+        result = SticklerConfigMapper.build_stickler_model_config(schema)["schema"]
+        prop = result["properties"]["InvoiceDate"]
+        assert prop["x-aws-stickler-comparator"] == "DateComparator"
+        assert prop["x-aws-stickler-comparator-config"] == {
+            "dayfirst": False,
+            "range_mode": "contains",
+        }
+
+    def test_date_method_in_method_to_comparator_map(self):
+        assert SticklerConfigMapper.METHOD_TO_COMPARATOR["DATE"] == "DateComparator"
+
+    def test_date_method_rejected_on_structured_array(self):
+        # DATE is a scalar-field method; using it on a List[Object] is invalid
+        # and _validate_method_for_field must raise.
+        schema = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"d": {"type": "string"}},
+            },
+        }
+        with pytest.raises(ValueError, match="DATE"):
+            SticklerConfigMapper._validate_method_for_field(schema, "DATE", "dates")
+
+    def test_date_field_builds_end_to_end(self):
+        """A DATE field must convert cleanly through the real Stickler
+        JsonSchemaFieldConverter + Pydantic model build, and score
+        format-variant dates as a match."""
+        from pydantic import create_model
+        from stickler import StructuredModel
+        from stickler.structured_object_evaluator.models.json_schema_field_converter import (  # noqa: E501
+            JsonSchemaFieldConverter,
+        )
+
+        schema = {
+            "$id": "D",
+            "x-aws-idp-document-type": "D",
+            "type": "object",
+            "properties": {
+                "d": {"type": "string", "x-aws-idp-evaluation-method": "DATE"}
+            },
+            "required": ["d"],
+        }
+        sch = SticklerConfigMapper.build_stickler_model_config(schema)["schema"]
+        conv = JsonSchemaFieldConverter(sch)
+        fields = conv.convert_properties_to_fields(
+            sch.get("properties", {}), sch.get("required", [])
+        )
+        model = create_model(  # type: ignore  # pyright: reportCallIssue=false
+            "D", **fields, __base__=StructuredModel
+        )
+
+        # Same calendar day, different surface form -> perfect match.
+        assert model(d="2024-01-05").compare(model(d="January 5, 2024")) == 1.0
+        # Genuinely different dates -> no match.
+        assert model(d="2024-01-05").compare(model(d="2024-06-30")) == 0.0

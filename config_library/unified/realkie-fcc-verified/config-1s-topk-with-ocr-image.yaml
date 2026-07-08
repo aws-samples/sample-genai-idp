@@ -45,7 +45,7 @@ classes:
            appears at the line-item level; in others, it appears at a
            sub-line/week level beneath the main line entry. Output null if not shown."
           x-aws-idp-confidence-threshold: '0.8'
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           type: string
         LineItemDays:
@@ -73,7 +73,7 @@ classes:
            of LineItemStartDate. The end date may be identical to the
            start date when a line item covers a single day. Output null if not explicitly stated."
           x-aws-idp-confidence-threshold: '0.8'
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           type: string
         LineItemDescription:
