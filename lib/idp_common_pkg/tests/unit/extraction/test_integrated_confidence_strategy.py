@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-"""Unit tests for the two integrated-confidence strategies (agentic extraction).
+"""Unit tests for the integrated-confidence strategies (agentic extraction).
 
 `extraction.agentic.integrated_confidence_strategy` (a hidden experimental knob)
 selects how confidence is produced when `confidence.mode == integrated`:
@@ -10,10 +10,13 @@ selects how confidence is produced when `confidence.mode == integrated`:
     provide_field_assessment call (a dedicated reflection inference).
   - single_shot: extract + confidence in ONE combined tool call
     (extraction_with_confidence_tool), saving the follow-up inference.
+  - topk: extract + confidence in ONE combined tool call
+    (extraction_with_topk_tool) where the agent emits top-K guesses with
+    probabilities; the shared topk_resolver takes G1 as value, P1 as confidence.
 
-Both must record the SAME agent.state["field_assessment"] so the downstream
+All must record the SAME agent.state["field_assessment"] shape so the downstream
 collation/grounding/explainability path is identical. These tests cover the
-config field, the combined tool's behavior, and (lightly) tool selection.
+config field, each tool's behavior, and (lightly) tool selection.
 """
 
 from __future__ import annotations
@@ -76,11 +79,12 @@ def _tools(model_class):
     (
         extraction_tool,
         extraction_with_confidence_tool,
+        extraction_with_topk_tool,
         apply_json_patches,
         make_buffer_data_final_extraction,
         finalize_table_extraction,
     ) = create_dynamic_extraction_tool_and_patch_tool(model_class)
-    return extraction_tool, extraction_with_confidence_tool
+    return extraction_tool, extraction_with_confidence_tool, extraction_with_topk_tool
 
 
 # =============================================================================
@@ -136,7 +140,7 @@ class TestStrategyConfigField:
 # =============================================================================
 class TestSingleShotCombinedTool:
     def test_records_extraction_and_confidence_in_one_call(self):
-        _, combined = _tools(_Statement)
+        _, combined, _topk = _tools(_Statement)
         agent = MockAgent()
 
         extraction = {
@@ -167,7 +171,7 @@ class TestSingleShotCombinedTool:
         assert "recorded" in result.lower()
 
     def test_schema_invalid_extraction_raises_and_records_nothing(self):
-        _, combined = _tools(_Statement)
+        _, combined, _topk = _tools(_Statement)
         agent = MockAgent()
         # Missing required field -> Pydantic raises (surfaced to the retry loop);
         # neither extraction nor confidence is recorded.
@@ -181,7 +185,7 @@ class TestSingleShotCombinedTool:
         assert agent.state.get("field_assessment") is None
 
     def test_empty_array_returns_error_string_and_records_nothing(self):
-        _, combined = _tools(_Statement)
+        _, combined, _topk = _tools(_Statement)
         agent = MockAgent()
         # Array-shape guard returns an error string (not a raise) before validation.
         result = combined(extraction=[], field_assessment={"x": 1}, agent=agent)
@@ -190,7 +194,7 @@ class TestSingleShotCombinedTool:
         assert agent.state.get("field_assessment") is None
 
     def test_single_element_array_unwrapped(self):
-        _, combined = _tools(_Statement)
+        _, combined, _topk = _tools(_Statement)
         agent = MockAgent()
         payload = {"account_number": "9", "transactions": []}
         combined(extraction=[payload], field_assessment={}, agent=agent)
@@ -202,7 +206,7 @@ class TestSingleShotCombinedTool:
 # =============================================================================
 class TestTwoStepPlainTool:
     def test_extraction_tool_records_only_extraction(self):
-        plain, _ = _tools(_Statement)
+        plain, _, _topk = _tools(_Statement)
         agent = MockAgent()
         plain(
             extraction={"account_number": "1", "transactions": []},
@@ -225,7 +229,7 @@ class TestTwoStepPlainTool:
 # Equivalence: both strategies yield the same recorded state shape
 # =============================================================================
 def test_both_strategies_produce_same_state_shape():
-    plain, combined = _tools(_Statement)
+    plain, combined, _topk = _tools(_Statement)
     from idp_common.extraction.agentic_idp import provide_field_assessment
 
     extraction = {
@@ -248,6 +252,64 @@ def test_both_strategies_produce_same_state_shape():
 
     assert a1.state.get("current_extraction") == a2.state.get("current_extraction")
     assert a1.state.get("field_assessment") == a2.state.get("field_assessment")
+
+
+# =============================================================================
+# topk: the combined tool resolves G1->value and P1->confidence in one call
+# =============================================================================
+class TestTopKConfigField:
+    def test_topk_accepted(self):
+        from idp_common.config.models import AgenticConfig
+
+        cfg = AgenticConfig(integrated_confidence_strategy="topk")
+        assert cfg.integrated_confidence_strategy == "topk"
+
+    def test_topk_case_insensitive(self):
+        from idp_common.config.models import AgenticConfig
+
+        assert (
+            AgenticConfig(
+                integrated_confidence_strategy=" TopK "
+            ).integrated_confidence_strategy
+            == "topk"
+        )
+
+
+class TestTopKCombinedTool:
+    def test_resolves_g1_value_and_p1_confidence(self):
+        _plain, _combined, topk = _tools(_Statement)
+        agent = MockAgent()
+
+        candidates = {
+            "account_number": {"G1": "12345", "P1": 0.97, "G2": "1234S", "P2": 0.03},
+            "transactions": [
+                {
+                    "description": {"G1": "Coffee", "P1": 0.9},
+                    "amount": {"G1": "4.50", "P1": 0.8},
+                },
+            ],
+        }
+        result = topk(candidates=candidates, agent=agent)
+
+        # G1 became the extracted value (validated round-trip).
+        stored = agent.state.get("current_extraction")
+        assert stored["account_number"] == "12345"
+        assert stored["transactions"][0]["description"] == "Coffee"
+        # P1 became the confidence, in the SAME slot the other strategies use.
+        fa = agent.state.get("field_assessment")
+        assert fa["account_number"]["confidence"] == 0.97
+        assert fa["transactions"][0]["description"]["confidence"] == 0.9
+        assert "recorded" in result.lower()
+
+    def test_topk_invalid_extraction_records_nothing(self):
+        # Missing required account_number after resolution -> validation error;
+        # neither extraction nor confidence recorded.
+        _plain, _combined, topk = _tools(_Statement)
+        agent = MockAgent()
+        with pytest.raises(Exception):
+            topk(candidates={"transactions": []}, agent=agent)
+        assert agent.state.get("current_extraction") is None
+        assert agent.state.get("field_assessment") is None
 
 
 if __name__ == "__main__":

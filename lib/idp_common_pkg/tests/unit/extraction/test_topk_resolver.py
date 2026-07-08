@@ -1,0 +1,156 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+"""Unit tests for the 1S-TopK candidate resolver.
+
+``resolve_candidates`` takes an LLM response where each field is a ``{G1, P1,
+...}`` candidate object (top-K guesses + probabilities) and splits it into
+``inference_result`` (G1 values) + raw confidence leaves (P1) + full candidate
+metadata. ``is_topk_response`` detects that shape.
+"""
+
+from __future__ import annotations
+
+import pytest
+from idp_common.extraction.topk_resolver import (
+    is_topk_response,
+    resolve_candidates,
+)
+
+# --- is_topk_response ------------------------------------------------------
+
+
+def test_detects_scalar_candidates():
+    assert is_topk_response({"Agency": {"G1": "ACME", "P1": 0.9}}) is True
+
+
+def test_detects_list_item_candidates():
+    resp = {"Items": [{"rate": {"G1": "5", "P1": 0.8}}]}
+    assert is_topk_response(resp) is True
+
+
+def test_rejects_flat_response():
+    assert is_topk_response({"Agency": "ACME", "Total": 100}) is False
+
+
+def test_rejects_partial_marker():
+    # A dict with G1 but no P1 is not a candidate object.
+    assert is_topk_response({"Agency": {"G1": "ACME"}}) is False
+
+
+# --- resolve_candidates: scalars -------------------------------------------
+
+
+def test_scalar_resolution_takes_g1_and_p1():
+    schema = {"properties": {"Agency": {}}}
+    raw = {"Agency": {"G1": "ACME", "P1": 0.9, "G2": "ACMY", "P2": 0.1}}
+    values, assess, candidates = resolve_candidates(raw, schema)
+    assert values == {"Agency": "ACME"}
+    assert assess == {"Agency": {"confidence": 0.9}}
+    # Full candidate set preserved for audit.
+    assert candidates["Agency"]["G2"] == "ACMY"
+
+
+def test_number_value_is_coerced_to_float():
+    schema = {"properties": {"Total": {"type": "number"}}}
+    values, _assess, _c = resolve_candidates(
+        {"Total": {"G1": "800.15", "P1": 0.9}}, schema
+    )
+    assert values["Total"] == 800.15
+    assert isinstance(values["Total"], float)
+
+
+def test_bad_number_value_left_as_is():
+    schema = {"properties": {"Total": {"type": "number"}}}
+    values, _assess, _c = resolve_candidates(
+        {"Total": {"G1": "N/A", "P1": 0.5}}, schema
+    )
+    assert values["Total"] == "N/A"
+
+
+def test_null_g1_preserved():
+    schema = {"properties": {"Agency": {}}}
+    values, assess, _c = resolve_candidates({"Agency": {"G1": None, "P1": 0.0}}, schema)
+    assert values["Agency"] is None
+    assert assess["Agency"]["confidence"] == 0.0
+
+
+@pytest.mark.parametrize(
+    "raw_p, expected",
+    [(1.5, 1.0), (-0.2, 0.0), ("0.42", 0.42), ("bad", 0.0), (None, 0.0)],
+)
+def test_probability_clamped_and_coerced(raw_p, expected):
+    schema = {"properties": {"A": {}}}
+    _v, assess, _c = resolve_candidates({"A": {"G1": "x", "P1": raw_p}}, schema)
+    assert assess["A"]["confidence"] == expected
+
+
+def test_confidence_leaf_has_no_threshold():
+    # Thresholds are the enricher's job — the resolver emits confidence only.
+    schema = {"properties": {"A": {"x-aws-idp-confidence-threshold": "0.95"}}}
+    _v, assess, _c = resolve_candidates({"A": {"G1": "x", "P1": 0.9}}, schema)
+    assert assess["A"] == {"confidence": 0.9}
+
+
+def test_non_candidate_field_passes_through():
+    schema = {"properties": {"Agency": {}, "Note": {}}}
+    raw = {"Agency": {"G1": "ACME", "P1": 0.9}, "Note": "plain string"}
+    values, assess, _c = resolve_candidates(raw, schema)
+    assert values["Note"] == "plain string"
+    assert "Note" not in assess  # no confidence leaf for a passthrough field
+
+
+# --- resolve_candidates: arrays --------------------------------------------
+
+_LIST_SCHEMA = {
+    "properties": {"Items": {"type": "array", "items": {"$ref": "#/$defs/LineItem"}}},
+    "$defs": {
+        "LineItem": {
+            "properties": {"rate": {"type": "number"}, "day": {"type": "string"}}
+        }
+    },
+}
+
+
+def test_direct_array_resolves_per_row_per_column():
+    raw = {
+        "Items": [
+            {"rate": {"G1": "5", "P1": 0.8}, "day": {"G1": "Mon", "P1": 0.7}},
+            {"rate": {"G1": "6", "P1": 0.6}, "day": {"G1": "Tue", "P1": 0.5}},
+        ]
+    }
+    values, assess, _c = resolve_candidates(raw, _LIST_SCHEMA)
+    assert values["Items"] == [
+        {"rate": 5.0, "day": "Mon"},
+        {"rate": 6.0, "day": "Tue"},
+    ]
+    assert assess["Items"][0]["rate"]["confidence"] == 0.8
+    assert assess["Items"][1]["day"]["confidence"] == 0.5
+
+
+def test_wrapped_array_candidate():
+    # Some models wrap the whole list: {"Items": {"G1": [...rows...], "P1": 1.0}}
+    raw = {
+        "Items": {
+            "G1": [{"rate": {"G1": "5", "P1": 0.8}}],
+            "P1": 1.0,
+        }
+    }
+    values, assess, _c = resolve_candidates(raw, _LIST_SCHEMA)
+    assert values["Items"] == [{"rate": 5.0}]
+    assert assess["Items"][0]["rate"]["confidence"] == 0.8
+
+
+def test_array_item_non_candidate_subfield_passthrough():
+    raw = {"Items": [{"rate": {"G1": "5", "P1": 0.8}, "note": "as-is"}]}
+    values, assess, _c = resolve_candidates(raw, _LIST_SCHEMA)
+    assert values["Items"][0]["note"] == "as-is"
+    assert "note" not in assess["Items"][0]
+
+
+def test_non_dict_array_item_preserved():
+    raw = {"Items": ["not-a-dict", {"rate": {"G1": "5", "P1": 0.8}}]}
+    values, assess, _c = resolve_candidates(raw, _LIST_SCHEMA)
+    assert values["Items"][0] == "not-a-dict"
+    assert assess["Items"][0] == {}
+    assert values["Items"][1] == {"rate": 5.0}

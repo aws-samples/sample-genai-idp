@@ -553,6 +553,62 @@ The service supports both text and image inputs:
 
 The extraction service is designed to be thread-safe, supporting concurrent processing of multiple sections in parallel workloads.
 
+## 1S-TopK: single-stage extraction + confidence (Simple mode)
+
+When `extraction.mode: simple` and `extraction.confidence.mode: integrated`, the
+service produces the extracted values **and** their per-field confidence in a
+**single LLM call** — there is no separate Assessment pass, halving the number of
+LLM invocations for the extraction workflow.
+
+**How it works.** The selected task prompt
+(`extraction.task_prompt_extraction_with_confidence_topk`, chosen automatically by
+`prompt_assembly.select_extraction_task_prompt`) instructs the model to return,
+per field, its **top-K guesses with probabilities** rather than a single value:
+
+```json
+{
+  "Agency": { "G1": "ACME Media", "P1": 0.93, "G2": "ACME", "P2": 0.05, "G3": "...", "P3": 0.02 },
+  "LineItems": [
+    { "LineItemRate": { "G1": "800.15", "P1": 0.88 }, "LineItemDays": { "G1": "-TWTF--", "P1": 0.71 } }
+  ]
+}
+```
+
+`idp_common.extraction.topk_resolver.resolve_candidates` then splits this into:
+
+- **`inference_result`** — the top guess `G1` per field (numbers coerced per schema).
+- **raw confidence leaves** — `{"confidence": P1}` per field, stashed in
+  `metering["_integrated_field_assessment"]`. `_save_results` runs these through the
+  **shared** `enrich_assessment_with_thresholds` (attaches
+  `confidence_threshold` from each field's `x-aws-idp-confidence-threshold` or the
+  default, and builds threshold alerts) and grounds them into
+  `explainability_info` — the identical output contract to separate mode, so
+  evaluation, reporting, the UI, and HITL are all unchanged.
+- **`metadata.topk_candidates`** — the full candidate set (all K guesses) per field,
+  preserved for auditability, plus `metadata.assessment_method: "1s_topk"`.
+
+Because `explainability_info` is already present in the saved `result.json`, the
+downstream Assessment Lambda **auto-skips**.
+
+**Why top-K.** Asking the model to enumerate and rank alternatives (instead of a
+single value + a single confidence number) forces it to distribute probability
+mass, yielding **better-calibrated, less-overconfident** scores. See Tian et al.,
+*"Just Ask for Calibration"* (EMNLP 2023).
+
+**Contract.** Output keys follow `G<N>` (guess) / `P<N>` (probability). K is
+flexible — `G1`/`P1` alone is valid; the default prompt requests K=4. Only `G1`/`P1`
+are consumed; `G2..GK`/`P2..PK` are preserved verbatim in `topk_candidates`. If the
+model returns a flat response with no `G1`/`P1` candidates, the values pass through
+unchanged and the standalone Assessment step runs as the fallback (no regression).
+
+Advanced (agentic) integrated mode can opt into the same top-K elicitation via the
+hidden experimental knob `extraction.agentic.integrated_confidence_strategy: topk`
+(see below).
+
+Reference config:
+[`config_library/unified/realkie-fcc-verified/config-1s-topk-with-ocr-image.yaml`](../../../../config_library/unified/realkie-fcc-verified/config-1s-topk-with-ocr-image.yaml);
+end-to-end demo: [`notebooks/misc/e2e-example-with-1s-topk.ipynb`](../../../../notebooks/misc/e2e-example-with-1s-topk.ipynb).
+
 ## Agentic Extraction with Table Parsing Tool
 
 The extraction service supports an optional **agentic extraction mode** powered by the Strands agent framework with tool-based structured output. When enabled, the extraction agent gains intelligent tools including a deterministic table parser for robust tabular data extraction.
