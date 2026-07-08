@@ -8771,6 +8771,12 @@ Resources:
               - Effect: Allow
                 Action:
                   - "s3:GetObject"
+                  # s3:GetObjectVersion is required for the browser to fetch a
+                  # specific object version via a client-presigned URL
+                  # (?versionId=...) — used to view a past document version's
+                  # page images. Without it, versioned image loads get
+                  # AccessDenied and render blank.
+                  - "s3:GetObjectVersion"
                   - "s3:ListBucket"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:s3:::${OutputBucket}"

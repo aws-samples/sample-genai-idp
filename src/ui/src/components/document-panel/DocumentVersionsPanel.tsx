@@ -310,6 +310,9 @@ const DocumentVersionsPanel = ({ objectKey, viewingRunId = null, onViewVersion }
                     {isAdmin && (
                       <ButtonDropdown
                         variant="inline-icon"
+                        // Render the menu in a portal so it isn't clipped by the
+                        // table row/container overflow.
+                        expandToViewport
                         ariaLabel={`Actions for version ${item.RunId}`}
                         items={[
                           {
