@@ -1514,25 +1514,57 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         actual: bool,
         schema_analysis: dict[str, Any] | None,
         ocr_analysis: dict[str, Any] | None,
+        tool_enabled: bool = True,
+        ocr_had_markdown_tables: bool = True,
     ) -> str:
-        """Generate human-readable explanation of tool usage."""
+        """Generate a human-readable explanation of the table-parsing-tool decision.
 
+        Distinguishes the cases that matter for the report:
+          - tool DISABLED in config,
+          - tool ENABLED but OCR produced no Markdown tables (nothing to parse),
+          - tool AVAILABLE and recommended, but the AGENT chose not to call it
+            (a model decision — it judged direct LLM extraction sufficient),
+          - normal recommended-and-used / not-required cases.
+        """
         if expected and actual:
-            return "Tool was recommended and used as expected"
-        elif expected and not actual:
+            return "Tool was recommended and used as expected."
+
+        if expected and not actual:
+            # Recommended but not used — explain the actual blocker.
+            if not tool_enabled:
+                return (
+                    "Table parsing was recommended but is DISABLED in this "
+                    "configuration (extraction.agentic.table_parsing.enabled=false), "
+                    "so the agent used direct LLM extraction instead."
+                )
+            if not ocr_had_markdown_tables:
+                return (
+                    "Table parsing is enabled but the OCR output contained NO "
+                    "Markdown tables for it to parse (the deterministic parser only "
+                    "runs on Markdown pipe-tables — e.g. Textract with the TABLES "
+                    "feature, or another OCR backend that emits Markdown tables). "
+                    "The agent used direct LLM extraction instead."
+                )
             reasons = []
-            if schema_analysis and schema_analysis.get("tool_usage_recommended"):
-                reasons.append(schema_analysis.get("recommendation_reason", ""))
             if ocr_analysis and ocr_analysis.get("tool_usage_recommended"):
                 reasons.append(ocr_analysis.get("recommendation_reason", ""))
+            if schema_analysis and schema_analysis.get("tool_usage_recommended"):
+                reasons.append(schema_analysis.get("recommendation_reason", ""))
+            reason_str = "; ".join(r for r in reasons if r) or "large tables detected"
             return (
-                f"Tool was recommended but NOT used. Reasons: {'; '.join(reasons)}. "
-                f"This may indicate incomplete extraction."
+                "Table parsing was ENABLED and RECOMMENDED "
+                f"({reason_str}), and Markdown tables were present in the OCR, but "
+                "the extraction agent CHOSE NOT to call the deterministic parser — "
+                "it judged direct LLM extraction sufficient for this section. The "
+                "row counts below and the completeness check indicate whether that "
+                "was safe; if a large table looks truncated, this is the first thing "
+                "to inspect."
             )
-        elif not expected and actual:
-            return "Tool was used even though not required (agent chose to use it)"
-        else:
-            return "Tool usage was not required and was not used"
+
+        if not expected and actual:
+            return "Tool was used even though not strictly required (agent chose to use it)."
+
+        return "Tool usage was not required (no large Markdown tables detected) and was not used."
 
     def _check_completeness_detailed(
         self,
@@ -1801,6 +1833,203 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             )
         return issues
 
+    def _build_processing_flow(
+        self,
+        metadata: dict[str, Any],
+        extraction_method: str,
+        tool_used: bool,
+    ) -> dict[str, Any]:
+        """Build a normalized, render-agnostic description of the processing path.
+
+        Returns ``{"stages": [ {key,label,detail,status,fanout?}, ... ],
+        "recovery": {...}|None}``. ``status`` is one of ``ok`` | ``info`` |
+        ``warning`` | ``skipped``. The UI renders ``stages`` as a left-to-right
+        flow graph and ``recovery`` as an explicit "what failed and was recovered"
+        callout; the text report renders the same data as lines. Populated for BOTH
+        simple and advanced so there is always a flow to show.
+        """
+        is_agentic = extraction_method == "agentic"
+        sizing = metadata.get("sizing_plan") or {}
+        geometry_mode = (
+            sizing.get("geometry_mode") or self.config.extraction.geometry.mode or ""
+        ).lower()
+        conf_cfg = self.config.extraction.confidence
+        conf_enabled = bool(conf_cfg.enabled)
+        conf_mode = (conf_cfg.mode or "").lower()  # separate | integrated | off
+        split = metadata.get("assessment_batch_split_stats") or {}
+        decision = metadata.get("tool_usage_decision") or {}
+        validation = metadata.get("validation") or {}
+
+        stages: list[dict[str, Any]] = []
+
+        # 1) OCR
+        ocr_info = metadata.get("ocr_analysis") or {}
+        tables_seen = ocr_info.get("tables_detected", 0)
+        stages.append(
+            {
+                "key": "ocr",
+                "label": "OCR",
+                "detail": (
+                    f"{tables_seen} markdown table(s) in text"
+                    if tables_seen
+                    else "no markdown tables"
+                ),
+                "status": "ok",
+            }
+        )
+        # 2) Classify
+        stages.append(
+            {"key": "classify", "label": "Classify", "detail": "", "status": "ok"}
+        )
+
+        # 3) Extract — mode + sharding fan-out.
+        num_shards = 0
+        shard_trace = metadata.get("shard_trace")
+        if isinstance(shard_trace, dict):
+            num_shards = shard_trace.get("num_shards", 0) or 0
+        if is_agentic:
+            if num_shards and num_shards > 1:
+                extract_detail = f"agentic · {num_shards} shards (concurrent)"
+                fanout = num_shards
+            else:
+                extract_detail = "agentic · single agent"
+                fanout = 0
+        else:
+            extract_detail = "single LLM pass"
+            fanout = 0
+        stages.append(
+            {
+                "key": "extract",
+                "label": "Extract",
+                "detail": extract_detail,
+                "status": "ok",
+                "fanout": fanout,
+                "model": metadata.get("extraction_model"),
+            }
+        )
+
+        # 4) Table tool (only meaningful for agentic) — used / declined / unavailable.
+        if is_agentic and (decision or "table_parsing_tool_used" in metadata):
+            if tool_used:
+                t_status, t_detail = "ok", "deterministic parser used"
+            elif not decision.get("tool_enabled", True):
+                t_status, t_detail = "skipped", "disabled in config"
+            elif not decision.get("ocr_had_markdown_tables", True):
+                t_status, t_detail = "skipped", "no markdown tables in OCR"
+            elif decision.get("expected") and not decision.get("actual"):
+                t_status, t_detail = "warning", "available but agent declined"
+            else:
+                t_status, t_detail = "skipped", "not needed"
+            stages.append(
+                {
+                    "key": "table_tool",
+                    "label": "Table tool",
+                    "detail": t_detail,
+                    "status": t_status,
+                }
+            )
+
+        # 5) Model escalation (extraction schema-validation escalation), if any.
+        if validation.get("escalated"):
+            stages.append(
+                {
+                    "key": "escalation",
+                    "label": "Escalation",
+                    "detail": (
+                        f"{validation.get('escalation_scope') or 'fields'} → "
+                        f"{validation.get('escalation_model') or 'stronger model'}"
+                        + (
+                            " (resolved)"
+                            if validation.get("resolved_by_escalation")
+                            else ""
+                        )
+                    ),
+                    "status": "warning",
+                }
+            )
+
+        # 6) Confidence — source (deterministic OCR-inline vs LLM), batching/concurrency.
+        if not conf_enabled or conf_mode == "off":
+            stages.append(
+                {
+                    "key": "confidence",
+                    "label": "Confidence",
+                    "detail": "disabled",
+                    "status": "skipped",
+                }
+            )
+        else:
+            batch_count = split.get("batch_count")
+            concurrent = split.get("concurrent_batches")
+            if conf_mode == "integrated":
+                c_detail = "integrated (inline with extraction)"
+                fan = 0
+            elif batch_count and batch_count > 1:
+                c_detail = f"{conf_cfg.model or 'model'} · {batch_count} batches"
+                if concurrent and concurrent > 1:
+                    c_detail += f" · {concurrent}× concurrent"
+                fan = concurrent if (concurrent and concurrent > 1) else 0
+            else:
+                c_detail = f"{conf_cfg.model or 'model'} · 1 pass"
+                fan = 0
+            stages.append(
+                {
+                    "key": "confidence",
+                    "label": "Confidence",
+                    "detail": c_detail,
+                    "status": "ok",
+                    "fanout": fan,
+                    "model": conf_cfg.model,
+                }
+            )
+
+            # 7) Geometry — OCR-grounded vs LLM-estimated box.
+            if geometry_mode in ("ocr_only", "llm_grounded"):
+                g_detail = (
+                    "OCR-grounded (deterministic)"
+                    if geometry_mode == "ocr_only"
+                    else "LLM box refined by OCR"
+                )
+            elif geometry_mode == "llm":
+                g_detail = "LLM-estimated box"
+            else:
+                g_detail = "none"
+            stages.append(
+                {
+                    "key": "geometry",
+                    "label": "Geometry",
+                    "detail": g_detail,
+                    "status": "skipped" if geometry_mode in ("", "off") else "ok",
+                }
+            )
+
+        # Recovery summary: what the confidence self-healing had to fix. Only
+        # present when there was truncation/splitting/escalation activity, so an
+        # "auto recovered" status can point at EXACTLY what failed and was rescued.
+        recovery = None
+        if split:
+            recovered = (split.get("rows_recovered_by_retry", 0) or 0) + (
+                split.get("rows_recovered_by_escalation", 0) or 0
+            )
+            truncated = split.get("truncated_calls", 0) or 0
+            unrecoverable = split.get("unrecoverable_rows", 0) or 0
+            if truncated or recovered or unrecoverable:
+                recovery = {
+                    "truncated_calls": truncated,
+                    "splits": split.get("splits", 0) or 0,
+                    "rows_recovered_by_retry": split.get("rows_recovered_by_retry", 0)
+                    or 0,
+                    "rows_recovered_by_escalation": split.get(
+                        "rows_recovered_by_escalation", 0
+                    )
+                    or 0,
+                    "escalation_model": split.get("escalation_model"),
+                    "unrecoverable_rows": unrecoverable,
+                    "deadline_reached": bool(split.get("deadline_reached")),
+                }
+
+        return {"stages": stages, "recovery": recovery}
+
     def _generate_processing_report(self, metadata: dict[str, Any]) -> str:
         """Generate user-friendly processing report."""
 
@@ -1827,6 +2056,55 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             "",
         ]
 
+        # Processing flow — systematic, single-line-per-stage depiction of the whole
+        # path (mirrors the UI graph): OCR → Classify → Extract(→shards) →
+        # [Table tool] → [Escalation] → Confidence(→batches) → Geometry.
+        flow = metadata.get("processing_flow") or {}
+        stages = flow.get("stages") or []
+        if stages:
+            icon = {"ok": "✓", "info": "•", "warning": "⚠", "skipped": "–"}
+            report_lines.append("Processing Flow:")
+            for st in stages:
+                mark = icon.get(str(st.get("status", "ok")), "•")
+                detail = st.get("detail")
+                report_lines.append(
+                    f"  {mark} {st.get('label', '?')}"
+                    + (f": {detail}" if detail else "")
+                )
+            # Explicit recovery callout — WHAT failed and was recovered by retry.
+            rec = flow.get("recovery")
+            if rec:
+                recovered = (rec.get("rows_recovered_by_retry", 0)) + (
+                    rec.get("rows_recovered_by_escalation", 0)
+                )
+                report_lines.append("")
+                report_lines.append("  Confidence self-healing (auto-recovery):")
+                report_lines.append(
+                    f"    - Truncated confidence calls: {rec.get('truncated_calls', 0)} "
+                    f"(batches split {rec.get('splits', 0)}×)"
+                )
+                report_lines.append(
+                    f"    - Rows recovered by same-model retry: "
+                    f"{rec.get('rows_recovered_by_retry', 0)}"
+                )
+                if rec.get("rows_recovered_by_escalation", 0):
+                    report_lines.append(
+                        f"    - Rows recovered by ESCALATION to "
+                        f"{rec.get('escalation_model') or 'stronger model'}: "
+                        f"{rec.get('rows_recovered_by_escalation', 0)}"
+                    )
+                report_lines.append(f"    - Total rows auto-recovered: {recovered}")
+                if rec.get("unrecoverable_rows", 0):
+                    report_lines.append(
+                        f"    - ⚠ Rows still unscored after recovery: "
+                        f"{rec.get('unrecoverable_rows', 0)}"
+                    )
+                if rec.get("deadline_reached"):
+                    report_lines.append(
+                        "    - ⚠ Stopped early on the Lambda wall-clock guard"
+                    )
+            report_lines.append("")
+
         # Schema analysis
         if "schema_analysis" in metadata:
             schema_info = metadata["schema_analysis"]
@@ -1843,26 +2121,49 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         # OCR analysis
         if "ocr_analysis" in metadata:
             ocr_info = metadata["ocr_analysis"]
+            tables_detected = ocr_info.get("tables_detected", 0)
+            # Make the Markdown-table prerequisite explicit: the deterministic table
+            # parser can ONLY act on Markdown pipe-tables in the OCR text, and this
+            # pre-flight scan is what detects them.
+            if tables_detected > 0:
+                md_line = (
+                    f"  - Markdown tables in OCR text: YES "
+                    f"({tables_detected} region(s), ~{ocr_info.get('estimated_row_count', 0)} rows)"
+                )
+            else:
+                md_line = (
+                    "  - Markdown tables in OCR text: NONE — the OCR output has no "
+                    "Markdown pipe-tables, so the deterministic table parser cannot "
+                    "run on this section (enable Textract TABLES, or use an OCR "
+                    "backend that emits Markdown tables, to make it available)"
+                )
             report_lines.extend(
                 [
-                    "OCR Table Detection:",
-                    f"  - Tables detected: {ocr_info.get('tables_detected', 0)}",
-                    f"  - Estimated total rows: {ocr_info.get('estimated_row_count', 0)}",
+                    "OCR Table Detection (pre-flight scan of the OCR text):",
+                    md_line,
                     f"  - Tool usage recommendation: {ocr_info.get('recommendation_strength', 'N/A')}",
                     "",
                 ]
             )
 
-        # Tool usage decision
+        # Tool usage decision — make availability + the WHY prominent.
         if "tool_usage_decision" in metadata:
             decision = metadata["tool_usage_decision"]
             status_icon = "✓" if not decision.get("mismatch") else "⚠"
+            # Availability status: enabled in config AND OCR had Markdown tables.
+            if not decision.get("tool_enabled", True):
+                avail = "DISABLED in configuration"
+            elif not decision.get("ocr_had_markdown_tables", True):
+                avail = "enabled, but UNAVAILABLE (no Markdown tables in OCR text)"
+            else:
+                avail = "ENABLED and AVAILABLE (Markdown tables present in OCR)"
             report_lines.extend(
                 [
                     f"{status_icon} Table Parsing Tool Decision:",
-                    f"  - Expected usage: {'YES' if decision.get('expected') else 'NO'}",
-                    f"  - Actual usage: {'YES' if decision.get('actual') else 'NO'}",
-                    f"  - Explanation: {decision.get('explanation', 'N/A')}",
+                    f"  - Deterministic table parser: {avail}",
+                    f"  - Recommended: {'YES' if decision.get('expected') else 'NO'}",
+                    f"  - Actually used by agent: {'YES' if decision.get('actual') else 'NO'}",
+                    f"  - Why: {decision.get('explanation', 'N/A')}",
                     "",
                 ]
             )
@@ -3337,15 +3638,33 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     else False
                 )
 
+                # Facts that determine WHY the tool was or wasn't used, so the
+                # report can distinguish "tool unavailable" from "available but the
+                # agent declined it":
+                #  - tool_enabled: is the deterministic parser turned on in config?
+                #  - ocr_had_markdown_tables: did the OCR text actually contain
+                #    Markdown pipe-tables? The parser can ONLY run on those, and
+                #    ocr_analysis (a pre-flight scan of the OCR text) is what detects
+                #    them — so this is known before extraction, regardless of which
+                #    Textract features produced the text.
+                tool_enabled = self.config.extraction.agentic.table_parsing.enabled
+                ocr_had_markdown_tables = bool(
+                    result.ocr_analysis
+                    and result.ocr_analysis.get("tables_detected", 0) > 0
+                )
                 metadata["tool_usage_decision"] = {
                     "expected": tool_expected,
                     "actual": tool_used,
                     "mismatch": tool_expected != tool_used,
+                    "tool_enabled": tool_enabled,
+                    "ocr_had_markdown_tables": ocr_had_markdown_tables,
                     "explanation": self._explain_tool_usage_decision(
                         expected=tool_expected,
                         actual=tool_used,
                         schema_analysis=result.schema_analysis,
                         ocr_analysis=result.ocr_analysis,
+                        tool_enabled=tool_enabled,
+                        ocr_had_markdown_tables=ocr_had_markdown_tables,
                     ),
                 }
 
@@ -3484,6 +3803,21 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         if section_issues:
             section.processing_issues = section_issues
             metadata["processing_issues"] = [pi.to_dict() for pi in section_issues]
+
+        # Normalized processing-flow summary: ONE object capturing every stage
+        # decision so the report (text + UI graph) depicts the whole path
+        # systematically — extraction mode, sharding, table-tool use+rationale,
+        # confidence source (LLM vs deterministic) + batching/concurrency, geometry
+        # source (OCR-grounded vs LLM box), model escalations, and what (if
+        # anything) was recovered by retry. Built for BOTH simple and advanced so
+        # the UI always has a flow to render. Best-effort; consumers tolerate
+        # missing keys.
+        try:
+            metadata["processing_flow"] = self._build_processing_flow(
+                metadata, extraction_method, tool_used
+            )
+        except Exception as e:  # noqa: BLE001 - reporting only
+            logger.debug("Could not build processing_flow: %s", e)
 
         # Generate user-friendly processing report
         processing_report = self._generate_processing_report(metadata)

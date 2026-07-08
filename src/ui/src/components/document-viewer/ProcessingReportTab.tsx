@@ -39,6 +39,8 @@ interface ToolUsageDecision {
   actual?: boolean;
   mismatch?: boolean;
   explanation?: string;
+  tool_enabled?: boolean;
+  ocr_had_markdown_tables?: boolean;
 }
 
 interface CompletenessCheck {
@@ -113,6 +115,30 @@ interface AssessmentBatchSplitStats {
   unrecoverable_rows?: number;
 }
 
+interface FlowStage {
+  key?: string;
+  label?: string;
+  detail?: string;
+  status?: string; // ok | info | warning | skipped
+  fanout?: number;
+  model?: string;
+}
+
+interface FlowRecovery {
+  truncated_calls?: number;
+  splits?: number;
+  rows_recovered_by_retry?: number;
+  rows_recovered_by_escalation?: number;
+  escalation_model?: string;
+  unrecoverable_rows?: number;
+  deadline_reached?: boolean;
+}
+
+interface ProcessingFlow {
+  stages?: FlowStage[];
+  recovery?: FlowRecovery | null;
+}
+
 interface ProcessingMetadata {
   extraction_method?: string;
   extraction_time_seconds?: number;
@@ -129,6 +155,7 @@ interface ProcessingMetadata {
   population_check?: PopulationCheck;
   sizing_plan?: SizingPlan;
   assessment_batch_split_stats?: AssessmentBatchSplitStats;
+  processing_flow?: ProcessingFlow;
 }
 
 interface ProcessingIssue {
@@ -177,52 +204,93 @@ function pct(n: number | undefined): string {
 }
 
 /**
- * Compact, honest process-flow visual for the Processing Path section. Renders
- * the pipeline stages left-to-right; a stage that fanned out (sharded extraction
- * or concurrent confidence batches) shows stacked boxes to convey parallelism.
- * Uses counts only (no fabricated per-inference timings).
+ * Data-driven process-flow visual for the Processing Path section. Renders the
+ * backend's `processing_flow.stages` left-to-right (works for both simple and
+ * advanced), colors each stage by status, and stacks fanned-out stages (sharded
+ * extract / concurrent confidence) to convey parallelism. Uses recorded counts
+ * only (no fabricated per-inference timings).
  */
-const StageBox: React.FC<{ label: string; sub?: string; tone?: 'default' | 'parallel' }> = ({ label, sub, tone = 'default' }) => (
-  <div
-    style={{
-      border: `1px solid ${tone === 'parallel' ? '#0972d3' : '#b6bec9'}`,
-      borderRadius: 8,
-      padding: '6px 10px',
-      background: tone === 'parallel' ? '#f0f8ff' : '#ffffff',
-      minWidth: 90,
-      textAlign: 'center',
-    }}
-  >
-    <div style={{ fontSize: 12, fontWeight: 600 }}>{label}</div>
-    {sub && <div style={{ fontSize: 11, color: '#5f6b7a' }}>{sub}</div>}
-  </div>
-);
+// Per-status colors for a flow stage box.
+const STAGE_TONE: Record<string, { border: string; bg: string; mark: string }> = {
+  ok: { border: '#b6bec9', bg: '#ffffff', mark: '' },
+  info: { border: '#0972d3', bg: '#f0f8ff', mark: '' },
+  warning: { border: '#f89256', bg: '#fff7f0', mark: '⚠ ' },
+  skipped: { border: '#d5dbdb', bg: '#fbfbfb', mark: '' },
+};
 
-const Arrow: React.FC = () => <div style={{ alignSelf: 'center', color: '#5f6b7a' }}>→</div>;
-
-const ProcessFlow: React.FC<{
-  extractionMethod?: string;
-  batchCount?: number;
-  concurrentBatches?: number;
-}> = ({ extractionMethod, batchCount, concurrentBatches }) => {
-  const isAgentic = (extractionMethod || '').toLowerCase() === 'agentic';
-  const conf = concurrentBatches && concurrentBatches > 1;
+const StageBox: React.FC<{ label: string; sub?: string; status?: string; fanout?: number }> = ({ label, sub, status = 'ok', fanout }) => {
+  const tone = STAGE_TONE[status] || STAGE_TONE.ok;
+  const parallel = fanout && fanout > 1;
   return (
-    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'stretch', paddingTop: 4 }}>
-      <StageBox label="OCR" />
-      <Arrow />
-      <StageBox label="Classify" />
-      <Arrow />
-      <StageBox label="Extract" sub={isAgentic ? 'agentic, sharded' : 'single pass'} tone={isAgentic ? 'parallel' : 'default'} />
-      <Arrow />
-      <StageBox
-        label="Confidence"
-        sub={batchCount ? `${batchCount} batch${batchCount > 1 ? 'es' : ''}${conf ? `, ${concurrentBatches}× concurrent` : ''}` : 'inline'}
-        tone={conf ? 'parallel' : 'default'}
-      />
+    <div style={{ position: 'relative' }}>
+      {/* Stacked "shadow" cards convey fan-out (sharded extract / concurrent confidence). */}
+      {parallel && (
+        <>
+          <div
+            style={{
+              position: 'absolute',
+              top: 4,
+              left: 4,
+              right: -4,
+              bottom: -4,
+              border: `1px solid ${tone.border}`,
+              borderRadius: 8,
+              background: tone.bg,
+              opacity: 0.5,
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
+              top: 2,
+              left: 2,
+              right: -2,
+              bottom: -2,
+              border: `1px solid ${tone.border}`,
+              borderRadius: 8,
+              background: tone.bg,
+              opacity: 0.75,
+            }}
+          />
+        </>
+      )}
+      <div
+        style={{
+          position: 'relative',
+          border: `1px solid ${tone.border}`,
+          borderRadius: 8,
+          padding: '6px 10px',
+          background: tone.bg,
+          minWidth: 96,
+          textAlign: 'center',
+          opacity: status === 'skipped' ? 0.6 : 1,
+        }}
+      >
+        <div style={{ fontSize: 12, fontWeight: 600 }}>
+          {tone.mark}
+          {label}
+          {parallel ? ` ×${fanout}` : ''}
+        </div>
+        {sub && <div style={{ fontSize: 11, color: '#5f6b7a' }}>{sub}</div>}
+      </div>
     </div>
   );
 };
+
+const Arrow: React.FC = () => <div style={{ alignSelf: 'center', color: '#5f6b7a' }}>→</div>;
+
+// Data-driven flow: renders whatever stages the backend recorded (works for both
+// simple and advanced), coloring each by status and stacking fanned-out stages.
+const ProcessFlow: React.FC<{ stages: FlowStage[] }> = ({ stages }) => (
+  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'stretch', paddingTop: 4 }}>
+    {stages.map((st, i) => (
+      <React.Fragment key={st.key || i}>
+        {i > 0 && <Arrow />}
+        <StageBox label={st.label || '?'} sub={st.detail} status={st.status} fanout={st.fanout} />
+      </React.Fragment>
+    ))}
+  </div>
+);
 
 const ProcessingReportTab: React.FC<ProcessingReportTabProps> = ({ metadata, processingReport, inferenceResult, processingIssues }) => {
   if (!metadata) {
@@ -246,6 +314,10 @@ const ProcessingReportTab: React.FC<ProcessingReportTabProps> = ({ metadata, pro
   // Item 3: how the document was sized/split/batched (model-aware auto-sizing).
   const sizing = metadata.sizing_plan;
   const batchStats = metadata.assessment_batch_split_stats;
+  // Systematic flow (both simple and advanced) + explicit auto-recovery detail.
+  const flow = metadata.processing_flow;
+  const flowStages = flow?.stages || [];
+  const recovery = flow?.recovery;
 
   // ---- Build the list of issues to surface up top (plain language) ----
   const issues: { label: string; detail: string }[] = [];
@@ -359,9 +431,34 @@ const ProcessingReportTab: React.FC<ProcessingReportTabProps> = ({ metadata, pro
       </Container>
 
       {/* ---- Processing path: how the doc was sized / split / batched ---- */}
-      {(sizing || batchStats) && (
+      {(sizing || batchStats || flowStages.length > 0) && (
         <Container header={<Header variant="h2">Processing Path</Header>}>
           <SpaceBetween size="m">
+            {/* Systematic flow graph (rendered for BOTH simple and advanced):
+                OCR → Classify → Extract(→shards) → [Table tool] → [Escalation] →
+                Confidence(→batches) → Geometry — each stage colored by status. */}
+            {flowStages.length > 0 && <ProcessFlow stages={flowStages} />}
+            {/* Explicit "what failed and was recovered by retry" callout. */}
+            {recovery && (
+              <Box fontSize="body-s" padding="xs" color="text-body-secondary" variant="p">
+                <strong>⚠ Confidence auto-recovery:</strong>{' '}
+                {(recovery.truncated_calls || 0) > 0
+                  ? `${recovery.truncated_calls} confidence call(s) truncated at the model's output limit (batches split ${recovery.splits || 0}×). `
+                  : ''}
+                Recovered <strong>{(recovery.rows_recovered_by_retry || 0) + (recovery.rows_recovered_by_escalation || 0)}</strong> row(s)
+                {(recovery.rows_recovered_by_retry || 0) > 0 ? ` — ${recovery.rows_recovered_by_retry} by same-model retry` : ''}
+                {(recovery.rows_recovered_by_escalation || 0) > 0
+                  ? `, ${recovery.rows_recovered_by_escalation} by escalation to ${recovery.escalation_model || 'a stronger model'}`
+                  : ''}
+                .{' '}
+                {(recovery.unrecoverable_rows || 0) > 0 ? (
+                  <span style={{ color: '#d13212' }}>{recovery.unrecoverable_rows} row(s) remained unscored.</span>
+                ) : (
+                  'All rows scored.'
+                )}
+                {recovery.deadline_reached ? ' Stopped early on the Lambda wall-clock guard.' : ''}
+              </Box>
+            )}
             {sizing && (
               <ColumnLayout columns={4} variant="text-grid">
                 <div>
@@ -404,14 +501,6 @@ const ProcessingReportTab: React.FC<ProcessingReportTabProps> = ({ metadata, pro
                 Manual size overrides in effect: {JSON.stringify(sizing.overrides)}
               </Box>
             )}
-            {/* Compact process-flow visual: shows the pipeline stages and where
-                work fanned out (parallel) vs. ran in sequence. Driven by the
-                counts we actually have (no fabricated timings). */}
-            <ProcessFlow
-              extractionMethod={metadata.extraction_method}
-              batchCount={batchStats?.batch_count}
-              concurrentBatches={batchStats?.concurrent_batches}
-            />
           </SpaceBetween>
         </Container>
       )}
@@ -541,13 +630,35 @@ const ProcessingReportTab: React.FC<ProcessingReportTabProps> = ({ metadata, pro
           {isAgentic && (metadata.ocr_analysis || stats) && (
             <div>
               <Box variant="awsui-key-label">Table Extraction</Box>
-              <Box fontSize="body-s" padding={{ bottom: 'xs' }} color="text-body-secondary">
-                {tableToolUsed
-                  ? 'The deterministic table parser was used (parses tables from OCR text instead of having the model regenerate every row).'
-                  : metadata.ocr_analysis?.tool_usage_recommended || metadata.ocr_analysis?.recommendation_strength === 'MANDATORY'
-                    ? 'Large tables were detected but the deterministic table parser was not used for this section.'
-                    : 'No large tables detected; the deterministic table parser was not needed.'}
-              </Box>
+              {(() => {
+                const decision = metadata.tool_usage_decision;
+                const recommended =
+                  metadata.ocr_analysis?.tool_usage_recommended || metadata.ocr_analysis?.recommendation_strength === 'MANDATORY';
+                // Prefer the backend's explicit, reasoned explanation when the tool
+                // was recommended but not used — it states WHY (disabled / no
+                // Markdown tables in OCR / agent declined) rather than just "not used".
+                let text: string;
+                let warn = false;
+                if (tableToolUsed) {
+                  text =
+                    'The deterministic table parser was used (parses tables from OCR text instead of having the model regenerate every row).';
+                } else if (recommended && decision?.explanation) {
+                  text = decision.explanation;
+                  // Only a genuine "agent declined an available tool" is worth a warning tint.
+                  warn = decision.tool_enabled !== false && decision.ocr_had_markdown_tables !== false;
+                } else if (recommended) {
+                  text = 'Large tables were detected but the deterministic table parser was not used for this section.';
+                  warn = true;
+                } else {
+                  text = 'No large tables detected in the OCR text; the deterministic table parser was not needed.';
+                }
+                return (
+                  <Box fontSize="body-s" padding={{ bottom: 'xs' }} color={warn ? 'text-status-warning' : 'text-body-secondary'}>
+                    {warn ? '⚠ ' : ''}
+                    {text}
+                  </Box>
+                );
+              })()}
               <ColumnLayout columns={3} variant="text-grid">
                 {metadata.ocr_analysis?.estimated_row_count !== undefined && (
                   <div>

@@ -996,3 +996,205 @@ class TestGroundShardAssessment:
                 section_info=self._section_info(["1"]),
                 geometry_mode="ocr_only",
             )
+
+
+@pytest.mark.unit
+class TestToolUsageDecisionExplanation:
+    """The table-parsing-tool decision must clearly explain WHY the deterministic
+    parser was or wasn't used — distinguishing disabled / no-Markdown-tables /
+    agent-declined so the Processing Report isn't ambiguous."""
+
+    def _svc(self):
+        return ExtractionService.__new__(ExtractionService)
+
+    _OCR = {
+        "tool_usage_recommended": True,
+        "recommendation_reason": "Detected 8 table(s) with ~139 total rows",
+        "tables_detected": 8,
+    }
+
+    def test_agent_declined_available_tool(self):
+        msg = self._svc()._explain_tool_usage_decision(
+            True,
+            False,
+            None,
+            self._OCR,
+            tool_enabled=True,
+            ocr_had_markdown_tables=True,
+        )
+        assert "CHOSE NOT" in msg
+        assert "Detected 8 table(s)" in msg  # the concrete reason it was recommended
+
+    def test_no_markdown_tables_in_ocr(self):
+        msg = self._svc()._explain_tool_usage_decision(
+            True,
+            False,
+            None,
+            {"tables_detected": 0},
+            tool_enabled=True,
+            ocr_had_markdown_tables=False,
+        )
+        assert "NO Markdown tables" in msg
+        assert "TABLES feature" in msg  # points at the OCR-side remedy
+
+    def test_tool_disabled(self):
+        msg = self._svc()._explain_tool_usage_decision(
+            True,
+            False,
+            None,
+            self._OCR,
+            tool_enabled=False,
+            ocr_had_markdown_tables=True,
+        )
+        assert "DISABLED" in msg
+
+    def test_recommended_and_used(self):
+        msg = self._svc()._explain_tool_usage_decision(True, True, None, self._OCR)
+        assert "used as expected" in msg
+
+    def test_report_states_availability_and_reason(self):
+        # The rendered report must surface availability + the WHY line for the
+        # "agent declined an available tool" case.
+        md = {
+            "extraction_method": "agentic",
+            "parsing_succeeded": True,
+            "extraction_time_seconds": 1.0,
+            "ocr_analysis": {
+                "tables_detected": 8,
+                "estimated_row_count": 139,
+                "recommendation_strength": "STRONGLY_RECOMMENDED",
+                "tool_usage_recommended": True,
+            },
+            "tool_usage_decision": {
+                "expected": True,
+                "actual": False,
+                "mismatch": True,
+                "tool_enabled": True,
+                "ocr_had_markdown_tables": True,
+                "explanation": "... CHOSE NOT to call the deterministic parser ...",
+            },
+        }
+        report = self._svc()._generate_processing_report(md)
+        assert "Markdown tables in OCR text: YES" in report
+        assert "ENABLED and AVAILABLE" in report
+        assert "Actually used by agent: NO" in report
+        assert "CHOSE NOT" in report
+
+    def test_report_states_no_markdown_tables(self):
+        md = {
+            "extraction_method": "agentic",
+            "parsing_succeeded": True,
+            "extraction_time_seconds": 1.0,
+            "ocr_analysis": {
+                "tables_detected": 0,
+                "estimated_row_count": 0,
+                "recommendation_strength": "OPTIONAL",
+                "tool_usage_recommended": False,
+            },
+            "tool_usage_decision": {
+                "expected": False,
+                "actual": False,
+                "mismatch": False,
+                "tool_enabled": True,
+                "ocr_had_markdown_tables": False,
+                "explanation": "no markdown tables",
+            },
+        }
+        report = self._svc()._generate_processing_report(md)
+        assert "Markdown tables in OCR text: NONE" in report
+        assert "cannot" in report and "table parser" in report
+
+
+@pytest.mark.unit
+class TestProcessingFlow:
+    """The normalized processing_flow drives the report's flow graph for BOTH
+    simple and advanced, and the recovery summary explains auto-recovery."""
+
+    def _svc(self, conf_mode="separate", conf_enabled=True, geometry="ocr_only"):
+        cfg = {
+            "classes": [{"$id": "x", "type": "object", "properties": {}}],
+            "extraction": {
+                "model": "us.anthropic.claude-sonnet-5",
+                "temperature": 0,
+                "top_k": 5,
+                "system_prompt": "s",
+                "task_prompt": "t {DOCUMENT_TEXT}",
+                "confidence": {
+                    "enabled": conf_enabled,
+                    "mode": conf_mode,
+                    "model": "us.amazon.nova-lite-v1:0",
+                },
+                "geometry": {"mode": geometry},
+            },
+        }
+        return ExtractionService(region="us-west-2", config=cfg)
+
+    def test_simple_mode_has_full_flow(self):
+        svc = self._svc()
+        md = {
+            "extraction_method": "traditional",
+            "extraction_model": "us.anthropic.claude-sonnet-5",
+            "ocr_analysis": {"tables_detected": 0},
+            "assessment_batch_split_stats": {"batch_count": 1, "concurrent_batches": 1},
+        }
+        flow = svc._build_processing_flow(md, "traditional", False)
+        labels = [s["label"] for s in flow["stages"]]
+        assert labels == ["OCR", "Classify", "Extract", "Confidence", "Geometry"]
+        extract = next(s for s in flow["stages"] if s["label"] == "Extract")
+        assert "single LLM pass" in extract["detail"]
+        assert flow["recovery"] is None
+
+    def test_advanced_flow_shards_tabletool_confidence_geometry(self):
+        svc = self._svc()
+        md = {
+            "extraction_method": "agentic",
+            "extraction_model": "us.anthropic.claude-sonnet-5",
+            "ocr_analysis": {"tables_detected": 8},
+            "sizing_plan": {"geometry_mode": "ocr_only"},
+            "shard_trace": {"num_shards": 5},
+            "tool_usage_decision": {
+                "expected": True,
+                "actual": False,
+                "tool_enabled": True,
+                "ocr_had_markdown_tables": True,
+            },
+            "assessment_batch_split_stats": {
+                "batch_count": 12,
+                "concurrent_batches": 10,
+            },
+        }
+        flow = svc._build_processing_flow(md, "agentic", False)
+        by = {s["label"]: s for s in flow["stages"]}
+        assert by["Extract"]["fanout"] == 5
+        assert by["Table tool"]["status"] == "warning"  # available but declined
+        assert by["Confidence"]["fanout"] == 10
+        assert by["Geometry"]["detail"].startswith("OCR-grounded")
+
+    def test_recovery_summary_populated(self):
+        svc = self._svc()
+        md = {
+            "extraction_method": "agentic",
+            "assessment_batch_split_stats": {
+                "truncated_calls": 3,
+                "splits": 3,
+                "rows_recovered_by_retry": 40,
+                "rows_recovered_by_escalation": 5,
+                "escalation_model": "us.anthropic.claude-sonnet-5:1m",
+                "unrecoverable_rows": 2,
+            },
+        }
+        flow = svc._build_processing_flow(md, "agentic", False)
+        rec = flow["recovery"]
+        assert rec["rows_recovered_by_retry"] == 40
+        assert rec["rows_recovered_by_escalation"] == 5
+        assert rec["unrecoverable_rows"] == 2
+
+    def test_confidence_off_marks_stage_skipped(self):
+        svc = self._svc(conf_enabled=False, conf_mode="off")
+        md = {"extraction_method": "agentic", "ocr_analysis": {"tables_detected": 0}}
+        flow = svc._build_processing_flow(md, "agentic", False)
+        conf = next(s for s in flow["stages"] if s["label"] == "Confidence")
+        assert conf["status"] == "skipped"
+        assert conf["detail"] == "disabled"
+        # No Geometry stage when confidence is off.
+        assert not any(s["label"] == "Geometry" for s in flow["stages"])
