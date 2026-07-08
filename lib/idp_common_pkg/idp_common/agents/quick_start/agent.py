@@ -38,6 +38,14 @@ Follow this flow:
    fields to the user in readable form and ask them to confirm or request
    changes. Use refine_schema to iterate. Schema authoring/refinement is cheap;
    iterate freely.
+   - Whenever you discuss or draft a document type (whether it came from a
+     catalog match or from scratch), ALSO call list_sample_documents and check
+     for a bundled sample of the SAME document type. If one exists, cite it as a
+     reference example with the <sampledoc> link tag (see "Example / sample
+     documents") so the user can open the real document. e.g. if the user asks
+     about driver licenses and a "California Driver License" sample exists, link
+     it. search_catalog matches the user's existing configs, NOT the bundled
+     samples, so you must check list_sample_documents separately to find one.
 4. When the user approves the schema, call create_config_version to create a
    runnable config version. Tell them it is created but not activated. To view
    or activate it, they go to Configuration > View/Edit Configuration in the
