@@ -35,19 +35,16 @@ def _mock_bedrock(text):
 
 
 class TestSearchCatalog:
-    def test_empty_when_no_config_classes_or_schemas(self, monkeypatch):
+    def test_empty_when_no_config_classes_or_schemas(self):
         from idp_common.agents.quick_start.tools import bootstrap_tools as bt
 
-        monkeypatch.delenv("GENERATOR_SCHEMAS_ROOT", raising=False)
         with patch.object(bt, "_all_config_classes", return_value=[]):
             out = json.loads(bt.search_catalog_impl("employee paystub"))
         assert out["matched"] is False
 
-    def test_indexes_config_classes(self, monkeypatch):
+    def test_indexes_config_classes(self):
         from idp_common.agents.quick_start.tools import bootstrap_tools as bt
         from idp_common.synthesis import catalog as catalog_mod
-
-        monkeypatch.delenv("GENERATOR_SCHEMAS_ROOT", raising=False)
 
         captured = {}
 

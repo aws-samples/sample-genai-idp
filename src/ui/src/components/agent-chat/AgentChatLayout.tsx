@@ -22,6 +22,8 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import { DISCOVERY_JOB_PATH } from '../../routes/constants';
 import { SupportPromptGroup, LoadingBar } from '@cloudscape-design/chat-components';
 import SafeMarkdown from '../common/SafeMarkdown';
+import { generateClient } from '../../api/client-shim';
+import { getSampleDocumentUrl } from '../../graphql/generated';
 
 import useAgentChat from '../../hooks/use-agent-chat';
 import useAppContext from '../../contexts/app';
@@ -39,6 +41,29 @@ import './AgentChatLayout.css';
 import type { ChatMessage } from '../../types/agent-chat';
 
 const logger = new ConsoleLogger('AgentChatLayout');
+
+const sampleClient = generateClient();
+
+// Renders <sampledoc s3key="samples/..."> emitted by the Quick Start agent as a
+// clickable link; on click it presigns via getSampleDocumentUrl and opens the
+// document (single doc) or downloads the zip (batch) in a new tab.
+const SampleDocLink = ({ s3key, children }: { s3key?: string; children?: React.ReactNode }): React.JSX.Element => {
+  const open = async (): Promise<void> => {
+    if (!s3key) return;
+    try {
+      const resp = await sampleClient.graphql({ query: getSampleDocumentUrl, variables: { s3Key: s3key } });
+      const url = (resp as { data?: { getSampleDocumentUrl?: { url?: string } } })?.data?.getSampleDocumentUrl?.url;
+      if (url) window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      logger.error('Failed to open sample document', err);
+    }
+  };
+  // No href: Cloudscape Link with only onFollow runs the action without any
+  // route navigation (matches the WelcomeContent Quick Start link pattern).
+  return <Link onFollow={open}>{children}</Link>;
+};
+
+const markdownComponents = { sampledoc: SampleDocLink } as unknown as Record<string, React.ComponentType<Record<string, unknown>>>;
 
 interface AgentConfig {
   agentType?: string;
@@ -477,7 +502,7 @@ const AgentChatLayout = ({
                 }
 
                 // Handle regular text messages (preserve existing functionality)
-                return <SafeMarkdown>{contentText}</SafeMarkdown>;
+                return <SafeMarkdown components={markdownComponents}>{contentText}</SafeMarkdown>;
               })()}
             </div>
           </div>

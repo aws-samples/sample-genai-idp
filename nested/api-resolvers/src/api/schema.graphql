@@ -494,6 +494,11 @@ type FileContentsResponse @aws_cognito_user_pools @aws_iam {
   isBinary: Boolean
 }
 
+type SampleDocumentUrl @aws_cognito_user_pools @aws_iam {
+  url: String!
+  s3Key: String!
+}
+
 type StepFunctionExecutionStep @aws_cognito_user_pools @aws_iam {
   name: String!
   type: String!
@@ -1120,6 +1125,7 @@ type Query @aws_cognito_user_pools @aws_iam {
     nextToken: String
   ): DocumentPage
   getFileContents(s3Uri: String!, versionId: String): FileContentsResponse
+  getSampleDocumentUrl(s3Key: String!): SampleDocumentUrl
   getStepFunctionExecution(executionArn: String!): StepFunctionExecutionResponse
 
   # Document version history (processing runs). All authenticated users may

@@ -207,11 +207,7 @@ def _all_config_classes() -> list:
 
 
 def search_catalog_impl(description: str) -> str:
-    schemas_root = os.environ.get("GENERATOR_SCHEMAS_ROOT")
-    entries = catalog_mod.build_catalog(
-        generator_schemas_root=schemas_root,
-        config_classes=_all_config_classes(),
-    )
+    entries = catalog_mod.build_catalog(config_classes=_all_config_classes())
     if not entries:
         return json.dumps({"matched": False, "reason": "Catalog is empty"})
     match = catalog_mod.match_catalog(description, entries)

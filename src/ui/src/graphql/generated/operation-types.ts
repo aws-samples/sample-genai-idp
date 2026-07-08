@@ -1232,6 +1232,7 @@ export type Query = {
   getModelConfigLimits?: Maybe<ModelConfigLimitsResponse>;
   getMyProfile?: Maybe<User>;
   getPricing?: Maybe<PricingResponse>;
+  getSampleDocumentUrl?: Maybe<SampleDocumentUrl>;
   getStepFunctionExecution?: Maybe<StepFunctionExecutionResponse>;
   getTestRun?: Maybe<TestRun>;
   getTestRunStatus?: Maybe<TestRunStatus>;
@@ -1352,6 +1353,11 @@ export type QueryGetFileContentsArgs = {
 
 export type QueryGetFinetuningJobArgs = {
   jobId: Scalars['ID']['input'];
+};
+
+
+export type QueryGetSampleDocumentUrlArgs = {
+  s3Key: Scalars['String']['input'];
 };
 
 
@@ -1499,6 +1505,11 @@ export type RegisterFeatureInput = {
   stackName: Scalars['String']['input'];
   stackRegion: Scalars['String']['input'];
   uiBundlePath: Scalars['String']['input'];
+};
+
+export type SampleDocumentUrl = {
+  s3Key: Scalars['String']['output'];
+  url: Scalars['String']['output'];
 };
 
 export type Section = {
@@ -2291,6 +2302,13 @@ export type GetPricingQueryVariables = Exact<{ [key: string]: never; }>;
 
 
 export type GetPricingQuery = { getPricing?: { success: boolean, pricing?: string | null, defaultPricing?: string | null, error?: { type?: string | null, message?: string | null } | null } | null };
+
+export type GetSampleDocumentUrlQueryVariables = Exact<{
+  s3Key: Scalars['String']['input'];
+}>;
+
+
+export type GetSampleDocumentUrlQuery = { getSampleDocumentUrl?: { url: string, s3Key: string } | null };
 
 export type GetStepFunctionExecutionQueryVariables = Exact<{
   executionArn: Scalars['String']['input'];

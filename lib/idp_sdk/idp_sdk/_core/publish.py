@@ -1031,6 +1031,83 @@ STDERR:
             f"Config library synced ({file_count} files in {elapsed:.1f}s)"
         )
 
+    def _sample_files_to_publish(self):
+        """Relative paths (under samples/) of sample docs + batch zips to publish.
+
+        Mirrors the manifest allowlist: top-level document files plus the known
+        batch subdirs, each also represented by a single <id>.zip archive.
+        """
+        samples_dir = Path(self._SAMPLES_DIR)
+        if not samples_dir.is_dir():
+            return []
+        rels = []
+        for entry in sorted(os.listdir(samples_dir)):
+            path = samples_dir / entry
+            if path.is_file() and entry.lower().endswith(self._SAMPLE_DOC_EXTS):
+                rels.append(entry)
+            elif path.is_dir() and entry in self._SAMPLE_DOC_SUBDIRS:
+                docs = [
+                    f
+                    for f in sorted(os.listdir(path))
+                    if f.lower().endswith(self._SAMPLE_DOC_EXTS)
+                ]
+                if not docs:
+                    continue
+                rels.extend(f"{entry}/{d}" for d in docs)
+                rels.append(f"{entry}.zip")
+        return sorted(rels)
+
+    def zip_sample_batches(self):
+        """Create samples/<id>.zip for each batch subdir (single-file download)."""
+        samples_dir = Path(self._SAMPLES_DIR)
+        if not samples_dir.is_dir():
+            return
+        for entry in self._SAMPLE_DOC_SUBDIRS:
+            batch_dir = samples_dir / entry
+            if not batch_dir.is_dir():
+                continue
+            docs = [
+                f
+                for f in sorted(os.listdir(batch_dir))
+                if f.lower().endswith(self._SAMPLE_DOC_EXTS)
+            ]
+            if not docs:
+                continue
+            zip_path = samples_dir / f"{entry}.zip"
+            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for d in docs:
+                    zf.write(batch_dir / d, arcname=d)
+            self.log_verbose(f"Zipped batch {entry} ({len(docs)} files)")
+
+    def upload_samples(self):
+        """Upload sample documents + batch zips to the artifact bucket.
+
+        The deploy-time CopySampleFiles custom resource then copies these into
+        the stack's ConfigurationBucket under samples/, where the getSampleDocumentUrl
+        resolver presigns them and the Quick Start agent links them.
+        """
+        samples_dir = Path(self._SAMPLES_DIR)
+        if not samples_dir.is_dir():
+            self.log_verbose(
+                f"{self._SAMPLES_DIR}/ not found — skipping samples upload"
+            )
+            return
+        self.zip_sample_batches()
+        rels = self._sample_files_to_publish()
+        if not rels:
+            return
+        s3 = boto3.client("s3", region_name=self.region)
+        base = f"{self.prefix_and_version}/samples"
+        for rel in rels:
+            s3.upload_file(str(samples_dir / rel), self.bucket, f"{base}/{rel}")
+        self.log_success(
+            f"Uploaded {len(rels)} sample files to s3://{self.bucket}/{base}"
+        )
+
+    def generate_samples_file_list(self):
+        """FileList (relative to samples/) for the deploy-time CopySampleFiles copy."""
+        return self._sample_files_to_publish()
+
     def ui_changed(self):
         """Check if UI has changed based on zipfile hash, returns (changed, zipfile_path)"""
         ui_hash = self.compute_ui_hash()
@@ -1705,6 +1782,11 @@ STDERR:
                         "name": name,
                         "description": desc,
                         "s3Key": f"samples/{entry}/",
+                        # A single downloadable archive of the batch, produced by
+                        # zip_sample_batches() and copied to the bucket alongside
+                        # the loose files. The "open sample" resolver presigns this
+                        # so the source link downloads one file.
+                        "zipS3Key": f"samples/{entry}.zip",
                         "kind": "batch",
                         "fileCount": len(docs),
                     }
@@ -2207,6 +2289,10 @@ STDERR:
                 config_files_list = self.generate_config_file_list()
                 config_files_json = json.dumps(config_files_list)
 
+                # Sample-document file list (docs + batch zips) for the
+                # deploy-time CopySampleFiles copy into the ConfigurationBucket.
+                sample_files_json = json.dumps(self.generate_samples_file_list())
+
                 # Extract content-based hash from unified source zipfile name for ImageVersion
                 # Format: unified-source-{hash}.zip -> extract {hash}
                 unified_image_version = unified_source_zipfile.replace(
@@ -2296,6 +2382,7 @@ STDERR:
                         ).encode()
                     ).hexdigest()[:16],
                     "<CONFIG_FILES_LIST_TOKEN>": config_files_json,
+                    "<SAMPLE_FILES_LIST_TOKEN>": sample_files_json,
                     "<WORKFORCE_URL_HASH_TOKEN>": workforce_url_hash,
                     "<A2I_RESOURCES_HASH_TOKEN>": a2i_resources_hash,
                     "<COGNITO_CLIENT_HASH_TOKEN>": cognito_client_hash,
@@ -3853,6 +3940,10 @@ STDERR:
             step_start = time.time()
             self.generate_samples_manifest()
             self._upload_samples_manifest_to_artifacts()
+            # Upload the sample document bytes (+ per-batch zips) so the
+            # deploy-time CopySampleFiles resource can land them in the
+            # ConfigurationBucket for in-app opening.
+            self.upload_samples()
             timing_breakdown["Write & upload samples-manifest.json"] = (
                 time.time() - step_start
             )

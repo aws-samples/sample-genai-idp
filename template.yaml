@@ -2069,6 +2069,20 @@ Resources:
       ConfigLibraryHash: "<CONFIG_LIBRARY_HASH_TOKEN>"
       FileList: <CONFIG_FILES_LIST_TOKEN>
 
+  # Copies bundled sample documents (+ per-batch zips) from the artifact bucket
+  # into the ConfigurationBucket under samples/, so the getSampleDocumentUrl
+  # resolver can presign them and the Quick Start agent can link them. Reuses the
+  # FileList-driven ConfigurationCopyFunction.
+  CopySampleFiles:
+    Type: Custom::ConfigurationCopy
+    Properties:
+      ServiceToken: !GetAtt ConfigurationCopyFunction.Arn
+      SourceBucket: "<ARTIFACT_BUCKET_TOKEN>"
+      SourcePrefix: "<ARTIFACT_PREFIX_TOKEN>/samples"
+      TargetBucket: !Ref ConfigurationBucket
+      TargetPrefix: "samples"
+      FileList: <SAMPLE_FILES_LIST_TOKEN>
+
   ##########################################################################
   # Nested stack for selected options
   ##########################################################################

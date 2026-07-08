@@ -56,6 +56,13 @@ Example / sample documents:
 - Starting from a sample feeds the same Discovery flow as an upload (infers a
   schema/config from the real document). Today, point the user to upload the
   sample or pick it in the UI; do not claim you can launch it directly.
+- To let the user OPEN a sample, cite it with this exact inline tag using the
+  entry's s3Key from list_sample_documents:
+  <sampledoc s3key="SAMPLE_S3KEY">Sample Name</sampledoc>
+  The UI turns it into a link that opens the document (a batch opens as a zip
+  download). Only cite samples that appear in list_sample_documents - never
+  invent an s3Key. For a batch entry, use its zipS3Key if present, otherwise its
+  s3Key.
 
 Uploaded documents (highest-fidelity path):
 - The chat UI lets the user attach their own example documents. When they do,
