@@ -328,8 +328,17 @@ Resources:
               backend:
                 type: string
                 title: OCR backend
-                description: "OCR backend to use: 'textract' for AWS Textract, 'bedrock' for LLM-based OCR, 'none' for image-only processing without OCR"
-                enum: ["textract", "bedrock", "none"]
+                description: >-
+                  OCR engine. 'textract' (default): AWS Textract — cheapest for
+                  plain text ($1.50/1K pages raw) and best when you need only raw
+                  text or already tune specific Textract features (Tables
+                  $15/1K, Forms $50/1K). 'bda': Amazon Bedrock Data Automation —
+                  flat $10/1K pages returning markdown with tables and layout
+                  plus word-level confidence/bounding boxes in one call; choose
+                  it for table-aware OCR (enables the extraction table tool) and
+                  predictable pricing without composing Textract features.
+                  'bedrock': LLM-based OCR. 'none': image-only, no OCR.
+                enum: ["textract", "bedrock", "bda", "none"]
                 default: "textract"
                 order: 1
               model_id:
@@ -3811,6 +3820,28 @@ Resources:
               Condition:
                 StringLike:
                   "lambda:FunctionName": "GENAIIDP-*"
+            # Bedrock Data Automation permissions for the 'bda' OCR backend.
+            # Sync InvokeDataAutomation on the auto-managed standard-output
+            # project + the standard data-automation profile.
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeDataAutomation
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:data-automation-project/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:data-automation-profile/*.data-automation-v1"
+                - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:data-automation-profile/*.data-automation-v1"
+            # Control-plane actions to find-or-create the OCR standard-output project.
+            - Effect: Allow
+              Action:
+                - bedrock:CreateDataAutomationProject
+                - bedrock:GetDataAutomationProject
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:data-automation-project/*"
+            # ListDataAutomationProjects is a collection op without resource-level scoping.
+            - Effect: Allow
+              Action:
+                - bedrock:ListDataAutomationProjects
+              Resource: "*"
 
   OCRFunctionLogGroup:
     Type: AWS::Logs::LogGroup

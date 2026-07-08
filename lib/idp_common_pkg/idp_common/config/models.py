@@ -1169,7 +1169,16 @@ class OCRConfig(BaseModel):
         description="Pipeline hooks invoked after OCR (Feature Platform)",
     )
     backend: str = Field(
-        default="textract", description="OCR backend (textract or bedrock)"
+        default="textract",
+        description="OCR backend: 'textract', 'bedrock' (LLM OCR), 'bda' (Bedrock Data Automation), or 'none' (image-only)",
+    )
+    bda_project_arn: Optional[str] = Field(
+        default=None,
+        description=(
+            "ARN of a Bedrock Data Automation standard-output SYNC project used "
+            "when backend='bda'. If unset, a standard-output OCR project is "
+            "auto-created and reused."
+        ),
     )
     model_id: Optional[str] = Field(
         default=None,
