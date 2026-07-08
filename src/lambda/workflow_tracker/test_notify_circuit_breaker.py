@@ -26,11 +26,15 @@ def index_module(monkeypatch):
     fake_models = MagicMock()
     fake_docs_service = MagicMock()
     fake_docs_service.create_document_service = MagicMock(return_value=MagicMock())
+    fake_document_versions = MagicMock()
+    fake_document_versions.build_run_id = MagicMock(return_value="test-run-id")
+    fake_document_versions.snapshot_output_versions = MagicMock()
 
     module_patches = {
         "idp_common": fake_idp_common,
         "idp_common.models": fake_models,
         "idp_common.docs_service": fake_docs_service,
+        "idp_common.document_versions": fake_document_versions,
     }
     for name, mod in module_patches.items():
         monkeypatch.setitem(sys.modules, name, mod)
