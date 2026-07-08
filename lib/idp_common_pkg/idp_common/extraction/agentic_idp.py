@@ -110,6 +110,51 @@ def supports_tool_caching(model_id: str) -> bool:
     return "anthropic.claude" in model_id or "us.anthropic.claude" in model_id
 
 
+def _summarization_params(
+    model_id: str | None, _context_buffer: float
+) -> tuple[int, float]:
+    """Derive (preserve_recent_messages, summary_ratio) from the model window.
+
+    Larger context window → preserve more recent turns verbatim before the
+    conversation manager summarizes, so the agent is far less likely to lose the
+    parsed-table / finalize-instruction context mid-run (the re-parse/no-commit
+    loop root cause). Buckets keep it simple and safe:
+
+    - >= 1M input tokens  -> preserve 40 (summarize very rarely)
+    - >= 400K             -> preserve 20
+    - >= 200K             -> preserve 10
+    - otherwise / unknown -> preserve 5  (the conservative legacy value)
+
+    ``summary_ratio`` stays high (0.9) so that WHEN summarization does trigger it
+    compresses aggressively — we want few, large-preserve windows, not frequent
+    small summaries. ``context_buffer`` is accepted for future tuning but not
+    currently needed (the buckets already bake in headroom).
+    """
+    try:
+        from idp_common.bedrock.model_utils import get_model_max_input_tokens
+
+        window = get_model_max_input_tokens(model_id) if model_id else 0
+    except Exception:  # noqa: BLE001 - unknown model → conservative default
+        window = 0
+
+    if window >= 1_000_000:
+        preserve = 40
+    elif window >= 400_000:
+        preserve = 20
+    elif window >= 200_000:
+        preserve = 10
+    else:
+        preserve = 5
+    logger.info(
+        "Conversation summarization sizing: model=%s input_window=%d -> "
+        "preserve_recent_messages=%d summary_ratio=0.9",
+        model_id,
+        window,
+        preserve,
+    )
+    return preserve, 0.9
+
+
 def supports_prompt_caching(model_id: str) -> bool:
     """
     Check if a model supports prompt caching (cachePoint in system prompt).
@@ -1855,6 +1900,18 @@ async def structured_output_async(
     # requires all values to be JSON-serializable.
     _active_checkpoint_callback_var.set(checkpoint_callback)
 
+    # Model-aware conversation summarization (item 1). The Strands
+    # SummarizingConversationManager only exposes count/ratio knobs (no token
+    # budget), so we DERIVE preserve_recent_messages from the model's context
+    # window: a roomy model keeps more recent turns verbatim before summarizing,
+    # so it is far less likely to summarize away the "you already parsed the
+    # table — now finalize with extraction_tool" context that caused the
+    # re-parse/no-commit loop. A small-window model keeps the conservative
+    # minimum. This complements sharding (which keeps each shard's conversation
+    # small in the first place).
+    preserve_recent, summary_ratio = _summarization_params(
+        model_id, config.extraction.context_buffer
+    )
     agent = Agent(
         model=BedrockModel(
             **model_config,
@@ -1871,7 +1928,7 @@ async def structured_output_async(
             "extraction_schema_json": schema_json,  # Store for schema reminder tool
         },
         conversation_manager=SummarizingConversationManager(
-            summary_ratio=0.95, preserve_recent_messages=5
+            summary_ratio=summary_ratio, preserve_recent_messages=preserve_recent
         ),
     )
     if existing_data:

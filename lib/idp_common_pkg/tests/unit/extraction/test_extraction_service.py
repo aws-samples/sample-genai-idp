@@ -854,3 +854,141 @@ class TestNormalizeTableParsingStats:
         )
         assert out["parse_success_rate"] == pytest.approx(0.98)
         assert out["avg_confidence"] == pytest.approx(98.4)
+
+
+@pytest.mark.unit
+class TestGroundShardAssessment:
+    """Per-shard OCR grounding: a shard grounds its OWN rows against ONLY its own
+    pages, so grounding scales per-shard instead of a full-section merge sweep."""
+
+    def _service(self):
+        config = {
+            "classes": [
+                {
+                    "$id": "stmt",
+                    "type": "object",
+                    "properties": {
+                        "Transactions": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {"Amount": {"type": "string"}},
+                            },
+                        }
+                    },
+                }
+            ],
+            "extraction": {
+                "model": "anthropic.claude-3-sonnet-20240229-v1:0",
+                "temperature": 0.0,
+                "top_k": 5,
+                "system_prompt": "sys",
+                "task_prompt": "task {DOCUMENT_TEXT}",
+            },
+        }
+        return ExtractionService(region="us-west-2", config=config)
+
+    def _section_info(self, page_ids):
+        from idp_common.extraction.service import SectionInfo
+
+        return SectionInfo(
+            class_label="stmt",
+            sorted_page_ids=page_ids,
+            page_indices=[int(p) - 1 for p in page_ids],
+            output_bucket="out",
+            output_key="k",
+            output_uri="s3://out/k",
+            start_page=int(page_ids[0]),
+            end_page=int(page_ids[-1]),
+        )
+
+    def test_grounds_only_shard_pages(self):
+        """The shard for pages 3-4 loads OCR for exactly those page_ids and grounds
+        its rows against them — NOT the whole section's pages."""
+        service = self._service()
+        service._class_schema = service._get_class_schema("stmt")
+
+        # 6-page section; this shard covers global pages 3-4 (0-based slice 2:4).
+        section_info = self._section_info(["1", "2", "3", "4", "5", "6"])
+        payload = {"page_start": 2, "page_end": 4}
+
+        assessment = {
+            "Transactions": [
+                {"Amount": {"confidence": 0.9}},
+                {"Amount": {"confidence": 0.9}},
+            ]
+        }
+        extracted = {"Transactions": [{"Amount": "10.00"}, {"Amount": "20.00"}]}
+
+        captured = {}
+
+        def fake_load(pages, page_ids):
+            captured["page_ids"] = list(page_ids)
+            return {3: {"lines": []}}  # non-empty so grounding proceeds
+
+        def fake_ground(assess, extraction, pd, mode, schema, skip_grounded=False):
+            captured["mode"] = mode
+            captured["schema"] = schema
+            captured["skip_grounded"] = skip_grounded
+            # tag a leaf so we can assert it ran in place
+            assess["Transactions"][0]["Amount"]["geometry_source"] = "ocr"
+            return assess
+
+        with (
+            patch(
+                "idp_common.assessment.ocr_grounding.load_page_ocr_data",
+                side_effect=fake_load,
+            ),
+            patch(
+                "idp_common.assessment.ocr_grounding.ground_assessment_geometry",
+                side_effect=fake_ground,
+            ),
+        ):
+            service._ground_shard_assessment(
+                assessment=assessment,
+                extracted_fields=extracted,
+                payload=payload,
+                document=Document(id="d", input_key="k"),
+                section_info=section_info,
+                geometry_mode="ocr_only",
+            )
+
+        # Scoped to exactly the shard's global page_ids (3, 4) — not all six.
+        assert captured["page_ids"] == ["3", "4"]
+        assert captured["mode"] == "ocr_only"
+        # Grounded in place on the passed assessment object.
+        assert assessment["Transactions"][0]["Amount"]["geometry_source"] == "ocr"
+
+    def test_noop_on_empty_assessment(self):
+        service = self._service()
+        # Should not raise or call load when assessment is empty.
+        with patch(
+            "idp_common.assessment.ocr_grounding.load_page_ocr_data"
+        ) as mock_load:
+            service._ground_shard_assessment(
+                assessment={},
+                extracted_fields={"Transactions": []},
+                payload={"page_start": 0, "page_end": 1},
+                document=Document(id="d", input_key="k"),
+                section_info=self._section_info(["1"]),
+                geometry_mode="ocr_only",
+            )
+        mock_load.assert_not_called()
+
+    def test_grounding_failure_is_swallowed(self):
+        """A grounding exception must never propagate out of the shard."""
+        service = self._service()
+        service._class_schema = service._get_class_schema("stmt")
+        with patch(
+            "idp_common.assessment.ocr_grounding.load_page_ocr_data",
+            side_effect=RuntimeError("boom"),
+        ):
+            # No exception should escape.
+            service._ground_shard_assessment(
+                assessment={"Transactions": [{"Amount": {"confidence": 0.9}}]},
+                extracted_fields={"Transactions": [{"Amount": "10.00"}]},
+                payload={"page_start": 0, "page_end": 1},
+                document=Document(id="d", input_key="k"),
+                section_info=self._section_info(["1"]),
+                geometry_mode="ocr_only",
+            )

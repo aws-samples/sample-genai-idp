@@ -327,6 +327,8 @@
                                     "Retry": [
                                         {
                                             "ErrorEquals": [
+                                                "States.Timeout",
+                                                "Lambda.Unknown",
                                                 "Sandbox.Timedout",
                                                 "Lambda.ServiceException",
                                                 "Lambda.AWSLambdaException",
@@ -396,6 +398,8 @@
                         "Retry": [
                             {
                                 "ErrorEquals": [
+                                    "States.Timeout",
+                                    "Lambda.Unknown",
                                     "Sandbox.Timedout",
                                     "Lambda.ServiceException",
                                     "Lambda.AWSLambdaException",
@@ -449,6 +453,8 @@
                         "Retry": [
                             {
                                 "ErrorEquals": [
+                                    "States.Timeout",
+                                    "Lambda.Unknown",
                                     "Sandbox.Timedout",
                                     "Lambda.ServiceException",
                                     "Lambda.AWSLambdaException",

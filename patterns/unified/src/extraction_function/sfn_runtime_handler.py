@@ -105,6 +105,17 @@ def handler(event, context):
     working_bucket, full_document, config = _load(event)
     service = extraction.ExtractionService(config=config)
 
+    # Absolute epoch deadline for the in-shard/merge confidence self-healing ladder
+    # so a truncation-retry storm on a small-cap confidence model can't run this
+    # Lambda into its 900s wall (the ladder stops with an
+    # assessment_deadline_reached warning, keeping recovered rows). None in local
+    # invocations without a real Lambda context.
+    deadline_epoch = None
+    try:
+        deadline_epoch = time.time() + (context.get_remaining_time_in_millis() / 1000.0)
+    except Exception:
+        deadline_epoch = None
+
     if mode == "plan":
         plan = service.plan_section_shards(
             document=full_document, section_id=section_id
@@ -125,6 +136,7 @@ def handler(event, context):
             section_id=section_id,
             shard_index=int(event["shard_index"]),
             persistence=_persistence(working_bucket, execution_arn),
+            deadline_epoch=deadline_epoch,
         )
         return {
             "section_id": section_id,
@@ -141,6 +153,7 @@ def handler(event, context):
             document=full_document,
             section_id=section_id,
             persistence=_persistence(working_bucket, execution_arn),
+            deadline_epoch=deadline_epoch,
         )
         if section_document.status == Status.FAILED:
             raise Exception(f"Merge failed for section {section_id}")

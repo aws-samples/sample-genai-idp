@@ -7,12 +7,21 @@ export interface ConfidenceThresholdAlert {
   confidenceThreshold: number;
 }
 
+export interface ProcessingIssue {
+  stage: string;
+  severity: string; // "error" | "warning" | "info"
+  code: string;
+  message: string;
+  rootCause?: string;
+}
+
 export interface Section {
   Id: string;
   PageIds: number[];
   Class: string;
   OutputJSONUri: string;
   ConfidenceThresholdAlerts: ConfidenceThresholdAlert[];
+  ProcessingIssues?: ProcessingIssue[];
 }
 
 export interface Page {
@@ -73,5 +82,7 @@ export interface Document {
   metering?: Record<string, unknown>;
   hitlReviewHistory?: Record<string, unknown>[];
   confidenceAlertCount?: number;
+  ProcessingIssueCount?: number;
+  processingIssueCount?: number;
   executionArn?: string;
 }

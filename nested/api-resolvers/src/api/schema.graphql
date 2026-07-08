@@ -106,6 +106,7 @@ type Document implements DynamoDbBase @aws_cognito_user_pools @aws_iam {
   HITLReviewedByEmail: String
   HITLReviewHistory: AWSJSON
   ConfidenceAlertCount: Int
+  ProcessingIssueCount: Int
   ConfigVersion: String
   TraceId: String
 }
@@ -116,6 +117,10 @@ type Section @aws_cognito_user_pools @aws_iam {
   Class: String
   OutputJSONUri: String
   ConfidenceThresholdAlerts: [ConfidenceThresholdAlert]
+  # Structured self-healing / quality issues detected for this section
+  # (assessment incomplete, recovered-with-retries, geometry incomplete, …).
+  # Drives the section Status icon + hover details in the UI.
+  ProcessingIssues: [ProcessingIssue]
   # True when the class this section was classified as is marked with
   # x-aws-idp-exclude-from-processing: true (e.g., static instruction pages).
   # The UI uses this to render a "Skipped" badge and suppress empty
@@ -130,6 +135,14 @@ type ConfidenceThresholdAlert @aws_cognito_user_pools @aws_iam {
   attributeName: String
   confidence: Float
   confidenceThreshold: Float
+}
+
+type ProcessingIssue @aws_cognito_user_pools @aws_iam {
+  stage: String
+  severity: String
+  code: String
+  message: String
+  rootCause: String
 }
 
 type Page @aws_cognito_user_pools @aws_iam {
@@ -156,6 +169,7 @@ type DocumentListItem implements DynamoDbBase @aws_cognito_user_pools @aws_iam {
   HITLReviewURL: String
   HITLTriggered: Boolean
   HITLCompleted: Boolean
+  ProcessingIssueCount: Int
 }
 
 # User Management Types

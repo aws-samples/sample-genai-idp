@@ -253,17 +253,20 @@ failures a single huge request would hit — and runs shards in parallel.
 
 ```yaml
 extraction:
+  context_buffer: 0.30            # ONE knob: keep 30% of each model window free (auto-sizes everything below)
   agentic:
     enabled: true
-    max_concurrent_batches: 5     # >1 enables sharding (upper bound on parallelism & shard count)
-    shard_token_budget: 8000      # max OCR tokens per shard (default)
-    max_pages_per_shard: 5        # page ceiling per shard (default; 0 disables)
-    runtime: step_functions       # 'in_process' (default) | 'step_functions'
+    runtime: step_functions       # DEFAULT for agentic: per-shard Lambdas defeat the 900s timeout + resume
+    max_concurrent_batches: 10    # >1 enables sharding (upper bound on parallelism & shard count)
+    shard_token_budget: 0         # 0 = AUTO-size from the model's context window (minus context_buffer)
+    max_pages_per_shard: 5        # page ceiling per shard (timeout-critical; fixed default, not model-derived)
 ```
 
-- **Works by default.** With `max_concurrent_batches > 1`, a shard closes when *either* the token budget *or* the page ceiling is reached — so large documents shard reliably without per-document tuning. Single-pass extraction (`max_concurrent_batches: 1`, the default) is unchanged.
-- **Two runtimes, same logic.** `in_process` (default) runs shards with asyncio inside one Lambda. `step_functions` runs each shard as its own Lambda iteration in a nested Step Functions **Distributed Map**, so a very large section is not bound by the single-Lambda 15-minute limit and Step Functions natively **retries only the incomplete shards** (completed shards are reused from S3).
-- **Large-document guidance.** For 100+ page documents prefer `runtime: step_functions`, and raise `max_concurrent_batches` (e.g. 10). Validated at scale on 100- and 200-page single- and multi-table documents in both table-parsing and pure-sharded-LLM modes (exact row counts, no loss/duplication, no timeouts).
+- **Model-aware auto-sizing (default).** `shard_token_budget: 0` means the per-shard OCR-token budget is derived from the extraction model's context window minus `context_buffer` — a 1M-context model (`:1m`) shards much larger than a 200K one, automatically. The confidence list-batch size is likewise auto-derived from the confidence model's output cap. You set only `context_buffer`; the derived sizes are logged and shown in the **Processing Report**. Non-zero values pin an explicit override.
+- **`max_pages_per_shard` is the timeout lever.** It stays a small fixed default (5) rather than model-derived: the 900s Lambda limit is about *sequential agent turns per shard* (wall-clock), not context tokens, so a roomy token budget must not collapse a large doc back into one giant shard. Fewer pages/shard ⇒ fewer turns ⇒ each shard Lambda finishes well under 900s.
+- **Advanced defaults to the resumable runtime.** `runtime: step_functions` is now the agentic default: each shard is its own Lambda iteration in a nested Step Functions **Distributed Map**, so a very large section is not bound by the single-Lambda 15-minute limit and Step Functions **retries only the incomplete shards** (completed shards are reused from S3). `in_process` (asyncio within one Lambda) remains available but is still bound by that one Lambda's 900s.
+- **Confidence *and* bounding-box grounding are sharded too.** Each shard runs its confidence assessment **and grounds its own rows' bounding boxes against only its own pages** — so both scale per-shard and run concurrently. The final merge only concatenates already-scored, already-grounded rows (plus a fast top-up for any rows the assessment LLM omitted); it does **not** re-assess or re-ground the whole section. This keeps the merge step fast even on very large tables (previously a single full-section grounding sweep over thousands of rows could approach the merge Lambda's 900s limit).
+- **Large-document guidance.** The defaults above are tuned to work out-of-the-box on large documents. Validated at scale on 100- and 200-page single- and multi-table documents (exact row counts, no loss/duplication, no timeouts).
 
 See [Large-Document Guidance](#8-large-document-guidance) for choosing between
 Simple + separate confidence and Advanced sharding.
@@ -631,20 +634,54 @@ extraction:
     list_batch_size: 25       # rows per assessment batch for large lists
 ```
 
-> **Automatic recovery when the model truncates.** `list_batch_size` is a *row*
-> count, but the model's real limit is its **max output tokens**. When per-row
-> output is large — most notably with `geometry.mode: llm` (a bounding box per
-> cell) — a batch can overflow a small-cap model's ceiling (e.g. Amazon Nova
-> Lite caps at 10,000 output tokens). A truncated response is unparseable, which
-> used to silently assign a default `0.5` to every field and leave list rows
-> unscored. The assessment step now **detects truncation and recursively halves
-> the batch until it fits**, so coverage is preserved automatically. When this
-> happens it is recorded in the section's
-> `metadata.assessment_batch_split_stats` and (for agentic) an
-> `⚠ Assessment Batch Splitting` block in the processing report. If rows are
-> still unscored at a single-row batch, the durable fix is to reduce per-row
-> output — e.g. set `geometry.mode: ocr_only` (the default) so boxes come from
-> OCR value-matching rather than the model.
+> **Automatic recovery when the model truncates (self-healing).** `list_batch_size`
+> is a *row* count, but the model's real limit is its **max output tokens**. When
+> per-row output is large — most notably with `geometry.mode: llm`/`llm_grounded`
+> (a bounding box per cell, ~3× the output) — a batch can overflow a small-cap
+> model's ceiling (e.g. Amazon Nova Lite caps at 10,000 output tokens). A
+> truncated response is unparseable, which used to silently assign a default
+> `0.5` to every field and leave list rows unscored. Advanced mode now heals this
+> automatically, cheapest-first:
+>
+> 1. **Token-aware first-pass sizing.** The first batch is sized to the confidence
+>    model's output cap — so Nova Lite + `llm_grounded` starts at ~6–9 rows
+>    instead of truncating at 25. This only ever *shrinks* `list_batch_size`; a
+>    large-output model keeps your configured size.
+> 2. **Recursive splitting.** Any batch that still truncates is halved and
+>    re-assessed until it fits.
+> 3. **Model escalation.** If rows are *still* unscored after shrinking + retries,
+>    the remaining rows are re-assessed on a stronger confidence model (bigger
+>    output cap). ON by default; configure with:
+>
+>    ```yaml
+>    extraction:
+>      confidence:
+>        escalation_enabled: true
+>        escalation_model: "us.anthropic.claude-sonnet-4-20250514-v1:0"
+>        max_escalation_rounds: 2
+>    ```
+>
+>    Per-class override: `x-aws-idp-confidence-escalation-model`. Set
+>    `escalation_model: null` to skip the model step.
+>
+> This activity is recorded in the section's
+> `metadata.assessment_batch_split_stats` (`derived_batch_size`,
+> `escalation_model`, `rows_recovered_by_escalation`, `unrecoverable_rows`, …) and
+> (for agentic) an `⚠ Assessment Batch Splitting` block in the processing report.
+> If rows remain unscored even after escalation, the durable fix is to reduce
+> per-row output — e.g. set `geometry.mode: ocr_only` (the default) so boxes come
+> from OCR value-matching rather than the model.
+
+> **Surfaced in the UI.** Whatever the self-healing ladder does (or can't do) is
+> recorded as a structured **processing issue** on the section — `severity`
+> (error / warning / info), `code` (e.g. `assessment_incomplete`,
+> `assessment_recovered_with_retries`, `assessment_deadline_reached`), a
+> user-facing `message`, and a technical `root_cause`. These are persisted to
+> DynamoDB and shown in the Web UI: a **Status** column on the document's Sections
+> panel (hover for the message + root cause), a **Processing Issues** count column
+> on the document list, and a structured list at the top of the section
+> **Processing Report** tab. A document that quietly self-healed — or one where a
+> row genuinely couldn't be scored — is therefore visible at a glance.
 
 > **This replaces granular assessment.** The former "granular assessment"
 > service (a separate thread-pool fan-out with DynamoDB caching) has been

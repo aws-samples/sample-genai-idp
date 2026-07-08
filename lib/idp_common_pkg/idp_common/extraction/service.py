@@ -14,7 +14,7 @@ import json
 import logging
 import os
 import time
-from typing import Any
+from typing import Any, Callable
 
 from idp_common import bedrock, image, metrics, s3, utils
 from idp_common.bedrock import format_prompt, is_openai_responses_model
@@ -175,6 +175,15 @@ class ExtractionService:
         # current section, emitted as explainability_info by _save_results.
         # Reset per section. None when in-shard assessment did not run.
         self._grounded_assessment: dict[str, Any] | None = None
+        # Wall-clock deadline (epoch seconds) for the in-shard assessment ladder
+        # (1.5). Set per-invocation from the Lambda context; None = no guard.
+        self._assessment_deadline_epoch: float | None = None
+        # Memoized model-aware SizingPlan for the current section (item 2).
+        self._sizing_plan: Any = None
+        # The Document for the current section, stashed by _prepare_section_context
+        # so per-shard grounding can load each shard's OCR pageData without
+        # threading `document` through _invoke_extraction_model. Reset per section.
+        self._document: Document | None = None
 
         # Get model_id from config for logging (type-safe access with fallback)
         model_id = (
@@ -588,11 +597,61 @@ class ExtractionService:
         )
         return images[:cap]
 
+    def _get_sizing_plan(self) -> Any:
+        """Model-aware sizing plan for this section (memoized per-invocation).
+
+        Derives shard token budget + confidence list-batch size from the
+        extraction model's context/output windows minus
+        ``extraction.context_buffer`` (see idp_common.bedrock.sizing). Explicit
+        non-zero config values for shard_token_budget / list_batch_size are
+        passed as overrides so they still win. Logged once per section.
+        """
+        cached = getattr(self, "_sizing_plan", None)
+        if cached is not None:
+            return cached
+        from idp_common.bedrock.sizing import compute_sizing_plan
+
+        ex = self.config.extraction
+        agentic = ex.agentic
+        # Explicit (non-zero) config values act as overrides; 0 => auto-size.
+        stb = getattr(agentic, "shard_token_budget", 0) or None
+        lbs = getattr(ex.confidence, "list_batch_size", 0) or None
+        # list_batch_size has a legacy non-zero default (25); treat the legacy
+        # default as "not an explicit override" so auto-sizing applies unless the
+        # user genuinely changed it. We can't perfectly detect that, so honor any
+        # value <= 0 as auto and otherwise pass it as an override only when the
+        # confidence model is unknown (auto-size can't help). Simplest robust
+        # rule: always auto-size list batch, but never EXCEED the configured
+        # ceiling — handled in assess_results_batched's token-aware sizing.
+        plan = compute_sizing_plan(
+            model_id=(self._pending_extraction_model or ex.model),
+            context_buffer=getattr(ex, "context_buffer", 0.30),
+            geometry_mode=ex.geometry.mode,
+            max_images_per_agent=getattr(agentic, "max_images_per_agent", 20),
+            default_max_pages_per_shard=self._max_pages_per_shard(),
+            shard_token_budget_override=stb,
+            list_batch_size_override=lbs if (lbs and lbs != 25) else None,
+            log_label="extraction",
+        )
+        self._sizing_plan = plan
+        return plan
+
     def _shard_token_budget(self) -> int:
-        """Per-shard input-token budget (config override or default)."""
+        """Per-shard input-token budget.
+
+        Uses the explicit config override when set (non-zero); otherwise the
+        model-aware auto-derived budget (falls back to the module default if
+        sizing is somehow unavailable).
+        """
         agentic = self.config.extraction.agentic
         budget = getattr(agentic, "shard_token_budget", None)
-        return int(budget) if budget else DEFAULT_SHARD_TOKEN_BUDGET
+        if budget:
+            return int(budget)
+        try:
+            return int(self._get_sizing_plan().shard_token_budget)
+        except Exception as e:  # noqa: BLE001 - never break sharding on sizing
+            logger.warning("Auto-sizing shard budget failed (%s); using default", e)
+            return DEFAULT_SHARD_TOKEN_BUDGET
 
     def _max_pages_per_shard(self) -> int:
         """Per-shard page ceiling (config override or default).
@@ -766,6 +825,12 @@ class ExtractionService:
         self._page_images = []
         self._image_uris = []
         self._grounded_assessment = None
+        # Wall-clock deadline (epoch seconds) for the in-shard assessment ladder
+        # (1.5); set per-invocation from the Lambda context. None = no guard.
+        self._assessment_deadline_epoch = None
+        # Memoized model-aware SizingPlan for the current section (item 2).
+        self._sizing_plan = None
+        self._document = None
 
     def _validate_and_find_section(
         self, document: Document, section_id: str
@@ -1639,15 +1704,126 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             "empty_fields": empty_paths[:50],
         }
 
+    def _build_extraction_issues(
+        self,
+        *,
+        extracted_fields: dict[str, Any],
+        metadata: dict[str, Any],
+        section_id: str | None,
+    ) -> list[Any]:
+        """Detect extraction shortfalls and emit structured ProcessingIssues.
+
+        Runs for BOTH traditional (simple) and agentic extraction so an
+        under-produced extraction is never silently reported as SUCCESS. Two
+        signals:
+
+        - **Empty schema-defined list fields** (``extraction_incomplete``,
+          warning): a field the schema declares as an array came back empty. This
+          is the classic Simple-mode large-table failure (``PortfolioDetail: []``
+          on a 25-page statement). When extraction is NOT already agentic, the
+          message recommends toggling to Advanced (agentic) extraction, whose
+          deterministic table parser is built for exactly this.
+        - **Below-threshold population** (``extraction_sparse``, info): reuses the
+          existing ``population_check`` heuristic when present.
+
+        Best-effort and advisory: a genuinely empty section (no such data in the
+        document) will also flag, so these are warning/info, never hard errors.
+        """
+        from idp_common.config.schema_constants import (
+            SCHEMA_PROPERTIES,
+            SCHEMA_TYPE,
+            TYPE_ARRAY,
+        )
+        from idp_common.models import ProcessingIssue
+
+        issues: list[Any] = []
+        is_agentic = self.config.extraction.agentic.enabled
+        properties = (self._class_schema or {}).get(SCHEMA_PROPERTIES, {}) or {}
+
+        # 1) Empty schema-defined array fields.
+        empty_lists = [
+            name
+            for name, spec in properties.items()
+            if isinstance(spec, dict)
+            and spec.get(SCHEMA_TYPE) == TYPE_ARRAY
+            and isinstance(extracted_fields.get(name), list)
+            and len(extracted_fields.get(name, [])) == 0
+        ]
+        if empty_lists:
+            fields_str = ", ".join(empty_lists)
+            rec = (
+                " This document has large/tabular fields; Advanced (agentic) "
+                "extraction with table parsing is recommended for it."
+                if not is_agentic
+                else ""
+            )
+            issues.append(
+                ProcessingIssue(
+                    stage="extraction",
+                    severity="warning",
+                    code="extraction_incomplete",
+                    message=(
+                        f"Extraction returned no rows for list field(s): "
+                        f"{fields_str}. If the document contains this data, it was "
+                        f"not captured.{rec}"
+                    ),
+                    root_cause=(
+                        f"{'agentic' if is_agentic else 'traditional'} extraction "
+                        f"with model "
+                        f"{self._pending_extraction_model or self.config.extraction.model}; "
+                        f"empty array field(s): {fields_str}"
+                    ),
+                    section_id=section_id,
+                    details={"empty_list_fields": empty_lists, "agentic": is_agentic},
+                )
+            )
+
+        # 2) Below-threshold population heuristic (agentic populates this today).
+        pop = metadata.get("population_check")
+        if isinstance(pop, dict) and pop.get("below_threshold"):
+            issues.append(
+                ProcessingIssue(
+                    stage="extraction",
+                    severity="info",
+                    code="extraction_sparse",
+                    message=(
+                        f"Only {pop.get('fields_populated')}/{pop.get('fields_defined')} "
+                        f"schema fields were populated — possible silent extraction "
+                        f"loss."
+                    ),
+                    root_cause=(
+                        f"population ratio {pop.get('population_ratio')} below "
+                        f"threshold {pop.get('threshold')}"
+                    ),
+                    section_id=section_id,
+                    details={"empty_fields": pop.get("empty_fields", [])[:20]},
+                )
+            )
+        return issues
+
     def _generate_processing_report(self, metadata: dict[str, Any]) -> str:
         """Generate user-friendly processing report."""
+
+        # Status reflects BOTH parse success AND any structured processing issues,
+        # so an extraction that parsed but under-produced (e.g. an empty large
+        # table) is not misreported as a clean SUCCESS.
+        issues_for_status = metadata.get("processing_issues") or []
+        severities = {str(i.get("severity", "")).lower() for i in issues_for_status}
+        if not metadata.get("parsing_succeeded"):
+            status_line = "FAILED"
+        elif "error" in severities:
+            status_line = "COMPLETED WITH ERRORS"
+        elif "warning" in severities:
+            status_line = "COMPLETED WITH WARNINGS"
+        else:
+            status_line = "SUCCESS"
 
         report_lines = [
             "=== EXTRACTION PROCESSING REPORT ===",
             "",
             f"Extraction Method: {metadata.get('extraction_method', 'N/A').upper()}",
             f"Processing Time: {metadata.get('extraction_time_seconds', 0):.1f} seconds",
-            f"Status: {'SUCCESS' if metadata.get('parsing_succeeded') else 'FAILED'}",
+            f"Status: {status_line}",
             "",
         ]
 
@@ -1733,6 +1909,35 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     report_lines.append(f"    {w}")
                 report_lines.append("")
 
+        # Item 3: how the document was SIZED and SPLIT (model-aware auto-sizing).
+        # Always shown for agentic so the user can see the processing path.
+        sizing = metadata.get("sizing_plan")
+        if sizing:
+            report_lines.append("How this document was processed:")
+            report_lines.append(
+                f"  - Model: {sizing.get('model_id')} "
+                f"(input window {sizing.get('max_input_tokens'):,}, "
+                f"output cap {sizing.get('max_output_tokens'):,})"
+            )
+            report_lines.append(
+                f"  - Context buffer: {int(sizing.get('context_buffer', 0) * 100)}% "
+                f"kept free"
+            )
+            report_lines.append(
+                f"  - Auto shard budget: ~{sizing.get('shard_token_budget'):,} "
+                f"input tokens/shard, max {sizing.get('max_pages_per_shard')} "
+                f"pages/shard"
+            )
+            report_lines.append(
+                f"  - Auto confidence list-batch size: "
+                f"{sizing.get('list_batch_size')} rows"
+            )
+            if sizing.get("overrides"):
+                report_lines.append(
+                    f"  - Manual overrides in effect: {sizing['overrides']}"
+                )
+            report_lines.append("")
+
         # Assessment batch-splitting (only present when the confidence model
         # truncated its output and batches had to shrink to recover coverage).
         if "assessment_batch_split_stats" in metadata:
@@ -1742,6 +1947,21 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             if block:
                 report_lines.append("⚠ " + block)
                 report_lines.append("")
+
+        # Structured processing issues (1.4): the definitive, user-facing list of
+        # what went wrong / was auto-healed, with root cause and the model chain.
+        if metadata.get("processing_issues"):
+            _icons = {"error": "✗", "warning": "⚠", "info": "ℹ"}
+            report_lines.append("Processing Issues:")
+            for issue in metadata["processing_issues"]:
+                icon = _icons.get(issue.get("severity", "info"), "•")
+                report_lines.append(
+                    f"  {icon} [{issue.get('code', 'issue')}] "
+                    f"{issue.get('message', '')}"
+                )
+                if issue.get("root_cause"):
+                    report_lines.append(f"      Root cause: {issue['root_cause']}")
+            report_lines.append("")
 
         report_lines.append("=" * 40)
 
@@ -2369,7 +2589,9 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                         ),
                         persistence=self._shard_persistence,
                         runtime=runtime,
-                        assess_runner=self._build_assess_runner(section_info),
+                        assess_runner=self._build_assess_runner(
+                            section_info, self._document
+                        ),
                     )
                 )
             else:
@@ -2846,12 +3068,21 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     document.pages, section_info.sorted_page_ids
                 )
                 if page_data_by_page:
+                    # skip_grounded: in the sharded path each shard already
+                    # grounded its own rows against its own pages (in
+                    # _build_assess_runner), so this post-merge pass only needs to
+                    # ground residual leaves (e.g. reconcile-padded placeholder
+                    # rows) — the O(rows × all-pages) full-section fuzzy sweep that
+                    # blew the merge Lambda's 900s ceiling is skipped. On the
+                    # non-sharded single-agent path no leaf is pre-grounded, so
+                    # everything is grounded here exactly as before.
                     grounded = ground_assessment_geometry(
                         merged_assessment,
                         extracted_fields,
                         page_data_by_page,
                         geometry_mode,
                         self._class_schema,
+                        skip_grounded=True,
                     )
             except Exception as e:  # noqa: BLE001 - grounding is advisory
                 logger.warning(
@@ -2884,19 +3115,21 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         so a chunk the confidence model TRUNCATES (e.g. Nova Lite over an
         ``llm``-geometry batch too large for its output cap) is recursively halved
         and re-assessed until it fits — the same recovery the ``separate`` path
-        gets inside ``assess_results_batched`` — instead of being left unscored.
+        gets inside ``assess_results_batched``. When rows STILL truncate after
+        shrinking, the shared self-healing ladder escalates the residual rows to
+        a stronger confidence model (bigger output cap) — the same ladder the
+        ``separate`` path uses — so integrated mode is equally robust.
 
         Returns ``(merged_assessment, new_alerts, split_stats)`` where
-        ``split_stats`` records any adaptive-splitting activity (None when nothing
-        was retried). Best-effort — a failed retry keeps placeholders.
+        ``split_stats`` records any adaptive-splitting/escalation activity (None
+        when nothing was retried). Best-effort — a failed retry keeps placeholders.
         """
         from idp_common.assessment.batching import (
-            _assess_slice_adaptive,
             _missing_row_indices,
             _new_split_stats,
-            _row_confidence_missing,
+            _retry_missing_rows,
+            compute_token_aware_batch_size,
             enrich_assessment_with_thresholds,
-            reconcile_assessment_to_data,
         )
         from idp_common.assessment.service import AssessmentService
 
@@ -2910,10 +3143,20 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             return merged_assessment, [], None
 
         assessment_service = AssessmentService(region=self.region, config=self.config)
+        confidence_cfg = self.config.extraction.confidence
         default_threshold = self.config.hitl.confidence_threshold
         new_alerts: list[dict[str, Any]] = []
-        batch_size = self.config.extraction.confidence.list_batch_size
+        configured_batch_size = confidence_cfg.list_batch_size
+        geometry_mode = self.config.extraction.geometry.mode
         split_stats = _new_split_stats()
+        split_stats["configured_batch_size"] = configured_batch_size
+
+        # 1.2 Resolve the escalation model (per-class override > global) so the
+        # ladder can rescue rows a small-cap confidence model keeps truncating.
+        escalation_model = assessment_service._resolve_confidence_escalation_model(
+            section_info.class_label
+        )
+        escalation_enabled = confidence_cfg.escalation_enabled
 
         def _one_call(results: dict[str, Any]) -> Any:
             return assessment_service.assess_results(
@@ -2924,41 +3167,59 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                 ocr_text_confidence="",
             )
 
-        for field, missing in targets.items():
-            rows = extracted_fields[field]
-            base_results = {k: v for k, v in extracted_fields.items() if k != field}
-            for _round in range(2):
-                if not missing:
-                    break
-                logger.info(
-                    "Integrated retry: re-scoring %d unscored '%s' rows (round %d)",
-                    len(missing),
-                    field,
-                    _round + 1,
+        escalation_one_call: Callable[[dict[str, Any]], Any] | None = None
+        if (
+            escalation_enabled
+            and escalation_model
+            and confidence_cfg.max_escalation_rounds
+        ):
+
+            def _escalation_call(results: dict[str, Any]) -> Any:
+                return assessment_service.assess_results(
+                    class_label=section_info.class_label,
+                    extraction_results=results,
+                    document_text=self._document_text,
+                    page_images=self._page_images,
+                    ocr_text_confidence="",
+                    model_id_override=escalation_model,
                 )
-                recovered_any = False
-                for start in range(0, len(missing), batch_size):
-                    idx_chunk = missing[start : start + batch_size]
-                    sliced = _assess_slice_adaptive(
-                        _one_call,
-                        base_results=base_results,
-                        big_field=field,
-                        rows=[rows[i] for i in idx_chunk],
-                        reconcile=reconcile_assessment_to_data,
-                        stats=split_stats,
-                    )
-                    retry_rows = sliced["rows"]
-                    new_alerts.extend(sliced["alerts"])
-                    for local_i, orig_i in enumerate(idx_chunk):
-                        if local_i < len(retry_rows) and not _row_confidence_missing(
-                            retry_rows[local_i]
-                        ):
-                            merged_assessment[field][orig_i] = retry_rows[local_i]
-                            recovered_any = True
-                            split_stats["rows_recovered_by_retry"] += 1
-                missing = _missing_row_indices(merged_assessment.get(field), rows)
-                if not recovered_any:
-                    break
+
+            escalation_one_call = _escalation_call
+
+        for field, _missing in targets.items():
+            rows = extracted_fields[field]
+            # 1.1 Token-aware first-pass size for this field's confidence model.
+            sample_row = rows[0] if rows else None
+            batch_size = compute_token_aware_batch_size(
+                confidence_cfg.model, sample_row, geometry_mode, configured_batch_size
+            )
+            if split_stats["derived_batch_size"] is None:
+                split_stats["derived_batch_size"] = batch_size
+            esc_batch = (
+                compute_token_aware_batch_size(
+                    escalation_model, sample_row, geometry_mode, configured_batch_size
+                )
+                if escalation_one_call is not None
+                else batch_size
+            )
+            # Reuse the shared self-healing ladder: same-model retry rounds, then
+            # model escalation for whatever still truncates.
+            merged_assessment, _field_alerts, _metering, _dur = _retry_missing_rows(
+                _one_call,
+                extraction_results=extracted_fields,
+                big_field=field,
+                merged_assessment=merged_assessment,
+                merged_alerts=new_alerts,
+                merged_metering={},
+                batch_size=batch_size,
+                max_retries=2,
+                split_stats=split_stats,
+                escalation_one_call=escalation_one_call,
+                escalation_model=escalation_model if escalation_enabled else None,
+                escalation_batch_size=esc_batch,
+                max_escalation_rounds=confidence_cfg.max_escalation_rounds,
+                deadline_epoch=self._assessment_deadline_epoch,
+            )
             split_stats["unrecoverable_rows"] += len(
                 _missing_row_indices(merged_assessment.get(field), rows)
             )
@@ -3120,6 +3381,23 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         if split_stats_are_notable(assessment_split_stats):
             metadata["assessment_batch_split_stats"] = assessment_split_stats
 
+        # Item 3: record HOW the document was split/sized so the processing report
+        # (and the UI process graph) can show it. Emit the model-aware sizing plan
+        # + the shard count for this section. Best-effort.
+        if extraction_method == "agentic":
+            try:
+                plan = self._get_sizing_plan()
+                metadata["sizing_plan"] = plan.to_dict()
+            except Exception as e:  # noqa: BLE001 - reporting only
+                logger.debug("Could not record sizing_plan: %s", e)
+            shard_meta = (
+                result.metering.pop("_shard_process_trace", None)
+                if result.metering
+                else None
+            )
+            if shard_meta:
+                metadata["shard_trace"] = shard_meta
+
         # Add truncation/repair metadata when relevant
         if result.output_truncated:
             metadata["output_truncated"] = True
@@ -3165,6 +3443,47 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                 section=section,
                 section_info=section_info,
             )
+
+        # Structured issues (1.4) + completeness gate (1.3): translate the
+        # in-shard assessment's split_stats + a coverage audit of the grounded
+        # assessment into user-surfacing ProcessingIssues attached to the section.
+        section_issues: list[Any] = []
+        if merged_assessment is not None:
+            from idp_common.assessment.batching import (
+                audit_explainability,
+                build_assessment_issues,
+            )
+
+            geometry_mode = self.config.extraction.geometry.mode
+            _gaps, audit_issues = audit_explainability(
+                self._grounded_assessment,
+                fields_for_output,
+                geometry_mode=geometry_mode,
+                section_id=section_id,
+            )
+            section_issues = (
+                build_assessment_issues(
+                    metadata.get("assessment_batch_split_stats"),
+                    section_id=section_id,
+                    confidence_model=self.config.extraction.confidence.model,
+                    geometry_mode=geometry_mode,
+                )
+                + audit_issues
+            )
+
+        # Extraction-completeness issue (BOTH modes): flag empty / suspiciously
+        # sparse extractions — e.g. a large list schema field that came back
+        # empty (the exact simple-mode failure on large tables). Recommends
+        # Advanced (agentic) extraction when Simple under-produced.
+        section_issues += self._build_extraction_issues(
+            extracted_fields=fields_for_output,
+            metadata=metadata,
+            section_id=section_id,
+        )
+
+        if section_issues:
+            section.processing_issues = section_issues
+            metadata["processing_issues"] = [pi.to_dict() for pi in section_issues]
 
         # Generate user-friendly processing report
         processing_report = self._generate_processing_report(metadata)
@@ -3216,6 +3535,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         document: Document,
         section_id: str,
         checkpoint_data: dict[str, Any] | None = None,
+        deadline_epoch: float | None = None,
     ) -> Document:
         """
         Process a single section from a Document object.
@@ -3226,12 +3546,17 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             checkpoint_data: Optional partial extraction data from a previous
                 timed-out invocation.  When provided the agentic agent will
                 resume from this state instead of starting from scratch.
+            deadline_epoch: Optional absolute epoch (seconds) by which this Lambda
+                must finish (from ``context.get_remaining_time_in_millis()``).
+                Threaded into the in-shard assessment self-healing ladder's
+                wall-clock guard so escalation stops before a hard timeout (1.5).
 
         Returns:
             Document: Updated Document object with extraction results for the section
         """
         # Reset state
         self._reset_context()
+        self._assessment_deadline_epoch = deadline_epoch
 
         # Validate and get section
         section = self._validate_and_find_section(document, section_id)
@@ -3319,6 +3644,11 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         ``process_document_section`` so the SFN shard/merge entry points can reuse
         the identical preparation without duplicating it (single source of truth).
         """
+        # Stash the document so per-shard grounding (in _build_assess_runner) can
+        # load each shard's OCR pageData without threading `document` through
+        # _invoke_extraction_model.
+        self._document = document
+
         # Load per-page text first so the page-type resolver and the
         # prompt-formatter can both consume it without re-reading S3.
         page_id_to_text = self._load_page_texts(document, section_info.sorted_page_ids)
@@ -3451,22 +3781,37 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         Thin delegate to the shared
         :func:`idp_common.assessment.batching.assess_results_batched` (the same
         implementation the standalone Assessment step now uses) with the batch size
-        read from ``extraction.confidence.list_batch_size``. Returns
+        read from ``extraction.confidence.list_batch_size``. Threads the confidence
+        model + geometry mode (for token-aware first-pass sizing) and the resolved
+        escalation model (for the self-healing ladder) so the agentic in-shard
+        ``separate`` path is exactly as robust as the standalone step. Returns
         ``{"assessment", "alerts", "metering", "parsing_succeeded",
-        "duration_seconds"}``.
+        "duration_seconds", "split_stats"}``.
         """
         from idp_common.assessment.batching import assess_results_batched
 
+        confidence_cfg = self.config.extraction.confidence
         return assess_results_batched(
             assessment_service,
             class_label=class_label,
             extraction_results=extraction_results,
             document_text=document_text,
             page_images=page_images,
-            batch_size=self.config.extraction.confidence.list_batch_size,
+            batch_size=confidence_cfg.list_batch_size,
+            confidence_model_id=confidence_cfg.model,
+            geometry_mode=self.config.extraction.geometry.mode,
+            escalation_enabled=confidence_cfg.escalation_enabled,
+            escalation_model=assessment_service._resolve_confidence_escalation_model(
+                class_label
+            ),
+            max_escalation_rounds=confidence_cfg.max_escalation_rounds,
+            deadline_epoch=self._assessment_deadline_epoch,
+            max_concurrent_batches=self.config.extraction.agentic.max_concurrent_batches,
         )
 
-    def _build_assess_runner(self, section_info: SectionInfo) -> "Any | None":
+    def _build_assess_runner(
+        self, section_info: SectionInfo, document: Document | None = None
+    ) -> "Any | None":
         """Build the per-shard assess_runner closure (or None when disabled).
 
         The closure reuses ``AssessmentService.assess_results`` over a single
@@ -3475,6 +3820,15 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         Assessment step runs — just scoped to the shard and with no S3 round
         trip. Returns ``None`` when in-shard assessment is not enabled, leaving
         the default (no-assessment) extraction path completely unchanged.
+
+        When ``document`` is provided and OCR geometry grounding is on
+        (``geometry.mode`` not ``llm``/``off``), the shard also GROUNDS its own
+        rows against ONLY its own pages' OCR data right here — so grounding
+        scales per-shard exactly like the confidence assessment does, instead of
+        being deferred to a single full-section sweep in the merge step (which is
+        O(rows × all-pages) fuzzy matching and blew the merge Lambda's 900s ceiling
+        on large tables). The merge step then re-grounds with ``skip_grounded=True``,
+        a near-instant no-op over already-grounded leaves.
         """
         if not self._inshard_assessment_enabled():
             return None
@@ -3483,6 +3837,13 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
 
         assessment_service = AssessmentService(region=self.region, config=self.config)
         class_label = section_info.class_label
+        geometry_mode = self.config.extraction.geometry.mode
+        sorted_page_ids = section_info.sorted_page_ids
+        ground_in_shard = (
+            document is not None
+            and geometry_mode not in ("llm", "off")
+            and bool(sorted_page_ids)
+        )
 
         async def _assess_runner(
             *, extracted_fields: dict[str, Any], payload: dict[str, Any]
@@ -3502,17 +3863,111 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                 # reliably enumerates every row (a single call over a big list
                 # under-enumerates/omits it). Reconciliation inside keeps the
                 # per-row assessment index-aligned with the shard's data.
-                return self._assess_results_batched(
+                result = self._assess_results_batched(
                     assessment_service,
                     class_label=class_label,
                     extraction_results=extraction_results,
                     document_text=document_text,
                     page_images=page_images,
                 )
+                shard_assessment = result.get("assessment") or {}
+                if ground_in_shard:
+                    self._ground_shard_assessment(
+                        assessment=shard_assessment,
+                        extracted_fields=extraction_results,
+                        payload=payload,
+                        document=document,
+                        section_info=section_info,
+                        geometry_mode=geometry_mode,
+                    )
+                # Prune assessment rows for phantom DATA rows in lockstep with
+                # what the merge drops from the data, so the persisted (already
+                # grounded) per-shard assessment stays index-aligned with the
+                # phantom-filtered merged data. MUST run AFTER grounding (grounding
+                # needs full 1:1 alignment); it only shrinks, so grounded rows that
+                # survive keep their boxes.
+                from idp_common.extraction.runtime import (
+                    _prune_phantom_rows_from_assessment,
+                )
+
+                _prune_phantom_rows_from_assessment(
+                    extraction_results, shard_assessment
+                )
+                return result
 
             return await _asyncio.to_thread(_run)
 
         return _assess_runner
+
+    def _ground_shard_assessment(
+        self,
+        *,
+        assessment: dict[str, Any],
+        extracted_fields: dict[str, Any],
+        payload: dict[str, Any],
+        document: Document,
+        section_info: SectionInfo,
+        geometry_mode: str,
+    ) -> None:
+        """Ground ONE shard's per-field assessment against ONLY its own pages.
+
+        Loads OCR ``pageData.json`` for just the shard's page slice (keyed by the
+        real global 1-indexed page number, exactly like the full-section path) and
+        grounds the shard's assessment leaves in place. Scoping to the shard's
+        pages both bounds the work (O(shard-rows × shard-pages) instead of
+        O(all-rows × all-pages)) and improves correctness — a row's value can only
+        appear on its own pages, so cross-page false matches are avoided. Row-order
+        disambiguation of repeated values is naturally scoped to the shard's rows.
+        Best-effort: grounding never fails the shard's assessment.
+        """
+        if not assessment:
+            return
+        try:
+            from idp_common.assessment.ocr_grounding import (
+                ground_assessment_geometry,
+                load_page_ocr_data,
+            )
+
+            sorted_page_ids = section_info.sorted_page_ids
+            page_start = payload.get("page_start", 0)
+            page_end = payload.get("page_end", len(sorted_page_ids))
+            shard_page_ids = sorted_page_ids[page_start:page_end]
+            page_data_by_page = load_page_ocr_data(document.pages, shard_page_ids)
+            if not page_data_by_page:
+                return
+            # Observability: grounding is pure-CPU value→OCR-line matching; on a
+            # large table it used to run for minutes SILENTLY (the exact-index fast
+            # path now keeps it ~seconds, but log the size + duration so a
+            # regression is never an invisible hang again — the user asked for every
+            # heavy step to be traceable in CloudWatch).
+            row_count = sum(
+                len(v) for v in extracted_fields.values() if isinstance(v, list)
+            )
+            _t0 = time.time()
+            ground_assessment_geometry(
+                assessment,
+                extracted_fields,
+                page_data_by_page,
+                geometry_mode,
+                self._class_schema,
+            )
+            logger.info(
+                "In-shard OCR grounding: pages %s-%s, %d page(s), ~%d list row(s) "
+                "grounded in %.2fs (geometry=%s)",
+                page_start,
+                page_end,
+                len(page_data_by_page),
+                row_count,
+                time.time() - _t0,
+                geometry_mode,
+            )
+        except Exception as e:  # noqa: BLE001 - grounding is advisory
+            logger.warning(
+                "In-shard OCR grounding failed for pages %s-%s (keeping ungrounded): %s",
+                payload.get("page_start"),
+                payload.get("page_end"),
+                e,
+            )
 
     def _assess_single_agent(
         self,
@@ -3607,6 +4062,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         section_id: str,
         shard_index: int,
         persistence: Any,
+        deadline_epoch: float | None = None,
     ) -> dict[str, Any]:
         """Run ONE shard of a section — the nested-SFN Distributed Map body.
 
@@ -3615,6 +4071,12 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         persisted to S3 via ``persistence``; this returns a small descriptor so
         the Map collects only pointers. This is the SFN counterpart to one
         asyncio task in ``InProcessRuntime`` — same primitive, different scheduler.
+
+        ``deadline_epoch`` (absolute epoch seconds, from the shard Lambda's
+        ``context.get_remaining_time_in_millis()``) bounds the in-shard confidence
+        self-healing ladder so a truncation-retry storm on a small-cap confidence
+        model stops (with an ``assessment_deadline_reached`` warning, keeping
+        recovered rows) instead of running the shard Lambda into its 900s wall.
         """
         import asyncio as _asyncio
 
@@ -3622,6 +4084,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         from idp_common.extraction.runtime import extract_one_shard
 
         self._reset_context()
+        self._assessment_deadline_epoch = deadline_epoch
         section = self._validate_and_find_section(document, section_id)
         if not section:
             raise ValueError(f"Section {section_id} not found")
@@ -3651,7 +4114,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                 custom_instruction=custom_instruction,
                 persistence=persistence,
                 shard_runner=default_shard_runner,
-                assess_runner=self._build_assess_runner(section_info),
+                assess_runner=self._build_assess_runner(section_info, self._document),
             )
         )
         return {
@@ -3676,6 +4139,19 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         if not section:
             raise ValueError(f"Section {section_id} not found")
         section_info = self._prepare_section_info(document, section)
+        # Diagnostic: what the plan step actually sees for this section — page
+        # count on the section, on the resolved section_info, and how many pages
+        # are present in the document. A large section that reports few pages here
+        # is why it would fall to single-pass.
+        logger.info(
+            "plan_section_shards ENTRY: section=%s class=%s section.page_ids=%d "
+            "section_info.sorted_page_ids=%d document.pages=%d",
+            section_id,
+            getattr(section, "classification", "?"),
+            len(getattr(section, "page_ids", []) or []),
+            len(getattr(section_info, "sorted_page_ids", []) or []),
+            len(getattr(document, "pages", {}) or {}),
+        )
 
         agentic = self.config.extraction.agentic
         runtime_choice = (getattr(agentic, "runtime", None) or "in_process").lower()
@@ -3685,13 +4161,42 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             or runtime_choice not in ("step_functions", "stepfunctions", "sfn")
             or num_batches <= 1
         ):
+            logger.info(
+                "plan_section_shards: single-pass (agentic=%s runtime=%s "
+                "max_concurrent_batches=%s) for section %s",
+                agentic.enabled,
+                runtime_choice,
+                num_batches,
+                section_id,
+            )
             return {"shard_mode": False, "num_shards": 0, "shards": []}
 
         if self._prepare_section_context(document, section, section_info) is None:
+            logger.info(
+                "plan_section_shards: empty schema for section %s (class=%s) — "
+                "single-pass",
+                section_id,
+                section_info.class_label,
+            )
             return {"shard_mode": False, "num_shards": 0, "shards": []}
 
         _model_id, _dyn, shard_payloads, _ci = self._build_agentic_shard_plan(
             section_info
+        )
+        # Explicit trace of the shard decision (item 3 observability): page count,
+        # budgets, and resulting shard count — so a "why didn't it shard?" is
+        # answerable from CloudWatch alone.
+        logger.info(
+            "plan_section_shards: section=%s class=%s pages=%d "
+            "shard_token_budget=%d max_pages_per_shard=%d max_concurrent_batches=%d "
+            "-> %d shard payload(s)",
+            section_id,
+            section_info.class_label,
+            len(self._page_texts),
+            self._shard_token_budget(),
+            self._max_pages_per_shard(),
+            num_batches,
+            len(shard_payloads),
         )
         if len(shard_payloads) <= 1:
             return {
@@ -3720,6 +4225,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         document: Document,
         section_id: str,
         persistence: Any,
+        deadline_epoch: float | None = None,
     ) -> Document:
         """Merge per-shard results from S3 into the final section result.
 
@@ -3728,11 +4234,16 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         ``merge_shard_dicts`` (page-ordered), runs the same validation/escalation
         + completeness checks as the in-process path, and saves results — so the
         SFN path and in-process path produce identical output.
+
+        ``deadline_epoch`` (from the merge Lambda's remaining time) bounds any
+        residual confidence self-healing done here (e.g. re-scoring reconcile-padded
+        rows) so it can't run the merge Lambda into its 900s wall.
         """
         from idp_common.extraction.runtime import merge_shard_dicts
 
         t0 = time.time()
         self._reset_context()
+        self._assessment_deadline_epoch = deadline_epoch
         section = self._validate_and_find_section(document, section_id)
         if not section:
             raise ValueError(f"Section {section_id} not found")

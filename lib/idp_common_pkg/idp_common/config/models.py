@@ -276,26 +276,26 @@ class AgenticConfig(BaseModel):
         "RPM — tune to your quota.",
     )
     shard_token_budget: int = Field(
-        default=8000,
-        gt=0,
-        description="Target maximum input tokens (estimated, ~chars/4) of OCR "
-        "text per shard when max_concurrent_batches > 1. Pages are grouped so "
-        "each shard stays under this budget, creating as many shards as needed "
-        "(capped by max_concurrent_batches). The default (8000) reliably shards "
-        "large documents so a single agent never has to emit a giant table in "
-        "one Bedrock call (the read-timeout failure mode). Raise for "
-        "large-context models (e.g. 1M-context Claude); lower if shards still "
-        "overflow.",
+        default=0,
+        ge=0,
+        description="OPTIONAL OVERRIDE (0 = auto-size from the model). Target "
+        "maximum input tokens (~chars/4) of OCR text per shard when "
+        "max_concurrent_batches > 1. When 0 (default), this is auto-derived from "
+        "the extraction model's context window minus extraction.context_buffer "
+        "(see idp_common.bedrock.sizing) — so a 1M-context model shards larger "
+        "than a 200K one automatically. Set a non-zero value only to pin it.",
     )
     max_pages_per_shard: int = Field(
         default=5,
         ge=0,
         description="Page-count ceiling per shard when max_concurrent_batches "
         "> 1. A shard is closed once it holds this many pages even if its OCR "
-        "text is still under shard_token_budget — so a document with unusually "
-        "compact pages still shards on page count (tokens AND pages both bound a "
-        "shard). This guarantees large docs shard regardless of text density. "
-        "0 = disabled (token budget alone bounds shards).",
+        "text is under the token budget. This is the TIMEOUT-critical lever "
+        "(fewer pages/shard = fewer sequential agent turns = each shard Lambda "
+        "finishes well under 900s), so it stays a small fixed default (5) rather "
+        "than model-derived — a roomy token budget must NOT collapse a large doc "
+        "back into one giant shard. 0 = disabled (token budget alone bounds "
+        "shards; not recommended for large docs).",
     )
     max_images_per_agent: int = Field(
         default=20,
@@ -496,7 +496,40 @@ class ConfidenceConfig(BaseModel):
             "the list, leaving rows unassessed. When a shard's extracted list exceeds "
             "this size, the assessment is run in batches of this many rows and "
             "concatenated, so every row gets a confidence. Lower = more reliable "
-            "enumeration but more inferences; raise for capable models."
+            "enumeration but more inferences; raise for capable models. NOTE: this is "
+            "an UPPER bound — the self-healing ladder derives a smaller token-aware "
+            "first-pass size when the confidence model's output cap would truncate it."
+        ),
+    )
+    escalation_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable the assessment self-healing ladder: when confidence rows still "
+            "come back unscored/truncated after token-aware batch shrinking and "
+            "same-model retries, re-assess ONLY the still-missing rows with a "
+            "stronger 'escalation_model' (larger output cap). ON by default so "
+            "advanced mode completes correctly the first time; the ladder is a no-op "
+            "when nothing is missing."
+        ),
+    )
+    escalation_model: Optional[str] = Field(
+        default=None,
+        description=(
+            "Stronger Bedrock confidence model the ladder escalates to (e.g. a "
+            "128K-output Claude model when the primary confidence model is Nova Lite "
+            "at 10K). Falls back to the per-class "
+            "'x-aws-idp-confidence-escalation-model' override. None -> the model "
+            "escalation step is skipped (ladder stays at token-aware shrink + retry)."
+        ),
+    )
+    max_escalation_rounds: int = Field(
+        default=2,
+        ge=0,
+        description=(
+            "Upper bound on self-healing ladder rounds (token-aware shrink/retry "
+            "rounds plus the model-escalation round). Bounds added cost/latency so "
+            "the ladder stays within the Lambda wall-clock budget. 0 disables the "
+            "ladder entirely."
         ),
     )
     image: ImageConfig = Field(default_factory=ImageConfig)
@@ -515,6 +548,14 @@ class ConfidenceConfig(BaseModel):
         """Parse int from string or number"""
         if isinstance(v, str):
             return int(v) if v else 0
+        return int(v)
+
+    @field_validator("max_escalation_rounds", mode="before")
+    @classmethod
+    def parse_max_escalation_rounds(cls, v: Any) -> int:
+        """Parse int from string or number; empty/None -> default 2."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return 2
         return int(v)
 
     @field_validator("mode", mode="before")
@@ -626,6 +667,22 @@ class ExtractionConfig(BaseModel):
         default_factory=list,
         description="Pipeline hooks invoked after extraction (Feature Platform)",
     )
+    context_buffer: float = Field(
+        default=0.30,
+        ge=0.0,
+        le=0.95,
+        description=(
+            "Fraction of each model's context/output window kept free as safety "
+            "headroom (default 0.30 = never use more than 70% of a window). This "
+            "is the ONE knob for model-aware auto-sizing: shard token/page budgets "
+            "and confidence list-batch sizes are derived from the model's input "
+            "and output limits minus this buffer (see idp_common.bedrock.sizing), "
+            "so you don't hand-set per-model sizes. Raise it (e.g. 0.5) if you see "
+            "context-overflow or truncation; lower it (e.g. 0.15) to pack more per "
+            "shard/batch on a roomy model. The derived sizes are logged and shown "
+            "in the processing report."
+        ),
+    )
     model: str = Field(
         default="us.amazon.nova-pro-v1:0",
         description="Bedrock model ID for extraction. Use 'LambdaHook' to invoke a custom Lambda function instead of Bedrock.",
@@ -720,6 +777,14 @@ class ExtractionConfig(BaseModel):
         """Parse float from string or number"""
         if isinstance(v, str):
             return float(v) if v else 0.0
+        return float(v)
+
+    @field_validator("context_buffer", mode="before")
+    @classmethod
+    def parse_context_buffer(cls, v: Any) -> float:
+        """Parse the context buffer; empty/None -> default 0.30."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return 0.30
         return float(v)
 
     @field_validator("mode", mode="before")

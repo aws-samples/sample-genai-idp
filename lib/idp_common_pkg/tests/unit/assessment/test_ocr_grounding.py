@@ -290,6 +290,54 @@ class TestOcrOnlyGroundingMode:
         assert tops == [pytest.approx(0.10), pytest.approx(0.30), pytest.approx(0.50)]
 
 
+class TestExactIndexFastPath:
+    """The index-first fast path (perf: ~30× on large tables) must be behaviorally
+    identical to the full per-page scan."""
+
+    def test_exact_index_hit_returns_line_box(self):
+        pd = {1: _page([_line("AAPL", 0.1, 0.2, width=0.05, height=0.02)])}
+        geom, source, _ = g.match_value_to_geometry("AAPL", pd)
+        assert source == "ocr"
+        assert geom["boundingBox"]["top"] == pytest.approx(0.2)
+        assert geom["page"] == 1
+
+    def test_exact_hit_skips_fuzzy_noise_on_other_lines(self):
+        # A near-miss fuzzy line must NOT displace the exact hit (fast path returns
+        # the exact tier and never runs the fuzzy sweep).
+        pd = {
+            1: _page(
+                [
+                    _line("AAPL", 0.1, 0.2),
+                    _line("AAPLE", 0.1, 0.5),  # fuzzy near-miss, lower on page
+                ]
+            )
+        }
+        geom, source, _ = g.match_value_to_geometry("AAPL", pd)
+        assert source == "ocr"
+        assert geom["boundingBox"]["top"] == pytest.approx(0.2)  # the exact line
+
+    def test_index_first_matches_full_scan_across_pages(self):
+        # A value present on page 2 only: fast path (index) and the full scan must
+        # yield the same box. (Differential guard for the cross-page fast path.)
+        pd = {
+            1: _page([_line("Something else", 0.1, 0.1)]),
+            2: _page([_line("TARGET VALUE", 0.3, 0.4, width=0.2, height=0.02)]),
+        }
+        geom, source, _ = g.match_value_to_geometry("TARGET VALUE", pd)
+        assert source == "ocr"
+        assert geom["page"] == 2
+        assert geom["boundingBox"]["left"] == pytest.approx(0.3)
+
+    def test_page_indexes_cached_once(self):
+        page = _page([_line("x", 0.1, 0.1)])
+        pd = {1: page}
+        g.match_value_to_geometry("x", pd)
+        # Private caches were populated on the page_data dict.
+        assert "__norm_lines_cache__" in page
+        assert "__exact_index_cache__" in page
+        assert page["__exact_index_cache__"].get("x")  # normalized key indexed
+
+
 class TestPageResolution:
     def test_multi_page_resolves_to_preferred_page(self):
         pd = {
@@ -537,6 +585,86 @@ class TestGroundAssessmentGeometry:
         assessment = {"Field": {"confidence": 0.9, "geometry": "not a list"}}
         out = g.ground_assessment_geometry(assessment, {"Field": "x"}, {})
         assert out is assessment
+
+    def test_skip_grounded_leaves_already_grounded_untouched(self):
+        # A leaf already grounded per-shard (has geometry_source) must NOT be
+        # re-grounded by a post-merge skip_grounded pass — its box is preserved
+        # even though the merge-step OCR would match a DIFFERENT line.
+        assessment = {
+            "Amount": {
+                "confidence": 0.9,
+                "geometry_source": "ocr",
+                "geometry": [
+                    {
+                        "boundingBox": {
+                            "left": 0.1,
+                            "top": 0.10,
+                            "width": 0.1,
+                            "height": 0.02,
+                        },
+                        "page": 1,
+                    }
+                ],
+            }
+        }
+        extraction = {"Amount": "50.00"}
+        # OCR would ground "50.00" to top=0.90; skip_grounded must keep top=0.10.
+        pd = {1: _page([_line("50.00", 0.1, 0.90)])}
+        out = g.ground_assessment_geometry(
+            assessment, extraction, pd, "ocr_only", skip_grounded=True
+        )
+        assert out["Amount"]["geometry"][0]["boundingBox"]["top"] == pytest.approx(0.10)
+
+    def test_skip_grounded_still_grounds_ungrounded_leaves(self):
+        # A residual leaf with NO geometry_source (e.g. a reconcile-padded
+        # placeholder row) IS grounded by the skip_grounded pass — so the merge
+        # step still fills in rows the shards left ungrounded.
+        assessment = {
+            "GroundedRow": {
+                "confidence": 0.9,
+                "geometry_source": "ocr",
+                "geometry": [],
+            },
+            "PaddedRow": {"confidence": None},  # no geometry_source
+        }
+        extraction = {"GroundedRow": "AAA", "PaddedRow": "BBB"}
+        pd = {1: _page([_line("BBB", 0.2, 0.40)])}
+        out = g.ground_assessment_geometry(
+            assessment, extraction, pd, "ocr_only", skip_grounded=True
+        )
+        # The padded leaf got a real OCR box...
+        assert out["PaddedRow"].get("geometry_source") == "ocr"
+        assert out["PaddedRow"]["geometry"][0]["boundingBox"]["top"] == pytest.approx(
+            0.40
+        )
+        # ...and the already-grounded leaf was left as-is (empty geometry preserved).
+        assert out["GroundedRow"]["geometry"] == []
+
+    def test_skip_grounded_false_regrounds_everything(self):
+        # Default (skip_grounded=False) re-grounds even already-grounded leaves —
+        # the single-agent (non-sharded) path relies on this.
+        assessment = {
+            "Amount": {
+                "confidence": 0.9,
+                "geometry_source": "ocr",
+                "geometry": [
+                    {
+                        "boundingBox": {
+                            "left": 0.1,
+                            "top": 0.10,
+                            "width": 0.1,
+                            "height": 0.02,
+                        },
+                        "page": 1,
+                    }
+                ],
+            }
+        }
+        extraction = {"Amount": "50.00"}
+        pd = {1: _page([_line("50.00", 0.1, 0.90)])}
+        out = g.ground_assessment_geometry(assessment, extraction, pd, "ocr_only")
+        # Re-grounded to the OCR line's actual position.
+        assert out["Amount"]["geometry"][0]["boundingBox"]["top"] == pytest.approx(0.90)
 
 
 class TestLoadPageOcrData:

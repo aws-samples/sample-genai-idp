@@ -18,6 +18,7 @@ import {
   Modal,
   Alert,
   Badge,
+  Popover,
 } from '@cloudscape-design/components';
 import type { ButtonDropdownProps } from '@cloudscape-design/components';
 import { generateClient } from '../../api/client-shim';
@@ -25,6 +26,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 
 import FileViewer from '../document-viewer/JSONViewer';
 import { getSectionConfidenceAlertCount, getSectionConfidenceAlerts } from '../common/confidence-alerts-utils';
+import { getSectionIssueStatus, type ProcessingIssue } from '../common/processing-issues-utils';
 import useConfiguration from '../../hooks/use-configuration';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
@@ -47,6 +49,8 @@ interface SectionItem {
   // is performed for excluded sections; the UI renders a "Skipped" badge.
   Excluded?: boolean;
   ExclusionReason?: string | null;
+  // Structured self-healing / quality issues detected for this section.
+  ProcessingIssues?: ProcessingIssue[] | null;
 }
 
 interface PageItem {
@@ -123,6 +127,60 @@ const ConfidenceAlertsCell = ({
   }
 
   return <StatusIndicator type="warning">{alertCount}</StatusIndicator>;
+};
+
+// Processing status cell: a worst-severity StatusIndicator over the section's
+// structured ProcessingIssues, wrapped in a hover Popover listing each issue's
+// message + root cause. Reuses the getSectionIssueStatus helper (mirrors the
+// hitl-status-renderer + confidence-alerts-utils conventions).
+const StatusCell = ({ item }: { item: SectionItem }): React.JSX.Element => {
+  const issues = item.ProcessingIssues || [];
+  const { type, label } = getSectionIssueStatus(item);
+
+  const indicator = <StatusIndicator type={type}>{label}</StatusIndicator>;
+
+  if (issues.length === 0) {
+    return indicator;
+  }
+
+  return (
+    <Popover
+      dismissButton={false}
+      position="top"
+      size="large"
+      triggerType="custom"
+      header="Processing issues"
+      content={
+        <SpaceBetween size="s">
+          {issues.map((issue, idx) => (
+            <div key={`${issue.code ?? 'issue'}-${issue.message?.slice(0, 24) ?? idx}`}>
+              <Box variant="awsui-key-label">
+                <StatusIndicator
+                  type={
+                    (issue.severity || 'info').toLowerCase() === 'error'
+                      ? 'error'
+                      : (issue.severity || 'info').toLowerCase() === 'warning'
+                        ? 'warning'
+                        : 'info'
+                  }
+                >
+                  {issue.code || issue.stage || 'issue'}
+                </StatusIndicator>
+              </Box>
+              <Box variant="p">{issue.message}</Box>
+              {issue.rootCause && (
+                <Box variant="small" color="text-body-secondary">
+                  Root cause: {issue.rootCause}
+                </Box>
+              )}
+            </div>
+          ))}
+        </SpaceBetween>
+      }
+    >
+      <span style={{ cursor: 'pointer' }}>{indicator}</span>
+    </Popover>
+  );
 };
 
 const ActionsCell = ({
@@ -538,6 +596,14 @@ const createColumnDefinitions = (
       cell: (item: SectionItem) => <ConfidenceAlertsCell item={item} mergedConfig={mergedConfig} />,
       minWidth: 140,
       width: 140,
+      isResizable: true,
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      cell: (item: SectionItem) => <StatusCell item={item} />,
+      minWidth: 150,
+      width: 150,
       isResizable: true,
     },
     {

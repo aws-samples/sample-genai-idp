@@ -111,6 +111,60 @@ class TestMergeWrappers:
         assert merged["transactions"] == [row]
 
 
+class TestPrunePhantomRowsFromAssessment:
+    """The per-shard assessment must drop the SAME phantom rows the merge drops
+    from the data, so the (pre-grounded) assessment stays index-aligned."""
+
+    def test_prunes_midlist_phantom_in_lockstep(self):
+        from idp_common.extraction.runtime import (
+            _prune_phantom_rows_from_assessment,
+        )
+
+        real1 = {"RowID": 1, "Symbol": "AAPL", "Account": "X", "Qty": "5"}
+        phantom = {"RowID": 2, "Symbol": None, "Account": None, "Qty": None}
+        real2 = {"RowID": 3, "Symbol": "MSFT", "Account": "Y", "Qty": "9"}
+        extracted = {"transactions": [real1, phantom, real2]}
+        # Assessment aligned 1:1 with data (post-reconcile), each row distinct.
+        assessment = {
+            "transactions": [
+                {"Symbol": {"confidence": 0.1}},
+                {"Symbol": {"confidence": 0.2}},  # phantom's assessment
+                {"Symbol": {"confidence": 0.3}},
+            ]
+        }
+        _prune_phantom_rows_from_assessment(extracted, assessment)
+        # Phantom's assessment (0.2) removed; real rows keep their order/scores.
+        assert [r["Symbol"]["confidence"] for r in assessment["transactions"]] == [
+            0.1,
+            0.3,
+        ]
+
+    def test_noop_when_lengths_differ(self):
+        # Defensive: if assessment isn't 1:1 with data, don't risk a mis-prune.
+        from idp_common.extraction.runtime import (
+            _prune_phantom_rows_from_assessment,
+        )
+
+        extracted = {
+            "transactions": [
+                {"RowID": 2, "Symbol": None, "Account": None, "Qty": None},
+            ]
+        }
+        assessment = {"transactions": []}  # length mismatch
+        _prune_phantom_rows_from_assessment(extracted, assessment)
+        assert assessment["transactions"] == []
+
+    def test_noop_when_no_phantoms(self):
+        from idp_common.extraction.runtime import (
+            _prune_phantom_rows_from_assessment,
+        )
+
+        extracted = {"transactions": [{"RowID": 1, "Symbol": "A", "Account": "X"}]}
+        assessment = {"transactions": [{"Symbol": {"confidence": 0.9}}]}
+        _prune_phantom_rows_from_assessment(extracted, assessment)
+        assert assessment["transactions"] == [{"Symbol": {"confidence": 0.9}}]
+
+
 # --------------------- table_parsing_stats metering ----------------------- #
 class TestTableParsingStatsMerge:
     """Regression coverage for the 500%/496% Processing Report bug.
@@ -599,6 +653,96 @@ class TestInShardAssessment:
         assert (
             response["_shard_assessment"]["assessment"]["account"]["confidence"] == 0.7
         )
+
+    def test_b5_extraction_checkpointed_before_assessment(self):
+        """B5: the extraction is persisted (flagged assessment_pending) the moment
+        the agent finishes, BEFORE assessment runs — so a crash during assessment
+        can resume from it."""
+        saves: list[dict] = []
+
+        class _Persist:
+            def load(self, sid, ps, pe):
+                return None  # nothing persisted yet
+
+            def save(self, sid, ps, pe, result):
+                saves.append(dict(result))
+
+        runner = _make_runner({0: {"account": "A", "transactions": [{"r": 1}]}})
+        assess = _make_assess_runner(
+            {0: {"assessment": {"account": {"confidence": 0.9}}, "alerts": []}}
+        )
+        asyncio.run(
+            extract_one_shard(
+                shard_index=0,
+                total_shards=1,
+                payload=_payload(0, 1),
+                model_id="m",
+                data_format=_Model,
+                config=IDPConfig(),
+                section_id="sec",
+                shard_runner=runner,
+                assess_runner=assess,
+                persistence=_Persist(),
+            )
+        )
+        # Two saves: (1) extraction checkpoint with assessment_pending, then
+        # (2) the complete record with the assessment and no pending flag.
+        assert len(saves) == 2
+        assert saves[0].get("assessment_pending") is True
+        assert saves[0].get("assessment") is None
+        assert saves[1].get("assessment") == {"account": {"confidence": 0.9}}
+        assert saves[1].get("assessment_pending") is not True
+
+    def test_b5_resume_reuses_extraction_reruns_assessment_only(self):
+        """B5: when a prior attempt persisted extraction but did NOT finish
+        assessment (assessment_pending), the retry reuses the extraction (agent
+        NOT re-run) and runs assessment only."""
+        # Store seeded as if a prior attempt crashed mid-assessment.
+        store = {
+            ("sec", 0, 1): {
+                "extracted_fields": {"account": "A", "transactions": [{"r": 1}]},
+                "metering": {"shard0": {"t": 1}},
+                "assessment_pending": True,
+            }
+        }
+
+        class _Persist:
+            def load(self, sid, ps, pe):
+                return store.get((sid, ps, pe))
+
+            def save(self, sid, ps, pe, result):
+                store[(sid, ps, pe)] = dict(result)
+
+        agent_calls: list[int] = []
+        runner = _make_runner(
+            {0: {"account": "A", "transactions": [{"r": 1}]}}, call_log=agent_calls
+        )
+        assess = _make_assess_runner(
+            {0: {"assessment": {"account": {"confidence": 0.55}}, "alerts": []}}
+        )
+        fields, response = asyncio.run(
+            extract_one_shard(
+                shard_index=0,
+                total_shards=1,
+                payload=_payload(0, 1),
+                model_id="m",
+                data_format=_Model,
+                config=IDPConfig(),
+                section_id="sec",
+                shard_runner=runner,
+                assess_runner=assess,
+                persistence=_Persist(),
+            )
+        )
+        # The expensive agent loop was NOT re-run...
+        assert agent_calls == []
+        # ...the reused extraction is returned...
+        assert fields["account"] == "A"
+        # ...and assessment was (re-)computed and persisted complete.
+        assert (
+            response["_shard_assessment"]["assessment"]["account"]["confidence"] == 0.55
+        )
+        assert store[("sec", 0, 1)].get("assessment_pending") is not True
 
     def test_merge_collates_list_assessment_page_ordered(self):
         from idp_common.extraction.runtime import merge_assessment_dicts
