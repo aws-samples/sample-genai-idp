@@ -877,7 +877,9 @@ class OcrService:
                 temperature=0.0,
                 top_p=0.1,
                 top_k=5,
-                max_tokens=4096,
+                # None => Bedrock client resolves the model's max output tokens
+                # (model_config_limits.yaml); Bedrock's default-when-omitted truncates.
+                max_tokens=None,
                 reasoning_effort=getattr(self.config.ocr, "reasoning_effort", None)
                 if hasattr(self, "config")
                 else None,
@@ -1106,7 +1108,9 @@ class OcrService:
                 temperature=0.0,
                 top_p=0.1,
                 top_k=5,
-                max_tokens=4096,
+                # None => Bedrock client resolves the model's max output tokens
+                # (model_config_limits.yaml); Bedrock's default-when-omitted truncates.
+                max_tokens=None,
                 reasoning_effort=getattr(self.config.ocr, "reasoning_effort", None)
                 if hasattr(self, "config")
                 else None,
@@ -1578,7 +1582,9 @@ class OcrService:
             temperature=0.0,  # Use lowest temperature for OCR accuracy
             top_p=0.1,
             top_k=5,
-            max_tokens=4096,
+            # None => Bedrock client resolves the model's max output tokens
+            # (model_config_limits.yaml); Bedrock's default-when-omitted truncates.
+            max_tokens=None,
             reasoning_effort=getattr(self.config.ocr, "reasoning_effort", None)
             if hasattr(self, "config")
             else None,
@@ -2265,7 +2271,9 @@ class OcrService:
                     temperature=0.0,
                     top_p=0.1,
                     top_k=5,
-                    max_tokens=4096,
+                    # None => Bedrock client resolves the model's max output tokens
+                    # (model_config_limits.yaml); Bedrock's default-when-omitted truncates.
+                    max_tokens=None,
                     reasoning_effort=getattr(self.config.ocr, "reasoning_effort", None)
                     if hasattr(self, "config")
                     else None,

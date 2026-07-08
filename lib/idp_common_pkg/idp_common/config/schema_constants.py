@@ -146,6 +146,12 @@ VALID_EVALUATION_METHODS = frozenset(
 # Note: This is now superseded by X_AWS_IDP_EVALUATION_THRESHOLD
 X_AWS_IDP_CONFIDENCE_THRESHOLD = "x-aws-idp-confidence-threshold"
 
+# Per-class stronger confidence model the assessment self-healing ladder
+# escalates to when rows still truncate/come back unscored after token-aware
+# shrinking and same-model retries. Mirrors X_AWS_IDP_EXTRACTION_ESCALATION_MODEL;
+# overrides the global extraction.confidence.escalation_model for that class.
+X_AWS_IDP_CONFIDENCE_ESCALATION_MODEL = "x-aws-idp-confidence-escalation-model"
+
 # ============================================================================
 # AWS IDP Prompt Extensions
 # ============================================================================

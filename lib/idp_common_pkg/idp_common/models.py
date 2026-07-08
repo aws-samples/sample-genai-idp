@@ -55,6 +55,69 @@ class Page:
 
 
 @dataclass
+class ProcessingIssue:
+    """A structured, user-surfacing record of something that went wrong (or was
+    auto-healed) during processing.
+
+    Replaces the scattered signals (``split_stats`` / ``parsing_succeeded`` /
+    free-text ``document.errors``) with ONE concept that the backend produces,
+    DynamoDB persists, GraphQL exposes, and the UI renders as a section status
+    icon + tooltip. An issue never fails the document — it flags it.
+
+    Fields:
+        stage: Where it arose — ``"extraction"`` | ``"assessment"`` | ``"ocr"`` …
+        severity: ``"error"`` (incomplete/failed), ``"warning"`` (partial /
+            degraded), or ``"info"`` (auto-recovered but worth noting).
+        code: Stable machine code, e.g. ``"assessment_incomplete"``,
+            ``"assessment_recovered_with_retries"``,
+            ``"assessment_deadline_reached"``, ``"extraction_incomplete"``.
+        message: User-friendly one-liner.
+        root_cause: Technical detail — model, output cap, rows affected, geometry
+            mode, escalation chain tried.
+        section_id: The section this pertains to (None for document-level).
+        details: Structured payload (split_stats, unrecoverable indices, model
+            chain) for the processing report / debugging.
+    """
+
+    stage: str
+    severity: str
+    code: str
+    message: str
+    root_cause: str = ""
+    section_id: Optional[str] = None
+    details: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to a compact dict (omitting empty optional fields)."""
+        result: Dict[str, Any] = {
+            "stage": self.stage,
+            "severity": self.severity,
+            "code": self.code,
+            "message": self.message,
+        }
+        if self.root_cause:
+            result["root_cause"] = self.root_cause
+        if self.section_id is not None:
+            result["section_id"] = self.section_id
+        if self.details:
+            result["details"] = self.details
+        return result
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ProcessingIssue":
+        """Create a ProcessingIssue from its dict representation."""
+        return cls(
+            stage=data.get("stage", ""),
+            severity=data.get("severity", "info"),
+            code=data.get("code", ""),
+            message=data.get("message", ""),
+            root_cause=data.get("root_cause", ""),
+            section_id=data.get("section_id"),
+            details=data.get("details", {}) or {},
+        )
+
+
+@dataclass
 class Section:
     """Represents a section of pages with the same classification."""
 
@@ -65,6 +128,10 @@ class Section:
     extraction_result_uri: Optional[str] = None
     attributes: Optional[Dict[str, Any]] = None
     confidence_threshold_alerts: List[Dict[str, Any]] = field(default_factory=list)
+    processing_issues: List["ProcessingIssue"] = field(default_factory=list)
+    """Structured issues detected for this section (assessment incomplete,
+    recovered-with-retries, extraction incomplete, …). Rolled up to
+    ``Document.processing_issues`` and surfaced in the UI."""
 
     # Exclusion flags (populated by ClassificationService from class config)
     excluded: bool = False
@@ -90,13 +157,18 @@ class Section:
             extraction_result_uri=data.get("extraction_result_uri"),
             attributes=data.get("attributes"),
             confidence_threshold_alerts=data.get("confidence_threshold_alerts", []),
+            processing_issues=[
+                ProcessingIssue.from_dict(pi)
+                for pi in data.get("processing_issues", [])
+                if isinstance(pi, dict)
+            ],
             excluded=bool(data.get("excluded", False)),
             exclusion_reason=data.get("exclusion_reason"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert section to dictionary representation."""
-        return {
+        result: Dict[str, Any] = {
             "section_id": self.section_id,
             "classification": self.classification,
             "confidence": self.confidence,
@@ -107,6 +179,12 @@ class Section:
             "excluded": self.excluded,
             "exclusion_reason": self.exclusion_reason,
         }
+        # Only emit when non-empty to keep output compact / back-compatible.
+        if self.processing_issues:
+            result["processing_issues"] = [
+                pi.to_dict() for pi in self.processing_issues
+            ]
+        return result
 
 
 @dataclass
@@ -305,6 +383,32 @@ class Document:
     # Confidence alerts (top-level count for GSI projection)
     confidence_alert_count: int = 0
 
+    # Processing issues rolled up from sections (+ any document-level issues).
+    # Kept as a top-level count for cheap GSI projection / list filtering,
+    # mirroring confidence_alert_count. The full issue objects live on each
+    # Section (and are also listed here for document-level convenience).
+    processing_issues: List["ProcessingIssue"] = field(default_factory=list)
+
+    @property
+    def all_processing_issues(self) -> List["ProcessingIssue"]:
+        """All issues across sections + any document-level ones (deduped by
+        identity — sections own their issues; document-level issues have no
+        section_id)."""
+        issues: List["ProcessingIssue"] = list(self.processing_issues)
+        for section in self.sections:
+            issues.extend(section.processing_issues)
+        return issues
+
+    @property
+    def processing_issue_count(self) -> int:
+        """Total number of processing issues (sections + document-level)."""
+        return len(self.all_processing_issues)
+
+    @property
+    def has_processing_issues(self) -> bool:
+        """True if any processing issue was recorded (any severity)."""
+        return self.processing_issue_count > 0
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert document to dictionary representation."""
         # First convert basic attributes
@@ -331,6 +435,16 @@ class Document:
             "confidence_alert_count": self.confidence_alert_count,
             # We don't include evaluation_result or summarization_result in the dict since they're objects
         }
+
+        # Processing-issue rollup (top-level count for GSI / list filtering).
+        # Only emit when non-zero to keep output compact / back-compatible.
+        issue_count = self.processing_issue_count
+        if issue_count:
+            result["processing_issue_count"] = issue_count
+        if self.processing_issues:
+            result["processing_issues"] = [
+                pi.to_dict() for pi in self.processing_issues
+            ]
 
         # Convert pages
         result["pages"] = {}
@@ -361,6 +475,10 @@ class Document:
             }
             if section.attributes:
                 section_dict["attributes"] = section.attributes
+            if section.processing_issues:
+                section_dict["processing_issues"] = [
+                    pi.to_dict() for pi in section.processing_issues
+                ]
             # Only emit exclusion fields when set to keep output compact
             # and backward-compatible with existing consumers.
             if section.excluded:
@@ -462,10 +580,23 @@ class Document:
                     confidence_threshold_alerts=section_data.get(
                         "confidence_threshold_alerts", []
                     ),
+                    processing_issues=[
+                        ProcessingIssue.from_dict(pi)
+                        for pi in section_data.get("processing_issues", [])
+                        if isinstance(pi, dict)
+                    ],
                     excluded=bool(section_data.get("excluded", False)),
                     exclusion_reason=section_data.get("exclusion_reason"),
                 )
             )
+
+        # Restore any document-level processing issues (section-level ones are
+        # restored on each Section above).
+        document.processing_issues = [
+            ProcessingIssue.from_dict(pi)
+            for pi in data.get("processing_issues", [])
+            if isinstance(pi, dict)
+        ]
 
         # Convert HITL metadata if present
         hitl_metadata_data = data.get("hitl_metadata", [])

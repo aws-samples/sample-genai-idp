@@ -16,12 +16,29 @@ ocr:
   
   # Textract features to enable
   # Options: LAYOUT, TABLES, FORMS, SIGNATURES, QUERIES
-  # LAYOUT-only by default (~$0.004/page). Add TABLES for advanced/agentic
-  # extraction of table-heavy documents — it makes Textract emit structured
-  # Table blocks that linearize into markdown pipe-tables for the table parser —
-  # but TABLES+LAYOUT is ~$0.065/page (~16x), so enable it per-config where
-  # tabular extraction is needed rather than globally.
+  #
+  # DEFAULT: TABLES + LAYOUT. TABLES makes Textract emit structured Table/Cell
+  # blocks (with per-cell text, confidence, and geometry) that linearize into
+  # clean markdown pipe-tables for the agentic table parser and, in turn, produce
+  # more complete extraction AND more accurate confidence/geometry on table-heavy
+  # documents. Enabled by default because tables are common and the accuracy gain
+  # is large: on a validated 24-page brokerage statement, TABLES extracted all
+  # 1,440 rows (every page) while LAYOUT-only silently dropped ~5 pages (~300
+  # rows) where the plain-text linearization mis-segmented the table.
+  #
+  # COST TRADE-OFF — tune per deployment:
+  #   - Documents WITH tables: the extra Textract cost (TABLES+LAYOUT ~$0.065/page
+  #     vs LAYOUT-only ~$0.004/page, ~16x on the OCR line item) buys markedly
+  #     better table extraction + assessment, and is typically MORE cost-effective
+  #     and scalable end-to-end — cleaner cell structure means fewer LLM extraction
+  #     retries, fewer confidence truncations/re-batches, and less downstream
+  #     correction than fighting a mis-linearized plain-text table.
+  #   - Documents WITHOUT tables: TABLES adds cost with no benefit. If your corpus
+  #     is table-free (e.g. forms, prose, single-value docs), REMOVE the TABLES
+  #     entry below to fall back to cheaper LAYOUT-only OCR.
+  # Set this per-config to match the documents each stack actually processes.
   features:
+    - name: TABLES
     - name: LAYOUT
   
   # Concurrent API call workers

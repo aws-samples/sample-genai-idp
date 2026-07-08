@@ -241,7 +241,10 @@ class TestChatConfig:
         # Default should be a large-context Opus model (see decision in CHANGELOG).
         assert cfg.model == "us.anthropic.claude-opus-4-8:1m"
         assert cfg.temperature == 0.0
-        assert cfg.max_tokens == 4096
+        # max_tokens defaults to None (unset) => Bedrock client resolves the
+        # model's maximum output limit. An empty string also maps to None.
+        assert cfg.max_tokens is None
+        assert ChatConfig.model_validate({"max_tokens": ""}).max_tokens is None
         assert cfg.system_prompt  # non-empty
 
     def test_chat_config_string_numeric_parsing(self):

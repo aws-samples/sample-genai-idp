@@ -344,7 +344,9 @@ discovery:
         # Missing fields should have IDPConfig defaults
         self.assertEqual(without_gt_config.temperature, 1.0)
         self.assertEqual(without_gt_config.top_p, 0.1)
-        self.assertEqual(without_gt_config.max_tokens, 10000)
+        # max_tokens now defaults to None (unset) => the Bedrock client resolves
+        # the model's maximum output limit at request time.
+        self.assertIsNone(without_gt_config.max_tokens)
 
     # Note: bedrock_model_id parameter was removed from ClassesDiscovery constructor
     # Model configuration is now handled through the config parameter only

@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React from 'react';
-import { Button, ButtonDropdown, CollectionPreferences, Link, SpaceBetween } from '@cloudscape-design/components';
+import { Button, ButtonDropdown, CollectionPreferences, Link, SpaceBetween, StatusIndicator } from '@cloudscape-design/components';
 import type { CollectionPreferencesProps } from '@cloudscape-design/components';
 import type { TableProps } from '@cloudscape-design/components';
 
@@ -23,6 +23,7 @@ export interface MappedDocument {
   configVersion: string;
   evaluationStatus: string;
   confidenceAlertCount: number;
+  processingIssueCount: number;
   hitlStatus: string;
   hitlReviewOwner: string;
   hitlReviewOwnerEmail: string;
@@ -131,6 +132,16 @@ export const COLUMN_DEFINITIONS_MAIN = (versions: ConfigVersion[] = []): TablePr
     width: 150,
   },
   {
+    id: 'processingIssueCount',
+    header: 'Processing Issues',
+    cell: (item) => {
+      const count = item.processingIssueCount || 0;
+      return count === 0 ? <StatusIndicator type="success">0</StatusIndicator> : <StatusIndicator type="warning">{count}</StatusIndicator>;
+    },
+    sortingField: 'processingIssueCount',
+    width: 150,
+  },
+  {
     id: 'hitlStatus',
     header: 'Review Status',
     cell: (item) => renderHitlStatus(item),
@@ -179,6 +190,7 @@ const VISIBLE_CONTENT_OPTIONS = [
       { id: 'configVersion', label: 'Config Version' },
       { id: 'evaluationStatus', label: 'Evaluation' },
       { id: 'confidenceAlertCount', label: 'Confidence Alerts' },
+      { id: 'processingIssueCount', label: 'Processing Issues' },
       { id: 'hitlStatus', label: 'Review Status' },
       { id: 'hitlReviewOwner', label: 'Review Owner' },
       { id: 'hitlReviewedBy', label: 'Review Completed By' },
@@ -193,6 +205,7 @@ const VISIBLE_CONTENT = [
   'initialEventTime',
   'duration',
   'confidenceAlertCount',
+  'processingIssueCount',
   'hitlStatus',
 ];
 

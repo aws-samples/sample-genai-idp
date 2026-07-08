@@ -642,6 +642,56 @@ class TestValidateMaxTokens:
         assert result["valid"] is True
         assert len(result["errors"]) == 0
 
+    def test_string_valued_max_tokens_within_limit(self):
+        """Config stores numbers as strings (DynamoDB); a stringified numeric
+        max_tokens within the model limit must validate cleanly (regression:
+        previously raised 'str > int' and silently skipped the guard)."""
+        config = {
+            "classification": {
+                "model": "us.amazon.nova-lite-v1:0",
+                "max_tokens": "5000",  # string, within 10,000
+            }
+        }
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_max_tokens(config, result)
+        assert result["valid"] is True
+        assert len(result["errors"]) == 0
+
+    def test_string_valued_max_tokens_over_limit_is_caught(self):
+        """A stringified numeric max_tokens over the limit must be flagged
+        (regression: the str>int TypeError used to be swallowed as a warning,
+        letting an over-limit cap slip through)."""
+        config = {
+            "classification": {
+                "model": "us.amazon.nova-lite-v1:0",
+                "max_tokens": "99999",  # string, exceeds 10,000
+            }
+        }
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_max_tokens(config, result)
+        assert result["valid"] is False
+        assert len(result["errors"]) == 1
+        assert "exceeds model limit" in result["errors"][0]
+
+    def test_empty_string_max_tokens_is_skipped(self):
+        """An empty-string max_tokens means 'unset' (use the model max), so it
+        must be skipped, not treated as 0 or errored."""
+        config = {
+            "classification": {
+                "model": "us.amazon.nova-lite-v1:0",
+                "max_tokens": "",  # unset => model max
+            },
+            "summarization": {
+                "enabled": True,
+                "model": "us.amazon.nova-lite-v1:0",
+                "max_tokens": None,  # unset => model max
+            },
+        }
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_max_tokens(config, result)
+        assert result["valid"] is True
+        assert len(result["errors"]) == 0
+
     def test_nova2_models_have_10k_limit(self):
         """Test that Nova 2 models have 10,000 token limit.
 

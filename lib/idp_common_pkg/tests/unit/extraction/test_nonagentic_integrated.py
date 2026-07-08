@@ -173,6 +173,11 @@ class _TruncateOverN:
         self.max_rows = max_rows
         self.calls: list[int] = []
 
+    def _resolve_confidence_escalation_model(self, class_label):
+        # No escalation model configured for this fake — the ladder stays at
+        # token-aware shrink + same-model retry (what this test exercises).
+        return None
+
     def assess_results(
         self,
         *,
@@ -181,6 +186,7 @@ class _TruncateOverN:
         document_text,
         page_images,
         ocr_text_confidence="",
+        model_id_override=None,
     ):
         (field,) = [k for k, v in extraction_results.items() if isinstance(v, list)]
         rows = extraction_results[field]

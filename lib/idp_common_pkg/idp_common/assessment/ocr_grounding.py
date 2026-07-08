@@ -296,24 +296,44 @@ def _type_equal(value: Any, line_text: Any, hint: str) -> bool:
 
 
 def load_page_ocr_data(
-    pages: Dict[str, Any], page_ids: List[str]
+    pages: Dict[str, Any], page_ids: List[str], page_offset: int = 0
 ) -> Dict[int, Dict[str, Any]]:
     """
-    Load ``pageData.json`` for each page in ``page_ids`` keyed by 1-indexed page number.
+    Load ``pageData.json`` for each page in ``page_ids`` keyed by its **1-based
+    SECTION-RELATIVE page number** (NOT the document-absolute page id).
+
+    The returned key becomes ``geometry.page`` on every grounded field, and the UI
+    navigates with ``sectionPageIds[geometry.page - 1]`` — i.e. it expects page 1 to
+    be the FIRST page of the section. Keying by ``int(page_id)`` (document-absolute)
+    made a section that starts at doc page 2 emit ``page: 2`` for its first page, so
+    the viewer jumped to the wrong page (off by the section's start offset). Keying
+    by position within the section fixes this for every grounding path (ocr_only,
+    llm_grounded, standalone Assessment step, and the sharded agentic path).
+
+    ``page_ids`` MUST be in section reading order (callers pass ``sorted_page_ids``).
+    ``page_offset`` shifts the section-relative numbering for callers that pass only
+    a *slice* of the section's pages — the sharded path passes
+    ``sorted_page_ids[page_start:page_end]`` with ``page_offset=page_start`` so a
+    shard's pages still number relative to the WHOLE section (e.g. a shard over
+    section pages 6-10 yields keys 6-10, not 1-5).
 
     Pages without an ``ocr_page_data_uri`` (older documents) or whose artifact cannot
-    be read are simply omitted from the result, so callers degrade gracefully.
+    be read are simply omitted from the result, so callers degrade gracefully — the
+    section-relative numbering of the surviving pages is unaffected (it is derived
+    from the page's position in ``page_ids``, not from how many loaded).
 
     Args:
         pages: Document.pages mapping (page_id -> Page).
-        page_ids: Page IDs belonging to the section (1-indexed strings).
+        page_ids: Page IDs belonging to the section (or shard), in reading order.
+        page_offset: 0-based offset of ``page_ids[0]`` within the full section.
 
     Returns:
-        Mapping of ``int(page_id)`` -> parsed pageData dict, only for pages that have
-        usable data.
+        Mapping of ``section-relative 1-based page number`` -> parsed pageData dict,
+        only for pages that have usable data.
     """
     result: Dict[int, Dict[str, Any]] = {}
-    for page_id in page_ids:
+    for local_idx, page_id in enumerate(page_ids):
+        section_page = page_offset + local_idx + 1  # 1-based, section-relative
         page = pages.get(page_id)
         if page is None:
             continue
@@ -328,10 +348,7 @@ def load_page_ocr_data(
             )
             continue
         if isinstance(page_data, dict):
-            try:
-                result[int(page_id)] = page_data
-            except (TypeError, ValueError):
-                logger.warning(f"Non-numeric page_id '{page_id}' skipped for grounding")
+            result[section_page] = page_data
     return result
 
 
@@ -399,6 +416,58 @@ _SOURCE_NORMALIZED = "ocr-normalized"
 _SOURCE_FUZZY = "ocr-fuzzy"
 
 
+def _dedup_norm_variants(variants: Optional[List[str]], norm_value: str) -> List[str]:
+    """Normalize + dedupe a value's format variants, preserving order.
+
+    ``variants[0]`` (the primary value) stays first so callers can tag any
+    non-primary hit as a format-normalized match.
+    """
+    src = variants if variants else [norm_value]
+    seen: set = set()
+    out: List[str] = []
+    for v in src:
+        nv = _normalize(v)
+        if nv and nv not in seen:
+            seen.add(nv)
+            out.append(nv)
+    return out
+
+
+def _ensure_page_indexes(page_data: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+    """Build (once, cached on ``page_data``) the normalized-line list and the
+    EXACT-match index, returning the index.
+
+    Grounding calls into a page once per extracted value (a 300-row × 6-col table
+    → 1,800 values). Without caching, every call re-normalized all ~370 lines —
+    O(values × lines) work that pushed per-shard grounding of a large table to
+    ~60s and toward the shard Lambda's 900s wall. The normalized lines and an
+    ``exact-text -> [lines]`` index are computed once and reused; the EXACT index
+    turns the common table-cell case (value == one OCR line verbatim) into an O(1)
+    dict hit instead of a linear scan + fuzzy ladder. Cached under private keys the
+    caller never serializes.
+    """
+    idx = page_data.get("__exact_index_cache__")
+    if idx is not None:
+        return idx
+    lines = page_data.get("lines")
+    norm_lines: List[Tuple[str, Dict[str, Any]]] = (
+        [
+            (_normalize(line.get("text")), line)
+            for line in lines
+            if isinstance(line, dict)
+        ]
+        if isinstance(lines, list)
+        else []
+    )
+    page_data["__norm_lines_cache__"] = norm_lines
+    idx = {}
+    for nt, ln in norm_lines:
+        if nt:
+            idx.setdefault(nt, []).append(ln)
+    page_data["__exact_index_cache__"] = idx
+    return idx
+
+
 def _collect_candidates_in_page(
     norm_value: str,
     value_tokens: set,
@@ -435,20 +504,11 @@ def _collect_candidates_in_page(
     # Variant forms to text-match against (normalized, deduped, non-empty). The
     # primary value is variant[0]; any OTHER variant that hits is a normalized
     # (format-bridged) match and is tagged accordingly.
-    variants = norm_variants if norm_variants else [norm_value]
-    seen_v: set = set()
-    norm_variant_list: List[str] = []
-    for v in variants:
-        nv = _normalize(v)
-        if nv and nv not in seen_v:
-            seen_v.add(nv)
-            norm_variant_list.append(nv)
+    norm_variant_list = _dedup_norm_variants(norm_variants, norm_value)
 
-    # Pre-compute normalized + raw line text once.
-    norm_lines: List[Tuple[str, Dict[str, Any]]] = []
-    for line in lines:
-        if isinstance(line, dict):
-            norm_lines.append((_normalize(line.get("text")), line))
+    # Normalized lines + EXACT index are built (once) and cached on page_data.
+    _ensure_page_indexes(page_data)
+    norm_lines = page_data.get("__norm_lines_cache__") or []
 
     candidates: List[Tuple[int, Dict[str, Any], str, Optional[float]]] = []
 
@@ -486,8 +546,24 @@ def _collect_candidates_in_page(
             if match is not None:
                 candidates.append(match)
 
-    # Multi-line spans (value == concatenation of consecutive lines).
-    candidates.extend(_collect_span_candidates(norm_value, norm_lines, page_num))
+    # Tier-aware early-out. The caller keeps only the MOST PRECISE tier that
+    # matched, so a pass that can only produce a WORSE tier than what we already
+    # have is pure waste. Tiers: EXACT=1 < SUBSTRING=2 < SPAN=3 < TYPED=4 <
+    # PARTIAL=5 < FUZZY=6 < LEVENSHTEIN=7.
+    #   • SPAN (3): skip only if we already have EXACT/SUBSTRING (≤ SPAN). A mere
+    #     PARTIAL/TYPED (>SPAN) must NOT skip it — a multi-line span can still win.
+    #   • FUZZY/LEVENSHTEIN (6/7): skip whenever ANY candidate exists — they can
+    #     never beat tiers 1-5. Skipping these O(lines) sweeps is the bulk of the
+    #     speed-up for real documents.
+    best_so_far = min((t for t, *_ in candidates), default=None)
+    if best_so_far is None or best_so_far > _TIER_SPAN:
+        # Multi-line spans (value == concatenation of consecutive lines).
+        candidates.extend(_collect_span_candidates(norm_value, norm_lines, page_num))
+        best_so_far = min((t for t, *_ in candidates), default=None)
+
+    if candidates:
+        # Have at least a PARTIAL/TYPED/SPAN hit → fuzzy/Levenshtein can't improve.
+        return candidates
 
     # Token-overlap fuzzy.
     for norm_text, line in norm_lines:
@@ -679,20 +755,44 @@ def match_value_to_geometry(
 
     ref = _ref_from_llm_geometry(preferred_geometry)
 
-    # Collect candidates across all pages.
+    norm_variant_list = _dedup_norm_variants(variants, norm_value)
+
+    # FAST PATH — EXACT index lookup across ALL pages first. EXACT (tier 1) is the
+    # best possible tier, so if any page's O(1) index has a verbatim hit for a
+    # variant we take those candidates and NEVER run the per-page O(lines) scan +
+    # fuzzy/Levenshtein sweeps. This is what keeps grounding a 300-row table fast:
+    # every cell value equals its OCR line verbatim, so it's a dict hit, not a scan
+    # over ~1,800 lines × the full fuzzy ladder. Falls through to the full scan only
+    # when nothing matched exactly (reformatting / OCR noise).
     candidates: List[Tuple[int, Dict[str, Any], str, Optional[float]]] = []
     for page_num in sorted(page_data_by_page):
-        candidates.extend(
-            _collect_candidates_in_page(
-                norm_value,
-                value_tokens,
-                page_data_by_page[page_num],
-                page_num,
-                norm_variants=variants,
-                raw_value=value,
-                hint=hint,
+        page_data = page_data_by_page[page_num]
+        if not isinstance(page_data, dict) or not page_data.get("geometryAvailable"):
+            continue
+        idx = _ensure_page_indexes(page_data)
+        for i, nv in enumerate(norm_variant_list):
+            for ln in idx.get(nv, ()):
+                m = _build_match(
+                    ln, page_num, _TIER_EXACT, None if i == 0 else _SOURCE_NORMALIZED
+                )
+                if m is not None:
+                    candidates.append(m)
+    if candidates:
+        best_tier = _TIER_EXACT  # by construction
+    else:
+        # Full (slower) collection across all pages: substring/span/typed/fuzzy.
+        for page_num in sorted(page_data_by_page):
+            candidates.extend(
+                _collect_candidates_in_page(
+                    norm_value,
+                    value_tokens,
+                    page_data_by_page[page_num],
+                    page_num,
+                    norm_variants=variants,
+                    raw_value=value,
+                    hint=hint,
+                )
             )
-        )
 
     if not candidates:
         return None
@@ -787,6 +887,7 @@ def _ground_node(
     geometry_mode: str = "llm_grounded",
     occurrence_index: Optional[int] = None,
     schema_node: Optional[Dict[str, Any]] = None,
+    skip_grounded: bool = False,
 ) -> None:
     """
     Recursively walk an assessment subtree, grounding leaf geometries in place.
@@ -798,9 +899,13 @@ def _ground_node(
     level / for scalars), used for ocr_only row-order disambiguation of repeated
     values. ``schema_node`` is the JSON-Schema fragment for the current node (its
     ``format``/``type`` give the format-matching hint), descended in parallel.
+    ``skip_grounded`` leaves already-grounded leaves untouched (see
+    :func:`ground_assessment_geometry`).
     """
     if isinstance(assessment_node, dict):
         if "confidence" in assessment_node:
+            if skip_grounded and assessment_node.get("geometry_source"):
+                return
             _ground_leaf(
                 assessment_node,
                 extraction_node,
@@ -844,6 +949,7 @@ def _ground_node(
                 geometry_mode,
                 occurrence_index,
                 _field_schema_for(schema_node, key),
+                skip_grounded,
             )
     elif isinstance(assessment_node, list):
         item_schema = _item_schema_of(schema_node)
@@ -862,6 +968,7 @@ def _ground_node(
                 geometry_mode,
                 idx,
                 item_schema,
+                skip_grounded,
             )
 
 
@@ -928,6 +1035,7 @@ def ground_assessment_geometry(
     page_data_by_page: Dict[int, Dict[str, Any]],
     geometry_mode: str = "llm_grounded",
     class_schema: Optional[Dict[str, Any]] = None,
+    skip_grounded: bool = False,
 ) -> Dict[str, Any]:
     """
     Produce field geometry from OCR (and optionally the LLM box), in place.
@@ -949,6 +1057,12 @@ def ground_assessment_geometry(
         page_data_by_page: Mapping of 1-indexed page number -> pageData dict, from
             ``load_page_ocr_data``.
         geometry_mode: ``"ocr_only"``, ``"llm_grounded"``, ``"llm"``, or ``"off"``.
+        skip_grounded: When True, a leaf that already carries a ``geometry_source``
+            is left untouched. This makes a post-merge grounding pass a near-instant
+            no-op when the rows were already grounded per-shard (each shard grounds
+            its own rows against its own pages), while still grounding any residual
+            leaves (e.g. reconcile-padded placeholder rows, or the non-sharded
+            single-agent path that grounds only once at the end).
 
     Returns:
         The same ``enhanced_assessment`` dict, grounded in place.
@@ -967,6 +1081,7 @@ def ground_assessment_geometry(
                 geometry_mode,
                 None,
                 _field_schema_for(class_schema, attr_name),
+                skip_grounded,
             )
     except Exception as e:
         # Grounding is best-effort enrichment; never fail assessment over it.

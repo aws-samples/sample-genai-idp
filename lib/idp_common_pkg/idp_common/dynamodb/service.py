@@ -15,7 +15,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from idp_common.dynamodb.client import DynamoDBClient
-from idp_common.models import Document, Page, Section, Status
+from idp_common.models import Document, Page, ProcessingIssue, Section, Status
 
 logger = logging.getLogger(__name__)
 
@@ -268,6 +268,28 @@ class DocumentDynamoDBService:
                         alerts_data.append(alert_data)
                     section_data["ConfidenceThresholdAlerts"] = alerts_data
 
+                # Persist structured processing issues (self-healing observability).
+                # Stored as compact camelCase dicts mirroring the GraphQL
+                # ProcessingIssue type; the (potentially large) details blob is
+                # JSON-stringified so it round-trips without exploding the item.
+                if section.processing_issues:
+                    issues_data = []
+                    for issue in section.processing_issues:
+                        issue_item: Dict[str, Any] = {
+                            "stage": issue.stage,
+                            "severity": issue.severity,
+                            "code": issue.code,
+                            "message": issue.message,
+                        }
+                        if issue.root_cause:
+                            issue_item["rootCause"] = issue.root_cause
+                        if issue.details:
+                            issue_item["details"] = json.dumps(
+                                issue.details, default=str
+                            )
+                        issues_data.append(issue_item)
+                    section_data["ProcessingIssues"] = issues_data
+
                 sections_data.append(section_data)
 
             if sections_data:
@@ -351,6 +373,24 @@ class DocumentDynamoDBService:
         set_expressions.append("#ConfidenceAlertCount = :ConfidenceAlertCount")
         expression_names["#ConfidenceAlertCount"] = "ConfidenceAlertCount"
         expression_values[":ConfidenceAlertCount"] = document.confidence_alert_count
+
+        # Always persist processing-issue count (even 0) so the document list can
+        # show/filter on it, mirroring ConfidenceAlertCount (the authoritative
+        # filterable source of truth).
+        issue_count = document.processing_issue_count
+        set_expressions.append("#ProcessingIssueCount = :ProcessingIssueCount")
+        expression_names["#ProcessingIssueCount"] = "ProcessingIssueCount"
+        expression_values[":ProcessingIssueCount"] = issue_count
+
+        # Sparse GSI attribute for cheap "has processing issues" filtering — SET
+        # only when there ARE issues (mirrors the HITLPendingReview sparse pattern).
+        # Not proactively removed on issue-free writes: ProcessingIssueCount (always
+        # written, above) is the authoritative filter source, and avoiding a REMOVE
+        # here keeps the update-expression additive.
+        if issue_count > 0:
+            set_expressions.append("#HasProcessingIssues = :HasProcessingIssues")
+            expression_names["#HasProcessingIssues"] = "HasProcessingIssues"
+            expression_values[":HasProcessingIssues"] = "true"
 
         # Build update expression with optional REMOVE clause
         update_expression = "SET " + ", ".join(set_expressions)
@@ -464,6 +504,29 @@ class DocumentDynamoDBService:
                             }
                         )
 
+                # Convert persisted processing issues back to ProcessingIssue.
+                processing_issues = []
+                issues_data = section_data.get("ProcessingIssues", [])
+                if issues_data:
+                    for iss in issues_data:
+                        details = iss.get("details")
+                        if isinstance(details, str):
+                            try:
+                                details = json.loads(details)
+                            except (json.JSONDecodeError, TypeError):
+                                details = {}
+                        processing_issues.append(
+                            ProcessingIssue(
+                                stage=iss.get("stage", ""),
+                                severity=iss.get("severity", "info"),
+                                code=iss.get("code", ""),
+                                message=iss.get("message", ""),
+                                root_cause=iss.get("rootCause", ""),
+                                section_id=section_data.get("Id"),
+                                details=details or {},
+                            )
+                        )
+
                 doc.sections.append(
                     Section(
                         section_id=section_data.get("Id", ""),
@@ -471,6 +534,7 @@ class DocumentDynamoDBService:
                         page_ids=page_ids,
                         extraction_result_uri=section_data.get("OutputJSONUri"),
                         confidence_threshold_alerts=confidence_threshold_alerts,
+                        processing_issues=processing_issues,
                     )
                 )
 
