@@ -26,6 +26,7 @@ from pydantic import (
     ConfigDict,
     Discriminator,
     Field,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -55,6 +56,21 @@ def _parse_optional_max_tokens(v: Any) -> Optional[int]:
         v = int(v)
     v = int(v)
     return v if v > 0 else None
+
+
+def _parse_required_int(v: Any, info: ValidationInfo, cls: type) -> int:
+    """Parse a required int, falling back to the field's default on empty/None.
+
+    A stored config may carry an explicit ``null`` or empty string for a field
+    that is otherwise a required int with a default (e.g. ``list_batch_size``,
+    ``max_empty_line_gap``). Coercing that directly via ``int(None)`` raises
+    ``TypeError``, which would fail config load/validation on upgrade. Treat
+    empty/None as "use the model's declared default" instead.
+    """
+    if v is None or (isinstance(v, str) and not v.strip()):
+        default = cls.model_fields[info.field_name].default
+        return int(default) if default is not None else 0
+    return int(v)
 
 
 class ImageConfig(BaseModel):
@@ -176,11 +192,9 @@ class TableParsingConfig(BaseModel):
 
     @field_validator("max_empty_line_gap", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any, info: ValidationInfo) -> int:
+        """Parse int from string or number (empty/None -> field default)."""
+        return _parse_required_int(v, info, cls)
 
 
 class ValidationConfig(BaseModel):
@@ -564,11 +578,9 @@ class ConfidenceConfig(BaseModel):
 
     @field_validator("list_batch_size", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any, info: ValidationInfo) -> int:
+        """Parse int from string or number (empty/None -> field default)."""
+        return _parse_required_int(v, info, cls)
 
     @field_validator("max_escalation_rounds", mode="before")
     @classmethod
@@ -1258,11 +1270,9 @@ class ErrorAnalyzerParameters(BaseModel):
         mode="before",
     )
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any, info: ValidationInfo) -> int:
+        """Parse int from string or number (empty/None -> field default)."""
+        return _parse_required_int(v, info, cls)
 
 
 class ErrorAnalyzerConfig(BaseModel):
@@ -1941,11 +1951,9 @@ class RuleValidationConfig(BaseModel):
         mode="before",
     )
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any, info: ValidationInfo) -> int:
+        """Parse int from string or number (empty/None -> field default)."""
+        return _parse_required_int(v, info, cls)
 
 
 class EvaluationLLMMethodConfig(BaseModel):
@@ -2144,11 +2152,9 @@ class MultiDocumentDiscoveryConfig(BaseModel):
         mode="before",
     )
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any, info: ValidationInfo) -> int:
+        """Parse int from string or number (empty/None -> field default)."""
+        return _parse_required_int(v, info, cls)
 
     @field_validator("max_tokens", mode="before")
     @classmethod
