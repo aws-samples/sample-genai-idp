@@ -1596,66 +1596,110 @@ STDERR:
     # Subdirectories of samples/ that hold batches of documents (indexed as a
     # single "batch" entry). Other subdirs (code samples, hooks) are skipped.
     _SAMPLE_DOC_SUBDIRS = ("w2", "rule-validation")
-    # Curated names/descriptions for well-known samples; anything not listed
-    # falls back to a filename-derived name + generic description, so newly
-    # added samples are still indexed automatically.
+    # Directory holding the unified-pattern config-library presets. Used to
+    # resolve a sample's associated config by folder-name convention when no
+    # explicit configId override is provided.
+    _UNIFIED_CONFIG_DIR = "config_library/unified"
+
+    # Curated names/descriptions/config-associations for well-known samples;
+    # anything not listed falls back to a filename-derived name + generic
+    # description (and a folder-name-convention config lookup), so newly added
+    # samples are still indexed automatically. Each value is
+    # (name, description, configId) where configId is the config_library/unified
+    # preset folder the sample is designed for, or None if unassociated.
     _SAMPLE_OVERRIDES = {
         "lending_package.pdf": (
             "Lending Package",
             "Multi-page mortgage loan packet (application, pay stubs, W-2, bank "
             "statements) — a multi-class packet for testing classification + extraction.",
+            "lending-package-sample",
         ),
         "lending_package-long.pdf": (
             "Lending Package (long)",
             "Longer multi-page mortgage loan packet variant.",
+            "lending-package-sample",
         ),
         "insurance_package.pdf": (
             "Insurance Package",
             "Multi-section insurance claim packet for multi-class processing.",
+            None,
         ),
         "insurance_package_single.pdf": (
             "Insurance Package (single)",
             "Single-section insurance document sample.",
+            None,
         ),
         "bank-statement-multipage.pdf": (
             "Bank Statement (multi-page)",
             "Multi-page bank statement with transaction tables — good for agentic "
             "table extraction.",
+            "bank-statement-sample",
         ),
         "healthcare-multisection-package.pdf": (
             "Healthcare Package",
             "Multi-section healthcare document packet.",
+            "healthcare-multisection-package",
         ),
         "rvl_cdip_package.pdf": (
             "RVL-CDIP Package",
             "Mixed-document packet from the RVL-CDIP set for classification testing.",
+            "rvl-cdip-package-sample",
         ),
         "DS11-USPassportApplication.pdf": (
             "US Passport Application (DS-11)",
             "US passport application form.",
+            "ds11-passport-application",
         ),
         "old_cal_license.png": (
             "California Driver License",
             "Driver license image sample.",
+            None,
         ),
         "w2": (
             "W-2 Forms",
             "Batch of W-2 tax form documents.",
+            "fake-w2",
         ),
         "rule-validation": (
             "Rule Validation Samples",
             "Documents for the rule-validation pipeline.",
+            "rule-validation",
         ),
     }
 
+    def _sample_config_id(self, override_config_id, sample_id):
+        """Resolve the config_library preset associated with a sample.
+
+        Prefers the explicit override; otherwise falls back to a folder-name
+        convention (config_library/unified/<sample_id> exists). Returns None
+        when no association can be established.
+        """
+        if override_config_id:
+            return override_config_id
+        candidate = Path(self._UNIFIED_CONFIG_DIR) / sample_id
+        if candidate.is_dir():
+            return sample_id
+        return None
+
     def _sample_label(self, key):
-        """(name, description) for a sample key, from overrides or filename."""
+        """(name, description, configId) for a sample key.
+
+        Uses the curated overrides table when present; otherwise derives a
+        name from the filename and attempts a folder-name-convention config
+        lookup. ``configId`` is the associated config_library/unified preset,
+        or None.
+        """
+        sample_id = os.path.splitext(os.path.basename(key))[0]
         override = self._SAMPLE_OVERRIDES.get(key)
         if override:
-            return override
-        base = os.path.splitext(os.path.basename(key))[0]
-        name = base.replace("_", " ").replace("-", " ").strip().title()
-        return name, f"Sample document: {name}."
+            name, desc, override_config_id = override
+            return name, desc, self._sample_config_id(override_config_id, sample_id)
+        name = sample_id.replace("_", " ").replace("-", " ").strip().title()
+        return (
+            name,
+            f"Sample document: {name}.",
+            self._sample_config_id(None, sample_id),
+        )
 
     def generate_samples_manifest(self):
         """Scan samples/ and write config_library/samples-manifest.json.
@@ -1664,9 +1708,11 @@ STDERR:
         document subdirectories (as single "batch" entries). Other subdirs
         (code samples, lambda hooks) are skipped. Called alongside
         write_catalog_file so it rides the same config_library sync to the
-        ConfigurationBucket. The ``s3Key`` is recorded relative to a future
-        samples/ prefix; wiring samples into a Discovery-readable bucket is a
-        follow-up (the agent lists them today; one-click launch comes later).
+        ConfigurationBucket. Each entry's ``s3Key`` matches where
+        upload_samples() / CopySampleFiles land the binary in the stack's
+        ConfigurationBucket (``samples/<file>``), and ``configId`` records the
+        associated config_library/unified preset (or None), so the UI can offer
+        to import + use the matching config when the sample is launched.
         """
         samples_dir = Path(self._SAMPLES_DIR)
         if not samples_dir.is_dir():
@@ -1679,7 +1725,7 @@ STDERR:
         for entry in sorted(os.listdir(samples_dir)):
             path = samples_dir / entry
             if path.is_file() and entry.lower().endswith(self._SAMPLE_DOC_EXTS):
-                name, desc = self._sample_label(entry)
+                name, desc, config_id = self._sample_label(entry)
                 samples.append(
                     {
                         "id": os.path.splitext(entry)[0],
@@ -1688,6 +1734,7 @@ STDERR:
                         "s3Key": f"samples/{entry}",
                         "kind": "document",
                         "fileCount": 1,
+                        "configId": config_id,
                     }
                 )
             elif path.is_dir() and entry in self._SAMPLE_DOC_SUBDIRS:
@@ -1698,7 +1745,7 @@ STDERR:
                 ]
                 if not docs:
                     continue
-                name, desc = self._sample_label(entry)
+                name, desc, config_id = self._sample_label(entry)
                 samples.append(
                     {
                         "id": entry,
@@ -1707,6 +1754,7 @@ STDERR:
                         "s3Key": f"samples/{entry}/",
                         "kind": "batch",
                         "fileCount": len(docs),
+                        "configId": config_id,
                     }
                 )
 
@@ -1741,6 +1789,59 @@ STDERR:
         self.log_verbose(
             f"Uploaded samples-manifest.json to s3://{self.bucket}/{s3_key}"
         )
+
+    def iter_sample_files(self):
+        """Yield sample document files as paths relative to samples/.
+
+        Applies the SAME selection rules as generate_samples_manifest: top-level
+        files with a document extension, plus the document extensions inside the
+        known batch subdirectories. Code/hook subdirs and non-document files
+        (.xlsx, .docx, ...) are skipped, so we never ship
+        lambda-hook-inference/, external-mcp-client/, etc.
+        """
+        samples_dir = Path(self._SAMPLES_DIR)
+        if not samples_dir.is_dir():
+            return
+        for entry in sorted(os.listdir(samples_dir)):
+            path = samples_dir / entry
+            if path.is_file() and entry.lower().endswith(self._SAMPLE_DOC_EXTS):
+                yield entry
+            elif path.is_dir() and entry in self._SAMPLE_DOC_SUBDIRS:
+                for f in sorted(os.listdir(path)):
+                    if f.lower().endswith(self._SAMPLE_DOC_EXTS):
+                        yield f"{entry}/{f}"
+
+    def generate_sample_file_list(self):
+        """List of sample document files (relative to samples/) for copying.
+
+        Consumed by the deploy-time CopySampleFiles custom resource
+        (<SAMPLE_FILES_LIST_TOKEN>) so ConfigurationCopyFunction copies each
+        binary from the artifacts bucket into the stack's ConfigurationBucket
+        under samples/.
+        """
+        return sorted(self.iter_sample_files())
+
+    def upload_samples(self):
+        """Upload curated sample document binaries to the artifacts bucket.
+
+        Mirrors upload_config_library, but uploads only the curated document
+        files (see iter_sample_files) to
+        s3://{bucket}/{prefix_and_version}/samples/. The deploy-time
+        CopySampleFiles custom resource then copies them into the stack's
+        ConfigurationBucket under samples/, where the samples-manifest s3Key
+        values point and the upload_resolver reads them.
+        """
+        self.log_phase("Uploading Sample Documents", "📄")
+        files = self.generate_sample_file_list()
+        if not files:
+            self.log_verbose(f"No sample documents found under {self._SAMPLES_DIR}/")
+            return
+        self.log_task(f"Uploading {len(files)} sample documents to S3...")
+        for rel_path in files:
+            local_path = os.path.join(self._SAMPLES_DIR, rel_path)
+            s3_key = f"{self.prefix_and_version}/samples/{rel_path}"
+            self.s3_client.upload_file(local_path, self.bucket, s3_key)
+        self.log_success(f"Uploaded {len(files)} sample documents")
 
     def _load_marketplace_features(self):
         """Load + normalize the curated marketplace extension list.
@@ -2207,6 +2308,20 @@ STDERR:
                 config_files_list = self.generate_config_file_list()
                 config_files_json = json.dumps(config_files_list)
 
+                # Sample document file list + content hash for the deploy-time
+                # CopySampleFiles custom resource. Hash over the curated files'
+                # contents so a changed sample (even without a rename)
+                # re-triggers the copy into the ConfigurationBucket.
+                sample_files_list = self.generate_sample_file_list()
+                sample_files_json = json.dumps(sample_files_list)
+                sample_hash_material = "".join(
+                    rel + self.get_file_checksum(os.path.join(self._SAMPLES_DIR, rel))
+                    for rel in sample_files_list
+                )
+                samples_hash = hashlib.sha256(
+                    sample_hash_material.encode()
+                ).hexdigest()[:16]
+
                 # Extract content-based hash from unified source zipfile name for ImageVersion
                 # Format: unified-source-{hash}.zip -> extract {hash}
                 unified_image_version = unified_source_zipfile.replace(
@@ -2296,6 +2411,10 @@ STDERR:
                         ).encode()
                     ).hexdigest()[:16],
                     "<CONFIG_FILES_LIST_TOKEN>": config_files_json,
+                    # Sample document binaries copied into the ConfigurationBucket
+                    # under samples/ at deploy time (CopySampleFiles).
+                    "<SAMPLES_HASH_TOKEN>": samples_hash,
+                    "<SAMPLE_FILES_LIST_TOKEN>": sample_files_json,
                     "<WORKFORCE_URL_HASH_TOKEN>": workforce_url_hash,
                     "<A2I_RESOURCES_HASH_TOKEN>": a2i_resources_hash,
                     "<COGNITO_CLIENT_HASH_TOKEN>": cognito_client_hash,
@@ -3856,6 +3975,14 @@ STDERR:
             timing_breakdown["Write & upload samples-manifest.json"] = (
                 time.time() - step_start
             )
+
+            # Upload the curated sample-document binaries to the artifacts
+            # bucket. The deploy-time CopySampleFiles custom resource copies
+            # them into the stack's ConfigurationBucket under samples/, matching
+            # the samples-manifest s3Key values so the UI can launch them.
+            step_start = time.time()
+            self.upload_samples()
+            timing_breakdown["Upload sample documents"] = time.time() - step_start
 
             # Build main template
             step_start = time.time()

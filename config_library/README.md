@@ -172,6 +172,24 @@ To add few-shot examples to your configuration:
 - Choose descriptive names that reflect the use case (e.g., `lending-package-sample`, `bank-statement-sample`)
 - Keep names concise but informative
 
+## Sample Documents and the Samples Manifest
+
+The repository's top-level `samples/` directory holds example documents (single files and batch subdirectories such as `w2/`). At publish time the build:
+
+1. Scans `samples/` and generates `config_library/samples-manifest.json` — a machine-readable index of each sample (`id`, `name`, `description`, `s3Key`, `kind`, `fileCount`, and `configId`).
+2. Uploads the curated sample binaries to the artifacts bucket and, at deploy time, copies both the manifest and the binaries into the stack's ConfigurationBucket under `samples/`.
+
+The web UI reads the manifest to let users browse and process bundled samples directly (see [web-ui.md](../docs/web-ui.md#upload-documents)).
+
+### Associating a sample with a configuration (`configId`)
+
+`configId` links a sample to the `config_library/unified` preset it is designed for, so the UI can offer to import and use that configuration when the sample is launched. It is resolved at publish time (see `_SAMPLE_OVERRIDES` and `_sample_config_id` in `lib/idp_sdk/idp_sdk/_core/publish.py`) by:
+
+1. An explicit entry in the curated overrides table, or
+2. A folder-name convention — if `config_library/unified/<sample-id>/` exists, that preset is used automatically.
+
+To associate a new sample with a config, either name the sample to match its config folder, or add an override entry. Samples with no match get `configId: null` and upload under the currently selected configuration version.
+
 ## Best Practices
 
 ### Document Classes

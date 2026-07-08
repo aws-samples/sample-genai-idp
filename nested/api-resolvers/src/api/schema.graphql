@@ -320,6 +320,33 @@ type ConfigurationLibraryFileResponse @aws_cognito_user_pools @aws_iam {
   error: String
 }
 
+# A bundled sample document (or batch of documents) available in the deployed
+# ConfigurationBucket, sourced from config_library/samples-manifest.json.
+type SampleDocument @aws_cognito_user_pools @aws_iam {
+  id: String!
+  name: String!
+  description: String
+  s3Key: String!
+  kind: String!
+  fileCount: Int
+  # Associated config_library/unified preset folder, or null when the sample
+  # is not tied to a specific configuration.
+  configId: String
+}
+
+type SampleDocumentListResponse @aws_cognito_user_pools @aws_iam {
+  success: Boolean!
+  samples: [SampleDocument]
+  error: String
+}
+
+type SampleDocumentUploadResponse @aws_cognito_user_pools @aws_iam {
+  success: Boolean!
+  # Object keys copied into the InputBucket (one per file; a batch yields many).
+  objectKeys: [String]
+  error: String
+}
+
 type DiscoveryJobList @aws_cognito_user_pools @aws_iam {
   DiscoveryJobs: [DiscoveryJobListItem]
   nextToken: String
@@ -876,6 +903,15 @@ type Mutation {
     version: String
   ): PresignedUrlResponse!
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  # Server-side copy of a bundled sample document (by id, from the
+  # ConfigurationBucket) into the InputBucket to trigger processing. Stamps the
+  # config version as object metadata like the uploadDocument presigned path.
+  uploadSampleDocument(
+    sampleId: String!
+    prefix: String
+    version: String
+  ): SampleDocumentUploadResponse!
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   uploadDiscoveryDocument(
     fileName: String!
     contentType: String
@@ -1198,6 +1234,10 @@ type Query @aws_cognito_user_pools @aws_iam {
     configName: String!
     fileName: String!
   ): ConfigurationLibraryFileResponse
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
+
+  # Bundled sample documents available in the deployed ConfigurationBucket.
+  listSampleDocuments: SampleDocumentListResponse
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
 
   # User Management queries
