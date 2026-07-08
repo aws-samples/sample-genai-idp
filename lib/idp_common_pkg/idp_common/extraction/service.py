@@ -3932,7 +3932,12 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             page_start = payload.get("page_start", 0)
             page_end = payload.get("page_end", len(sorted_page_ids))
             shard_page_ids = sorted_page_ids[page_start:page_end]
-            page_data_by_page = load_page_ocr_data(document.pages, shard_page_ids)
+            # page_offset=page_start so this shard's pages number relative to the
+            # WHOLE section (section page 1 = section's first page), giving the same
+            # section-relative geometry.page the merge/standalone paths produce.
+            page_data_by_page = load_page_ocr_data(
+                document.pages, shard_page_ids, page_offset=page_start
+            )
             if not page_data_by_page:
                 return
             # Observability: grounding is pure-CPU value→OCR-line matching; on a

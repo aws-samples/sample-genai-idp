@@ -675,18 +675,61 @@ class TestLoadPageOcrData:
         pages = {"1": FakePage()}
         assert g.load_page_ocr_data(pages, ["1"]) == {}
 
-    def test_loads_and_keys_by_int_page(self):
+    def test_keys_by_section_relative_page_number(self):
+        # A section that starts at DOC page 2 must key its first page as SECTION
+        # page 1 (not 2), so the UI (sectionPageIds[page-1]) navigates correctly.
         class FakePage:
-            ocr_page_data_uri = "s3://bucket/pages/1/pageData.json"
+            def __init__(self, pid):
+                self.page_id = pid
+                self.ocr_page_data_uri = f"s3://bucket/pages/{pid}/pageData.json"
 
-        pages = {"1": FakePage()}
+        pages = {str(i): FakePage(str(i)) for i in range(2, 6)}  # doc pages 2-5
         with patch.object(
             g.s3,
             "get_json_content",
             return_value={"lines": [], "geometryAvailable": False},
         ):
-            result = g.load_page_ocr_data(pages, ["1"])
-        assert 1 in result
+            result = g.load_page_ocr_data(pages, ["2", "3", "4", "5"])
+        # Section-relative: doc pages 2,3,4,5 -> section pages 1,2,3,4.
+        assert sorted(result.keys()) == [1, 2, 3, 4]
+
+    def test_page_offset_for_shard_slice(self):
+        # A shard covering section pages 6-8 (slice of the section) must still
+        # number relative to the WHOLE section via page_offset.
+        class FakePage:
+            def __init__(self, pid):
+                self.ocr_page_data_uri = f"s3://bucket/pages/{pid}/pageData.json"
+
+        pages = {str(i): FakePage(str(i)) for i in range(2, 20)}
+        shard_ids = ["7", "8", "9"]  # doc pages; section-relative these are 6,7,8
+        with patch.object(
+            g.s3,
+            "get_json_content",
+            return_value={"lines": [], "geometryAvailable": False},
+        ):
+            result = g.load_page_ocr_data(pages, shard_ids, page_offset=5)
+        assert sorted(result.keys()) == [6, 7, 8]
+
+    def test_missing_page_does_not_shift_numbering(self):
+        # If a middle page has no OCR data, the surviving pages keep their
+        # section-relative numbers (derived from position, not load order).
+        class FakePage:
+            def __init__(self, uri):
+                self.ocr_page_data_uri = uri
+
+        pages = {
+            "2": FakePage("s3://b/2/pageData.json"),
+            "3": FakePage(None),  # no OCR data
+            "4": FakePage("s3://b/4/pageData.json"),
+        }
+        with patch.object(
+            g.s3,
+            "get_json_content",
+            return_value={"lines": [], "geometryAvailable": False},
+        ):
+            result = g.load_page_ocr_data(pages, ["2", "3", "4"])
+        # page 3 dropped, but 2->1 and 4->3 keep their section-relative positions.
+        assert sorted(result.keys()) == [1, 3]
 
     def test_unreadable_page_is_skipped(self):
         class FakePage:
@@ -696,6 +739,60 @@ class TestLoadPageOcrData:
         with patch.object(g.s3, "get_json_content", side_effect=Exception("boom")):
             result = g.load_page_ocr_data(pages, ["1"])
         assert result == {}
+
+
+class TestSectionRelativePageNumbers:
+    """geometry.page must be SECTION-RELATIVE (1 = section's first page) so the UI
+    (sectionPageIds[page-1]) navigates to the correct page — regardless of where the
+    section starts in the document."""
+
+    def test_grounded_page_is_section_relative(self):
+        # page_data keyed section-relative (as load_page_ocr_data now produces):
+        # section page 1 = doc page 2, section page 2 = doc page 3, etc.
+        pd = {
+            1: _page([_line("Alpha", 0.1, 0.10)]),
+            2: _page([_line("Bravo", 0.1, 0.10)]),
+            3: _page([_line("Charlie", 0.1, 0.10)]),
+        }
+        assessment = {
+            "f1": {"confidence": 0.9},
+            "f2": {"confidence": 0.9},
+            "f3": {"confidence": 0.9},
+        }
+        extraction = {"f1": "Alpha", "f2": "Bravo", "f3": "Charlie"}
+        out = g.ground_assessment_geometry(assessment, extraction, pd, "ocr_only")
+        # A value on the section's 3rd page grounds to page 3 (NOT a doc-absolute
+        # number), and the section's 1st-page value to page 1.
+        assert out["f1"]["geometry"][0]["page"] == 1
+        assert out["f2"]["geometry"][0]["page"] == 2
+        assert out["f3"]["geometry"][0]["page"] == 3
+
+    def test_load_then_ground_end_to_end_offset_section(self):
+        # Simulate a section starting at doc page 2: load_page_ocr_data keys it
+        # section-relative, and grounding stamps those section-relative pages.
+        class FakePage:
+            def __init__(self, uri):
+                self.ocr_page_data_uri = uri
+
+        # Two doc pages (2,3) whose pageData we mock via get_json_content per-uri.
+        page_payloads = {
+            "s3://b/2/pageData.json": _page([_line("FirstPageVal", 0.2, 0.3)]),
+            "s3://b/3/pageData.json": _page([_line("SecondPageVal", 0.2, 0.3)]),
+        }
+        pages = {
+            "2": FakePage("s3://b/2/pageData.json"),
+            "3": FakePage("s3://b/3/pageData.json"),
+        }
+        with patch.object(
+            g.s3, "get_json_content", side_effect=lambda uri: page_payloads[uri]
+        ):
+            pd = g.load_page_ocr_data(pages, ["2", "3"])
+        assert sorted(pd.keys()) == [1, 2]
+        assessment = {"a": {"confidence": 0.9}, "b": {"confidence": 0.9}}
+        extraction = {"a": "FirstPageVal", "b": "SecondPageVal"}
+        out = g.ground_assessment_geometry(assessment, extraction, pd, "ocr_only")
+        assert out["a"]["geometry"][0]["page"] == 1  # section's first page
+        assert out["b"]["geometry"][0]["page"] == 2  # section's second page
 
 
 class TestServiceIntegration:

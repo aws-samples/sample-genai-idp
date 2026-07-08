@@ -296,24 +296,44 @@ def _type_equal(value: Any, line_text: Any, hint: str) -> bool:
 
 
 def load_page_ocr_data(
-    pages: Dict[str, Any], page_ids: List[str]
+    pages: Dict[str, Any], page_ids: List[str], page_offset: int = 0
 ) -> Dict[int, Dict[str, Any]]:
     """
-    Load ``pageData.json`` for each page in ``page_ids`` keyed by 1-indexed page number.
+    Load ``pageData.json`` for each page in ``page_ids`` keyed by its **1-based
+    SECTION-RELATIVE page number** (NOT the document-absolute page id).
+
+    The returned key becomes ``geometry.page`` on every grounded field, and the UI
+    navigates with ``sectionPageIds[geometry.page - 1]`` — i.e. it expects page 1 to
+    be the FIRST page of the section. Keying by ``int(page_id)`` (document-absolute)
+    made a section that starts at doc page 2 emit ``page: 2`` for its first page, so
+    the viewer jumped to the wrong page (off by the section's start offset). Keying
+    by position within the section fixes this for every grounding path (ocr_only,
+    llm_grounded, standalone Assessment step, and the sharded agentic path).
+
+    ``page_ids`` MUST be in section reading order (callers pass ``sorted_page_ids``).
+    ``page_offset`` shifts the section-relative numbering for callers that pass only
+    a *slice* of the section's pages — the sharded path passes
+    ``sorted_page_ids[page_start:page_end]`` with ``page_offset=page_start`` so a
+    shard's pages still number relative to the WHOLE section (e.g. a shard over
+    section pages 6-10 yields keys 6-10, not 1-5).
 
     Pages without an ``ocr_page_data_uri`` (older documents) or whose artifact cannot
-    be read are simply omitted from the result, so callers degrade gracefully.
+    be read are simply omitted from the result, so callers degrade gracefully — the
+    section-relative numbering of the surviving pages is unaffected (it is derived
+    from the page's position in ``page_ids``, not from how many loaded).
 
     Args:
         pages: Document.pages mapping (page_id -> Page).
-        page_ids: Page IDs belonging to the section (1-indexed strings).
+        page_ids: Page IDs belonging to the section (or shard), in reading order.
+        page_offset: 0-based offset of ``page_ids[0]`` within the full section.
 
     Returns:
-        Mapping of ``int(page_id)`` -> parsed pageData dict, only for pages that have
-        usable data.
+        Mapping of ``section-relative 1-based page number`` -> parsed pageData dict,
+        only for pages that have usable data.
     """
     result: Dict[int, Dict[str, Any]] = {}
-    for page_id in page_ids:
+    for local_idx, page_id in enumerate(page_ids):
+        section_page = page_offset + local_idx + 1  # 1-based, section-relative
         page = pages.get(page_id)
         if page is None:
             continue
@@ -328,10 +348,7 @@ def load_page_ocr_data(
             )
             continue
         if isinstance(page_data, dict):
-            try:
-                result[int(page_id)] = page_data
-            except (TypeError, ValueError):
-                logger.warning(f"Non-numeric page_id '{page_id}' skipped for grounding")
+            result[section_page] = page_data
     return result
 
 

@@ -922,8 +922,9 @@ class TestGroundShardAssessment:
 
         captured = {}
 
-        def fake_load(pages, page_ids):
+        def fake_load(pages, page_ids, page_offset=0):
             captured["page_ids"] = list(page_ids)
+            captured["page_offset"] = page_offset
             return {3: {"lines": []}}  # non-empty so grounding proceeds
 
         def fake_ground(assess, extraction, pd, mode, schema, skip_grounded=False):
@@ -955,6 +956,9 @@ class TestGroundShardAssessment:
 
         # Scoped to exactly the shard's global page_ids (3, 4) — not all six.
         assert captured["page_ids"] == ["3", "4"]
+        # page_offset = page_start so the shard's pages number relative to the WHOLE
+        # section (section pages 3,4), keeping geometry.page section-relative.
+        assert captured["page_offset"] == 2
         assert captured["mode"] == "ocr_only"
         # Grounded in place on the passed assessment object.
         assert assessment["Transactions"][0]["Amount"]["geometry_source"] == "ocr"
