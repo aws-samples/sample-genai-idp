@@ -492,6 +492,44 @@ def compare_semantic(
         return compare_fuzzy(expected, actual, threshold)
 
 
+def compare_date(
+    expected: Any,
+    actual: Any,
+    threshold: float = 1.0,
+) -> Tuple[bool, float]:
+    """
+    Compare two date values semantically (format-insensitive).
+
+    Uses Stickler's DateComparator (v0.5.0+), which normalizes date strings to
+    datetimes before comparing so that e.g. "01/05/2024", "2024-01-05" and
+    "January 5, 2024" all match. Falls back to fuzzy matching if Stickler's
+    DateComparator is unavailable.
+
+    Args:
+        expected: Expected value
+        actual: Actual value
+        threshold: Minimum score to consider a match (0.0 to 1.0)
+
+    Returns:
+        Tuple of (matched, score)
+    """
+    if expected is None and actual is None:
+        return True, 1.0
+    if expected is None or actual is None:
+        return False, 0.0
+
+    try:
+        from stickler.comparators.date import DateComparator
+
+        score = DateComparator().compare(str(expected), str(actual))
+        return score >= threshold, score
+    except Exception as e:
+        logger.warning(
+            f"DateComparator unavailable or failed ({e}); falling back to fuzzy"
+        )
+        return compare_fuzzy(expected, actual, threshold)
+
+
 def compare_values(
     expected: Any,
     actual: Any,
@@ -574,6 +612,13 @@ def compare_values(
     elif method == EvaluationMethod.SEMANTIC:
         # Use embedding-based semantic comparison with configurable threshold
         matched, score = compare_semantic(expected, actual, threshold)
+
+    elif method == EvaluationMethod.DATE:
+        # Use Stickler's DateComparator for format-insensitive date matching.
+        # DateComparator scores exact-day matches as 1.0, so default to a
+        # threshold of 1.0 when the caller left the generic 0.8 default.
+        date_threshold = 1.0 if threshold == 0.8 else threshold
+        matched, score = compare_date(expected, actual, date_threshold)
 
     elif method == EvaluationMethod.LLM:
         # Use the compare_llm function directly

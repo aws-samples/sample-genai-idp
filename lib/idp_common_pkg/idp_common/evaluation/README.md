@@ -204,12 +204,32 @@ The service supports multiple evaluation methods that can be configured for each
 - `EXACT`: Exact string match (after normalizing whitespace and punctuation)
 - `NUMERIC_EXACT`: Exact match for numeric values (after normalizing currency symbols)
 - `FUZZY`: Fuzzy string matching with configurable evaluation_threshold
+- `DATE`: Format-insensitive date comparison (Stickler v0.5.0+ `DateComparator`). Parses both values into dates before comparing, so `01/05/2024`, `2024-01-05`, and `January 5, 2024` all match. Also handles date ranges (e.g. `2024-01-01 to 2024-01-31`). Optional per-field tuning via `x-aws-idp-evaluation-method-config` (e.g. `dayfirst`, `tolerance`, `range_mode`).
 - `HUNGARIAN`: Optimal matching for lists of values using the Hungarian algorithm with configurable comparator types:
   - `EXACT`: Default comparator for exact string matching (after normalization)
   - `FUZZY`: Fuzzy string matching with configurable threshold
   - `NUMERIC`: Numeric comparison after normalizing currency symbols and formats
 - `SEMANTIC`: Efficient semantic similarity comparison using Bedrock Titan embeddings (amazon.titan-embed-text-v1)
 - `LLM`: LLM-based evaluation using Bedrock models (Claude or Titan) for semantically comparable values with detailed explanations
+
+#### DATE method configuration
+
+The `DATE` method accepts an optional `x-aws-idp-evaluation-method-config` object that is passed through to Stickler's `DateComparator`:
+
+```yaml
+InvoiceDate:
+  type: string
+  format: date
+  description: Invoice issue date
+  x-aws-idp-evaluation-method: DATE
+  x-aws-idp-evaluation-method-config:
+    dayfirst: false        # false = month-first (US); true = day-first (EU); omit to try both
+    range_mode: graded     # graded (default) | strict | contains | reject
+```
+
+Notes:
+- `DATE` is for calendar dates only. Time-only values (e.g. `19:02`) score `0.0` — keep those on `EXACT`.
+- Fields that merely mention "date" in free text (e.g. a narrative statement) should stay on `LLM`/`SEMANTIC`, not `DATE`.
 
 ### Semantic vs LLM Evaluation
 

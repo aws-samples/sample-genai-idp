@@ -160,7 +160,7 @@ classes:
             type: string
             format: date
             description: Parent's date of birth (mm/dd/yyyy).
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           PlaceOfBirth:
             type: string
             description: Parent's place of birth.
@@ -183,7 +183,7 @@ classes:
         type: string
         format: date
         description: Applicant's date of birth in mm/dd/yyyy (field 2).
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       Sex:
         type: string
         description: Applicant's sex (M/F) from field 3.
@@ -243,12 +243,12 @@ classes:
             type: string
             format: date
             description: Planned departure date.
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           ReturnDate:
             type: string
             format: date
             description: Planned return date.
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           CountriesToBeVisited:
             type: string
             description: Countries to be visited.

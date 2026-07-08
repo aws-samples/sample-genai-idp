@@ -20,6 +20,7 @@ class EvaluationMethod(Enum):
     SEMANTIC = "SEMANTIC"  # Semantic similarity comparison using embeddings
     HUNGARIAN = "HUNGARIAN"  # Bipartite matching for lists of values
     FUZZY = "FUZZY"  # Fuzzy string matching
+    DATE = "DATE"  # Semantic date comparison (format-insensitive, ranges)
     LLM = "LLM"  # LLM-based comparison using Bedrock models
 
 

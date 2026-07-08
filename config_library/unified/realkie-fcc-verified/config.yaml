@@ -37,13 +37,13 @@ classes:
         LineItemStartDate:
           description: Start date for the line item, formatted as MM/DD/YY (2-digit year, e.g. 10/22/16). Output null if not shown.
           x-aws-idp-confidence-threshold: '0.8'
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           type: string
         LineItemEndDate:
           description: End date for the line item, formatted as MM/DD/YY (2-digit year, e.g. 10/22/16). Output null if not shown.
           x-aws-idp-confidence-threshold: '0.8'
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           type: string
         LineItemDescription:

@@ -169,7 +169,8 @@ JSON Schema is extended with custom AWS IDP fields:
 ### Attribute-Level Extensions
 
 - `x-aws-idp-evaluation-method` - Evaluation method for attribute comparison
-  - Valid values: `EXACT`, `NUMERIC_EXACT`, `FUZZY`, `SEMANTIC`, `LLM`
+  - Valid values: `EXACT`, `NUMERIC_EXACT`, `FUZZY`, `LEVENSHTEIN`, `SEMANTIC`, `DATE`, `LLM`, `HUNGARIAN`
+- `x-aws-idp-evaluation-method-config` - Optional comparator config passed through to the underlying comparator (used by `DATE`: `dayfirst`, `tolerance`, `range_mode`)
 - `x-aws-idp-confidence-threshold` - Confidence threshold (0.0 to 1.0)
 - `x-aws-idp-prompt-override` - Custom prompt for attribute extraction
 

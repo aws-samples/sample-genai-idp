@@ -121,12 +121,19 @@ X_AWS_IDP_EVALUATION_MATCH_THRESHOLD = "x-aws-idp-evaluation-match-threshold"
 
 X_AWS_IDP_EXAMPLES = "x-aws-idp-examples"
 
+# Optional per-field config for the evaluation comparator, passed through to the
+# underlying Stickler comparator (maps to x-aws-stickler-comparator-config).
+# Currently used by the DATE method to configure DateComparator (e.g. dayfirst,
+# tolerance, range_mode).
+X_AWS_IDP_EVALUATION_METHOD_CONFIG = "x-aws-idp-evaluation-method-config"
+
 # Valid evaluation methods
 EVALUATION_METHOD_EXACT = "EXACT"
 EVALUATION_METHOD_NUMERIC_EXACT = "NUMERIC_EXACT"
 EVALUATION_METHOD_FUZZY = "FUZZY"
 EVALUATION_METHOD_LEVENSHTEIN = "LEVENSHTEIN"
 EVALUATION_METHOD_SEMANTIC = "SEMANTIC"
+EVALUATION_METHOD_DATE = "DATE"
 EVALUATION_METHOD_LLM = "LLM"
 EVALUATION_METHOD_HUNGARIAN = "HUNGARIAN"
 
@@ -137,6 +144,7 @@ VALID_EVALUATION_METHODS = frozenset(
         EVALUATION_METHOD_FUZZY,
         EVALUATION_METHOD_LEVENSHTEIN,
         EVALUATION_METHOD_SEMANTIC,
+        EVALUATION_METHOD_DATE,
         EVALUATION_METHOD_LLM,
         EVALUATION_METHOD_HUNGARIAN,
     ]

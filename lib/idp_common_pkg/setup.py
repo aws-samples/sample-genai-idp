@@ -52,7 +52,7 @@ extras_require = {
     ],
     # Evaluation module dependencies
     "evaluation": [
-        "stickler-eval==0.4.0",
+        "stickler-eval==0.5.0",
         "genson==1.3.0",
         "munkres>=1.1.4",  # For Hungarian algorithm
         "numpy==1.26.4",  # For numeric operations
@@ -100,7 +100,7 @@ extras_require = {
     ],
     # Full package with all dependencies
     "all": [
-        "stickler-eval==0.4.0",
+        "stickler-eval==0.5.0",
         "genson==1.3.0",
         "Pillow==12.1.1",
         "pypdfium2>=5.5.0",

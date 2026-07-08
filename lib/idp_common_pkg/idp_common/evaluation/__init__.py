@@ -10,6 +10,7 @@ using the Stickler library for structured object comparison.
 
 # Legacy comparator functions (deprecated - kept for backward compatibility)
 from idp_common.evaluation.comparator import (
+    compare_date,
     compare_exact,
     compare_fuzzy,
     compare_hungarian,
@@ -54,4 +55,5 @@ __all__ = [
     "compare_numeric",
     "compare_fuzzy",
     "compare_hungarian",
+    "compare_date",
 ]
