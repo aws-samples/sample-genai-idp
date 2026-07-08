@@ -2069,6 +2069,22 @@ Resources:
       ConfigLibraryHash: "<CONFIG_LIBRARY_HASH_TOKEN>"
       FileList: <CONFIG_FILES_LIST_TOKEN>
 
+  # Copies the curated sample-document binaries from the artifacts bucket into
+  # the stack's ConfigurationBucket under samples/. Reuses the generic
+  # ConfigurationCopyFunction. The target keys (samples/<file>) match the
+  # s3Key values in config_library/samples-manifest.json, so the UI can list
+  # and launch bundled samples without a local download.
+  CopySampleFiles:
+    Type: Custom::ConfigurationCopy
+    Properties:
+      ServiceToken: !GetAtt ConfigurationCopyFunction.Arn
+      SourceBucket: "<ARTIFACT_BUCKET_TOKEN>"
+      SourcePrefix: "<ARTIFACT_PREFIX_TOKEN>/samples"
+      TargetBucket: !Ref ConfigurationBucket
+      TargetPrefix: "samples"
+      ConfigLibraryHash: "<SAMPLES_HASH_TOKEN>"
+      FileList: <SAMPLE_FILES_LIST_TOKEN>
+
   ##########################################################################
   # Nested stack for selected options
   ##########################################################################
