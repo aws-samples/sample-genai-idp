@@ -1460,7 +1460,7 @@ Resources:
                     minimum: 1
                     default: 25
                     order: 2
-                    hideWhen: { field: "extraction.confidence.mode", value: "off" }
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
                   model:
                     type: string
                     title: Confidence model
@@ -1537,6 +1537,7 @@ Resources:
                     defaultExpanded: false
                     description: "Advanced inference tuning (sampling + reasoning effort). Defaults are sensible; most users never change these."
                     order: 5
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
                     properties:
                       temperature:
                         type: number
