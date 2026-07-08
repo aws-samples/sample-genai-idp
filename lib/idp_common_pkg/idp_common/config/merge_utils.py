@@ -1152,10 +1152,21 @@ def _validate_max_tokens(merged_config: Dict[str, Any], result: Dict[str, Any]) 
                 continue
 
         model_id = section.get(config["model_field"])
-        max_tokens = section.get(config["max_tokens_field"])
+        max_tokens_raw = section.get(config["max_tokens_field"])
 
-        # Skip if either value is missing
-        if not model_id or not max_tokens:
+        # Skip if the model is missing. max_tokens is an OPTIONAL cap: empty
+        # string / None / a value that coerces to <= 0 all mean "unset" (use the
+        # model's max output), so there is nothing to validate.
+        if not model_id or max_tokens_raw in (None, ""):
+            continue
+
+        # Config stores numbers as strings (DynamoDB); coerce before comparing
+        # against the int model limit. A non-numeric value is treated as unset.
+        try:
+            max_tokens = int(max_tokens_raw)
+        except (TypeError, ValueError):
+            continue
+        if max_tokens <= 0:
             continue
 
         # Get model's max output tokens limit
