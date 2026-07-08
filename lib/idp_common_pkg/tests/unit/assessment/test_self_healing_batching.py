@@ -353,6 +353,40 @@ def test_deadline_stops_adaptive_split_recursion():
     assert len(svc.primary_calls) < 10
 
 
+def test_deadline_reached_propagates_from_concurrent_workers():
+    """A wall-clock cutoff hit inside a CONCURRENT fan-out worker must survive the
+    post-join merge and still set deadline_reached (regression: the merge loop
+    summed counters but dropped the deadline_reached bool, so
+    assessment_deadline_reached never fired on the concurrent path)."""
+    import time as _time
+
+    # Always-truncating primary, no escalation → the adaptive splitter in each
+    # worker hits the deadline guard. Many rows + concurrency forces multiple
+    # fanned-out workers (not just the cache-warm batch).
+    svc = LadderService("transactions", CLAUDE_SONNET, primary_max_rows=0)
+    data = {"transactions": _rows(60)}
+
+    result = assess_results_batched(
+        svc,
+        class_label="bank-statement",
+        extraction_results=data,
+        document_text="...",
+        page_images=[],
+        batch_size=10,
+        confidence_model_id=NOVA_LITE,
+        geometry_mode="llm_grounded",
+        escalation_enabled=False,
+        max_concurrent_batches=5,  # force concurrent fan-out
+        deadline_epoch=_time.time() + 1.0,  # below the 90s reserve
+    )
+
+    assert result["split_stats"]["concurrent_batches"] and (
+        result["split_stats"]["concurrent_batches"] > 1
+    )
+    # The flag set inside a worker must survive the merge.
+    assert result["split_stats"]["deadline_reached"] is True
+
+
 def test_no_deadline_allows_escalation():
     """With no deadline threaded in (local/non-Lambda), escalation runs normally
     and deadline_reached stays False."""

@@ -245,3 +245,18 @@ def test_audit_no_geometry_check_when_mode_off():
     assessment = {"txns": [{"amt": {"confidence": 0.9}}]}
     gaps, issues = audit_explainability(assessment, data, geometry_mode="off")
     assert not issues  # geometry not required, confidence present & in range
+
+
+def test_audit_flags_trailing_rows_when_assessment_shorter_than_data():
+    # The model omitted trailing rows: assessment has 2, data has 5. The
+    # completeness gate MUST report the missing indices 2,3,4 (not silently stop
+    # at min(len)). This is the exact under-reporting the gate exists to catch.
+    data = {"txns": [{"amt": str(i)} for i in range(5)]}
+    assessment = {
+        "txns": [
+            {"amt": {"confidence": 0.9}},
+            {"amt": {"confidence": 0.9}},
+        ]
+    }
+    gaps, _issues = audit_explainability(assessment, data, geometry_mode="ocr_only")
+    assert gaps == {"txns": [2, 3, 4]}

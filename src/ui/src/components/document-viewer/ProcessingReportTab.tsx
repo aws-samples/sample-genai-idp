@@ -210,12 +210,31 @@ function pct(n: number | undefined): string {
  * extract / concurrent confidence) to convey parallelism. Uses recorded counts
  * only (no fabricated per-inference timings).
  */
-// Per-status colors for a flow stage box.
+// Per-status flow-stage styling. Uses Cloudscape CSS custom properties (with hex
+// fallbacks, the established pattern in this app) so the boxes adapt to dark /
+// high-contrast modes, and pairs each status with a text MARK so status is never
+// conveyed by color alone (accessibility). `ok` is neutral (no mark).
 const STAGE_TONE: Record<string, { border: string; bg: string; mark: string }> = {
-  ok: { border: '#b6bec9', bg: '#ffffff', mark: '' },
-  info: { border: '#0972d3', bg: '#f0f8ff', mark: '' },
-  warning: { border: '#f89256', bg: '#fff7f0', mark: '⚠ ' },
-  skipped: { border: '#d5dbdb', bg: '#fbfbfb', mark: '' },
+  ok: {
+    border: 'var(--color-border-divider-default, #b6bec9)',
+    bg: 'var(--color-background-container-content, #ffffff)',
+    mark: '',
+  },
+  info: {
+    border: 'var(--color-border-status-info, #0972d3)',
+    bg: 'var(--color-background-status-info, #f0f8ff)',
+    mark: '● ',
+  },
+  warning: {
+    border: 'var(--color-border-status-warning, #f89256)',
+    bg: 'var(--color-background-status-warning, #fff7f0)',
+    mark: '⚠ ',
+  },
+  skipped: {
+    border: 'var(--color-border-divider-secondary, #d5dbdb)',
+    bg: 'var(--color-background-container-content, #fbfbfb)',
+    mark: '– ',
+  },
 };
 
 const StageBox: React.FC<{ label: string; sub?: string; status?: string; fanout?: number }> = ({ label, sub, status = 'ok', fanout }) => {
@@ -452,9 +471,9 @@ const ProcessingReportTab: React.FC<ProcessingReportTabProps> = ({ metadata, pro
                   : ''}
                 .{' '}
                 {(recovery.unrecoverable_rows || 0) > 0 ? (
-                  <span style={{ color: '#d13212' }}>{recovery.unrecoverable_rows} row(s) remained unscored.</span>
+                  <StatusIndicator type="error">{recovery.unrecoverable_rows} row(s) remained unscored</StatusIndicator>
                 ) : (
-                  'All rows scored.'
+                  <StatusIndicator type="success">All rows scored</StatusIndicator>
                 )}
                 {recovery.deadline_reached ? ' Stopped early on the Lambda wall-clock guard.' : ''}
               </Box>

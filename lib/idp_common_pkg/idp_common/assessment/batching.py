@@ -716,9 +716,14 @@ def audit_explainability(
             if not isinstance(assessed, list):
                 gaps[field] = list(range(len(data_val)))
                 continue
-            for i in range(min(len(assessed), len(data_val))):
-                if _row_confidence_missing(assessed[i]):
+            # Audit EVERY data row. A trailing row the model omitted (assessed
+            # shorter than data) is a genuine gap the completeness gate must catch —
+            # iterating only min(len) would silently under-report exactly those
+            # missing rows.
+            for i in range(len(data_val)):
+                if i >= len(assessed) or _row_confidence_missing(assessed[i]):
                     gaps.setdefault(field, []).append(i)
+                    continue
                 for leaf in _leaf_confidences(assessed[i]):
                     conf = leaf.get("confidence")
                     if isinstance(conf, (int, float)) and not (0.0 <= conf <= 1.0):
@@ -1183,13 +1188,27 @@ def assess_results_batched(
                 # map preserves input order → results stay index-aligned.
                 sliced_results.extend(pool.map(_assess_chunk, rest, per_chunk_stats))
             for cs in per_chunk_stats:
+                # Sum every counter a worker could have incremented (including the
+                # escalation counters — a worker can escalate inside its adaptive
+                # split), and OR-merge the wall-clock `deadline_reached` flag so a
+                # cutoff hit inside a concurrent worker still surfaces
+                # `assessment_deadline_reached`. Batch_count/concurrent_batches are
+                # set by the caller (below), not per-chunk, so they are not summed.
                 for key in (
                     "truncated_calls",
                     "splits",
                     "rows_recovered_by_retry",
+                    "rows_recovered_by_escalation",
+                    "escalation_rounds",
                     "unrecoverable_rows",
                 ):
                     split_stats[key] = split_stats.get(key, 0) + cs.get(key, 0)
+                if cs.get("deadline_reached"):
+                    split_stats["deadline_reached"] = True
+                if cs.get("escalation_model") and not split_stats.get(
+                    "escalation_model"
+                ):
+                    split_stats["escalation_model"] = cs["escalation_model"]
                 cs_min = cs.get("min_batch_size_used")
                 if cs_min is not None:
                     _record_min_batch(split_stats, cs_min)
