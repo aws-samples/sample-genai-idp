@@ -8,8 +8,10 @@ This module provides a Stickler-compatible comparator that wraps
 the existing IDP LLM-based evaluation logic.
 """
 
+import json
 import logging
-from typing import Any, Dict, Optional
+import re
+from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -163,8 +165,7 @@ class LLMComparator(BaseComparator):
         """
         Compare two values using LLM-based semantic evaluation.
 
-        This method delegates to the existing compare_llm function from
-        the IDP evaluation system.
+        This method delegates to the module-level compare_llm function.
 
         Args:
             value1: First value to compare (expected)
@@ -173,9 +174,6 @@ class LLMComparator(BaseComparator):
         Returns:
             Similarity score between 0.0 and 1.0
         """
-        # Import here to avoid circular dependencies
-        from idp_common.evaluation.comparator import compare_llm
-
         try:
             # Call the existing LLM comparison logic
             matched, score, reason = compare_llm(
@@ -226,3 +224,247 @@ def create_llm_comparator_from_config(config: dict) -> LLMComparator:
         task_prompt=config.get("task_prompt"),
         threshold=config.get("threshold", 0.8),
     )
+
+
+def compare_llm(
+    expected: Any,
+    actual: Any,
+    document_class: Optional[str] = None,
+    attr_name: Optional[str] = None,
+    attr_description: Optional[str] = None,
+    llm_config: Optional[dict] = None,
+    bedrock_invoker=None,
+) -> Tuple[bool, float, Optional[str]]:
+    """
+    Compare values using an LLM to determine semantic equivalence.
+
+    Invokes a Bedrock model with a JSON-returning prompt and parses out the
+    match/score/reason. Used by LLMComparator.compare() (the Stickler-registered
+    comparator for the LLM evaluation method).
+
+    Args:
+        expected: Expected value
+        actual: Actual value
+        document_class: Document class name
+        attr_name: Attribute name
+        attr_description: Attribute description
+        llm_config: Configuration for LLM invocation
+        bedrock_invoker: Function to invoke Bedrock models
+
+    Returns:
+        Tuple of (matched, score, reason)
+    """
+    if not bedrock_invoker:
+        from idp_common import bedrock
+
+        bedrock_invoker = bedrock.invoke_model
+
+    try:
+        # Format attribute description
+        doc_class = document_class if document_class is not None else "unknown"
+        name = attr_name if attr_name is not None else "attribute"
+        desc = attr_description if attr_description is not None else ""
+
+        # Default LLM configuration if not provided
+        config = llm_config or {}
+        model = config.get("model", "us.anthropic.claude-3-sonnet-20240229-v1:0")
+        temperature = config.get("temperature", 0.0)
+        top_k = config.get("top_k", 5)
+        reasoning_effort = config.get("reasoning_effort")
+
+        # Get system and task prompts from config or use defaults
+        system_prompt = config.get(
+            "system_prompt",
+            """You are an evaluator that helps determine if the predicted and expected values match for document attribute extraction. You will consider the context and meaning rather than just exact string matching.""",
+        )
+
+        task_prompt_template = config.get(
+            "task_prompt",
+            """I need to evaluate attribute extraction for a document of class: {DOCUMENT_CLASS}.
+
+For the attribute named "{ATTRIBUTE_NAME}" described as "{ATTRIBUTE_DESCRIPTION}":
+- Expected value: {EXPECTED_VALUE}
+- Actual value: {ACTUAL_VALUE}
+
+Do these values match in meaning, taking into account formatting differences, word order, abbreviations, and semantic equivalence?
+Provide your assessment as a JSON with three fields:
+- "match": boolean (true if they match, false if not)
+- "score": number between 0 and 1 representing the confidence/similarity score
+- "reason": brief explanation of your decision
+
+Respond ONLY with the JSON and nothing else.  Here's the exact format:
+{
+  "match": true or false,
+  "score": 0.0 to 1.0,
+  "reason": "Your explanation here"
+}
+""",
+        )
+
+        # Log for debugging
+        logger.debug(f"LLM evaluation starting for attribute: {name}")
+        logger.debug(f"Document class: {doc_class}")
+        logger.debug(f"Attribute description: {desc}")
+
+        # Handle None values
+        expected_str = str(expected) if expected is not None else "None"
+        actual_str = str(actual) if actual is not None else "None"
+
+        logger.debug(f"Expected value: {expected_str}")
+        logger.debug(f"Actual value: {actual_str}")
+
+        # Create task_placeholders dictionary with all possible placeholders
+        task_placeholders = {
+            "DOCUMENT_CLASS": doc_class,
+            "ATTRIBUTE_NAME": name,
+            "ATTRIBUTE_DESCRIPTION": desc,
+            "EXPECTED_VALUE": expected_str,
+            "ACTUAL_VALUE": actual_str,
+        }
+
+        try:
+            # Use the common format_prompt function from bedrock
+            from idp_common.bedrock import format_prompt
+
+            task_prompt = format_prompt(
+                task_prompt_template,
+                task_placeholders,
+                required_placeholders=None,  # Don't validate specific placeholders as they may vary
+            )
+            logger.debug(
+                f"Successfully formatted task prompt with {len(task_placeholders)} placeholders"
+            )
+        except Exception as e:
+            error_msg = f"Task prompt formatting error: {str(e)}"
+            logger.error(f"Prompt template: '{task_prompt_template}'")
+            logger.error(f"Placeholders: '{task_placeholders}'")
+            logger.error(error_msg)
+            return False, 0.0, error_msg
+
+        # Create content for LLM request
+        content = [{"text": task_prompt}]
+
+        # Log system prompt for debugging
+        logger.debug(f"Calling Bedrock model: {model}")
+
+        # Call Bedrock model
+        response = bedrock_invoker(
+            model_id=model,
+            system_prompt=system_prompt,
+            content=content,
+            temperature=temperature,
+            top_k=top_k,
+            reasoning_effort=reasoning_effort,
+        )
+
+        # Extract and parse response
+        from idp_common import bedrock
+
+        result_text = bedrock.extract_text_from_response(response).strip()
+        logger.debug(f"Raw LLM response: {result_text}")
+
+        # Try to parse as JSON
+        try:
+            # First attempt to find JSON block within text using regex
+            # This pattern looks for balanced braces to find JSON objects
+            json_pattern = r"(\{(?:[^{}]|(?:\{(?:[^{}]|(?:\{[^{}]*\}))*\}))*\})"
+            json_matches = re.findall(json_pattern, result_text)
+
+            # Check for code blocks with ```json ... ``` pattern
+            code_block_pattern = r"```json\s*([\s\S]*?)\s*```"
+            code_blocks = re.findall(code_block_pattern, result_text)
+
+            # Try to parse code blocks first if they exist
+            for code_block in code_blocks:
+                try:
+                    result_json = json.loads(code_block)
+                    # Check if the JSON has the expected fields
+                    if "match" in result_json and "score" in result_json:
+                        match_value = result_json.get("match", False)
+                        score_value = result_json.get("score", 0.0)
+                        reason = result_json.get("reason", "No reason provided")
+                        logger.info(
+                            f"LLM evaluation for {name} (from code block): match={match_value}, score={score_value}, reason={reason}"
+                        )
+                        return bool(match_value), float(score_value), reason
+                except json.JSONDecodeError:
+                    # This code block wasn't valid JSON, try next one
+                    continue
+
+            # If we found potential JSON blocks
+            if json_matches:
+                # Try each potential JSON block
+                for json_block in json_matches:
+                    try:
+                        result_json = json.loads(json_block)
+                        # Check if the JSON has the expected fields
+                        if "match" in result_json and "score" in result_json:
+                            match_value = result_json.get("match", False)
+                            score_value = result_json.get("score", 0.0)
+                            reason = result_json.get("reason", "No reason provided")
+                            logger.info(
+                                f"LLM evaluation for {name}: match={match_value}, score={score_value}, reason={reason}"
+                            )
+                            return bool(match_value), float(score_value), reason
+                    except json.JSONDecodeError:
+                        # This particular block wasn't valid JSON, try next one
+                        continue
+
+            # If we didn't find a valid JSON block, try the entire text
+            result_json = json.loads(result_text)
+            # Extract values from JSON
+            match_value = result_json.get("match", False)
+            score_value = result_json.get("score", 0.0)
+            reason = result_json.get("reason", "No reason provided")
+            logger.info(
+                f"LLM evaluation for {name}: match={match_value}, score={score_value}, reason={reason}"
+            )
+            return bool(match_value), float(score_value), reason
+        except json.JSONDecodeError as e:
+            error_msg = f"Error parsing LLM response as JSON: {str(e)}"
+            logger.error(error_msg)
+            logger.error(f"Raw response was: {result_text}")
+
+            # Last-ditch effort: try a very flexible pattern to extract key information
+            # Look for match/score/reason patterns directly
+            try:
+                match_pattern = r'"?match"?\s*[:=]\s*(true|false)'
+                score_pattern = r'"?score"?\s*[:=]\s*([0-9]*\.?[0-9]+)'
+                reason_pattern = r'"?reason"?\s*[:=]\s*"([^"]*)"'
+
+                match_search = re.search(match_pattern, result_text.lower())
+                score_search = re.search(score_pattern, result_text.lower())
+                reason_search = re.search(reason_pattern, result_text)
+
+                if match_search and score_search:
+                    match_value = match_search.group(1).lower() == "true"
+                    score_value = float(score_search.group(1))
+                    reason = (
+                        reason_search.group(1)
+                        if reason_search
+                        else "No reason extracted"
+                    )
+
+                    logger.info(
+                        f"LLM evaluation for {name} (extracted from text): match={match_value}, score={score_value}"
+                    )
+                    return bool(match_value), float(score_value), reason
+            except Exception as extract_error:
+                logger.error(
+                    f"Failed to extract values from malformed response: {str(extract_error)}"
+                )
+
+            logger.error(
+                'Response from LLM must be JSON like: {"match": boolean, "score": float, "reason": string}'
+            )
+            return False, 0.0, error_msg
+        except Exception as e:
+            error_msg = f"Unexpected error processing LLM response: {str(e)}"
+            logger.error(error_msg)
+            logger.error(f"Raw response was: {result_text}")
+            return False, 0.0, error_msg
+
+    except Exception as e:
+        error_msg = f"Error in LLM evaluation for {attr_name}: {str(e)}"
+        logger.error(error_msg)
+        return False, 0.0, error_msg

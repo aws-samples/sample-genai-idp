@@ -1355,14 +1355,11 @@ The solution includes a comprehensive Jupyter notebook (`notebooks/evaluation_re
 4. **Comparative Analysis**: Compare performance across different prompt configurations
 5. **Automated Alerts**: Set up CloudWatch alarms based on accuracy metrics stored in the database
 
-## Migration from Legacy Evaluation
+## Evaluation Engine
 
-The feature/stickler branch introduces a new Stickler-based evaluation service while preserving the legacy implementation for backward compatibility:
+Evaluation is powered entirely by the [Stickler](https://github.com/awslabs/stickler) library via `service.py`. (The pre-Stickler custom-comparator engine, formerly `service_legacy.py` / `comparator.py`, has been removed.)
 
-- **New**: `service.py` (Stickler-based) - default for new deployments
-- **Legacy**: `service_legacy.py` - preserved for existing workflows
-
-All existing configurations are compatible with the Stickler service through the `SticklerConfigMapper`, which translates IDP evaluation extensions to Stickler format transparently.
+All existing configurations are compatible through the `SticklerConfigMapper`, which translates IDP evaluation extensions to Stickler format transparently.
 
 ### What Changed
 

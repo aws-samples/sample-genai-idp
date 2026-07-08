@@ -53,6 +53,7 @@ def _normalize_comparator_name(comparator: str) -> str:
         "NumericComparator": "NumericExact",
         "LevenshteinComparator": "Levenshtein",
         "SemanticComparator": "Semantic",
+        "DateComparator": "Date",
         "LLMComparator": "LLM",
     }
     return mapping.get(comparator, comparator)
