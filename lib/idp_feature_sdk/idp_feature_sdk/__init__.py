@@ -12,4 +12,4 @@ __all__ = [
     "PublishResult",
     "load_manifest",
 ]
-__version__ = "0.5.16"
+__version__ = "0.6.0"

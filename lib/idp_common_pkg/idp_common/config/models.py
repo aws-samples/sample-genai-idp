@@ -281,7 +281,11 @@ class AgenticConfig(BaseModel):
             "calls provide_field_assessment in a follow-up inference within the same "
             "turn (a dedicated reflection pass over the finalized values). "
             "'single_shot': the agent emits values AND per-field confidence together "
-            "in ONE combined tool call, saving the follow-up inference. Both produce "
+            "in ONE combined tool call, saving the follow-up inference. "
+            "'topk': the agent emits, per field, its top-K guesses with probabilities "
+            "(G1/P1 … GK/PK) in ONE combined tool call; the shared topk_resolver takes "
+            "G1 as the value and P1 as the confidence — the agentic analogue of the "
+            "simple-mode 1S-TopK path, for better-calibrated scores. All three produce "
             "identical explainability_info downstream; this only changes inference "
             "mechanics. Provided so cost/latency vs. confidence-calibration can be "
             "A/B tested before choosing a default. Ignored unless "
@@ -370,10 +374,10 @@ class AgenticConfig(BaseModel):
         if v is None or (isinstance(v, str) and not v.strip()):
             return "two_step"
         v = str(v).strip().lower()
-        if v not in ("two_step", "single_shot"):
+        if v not in ("two_step", "single_shot", "topk"):
             raise ValueError(
-                "integrated_confidence_strategy must be 'two_step' or 'single_shot', "
-                f"got {v!r}"
+                "integrated_confidence_strategy must be 'two_step', 'single_shot', "
+                f"or 'topk', got {v!r}"
             )
         return v
 
@@ -734,9 +738,24 @@ class ExtractionConfig(BaseModel):
     task_prompt_extraction_with_confidence: str = Field(
         default="",
         description=(
-            "Task prompt template for INTEGRATED extraction+confidence — used when "
-            "extraction.confidence.mode == 'integrated', where a single inference "
-            "emits each value AND its confidence. Populated from system defaults."
+            "Task prompt template for INTEGRATED extraction+confidence in AGENTIC "
+            "(advanced) mode — used when extraction.confidence.mode == 'integrated' "
+            "and extraction.mode == 'advanced', where the agent calls the "
+            "provide_field_assessment tool after extracting. Populated from system "
+            "defaults."
+        ),
+    )
+    task_prompt_extraction_with_confidence_topk: str = Field(
+        default="",
+        description=(
+            "Task prompt template for 1-Stage TopK INTEGRATED extraction+confidence "
+            "in SIMPLE (non-agentic) mode — used when "
+            "extraction.confidence.mode == 'integrated' and extraction.mode == "
+            "'simple'. A single LLM call emits its top-K guesses with probabilities "
+            "(G1/P1 … GK/PK) per field; topk_resolver takes G1 as the value and P1 "
+            "as the confidence. Requesting ranked alternatives yields better-"
+            "calibrated confidence than single-value self-assessment. Populated "
+            "from system defaults."
         ),
     )
     # NOTE (v0.6): the confidence-only prompt lives at extraction.confidence.task_prompt
@@ -1162,7 +1181,16 @@ class OCRConfig(BaseModel):
         description="Pipeline hooks invoked after OCR (Feature Platform)",
     )
     backend: str = Field(
-        default="textract", description="OCR backend (textract or bedrock)"
+        default="textract",
+        description="OCR backend: 'textract', 'bedrock' (LLM OCR), 'bda' (Bedrock Data Automation), or 'none' (image-only)",
+    )
+    bda_project_arn: Optional[str] = Field(
+        default=None,
+        description=(
+            "ARN of a Bedrock Data Automation standard-output SYNC project used "
+            "when backend='bda'. If unset, a standard-output OCR project is "
+            "auto-created and reused."
+        ),
     )
     model_id: Optional[str] = Field(
         default=None,

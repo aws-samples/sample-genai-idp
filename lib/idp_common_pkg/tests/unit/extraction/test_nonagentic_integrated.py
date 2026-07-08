@@ -1,16 +1,17 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-"""Non-agentic (simple) integrated confidence.
+"""Non-agentic (simple) integrated confidence — 1S-TopK.
 
-The simple extraction path, when ``confidence.mode == integrated``, asks the model
-to return values + inline confidence in ONE inference. These lock in:
-  - the {extraction, confidence} envelope is split (values -> inference_result,
-    confidence -> metering marker), fixing the malformed inference_result bug;
-  - a ``field_assessment`` sibling key (the shape a non-tool model emits when told
-    to "call the provide_field_assessment tool") is lifted the same way, so the
-    standalone Assessment step is skipped instead of double-billing;
-  - a flat response (model ignored confidence) passes through untouched so the
+The simple extraction path, when ``confidence.mode == integrated``, uses the
+1S-TopK prompt: the model returns, per field, its top-K guesses with
+probabilities (``G1/P1`` … ``GK/PK``) in ONE inference. These lock in:
+  - a TopK candidate response is split (``G1`` -> inference_result, ``P1`` ->
+    the ``_integrated_field_assessment`` metering marker) so the standalone
+    Assessment step is skipped instead of double-billing, with the full
+    candidate set stashed in ``_topk_candidates`` for audit;
+  - list/array fields resolve per-row/per-column;
+  - a flat response (no G1/P1 candidates) passes through untouched so the
     standalone Assessment step runs as the fallback;
   - the shared threshold-enrichment attaches confidence_threshold + alerts.
 """
@@ -41,108 +42,67 @@ def _svc():
     return svc
 
 
-def test_envelope_split_moves_confidence_to_metering():
+def test_topk_scalar_split_moves_confidence_to_metering():
+    # Each field is a {G1, P1, ...} candidate object. G1 -> value, P1 -> confidence.
     svc = _svc()
+    svc._class_schema = {"properties": {"Agency": {}, "Total": {"type": "number"}}}
     metering = {}
     parsed = {
-        "extraction": {"Agency": "ACME", "Items": [{"rate": "5"}]},
-        "confidence": {
-            "Agency": {"confidence": 0.9, "confidence_reason": "clear"},
-            "Items": [{"rate": {"confidence": 0.8}}],
-        },
+        "Agency": {"G1": "ACME", "P1": 0.9, "G2": "ACMY", "P2": 0.1},
+        "Total": {"G1": "100", "P1": 0.7},
     }
     values = svc._split_inline_confidence(parsed, metering)
-    assert values == {"Agency": "ACME", "Items": [{"rate": "5"}]}
-    assert "extraction" not in values and "confidence" not in values
+    assert values == {"Agency": "ACME", "Total": 100.0}  # number coerced
     assert metering["_integrated_field_assessment"]["Agency"]["confidence"] == 0.9
+    assert metering["_integrated_field_assessment"]["Total"]["confidence"] == 0.7
+    # Raw candidates preserved for audit.
+    assert metering["_topk_candidates"]["Agency"]["G2"] == "ACMY"
 
 
-def test_case_insensitive_envelope():
+def test_topk_list_split_resolves_per_row():
+    # Direct-array TopK: each row's sub-attributes are {G1, P1, ...} candidates.
     svc = _svc()
+    svc._class_schema = {
+        "properties": {
+            "Items": {"type": "array", "items": {"properties": {"rate": {}}}}
+        }
+    }
     metering = {}
     parsed = {
-        "Extraction": {"A": "1"},
-        "Confidence": {"A": {"confidence": 0.7}},
+        "Items": [
+            {"rate": {"G1": "5", "P1": 0.8}},
+            {"rate": {"G1": "6", "P1": 0.6}},
+        ]
     }
     values = svc._split_inline_confidence(parsed, metering)
-    assert values == {"A": "1"}
-    assert "_integrated_field_assessment" in metering
+    assert values == {"Items": [{"rate": "5"}, {"rate": "6"}]}
+    assess = metering["_integrated_field_assessment"]["Items"]
+    assert assess[0]["rate"]["confidence"] == 0.8
+    assert assess[1]["rate"]["confidence"] == 0.6
 
 
-def test_field_assessment_sibling_is_lifted():
-    # The shape a non-tool (simple) model emits given "call provide_field_assessment":
-    # confidence rides as a `field_assessment` sibling next to the real fields.
+def test_topk_confidence_leaves_have_no_threshold():
+    # The resolver emits confidence-only leaves; thresholds are attached later by
+    # the shared enricher (single source of truth for thresholds).
     svc = _svc()
+    svc._class_schema = {"properties": {"Agency": {}}}
     metering = {}
-    parsed = {
-        "Agency": "ACME",
-        "Total": "100",
-        "Items": [{"rate": "5"}],
-        "field_assessment": {
-            "Agency": {"confidence": 0.95},
-            "Total": {"confidence": 0.6, "confidence_reason": "faint"},
-            "Items": [{"rate": {"confidence": 0.8}}],
-        },
-    }
-    values = svc._split_inline_confidence(parsed, metering)
-    # field_assessment stripped from values (no leak into inference_result)...
-    assert values == {"Agency": "ACME", "Total": "100", "Items": [{"rate": "5"}]}
-    assert "field_assessment" not in values
-    # ...and lifted into the metering marker so the standalone step is skipped.
-    assert metering["_integrated_field_assessment"]["Agency"]["confidence"] == 0.95
-
-
-def test_confidence_sibling_is_lifted():
-    # Some models use "confidence" as the sibling key alongside the fields.
-    svc = _svc()
-    metering = {}
-    parsed = {
-        "Agency": "ACME",
-        "confidence": {"Agency": {"confidence": 0.9}},
-    }
-    values = svc._split_inline_confidence(parsed, metering)
-    assert values == {"Agency": "ACME"}
-    assert "_integrated_field_assessment" in metering
-
-
-def test_real_field_named_field_assessment_not_lifted():
-    # A genuine document field literally named "field_assessment" holding plain
-    # values (no {"confidence": ...} leaves) must NOT be mistaken for confidence.
-    svc = _svc()
-    metering = {}
-    parsed = {"Agency": "ACME", "field_assessment": "passed review"}
-    values = svc._split_inline_confidence(parsed, metering)
-    assert values == parsed
-    assert "_integrated_field_assessment" not in metering
+    svc._split_inline_confidence({"Agency": {"G1": "ACME", "P1": 0.9}}, metering)
+    leaf = metering["_integrated_field_assessment"]["Agency"]
+    assert leaf == {"confidence": 0.9}
+    assert "confidence_threshold" not in leaf
 
 
 def test_flat_response_passes_through_no_marker():
+    # No G1/P1 candidates -> not TopK; pass through and let the standalone
+    # Assessment step run as the fallback.
     svc = _svc()
     metering = {}
     parsed = {"Agency": "ACME", "Total": "100"}
     values = svc._split_inline_confidence(parsed, metering)
     assert values == parsed
     assert "_integrated_field_assessment" not in metering
-
-
-def test_real_field_named_extraction_not_split():
-    # A genuine 3-key result that merely contains "extraction" must NOT split.
-    svc = _svc()
-    metering = {}
-    parsed = {"extraction": "some value", "Agency": "ACME", "Total": "100"}
-    values = svc._split_inline_confidence(parsed, metering)
-    assert values == parsed
-    assert "_integrated_field_assessment" not in metering
-
-
-def test_envelope_without_usable_confidence_falls_back():
-    svc = _svc()
-    metering = {}
-    parsed = {"extraction": {"A": "1"}, "confidence": None}
-    values = svc._split_inline_confidence(parsed, metering)
-    assert values == {"A": "1"}
-    # no confidence to lift -> standalone step runs
-    assert "_integrated_field_assessment" not in metering
+    assert "_topk_candidates" not in metering
 
 
 def test_enrichment_attaches_thresholds_and_alerts():
