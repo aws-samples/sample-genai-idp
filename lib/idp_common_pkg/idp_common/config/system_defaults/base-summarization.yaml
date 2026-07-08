@@ -9,7 +9,9 @@ summarization:
   enabled: true
   model: us.amazon.nova-pro-v1:0
   top_p: "0.0"
-  max_tokens: "4096"
+  # Empty => use the selected model's maximum output limit (model_config_limits.yaml).
+  # Set a positive value only to cap output below the model max.
+  max_tokens: ""
   top_k: "5"
   temperature: "0.0"
   system_prompt: >-

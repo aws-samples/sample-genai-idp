@@ -61,6 +61,7 @@ from .evaluation import (
     EvaluationMetrics,
     EvaluationReport,
     FieldComparison,
+    UseAsBaselineResult,
 )
 from .manifest import ManifestDocument, ManifestResult, ManifestValidationResult
 from .publish import PublishResult, TemplateTransformResult
@@ -166,6 +167,7 @@ __all__ = [
     "EvaluationReport",
     "FieldComparison",
     "EvaluationMetrics",
+    "UseAsBaselineResult",
     "DeleteResult",
     # Publish models
     "PublishResult",

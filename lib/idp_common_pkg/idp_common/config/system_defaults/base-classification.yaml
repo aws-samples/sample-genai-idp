@@ -22,7 +22,9 @@ classification:
   model: us.amazon.nova-2-lite-v1:0
   temperature: "0.0"
   top_p: "0.0"
-  max_tokens: "4096"
+  # Empty => use the selected model's maximum output limit (model_config_limits.yaml).
+  # Set a positive value only to cap output below the model max.
+  max_tokens: ""
   top_k: "5"
   system_prompt: >-
     You are a multimodal document classification expert that analyzes business documents using both visual layout and textual content. Your task is to classify single-page documents into predefined categories based on their structural patterns, visual features, and text content. Your output must be valid JSON according to the requested format.

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getDocumentConfidenceAlertCount } from './confidence-alerts-utils';
+import { getDocumentProcessingIssueCount } from './processing-issues-utils';
 import { parseMetering, parseHITLReviewHistory } from '../../graphql/awsjson-parsers';
 
 interface DocumentApiItem {
@@ -35,6 +36,7 @@ interface DocumentApiItem {
   HITLReviewedByEmail?: string;
   HITLReviewHistory?: string | Record<string, unknown>[];
   ConfidenceAlertCount?: number;
+  ProcessingIssueCount?: number;
   ConfigVersion?: string;
 }
 
@@ -113,6 +115,14 @@ const mapDocumentsAttributes = (documents: DocumentApiItem[]): Record<string, un
         ? apiConfidenceAlertCount
         : getDocumentConfidenceAlertCount((sections ?? null) as Parameters<typeof getDocumentConfidenceAlertCount>[0]);
 
+    // Processing-issue count: prefer the server-side ProcessingIssueCount (GSI /
+    // getDocument), else derive from the sections' ProcessingIssues arrays.
+    const apiProcessingIssueCount = item.ProcessingIssueCount;
+    const processingIssueCount =
+      apiProcessingIssueCount != null
+        ? apiProcessingIssueCount
+        : getDocumentProcessingIssueCount((sections ?? null) as Parameters<typeof getDocumentProcessingIssueCount>[0]);
+
     // Extract HITL metadata - use HITLTriggered from backend, fallback to status check
     const hitlTriggered = item.HITLTriggered === true || (hitlStatus && hitlStatus !== 'N/A');
     const hitlCompleted = isHitlCompleted(hitlStatus);
@@ -145,6 +155,7 @@ const mapDocumentsAttributes = (documents: DocumentApiItem[]): Record<string, un
       summaryReportUri,
       ruleValidationResultUri,
       confidenceAlertCount,
+      processingIssueCount,
       listPK,
       listSK,
       hitlTriggered,

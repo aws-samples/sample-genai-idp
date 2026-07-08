@@ -608,6 +608,64 @@ class BatchOperation:
             output_dir=result.get("output_dir", output_dir),
         )
 
+    def list_versions(
+        self,
+        document_id: str,
+        stack_name: Optional[str] = None,
+        **kwargs,
+    ) -> List[Dict[str, Any]]:
+        """List processing-run versions for a document, newest first.
+
+        Args:
+            document_id: The document's S3 object key (its tracking id)
+            stack_name: Optional stack name override
+
+        Returns:
+            List of run records (dicts with RunId, CompletionTime,
+            ConfigVersion, FileCount, ManifestUri, ...).
+        """
+        from idp_sdk._core.batch_processor import BatchProcessor
+
+        name = self._client._require_stack(stack_name)
+        processor = BatchProcessor(stack_name=name, region=self._client._region)
+        return processor.list_document_versions(document_id)
+
+    def download_version(
+        self,
+        document_id: str,
+        run_id: str,
+        output_dir: str,
+        stack_name: Optional[str] = None,
+        **kwargs,
+    ) -> BatchDownloadResult:
+        """Download the exact output bytes of a specific document version.
+
+        Uses the run's manifest to fetch each output object by its pinned S3
+        VersionId, so the download reflects that run even if later runs have
+        overwritten the objects.
+
+        Args:
+            document_id: The document's S3 object key
+            run_id: Run identifier (from list_versions)
+            output_dir: Local directory to save results
+            stack_name: Optional stack name override
+
+        Returns:
+            BatchDownloadResult with download statistics
+        """
+        from idp_sdk._core.batch_processor import BatchProcessor
+
+        name = self._client._require_stack(stack_name)
+        processor = BatchProcessor(stack_name=name, region=self._client._region)
+        result = processor.download_version_results(
+            document_id=document_id, run_id=run_id, output_dir=output_dir
+        )
+        return BatchDownloadResult(
+            files_downloaded=result.get("files_downloaded", 0),
+            documents_downloaded=1,
+            output_dir=result.get("output_dir", output_dir),
+        )
+
     def download_sources(
         self,
         batch_id: str,

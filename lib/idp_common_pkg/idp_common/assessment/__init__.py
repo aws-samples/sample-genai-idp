@@ -49,9 +49,17 @@ class AssessmentService:
 
         self._service = create_assessment_service(region=region, config=config)
 
-    def process_document_section(self, document, section_id: str):
-        """Process a single section from a Document object to assess extraction confidence."""
-        return self._service.process_document_section(document, section_id)
+    def process_document_section(
+        self, document, section_id: str, deadline_epoch: Optional[float] = None
+    ):
+        """Process a single section from a Document object to assess extraction confidence.
+
+        ``deadline_epoch`` (absolute epoch seconds from the Lambda context) is
+        forwarded to the self-healing ladder's wall-clock guard (1.5).
+        """
+        return self._service.process_document_section(
+            document, section_id, deadline_epoch=deadline_epoch
+        )
 
     def assess_document(self, document):
         """Assess extraction confidence for all sections in a document."""

@@ -248,8 +248,19 @@ def handler(event, context):
     t0 = time.time()
     logger.info(f"Starting assessment for section {section_id}")
 
+    # Wall-clock deadline for the self-healing ladder (1.5): convert the Lambda's
+    # remaining-time budget into an absolute epoch so the assessment escalation
+    # ladder can stop before a hard task timeout instead of losing the section.
+    deadline_epoch = None
     try:
-        updated_document = assessment_service.process_document_section(document, section_id)
+        deadline_epoch = time.time() + (context.get_remaining_time_in_millis() / 1000.0)
+    except Exception:  # noqa: BLE001 - context may be absent in local/test runs
+        deadline_epoch = None
+
+    try:
+        updated_document = assessment_service.process_document_section(
+            document, section_id, deadline_epoch=deadline_epoch
+        )
         t1 = time.time()
         logger.info(f"Total assessment time: {t1-t0:.2f} seconds")
 

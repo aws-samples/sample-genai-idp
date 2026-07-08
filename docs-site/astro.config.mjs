@@ -142,6 +142,10 @@ export default defineConfig({
               ],
             },
             {
+              label: "Document Versions",
+              slug: "document-versions",
+            },
+            {
               label: "Post-Processing Lambda Hook",
               slug: "post-processing-lambda-hook",
             },

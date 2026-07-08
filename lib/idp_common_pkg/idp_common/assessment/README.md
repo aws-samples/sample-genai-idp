@@ -214,14 +214,89 @@ The activity is surfaced for visibility (only when a run actually had to shrink)
 
 - **`metadata.assessment_batch_split_stats`** on the section result — a dict with
   `truncated_calls`, `splits`, `min_batch_size_used`, `rows_recovered_by_retry`,
-  and `unrecoverable_rows`.
+  `unrecoverable_rows`, `derived_batch_size`, `configured_batch_size`,
+  `escalation_model`, `escalation_rounds`, and `rows_recovered_by_escalation`.
 - An **`⚠ Assessment Batch Splitting`** block in the agentic extraction
   **processing report**.
 
-If rows remain unscored even at a single-row batch, `unrecoverable_rows` is
-non-zero — the practical fix then is to reduce per-row output, e.g. switch
-`extraction.geometry.mode` from `llm` to `ocr_only` (the default), which derives
-boxes from OCR value-matching instead of the model.
+### Self-healing: token-aware sizing + model escalation
+
+Adaptive splitting recovers a truncated batch by *shrinking* it against the
+**same** model. When the model's output cap is the real bottleneck, shrinking
+alone can bottom out at a single row and still recover nothing (the failure that
+left 34/68 transaction rows with `confidence: null`). Two additions make advanced
+mode complete correctly on the first try:
+
+1. **Token-aware first-pass sizing** (`compute_token_aware_batch_size`). Before
+   the first call, the effective batch size is derived from the confidence
+   model's output cap (`bedrock.model_utils.get_model_max_output_tokens`) and an
+   estimate of per-row output tokens (`extraction.sharding.estimate_tokens` ×
+   a confidence-envelope multiplier × a larger bbox multiplier for
+   `geometry.mode` `llm`/`llm_grounded`). The result **only ever shrinks**
+   `list_batch_size` (never grows it past your ceiling), so a small-cap model
+   (Nova Lite, 10K) starts at ~6–9 rows instead of truncating at 25. Unknown
+   models fall back to the configured size. Recorded as `derived_batch_size`.
+
+2. **Model-escalation ladder** (`extraction.confidence.escalation_*`). When rows
+   are *still* unscored after token-aware shrink + same-model retries, the
+   still-missing rows (only those) are re-assessed on a **stronger confidence
+   model** with a bigger output cap — the rung that actually fixes small-cap
+   truncation. Cheapest-first and bounded by `max_escalation_rounds`; a round
+   that recovers nothing stops early. Configure with:
+
+   ```yaml
+   extraction:
+     confidence:
+       escalation_enabled: true          # ON by default
+       escalation_model: "us.anthropic.claude-sonnet-4-20250514-v1:0"
+       max_escalation_rounds: 2
+   ```
+
+   Per-class override: `x-aws-idp-confidence-escalation-model` (mirrors
+   `x-aws-idp-extraction-escalation-model`). `escalation_model: null` skips the
+   model rung (ladder stays at shrink + retry). Escalation applies uniformly to
+   the standalone `separate` step and the `integrated` in-shard/inline retry.
+
+If rows remain unscored even after escalation, `unrecoverable_rows` is non-zero —
+reduce per-row output, e.g. switch `extraction.geometry.mode` from `llm` to
+`ocr_only` (the default), which derives boxes from OCR value-matching instead of
+the model.
+
+### Structured processing issues + completeness gate
+
+The ladder's `split_stats` are translated into user-surfacing
+`ProcessingIssue`s (`idp_common.models.ProcessingIssue`) by
+`build_assessment_issues`, so a run that healed (or couldn't heal) is visible
+without reading raw metadata. Severity ladder:
+
+| Condition | code | severity |
+|-----------|------|----------|
+| Rows still unscored after the full ladder | `assessment_incomplete` | **error** |
+| Wall-clock guard cut escalation short | `assessment_deadline_reached` | **warning** |
+| Healed, but needed shrinking/escalation | `assessment_recovered_with_retries` | **info** |
+
+A **completeness gate** (`audit_explainability`) runs after the ladder on both
+the standalone and in-shard paths: it confirms every extracted value has a real
+(non-null), in-range confidence and — when `geometry.mode != "off"` — a bounding
+box, emitting `assessment_confidence_out_of_range` / `assessment_geometry_incomplete`
+for anything structurally wrong. Issues are attached to each `Section`
+(`section.processing_issues`), rolled up to `Document.processing_issue_count`,
+and rendered in the extraction processing report.
+
+### Lambda wall-clock budget & resume safety
+
+The escalation ladder adds sequential model calls inside the 900s
+Extraction/Assessment Lambdas. To avoid a hard timeout, both handlers thread the
+Lambda's `context.get_remaining_time_in_millis()` down as an absolute
+`deadline_epoch`; before starting a **new escalation round** the ladder checks
+the estimated round cost fits in the remaining time minus a 90s safety reserve.
+If not, it stops, keeps what was recovered, and flags `deadline_reached` (→
+`assessment_deadline_reached` warning) — converting a would-be timeout into a
+soft, flagged, complete document. As defense in depth, the Step Functions
+`ExtractionStep`/`AssessmentStep`/`ShardExtractionStep` retry sets include
+`States.Timeout` / `Lambda.Unknown`, so a genuine timeout is retried and resumes
+via the per-shard S3 persistence and the Assessment step's "skip if
+`explainability_info` already present" short-circuit.
 
 ## Prompt Template Placeholders
 
@@ -432,6 +507,51 @@ Key behaviors:
 - **Safe fallback**: absent `pageData.json`, `geometryAvailable: false`, or no value match →
   keep the LLM-estimated box (identical to prior behavior). `pageData.json` is read from S3, so
   the `{OCR_TEXT_CONFIDENCE}` prompt and token budget are unchanged.
+
+### Per-shard grounding (sharded agentic path)
+
+In the sharded agentic path each shard **grounds its own rows against only its own
+pages** immediately after its in-shard confidence assessment (in
+`ExtractionService._build_assess_runner` → `_ground_shard_assessment`), rather than
+deferring one full-section grounding sweep to the merge step. This matters because
+grounding is `O(rows × pages)` fuzzy line-matching: a large multi-page table
+(e.g. 1,440 rows over 24 pages) grounded once at merge time is single-threaded, has
+no wall-clock guard, and could exceed the merge Lambda's 900s ceiling. Grounding
+per-shard makes it scale exactly like the confidence assessment does — each shard's
+work is bounded to its own ~N rows × ~5 pages and runs concurrently across shards.
+Scoping to the shard's pages also improves correctness: a row's value can only appear
+on its own pages, so cross-page false matches are avoided.
+
+The merge step then re-runs `ground_assessment_geometry(..., skip_grounded=True)`,
+which is a near-instant no-op over leaves that already carry a `geometry_source`
+(everything the shards grounded) and only grounds any **residual** leaves — e.g.
+reconcile-padded placeholder rows the assessment LLM omitted. The non-sharded
+single-agent path still grounds once at the end (`skip_grounded=True` is a no-op
+there because no leaf is pre-grounded), so behavior is identical.
+
+### Indexed value→line matching (performance)
+
+`match_value_to_geometry` builds, once per page and caches on the `pageData` dict,
+a normalized-line list plus an **exact-text → lines index**, then does an
+index-first pass across all pages before any linear scan. Because EXACT is the most
+precise tier, a value that equals an OCR line verbatim (the overwhelmingly common
+case for table cells) resolves as an O(1) dict hit and skips the substring / span /
+token-overlap / Levenshtein passes entirely; a tier-aware early-out likewise skips
+the fuzzy ladder whenever a hit that it cannot beat already exists. This took a
+1,440-row section from ~64s to ~2s with byte-identical output. When nothing matches
+exactly (reformatting, OCR noise) the full fuzzy ladder still runs, so match quality
+is unchanged. `_ground_shard_assessment` logs the row count + duration so a
+regression can never again be a silent multi-minute hang.
+
+### Images omitted in OCR-geometry modes
+
+In `geometry.mode: ocr_only` (default) and `off`, `assess_results` **drops the page
+images from the confidence prompt** — the model is never asked for boxes (geometry
+comes from OCR value-matching), so the images only bloat the request (~1.7K input
+tokens each; a 5-page shard ≈ 8.7K) and, on a small multimodal model like Nova Lite,
+materially raise latency and the odds of a max-output-token truncation on large
+tables. In `llm`/`llm_grounded` the images are kept (the model needs them to estimate
+boxes).
 
 See the *Geometry / Bounding Boxes* section of `docs/extraction-and-confidence.md`
 for the user-facing description.

@@ -290,6 +290,73 @@ def get_model_max_output_tokens(model_id: str) -> int:
     )
 
 
+def get_model_max_input_tokens(model_id: str) -> int:
+    """Get the maximum INPUT (context-window) tokens supported by a model.
+
+    Companion to :func:`get_model_max_output_tokens`, backed by the same
+    EFFECTIVE limits (DynamoDB Configuration Table when available, else
+    ``config_library/model_config_limits.yaml`` on disk) via the
+    ``max_input_tokens`` field. Drives
+    model-aware auto-sizing of shard token/page budgets and confidence list-batch
+    sizes (see ``idp_common.bedrock.sizing``). Patterns are matched in order
+    (first match wins), so ``:1m`` extended-context variants — which have their
+    own 1,000,000-token patterns placed before the base entries — resolve to the
+    large window rather than the base 200K.
+
+    Args:
+        model_id: Bedrock model identifier (e.g. ``us.anthropic.claude-sonnet-5:1m``)
+
+    Returns:
+        Maximum input/context tokens supported by the model.
+
+    Raises:
+        ValueError: If no pattern matches, or the matched entry has no
+            ``max_input_tokens`` (callers should fall back to a safe default).
+
+    Examples:
+        >>> get_model_max_input_tokens("us.anthropic.claude-sonnet-5")
+        200000
+        >>> get_model_max_input_tokens("us.anthropic.claude-sonnet-5:1m")
+        1000000
+        >>> get_model_max_input_tokens("us.amazon.nova-lite-v1:0")
+        300000
+    """
+    model_id_lower = model_id.lower()
+    # Use the EFFECTIVE limits (DynamoDB Configuration Table when available, else
+    # config_library/model_config_limits.yaml on disk) — same source as
+    # get_model_max_output_tokens — so a window edited in the UI's Model Limits
+    # page also drives input-based auto-sizing.
+    model_limits = _get_effective_model_limits()
+
+    for limit_entry in model_limits:
+        pattern = limit_entry.get("pattern", "")
+        max_input = limit_entry.get("max_input_tokens")
+        if not pattern:
+            continue
+        if re.search(pattern, model_id_lower):
+            if max_input is None:
+                raise ValueError(
+                    f"Model ID {model_id} matched pattern {pattern!r} but that "
+                    "entry has no 'max_input_tokens'. Add it to "
+                    "model_config_limits.yaml."
+                )
+            logger.debug(
+                "Matched model input-window pattern",
+                extra={
+                    "model_id": model_id,
+                    "pattern": pattern,
+                    "max_input_tokens": max_input,
+                },
+            )
+            return max_input
+
+    raise ValueError(
+        f"Unsupported model ID: {model_id}. No max_input_tokens defined in "
+        "model_config_limits.yaml. Supported families: Claude, Amazon Nova, "
+        "OpenAI GPT-5.x."
+    )
+
+
 # Bedrock's ValidationException for an over-limit maxTokens request states the
 # real cap in the message. There is no AWS API that exposes the per-model output
 # limit, so this error text is the authoritative source we fall back to when
