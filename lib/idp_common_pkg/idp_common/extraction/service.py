@@ -184,6 +184,10 @@ class ExtractionService:
         # so per-shard grounding can load each shard's OCR pageData without
         # threading `document` through _invoke_extraction_model. Reset per section.
         self._document: Document | None = None
+        # Agent's optional self-reported table-tool rationale (a "TABLE_TOOL_NOTE:"
+        # line) captured from its final message; consumed by _save_results. Reset
+        # per section so a prior section's note never leaks.
+        self._agent_table_tool_note: str | None = None
 
         # Get model_id from config for logging (type-safe access with fallback)
         model_id = (
@@ -831,6 +835,7 @@ class ExtractionService:
         # Memoized model-aware SizingPlan for the current section (item 2).
         self._sizing_plan = None
         self._document = None
+        self._agent_table_tool_note = None
 
     def _validate_and_find_section(
         self, document: Document, section_id: str
@@ -1508,6 +1513,29 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         # Return empty for optional cases (standard TABLE_PARSING_PROMPT_ADDENDUM will be used)
         return ""
 
+    @staticmethod
+    def _extract_table_tool_note(response_with_metering: Any) -> str | None:
+        """Pull the agent's optional ``TABLE_TOOL_NOTE:`` line from its final text.
+
+        The extraction agent is instructed to end its final message with a single
+        ``TABLE_TOOL_NOTE: <one sentence>`` line when it extracted a large table
+        directly instead of calling the deterministic parser. We surface that
+        first-person rationale in the processing report (clearly labelled as the
+        agent's *stated* reason — a post-hoc explanation, not ground truth).
+        Returns the note text (without the prefix), or None. Best-effort.
+        """
+        try:
+            from idp_common import bedrock
+
+            text = bedrock.extract_text_from_response(dict(response_with_metering))
+        except Exception:  # noqa: BLE001 - report-only; never fail extraction
+            return None
+        if not text or "TABLE_TOOL_NOTE:" not in text:
+            return None
+        # Take the content after the last occurrence of the marker, first line only.
+        note = text.split("TABLE_TOOL_NOTE:")[-1].strip().splitlines()[0].strip()
+        return note or None
+
     def _explain_tool_usage_decision(
         self,
         expected: bool,
@@ -1516,6 +1544,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
         ocr_analysis: dict[str, Any] | None,
         tool_enabled: bool = True,
         ocr_had_markdown_tables: bool = True,
+        agent_note: str | None = None,
     ) -> str:
         """Generate a human-readable explanation of the table-parsing-tool decision.
 
@@ -1551,15 +1580,23 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             if schema_analysis and schema_analysis.get("tool_usage_recommended"):
                 reasons.append(schema_analysis.get("recommendation_reason", ""))
             reason_str = "; ".join(r for r in reasons if r) or "large tables detected"
-            return (
+            base = (
                 "Table parsing was ENABLED and RECOMMENDED "
                 f"({reason_str}), and Markdown tables were present in the OCR, but "
-                "the extraction agent CHOSE NOT to call the deterministic parser — "
-                "it judged direct LLM extraction sufficient for this section. The "
-                "row counts below and the completeness check indicate whether that "
-                "was safe; if a large table looks truncated, this is the first thing "
-                "to inspect."
+                "the extraction agent CHOSE NOT to call the deterministic parser and "
+                "extracted the table directly instead."
             )
+            if agent_note:
+                # First-person reason the agent gave — a stated (post-hoc)
+                # explanation, not verified ground truth.
+                base += f' Agent\'s stated reason: "{agent_note}"'
+            else:
+                base += (
+                    " (No reason was reported by the agent.) The row counts below "
+                    "and the completeness check indicate whether that was safe; if a "
+                    "large table looks truncated, this is the first thing to inspect."
+                )
+            return base
 
         if not expected and actual:
             return "Tool was used even though not strictly required (agent chose to use it)."
@@ -2915,6 +2952,14 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             metering = response_with_metering["metering"]
             parsing_succeeded = True
 
+            # Capture the agent's optional self-reported table-tool rationale (a
+            # "TABLE_TOOL_NOTE:" line it emits when it extracted a large table
+            # directly instead of calling parse_table). Best-effort; empty when the
+            # agent used the tool or added no note.
+            self._agent_table_tool_note = self._extract_table_tool_note(
+                response_with_metering
+            )
+
             # Full JSON-Schema validation of the final result, with optional
             # bounded escalation to a stronger model. No-op unless
             # extraction.agentic.validation.enabled. Updates extracted_fields,
@@ -3652,7 +3697,11 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     result.ocr_analysis
                     and result.ocr_analysis.get("tables_detected", 0) > 0
                 )
-                metadata["tool_usage_decision"] = {
+                # Agent's optional self-reported rationale for skipping the tool
+                # (captured from its final message). Only meaningful when it was
+                # recommended but not used.
+                agent_note = getattr(self, "_agent_table_tool_note", None)
+                decision: dict[str, Any] = {
                     "expected": tool_expected,
                     "actual": tool_used,
                     "mismatch": tool_expected != tool_used,
@@ -3665,8 +3714,12 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                         ocr_analysis=result.ocr_analysis,
                         tool_enabled=tool_enabled,
                         ocr_had_markdown_tables=ocr_had_markdown_tables,
+                        agent_note=agent_note,
                     ),
                 }
+                if agent_note and tool_expected and not tool_used:
+                    decision["agent_stated_reason"] = agent_note
+                metadata["tool_usage_decision"] = decision
 
             # Validate completeness
             if result.schema_analysis or result.ocr_analysis:

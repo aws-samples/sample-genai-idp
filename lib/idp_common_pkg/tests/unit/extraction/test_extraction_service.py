@@ -1024,6 +1024,49 @@ class TestToolUsageDecisionExplanation:
         )
         assert "CHOSE NOT" in msg
         assert "Detected 8 table(s)" in msg  # the concrete reason it was recommended
+        assert "No reason was reported" in msg  # no agent note supplied
+
+    def test_agent_declined_with_stated_reason(self):
+        msg = self._svc()._explain_tool_usage_decision(
+            True,
+            False,
+            None,
+            self._OCR,
+            tool_enabled=True,
+            ocr_had_markdown_tables=True,
+            agent_note="Table had only 5 rows; direct extraction was reliable.",
+        )
+        assert "CHOSE NOT" in msg
+        assert "Agent's stated reason: \"Table had only 5 rows" in msg
+
+    def test_extract_table_tool_note_parses_marker(self):
+        svc = self._svc()
+        resp = {
+            "response": {
+                "output": {
+                    "message": {
+                        "content": [
+                            {
+                                "text": "Extraction complete.\n"
+                                "TABLE_TOOL_NOTE: Pipe-table was malformed so I read "
+                                "values from context."
+                            }
+                        ]
+                    }
+                }
+            },
+            "metering": {},
+        }
+        note = svc._extract_table_tool_note(resp)
+        assert note == "Pipe-table was malformed so I read values from context."
+
+    def test_extract_table_tool_note_absent_returns_none(self):
+        svc = self._svc()
+        resp = {
+            "response": {"output": {"message": {"content": [{"text": "All done."}]}}},
+            "metering": {},
+        }
+        assert svc._extract_table_tool_note(resp) is None
 
     def test_no_markdown_tables_in_ocr(self):
         msg = self._svc()._explain_tool_usage_decision(

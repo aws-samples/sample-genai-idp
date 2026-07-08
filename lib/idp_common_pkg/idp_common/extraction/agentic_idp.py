@@ -862,6 +862,14 @@ After successfully using the extraction tool, you MUST:
 4. Look for any missing fields, incorrect values, or formatting issues
 5. If any discrepancies are found, use the apply_json_patches tool to fix them
 6. Only finish when you are confident all data is accurate and complete
+
+TABLE TOOL NOTE (for the processing report):
+If the document contained a large table AND you did NOT use the parse_table /
+map_table_to_schema tools to extract it, end your final response with ONE short
+sentence, on its own line, beginning exactly with "TABLE_TOOL_NOTE:" that states
+briefly why you extracted the table directly instead (e.g. the table was small,
+the OCR pipe-table was malformed, columns didn't map cleanly). If you DID use the
+table tools, or there was no large table, do not add this note.
 """
 
 
