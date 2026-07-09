@@ -1,0 +1,101 @@
+# =============================================================================
+# Benchmark configuration matrix
+# =============================================================================
+# Design principle: full-factorial over every knob is combinatorially huge and
+# largely redundant (accuracy was empirically FLAT across several axes). Instead
+# we test:
+#   (1) a curated set of CORE cells covering the decision-relevant combinations, and
+#   (2) targeted ONE-AXIS sweeps that vary a single knob with the rest held at the
+#       core "default" so each knob's effect is isolated (scientific control).
+#
+# Each cell names the knobs it sets; make_configs.py merges them onto a base
+# managed config (per document class) and validates to a full v0.6 IDPConfig.
+# Axes and their real config paths are documented in axes: below.
+# =============================================================================
+
+axes:
+  ocr:                                     # OCR backend / features
+    textract_layout:  {use_bda: false, ocr.backend: textract, ocr.features: [LAYOUT]}
+    textract_tables:  {use_bda: false, ocr.backend: textract, ocr.features: [TABLES, LAYOUT]}
+    bda:              {use_bda: true}
+    bedrock_llm:      {use_bda: false, ocr.backend: bedrock}   # LLM-based OCR (Nova)
+  extraction_mode:                         # extraction.mode (+ agentic.enabled derived)
+    simple:   {extraction.mode: simple}
+    advanced: {extraction.mode: advanced}  # agentic sharding + table tool
+  assessment:                              # extraction.confidence.mode
+    off:        {extraction.confidence.mode: "off"}
+    separate:   {extraction.confidence.mode: separate}
+    integrated: {extraction.confidence.mode: integrated}
+  geometry:                                # extraction.geometry.mode
+    ocr_only:     {extraction.geometry.mode: ocr_only}
+    llm:          {extraction.geometry.mode: llm}
+    llm_grounded: {extraction.geometry.mode: llm_grounded}
+  escalation:                              # extraction.confidence.escalation_enabled
+    on:  {extraction.confidence.escalation_enabled: true}
+    off: {extraction.confidence.escalation_enabled: false}
+  extraction_model:                        # extraction.model
+    sonnet5:      {extraction.model: us.anthropic.claude-sonnet-5}
+    sonnet5_1m:   {extraction.model: us.anthropic.claude-sonnet-5:1m}
+    nova_pro:     {extraction.model: us.amazon.nova-pro-v1:0}
+    nova_lite:    {extraction.model: us.amazon.nova-lite-v1:0}
+  confidence_model:                        # extraction.confidence.model
+    nova_lite:  {extraction.confidence.model: us.amazon.nova-lite-v1:0}
+    nova_2_lite: {extraction.confidence.model: us.amazon.nova-2-lite-v1:0}
+    sonnet5:    {extraction.confidence.model: us.anthropic.claude-sonnet-5}
+  reasoning_effort:                        # extraction.reasoning_effort (Claude effort models)
+    low:    {extraction.reasoning_effort: low}
+    medium: {extraction.reasoning_effort: medium}
+    high:   {extraction.reasoning_effort: high}
+
+# The "default" knob values used to hold every non-swept axis constant.
+default_cell:
+  ocr: textract_tables
+  extraction_mode: simple
+  assessment: separate
+  geometry: ocr_only
+  escalation: "off"          # OFF in the isolate-a-knob baseline so escalation cost
+                             # doesn't confound cross-cell cost comparisons; the
+                             # escalation sweep turns it on explicitly.
+  extraction_model: sonnet5
+  confidence_model: nova_lite
+  reasoning_effort: low
+
+# -----------------------------------------------------------------------------
+# CORE cells — the decision-relevant combinations every release should measure.
+# These are the "which mode / OCR / assessment should I pick" answers.
+# -----------------------------------------------------------------------------
+core_cells:
+  - {id: core-tt-simple-sep,   ocr: textract_tables, extraction_mode: simple,   assessment: separate}
+  - {id: core-tt-simple-int,   ocr: textract_tables, extraction_mode: simple,   assessment: integrated}
+  - {id: core-tt-simple-off,   ocr: textract_tables, extraction_mode: simple,   assessment: "off"}
+  - {id: core-tt-adv-sep,      ocr: textract_tables, extraction_mode: advanced, assessment: separate}
+  - {id: core-tt-adv-int,      ocr: textract_tables, extraction_mode: advanced, assessment: integrated}
+  - {id: core-tl-simple-sep,   ocr: textract_layout, extraction_mode: simple,   assessment: separate}
+  - {id: core-tl-adv-sep,      ocr: textract_layout, extraction_mode: advanced, assessment: separate}
+  - {id: core-bda-simple-sep,  ocr: bda,             extraction_mode: simple,   assessment: separate}
+  - {id: core-bda-adv-sep,     ocr: bda,             extraction_mode: advanced, assessment: separate}
+  - {id: core-llm-simple-sep,  ocr: bedrock_llm,     extraction_mode: simple,   assessment: separate}
+
+# -----------------------------------------------------------------------------
+# ONE-AXIS sweeps — vary a single knob, everything else = default_cell.
+# Isolates each knob's marginal effect on accuracy/cost/calibration/latency.
+# -----------------------------------------------------------------------------
+sweeps:
+  ocr:              [textract_layout, textract_tables, bda, bedrock_llm]
+  extraction_mode:  [simple, advanced]
+  assessment:       ["off", separate, integrated]
+  geometry:         [ocr_only, llm, llm_grounded]
+  escalation:       ["off", "on"]           # run on the low-confidence corpus to expose cost
+  extraction_model: [nova_lite, nova_pro, sonnet5, sonnet5_1m]
+  confidence_model: [nova_lite, nova_2_lite, sonnet5]
+  reasoning_effort: [low, medium, high]
+
+# -----------------------------------------------------------------------------
+# Suites — named subsets so a PR can run a cheap smoke test and a release can run
+# the full study. run_matrix.py --suite <name>.
+# -----------------------------------------------------------------------------
+suites:
+  smoke:   {cells: [core-tt-simple-sep, core-tt-adv-sep], docs: [small_narrow, tiny_form], repeats: 1}
+  core:    {cells: "core_cells", docs: "core_docs", repeats: 1}
+  full:    {cells: "core_cells+sweeps", docs: "all", repeats: 1}
+  scaling: {cells: [core-tt-simple-sep, core-tt-adv-sep], docs: "scaling_series", repeats: 1}
