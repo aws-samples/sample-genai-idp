@@ -23,15 +23,38 @@ from __future__ import annotations
 
 import json
 
-import strands  # noqa: E402 — mocked to a passthrough so @tool wraps nothing
+import pytest
 
-strands.tool = lambda fn: fn  # type: ignore[assignment]
+# The @tool decorator: under tests, conftest replaces the ``strands`` module with
+# a MagicMock, so ``table_parser`` binds a MagicMock as ``tool`` at import (which
+# breaks @tool). We must make it a passthrough BEFORE the factories are called.
+# table_parser does ``from strands import tool``, so patch the BOUND name on the
+# module directly (not the global ``strands.tool``), and re-apply it per-test via
+# an autouse fixture so this file never depends on — or corrupts — the import
+# order relative to the other table-tool test modules.
+from idp_common.extraction.tools import table_parser as _tp  # noqa: E402
+
+_tp.tool = lambda fn: fn  # type: ignore[assignment]
 
 from idp_common.extraction.tools.table_parser import (  # noqa: E402
     INLINE_ROW_CAP,
     create_map_table_to_schema_tool,
     create_parse_table_tool,
 )
+
+
+@pytest.fixture(autouse=True)
+def _passthrough_tool_decorator():
+    """Ensure ``table_parser.tool`` is a passthrough for each test in this module
+    and RESTORE the prior value afterward, so running this file before/after the
+    other table-tool test modules can neither be broken by nor break their
+    import-order-dependent decorator state."""
+    prev = _tp.tool
+    _tp.tool = lambda fn: fn  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        _tp.tool = prev  # type: ignore[assignment]
 
 
 class _State:
@@ -125,6 +148,25 @@ class TestParseTableWriteback:
         assert content_json["row_count"] == n
         assert "rows" in content_json
         assert len(content_json["rows"]) == n
+
+    def test_no_tables_preserves_parser_status_in_state(self):
+        """The Bedrock-facing status is folded to success/error, but the parser's
+        semantic status ("no_tables_found") must NOT be lost from the object
+        stored in agent state — it is preserved under ``parser_status``.
+        (Regression: the fold used to mutate the same object held in state.)"""
+        agent = _Agent()
+        tool = create_parse_table_tool()
+        # Text with no Markdown table -> parser status "no_tables_found".
+        result = tool(table_text="Just some prose, no table here.", agent=agent)
+
+        # Return is Bedrock-ToolResult-valid.
+        assert result["status"] in ("success", "error")
+        # Semantic status preserved on the return...
+        assert result["parser_status"] == "no_tables_found"
+        # ...and in the object stored in agent state (not clobbered to success).
+        stored = agent.state.get("last_parse_table_result")
+        if stored is not None:  # state only set when a parse was attempted
+            assert stored.get("parser_status") == "no_tables_found"
 
 
 class TestMapTableWriteback:

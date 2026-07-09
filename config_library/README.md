@@ -236,6 +236,10 @@ extraction:
       auto_merge_adjacent_tables: true  # Merge table fragments
       min_confidence_threshold: 95.0  # OCR confidence target
       min_parse_success_rate: 0.90  # Quality threshold
+      lazy_images: true  # Skip pre-loading page images when the table parse
+                         # succeeds (text-driven tool; view_image on demand).
+                         # Big cost saver on multi-page docs. false = always
+                         # attach images (image-dependent corpora).
 ```
 
 **When to use**:

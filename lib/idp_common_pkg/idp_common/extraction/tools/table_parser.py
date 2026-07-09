@@ -51,6 +51,35 @@ def _compact_content(summary: dict[str, Any]) -> list[dict[str, Any]]:
     return [{"json": summary}]
 
 
+def _build_row_summary(
+    rows: list[Any],
+    row_count: int,
+    rows_key: str,
+    next_tool: str,
+) -> dict[str, Any]:
+    """Build the model-visible row portion of a tool-result summary.
+
+    Small tables (<= ``INLINE_ROW_CAP``) inline every row under ``rows_key`` so
+    the manual/fallback extraction workflow still sees the data. Large tables
+    inline only head/tail samples + counts + a note pointing the agent at the
+    next tool (which reads the full rows from agent state) — so the dense rows
+    never re-enter the growing conversation. Shared by parse_table and
+    map_table_to_schema to avoid drift between the two blocks.
+    """
+    if row_count <= INLINE_ROW_CAP:
+        return {rows_key: rows}
+    return {
+        "sample_first_rows": rows[:SAMPLE_ROWS],
+        "sample_last_rows": rows[-SAMPLE_ROWS:],
+        "rows_omitted_from_echo": row_count - 2 * SAMPLE_ROWS,
+        "note": (
+            f"All {row_count} rows are stored in agent state. "
+            f"Call {next_tool} next (it reads them from state) — "
+            "do NOT re-type the rows."
+        ),
+    }
+
+
 def _split_table_row(line: str) -> list[str]:
     """
     Split a Markdown table row into cells, handling edge pipes.
@@ -688,7 +717,11 @@ def create_parse_table_tool(
 
         Returns:
             Dict with parsed data and quality metrics:
-            - status: "success", "no_tables_found", or "error"
+            - status: "success" or "error" (Bedrock ToolResult-valid). The
+              richer parser status ("success"/"no_tables_found"/"error") is
+              preserved under ``parser_status`` — read that, not ``status``,
+              for the semantic outcome.
+            - parser_status: "success", "no_tables_found", or "error"
             - columns: list of column header strings
             - rows: list of dicts mapping column names to cell values
             - row_count: number of data rows
@@ -814,19 +847,9 @@ def create_parse_table_tool(
         # large tables we inline only head+tail samples + stats.
         row_count = result.get("row_count", 0)
         rows = result.get("rows", []) or []
-        if row_count <= INLINE_ROW_CAP:
-            visible_rows: dict[str, Any] = {"rows": rows}
-        else:
-            visible_rows = {
-                "sample_first_rows": rows[:SAMPLE_ROWS],
-                "sample_last_rows": rows[-SAMPLE_ROWS:],
-                "rows_omitted_from_echo": row_count - 2 * SAMPLE_ROWS,
-                "note": (
-                    f"All {row_count} parsed rows are stored in agent state. "
-                    "Call map_table_to_schema next (it reads them from state) — "
-                    "do NOT re-type the rows."
-                ),
-            }
+        visible_rows = _build_row_summary(
+            rows, row_count, rows_key="rows", next_tool="map_table_to_schema"
+        )
         summary: dict[str, Any] = {
             "status": result.get("status"),
             "table_count": result.get("table_count", 0),
@@ -847,12 +870,17 @@ def create_parse_table_tool(
         # the str(result) inline path) when the dict has both ``status`` and
         # ``content``, and Bedrock only accepts a ToolResult status of
         # "success"/"error". The parser's richer statuses ("no_tables_found")
-        # are folded into "success" (the CALL succeeded; the compact content
-        # conveys that no tables were found) to stay Bedrock-valid — matching the
-        # pre-change behavior where every result was wrapped as success.
-        summary_status = summary.get("status")
+        # must be folded to "success"/"error" for the RETURN.
+        #
+        # But ``result`` is the SAME object already stored in agent state
+        # (``last_parse_table_result``, above), so we must NOT clobber its
+        # semantic status in place. Preserve the parser status under
+        # ``parser_status`` first, then set the Bedrock-facing ``status``. State
+        # (and the documented contract) thus retains the original meaning.
+        parser_status = result.get("status")
+        result.setdefault("parser_status", parser_status)
         result["content"] = _compact_content(summary)
-        result["status"] = "error" if summary_status == "error" else "success"
+        result["status"] = "error" if parser_status == "error" else "success"
         return result
 
     return parse_table
@@ -1172,19 +1200,12 @@ def create_map_table_to_schema_tool():
         # top-level keys are dropped from the request), so the dense rows stay
         # out of the growing conversation.
         row_count = len(mapped_rows)
-        if row_count <= INLINE_ROW_CAP:
-            visible_rows: dict[str, Any] = {"mapped_rows": mapped_rows}
-        else:
-            visible_rows = {
-                "sample_first_rows": mapped_rows[:SAMPLE_ROWS],
-                "sample_last_rows": mapped_rows[-SAMPLE_ROWS:],
-                "rows_omitted_from_echo": row_count - 2 * SAMPLE_ROWS,
-                "note": (
-                    f"All {row_count} mapped rows are stored in agent state. "
-                    "Call finalize_table_extraction next (it reads them from "
-                    "state) — do NOT re-type the rows."
-                ),
-            }
+        visible_rows = _build_row_summary(
+            mapped_rows,
+            row_count,
+            rows_key="mapped_rows",
+            next_tool="finalize_table_extraction",
+        )
         summary: dict[str, Any] = {
             "status": "success",
             "row_count": row_count,
