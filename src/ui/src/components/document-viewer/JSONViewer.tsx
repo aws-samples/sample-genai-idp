@@ -5,7 +5,7 @@ import React, { useState, useMemo, Suspense, useEffect } from 'react';
 import { Box, Button, Spinner } from '@cloudscape-design/components';
 import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
-import { getFileContents, uploadDocument } from '../../graphql/generated';
+import { getFilePresignedUrl, uploadDocument } from '../../graphql/generated';
 import { useDocumentVersion } from '../../contexts/document-version';
 
 // Lazy load VisualEditorModal for better performance
@@ -78,7 +78,13 @@ const JSONViewer = ({
     [sectionData],
   );
 
-  // Fetch content and immediately open Visual Editor
+  // Fetch content and immediately open Visual Editor.
+  //
+  // The bytes are fetched directly from S3 via a short-lived presigned URL
+  // rather than proxied through the resolver Lambda. Section `result.json`
+  // files can exceed Lambda's 6 MB synchronous response cap (e.g. a large
+  // single-section document), which previously surfaced as a generic
+  // "Failed to load content" error. A presigned GET has no such size limit.
   const handleViewEditData = async () => {
     setIsLoading(true);
     setError(null);
@@ -86,23 +92,23 @@ const JSONViewer = ({
       logger.info('Fetching content:', fileUri);
 
       const response = await client.graphql({
-        query: getFileContents,
+        query: getFilePresignedUrl,
         variables: { s3Uri: fileUri, versionId: versionIdForUri(fileUri) },
       });
 
-      const result = response.data?.getFileContents;
+      const result = response.data?.getFilePresignedUrl;
 
-      if (!result) {
+      if (!result?.presignedUrl) {
         setError('No response from server.');
         return;
       }
 
-      if (result.isBinary === true) {
-        setError('This file contains binary content that cannot be viewed.');
-        return;
+      // Fetch the file bytes straight from S3.
+      const s3Response = await fetch(result.presignedUrl);
+      if (!s3Response.ok) {
+        throw new Error(`S3 fetch failed: ${s3Response.status} ${s3Response.statusText}`);
       }
-
-      const fetchedContent = result.content ?? '';
+      const fetchedContent = await s3Response.text();
       logger.debug('Received content');
 
       // Parse JSON content
