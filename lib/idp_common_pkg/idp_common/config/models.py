@@ -179,6 +179,17 @@ class TableParsingConfig(BaseModel):
         "page breaks. Disable if documents contain multiple similar tables that "
         "should remain separate.",
     )
+    lazy_images: bool = Field(
+        default=True,
+        description="When the deterministic table parser successfully parses the "
+        "document's table(s) in pre-flight, do NOT pre-load page images into the "
+        "agentic extraction prompt. The table parser is text/markdown-driven and "
+        "never reads images, and the agent can still fetch a page on demand via "
+        "the view_image tool. Pre-loaded images are re-sent every agent turn and "
+        "dominate cost on multi-page documents. Set to false to always attach page "
+        "images (image-dependent corpora where the LLM must see page layout even "
+        "when a table is present).",
+    )
 
     @field_validator(
         "min_confidence_threshold", "min_parse_success_rate", mode="before"

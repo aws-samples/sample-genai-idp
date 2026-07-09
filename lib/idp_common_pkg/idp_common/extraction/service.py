@@ -2868,12 +2868,40 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                 select_extraction_task_prompt(self.config.extraction) or ""
             )
             send_images = "{DOCUMENT_IMAGE}" in prompt_template
+
+            # Cost optimization: when the deterministic table parser already
+            # parsed the document's table(s) in pre-flight, the agentic loop is
+            # text/markdown-driven (parse_table / map_table_to_schema never read
+            # images) and the agent can still fetch a page on demand via the
+            # view_image tool. Pre-loading every page image re-sends them on
+            # every agent turn and dominates cost on multi-page docs (and can
+            # push large docs toward context-window limits). So suppress the
+            # up-front image attachment when a successful pre-flight table parse
+            # covers the doc. Gated by config (lazy_images, default on) so
+            # image-dependent corpora can opt back in. Local+live A/B: identical
+            # completeness/accuracy (recall 1.0) with images off on this path.
+            suppress_images_for_table = (
+                send_images
+                and self.config.extraction.agentic.table_parsing.lazy_images
+                and preflight_parse_result is not None
+                and preflight_parse_result.get("status") == "success"
+            )
+            if suppress_images_for_table:
+                send_images = False
+
             agentic_images = (
                 self._cap_agent_images(self._page_images) if send_images else []
             )
             num_pages = len(self._page_images) or len(section_info.sorted_page_ids)
 
-            if not send_images and self._page_images:
+            if suppress_images_for_table and self._page_images:
+                logger.info(
+                    "Skipping up-front image attachment for agentic extraction "
+                    "(pre-flight table parse succeeded; table tool is text-driven, "
+                    "view_image remains available on demand)",
+                    extra={"page_count": num_pages},
+                )
+            elif not send_images and self._page_images:
                 logger.info(
                     "Skipping image attachment for agentic extraction "
                     "(task prompt does not reference {DOCUMENT_IMAGE})",

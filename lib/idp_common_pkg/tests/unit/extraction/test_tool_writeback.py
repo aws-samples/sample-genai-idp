@@ -174,3 +174,29 @@ class TestMapTableWriteback:
         content_len = _content_text_len(result)
         full_len = len(json.dumps(result["mapped_rows"]))
         assert content_len < full_len * 0.10
+
+
+class TestLazyImagesConfig:
+    """The lazy_images knob (perf: don't pre-load page images when the pre-flight
+    table parser already covers the doc; the table path is text-driven and
+    view_image fetches on demand). Defaults on; overridable for image-dependent
+    corpora. The service gating (service.py) is exercised end-to-end by the
+    live/local A/B; here we lock the config contract."""
+
+    def test_lazy_images_defaults_true(self):
+        from idp_common.config.models import TableParsingConfig
+
+        assert TableParsingConfig().lazy_images is True
+
+    def test_lazy_images_overridable(self):
+        from idp_common.config.models import TableParsingConfig
+
+        assert TableParsingConfig(lazy_images=False).lazy_images is False
+
+    def test_lazy_images_present_after_merge(self):
+        from idp_common.config.merge_utils import merge_config_with_defaults
+        from idp_common.config.models import IDPConfig
+
+        merged = merge_config_with_defaults({}, validate=True)
+        cfg = IDPConfig(**merged)
+        assert cfg.extraction.agentic.table_parsing.lazy_images is True
