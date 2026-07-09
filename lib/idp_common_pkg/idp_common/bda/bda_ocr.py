@@ -23,8 +23,20 @@ against the live service):
   the mean of its child words' confidence.
 
 BDA confidences are 0-1; Textract confidences are 0-100, so we scale by 100.
-BDA bounding boxes are already normalized 0-1 ({left, top, width, height}),
-matching Textract's convention.
+BDA bounding boxes are normalized 0-1 ({left, top, width, height}), matching
+Textract's convention.
+
+**Coordinate frame: BDA rectifies the page.** BDA internally deskews /
+perspective-corrects the input image and returns every bounding box normalized
+against that *rectified* image, not against the original page image the pipeline
+stored (``image.jpg``) and the UI displays. On a clean, axis-aligned scan the
+two frames coincide and boxes line up. On a skewed/rotated scan they don't, and
+overlays land in the wrong spot. Each page's ``asset_metadata.corners`` gives
+where the rectified image's four corners fall in the *original* image (0-1,
+ordered TL, TR, BR, BL), so we map every box back into original-image space via
+bilinear interpolation before emitting geometry. This makes BDA geometry agree
+with Textract's (which is never rectified). The mapping is a no-op when corners
+are absent or identity, preserving behavior for clean pages / older payloads.
 """
 
 from __future__ import annotations
@@ -42,29 +54,116 @@ logger = logging.getLogger(__name__)
 OCR_PROJECT_NAME = "GENAIIDP-OCR-StandardOutput"
 
 
-def _bbox_to_geometry(bbox: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Convert a BDA bounding_box (0-1) to a Textract-format Geometry, or None."""
+# A "corners" quad that is (within tolerance) the unit square: the rectified
+# image equals the original image, so no coordinate mapping is needed.
+_IDENTITY_CORNERS = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+_CORNERS_IDENTITY_TOL = 1e-3
+
+
+def _normalize_corners(
+    corners: Optional[Any],
+) -> Optional[List[tuple[float, float]]]:
+    """Coerce BDA ``asset_metadata.corners`` to four (x, y) tuples, or None.
+
+    Corners are the original-image (0-1) positions of the rectified image's four
+    corners, ordered top-left, top-right, bottom-right, bottom-left. Returns None
+    when absent/malformed, or when the quad is effectively the unit square (an
+    identity rectification, so no mapping is required).
+    """
+    if not isinstance(corners, (list, tuple)) or len(corners) != 4:
+        return None
+    pts: List[tuple[float, float]] = []
+    for c in corners:
+        if isinstance(c, (list, tuple)) and len(c) == 2:
+            try:
+                pts.append((float(c[0]), float(c[1])))
+            except (TypeError, ValueError):
+                return None
+        elif isinstance(c, dict) and "x" in c and "y" in c:
+            try:
+                pts.append((float(c["x"]), float(c["y"])))
+            except (TypeError, ValueError):
+                return None
+        else:
+            return None
+    if all(
+        abs(px - ix) <= _CORNERS_IDENTITY_TOL and abs(py - iy) <= _CORNERS_IDENTITY_TOL
+        for (px, py), (ix, iy) in zip(pts, _IDENTITY_CORNERS)
+    ):
+        return None
+    return pts
+
+
+def _map_point(
+    u: float, v: float, corners: List[tuple[float, float]]
+) -> tuple[float, float]:
+    """Bilinearly map a rectified-space point (u, v in 0-1) to original space.
+
+    ``corners`` are the original-image coordinates of the rectified corners in
+    TL, TR, BR, BL order. Bilinear interpolation across that quad inverts BDA's
+    rectification closely enough for overlay purposes (BDA rectification is an
+    affine/perspective deskew; bilinear is exact for affine and a good
+    approximation for mild perspective).
+    """
+    (tlx, tly), (trx, try_), (brx, bry), (blx, bly) = corners
+    top_x = tlx + (trx - tlx) * u
+    top_y = tly + (try_ - tly) * u
+    bot_x = blx + (brx - blx) * u
+    bot_y = bly + (bry - bly) * u
+    return (top_x + (bot_x - top_x) * v, top_y + (bot_y - top_y) * v)
+
+
+def _bbox_to_geometry(
+    bbox: Optional[Dict[str, Any]],
+    corners: Optional[List[tuple[float, float]]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Convert a BDA bounding_box (0-1) to a Textract-format Geometry, or None.
+
+    When ``corners`` is provided (a non-identity rectification quad), the box is
+    mapped from BDA's rectified frame back into original-image space so it aligns
+    with the stored page image / UI overlays. A rectified axis-aligned box maps
+    to a (possibly non-rectangular) quadrilateral, which becomes the ``Polygon``;
+    ``BoundingBox`` is that quad's axis-aligned envelope (Textract convention).
+    """
     if not isinstance(bbox, dict):
         return None
     left = bbox.get("left", 0.0)
     top = bbox.get("top", 0.0)
     width = bbox.get("width", 0.0)
     height = bbox.get("height", 0.0)
+
+    if corners is None:
+        # No rectification (clean page / identity corners): pass through, and
+        # synthesize a rectangular polygon so downstream geometry consumers (UI
+        # highlighting) have the same shape Textract provides.
+        polygon = [
+            (left, top),
+            (left + width, top),
+            (left + width, top + height),
+            (left, top + height),
+        ]
+    else:
+        # Map each rectified corner back into original-image space. Order is
+        # TL, TR, BR, BL to match Textract's polygon winding.
+        polygon = [
+            _map_point(left, top, corners),
+            _map_point(left + width, top, corners),
+            _map_point(left + width, top + height, corners),
+            _map_point(left, top + height, corners),
+        ]
+
+    xs = [p[0] for p in polygon]
+    ys = [p[1] for p in polygon]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
     return {
         "BoundingBox": {
-            "Left": left,
-            "Top": top,
-            "Width": width,
-            "Height": height,
+            "Left": min_x,
+            "Top": min_y,
+            "Width": max_x - min_x,
+            "Height": max_y - min_y,
         },
-        # Synthesize a rectangular polygon so downstream geometry consumers
-        # (UI highlighting) have the same shape Textract provides.
-        "Polygon": [
-            {"X": left, "Y": top},
-            {"X": left + width, "Y": top},
-            {"X": left + width, "Y": top + height},
-            {"X": left, "Y": top + height},
-        ],
+        "Polygon": [{"X": x, "Y": y} for x, y in polygon],
     }
 
 
@@ -110,6 +209,28 @@ def bda_standard_output_to_textract_blocks(
 
     text_lines: List[Dict[str, Any]] = standard_output.get("text_lines", []) or []
     text_words: List[Dict[str, Any]] = standard_output.get("text_words", []) or []
+
+    # Rectification corners are per-page (asset_metadata.corners). Map each
+    # page_index to its normalized corners so every box can be re-projected into
+    # original-image space; None means identity/absent (no mapping needed).
+    corners_by_page: Dict[Optional[int], Optional[List[tuple[float, float]]]] = {}
+    for page in standard_output.get("pages", []) or []:
+        if not isinstance(page, dict):
+            continue
+        asset_meta = page.get("asset_metadata") or {}
+        corners_by_page[page.get("page_index")] = _normalize_corners(
+            asset_meta.get("corners")
+        )
+
+    def _corners_for(unit: Dict[str, Any]) -> Optional[List[tuple[float, float]]]:
+        pi = unit.get("page_index")
+        if pi in corners_by_page:
+            return corners_by_page[pi]
+        # Single-page invocations sometimes omit a matching page_index on the
+        # unit; fall back to the sole page's corners when unambiguous.
+        if len(corners_by_page) == 1:
+            return next(iter(corners_by_page.values()))
+        return None
 
     def _on_page(unit: Dict[str, Any]) -> bool:
         if page_index is None:
@@ -169,7 +290,9 @@ def bda_standard_output_to_textract_blocks(
                     "Id": wid,
                     "Text": word.get("text", ""),
                     "Confidence": wconf_scaled,
-                    "Geometry": _bbox_to_geometry(_first_bbox(word)),
+                    "Geometry": _bbox_to_geometry(
+                        _first_bbox(word), _corners_for(word)
+                    ),
                 }
             )
             word_ids.append(wid)
@@ -187,7 +310,7 @@ def bda_standard_output_to_textract_blocks(
             "Id": line_id,
             "Text": line.get("text", ""),
             "Confidence": line_conf,
-            "Geometry": _bbox_to_geometry(_first_bbox(line)),
+            "Geometry": _bbox_to_geometry(_first_bbox(line), _corners_for(line)),
         }
         if word_ids:
             line_block["Relationships"] = [{"Type": "CHILD", "Ids": word_ids}]
