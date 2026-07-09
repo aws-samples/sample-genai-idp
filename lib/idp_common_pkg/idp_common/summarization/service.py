@@ -278,9 +278,9 @@ class SummarizationService:
         budget_tokens = int(max_input_tokens * _CONTEXT_SAFETY_FRACTION)
 
         # Account for the static task-prompt/system-prompt boilerplate.
-        boilerplate_tokens = _estimate_tokens(
-            config["task_prompt"]
-        ) + _estimate_tokens(config.get("system_prompt", ""))
+        boilerplate_tokens = _estimate_tokens(config["task_prompt"]) + _estimate_tokens(
+            config.get("system_prompt", "")
+        )
         payload_budget = max(0, budget_tokens - boilerplate_tokens)
 
         truncated = False
@@ -307,7 +307,7 @@ class SummarizationService:
                 else:
                     extraction_json = (
                         extraction_json[:extraction_char_cap]
-                        + '\n... (extraction results truncated to fit model context window)'
+                        + "\n... (extraction results truncated to fit model context window)"
                     )
                 extraction_tokens = _estimate_tokens(extraction_json)
 

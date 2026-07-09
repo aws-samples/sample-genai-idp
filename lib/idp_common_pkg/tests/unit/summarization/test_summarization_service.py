@@ -787,9 +787,7 @@ class TestExtractionArrayElision:
         """The prompt sent to Bedrock must NOT contain the full 6400-row list."""
         mock_invoke_model.return_value = {
             "response": {
-                "output": {
-                    "message": {"content": [{"text": '{"summary": "ok"}'}]}
-                }
+                "output": {"message": {"content": [{"text": '{"summary": "ok"}'}]}}
             },
             "metering": {"input_tokens": 10, "output_tokens": 5},
         }
@@ -833,9 +831,7 @@ class TestFitOrSkipGuard:
         config = service._get_summarization_config()
         # ~2M chars ≈ 500K tokens, far over Nova Pro's 300K window.
         huge_text = "word " * 400_000
-        placeholders, truncated = service._build_placeholders(
-            huge_text, {}, config
-        )
+        placeholders, truncated = service._build_placeholders(huge_text, {}, config)
         assert truncated is True
         assert len(placeholders["DOCUMENT_TEXT"]) < len(huge_text)
         assert "truncated" in placeholders["DOCUMENT_TEXT"].lower()
