@@ -118,8 +118,12 @@ def handler(event, context):
     # the AppSync schema (@aws_cognito_user_pools(cognito_groups:["Admin",
     # "Author"])). The REST dispatcher's Cognito authorizer only authenticates,
     # so re-enforce the group check here (dispatcher maps PermissionError->403).
+    # Direct Lambda invocations (no 'identity' — SDK/CLI/CI automation) are
+    # gated by IAM (lambda:InvokeFunction on this ARN), not Cognito groups —
+    # same carve-out as abort_test_runs.
+    is_api_invoke = event.get("identity") is not None
     groups = _caller_groups(event)
-    if not ({"Admin", "Author"}.intersection(groups)):
+    if is_api_invoke and not ({"Admin", "Author"}.intersection(groups)):
         logger.warning(
             "Forbidden: caller (groups=%s) attempted %s (requires Admin/Author)",
             groups, field_name,
