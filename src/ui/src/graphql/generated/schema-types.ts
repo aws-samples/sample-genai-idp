@@ -1247,6 +1247,7 @@ export type Query = {
   getModelConfigLimits?: Maybe<ModelConfigLimitsResponse>;
   getMyProfile?: Maybe<User>;
   getPricing?: Maybe<PricingResponse>;
+  getSampleDocumentUrl?: Maybe<SampleDocumentUrl>;
   getStepFunctionExecution?: Maybe<StepFunctionExecutionResponse>;
   getTestRun?: Maybe<TestRun>;
   getTestRunStatus?: Maybe<TestRunStatus>;
@@ -1374,6 +1375,11 @@ export type QueryGetFilePresignedUrlArgs = {
 
 export type QueryGetFinetuningJobArgs = {
   jobId: Scalars['ID']['input'];
+};
+
+
+export type QueryGetSampleDocumentUrlArgs = {
+  s3Key: Scalars['String']['input'];
 };
 
 
@@ -1543,6 +1549,11 @@ export type SampleDocumentUploadResponse = {
   error?: Maybe<Scalars['String']['output']>;
   objectKeys?: Maybe<Array<Maybe<Scalars['String']['output']>>>;
   success: Scalars['Boolean']['output'];
+};
+
+export type SampleDocumentUrl = {
+  s3Key: Scalars['String']['output'];
+  url: Scalars['String']['output'];
 };
 
 export type Section = {

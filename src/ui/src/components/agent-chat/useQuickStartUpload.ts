@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import JSZip from 'jszip';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from '../../api/client-shim';
-import { uploadMultiDocDiscoveryZip, startMultiDocDiscovery, listDiscoveryJobs } from '../../graphql/generated';
+import { uploadMultiDocDiscoveryZip, startMultiDocDiscovery, listDiscoveryJobs, uploadDiscoveryDocument } from '../../graphql/generated';
 
 const logger = new ConsoleLogger('useQuickStartUpload');
 const client = generateClient();
