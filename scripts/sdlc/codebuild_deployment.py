@@ -8,9 +8,11 @@ Handles IDP stack deployment and testing in AWS CodeBuild environment.
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -18,9 +20,29 @@ from textwrap import dedent
 
 import boto3
 
-# Cap any single command so a hung test/monitor cannot consume the CodeBuild
-# job timeout and prevent stack cleanup from running (leaks ~116 IAM roles).
+# Cap test/monitor commands so a hung inference run cannot consume the
+# CodeBuild job timeout and prevent stack cleanup from running (leaks ~116
+# IAM roles). Known-slow commands (publish, deploy --wait, delete --wait)
+# pass explicit larger timeouts.
 DEFAULT_COMMAND_TIMEOUT = 3600
+
+# Set when the test suite fails fast: newly started commands abort
+# immediately, and _kill_running_commands() terminates in-flight ones so
+# abandoned test threads cannot keep mutating the stack during cleanup.
+ABORT_TESTS = threading.Event()
+_RUNNING_PROCS = set()
+_RUNNING_PROCS_LOCK = threading.Lock()
+
+
+def _kill_running_commands():
+    """Kill the process groups of all in-flight run_command subprocesses."""
+    with _RUNNING_PROCS_LOCK:
+        procs = list(_RUNNING_PROCS)
+    for proc in procs:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
 
 
 def run_command(cmd, check=True, timeout=DEFAULT_COMMAND_TIMEOUT):
@@ -29,12 +51,53 @@ def run_command(cmd, check=True, timeout=DEFAULT_COMMAND_TIMEOUT):
     Args:
         cmd: Command to run
         check: Raise exception if command fails
-        timeout: Timeout in seconds (default: DEFAULT_COMMAND_TIMEOUT)
+        timeout: Timeout in seconds (default: DEFAULT_COMMAND_TIMEOUT).
+            With check=False a timeout returns a failed result instead of
+            raising, so cleanup paths always continue.
+
+    Commands run from test-pool threads (anything off the main thread) are
+    abortable: when the suite fails fast, in-flight ones are killed and new
+    ones refuse to start, so abandoned test threads cannot keep mutating the
+    stack while cleanup deletes it.
     """
+    abortable = threading.current_thread() is not threading.main_thread()
+    if abortable and ABORT_TESTS.is_set():
+        raise Exception(f"Command aborted (test suite failed fast): {cmd}")
     print(f"Running: {cmd}")
-    result = subprocess.run(
-        cmd, shell=True, capture_output=True, text=True, timeout=timeout
+    # start_new_session puts the shell and everything it spawns (idp-cli,
+    # docker, sam) in its own process group so timeout/abort can kill the
+    # whole tree, not just the shell.
+    proc = subprocess.Popen(
+        cmd,
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
     )  # nosec B602 nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true - hardcoded commands, no user input
+    if abortable:
+        with _RUNNING_PROCS_LOCK:
+            _RUNNING_PROCS.add(proc)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+        returncode = proc.returncode
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        stdout, stderr = proc.communicate()
+        returncode = -1
+        msg = f"Command timed out after {timeout}s: {cmd}"
+        print(msg)
+        if check:
+            raise Exception(msg)
+        stderr = (stderr or "") + f"\n{msg}"
+    finally:
+        if abortable:
+            with _RUNNING_PROCS_LOCK:
+                _RUNNING_PROCS.discard(proc)
+    result = subprocess.CompletedProcess(cmd, returncode, stdout, stderr)
     if result.stdout:
         print(result.stdout)
     if result.stderr:
@@ -169,9 +232,9 @@ def publish_templates():
     bucket_basename = f"genaiic-sdlc-sourcecode-{account_id}"
     prefix = f"codebuild-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
-    # Run idp-cli publish
+    # Run idp-cli publish — cold-cache Docker/UI builds can run long
     cmd = f"idp-cli publish --source-dir . --bucket-basename {bucket_basename} --prefix {prefix} --region {region}"
-    result = run_command(cmd)
+    result = run_command(cmd, timeout=3 * 3600)
 
     # Extract template URL from output - match S3 URLs only
     template_url_pattern = r"https://s3\..*?idp-main\.yaml"
@@ -1066,6 +1129,66 @@ def test_step11_test_compare(stack_name):
         return {"success": False, "error": f"test-compare test failed: {str(e)}"}
 
 
+# Single source of truth for the smoke-test suite: (func, step, name,
+# description). The parallel runner, the success summary, and the AI
+# failure-analysis prompt are all derived from this list — add or remove a
+# test here only. Step 11 runs sequentially after the parallel steps.
+PARALLEL_TEST_STEPS = [
+    (
+        test_step3_default_config,
+        "Step 3",
+        "Default config",
+        "Default config inference (Pipeline mode)",
+    ),
+    (test_step4_bda_mode, "Step 4", "BDA mode", "BDA mode config and inference"),
+    (
+        test_step5_rule_validation,
+        "Step 5",
+        "Rule validation",
+        "Rule validation config and processing",
+    ),
+    (
+        test_step6_multi_document,
+        "Step 6",
+        "Multi-document batch",
+        "Multi-document batch processing",
+    ),
+    (
+        test_step7_test_studio,
+        "Step 7",
+        "Test Studio",
+        "Test Studio evaluation (idp-cli test-result)",
+    ),
+    (
+        test_step8_agentic_extraction,
+        "Step 8",
+        "Agentic extraction",
+        "Agentic extraction with large tables",
+    ),
+    (
+        test_step9_single_doc_discovery,
+        "Step 9",
+        "Single-doc discovery",
+        "Single-document discovery",
+    ),
+    (
+        test_step10_multi_doc_discovery,
+        "Step 10",
+        "Multi-doc discovery",
+        "Multi-document discovery",
+    ),
+]
+SEQUENTIAL_TEST_STEPS = [
+    (
+        test_step11_test_compare,
+        "Step 11",
+        "test-compare",
+        "Test comparison (idp-cli test-compare)",
+    ),
+]
+ALL_TEST_STEPS = PARALLEL_TEST_STEPS + SEQUENTIAL_TEST_STEPS
+
+
 def deploy_and_test_stack(stack_name, admin_email, template_url):
     """Deploy and test the unified IDP stack"""
     print(f"Starting deployment: {stack_name}")
@@ -1083,7 +1206,9 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
         cmd += f" --role-arn {role_arn}"
         cmd += f" --parameters PermissionsBoundaryArn={permissions_boundary_arn}"
 
-        run_command(cmd)
+        # Full nested-stack creation can legitimately run long; don't let the
+        # default test-command timeout kill a healthy in-progress deploy.
+        run_command(cmd, timeout=3 * 3600)
         print("✅ Deployment completed")
 
         # Step 2: Test stack status
@@ -1096,6 +1221,7 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
             return {
                 "stack_name": stack_name,
                 "success": False,
+                "failure_type": "deploy",
                 "error": f"Stack deployment failed with status: {result.stdout.strip()}",
             }
 
@@ -1107,14 +1233,7 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
         print(f"{'=' * 80}\n")
 
         parallel_tests = [
-            (test_step3_default_config, "Step 3: Default config"),
-            (test_step4_bda_mode, "Step 4: BDA mode"),
-            (test_step5_rule_validation, "Step 5: Rule validation"),
-            (test_step6_multi_document, "Step 6: Multi-document batch"),
-            (test_step7_test_studio, "Step 7: Test Studio"),
-            (test_step8_agentic_extraction, "Step 8: Agentic extraction"),
-            (test_step9_single_doc_discovery, "Step 9: Single-doc discovery"),
-            (test_step10_multi_doc_discovery, "Step 10: Multi-doc discovery"),
+            (func, f"{step}: {name}") for func, step, name, _ in PARALLEL_TEST_STEPS
         ]
 
         failed_test = None
@@ -1144,8 +1263,13 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
                 failed_test = (test_name, {"success": False, "error": str(e)})
                 break
 
-        # Cancel queued tests; do NOT wait for running ones on failure —
-        # proceed straight to cleanup while they fail out in the background.
+        if failed_test:
+            # Fail fast: stop the other tests from mutating the stack while
+            # cleanup deletes it. New run_command calls in test threads abort
+            # immediately; in-flight subprocess trees are killed. The threads
+            # themselves then error out quickly against dead subprocesses.
+            ABORT_TESTS.set()
+            _kill_running_commands()
         executor.shutdown(wait=failed_test is None, cancel_futures=True)
 
         # Check if any parallel test failed
@@ -1155,6 +1279,7 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
             return {
                 "stack_name": stack_name,
                 "success": False,
+                "failure_type": "test",
                 "error": f"{test_name} failed: {result.get('error', 'Unknown error')}",
             }
 
@@ -1173,6 +1298,7 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
             return {
                 "stack_name": stack_name,
                 "success": False,
+                "failure_type": "test",
                 "error": f"Step 11: test-compare failed: {result.get('error', 'Unknown error')}",
             }
 
@@ -1184,6 +1310,7 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
         return {
             "stack_name": stack_name,
             "success": False,
+            "failure_type": "deploy",
             "error": f"Deployment/testing failed: {str(e)}",
         }
 
@@ -1337,13 +1464,16 @@ def get_codebuild_logs():
 def generate_publish_failure_summary(publish_error):
     """Generate summary for publish/build failures"""
     try:
+        # Build errors sit at the end of the log; a bounded tail keeps the
+        # prompt small instead of shipping the entire (potentially huge) log.
+        log_tail = "\n".join(get_codebuild_logs().split("\n")[-400:])
         prompt = dedent(f"""
         You are a build system analyst. Analyze this publish/build failure and provide specific technical guidance.
 
         Publish Error: {publish_error}
-        
-        Build Logs:
-        {get_codebuild_logs()}
+
+        Build Logs (last 400 lines):
+        {log_tail}
 
         ANALYZE THE LOGS FOR ALL ERROR TYPES:
         - Python linting/formatting errors (ruff check failed, code formatting check failed)
@@ -1493,10 +1623,37 @@ def get_cloudformation_logs(stack_name):
                 # Skip nested stacks we can't access
                 continue
 
-        return all_failed_events
+        return _filter_root_cause_events(all_failed_events)
 
     except Exception as e:
         return [{"error": f"Failed to retrieve CloudFormation logs: {str(e)}"}]
+
+
+def _filter_root_cause_events(failed_events):
+    """Drop cancellation-cascade noise so only concrete failures reach Bedrock.
+
+    A full rollback emits hundreds of 'Resource creation cancelled' and
+    ROLLBACK_* status events downstream of a handful of real failures;
+    filtering them here shrinks the summary prompt ~50x and lets the model
+    focus on actual ResourceStatusReasons.
+    """
+    cascade_markers = (
+        "Resource creation cancelled",
+        "cancelled",
+        "Rollback requested by user",
+        "No reason provided",
+    )
+    root_causes = [
+        e
+        for e in failed_events
+        if "FAILED" in e.get("status", "")
+        and not any(m in e.get("reason", "") for m in cascade_markers)
+    ]
+    # If filtering removed everything (unexpected event shapes), fall back to
+    # the raw list rather than sending the model nothing. Cap either way.
+    events = root_causes or failed_events
+    events.sort(key=lambda e: e.get("timestamp", ""))
+    return events[:20]
 
 
 def _invoke_bedrock(prompt):
@@ -1520,43 +1677,47 @@ def _invoke_bedrock(prompt):
     for block in response_body["content"]:
         if block.get("type") == "text":
             return block["text"]
-    return ""
+    # No text block (e.g. truncated response) — raise so callers fall back to
+    # their manual summary instead of silently printing nothing.
+    raise ValueError(
+        f"Bedrock response contained no text block "
+        f"(stop_reason={response_body.get('stop_reason')})"
+    )
 
 
 def generate_deployment_summary(result, stack_name, template_url):
     """Generate deployment summary using Bedrock API.
 
     Case routing (success / infrastructure failure / test failure) is done in
-    Python from the result dict — the model is only asked to explain, never to
-    decide pass/fail (earlier prompt-based routing misclassified failures and
-    leaked its scratchpad into the summary).
+    Python from result["failure_type"] — the model is only asked to explain,
+    never to decide pass/fail (earlier prompt-based routing misclassified
+    failures and leaked its scratchpad into the summary).
     """
     try:
         error_text = result.get("error", "")
 
         # Case C: success — static summary, no analysis needed
         if result.get("success"):
+            test_lines = "\n".join(
+                f"• Test {i} ({step}): {desc} ✓"
+                for i, (_, step, _, desc) in enumerate(ALL_TEST_STEPS, 1)
+            )
             return dedent(f"""
             🚀 DEPLOYMENT RESULTS
 
             📋 Stack Status: {stack_name} deployed successfully
             📦 Template: {template_url}
 
-            ✅ All Tests Passed (9 tests):
-            • Test 1 (Step 3): Default config with pipeline mode processing ✓
-            • Test 2 (Step 4): BDA mode config and inference (parallel) ✓
-            • Test 3 (Step 5): Rule validation config and processing ✓
-            • Test 4 (Step 6): Multi-document batch processing ✓
-            • Test 5 (Step 7): Test Studio evaluation with test-result command ✓
-            • Test 6 (Step 8): Agentic extraction with large tables ✓
-            • Test 7 (Step 9): Single-document discovery ✓
-            • Test 8 (Step 10): Multi-document discovery ✓
-            • Test 9 (Step 11): Test comparison with test-compare command ✓
-            """)
+            ✅ All Tests Passed ({len(ALL_TEST_STEPS)} tests):
+            {{test_lines}}
+            """).format(test_lines=test_lines)
 
-        # Case B: infrastructure failure — the deploy itself failed (error does
-        # not name a test "Step N"), so pull CloudFormation events for root cause
-        if not re.search(r"Step \d+", error_text):
+        # Case B: infrastructure failure — the deploy itself failed, so pull
+        # CloudFormation events for root cause. failure_type is set where the
+        # failure is classified in deploy_and_test_stack; "deploy" is also the
+        # safe default when the field is missing (e.g. exception result dicts
+        # built in main), since CF-event analysis degrades gracefully.
+        if result.get("failure_type", "deploy") != "test":
             print(f"🔍 Getting CloudFormation logs for: {stack_name}")
             try:
                 logs = get_cloudformation_logs(stack_name)
@@ -1605,7 +1766,14 @@ def generate_deployment_summary(result, stack_name, template_url):
             """)
             return _invoke_bedrock(cf_prompt)
 
-        # Case A: smoke test failure — deploy succeeded, a test step failed
+        # Case A: smoke test failure — deploy succeeded, a test step failed.
+        # Attach a bounded log tail: several tests report only a one-line
+        # error, and the actual mismatch (expected string, missing file,
+        # CLI stderr) is in the build log.
+        log_tail = "\n".join(get_codebuild_logs().split("\n")[-150:])
+        suite_reference = "\n".join(
+            f"• {step}: {desc}" for _, step, _, desc in ALL_TEST_STEPS
+        )
         test_prompt = dedent(f"""
         An IDP deployment succeeded but a post-deployment smoke test failed.
 
@@ -1615,15 +1783,10 @@ def generate_deployment_summary(result, stack_name, template_url):
         {error_text}
 
         Test suite reference:
-        • Step 3: Default config inference (Pipeline mode)
-        • Step 4: BDA mode config and inference
-        • Step 5: Rule validation
-        • Step 6: Multi-document batch processing
-        • Step 7: Test Studio evaluation (idp-cli test-result)
-        • Step 8: Agentic extraction with large tables
-        • Step 9: Single-document discovery
-        • Step 10: Multi-document discovery
-        • Step 11: Test comparison (idp-cli test-compare)
+        {suite_reference}
+
+        Last build log lines (for context on the failure):
+        {log_tail}
 
         Provide analysis in this format:
 
@@ -1756,11 +1919,15 @@ def cleanup_stack(result):
         # Cancel any running Bedrock ingestion jobs before stack deletion
         cancel_bedrock_ingestion_jobs(stack_name)
 
-        # Delete the stack and wait for completion (includes all cleanup via --force-delete-all)
+        # Delete the stack and wait for completion (includes all cleanup via
+        # --force-delete-all). Bucket emptying + CloudFront/KB teardown can
+        # run long; with check=False a timeout returns a failed result rather
+        # than raising, so cleanup_iam_resources below always still runs.
         print(f"[{stack_name}] attempting stack deletion...")
         run_command(
             f"idp-cli delete --stack-name {stack_name} --force --empty-buckets --force-delete-all --wait",
             check=False,
+            timeout=3 * 3600,
         )
 
         print(f"[{stack_name}] ✅ Cleanup completed")
