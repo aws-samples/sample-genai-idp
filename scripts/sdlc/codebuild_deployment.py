@@ -34,15 +34,20 @@ _RUNNING_PROCS = set()
 _RUNNING_PROCS_LOCK = threading.Lock()
 
 
+def _kill_proc_group(proc):
+    """Best-effort SIGKILL of a subprocess's entire process group."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
 def _kill_running_commands():
     """Kill the process groups of all in-flight run_command subprocesses."""
     with _RUNNING_PROCS_LOCK:
         procs = list(_RUNNING_PROCS)
     for proc in procs:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
+        _kill_proc_group(proc)
 
 
 def run_command(cmd, check=True, timeout=DEFAULT_COMMAND_TIMEOUT):
@@ -78,15 +83,23 @@ def run_command(cmd, check=True, timeout=DEFAULT_COMMAND_TIMEOUT):
     if abortable:
         with _RUNNING_PROCS_LOCK:
             _RUNNING_PROCS.add(proc)
+        # Close the race with the fail-fast kill sweep: if ABORT_TESTS was set
+        # between the check above and registration, the sweep may have already
+        # run and missed this proc — kill it ourselves.
+        if ABORT_TESTS.is_set():
+            _kill_proc_group(proc)
     try:
         stdout, stderr = proc.communicate(timeout=timeout)
         returncode = proc.returncode
     except subprocess.TimeoutExpired:
+        _kill_proc_group(proc)
+        # Bounded drain: a descendant that escaped the process group (its own
+        # setsid) can hold the pipes open forever — losing partial output is
+        # better than hanging the timeout path that guarantees progress.
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
-        stdout, stderr = proc.communicate()
+            stdout, stderr = proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            stdout, stderr = "", ""
         returncode = -1
         msg = f"Command timed out after {timeout}s: {cmd}"
         print(msg)
@@ -1444,10 +1457,13 @@ def get_codebuild_logs():
         log_group = f"/aws/codebuild/{build_id.split(':')[0]}"
         log_stream = build_id.split(":")[-1]
 
-        # Get logs from CloudWatch
+        # Get the NEWEST events (startFromHead=False): a long build exceeds
+        # one get_log_events page (~10K events / 1MB), and callers take the
+        # tail of what we return — the first page would give them lines from
+        # the start of the build instead of the failure at the end.
         logs_client = boto3.client("logs")
         response = logs_client.get_log_events(
-            logGroupName=log_group, logStreamName=log_stream, startFromHead=True
+            logGroupName=log_group, logStreamName=log_stream, startFromHead=False
         )
 
         # Extract log messages
