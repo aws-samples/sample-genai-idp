@@ -9,6 +9,7 @@ import os
 from urllib.parse import urlparse
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 # Set up logging
@@ -17,7 +18,16 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 logging.getLogger('idp_common.bedrock.client').setLevel(os.environ.get("BEDROCK_LOG_LEVEL", "INFO"))
 # Get LOG_LEVEL from environment variable with INFO as default
 
-s3_client = boto3.client('s3')
+# Force Signature Version 4 for presigned URLs. The IDP buckets are encrypted
+# with SSE-KMS, and S3 rejects SigV2-signed requests for KMS-encrypted objects
+# ("Requests specifying Server Side Encryption with AWS KMS managed keys require
+# AWS Signature Version 4"). Also pin the regional endpoint so the signed host
+# matches the bucket's region.
+s3_client = boto3.client(
+    "s3",
+    region_name=os.environ.get("AWS_REGION"),
+    config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}),
+)
 
 
 # Bucket allow-list for get_file_contents.
@@ -110,110 +120,178 @@ def _validate_bucket(bucket: str) -> None:
         raise Exception("Unauthorized: requested bucket is not accessible from this deployment.")
 
 
-def handler(event, context):
+# Presigned GET URLs expire after this many seconds. Short-lived: the UI
+# fetches immediately after receiving the URL.
+_PRESIGNED_URL_EXPIRY_SECONDS = 300
+
+
+def _parse_and_validate_uri(event):
+    """Parse `s3Uri`/`versionId` from the GraphQL args, validate, and return
+    ``(bucket, key, version_id)``. Shared by both handler branches."""
+    s3_uri = event['arguments']['s3Uri']
+    # Optional S3 object VersionId — used to fetch the exact bytes of a
+    # prior document version (see document version history). None fetches
+    # the current object.
+    version_id = event['arguments'].get('versionId')
+    logger.info(f"Processing S3 URI: {s3_uri}"
+                + (f" (versionId={version_id})" if version_id else ""))
+
+    # Parse S3 URI to get bucket and key. The URI must be of the
+    # form `s3://<bucket>/<key>`. We intentionally do NOT accept
+    # virtual-hosted-style HTTPS URIs here because they require a
+    # completely different parsing path.
+    parsed_uri = urlparse(s3_uri)
+    if parsed_uri.scheme != "s3" or not parsed_uri.netloc:
+        raise Exception("Invalid S3 URI: expected s3://<bucket>/<key>")
+    bucket = parsed_uri.netloc
+    key = parsed_uri.path.lstrip('/')  # Remove leading slash from path
+    if not key:
+        raise Exception("Invalid S3 URI: key is required")
+
+    # Enforce that the requested bucket belongs to this IDP stack's
+    # known bucket set — prevents use of this resolver as a generic
+    # S3-read gadget.
+    _validate_bucket(bucket)
+
+    if version_id == "null":
+        version_id = None
+    return bucket, key, version_id
+
+
+def _handle_presigned_url(event):
+    """Return a short-lived presigned GET URL for the requested object.
+
+    Used for files too large to return through :func:`_handle_file_contents`
+    (Lambda's synchronous response is capped at 6 MB). The browser fetches the
+    URL directly from S3, so the file bytes never traverse this Lambda.
     """
-    Lambda function to fetch contents of a file from S3
-    
+    bucket, key, version_id = _parse_and_validate_uri(event)
+    logger.info(f"Generating presigned URL for bucket: {bucket}, key: {key}")
+
+    # HEAD the object first so we (a) surface NoSuchKey as a clean error before
+    # minting a URL, and (b) return size/contentType the UI uses to decide how
+    # to handle the content.
+    head_kwargs = {"Bucket": bucket, "Key": key}
+    if version_id:
+        head_kwargs["VersionId"] = version_id
+    head = s3_client.head_object(**head_kwargs)
+
+    content_type = head.get('ContentType', '')
+    if not content_type or content_type in ('binary/octet-stream', 'application/octet-stream'):
+        content_type = mimetypes.guess_type(key)[0] or 'text/plain'
+
+    presign_params = {"Bucket": bucket, "Key": key}
+    if version_id:
+        presign_params["VersionId"] = version_id
+    presigned_url = s3_client.generate_presigned_url(
+        "get_object",
+        Params=presign_params,
+        ExpiresIn=_PRESIGNED_URL_EXPIRY_SECONDS,
+    )
+
+    logger.info(f"Generated presigned URL (size={head['ContentLength']}, "
+                f"contentType={content_type})")
+    return {
+        'presignedUrl': presigned_url,
+        'contentType': content_type,
+        'size': head['ContentLength'],
+    }
+
+
+def _handle_file_contents(event):
+    """Read a file's contents from S3 and return them inline (subject to
+    Lambda's 6 MB synchronous response cap)."""
+    bucket, key, version_id = _parse_and_validate_uri(event)
+
+    logger.info(f"Fetching from bucket: {bucket}, key: {key}")
+
+    # Get object from S3 (optionally a specific version)
+    get_kwargs = {"Bucket": bucket, "Key": key}
+    if version_id:
+        get_kwargs["VersionId"] = version_id
+    response = s3_client.get_object(**get_kwargs)
+
+    # Get content type from S3 response or infer from file extension
+    content_type = response.get('ContentType', '')
+    if not content_type or content_type == 'binary/octet-stream' or content_type == 'application/octet-stream':
+        content_type = mimetypes.guess_type(key)[0] or 'text/plain'
+
+    logger.info(f"File content type: {content_type}")
+    logger.info(f"File size: {response['ContentLength']}")
+
+    # Read file content with error handling for different encodings
+    try:
+        # First try UTF-8
+        file_content = response['Body'].read().decode('utf-8')
+    except UnicodeDecodeError:
+        # If UTF-8 fails, try with error handling
+        try:
+            response['Body'].seek(0)  # Reset the file pointer
+            file_content = response['Body'].read().decode('utf-8', errors='replace')
+            logger.warning("File content contained invalid UTF-8 characters that were replaced")
+        except Exception as decode_error:
+            # Last resort - if it's a binary file format with text extension
+            logger.error(f"Failed to decode content with error handling: {str(decode_error)}")
+            return {
+                'content': "This file contains binary content that cannot be displayed as text.",
+                'contentType': content_type,
+                'size': response['ContentLength'],
+                'isBinary': True
+            }
+
+    # For HTML content, escape the HTML to prevent XSS
+    if content_type.startswith('text/html') or content_type.startswith('application/xhtml+xml'):
+        file_content = html.escape(file_content)
+
+    # Return both content and metadata
+    return {
+        'content': file_content,
+        'contentType': content_type,
+        'size': response['ContentLength'],
+        'isBinary': False
+    }
+
+
+def handler(event, context):
+    """Resolver for both ``getFileContents`` and ``getFilePresignedUrl``.
+
+    Routes on the GraphQL ``fieldName``:
+      - ``getFilePresignedUrl`` -> return a presigned GET URL (no size limit;
+        browser fetches bytes directly from S3).
+      - ``getFileContents`` (default) -> return the file bytes inline (capped
+        at Lambda's 6 MB synchronous response limit).
+
     Parameters:
         event (dict): Lambda event data containing GraphQL arguments
         context (object): Lambda context
-        
+
     Returns:
-        dict: Dictionary containing file contents and metadata
-        
+        dict: Field-shaped response (see the two handlers above).
+
     Raises:
         Exception: Various exceptions related to S3 operations or invalid input
     """
     try:
         logger.info(f"Received event: {json.dumps(_sanitize_for_log(event))}")
-        
-        # Extract S3 URI from arguments
-        s3_uri = event['arguments']['s3Uri']
-        # Optional S3 object VersionId — used to fetch the exact bytes of a
-        # prior document version (see document version history). None fetches
-        # the current object.
-        version_id = event['arguments'].get('versionId')
-        logger.info(f"Processing S3 URI: {s3_uri}"
-                    + (f" (versionId={version_id})" if version_id else ""))
-        
-        # Parse S3 URI to get bucket and key. The URI must be of the
-        # form `s3://<bucket>/<key>`. We intentionally do NOT accept
-        # virtual-hosted-style HTTPS URIs here because they require a
-        # completely different parsing path.
-        parsed_uri = urlparse(s3_uri)
-        if parsed_uri.scheme != "s3" or not parsed_uri.netloc:
-            raise Exception("Invalid S3 URI: expected s3://<bucket>/<key>")
-        bucket = parsed_uri.netloc
-        key = parsed_uri.path.lstrip('/')  # Remove leading slash from path
-        if not key:
-            raise Exception("Invalid S3 URI: key is required")
 
-        # Enforce that the requested bucket belongs to this IDP stack's
-        # known bucket set — prevents use of this resolver as a generic
-        # S3-read gadget.
-        _validate_bucket(bucket)
+        field_name = (event.get('info') or {}).get('fieldName', 'getFileContents')
+        if field_name == 'getFilePresignedUrl':
+            return _handle_presigned_url(event)
+        return _handle_file_contents(event)
 
-        logger.info(f"Fetching from bucket: {bucket}, key: {key}")
-
-        # Get object from S3 (optionally a specific version)
-        get_kwargs = {"Bucket": bucket, "Key": key}
-        if version_id and version_id != "null":
-            get_kwargs["VersionId"] = version_id
-        response = s3_client.get_object(**get_kwargs)
-
-        
-        # Get content type from S3 response or infer from file extension
-        content_type = response.get('ContentType', '')
-        if not content_type or content_type == 'binary/octet-stream' or content_type == 'application/octet-stream':
-            content_type = mimetypes.guess_type(key)[0] or 'text/plain'
-        
-        logger.info(f"File content type: {content_type}")
-        logger.info(f"File size: {response['ContentLength']}")
-        
-        # Read file content with error handling for different encodings
-        try:
-            # First try UTF-8
-            file_content = response['Body'].read().decode('utf-8')
-        except UnicodeDecodeError:
-            # If UTF-8 fails, try with error handling
-            try:
-                response['Body'].seek(0)  # Reset the file pointer
-                file_content = response['Body'].read().decode('utf-8', errors='replace')
-                logger.warning("File content contained invalid UTF-8 characters that were replaced")
-            except Exception as decode_error:
-                # Last resort - if it's a binary file format with text extension
-                logger.error(f"Failed to decode content with error handling: {str(decode_error)}")
-                return {
-                    'content': "This file contains binary content that cannot be displayed as text.",
-                    'contentType': content_type,
-                    'size': response['ContentLength'],
-                    'isBinary': True
-                }
-        
-        # For HTML content, escape the HTML to prevent XSS
-        if content_type.startswith('text/html') or content_type.startswith('application/xhtml+xml'):
-            file_content = html.escape(file_content)
-            
-        # Return both content and metadata
-        return {
-            'content': file_content,
-            'contentType': content_type,
-            'size': response['ContentLength'],
-            'isBinary': False
-        }
-        
     except ClientError as e:
         error_code = e.response['Error']['Code']
         error_message = e.response['Error']['Message']
         logger.error(f"S3 ClientError: {error_code} - {error_message}")
-        
-        if error_code == 'NoSuchKey':
-            raise Exception(f"File not found: {key}")
-        elif error_code == 'NoSuchBucket':
-            raise Exception(f"Bucket not found: {bucket}")
+
+        # NoSuchKey (get_object) and 404 (head_object) both mean "missing object".
+        if error_code in ('NoSuchKey', '404'):
+            raise Exception("File not found")
+        elif error_code in ('NoSuchBucket', 'NoSuchVersion'):
+            raise Exception(f"Error accessing S3: {error_message}")
         else:
             raise Exception(f"Error accessing S3: {error_message}")
-            
+
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
         raise Exception(f"Error fetching file: {str(e)}")

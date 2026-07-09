@@ -31,7 +31,7 @@ import useConfiguration from '../../hooks/use-configuration';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
 import { useDocumentVersion } from '../../contexts/document-version';
-import { processChanges, getFileContents, skipAllSectionsReview } from '../../graphql/generated';
+import { processChanges, getFilePresignedUrl, skipAllSectionsReview } from '../../graphql/generated';
 import { parseHITLReviewHistory } from '../../graphql/awsjson-parsers';
 
 const client = generateClient();
@@ -285,23 +285,28 @@ const ActionsCell = ({
 
       logger.info(`Downloading ${type} data from:`, fileUri);
 
-      // Fetch file contents using GraphQL
+      // Resolve a presigned GET URL and fetch the bytes directly from S3.
+      // Section result.json files can exceed Lambda's 6 MB synchronous
+      // response cap, so we must not proxy the content through the resolver.
       const response = await client.graphql({
-        query: getFileContents,
+        query: getFilePresignedUrl,
         variables: { s3Uri: fileUri },
       });
 
-      const result = response.data.getFileContents;
+      const result = response.data.getFilePresignedUrl;
 
-      if (result?.isBinary) {
-        alert('This file contains binary content that cannot be downloaded');
-        return;
+      if (!result?.presignedUrl) {
+        throw new Error('No presigned URL returned');
       }
 
-      const content = result?.content;
+      const s3Response = await fetch(result.presignedUrl);
+      if (!s3Response.ok) {
+        throw new Error(`S3 fetch failed: ${s3Response.status} ${s3Response.statusText}`);
+      }
+      const content = await s3Response.text();
 
       // Create blob and download
-      const blob = new Blob([content as string], { type: 'application/json' });
+      const blob = new Blob([content], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
 
