@@ -23,6 +23,62 @@ from strands import tool
 
 logger = logging.getLogger(__name__)
 
+# Maximum number of parsed data rows to inline in a tool result's ``content``
+# (the part Strands re-sends to the model on EVERY subsequent turn). The full
+# row set is always preserved in agent state for the mapping/finalize pipeline;
+# only the model-visible echo is capped. Tables at or below this size still
+# echo all rows so the manual/fallback extraction workflow keeps working; large
+# tables echo only head+tail samples + stats, so the dense rows never re-enter
+# the growing conversation. This is the fix for the agentic input-token blow-up
+# (parsed rows were being re-transmitted N times across the multi-turn loop).
+INLINE_ROW_CAP = 50
+# How many head/tail sample rows to show the model when a table exceeds the cap.
+SAMPLE_ROWS = 5
+
+
+def _compact_content(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    """Wrap a compact summary dict as a Strands ToolResultContent list.
+
+    Returning a dict with BOTH ``status`` and ``content`` makes Strands treat it
+    as an already-formatted ToolResult (see strands.tools.decorator
+    ._wrap_tool_result) instead of falling back to ``str(result)`` — which would
+    inline the ENTIRE dict (all parsed rows) into agent.messages and re-send it
+    every turn. Bedrock's request formatter (BedrockModel
+    ._format_request_message_content) transmits only this ``content`` (plus
+    toolUseId/status), silently dropping any extra top-level keys — so the dense
+    ``rows``/``mapped_rows`` we keep alongside for state/tests are never sent.
+    """
+    return [{"json": summary}]
+
+
+def _build_row_summary(
+    rows: list[Any],
+    row_count: int,
+    rows_key: str,
+    next_tool: str,
+) -> dict[str, Any]:
+    """Build the model-visible row portion of a tool-result summary.
+
+    Small tables (<= ``INLINE_ROW_CAP``) inline every row under ``rows_key`` so
+    the manual/fallback extraction workflow still sees the data. Large tables
+    inline only head/tail samples + counts + a note pointing the agent at the
+    next tool (which reads the full rows from agent state) — so the dense rows
+    never re-enter the growing conversation. Shared by parse_table and
+    map_table_to_schema to avoid drift between the two blocks.
+    """
+    if row_count <= INLINE_ROW_CAP:
+        return {rows_key: rows}
+    return {
+        "sample_first_rows": rows[:SAMPLE_ROWS],
+        "sample_last_rows": rows[-SAMPLE_ROWS:],
+        "rows_omitted_from_echo": row_count - 2 * SAMPLE_ROWS,
+        "note": (
+            f"All {row_count} rows are stored in agent state. "
+            f"Call {next_tool} next (it reads them from state) — "
+            "do NOT re-type the rows."
+        ),
+    }
+
 
 def _split_table_row(line: str) -> list[str]:
     """
@@ -661,7 +717,11 @@ def create_parse_table_tool(
 
         Returns:
             Dict with parsed data and quality metrics:
-            - status: "success", "no_tables_found", or "error"
+            - status: "success" or "error" (Bedrock ToolResult-valid). The
+              richer parser status ("success"/"no_tables_found"/"error") is
+              preserved under ``parser_status`` — read that, not ``status``,
+              for the semantic outcome.
+            - parser_status: "success", "no_tables_found", or "error"
             - columns: list of column header strings
             - rows: list of dicts mapping column names to cell values
             - row_count: number of data rows
@@ -777,6 +837,50 @@ def create_parse_table_tool(
                 stats["invocation_count"] = 1
             agent.state.set("table_parsing_stats", stats)
 
+        # Build a COMPACT, model-visible summary and attach it as the tool
+        # result ``content``. The full parsed rows are already persisted in
+        # agent state (``last_parse_table_result``) for map_table_to_schema, so
+        # the model does not need them echoed back — and echoing them is exactly
+        # what caused input tokens to balloon (the dense rows were re-sent every
+        # subsequent turn). For small tables we still inline all rows so manual /
+        # fallback extraction (parse_table + extraction_tool) keeps working; for
+        # large tables we inline only head+tail samples + stats.
+        row_count = result.get("row_count", 0)
+        rows = result.get("rows", []) or []
+        visible_rows = _build_row_summary(
+            rows, row_count, rows_key="rows", next_tool="map_table_to_schema"
+        )
+        summary: dict[str, Any] = {
+            "status": result.get("status"),
+            "table_count": result.get("table_count", 0),
+            "columns": result.get("columns", []),
+            "row_count": row_count,
+            "quality": result.get("quality", {}),
+            "warnings": result.get("warnings", []),
+            **visible_rows,
+        }
+
+        # Return dict carries BOTH the compact ``content`` (what Strands re-sends
+        # to the model every turn) AND the full top-level keys (rows/tables/...)
+        # used by state persistence and the pipeline. Bedrock's request formatter
+        # transmits only ``content`` + toolUseId + status, dropping the extra
+        # keys — so the dense rows never re-enter the conversation.
+        #
+        # Strands only treats the return as a pre-formatted ToolResult (skipping
+        # the str(result) inline path) when the dict has both ``status`` and
+        # ``content``, and Bedrock only accepts a ToolResult status of
+        # "success"/"error". The parser's richer statuses ("no_tables_found")
+        # must be folded to "success"/"error" for the RETURN.
+        #
+        # But ``result`` is the SAME object already stored in agent state
+        # (``last_parse_table_result``, above), so we must NOT clobber its
+        # semantic status in place. Preserve the parser status under
+        # ``parser_status`` first, then set the Bedrock-facing ``status``. State
+        # (and the documented contract) thus retains the original meaning.
+        parser_status = result.get("status")
+        result.setdefault("parser_status", parser_status)
+        result["content"] = _compact_content(summary)
+        result["status"] = "error" if parser_status == "error" else "success"
         return result
 
     return parse_table
@@ -1086,6 +1190,31 @@ def create_map_table_to_schema_tool():
             result["sample_first_row"] = mapped_rows[0]
             result["sample_last_row"] = mapped_rows[-1]
 
+        # Compact, model-visible content. The full ``mapped_rows`` are persisted
+        # in agent state (``mapped_table_rows``) and read directly by
+        # finalize_table_extraction, so the model never needs them echoed — and
+        # echoing them is exactly the re-transmission that ballooned input
+        # tokens. Small results still inline every row (cheap, and preserves the
+        # fallback where the model reviews then patches); large results echo only
+        # samples + counts. Bedrock transmits only this ``content`` (the extra
+        # top-level keys are dropped from the request), so the dense rows stay
+        # out of the growing conversation.
+        row_count = len(mapped_rows)
+        visible_rows = _build_row_summary(
+            mapped_rows,
+            row_count,
+            rows_key="mapped_rows",
+            next_tool="finalize_table_extraction",
+        )
+        summary: dict[str, Any] = {
+            "status": "success",
+            "row_count": row_count,
+            "columns_mapped": list(col_map.values()),
+            "unmapped_columns": unmapped,
+            "warnings": warnings,
+            **visible_rows,
+        }
+        result["content"] = _compact_content(summary)
         return result
 
     return map_table_to_schema

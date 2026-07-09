@@ -192,6 +192,55 @@ const BoundingBox = memo(({ box, page, currentPage, imageRef, zoomLevel = 1, pan
 
 BoundingBox.displayName = 'BoundingBox';
 
+// Build the canonical Stickler comparison key for a field from its render path.
+// e.g. path=["LineItems", 0, "Description"] -> "LineItems[0].Description".
+// NOTE: `path` already INCLUDES the current field key (children are rendered
+// with path={[...path, key]} and array items with path={[...path, index]}), so
+// the field key must NOT be appended again here. The "Document Data" synthetic
+// root and undefined segments are ignored, and numeric segments become
+// "[index]" subscripts on the preceding field name.
+const buildComparisonKey = (path: (string | number)[]): string => {
+  const segments = path.filter((p) => p !== undefined && p !== 'Document Data');
+  let key = '';
+  for (const seg of segments) {
+    if (typeof seg === 'number') {
+      key += `[${seg}]`;
+    } else {
+      key += key ? `.${seg}` : String(seg);
+    }
+  }
+  return key;
+};
+
+// Find the nested field_comparison_details entry whose canonical key matches
+// this field's render path. Returns the matching detail (with the per-field
+// evaluation_method/weight the backend annotates) or null.
+const findNestedComparisonDetail = (
+  evaluationResults: Record<string, unknown> | null,
+  sectionId: unknown,
+  comparisonKey: string,
+): Record<string, unknown> | null => {
+  const sectionResults = evaluationResults?.section_results as Record<string, unknown>[] | undefined;
+  if (!sectionResults || !comparisonKey) return null;
+  let sectionResult = sectionResults.find((sr) => String(sr.section_id) === String(sectionId));
+  if (!sectionResult && sectionResults.length === 1) {
+    [sectionResult] = sectionResults;
+  }
+  const attributes = sectionResult?.attributes as Record<string, unknown>[] | undefined;
+  if (!attributes?.length) return null;
+  for (const attr of attributes) {
+    const details = attr.field_comparison_details as Record<string, unknown>[] | undefined;
+    if (Array.isArray(details)) {
+      for (const detail of details) {
+        if (String(detail.expected_key || '') === comparisonKey) {
+          return detail;
+        }
+      }
+    }
+  }
+  return null;
+};
+
 // Memoized component to render a form field based on its type
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const FormFieldRenderer = memo<Record<string, any>>(
@@ -400,39 +449,63 @@ const FormFieldRenderer = memo<Record<string, any>>(
       }
 
       if (sectionResult?.attributes?.length > 0) {
-        // Build the path string from current path and fieldKey
-        // path is like [index, "bankInfo"] and fieldKey is like "bank"
-        // We need to match against field_comparison_details paths like "checks[0].bankInfo.bank"
-        const _fullPath = [...path, fieldKey].filter((p) => p !== undefined && p !== 'Document Data');
+        // First, try an exact match on the canonical comparison key
+        // (e.g. "LineItems[0].Description" or "checks[0].bankInfo.bank"). This
+        // is how per-list-item leaf fields arrive - as flat entries carrying the
+        // backend-annotated per-field evaluation_method and weight. Restrict this
+        // to scalar (non-object, non-array) leaves; object/array nodes have their
+        // own group/array eval handling and must not be driven by an aggregate
+        // detail that happens to share their path.
+        const isScalarLeaf = value === null || typeof value !== 'object';
+        const comparisonKey = isScalarLeaf ? buildComparisonKey(path) : '';
+        const keyedDetail = comparisonKey
+          ? findNestedComparisonDetail(evaluationResults, sectionId, comparisonKey)
+          : null;
+        if (keyedDetail) {
+          evalResult = {
+            matched: keyedDetail.match,
+            score: keyedDetail.score,
+            threshold: keyedDetail.threshold,
+            reason: keyedDetail.reason,
+            expected: keyedDetail.expected_value,
+            actual: keyedDetail.actual_value,
+            parentPath: keyedDetail.expected_key || '',
+            evaluationMethod: keyedDetail.evaluation_method,
+            weight: keyedDetail.weight,
+          };
+        }
 
-        // Look through all attributes' field_comparison_details to find a match
-        for (const attr of sectionResult.attributes) {
-          if (attr.field_comparison_details && Array.isArray(attr.field_comparison_details)) {
-            // Search field_comparison_details for paths that end with our field/path
-            for (const detail of attr.field_comparison_details) {
-              const expectedKey = detail.expected_key || '';
-              // Check if this detail matches our path
-              // For nested paths like "checks[0].bankInfo" when looking at "bank" field
-              // We check if the actual/expected values contain our field
+        // Fall back to the legacy object-valued match: some details carry the
+        // whole object as actual_value with our field as a property.
+        if (!evalResult) {
+          for (const attr of sectionResult.attributes) {
+            if (attr.field_comparison_details && Array.isArray(attr.field_comparison_details)) {
+              // Search field_comparison_details for paths that end with our field/path
+              for (const detail of attr.field_comparison_details) {
+                const expectedKey = detail.expected_key || '';
+                // Check if this detail matches our path
+                // For nested paths like "checks[0].bankInfo" when looking at "bank" field
+                // We check if the actual/expected values contain our field
 
-              // Also extract leaf-level field values from actual_value/expected_value
-              if (detail.actual_value && typeof detail.actual_value === 'object') {
-                // Check if our fieldKey is a property in actual_value
-                if (fieldKey in detail.actual_value) {
-                  evalResult = {
-                    matched: detail.match,
-                    score: detail.score,
-                    threshold: attr.evaluation_threshold, // Get threshold from parent attribute
-                    reason: detail.reason,
-                    expected: detail.expected_value?.[fieldKey],
-                    actual: detail.actual_value?.[fieldKey],
-                    parentPath: expectedKey,
-                  };
-                  break;
+                // Also extract leaf-level field values from actual_value/expected_value
+                if (detail.actual_value && typeof detail.actual_value === 'object') {
+                  // Check if our fieldKey is a property in actual_value
+                  if (fieldKey in detail.actual_value) {
+                    evalResult = {
+                      matched: detail.match,
+                      score: detail.score,
+                      threshold: attr.evaluation_threshold, // Get threshold from parent attribute
+                      reason: detail.reason,
+                      expected: detail.expected_value?.[fieldKey],
+                      actual: detail.actual_value?.[fieldKey],
+                      parentPath: expectedKey,
+                    };
+                    break;
+                  }
                 }
               }
+              if (evalResult) break;
             }
-            if (evalResult) break;
           }
         }
       }
@@ -450,6 +523,10 @@ const FormFieldRenderer = memo<Record<string, any>>(
     const evalScore = evalResult?.score;
     const _evalThreshold = evalResult?.threshold;
     const evalReason = evalResult?.reason;
+    // Per-field comparison method and weight (backend-annotated); only present
+    // on path-keyed leaf matches, mirroring the top-level attributes table.
+    const evalMethod = evalResult?.evaluationMethod ? String(evalResult.evaluationMethod) : undefined;
+    const evalWeight = typeof evalResult?.weight === 'number' ? evalResult.weight : undefined;
 
     // Determine field type
     let fieldType: string = typeof value;
@@ -660,6 +737,13 @@ const FormFieldRenderer = memo<Record<string, any>>(
                       {evalReason && ` - ${evalReason}`}
                     </ExtBox>
                   )}
+                  {showComparison && (evalMethod || evalWeight !== undefined) && (
+                    <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color="text-body-secondary">
+                      {evalMethod && `Method: ${evalMethod}`}
+                      {evalMethod && evalWeight !== undefined && ' · '}
+                      {evalWeight !== undefined && `Weight: ${evalWeight.toFixed(2)}`}
+                    </ExtBox>
+                  )}
                 </ExtBox>
               }
             >
@@ -854,6 +938,13 @@ const FormFieldRenderer = memo<Record<string, any>>(
                     <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={hasMismatch ? 'text-status-warning' : 'text-status-success'}>
                       {`Eval Score: ${(evalScore * 100).toFixed(1)}%`}
                       {evalReason && ` - ${evalReason}`}
+                    </ExtBox>
+                  )}
+                  {showComparison && (evalMethod || evalWeight !== undefined) && (
+                    <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color="text-body-secondary">
+                      {evalMethod && `Method: ${evalMethod}`}
+                      {evalMethod && evalWeight !== undefined && ' · '}
+                      {evalWeight !== undefined && `Weight: ${evalWeight.toFixed(2)}`}
                     </ExtBox>
                   )}
                 </ExtBox>
@@ -1060,6 +1151,13 @@ const FormFieldRenderer = memo<Record<string, any>>(
                     <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={hasMismatch ? 'text-status-warning' : 'text-status-success'}>
                       {`Eval Score: ${(evalScore * 100).toFixed(1)}%`}
                       {evalReason && ` - ${evalReason}`}
+                    </ExtBox>
+                  )}
+                  {showComparison && (evalMethod || evalWeight !== undefined) && (
+                    <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color="text-body-secondary">
+                      {evalMethod && `Method: ${evalMethod}`}
+                      {evalMethod && evalWeight !== undefined && ' · '}
+                      {evalWeight !== undefined && `Weight: ${evalWeight.toFixed(2)}`}
                     </ExtBox>
                   )}
                 </ExtBox>
@@ -1451,6 +1549,13 @@ const FormFieldRenderer = memo<Record<string, any>>(
                     <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={hasMismatch ? 'text-status-warning' : 'text-status-success'}>
                       {`Eval Score: ${(evalScore * 100).toFixed(1)}%`}
                       {evalReason && ` - ${evalReason}`}
+                    </ExtBox>
+                  )}
+                  {showComparison && (evalMethod || evalWeight !== undefined) && (
+                    <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color="text-body-secondary">
+                      {evalMethod && `Method: ${evalMethod}`}
+                      {evalMethod && evalWeight !== undefined && ' · '}
+                      {evalWeight !== undefined && `Weight: ${evalWeight.toFixed(2)}`}
                     </ExtBox>
                   )}
                 </ExtBox>
