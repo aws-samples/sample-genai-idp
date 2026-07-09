@@ -49,6 +49,7 @@ classes:
           labeled as 'to address' or 'delivery address', typically appearing
           below the recipient name.
       date:
+        x-aws-idp-evaluation-method: DATE
         type: string
         description: >-
           The date when the letter was written. Look for a standalone date or
@@ -100,6 +101,7 @@ classes:
           The unique identifier for the form, typically a number or alphanumeric
           code. Often labeled as 'form number', 'id', or 'reference number'.
       submission_date:
+        x-aws-idp-evaluation-method: DATE
         type: string
         description: >-
           The date when the form was submitted or filed. Look for text near
@@ -127,6 +129,7 @@ classes:
           The name of the person or department that processed the form. May be
           indicated by 'processor', 'handled by', or 'approved by'.
       processing_date:
+        x-aws-idp-evaluation-method: DATE
         type: string
         description: >-
           The date when the form was processed or completed. Look for labels
@@ -153,11 +156,13 @@ classes:
         type: string
         description: The unique identifier for the invoice. Look for 'invoice no', 'invoice
       invoice_date:
+        x-aws-idp-evaluation-method: DATE
         type: string
         description: >-
           The date when the invoice was issued. May be labeled as 'date',
           'invoice date', or 'billing date'.
       due_date:
+        x-aws-idp-evaluation-method: DATE
         type: string
         description: >-
           The deadline by which payment must be made. Look for 'due date',
@@ -318,6 +323,7 @@ classes:
           Terms that represent the core topics of the paper. Look for a list
           labeled 'keywords' or 'key terms', typically after the abstract.
       publication_date:
+        x-aws-idp-evaluation-method: DATE
         type: string
         description: >-
           The date when the paper was published. May be preceded by 'published'
@@ -371,6 +377,7 @@ classes:
       organizational announcements or directives
     properties:
       memo_date:
+        x-aws-idp-evaluation-method: DATE
         type: string
         description: >-
           The date when the memo was written. Look for 'date' or 'memo date',
@@ -514,6 +521,7 @@ classes:
           The topic of the email. Often preceded by 'subject', 'RE:', or
           'regarding'.
       date_sent:
+        x-aws-idp-evaluation-method: DATE
         type: string
         description: >-
           The date and time when the email was sent. Look for 'date', 'sent on',
@@ -558,6 +566,7 @@ classes:
           Information about the person completing the questionnaire. May include
           fields labeled 'respondent', 'participant', or 'name'.
       submission_date:
+        x-aws-idp-evaluation-method: DATE
         type: string
         description: >-
           The date when the questionnaire was completed. Look for 'date',
@@ -716,6 +725,7 @@ classes:
           'type', 'category', or 'class' that indicate what kind of document
           this is.
       document_date:
+        x-aws-idp-evaluation-method: DATE
         type: string
         description: >-
           The date when the document was created. May be labeled as 'date',

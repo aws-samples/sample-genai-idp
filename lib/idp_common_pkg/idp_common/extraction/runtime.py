@@ -173,6 +173,37 @@ def _is_phantom_row(item: Any) -> bool:
     return non_empty < 2
 
 
+def _prune_phantom_rows_from_assessment(
+    extracted_fields: dict[str, Any], assessment: dict[str, Any]
+) -> None:
+    """Drop assessment rows whose DATA row is a phantom, keeping index alignment.
+
+    The merge drops phantom data rows (:func:`_is_phantom_row`) from each list
+    field, so ``merged_data[field][i]`` skips them. The per-shard assessment is
+    concatenated in the same order but is NOT phantom-filtered, so without this a
+    phantom row sitting *mid-list* would shift every following assessment row by
+    one relative to the merged data — misattributing confidence AND (now that
+    grounding is done per-shard and reused via ``skip_grounded``) the bounding
+    box. Pruning the shard's assessment in lockstep here — using the SAME phantom
+    predicate on the SAME data rows — means the persisted assessment lines up with
+    the phantom-filtered merged data exactly. Mutates ``assessment`` in place;
+    a no-op when the assessment list length doesn't match the data (defensive).
+    """
+    if not assessment:
+        return
+    for field, data_val in extracted_fields.items():
+        if not isinstance(data_val, list):
+            continue
+        assessed = assessment.get(field)
+        if not isinstance(assessed, list) or len(assessed) != len(data_val):
+            # Not index-aligned (e.g. reconcile hasn't run for this field) — the
+            # merge/reconcile will realign by length, so don't risk a mis-prune.
+            continue
+        keep = [i for i, row in enumerate(data_val) if not _is_phantom_row(row)]
+        if len(keep) != len(data_val):
+            assessment[field] = [assessed[i] for i in keep]
+
+
 def _merge_shard_results(
     results: list[tuple[Any, dict[str, Any]]],
     data_format: type[BaseModel],
@@ -435,25 +466,51 @@ async def extract_one_shard(
     page_start = payload["page_start"]
     page_end = payload["page_end"]
 
+    # B5 — two-phase resume. A shard persists in two steps: (1) extraction alone
+    # (``assessment_pending: True``) the moment the expensive agent loop finishes,
+    # then (2) the complete record after assessment. So a shard Lambda that dies
+    # DURING assessment (e.g. a slow confidence model) resumes on retry by REUSING
+    # the persisted extraction and re-running ONLY assessment — the costly agent
+    # loop is never repeated. ``cached_extraction`` carries the reused extraction
+    # into the assessment phase below.
+    cached_extraction: dict[str, Any] | None = None
     if persistence is not None:
         cached = persistence.load(section_id, page_start, page_end)
         if cached and cached.get("extracted_fields") is not None:
+            assessment_done = cached.get("assessment") is not None or not cached.get(
+                "assessment_pending", False
+            )
+            # Fully complete (extraction + assessment, or no assessment expected)
+            # → skip entirely. This is the original fast path.
+            if assessment_done or assess_runner is None:
+                logger.info(
+                    "Skipping shard %d/%d (pages %d-%d): complete result already "
+                    "persisted",
+                    shard_index + 1,
+                    total_shards,
+                    page_start,
+                    page_end,
+                )
+                hit_response: dict[str, Any] = {"metering": cached.get("metering", {})}
+                if cached.get("assessment") is not None:
+                    hit_response["_shard_assessment"] = {
+                        "assessment": cached.get("assessment"),
+                        "alerts": cached.get("alerts", []),
+                        "page_start": page_start,
+                        "page_end": page_end,
+                    }
+                return cached["extracted_fields"], hit_response
+            # Extraction done but assessment did NOT finish (a prior attempt timed
+            # out mid-assessment) → reuse the extraction, re-run assessment only.
             logger.info(
-                "Skipping shard %d/%d (pages %d-%d): complete result already persisted",
+                "Resuming shard %d/%d (pages %d-%d): extraction already persisted; "
+                "re-running assessment only (prior attempt did not complete it)",
                 shard_index + 1,
                 total_shards,
                 page_start,
                 page_end,
             )
-            response: dict[str, Any] = {"metering": cached.get("metering", {})}
-            if cached.get("assessment") is not None:
-                response["_shard_assessment"] = {
-                    "assessment": cached.get("assessment"),
-                    "alerts": cached.get("alerts", []),
-                    "page_start": page_start,
-                    "page_end": page_end,
-                }
-            return cached["extracted_fields"], response
+            cached_extraction = cached
 
     # Deterministic fault-injection hook (Phase 3 resume proof). When
     # EXTRACTION_FORCE_FAIL_SHARDS lists a 0-based page_start (comma-separated)
@@ -491,28 +548,51 @@ async def extract_one_shard(
                 page_end,
             )
 
-    if shard_runner is None:
-        raise ValueError(
-            "extract_one_shard requires a shard_runner (the strands-backed agent "
-            "callable). Callers in idp_common pass agentic_idp.default_shard_runner; "
-            "tests inject a fake. This keeps runtime.py strands-free."
+    response: dict[str, Any]
+    if cached_extraction is not None:
+        # B5 resume: reuse the persisted extraction; do NOT re-run the agent.
+        extracted_fields = cached_extraction["extracted_fields"]
+        response = {"metering": cached_extraction.get("metering", {})}
+    else:
+        if shard_runner is None:
+            raise ValueError(
+                "extract_one_shard requires a shard_runner (the strands-backed agent "
+                "callable). Callers in idp_common pass agentic_idp.default_shard_runner; "
+                "tests inject a fake. This keeps runtime.py strands-free."
+            )
+        data, response = await shard_runner(
+            shard_index=shard_index,
+            total_shards=total_shards,
+            payload=payload,
+            model_id=model_id,
+            data_format=data_format,
+            config=config,
+            context=context,
+            max_retries=max_retries,
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
+            max_tokens=max_tokens,
+            checkpoint_callback=checkpoint_callback,
+            custom_instruction=custom_instruction,
         )
-    data, response = await shard_runner(
-        shard_index=shard_index,
-        total_shards=total_shards,
-        payload=payload,
-        model_id=model_id,
-        data_format=data_format,
-        config=config,
-        context=context,
-        max_retries=max_retries,
-        connect_timeout=connect_timeout,
-        read_timeout=read_timeout,
-        max_tokens=max_tokens,
-        checkpoint_callback=checkpoint_callback,
-        custom_instruction=custom_instruction,
-    )
-    extracted_fields = data.model_dump(mode="json")
+        extracted_fields = data.model_dump(mode="json")
+
+        # B5 — Persist the EXTRACTION checkpoint before assessment runs, flagged
+        # ``assessment_pending`` so a crash during the (potentially slow) assessment
+        # phase lets the retry skip the agent loop and re-run assessment only. Only
+        # when a separate assessment pass is expected (assess_runner set); integrated
+        # mode already carries confidence inline so there is nothing to defer.
+        if persistence is not None and assess_runner is not None:
+            persistence.save(
+                section_id,
+                page_start,
+                page_end,
+                {
+                    "extracted_fields": extracted_fields,
+                    "metering": response.get("metering", {}),
+                    "assessment_pending": True,
+                },
+            )
 
     # In-shard assessment (integrated-assessment feature). Runs over THIS shard's
     # pages/values only, so it scales the same way extraction does. Best-effort:

@@ -46,6 +46,7 @@ from idp_common.bedrock.client import (
 from idp_common.bedrock.model_utils import get_model_max_output_tokens
 from idp_common.bedrock.openai_responses import is_openai_responses_model
 from idp_common.config.models import IDPConfig
+from idp_common.extraction.topk_resolver import resolve_candidates
 from idp_common.utils.bedrock_utils import (
     async_exponential_backoff_retry,
 )
@@ -108,6 +109,51 @@ def supports_tool_caching(model_id: str) -> bool:
         True if the model supports tool caching, False otherwise
     """
     return "anthropic.claude" in model_id or "us.anthropic.claude" in model_id
+
+
+def _summarization_params(
+    model_id: str | None, _context_buffer: float
+) -> tuple[int, float]:
+    """Derive (preserve_recent_messages, summary_ratio) from the model window.
+
+    Larger context window → preserve more recent turns verbatim before the
+    conversation manager summarizes, so the agent is far less likely to lose the
+    parsed-table / finalize-instruction context mid-run (the re-parse/no-commit
+    loop root cause). Buckets keep it simple and safe:
+
+    - >= 1M input tokens  -> preserve 40 (summarize very rarely)
+    - >= 400K             -> preserve 20
+    - >= 200K             -> preserve 10
+    - otherwise / unknown -> preserve 5  (the conservative legacy value)
+
+    ``summary_ratio`` stays high (0.9) so that WHEN summarization does trigger it
+    compresses aggressively — we want few, large-preserve windows, not frequent
+    small summaries. ``context_buffer`` is accepted for future tuning but not
+    currently needed (the buckets already bake in headroom).
+    """
+    try:
+        from idp_common.bedrock.model_utils import get_model_max_input_tokens
+
+        window = get_model_max_input_tokens(model_id) if model_id else 0
+    except Exception:  # noqa: BLE001 - unknown model → conservative default
+        window = 0
+
+    if window >= 1_000_000:
+        preserve = 40
+    elif window >= 400_000:
+        preserve = 20
+    elif window >= 200_000:
+        preserve = 10
+    else:
+        preserve = 5
+    logger.info(
+        "Conversation summarization sizing: model=%s input_window=%d -> "
+        "preserve_recent_messages=%d summary_ratio=0.9",
+        model_id,
+        window,
+        preserve,
+    )
+    return preserve, 0.9
 
 
 def supports_prompt_caching(model_id: str) -> bool:
@@ -457,6 +503,44 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
         return "Extraction and confidence recorded; the data format is correct"
 
     @tool
+    def extraction_with_topk_tool(
+        candidates: dict[str, Any],
+        agent: Agent,  # pyright: ignore[reportInvalidTypeForm]
+    ) -> str:
+        """Return your top-K guesses with probabilities for EVERY field in ONE call.
+
+        Use this INSTEAD of a plain extraction tool + assessment tool (1S-TopK
+        integrated confidence). For each field, provide a nested object with your
+        ranked guesses and their probabilities — the top guess (G1) becomes the
+        extracted value and its probability (P1) becomes the confidence:
+          - Scalar/group field ->
+            {"G1": "<best guess>", "P1": 0.0-1.0, "G2": "...", "P2": ..., ...}
+          - List field -> a LIST with ONE object per extracted row, IN THE SAME
+            ORDER, where each sub-attribute is itself a {G1, P1, ...} object.
+        Provide as many guesses (K) as are meaningful; G1/P1 alone is valid.
+        Ranking alternatives yields better-calibrated confidence than a single
+        value + single score. This overwrites any previous extraction/assessment.
+        """
+        # Resolve G1 -> value and P1 -> confidence using the shared resolver.
+        schema = model_class.model_json_schema()
+        inference_result, assessment_data, _candidates_meta = resolve_candidates(
+            candidates, schema
+        )
+        error = _record_extraction(inference_result, agent)
+        if error is not None:
+            return error
+        agent.state.set("field_assessment", assessment_data)
+        logger.info(
+            "extraction_with_topk_tool called (1S-TopK integrated)",
+            extra={
+                "field_count": len(assessment_data)
+                if isinstance(assessment_data, dict)
+                else 0
+            },
+        )
+        return "TopK extraction and confidence recorded; the data format is correct"
+
+    @tool
     def apply_json_patches(
         patches: list[dict[str, Any]],
         agent: Agent,
@@ -580,6 +664,7 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
     return (
         extraction_tool,
         extraction_with_confidence_tool,
+        extraction_with_topk_tool,
         apply_json_patches,
         make_buffer_data_final_extraction,
         finalize_table_extraction,
@@ -817,6 +902,14 @@ After successfully using the extraction tool, you MUST:
 4. Look for any missing fields, incorrect values, or formatting issues
 5. If any discrepancies are found, use the apply_json_patches tool to fix them
 6. Only finish when you are confident all data is accurate and complete
+
+TABLE TOOL NOTE (for the processing report):
+If the document contained a large table AND you did NOT use the parse_table /
+map_table_to_schema tools to extract it, end your final response with ONE short
+sentence, on its own line, beginning exactly with "TABLE_TOOL_NOTE:" that states
+briefly why you extracted the table directly instead (e.g. the table was small,
+the OCR pipe-table was malformed, columns didn't map cleanly). If you DID use the
+table tools, or there was no large table, do not add this note.
 """
 
 
@@ -1726,6 +1819,7 @@ async def structured_output_async(
     (
         extraction_tool,
         extraction_with_confidence_tool,
+        extraction_with_topk_tool,
         apply_json_patches,
         make_buffer_data_final_extraction,
         finalize_table_extraction,
@@ -1737,19 +1831,21 @@ async def structured_output_async(
     #     pass over the finalized values).
     #   single_shot: extract + confidence in ONE combined tool call
     #     (extraction_with_confidence_tool), saving the follow-up inference.
-    # Both write agent.state["field_assessment"], so the downstream collation /
-    # reconcile / grounding / explainability_info path is identical. The choice is
-    # a hidden experimental knob (extraction.agentic.integrated_confidence_strategy)
+    #   topk: extract + confidence in ONE combined tool call
+    #     (extraction_with_topk_tool) where the agent emits its top-K guesses with
+    #     probabilities per field; the shared topk_resolver takes G1 as the value
+    #     and P1 as the confidence. Better-calibrated than single_shot.
+    # All three write agent.state["field_assessment"], so the downstream collation
+    # / reconcile / grounding / explainability_info path is identical. The choice
+    # is a hidden experimental knob (extraction.agentic.integrated_confidence_strategy)
     # so cost/latency vs. confidence-calibration can be A/B tested; it is NOT in the
     # config UI schema. The instructions telling the agent which call to make live
-    # in the selected extraction TASK prompt (task_prompt_extraction_with_confidence).
-    single_shot_integrated = (
-        emit_field_assessment
-        and config.extraction.agentic.integrated_confidence_strategy == "single_shot"
-    )
-
-    if single_shot_integrated:
+    # in the selected extraction TASK prompt.
+    strategy = config.extraction.agentic.integrated_confidence_strategy
+    if emit_field_assessment and strategy == "single_shot":
         primary_extraction_tool = extraction_with_confidence_tool
+    elif emit_field_assessment and strategy == "topk":
+        primary_extraction_tool = extraction_with_topk_tool
     else:
         primary_extraction_tool = extraction_tool
 
@@ -1855,6 +1951,18 @@ async def structured_output_async(
     # requires all values to be JSON-serializable.
     _active_checkpoint_callback_var.set(checkpoint_callback)
 
+    # Model-aware conversation summarization (item 1). The Strands
+    # SummarizingConversationManager only exposes count/ratio knobs (no token
+    # budget), so we DERIVE preserve_recent_messages from the model's context
+    # window: a roomy model keeps more recent turns verbatim before summarizing,
+    # so it is far less likely to summarize away the "you already parsed the
+    # table — now finalize with extraction_tool" context that caused the
+    # re-parse/no-commit loop. A small-window model keeps the conservative
+    # minimum. This complements sharding (which keeps each shard's conversation
+    # small in the first place).
+    preserve_recent, summary_ratio = _summarization_params(
+        model_id, config.extraction.context_buffer
+    )
     agent = Agent(
         model=BedrockModel(
             **model_config,
@@ -1871,7 +1979,7 @@ async def structured_output_async(
             "extraction_schema_json": schema_json,  # Store for schema reminder tool
         },
         conversation_manager=SummarizingConversationManager(
-            summary_ratio=0.95, preserve_recent_messages=5
+            summary_ratio=summary_ratio, preserve_recent_messages=preserve_recent
         ),
     )
     if existing_data:

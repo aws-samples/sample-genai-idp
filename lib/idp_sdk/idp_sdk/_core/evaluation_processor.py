@@ -97,6 +97,106 @@ class EvaluationProcessor:
             logger.error(f"Error creating baseline: {e}")
             raise
 
+    def use_as_baseline(self, document_id: str) -> Dict:
+        """Promote a processed document's output to the evaluation baseline.
+
+        This is the programmatic equivalent of the UI "Use as Evaluation
+        Baseline" button: it copies every object under ``{document_id}/`` from
+        the output bucket into the evaluation baseline bucket, then records the
+        outcome on the document's tracking record via ``EvaluationStatus``
+        (``BASELINE_AVAILABLE`` on success, ``BASELINE_ERROR`` on failure).
+
+        Unlike the UI mutation (which returns immediately and copies in a
+        background Lambda), this runs synchronously and only returns once the
+        copy is complete — better suited to scripting and monitoring.
+
+        Args:
+            document_id: Document identifier (S3 key / object key)
+
+        Returns:
+            Dictionary with copy result: document_id, files_copied,
+            evaluation_status, and timestamp.
+        """
+        output_bucket = self.resources.get("OutputBucket")
+        if not output_bucket:
+            raise ValueError("OutputBucket not found in stack resources")
+
+        baseline_bucket = self.resources.get("EvaluationBaselineBucket")
+        if not baseline_bucket:
+            raise ValueError("EvaluationBaselineBucket not found in stack resources")
+
+        # Collect all objects under the document prefix. The prefix is the
+        # document id followed by "/" so we don't accidentally match sibling
+        # documents whose id shares a prefix (e.g. "doc1" vs "doc10").
+        prefix = f"{document_id}/"
+        paginator = self.s3.get_paginator("list_objects_v2")
+        keys = [
+            obj["Key"]
+            for page in paginator.paginate(Bucket=output_bucket, Prefix=prefix)
+            for obj in page.get("Contents", [])
+        ]
+
+        if not keys:
+            raise FileNotFoundError(
+                f"No output objects found under prefix '{prefix}' in bucket "
+                f"'{output_bucket}'. Has the document finished processing?"
+            )
+
+        # Mark copy in progress so concurrent readers (UI/CLI) see the state.
+        self._set_evaluation_status(document_id, "BASELINE_COPYING")
+
+        copied = 0
+        try:
+            for key in keys:
+                self.s3.copy_object(
+                    CopySource={"Bucket": output_bucket, "Key": key},
+                    Bucket=baseline_bucket,
+                    Key=key,
+                )
+                copied += 1
+        except Exception as e:
+            logger.error(f"Error copying baseline objects for {document_id}: {e}")
+            self._set_evaluation_status(document_id, "BASELINE_ERROR")
+            raise
+
+        self._set_evaluation_status(document_id, "BASELINE_AVAILABLE")
+
+        return {
+            "document_id": document_id,
+            "files_copied": copied,
+            "evaluation_status": "BASELINE_AVAILABLE",
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+    def _set_evaluation_status(self, document_id: str, status: str) -> None:
+        """Set EvaluationStatus on the document's tracking record.
+
+        Mirrors the DynamoDB layout used by idp_common's document service
+        (PK="doc#<key>", SK="none"). Best-effort: a status-write failure is
+        logged but not raised so it can't mask the copy result — except from
+        ``use_as_baseline`` which decides its own error handling.
+        """
+        table_name = self.resources.get("DocumentsTable")
+        if not table_name:
+            logger.warning(
+                "DocumentsTable not found in stack resources; skipping "
+                "EvaluationStatus update"
+            )
+            return
+
+        try:
+            table = self.dynamodb.Table(table_name)
+            table.update_item(
+                Key={"PK": f"doc#{document_id}", "SK": "none"},
+                UpdateExpression="SET #es = :es",
+                ExpressionAttributeNames={"#es": "EvaluationStatus"},
+                ExpressionAttributeValues={":es": status},
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to set EvaluationStatus={status} for {document_id}: {e}"
+            )
+
     def get_report(self, document_id: str, section_id: int = 1) -> Dict:
         """
         Get evaluation report for a document section

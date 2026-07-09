@@ -26,6 +26,7 @@ from pydantic import (
     ConfigDict,
     Discriminator,
     Field,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -36,6 +37,40 @@ from typing_extensions import Self
 # top-level `assessment` block into `extraction.confidence` / `extraction.geometry`
 # and introduced the top-level `hitl` block.
 CONFIG_FORMAT_VERSION = "0.6"
+
+
+def _parse_optional_max_tokens(v: Any) -> Optional[int]:
+    """Parse an optional max_tokens value from config.
+
+    max_tokens is an optional cap on model output. An empty string, ``None``,
+    or a value that coerces to 0 means "unset" — the Bedrock client then
+    resolves the selected model's maximum output limit
+    (model_config_limits.yaml). A positive int/string is used as an upper cap.
+    """
+    if v is None:
+        return None
+    if isinstance(v, str):
+        v = v.strip()
+        if not v:
+            return None
+        v = int(v)
+    v = int(v)
+    return v if v > 0 else None
+
+
+def _parse_required_int(v: Any, info: ValidationInfo, cls: type) -> int:
+    """Parse a required int, falling back to the field's default on empty/None.
+
+    A stored config may carry an explicit ``null`` or empty string for a field
+    that is otherwise a required int with a default (e.g. ``list_batch_size``,
+    ``max_empty_line_gap``). Coercing that directly via ``int(None)`` raises
+    ``TypeError``, which would fail config load/validation on upgrade. Treat
+    empty/None as "use the model's declared default" instead.
+    """
+    if v is None or (isinstance(v, str) and not v.strip()):
+        default = cls.model_fields[info.field_name].default
+        return int(default) if default is not None else 0
+    return int(v)
 
 
 class ImageConfig(BaseModel):
@@ -157,11 +192,9 @@ class TableParsingConfig(BaseModel):
 
     @field_validator("max_empty_line_gap", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any, info: ValidationInfo) -> int:
+        """Parse int from string or number (empty/None -> field default)."""
+        return _parse_required_int(v, info, cls)
 
 
 class ValidationConfig(BaseModel):
@@ -248,7 +281,11 @@ class AgenticConfig(BaseModel):
             "calls provide_field_assessment in a follow-up inference within the same "
             "turn (a dedicated reflection pass over the finalized values). "
             "'single_shot': the agent emits values AND per-field confidence together "
-            "in ONE combined tool call, saving the follow-up inference. Both produce "
+            "in ONE combined tool call, saving the follow-up inference. "
+            "'topk': the agent emits, per field, its top-K guesses with probabilities "
+            "(G1/P1 … GK/PK) in ONE combined tool call; the shared topk_resolver takes "
+            "G1 as the value and P1 as the confidence — the agentic analogue of the "
+            "simple-mode 1S-TopK path, for better-calibrated scores. All three produce "
             "identical explainability_info downstream; this only changes inference "
             "mechanics. Provided so cost/latency vs. confidence-calibration can be "
             "A/B tested before choosing a default. Ignored unless "
@@ -277,26 +314,26 @@ class AgenticConfig(BaseModel):
         "RPM — tune to your quota.",
     )
     shard_token_budget: int = Field(
-        default=8000,
-        gt=0,
-        description="Target maximum input tokens (estimated, ~chars/4) of OCR "
-        "text per shard when max_concurrent_batches > 1. Pages are grouped so "
-        "each shard stays under this budget, creating as many shards as needed "
-        "(capped by max_concurrent_batches). The default (8000) reliably shards "
-        "large documents so a single agent never has to emit a giant table in "
-        "one Bedrock call (the read-timeout failure mode). Raise for "
-        "large-context models (e.g. 1M-context Claude); lower if shards still "
-        "overflow.",
+        default=0,
+        ge=0,
+        description="OPTIONAL OVERRIDE (0 = auto-size from the model). Target "
+        "maximum input tokens (~chars/4) of OCR text per shard when "
+        "max_concurrent_batches > 1. When 0 (default), this is auto-derived from "
+        "the extraction model's context window minus extraction.context_buffer "
+        "(see idp_common.bedrock.sizing) — so a 1M-context model shards larger "
+        "than a 200K one automatically. Set a non-zero value only to pin it.",
     )
     max_pages_per_shard: int = Field(
         default=5,
         ge=0,
         description="Page-count ceiling per shard when max_concurrent_batches "
         "> 1. A shard is closed once it holds this many pages even if its OCR "
-        "text is still under shard_token_budget — so a document with unusually "
-        "compact pages still shards on page count (tokens AND pages both bound a "
-        "shard). This guarantees large docs shard regardless of text density. "
-        "0 = disabled (token budget alone bounds shards).",
+        "text is under the token budget. This is the TIMEOUT-critical lever "
+        "(fewer pages/shard = fewer sequential agent turns = each shard Lambda "
+        "finishes well under 900s), so it stays a small fixed default (5) rather "
+        "than model-derived — a roomy token budget must NOT collapse a large doc "
+        "back into one giant shard. 0 = disabled (token budget alone bounds "
+        "shards; not recommended for large docs).",
     )
     max_images_per_agent: int = Field(
         default=20,
@@ -337,10 +374,10 @@ class AgenticConfig(BaseModel):
         if v is None or (isinstance(v, str) and not v.strip()):
             return "two_step"
         v = str(v).strip().lower()
-        if v not in ("two_step", "single_shot"):
+        if v not in ("two_step", "single_shot", "topk"):
             raise ValueError(
-                "integrated_confidence_strategy must be 'two_step' or 'single_shot', "
-                f"got {v!r}"
+                "integrated_confidence_strategy must be 'two_step', 'single_shot', "
+                f"or 'topk', got {v!r}"
             )
         return v
 
@@ -497,7 +534,40 @@ class ConfidenceConfig(BaseModel):
             "the list, leaving rows unassessed. When a shard's extracted list exceeds "
             "this size, the assessment is run in batches of this many rows and "
             "concatenated, so every row gets a confidence. Lower = more reliable "
-            "enumeration but more inferences; raise for capable models."
+            "enumeration but more inferences; raise for capable models. NOTE: this is "
+            "an UPPER bound — the self-healing ladder derives a smaller token-aware "
+            "first-pass size when the confidence model's output cap would truncate it."
+        ),
+    )
+    escalation_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable the assessment self-healing ladder: when confidence rows still "
+            "come back unscored/truncated after token-aware batch shrinking and "
+            "same-model retries, re-assess ONLY the still-missing rows with a "
+            "stronger 'escalation_model' (larger output cap). ON by default so "
+            "advanced mode completes correctly the first time; the ladder is a no-op "
+            "when nothing is missing."
+        ),
+    )
+    escalation_model: Optional[str] = Field(
+        default=None,
+        description=(
+            "Stronger Bedrock confidence model the ladder escalates to (e.g. a "
+            "128K-output Claude model when the primary confidence model is Nova Lite "
+            "at 10K). Falls back to the per-class "
+            "'x-aws-idp-confidence-escalation-model' override. None -> the model "
+            "escalation step is skipped (ladder stays at token-aware shrink + retry)."
+        ),
+    )
+    max_escalation_rounds: int = Field(
+        default=2,
+        ge=0,
+        description=(
+            "Upper bound on self-healing ladder rounds (token-aware shrink/retry "
+            "rounds plus the model-escalation round). Bounds added cost/latency so "
+            "the ladder stays within the Lambda wall-clock budget. 0 disables the "
+            "ladder entirely."
         ),
     )
     image: ImageConfig = Field(default_factory=ImageConfig)
@@ -512,10 +582,16 @@ class ConfidenceConfig(BaseModel):
 
     @field_validator("list_batch_size", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
+    def parse_int(cls, v: Any, info: ValidationInfo) -> int:
+        """Parse int from string or number (empty/None -> field default)."""
+        return _parse_required_int(v, info, cls)
+
+    @field_validator("max_escalation_rounds", mode="before")
+    @classmethod
+    def parse_max_escalation_rounds(cls, v: Any) -> int:
+        """Parse int from string or number; empty/None -> default 2."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return 2
         return int(v)
 
     @field_validator("mode", mode="before")
@@ -627,6 +703,22 @@ class ExtractionConfig(BaseModel):
         default_factory=list,
         description="Pipeline hooks invoked after extraction (Feature Platform)",
     )
+    context_buffer: float = Field(
+        default=0.30,
+        ge=0.0,
+        le=0.95,
+        description=(
+            "Fraction of each model's context/output window kept free as safety "
+            "headroom (default 0.30 = never use more than 70% of a window). This "
+            "is the ONE knob for model-aware auto-sizing: shard token/page budgets "
+            "and confidence list-batch sizes are derived from the model's input "
+            "and output limits minus this buffer (see idp_common.bedrock.sizing), "
+            "so you don't hand-set per-model sizes. Raise it (e.g. 0.5) if you see "
+            "context-overflow or truncation; lower it (e.g. 0.15) to pack more per "
+            "shard/batch on a roomy model. The derived sizes are logged and shown "
+            "in the processing report."
+        ),
+    )
     model: str = Field(
         default="us.amazon.nova-pro-v1:0",
         description="Bedrock model ID for extraction. Use 'LambdaHook' to invoke a custom Lambda function instead of Bedrock.",
@@ -646,9 +738,24 @@ class ExtractionConfig(BaseModel):
     task_prompt_extraction_with_confidence: str = Field(
         default="",
         description=(
-            "Task prompt template for INTEGRATED extraction+confidence — used when "
-            "extraction.confidence.mode == 'integrated', where a single inference "
-            "emits each value AND its confidence. Populated from system defaults."
+            "Task prompt template for INTEGRATED extraction+confidence in AGENTIC "
+            "(advanced) mode — used when extraction.confidence.mode == 'integrated' "
+            "and extraction.mode == 'advanced', where the agent calls the "
+            "provide_field_assessment tool after extracting. Populated from system "
+            "defaults."
+        ),
+    )
+    task_prompt_extraction_with_confidence_topk: str = Field(
+        default="",
+        description=(
+            "Task prompt template for 1-Stage TopK INTEGRATED extraction+confidence "
+            "in SIMPLE (non-agentic) mode — used when "
+            "extraction.confidence.mode == 'integrated' and extraction.mode == "
+            "'simple'. A single LLM call emits its top-K guesses with probabilities "
+            "(G1/P1 … GK/PK) per field; topk_resolver takes G1 as the value and P1 "
+            "as the confidence. Requesting ranked alternatives yields better-"
+            "calibrated confidence than single-value self-assessment. Populated "
+            "from system defaults."
         ),
     )
     # NOTE (v0.6): the confidence-only prompt lives at extraction.confidence.task_prompt
@@ -723,6 +830,14 @@ class ExtractionConfig(BaseModel):
             return float(v) if v else 0.0
         return float(v)
 
+    @field_validator("context_buffer", mode="before")
+    @classmethod
+    def parse_context_buffer(cls, v: Any) -> float:
+        """Parse the context buffer; empty/None -> default 0.30."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return 0.30
+        return float(v)
+
     @field_validator("mode", mode="before")
     @classmethod
     def validate_mode(cls, v: Any) -> Optional[str]:
@@ -795,10 +910,10 @@ class ClassificationConfig(BaseModel):
             "without an effort control (Nova, Sonnet 4.5, Haiku 4.5)."
         ),
     )
-    max_tokens: int = Field(
-        default=4096,
+    max_tokens: Optional[int] = Field(
+        default=None,
         gt=0,
-        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+        description="Optional cap on output tokens. Leave empty to use the selected model's maximum output limit (recommended). If set, it must not exceed the model's limit.",
     )
     maxPagesForClassification: str = Field(
         default="ALL",
@@ -846,11 +961,9 @@ class ClassificationConfig(BaseModel):
 
     @field_validator("max_tokens", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any) -> Optional[int]:
+        """Parse optional max_tokens (empty/0 -> None = use model max)."""
+        return _parse_optional_max_tokens(v)
 
     @field_validator("maxPagesForClassification", mode="before")
     @classmethod
@@ -961,10 +1074,10 @@ class SummarizationConfig(BaseModel):
             "without an effort control (Nova, Sonnet 4.5, Haiku 4.5)."
         ),
     )
-    max_tokens: int = Field(
-        default=4096,
+    max_tokens: Optional[int] = Field(
+        default=None,
         gt=0,
-        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+        description="Optional cap on output tokens. Leave empty to use the selected model's maximum output limit (recommended). If set, it must not exceed the model's limit.",
     )
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
@@ -977,11 +1090,9 @@ class SummarizationConfig(BaseModel):
 
     @field_validator("max_tokens", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any) -> Optional[int]:
+        """Parse optional max_tokens (empty/0 -> None = use model max)."""
+        return _parse_optional_max_tokens(v)
 
 
 class ChatConfig(BaseModel):
@@ -1021,12 +1132,13 @@ class ChatConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
-    max_tokens: int = Field(
-        default=4096,
+    max_tokens: Optional[int] = Field(
+        default=None,
         gt=0,
         description=(
-            "Maximum number of output (response) tokens. Ensure this does "
-            "not exceed the selected model's limit."
+            "Optional cap on output (response) tokens. Leave empty to use the "
+            "selected model's maximum output limit (recommended). If set, it "
+            "must not exceed the model's limit."
         ),
     )
     reasoning_effort: str = Field(
@@ -1050,11 +1162,9 @@ class ChatConfig(BaseModel):
 
     @field_validator("max_tokens", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any) -> Optional[int]:
+        """Parse optional max_tokens (empty/0 -> None = use model max)."""
+        return _parse_optional_max_tokens(v)
 
 
 class OCRFeature(BaseModel):
@@ -1071,7 +1181,16 @@ class OCRConfig(BaseModel):
         description="Pipeline hooks invoked after OCR (Feature Platform)",
     )
     backend: str = Field(
-        default="textract", description="OCR backend (textract or bedrock)"
+        default="textract",
+        description="OCR backend: 'textract', 'bedrock' (LLM OCR), 'bda' (Bedrock Data Automation), or 'none' (image-only)",
+    )
+    bda_project_arn: Optional[str] = Field(
+        default=None,
+        description=(
+            "ARN of a Bedrock Data Automation standard-output SYNC project used "
+            "when backend='bda'. If unset, a standard-output OCR project is "
+            "auto-created and reused."
+        ),
     )
     model_id: Optional[str] = Field(
         default=None,
@@ -1179,11 +1298,9 @@ class ErrorAnalyzerParameters(BaseModel):
         mode="before",
     )
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any, info: ValidationInfo) -> int:
+        """Parse int from string or number (empty/None -> field default)."""
+        return _parse_required_int(v, info, cls)
 
 
 class ErrorAnalyzerConfig(BaseModel):
@@ -1765,10 +1882,10 @@ class FactExtractionConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.01, ge=0.0, le=1.0)
     top_k: float = Field(default=20.0, ge=0.0)
-    max_tokens: int = Field(
-        default=4096,
+    max_tokens: Optional[int] = Field(
+        default=None,
         gt=0,
-        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+        description="Optional cap on output tokens. Leave empty to use the selected model's maximum output limit (recommended). If set, it must not exceed the model's limit.",
     )
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
@@ -1780,10 +1897,9 @@ class FactExtractionConfig(BaseModel):
 
     @field_validator("max_tokens", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any) -> Optional[int]:
+        """Parse optional max_tokens (empty/0 -> None = use model max)."""
+        return _parse_optional_max_tokens(v)
 
 
 class RuleValidationOrchestratorConfig(BaseModel):
@@ -1800,10 +1916,10 @@ class RuleValidationOrchestratorConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.01, ge=0.0, le=1.0)
     top_k: float = Field(default=20.0, ge=0.0)
-    max_tokens: int = Field(
-        default=4096,
+    max_tokens: Optional[int] = Field(
+        default=None,
         gt=0,
-        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+        description="Optional cap on output tokens. Leave empty to use the selected model's maximum output limit (recommended). If set, it must not exceed the model's limit.",
     )
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
@@ -1815,10 +1931,9 @@ class RuleValidationOrchestratorConfig(BaseModel):
 
     @field_validator("max_tokens", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any) -> Optional[int]:
+        """Parse optional max_tokens (empty/0 -> None = use model max)."""
+        return _parse_optional_max_tokens(v)
 
 
 class RuleValidationConfig(BaseModel):
@@ -1864,21 +1979,19 @@ class RuleValidationConfig(BaseModel):
         mode="before",
     )
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any, info: ValidationInfo) -> int:
+        """Parse int from string or number (empty/None -> field default)."""
+        return _parse_required_int(v, info, cls)
 
 
 class EvaluationLLMMethodConfig(BaseModel):
     """Evaluation LLM method configuration"""
 
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
-    max_tokens: int = Field(
-        default=4096,
+    max_tokens: Optional[int] = Field(
+        default=None,
         gt=0,
-        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+        description="Optional cap on output tokens. Leave empty to use the selected model's maximum output limit (recommended). If set, it must not exceed the model's limit.",
     )
     top_k: float = Field(default=5.0, ge=0.0)
     reasoning_effort: str = Field(
@@ -1938,11 +2051,9 @@ class EvaluationLLMMethodConfig(BaseModel):
 
     @field_validator("max_tokens", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any) -> Optional[int]:
+        """Parse optional max_tokens (empty/0 -> None = use model max)."""
+        return _parse_optional_max_tokens(v)
 
 
 class EvaluationConfig(BaseModel):
@@ -1964,10 +2075,10 @@ class DiscoveryModelConfig(BaseModel):
     system_prompt: str = Field(default="", description="System prompt for discovery")
     temperature: float = Field(default=1.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
-    max_tokens: int = Field(
-        default=10000,
+    max_tokens: Optional[int] = Field(
+        default=None,
         gt=0,
-        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+        description="Optional cap on output tokens. Leave empty to use the selected model's maximum output limit (recommended). If set, it must not exceed the model's limit.",
     )
     user_prompt: str = Field(
         default="", description="User prompt template for discovery"
@@ -1983,11 +2094,9 @@ class DiscoveryModelConfig(BaseModel):
 
     @field_validator("max_tokens", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any) -> Optional[int]:
+        """Parse optional max_tokens (empty/0 -> None = use model max)."""
+        return _parse_optional_max_tokens(v)
 
 
 class MultiDocumentDiscoveryConfig(BaseModel):
@@ -2011,11 +2120,12 @@ class MultiDocumentDiscoveryConfig(BaseModel):
         le=1.0,
         description="Temperature for cluster analysis model",
     )
-    max_tokens: int = Field(
-        default=10000,
+    max_tokens: Optional[int] = Field(
+        default=None,
         gt=0,
-        description="Maximum output tokens for cluster analysis. "
-        "Ensure this does not exceed the selected model's limit.",
+        description="Optional cap on output tokens for cluster analysis. Leave "
+        "empty to use the selected model's maximum output limit (recommended). "
+        "If set, it must not exceed the model's limit.",
     )
     max_documents: int = Field(
         default=500,
@@ -2061,7 +2171,6 @@ class MultiDocumentDiscoveryConfig(BaseModel):
         return float(v)
 
     @field_validator(
-        "max_tokens",
         "max_documents",
         "min_cluster_size",
         "num_sample_documents",
@@ -2071,11 +2180,15 @@ class MultiDocumentDiscoveryConfig(BaseModel):
         mode="before",
     )
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any, info: ValidationInfo) -> int:
+        """Parse int from string or number (empty/None -> field default)."""
+        return _parse_required_int(v, info, cls)
+
+    @field_validator("max_tokens", mode="before")
+    @classmethod
+    def parse_max_tokens(cls, v: Any) -> Optional[int]:
+        """Parse optional max_tokens (empty/0 -> None = use model max)."""
+        return _parse_optional_max_tokens(v)
 
 
 class RuleDiscoveryAgenticConfig(BaseModel):
@@ -2107,7 +2220,11 @@ class RuleDiscoveryConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.0, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
-    max_tokens: int = Field(default=64000, gt=0)
+    max_tokens: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Optional cap on output tokens. Leave empty to use the selected model's maximum output limit (recommended). If set, it must not exceed the model's limit.",
+    )
     agentic: RuleDiscoveryAgenticConfig = Field(
         default_factory=RuleDiscoveryAgenticConfig,
         description="Agentic rule discovery configuration",
@@ -2123,11 +2240,9 @@ class RuleDiscoveryConfig(BaseModel):
 
     @field_validator("max_tokens", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any) -> Optional[int]:
+        """Parse optional max_tokens (empty/0 -> None = use model max)."""
+        return _parse_optional_max_tokens(v)
 
     @model_validator(mode="after")
     def set_default_review_agent_model(self) -> Self:

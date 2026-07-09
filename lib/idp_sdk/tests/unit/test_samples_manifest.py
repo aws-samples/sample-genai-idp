@@ -95,3 +95,46 @@ def test_empty_known_batch_dir_skipped(publisher_in_tmp):
     manifest = pub.generate_samples_manifest()
     ids = {s["id"] for s in manifest["samples"]}
     assert ids == {"invoice"}  # empty rule-validation/ produced no entry
+
+
+def test_config_id_association(publisher_in_tmp):
+    pub, tmp_path = publisher_in_tmp
+    samples = tmp_path / "samples"
+    # Curated override carries an explicit configId.
+    _touch(samples / "bank-statement-multipage.pdf")
+    # Folder-name convention: config_library/unified/<id> exists.
+    (tmp_path / "config_library" / "unified" / "my-custom-sample").mkdir(parents=True)
+    _touch(samples / "my-custom-sample.pdf")
+    # No override, no matching config folder → configId is None.
+    _touch(samples / "Nuveen.pdf")
+
+    manifest = pub.generate_samples_manifest()
+    by_id = {s["id"]: s for s in manifest["samples"]}
+
+    # Every entry carries the configId key.
+    assert all("configId" in s for s in manifest["samples"])
+    assert by_id["bank-statement-multipage"]["configId"] == "bank-statement-sample"
+    assert by_id["my-custom-sample"]["configId"] == "my-custom-sample"
+    assert by_id["Nuveen"]["configId"] is None
+
+
+def test_batch_config_id_and_file_list(publisher_in_tmp):
+    pub, tmp_path = publisher_in_tmp
+    samples = tmp_path / "samples"
+    _touch(samples / "lending_package.pdf")
+    _touch(samples / "w2" / "W2_0.pdf")
+    _touch(samples / "w2" / "W2_1.pdf")
+    _touch(samples / "notes.txt")  # non-document → excluded from file list
+
+    manifest = pub.generate_samples_manifest()
+    by_id = {s["id"]: s for s in manifest["samples"]}
+    # w2 batch maps to the fake-w2 preset via the overrides table.
+    assert by_id["w2"]["configId"] == "fake-w2"
+
+    # The deploy-time copy file list matches the curated document files
+    # (relative to samples/), excluding non-document files.
+    assert pub.generate_sample_file_list() == [
+        "lending_package.pdf",
+        "w2/W2_0.pdf",
+        "w2/W2_1.pdf",
+    ]

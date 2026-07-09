@@ -1,0 +1,7 @@
+mutation UploadSampleDocument($sampleId: String!, $prefix: String, $version: String) {
+  uploadSampleDocument(sampleId: $sampleId, prefix: $prefix, version: $version) {
+    success
+    objectKeys
+    error
+  }
+}

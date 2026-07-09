@@ -57,7 +57,8 @@ discovery:
       documents. Use provided ground truth data as reference to optimize field
       extraction and ensure consistency with expected document structure and
       field definitions.
-    max_tokens: "10000"
+    # Empty => use the selected model's maximum output limit (model_config_limits.yaml).
+    max_tokens: ""
     top_p: "0.1"
     temperature: "0.0"
     user_prompt: >-
@@ -82,7 +83,8 @@ discovery:
       You are an expert document analyst. Your task is to identify
       distinct document sections within a multi-page document package.
       Return only valid JSON.
-    max_tokens: "4096"
+    # Empty => use the selected model's maximum output limit (model_config_limits.yaml).
+    max_tokens: ""
     top_p: "0.1"
     temperature: "0.0"
     user_prompt: >-
@@ -98,7 +100,8 @@ discovery:
     embedding_model_id: us.cohere.embed-v4:0
     analysis_model_id: us.anthropic.claude-sonnet-4-6
     temperature: "0.0"
-    max_tokens: "10000"
+    # Empty => use the selected model's maximum output limit (model_config_limits.yaml).
+    max_tokens: ""
     max_documents: 500
     min_cluster_size: 2
     num_sample_documents: 3
@@ -113,7 +116,8 @@ discovery:
       documents. Analyze forms line by line to identify field names, data types,
       and organizational structure. Focus on creating comprehensive blueprints
       for document processing without extracting actual values.
-    max_tokens: "10000"
+    # Empty => use the selected model's maximum output limit (model_config_limits.yaml).
+    max_tokens: ""
     top_p: "0.1"
     temperature: "0.0"
     user_prompt: >-

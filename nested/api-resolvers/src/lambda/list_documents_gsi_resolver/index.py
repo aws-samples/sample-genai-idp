@@ -388,7 +388,15 @@ def _gsi_item_to_document(item):
         "HITLReviewedBy": item.get("HITLReviewedBy"),
         "PageCount": item.get("NumPages"),
         "ConfidenceAlertCount": confidence_alert_count,
+        # NOTE: ProcessingIssueCount is written to the base table item but is NOT
+        # part of this GSI's INCLUDE projection (DynamoDB does not allow adding
+        # attributes to an existing GSI's projection in-place). It therefore
+        # resolves to None on the fast list path and is filtered out below; the
+        # per-document view (getDocument, full item) returns the real count. If a
+        # future migration recreates the GSI with this attribute, this line will
+        # start populating it automatically.
+        "ProcessingIssueCount": item.get("ProcessingIssueCount"),
     }
-    
+
     # Remove None values to keep response clean
     return {k: v for k, v in doc.items() if v is not None}

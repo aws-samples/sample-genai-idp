@@ -380,6 +380,7 @@ The evaluation framework provides different comparison methods optimized for var
 | **Fuzzy** | Names, addresses, general text | Yes | 0.7 | Token-based fuzzy matching allowing minor variations and reordering. Threshold controls minimum similarity score |
 | **Levenshtein** | Text with typos, variations | Yes | 0.7 | Edit distance-based string comparison for detecting character-level differences. Threshold controls minimum similarity score |
 | **Semantic** | Descriptions, free text | Yes | 0.7 | Embedding-based similarity using Bedrock Titan embeddings for meaning comparison. Threshold controls minimum similarity score |
+| **Date** | Dates, date ranges | No (binary) | N/A | Format-insensitive date comparison (Stickler v0.5.0+ `DateComparator`). Parses both values into dates first, so `01/05/2024`, `2024-01-05`, and `January 5, 2024` all match. Handles ranges. Optionally tuned via `x-aws-idp-evaluation-method-config` (`dayfirst`, `tolerance`, `range_mode`). Not for time-only values |
 | **LLM** | Complex semantic equivalence | No (binary) | N/A | AI-powered comparison with detailed reasoning. Returns binary match decision (1.0 or 0.0), not similarity score |
 | **Hungarian** | Arrays of structured objects | Yes (match_threshold) | 0.8 | Optimal bipartite matching algorithm for list comparison. Uses document-level match threshold for item pairing |
 | **AggregateObject** | Nested objects | No | N/A | Recursive field-by-field comparison of nested structures. No top-level threshold |
@@ -398,6 +399,7 @@ Evaluation reports display thresholds **only for methods that use similarity-bas
 **Methods WITHOUT Threshold Display:**
 - `Exact` - Binary comparison (no threshold concept)
 - `NumericExact` - Uses tolerance, not threshold
+- `Date` - Binary date-equality decision (uses optional method-config, not a threshold)
 - `LLM` - Returns binary match decision
 - `AggregateObject` - Recursive comparison
 
@@ -422,7 +424,8 @@ classes:
         x-aws-idp-evaluation-weight: 2.0  # Critical field - double weight
       invoice_date:
         type: string
-        x-aws-idp-evaluation-method: FUZZY
+        format: date
+        x-aws-idp-evaluation-method: DATE  # Format-insensitive date match
         x-aws-idp-evaluation-weight: 1.5  # Important field
       vendor_name:
         type: string
@@ -596,6 +599,15 @@ classes:
         type: string
         description: The unique identifier for the invoice
         x-aws-idp-evaluation-method: EXACT  # Use exact string matching
+      invoice_date:
+        type: string
+        format: date
+        description: The date the invoice was issued
+        x-aws-idp-evaluation-method: DATE  # Format-insensitive date match
+        # Optional DateComparator tuning:
+        # x-aws-idp-evaluation-method-config:
+        #   dayfirst: false      # false = US month-first; true = EU day-first
+        #   range_mode: graded   # scoring policy for date ranges
       amount_due:
         type: string
         description: The total amount to be paid
@@ -1343,14 +1355,11 @@ The solution includes a comprehensive Jupyter notebook (`notebooks/evaluation_re
 4. **Comparative Analysis**: Compare performance across different prompt configurations
 5. **Automated Alerts**: Set up CloudWatch alarms based on accuracy metrics stored in the database
 
-## Migration from Legacy Evaluation
+## Evaluation Engine
 
-The feature/stickler branch introduces a new Stickler-based evaluation service while preserving the legacy implementation for backward compatibility:
+Evaluation is powered entirely by the [Stickler](https://github.com/awslabs/stickler) library via `service.py`. (The pre-Stickler custom-comparator engine, formerly `service_legacy.py` / `comparator.py`, has been removed.)
 
-- **New**: `service.py` (Stickler-based) - default for new deployments
-- **Legacy**: `service_legacy.py` - preserved for existing workflows
-
-All existing configurations are compatible with the Stickler service through the `SticklerConfigMapper`, which translates IDP evaluation extensions to Stickler format transparently.
+All existing configurations are compatible through the `SticklerConfigMapper`, which translates IDP evaluation extensions to Stickler format transparently.
 
 ### What Changed
 

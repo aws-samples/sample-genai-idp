@@ -204,6 +204,44 @@ class TestConfigModels:
         assert config.list_batch_size == 5
         assert not hasattr(config, "granular")
 
+    def test_required_int_none_falls_back_to_default(self):
+        """A stored config may carry an explicit ``null`` / empty string for a
+        required int field (e.g. ``list_batch_size``, ``max_empty_line_gap``).
+        These must fall back to the field default rather than crash with
+        ``int(None)`` when the config is re-validated (e.g. on upgrade)."""
+        from idp_common.config import ConfidenceConfig
+        from idp_common.config.models import TableParsingConfig
+
+        # Explicit None -> default (25)
+        assert (
+            ConfidenceConfig.model_validate({"list_batch_size": None}).list_batch_size
+            == 25
+        )
+        # Empty string -> default
+        assert (
+            ConfidenceConfig.model_validate({"list_batch_size": ""}).list_batch_size
+            == 25
+        )
+        # Valid values still coerce
+        assert (
+            ConfidenceConfig.model_validate({"list_batch_size": "8"}).list_batch_size
+            == 8
+        )
+
+        # Same guard on a different non-optional int field (default 3)
+        assert (
+            TableParsingConfig.model_validate(
+                {"max_empty_line_gap": None}
+            ).max_empty_line_gap
+            == 3
+        )
+        assert (
+            TableParsingConfig.model_validate(
+                {"max_empty_line_gap": 5}
+            ).max_empty_line_gap
+            == 5
+        )
+
     def test_config_validation_range_checks(self):
         """Test that validation enforces ranges"""
         # temperature must be between 0 and 1
@@ -241,7 +279,10 @@ class TestChatConfig:
         # Default should be a large-context Opus model (see decision in CHANGELOG).
         assert cfg.model == "us.anthropic.claude-opus-4-8:1m"
         assert cfg.temperature == 0.0
-        assert cfg.max_tokens == 4096
+        # max_tokens defaults to None (unset) => Bedrock client resolves the
+        # model's maximum output limit. An empty string also maps to None.
+        assert cfg.max_tokens is None
+        assert ChatConfig.model_validate({"max_tokens": ""}).max_tokens is None
         assert cfg.system_prompt  # non-empty
 
     def test_chat_config_string_numeric_parsing(self):

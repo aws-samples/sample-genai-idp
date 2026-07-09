@@ -62,6 +62,8 @@ developer_tests:
     - echo ""
     - make typecheck-pr TARGET_BRANCH=$TARGET_BRANCH
     - make test-cicd -C lib/idp_common_pkg
+    # UI unit tests (Vitest + jsdom, no browser). Node 22 installed above.
+    - cd src/ui && npm ci --prefer-offline --no-audit && npx vitest run && cd ../..
 
   artifacts:
     paths:

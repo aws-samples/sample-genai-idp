@@ -18,7 +18,9 @@ chat:
   temperature: "0.0"
   top_p: "0.1"
   top_k: "5"
-  max_tokens: "4096"
+  # Empty => use the selected model's maximum output limit (model_config_limits.yaml).
+  # Set a positive value only to cap output below the model max.
+  max_tokens: ""
   system_prompt: >-
     You are an assistant that answers questions about the attached document text.
     If you don't know the answer, say so. Do not invent information.

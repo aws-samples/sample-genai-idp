@@ -970,3 +970,94 @@ class BatchProcessor:
             "documents_downloaded": len(documents_downloaded),
             "output_dir": output_dir,
         }
+
+    # ------------------------------------------------------------------ #
+    # Document version history (processing runs)
+    # ------------------------------------------------------------------ #
+    def list_document_versions(self, document_id: str) -> List[Dict]:
+        """
+        List processing-run versions for a document, newest first.
+
+        Args:
+            document_id: The document's S3 object key (its tracking id)
+
+        Returns:
+            List of run records (RunId, CompletionTime, ConfigVersion,
+            FileCount, ManifestUri, ...).
+        """
+        from boto3.dynamodb.conditions import Key
+
+        table = self.dynamodb.Table(self.resources["TrackingTable"])
+        runs: List[Dict] = []
+        kwargs: Dict = {
+            "KeyConditionExpression": Key("PK").eq(f"doc#{document_id}")
+            & Key("SK").begins_with("run#"),
+            "ScanIndexForward": False,  # newest first
+        }
+        while True:
+            response = table.query(**kwargs)
+            runs.extend(response.get("Items", []))
+            if "LastEvaluatedKey" not in response:
+                break
+            kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+        return runs
+
+    def download_version_results(
+        self, document_id: str, run_id: str, output_dir: str
+    ) -> Dict:
+        """
+        Download the exact output bytes of a specific document version.
+
+        Reads the run's manifest (``<key>/runs/<run_id>/manifest.json``) and
+        fetches each pinned object by its S3 VersionId, so the download
+        reflects that run even if later runs have overwritten the objects.
+
+        Args:
+            document_id: The document's S3 object key
+            run_id: The run identifier (from list_document_versions)
+            output_dir: Local directory to download into
+
+        Returns:
+            Dictionary with download statistics.
+        """
+        output_bucket = self.resources["OutputBucket"]
+        manifest_key = f"{document_id}/runs/{run_id}/manifest.json"
+        try:
+            response = self.s3.get_object(Bucket=output_bucket, Key=manifest_key)
+            manifest = json.loads(response["Body"].read().decode("utf-8"))
+        except self.s3.exceptions.NoSuchKey:
+            raise ValueError(f"No manifest found for version {run_id} of {document_id}")
+
+        files = manifest.get("files", [])
+        os.makedirs(output_dir, exist_ok=True)
+        files_downloaded = 0
+        for file_entry in files:
+            key = file_entry["key"]
+            version_id = file_entry.get("version_id")
+            # Contain the write under output_dir/run_id: a manifest key that is
+            # absolute or contains ".." must not escape the target directory.
+            dest_root = os.path.abspath(os.path.join(output_dir, run_id))
+            local_path = os.path.abspath(os.path.join(dest_root, key))
+            if os.path.commonpath([dest_root, local_path]) != dest_root:
+                logger.warning(
+                    f"Skipping unsafe manifest key outside output dir: {key}"
+                )
+                continue
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            extra_args = {}
+            if version_id and version_id != "null":
+                extra_args["VersionId"] = version_id
+            self.s3.download_file(
+                Bucket=output_bucket,
+                Key=key,
+                Filename=local_path,
+                ExtraArgs=extra_args or None,
+            )
+            files_downloaded += 1
+            logger.debug(f"Downloaded {key} (version {version_id})")
+
+        return {
+            "files_downloaded": files_downloaded,
+            "run_id": run_id,
+            "output_dir": os.path.join(output_dir, run_id),
+        }

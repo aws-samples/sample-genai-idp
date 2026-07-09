@@ -11,7 +11,9 @@ discovery:
     temperature: "0.0"
     top_p: "0.0"
     top_k: "5"
-    max_tokens: "64000"
+    # Empty => use the selected model's maximum output limit (model_config_limits.yaml).
+    # Set a positive value only to cap output below the model max.
+    max_tokens: ""
     agentic:
       enabled: false
       review_agent: false

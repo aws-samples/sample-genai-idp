@@ -25,6 +25,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import generateS3PresignedUrl from '../common/generate-s3-presigned-url';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
+import { useDocumentVersion } from '../../contexts/document-version';
 import { getFieldConfidenceInfo } from '../common/confidence-alerts-utils';
 import { getFileContents, uploadDocument } from '../../graphql/generated';
 import JSONEditorTab from './JSONEditorTab';
@@ -1861,6 +1862,8 @@ const VisualEditorModal = ({
 }: VisualEditorModalProps) => {
   const { currentCredentials, user } = useAppContext();
   const { settings } = useSettingsContext();
+  // Pin page-image previews to the selected run when viewing a past version.
+  const { versionIdForUri, runId: viewingRunId } = useDocumentVersion();
   const [pageImages, setPageImages] = useState<Record<string, string>>({});
   const [loadingImages, setLoadingImages] = useState(true);
   const [currentPage, setCurrentPage] = useState<string | number | null>(null);
@@ -2478,7 +2481,9 @@ const VisualEditorModal = ({
             if (page?.ImageUri) {
               try {
                 logger.debug(`VisualEditorModal - generating presigned URL for page ${pageId}`);
-                const url = await generateS3PresignedUrl(page.ImageUri as string, currentCredentials as Record<string, unknown>);
+                const url = await generateS3PresignedUrl(page.ImageUri as string, currentCredentials as Record<string, unknown>, {
+                  versionId: versionIdForUri(page.ImageUri as string),
+                });
                 images[String(pageId)] = url;
               } catch (err) {
                 logger.error(`Error generating presigned URL for page ${pageId}:`, err);
@@ -2504,7 +2509,7 @@ const VisualEditorModal = ({
 
     loadImages();
     // Only reload images when modal opens or when pageIds/sectionData changes, not when switching pages
-  }, [visible, pageIds, sectionDocItem?.pages, currentCredentials]);
+  }, [visible, pageIds, sectionDocItem?.pages, currentCredentials, viewingRunId]);
 
   // Zoom controls
   const handleZoomIn = () => {
@@ -3533,6 +3538,11 @@ const VisualEditorModal = ({
                 inferenceResult={
                   (localJsonData?.inference_result || localJsonData?.inferenceResult) as
                     | Record<string, unknown>
+                    | undefined
+                }
+                processingIssues={
+                  (localJsonData?.metadata as Record<string, unknown> | undefined)?.processing_issues as
+                    | { stage?: string; severity?: string; code?: string; message?: string; rootCause?: string }[]
                     | undefined
                 }
               />

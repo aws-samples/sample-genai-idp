@@ -106,8 +106,42 @@ type Document implements DynamoDbBase @aws_cognito_user_pools @aws_iam {
   HITLReviewedByEmail: String
   HITLReviewHistory: AWSJSON
   ConfidenceAlertCount: Int
+  ProcessingIssueCount: Int
   ConfigVersion: String
   TraceId: String
+  # Number of retained processing runs (versions) for this document. Maintained
+  # as a counter on the doc item; intentionally NOT part of the TypeDateIndex
+  # GSI projection so document versioning required no GSI schema change.
+  VersionCount: Int
+}
+
+# An immutable record of one successful processing run of a document. Output
+# artifacts are pinned by S3 VersionId in a per-run manifest, so a version's
+# exact bytes survive later re-runs that overwrite the output objects.
+type DocumentVersion @aws_cognito_user_pools @aws_iam {
+  RunId: String!
+  ObjectKey: ID
+  CompletionTime: AWSDateTime
+  QueuedTime: AWSDateTime
+  WorkflowStartTime: AWSDateTime
+  WorkflowExecutionArn: String
+  ConfigVersion: String
+  PageCount: Int
+  FileCount: Int
+  ManifestUri: String
+  SummaryReportUri: String
+  EvaluationReportUri: String
+  Metering: AWSJSON
+  Sections: [Section]
+  Pages: [Page]
+  # Populated by getDocumentVersion: the manifest's pinned output objects.
+  Files: [DocumentVersionFile]
+}
+
+type DocumentVersionFile @aws_cognito_user_pools @aws_iam {
+  Key: String
+  VersionId: String
+  Size: Float
 }
 
 type Section @aws_cognito_user_pools @aws_iam {
@@ -116,6 +150,10 @@ type Section @aws_cognito_user_pools @aws_iam {
   Class: String
   OutputJSONUri: String
   ConfidenceThresholdAlerts: [ConfidenceThresholdAlert]
+  # Structured self-healing / quality issues detected for this section
+  # (assessment incomplete, recovered-with-retries, geometry incomplete, …).
+  # Drives the section Status icon + hover details in the UI.
+  ProcessingIssues: [ProcessingIssue]
   # True when the class this section was classified as is marked with
   # x-aws-idp-exclude-from-processing: true (e.g., static instruction pages).
   # The UI uses this to render a "Skipped" badge and suppress empty
@@ -130,6 +168,14 @@ type ConfidenceThresholdAlert @aws_cognito_user_pools @aws_iam {
   attributeName: String
   confidence: Float
   confidenceThreshold: Float
+}
+
+type ProcessingIssue @aws_cognito_user_pools @aws_iam {
+  stage: String
+  severity: String
+  code: String
+  message: String
+  rootCause: String
 }
 
 type Page @aws_cognito_user_pools @aws_iam {
@@ -156,6 +202,7 @@ type DocumentListItem implements DynamoDbBase @aws_cognito_user_pools @aws_iam {
   HITLReviewURL: String
   HITLTriggered: Boolean
   HITLCompleted: Boolean
+  ProcessingIssueCount: Int
 }
 
 # User Management Types
@@ -270,6 +317,33 @@ type ConfigurationLibraryFileResponse @aws_cognito_user_pools @aws_iam {
   success: Boolean!
   content: String!
   contentType: String!
+  error: String
+}
+
+# A bundled sample document (or batch of documents) available in the deployed
+# ConfigurationBucket, sourced from config_library/samples-manifest.json.
+type SampleDocument @aws_cognito_user_pools @aws_iam {
+  id: String!
+  name: String!
+  description: String
+  s3Key: String!
+  kind: String!
+  fileCount: Int
+  # Associated config_library/unified preset folder, or null when the sample
+  # is not tied to a specific configuration.
+  configId: String
+}
+
+type SampleDocumentListResponse @aws_cognito_user_pools @aws_iam {
+  success: Boolean!
+  samples: [SampleDocument]
+  error: String
+}
+
+type SampleDocumentUploadResponse @aws_cognito_user_pools @aws_iam {
+  success: Boolean!
+  # Object keys copied into the InputBucket (one per file; a batch yields many).
+  objectKeys: [String]
   error: String
 }
 
@@ -807,6 +881,11 @@ type Mutation {
   restoreDefaultModelConfigLimits: UpdateModelConfigLimitsResponse
     @aws_cognito_user_pools(cognito_groups: ["Admin"])
 
+  # Admin-only: permanently deletes a document version's pinned S3 object
+  # versions (irreversible), so it is more restrictive than deleteDocument.
+  deleteDocumentVersion(objectKey: ID!, runId: String!): Boolean!
+    @aws_cognito_user_pools(cognito_groups: ["Admin"])
+
   # Admin + Author operations
   deleteDocument(objectKeys: [String!]!): Boolean!
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
@@ -823,6 +902,15 @@ type Mutation {
     bucket: String
     version: String
   ): PresignedUrlResponse!
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  # Server-side copy of a bundled sample document (by id, from the
+  # ConfigurationBucket) into the InputBucket to trigger processing. Stamps the
+  # config version as object metadata like the uploadDocument presigned path.
+  uploadSampleDocument(
+    sampleId: String!
+    prefix: String
+    version: String
+  ): SampleDocumentUploadResponse!
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   uploadDiscoveryDocument(
     fileName: String!
@@ -1067,8 +1155,14 @@ type Query @aws_cognito_user_pools @aws_iam {
     limit: Int
     nextToken: String
   ): DocumentPage
-  getFileContents(s3Uri: String!): FileContentsResponse
+  getFileContents(s3Uri: String!, versionId: String): FileContentsResponse
   getStepFunctionExecution(executionArn: String!): StepFunctionExecutionResponse
+
+  # Document version history (processing runs). All authenticated users may
+  # view/list/compare; deleteDocumentVersion (a Mutation) is Admin-only.
+  listDocumentVersions(objectKey: ID!): [DocumentVersion]
+  getDocumentVersion(objectKey: ID!, runId: String!): DocumentVersion
+  compareDocumentVersions(objectKey: ID!, runIdA: String!, runIdB: String!): AWSJSON
 
   # Configuration & pricing queries - Admin, Author, Viewer (not Reviewer)
   getConfigVersions: ConfigurationVersionsResponse
@@ -1140,6 +1234,10 @@ type Query @aws_cognito_user_pools @aws_iam {
     configName: String!
     fileName: String!
   ): ConfigurationLibraryFileResponse
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
+
+  # Bundled sample documents available in the deployed ConfigurationBucket.
+  listSampleDocuments: SampleDocumentListResponse
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
 
   # User Management queries

@@ -762,8 +762,12 @@ const ConfigBuilder = ({
       });
     }
 
-    // For objects with properties, ensure the object exists in formValues
-    if (property.type === 'object' && property.properties && value === undefined) {
+    // For objects with properties, ensure the object exists in formValues.
+    // Exception: a `ghostGroup` object is a purely visual grouping whose own
+    // key never exists in the data (its children render at the parent path),
+    // so its value is always undefined — it must still render.
+    const isGhostGroupObject = property.ghostGroup === true || property.ghostGroup === 'true';
+    if (property.type === 'object' && property.properties && value === undefined && !isGhostGroupObject) {
       return null;
     }
 

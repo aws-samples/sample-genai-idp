@@ -1,0 +1,149 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# RealKIE-FCC-Verified reference config for the 1S-TopK single-stage
+# extraction + confidence method (simple / non-agentic integrated mode).
+#
+# All settings not explicitly defined here are inherited from the system
+# defaults — including the 1S-TopK task prompt
+# (extraction.task_prompt_extraction_with_confidence_topk), which is selected
+# automatically for extraction.mode: simple + extraction.confidence.mode:
+# integrated. To customize the prompt, override that key here or in the UI.
+
+use_bda: false
+
+notes: "RealKIE-FCC-Verified 1S-TopK settings (simple integrated extraction+confidence in a single LLM call). Summarization and chat disabled by default."
+
+extraction:
+  mode: simple            # non-agentic single-pass extraction
+  model: us.anthropic.claude-haiku-4-5-20251001-v1:0
+  confidence:
+    mode: integrated      # 1S-TopK: value + confidence emitted in one inference
+
+summarization:
+  enabled: false
+
+chat:
+  enabled: false
+
+rule_validation:
+  enabled: false
+
+classes:
+- $schema: https://json-schema.org/draft/2020-12/schema
+  $defs:
+    LineItem:
+      type: object
+      properties:
+        LineItemStartDate:
+          description: "The date marking the beginning of the
+           scheduled airing period for a line item. May appear
+           as a standalone column (e.g., \"Start Date\"), as the first part of
+           a date range (e.g., \"10/13/14 to 10/19/14\"), or embedded
+           within a \"Schedule Days to Run\" or \"Airtime\" or \"Scheduled\" field.
+           Formats include MM/DD/YY, MM/DD/YYYY etc. In some documents, this
+           appears at the line-item level; in others, it appears at a
+           sub-line/week level beneath the main line entry. Output null if not shown."
+          x-aws-idp-confidence-threshold: '0.8'
+          x-aws-idp-evaluation-method: DATE
+          x-aws-idp-evaluation-threshold: '0.7'
+          type: string
+        LineItemDays:
+          description: "The days of the week on which the spot is scheduled to air.
+           This field has highly variable formatting.
+           Example 1, dash-letter pattern (7-character positional):Each position
+           represents M-T-W-T-F-S-S, with a letter indicating the day is
+           active and a dash indicating it's not.
+           Example 1: \"-TWTF--\" (Tue to Fri),
+           \"1------\" (Mon only), \"------1\" (Sun only), \"-----S-\" (Sat), \"----1--\" (Fri).
+           Example 2: Abbreviated day names on sublines:Individual spot lines may list
+           days as \"Tu\", \"W\", \"Th\", \"Mon\", \"Tue\", etc.
+           Example 3: Comma-separated compact codes such as \"Day,Th-1\", \"Day,F-2\".
+           Example 4: It may also appear as descriptive prefixes in the description field,
+           e.g., \"M-F\" indicating Monday through Friday.
+           You MUST extract exactly as given in the document."
+          x-aws-idp-confidence-threshold: '0.8'
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          type: string
+        LineItemEndDate:
+          description: "The date marking the end of the scheduled airing period for a line item.
+           Appears as a standalone column (\"End Date\"), or as the second part of a date range
+           (e.g., \"10/13/14 to 10/19/14\", \"2/1/2016 - 2/28/2016\"). Formats mirror those
+           of LineItemStartDate. The end date may be identical to the
+           start date when a line item covers a single day. Output null if not explicitly stated."
+          x-aws-idp-confidence-threshold: '0.8'
+          x-aws-idp-evaluation-method: DATE
+          x-aws-idp-evaluation-threshold: '0.7'
+          type: string
+        LineItemDescription:
+          description: "The name or title of the program, show, or time slot in which the
+           advertisement is scheduled to air. Examples include program names
+           (\"People's Court\", \"Dr. Phil\", \"Rachael Ray\", \"NFL on FOX 3p\"), newscast identifiers
+           (\"M-F 10P-1035P NEWS\", \"SA 6P-630P NEWS\", \"SU 10P-1035P NEWS\"), time-slot descriptions
+           (\"M-F 1135p-1205a\", \"Su 1205p-1235a\"), or simulcast/edition names
+           (\"Noticias 45 Ed Nocturna\", \"C-News Simulcast\"). May include channel prefixes,
+           day prefixes (e.g., \"SA\", \"SU\", \"M-F\"). Can also contain supplementary qualifiers
+           like \"65572-[LCL]\". Output null if not shown."
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          type: string
+        LineItemRate:
+          description: The rate in dollars per show in the line entry. Only extract the number.
+           E.g. if the rate is "$800.15", extract 800.15. Output null if not shown.
+          x-aws-idp-confidence-threshold: '0.8'
+          x-aws-idp-evaluation-method: NUMERIC_EXACT
+          type: number
+  description: Invoice document
+  type: object
+  x-aws-idp-document-type: Invoice
+  properties:
+    Agency:
+      description: The agency the invoice is addressed to
+      x-aws-idp-confidence-threshold: '0.8'
+      x-aws-idp-evaluation-weight: '2'
+      x-aws-idp-evaluation-method: LEVENSHTEIN
+      x-aws-idp-evaluation-threshold: '0.7'
+      type: string
+    Advertiser:
+      description: The name of the advertiser
+      x-aws-idp-confidence-threshold: '0.8'
+      x-aws-idp-evaluation-weight: '2'
+      x-aws-idp-evaluation-method: FUZZY
+      x-aws-idp-evaluation-threshold: '0.8'
+      type: string
+    GrossTotal:
+      description: The gross total amount. Output null if not shown.
+      x-aws-idp-evaluation-weight: '2'
+      x-aws-idp-confidence-threshold: '0.8'
+      x-aws-idp-evaluation-method: NUMERIC_EXACT
+      type: number
+    PaymentTerms:
+      description: Terms of payment. Output null if not shown.
+      x-aws-idp-evaluation-weight: '0.2'
+      x-aws-idp-evaluation-method: FUZZY
+      x-aws-idp-evaluation-threshold: '0.7'
+      type: string
+    AgencyCommission:
+      description: The agency commission amount. Output null if not shown.
+      x-aws-idp-evaluation-weight: '0.2'
+      x-aws-idp-confidence-threshold: '0.8'
+      x-aws-idp-evaluation-method: NUMERIC_EXACT
+      type: number
+    NetAmountDue:
+      description: The net amount due after commission. Output null if not shown.
+      x-aws-idp-evaluation-weight: '2'
+      x-aws-idp-confidence-threshold: '0.8'
+      x-aws-idp-evaluation-method: NUMERIC_EXACT
+      type: number
+    LineItems:
+      type: array
+      description: List of line item details on the invoice; each item has several
+        possible elements
+      items:
+        $ref: '#/$defs/LineItem'
+  required:
+  - Agency
+  - Advertiser
+  - LineItems
+  $id: Invoice

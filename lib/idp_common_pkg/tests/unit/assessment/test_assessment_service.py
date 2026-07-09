@@ -11,6 +11,7 @@ Unit tests for the AssessmentService class.
 import pytest
 
 # Import standard library modules first
+import json
 import sys
 from textwrap import dedent
 from unittest.mock import MagicMock, patch
@@ -247,6 +248,52 @@ class TestAssessmentService:
 
     @patch("idp_common.assessment.service.bedrock.extract_text_from_response")
     @patch("idp_common.assessment.service.bedrock.invoke_model")
+    def test_assess_results_salvages_truncated_prefix(
+        self, mock_invoke_model, mock_extract_text, service
+    ):
+        """B4: a truncated response whose VALID PREFIX parses is salvaged — the
+        rows that came back keep their real scores instead of the whole call being
+        thrown away as all-default. Still flagged truncated so the caller retries
+        only the missing remainder."""
+        # Truncated mid-way through the third transaction row, but rows 1-2 are
+        # complete and well-formed → repair_truncated_json recovers them.
+        partial = (
+            '{"transactions": ['
+            '{"date": {"confidence": 0.97}, "amount": {"confidence": 0.95}}, '
+            '{"date": {"confidence": 0.92}, "amount": {"confidence": 0.9}}, '
+            '{"date": {"confidence": 0.8'  # cut off here
+        )
+        mock_invoke_model.return_value = {
+            "response": {
+                "stopReason": "max_tokens",
+                "output": {"message": {"content": [{"text": partial}]}},
+            },
+            "metering": {"Assessment/bedrock/m": {"outputTokens": 10000}},
+        }
+        mock_extract_text.return_value = partial
+
+        core = service.assess_results(
+            class_label="bank_statement",
+            extraction_results={
+                "transactions": [
+                    {"date": "1/1", "amount": "10"},
+                    {"date": "1/2", "amount": "20"},
+                    {"date": "1/3", "amount": "30"},
+                ]
+            },
+            document_text="text",
+            page_images=[],
+        )
+
+        assert core.truncated is True  # caller still retries the remainder
+        # Salvaged the 2 complete rows (real scores, NOT the 0.5 default).
+        tx = core.enhanced_assessment.get("transactions")
+        assert isinstance(tx, list) and len(tx) >= 2
+        assert tx[0]["date"]["confidence"] == 0.97
+        assert tx[1]["amount"]["confidence"] == 0.9
+
+    @patch("idp_common.assessment.service.bedrock.extract_text_from_response")
+    @patch("idp_common.assessment.service.bedrock.invoke_model")
     @patch("idp_common.image.prepare_image")
     def test_assess_results_not_truncated_on_normal_stop(
         self, mock_prepare_image, mock_invoke_model, mock_extract_text, service
@@ -271,6 +318,46 @@ class TestAssessmentService:
 
         assert core.truncated is False
         assert core.parsing_succeeded is True
+
+    @patch("idp_common.assessment.service.bedrock.extract_text_from_response")
+    @patch("idp_common.assessment.service.bedrock.invoke_model")
+    def test_images_dropped_in_ocr_only_mode(
+        self, mock_invoke_model, mock_extract_text, mock_config
+    ):
+        """B1: in ocr_only/off geometry modes the confidence call is text-only —
+        page images are omitted (they add ~1.7K input tok each and don't help a
+        no-bbox confidence judgement). In llm/llm_grounded modes images are kept."""
+        mock_invoke_model.return_value = {
+            "response": {
+                "stopReason": "end_turn",
+                "output": {"message": {"content": [{"text": "{}"}]}},
+            },
+            "metering": {},
+        }
+        mock_extract_text.return_value = '{"invoice_number": {"confidence": 0.9}}'
+
+        def _run(mode: str):
+            cfg = json.loads(json.dumps(mock_config))  # deep copy
+            cfg.setdefault("extraction", {}).setdefault("geometry", {})["mode"] = mode
+            svc = AssessmentService(region="us-west-2", config=cfg)
+            with patch.object(
+                svc,
+                "_build_content_with_or_without_image_placeholder",
+                return_value=[{"text": "prompt"}],
+            ) as builder:
+                svc.assess_results(
+                    class_label="invoice",
+                    extraction_results={"invoice_number": "INV-1"},
+                    document_text="text",
+                    page_images=[b"img1", b"img2", b"img3"],
+                )
+            # 7th positional arg is page_images passed into the content builder.
+            return builder.call_args.args[6]
+
+        assert _run("ocr_only") == []  # images dropped
+        assert _run("off") == []  # images dropped
+        assert _run("llm_grounded") == [b"img1", b"img2", b"img3"]  # kept
+        assert _run("llm") == [b"img1", b"img2", b"img3"]  # kept
 
     def test_format_property_descriptions(self, service):
         """Test formatting property descriptions from JSON Schema."""

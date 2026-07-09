@@ -23,7 +23,7 @@ classes:
             format: date
             description: Dates of hospitalization.
             type: string
-            x-aws-idp-evaluation-method: LLM
+            x-aws-idp-evaluation-method: DATE
           Medicaid-Resubmission-Code:
             type: string
             description: Medicaid resubmission code.
@@ -48,7 +48,7 @@ classes:
             format: date
             description: Date of birth of the patient.
             type: string
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           Patient-Sex:
             type: string
             description: Sex of the patient.
@@ -163,7 +163,7 @@ classes:
               Date of birth of the other insured. This is sub-entry b. of entry
               number 9, located on the left side of the form. It can be null.
             type: string
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
       ServiceInformationItem:
         type: object
         properties:
@@ -175,7 +175,7 @@ classes:
             format: date
             description: Date of service provided.
             type: string
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           Charges:
             type: string
             description: Charges for the service.
@@ -216,7 +216,7 @@ classes:
             format: date
             description: Date of the physician's signature.
             type: string
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
     description: Health insurance claim form for processing medical claims.
     type: object
     x-aws-idp-document-type: Health-Insurance-Claim-Form
@@ -332,7 +332,7 @@ classes:
             format: date
             description: Date of discharge
             type: string
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           Discharged-to:
             type: string
             description: Location to which the patient was discharged
@@ -341,7 +341,7 @@ classes:
             format: date
             description: Date of admission
             type: string
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
     description: >-
       Summary of patient's hospital discharge including assessments and
       recommendations.
@@ -489,7 +489,7 @@ classes:
               Date of birth of the license holder, located near the top left of
               the document.
             type: string
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           EyeColor:
             type: string
             description: >-
@@ -584,7 +584,7 @@ classes:
               Expiration date of the license, located near the top of the
               document.
             type: string
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           LicenseNumber:
             type: string
             description: Unique license number, located near the top of the document.
@@ -686,7 +686,7 @@ classes:
             format: date
             description: Dates of service for the claim.
             type: string
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           PaymentAmount:
             type: string
             description: Total payment amount for the claim.
@@ -841,7 +841,7 @@ classes:
             format: date
             description: Date of the examination
             type: string
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           ExamineeName:
             type: string
             description: Name of the examinee
@@ -850,7 +850,7 @@ classes:
             format: date
             description: Date of the injury
             type: string
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
       HistoryMedicalExamDef:
         type: object
         description: History of the examinee
@@ -910,7 +910,7 @@ classes:
             format: date
             description: Date of the invoice.
             type: string
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           InvoiceNumber:
             type: string
             description: Invoice number.
@@ -922,7 +922,7 @@ classes:
           DueDate:
             type: string
             description: Date by which payment is due.
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           PaymentMethod:
             type: string
             description: Method of payment (e.g., check).
@@ -1120,7 +1120,7 @@ classes:
             format: date
             description: Date of Birth of the patient.
             type: string
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           MRN:
             type: string
             description: Medical Record Number of the patient.
@@ -1133,7 +1133,7 @@ classes:
             format: date
             description: Date of the procedure.
             type: string
-            x-aws-idp-evaluation-method: LLM
+            x-aws-idp-evaluation-method: DATE
           Attending:
             type: string
             description: Name of the attending doctor.
@@ -1223,7 +1223,7 @@ classes:
             format: date
             description: Date when the refill is allowed.
             type: string
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           FacilityName:
             type: string
             description: Name of the health center issuing the prescription.
@@ -1232,7 +1232,7 @@ classes:
             format: date
             description: Date when the prescription was filled.
             type: string
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           QRCode:
             type: string
             description: Presence of a QR code on the prescription.

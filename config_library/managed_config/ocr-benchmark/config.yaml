@@ -30,7 +30,7 @@ classes:
             properties:
               date:
                 type: string
-                x-aws-idp-evaluation-method: LEVENSHTEIN
+                x-aws-idp-evaluation-method: DATE
                 x-aws-idp-evaluation-threshold: '0.7'
                 x-aws-idp-confidence-threshold: '0.8'
                 data_type: string
@@ -122,7 +122,7 @@ classes:
   properties:
     date:
       type: string
-      x-aws-idp-evaluation-method: LEVENSHTEIN
+      x-aws-idp-evaluation-method: DATE
       x-aws-idp-evaluation-threshold: '0.7'
       x-aws-idp-confidence-threshold: '0.8'
       description: The agreement date in YYYY-MM-DD format.
@@ -155,14 +155,14 @@ classes:
           data_type: number
         endDate:
           type: string
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
           description: Lease end date in YYYY-MM-DD format.
           data_type: string
         startDate:
           type: string
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
           description: Lease start date in YYYY-MM-DD format.
@@ -257,7 +257,7 @@ classes:
         properties:
           date:
             type: string
-            x-aws-idp-evaluation-method: LEVENSHTEIN
+            x-aws-idp-evaluation-method: DATE
             x-aws-idp-evaluation-threshold: '0.7'
             x-aws-idp-confidence-threshold: '0.8'
             description: Transaction date in MM/DD format as shown on the statement (not YYYY-MM-DD for this field).
@@ -426,7 +426,7 @@ classes:
               data_type: string
         date:
           type: string
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
           data_type: string
@@ -538,7 +538,7 @@ classes:
           x-aws-idp-confidence-threshold: '0.8'
         inspectionDate:
           type: string
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
           description: inspectionDate in YYYY-MM-DD format.
@@ -554,7 +554,7 @@ classes:
           description: Whether the equipment passed overall inspection. Extract the explicit pass/fail determination stated in the document. Do NOT infer this from individual checkpoint statuses — use only the explicitly stated overall result.
         nextInspectionDue:
           type: string
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
           description: nextInspectionDue in YYYY-MM-DD format.
@@ -626,7 +626,7 @@ classes:
           data_type: string
         electionDate:
           type: string
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
           data_type: string
@@ -635,7 +635,7 @@ classes:
       properties:
         date:
           type: string
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
           data_type: string
@@ -679,7 +679,7 @@ classes:
         properties:
           date:
             type: string
-            x-aws-idp-evaluation-method: LEVENSHTEIN
+            x-aws-idp-evaluation-method: DATE
             x-aws-idp-evaluation-threshold: '0.7'
             x-aws-idp-confidence-threshold: '0.8'
             data_type: string
@@ -814,7 +814,7 @@ classes:
             data_type: string
     weekStartDate:
       type: string
-      x-aws-idp-evaluation-method: LEVENSHTEIN
+      x-aws-idp-evaluation-method: DATE
       x-aws-idp-evaluation-threshold: '0.7'
       x-aws-idp-confidence-threshold: '0.8'
       data_type: string

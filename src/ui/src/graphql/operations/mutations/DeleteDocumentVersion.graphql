@@ -1,0 +1,3 @@
+mutation DeleteDocumentVersion($objectKey: ID!, $runId: String!) {
+  deleteDocumentVersion(objectKey: $objectKey, runId: $runId)
+}

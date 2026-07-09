@@ -18,7 +18,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 from idp_common import bedrock, image, metrics, s3, utils
 from idp_common.config.models import IDPConfig
@@ -35,7 +35,7 @@ from idp_common.config.schema_constants import (
     X_AWS_IDP_LIST_ITEM_DESCRIPTION,
 )
 from idp_common.models import Document
-from idp_common.utils import extract_json_from_text
+from idp_common.utils import extract_json_from_text, repair_truncated_json
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +163,25 @@ class AssessmentService:
             if schema.get(X_AWS_IDP_DOCUMENT_TYPE, "").lower() == class_label.lower():
                 return schema
         return {}
+
+    def _resolve_confidence_escalation_model(self, class_label: str) -> Optional[str]:
+        """Pick the stronger confidence model the self-healing ladder escalates to.
+
+        Precedence mirrors extraction's ``_resolve_escalation_model``: per-class
+        ``x-aws-idp-confidence-escalation-model`` override > global
+        ``extraction.confidence.escalation_model``. Returns None when neither is
+        set, in which case the ladder's model-escalation rung is skipped (it stays
+        at token-aware shrink + same-model retry).
+        """
+        from idp_common.config.schema_constants import (
+            X_AWS_IDP_CONFIDENCE_ESCALATION_MODEL,
+        )
+
+        class_schema = self._get_class_schema(class_label)
+        return (
+            class_schema.get(X_AWS_IDP_CONFIDENCE_ESCALATION_MODEL)
+            or self.config.extraction.confidence.escalation_model
+        )
 
     def _format_property_descriptions(self, schema: Dict[str, Any]) -> str:
         """
@@ -704,6 +723,7 @@ class AssessmentService:
         document_text: str,
         page_images: List[Any],
         ocr_text_confidence: str = "",
+        model_id_override: Optional[str] = None,
     ) -> AssessmentCoreResult:
         """Run the pure assessment inference over in-memory inputs.
 
@@ -724,6 +744,10 @@ class AssessmentService:
             document_text: Concatenated OCR text for the assessed pages.
             page_images: Prepared page images (may be empty).
             ocr_text_confidence: Optional condensed OCR text-confidence block.
+            model_id_override: When set, use this Bedrock model instead of the
+                configured confidence model. Used by the self-healing escalation
+                ladder to re-assess still-missing rows with a stronger model
+                (bigger output cap) WITHOUT mutating config.
 
         Returns:
             An ``AssessmentCoreResult`` with the enhanced per-field assessment,
@@ -736,7 +760,7 @@ class AssessmentService:
 
         # Get confidence configuration (v0.6: extraction.confidence.*)
         confidence_cfg = self.config.extraction.confidence
-        model_id = confidence_cfg.model
+        model_id = model_id_override or confidence_cfg.model
         temperature = confidence_cfg.temperature
         top_k = confidence_cfg.top_k
         top_p = confidence_cfg.top_p
@@ -770,6 +794,28 @@ class AssessmentService:
             raise ValueError(
                 "Assessment task_prompt is required in configuration but not found"
             )
+
+        # B1 — Gate images on geometry mode. In ``ocr_only`` (default) / ``off`` the
+        # model is NEVER asked for bounding boxes (geometry is derived by matching
+        # values to OCR lines afterward), so the page images add nothing to the
+        # confidence judgement — they only bloat the request (~1.7K input tokens
+        # EACH; 5 shard pages ≈ 8.7K tokens) and, on a small multimodal model like
+        # Nova Lite, materially increase over-generation/latency and the odds of a
+        # max-output-token truncation on large tables. Drop them here so the
+        # confidence call is text-only in those modes. LLM-box modes
+        # (``llm``/``llm_grounded``) still need the image to estimate boxes, so keep
+        # it there.
+        geometry_mode = (self.config.extraction.geometry.mode or "").lower()
+        effective_page_images: List[Any] = page_images
+        if geometry_mode in ("ocr_only", "off") and page_images:
+            logger.info(
+                "Confidence: geometry.mode=%s → omitting %d page image(s) from the "
+                "assessment prompt (text-only; geometry comes from OCR grounding)",
+                geometry_mode or "ocr_only",
+                len(page_images),
+            )
+            effective_page_images = []
+
         try:
             content = self._build_content_with_or_without_image_placeholder(
                 prompt_template,
@@ -778,7 +824,7 @@ class AssessmentService:
                 property_descriptions,
                 extraction_results_str,
                 ocr_text_confidence,
-                page_images,
+                effective_page_images,
             )
         except ValueError as e:
             logger.error(f"Error formatting prompt template: {str(e)}")
@@ -849,27 +895,63 @@ class AssessmentService:
                         "instead of single object"
                     )
         except Exception as e:
+            # B4 — Salvage the VALIDATED PREFIX of a truncated response instead of
+            # discarding the whole call. A truncated confidence body is well-formed
+            # JSON up to the last complete row object; repair_truncated_json recovers
+            # those rows and drops the partial tail. We keep only what parses into a
+            # dict — the recovered rows carry real scores, and the caller re-scores
+            # ONLY the still-missing remainder (see _splice_missing_rows), so the
+            # ~10K output tokens the model already spent are not wasted. This is
+            # safe even if the tail was run-away garbage: repair yields only the
+            # clean prefix, and anything unrecovered stays a null placeholder that
+            # the missing-row retry targets.
+            salvaged: Dict[str, Any] = {}
             if truncated:
-                logger.error(
-                    "Assessment output was TRUNCATED at the model's max output "
-                    "tokens, producing incomplete JSON. Assigning temporary "
-                    "default scores; the caller retries this call over a smaller "
-                    "row batch. Error: %s",
-                    e,
-                )
+                try:
+                    repaired, repair_info = repair_truncated_json(assessment_text)
+                    if isinstance(repaired, dict) and repaired:
+                        salvaged = repaired
+                        logger.warning(
+                            "Assessment output TRUNCATED at max output tokens; "
+                            "salvaged %d top-level field(s) from the valid prefix "
+                            "(method=%s). Unrecovered rows will be retried over a "
+                            "smaller batch.",
+                            repair_info.get("fields_recovered", len(repaired)),
+                            repair_info.get("repair_method"),
+                        )
+                except Exception as re:  # noqa: BLE001 - salvage is best-effort
+                    logger.warning("Truncated-response salvage failed: %s", re)
+                if not salvaged:
+                    logger.error(
+                        "Assessment output was TRUNCATED at the model's max output "
+                        "tokens and nothing could be salvaged. Assigning temporary "
+                        "default scores; the caller retries over a smaller batch. "
+                        "Error: %s",
+                        e,
+                    )
             else:
                 logger.error(
                     f"Error parsing assessment LLM output - invalid JSON?: "
                     f"{assessment_text} - {e}"
                 )
-            logger.info("Using default confidence scores.")
-            assessment_data = {}
-            for attr_name in extraction_results.keys():
-                assessment_data[attr_name] = {
-                    "confidence": 0.5,
-                    "confidence_reason": "Unable to parse assessment response - default score assigned",
-                }
-            parsing_succeeded = False
+
+            if salvaged:
+                # Keep the recovered rows; reconciliation downstream pads the
+                # still-missing rows with null placeholders that the missing-row
+                # retry (or escalation) then re-scores.
+                assessment_data = salvaged
+                # parsing_succeeded stays True: we DID parse a usable partial
+                # result. ``truncated`` (already set) is what signals the caller to
+                # retry the remainder — decoupled from parse success.
+            else:
+                logger.info("Using default confidence scores.")
+                assessment_data = {}
+                for attr_name in extraction_results.keys():
+                    assessment_data[attr_name] = {
+                        "confidence": 0.5,
+                        "confidence_reason": "Unable to parse assessment response - default score assigned",
+                    }
+                parsing_succeeded = False
 
         # Convert any model-provided bbox into geometry — only in the LLM-box
         # geometry modes ('llm', 'llm_grounded'). In 'ocr_only' (default) and 'off'
@@ -985,7 +1067,12 @@ class AssessmentService:
             truncated=truncated,
         )
 
-    def process_document_section(self, document: Document, section_id: str) -> Document:
+    def process_document_section(
+        self,
+        document: Document,
+        section_id: str,
+        deadline_epoch: Optional[float] = None,
+    ) -> Document:
         """
         Process a single section from a Document object to assess extraction confidence.
 
@@ -1153,14 +1240,22 @@ class AssessmentService:
             )
             from idp_common.assessment.batching import assess_results_batched
 
+            confidence_cfg = self.config.extraction.confidence
             batched = assess_results_batched(
                 self,
                 class_label=class_label,
                 extraction_results=extraction_results,
                 document_text=document_text,
                 page_images=page_images,
-                batch_size=self.config.extraction.confidence.list_batch_size,
+                batch_size=confidence_cfg.list_batch_size,
                 ocr_text_confidence=ocr_text_confidence,
+                confidence_model_id=confidence_cfg.model,
+                geometry_mode=self.config.extraction.geometry.mode,
+                escalation_enabled=confidence_cfg.escalation_enabled,
+                escalation_model=self._resolve_confidence_escalation_model(class_label),
+                max_escalation_rounds=confidence_cfg.max_escalation_rounds,
+                deadline_epoch=deadline_epoch,
+                max_concurrent_batches=self.config.extraction.agentic.max_concurrent_batches,
             )
             enhanced_assessment_data = batched["assessment"]
             confidence_threshold_alerts = batched["alerts"]
@@ -1207,12 +1302,56 @@ class AssessmentService:
             )
             # Surface adaptive batch-splitting activity (only when the model
             # truncated output and batches had to shrink) for visibility.
-            from idp_common.assessment.batching import split_stats_are_notable
+            from idp_common.assessment.batching import (
+                audit_explainability,
+                build_assessment_issues,
+                split_stats_are_notable,
+            )
 
             if split_stats_are_notable(batched_split_stats):
                 extraction_data["metadata"]["assessment_batch_split_stats"] = (
                     batched_split_stats
                 )
+
+            # Completeness gate (1.3) + structured issues (1.4): audit the final
+            # assessment for coverage/structure, then translate the ladder's
+            # split_stats + audit findings into user-surfacing ProcessingIssues.
+            _gaps, audit_issues = audit_explainability(
+                enhanced_assessment_data,
+                extraction_results,
+                geometry_mode=geometry_mode,
+                section_id=section_id,
+            )
+            processing_issues = (
+                build_assessment_issues(
+                    batched_split_stats,
+                    section_id=section_id,
+                    confidence_model=confidence_cfg.model,
+                    geometry_mode=geometry_mode,
+                )
+                + audit_issues
+            )
+            if processing_issues:
+                extraction_data["metadata"]["processing_issues"] = [
+                    pi.to_dict() for pi in processing_issues
+                ]
+                # Append a Processing Issues block to the (extraction-generated)
+                # processing report so the human-readable report on the simple/
+                # separate path also surfaces the root cause — the extraction
+                # report was written before this assessment step ran, so it
+                # otherwise wouldn't mention assessment issues.
+                existing_report = extraction_data.get("processing_report", "")
+                icons = {"error": "✗", "warning": "⚠", "info": "ℹ"}
+                issue_lines = ["", "Processing Issues (assessment):"]
+                for pi in processing_issues:
+                    issue_lines.append(
+                        f"  {icons.get(pi.severity, '•')} [{pi.code}] {pi.message}"
+                    )
+                    if pi.root_cause:
+                        issue_lines.append(f"      Root cause: {pi.root_cause}")
+                extraction_data["processing_report"] = (
+                    existing_report + "\n" + "\n".join(issue_lines)
+                ).strip()
 
             # Write the updated result back to S3
             bucket, key = utils.parse_s3_uri(section.extraction_result_uri)
@@ -1221,11 +1360,13 @@ class AssessmentService:
             )
 
             # Update the section in the document with confidence threshold alerts
+            # and any structured processing issues.
             for doc_section in document.sections:
                 if doc_section.section_id == section_id:
                     doc_section.confidence_threshold_alerts = (
                         confidence_threshold_alerts
                     )
+                    doc_section.processing_issues = processing_issues
                     break
 
             # Update document with metering data
