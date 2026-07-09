@@ -1058,10 +1058,19 @@ const ConfigBuilder = ({
         </ExtBox>
       );
 
+      // A nested section's own `description` renders as help text at the top of the
+      // expanded content (matches the always-open group path above).
+      const nestedDescription = property.description as string | undefined;
+
       // Object content - only shown when expanded. Ghost groups render children at the
       // parent path (childPath) so the grouping doesn't change any config path.
       const objectContent = isExpanded && (
         <ExtBox padding={{ left: `${nestLevel * 50 + 200}px`, top: '0' }} className="list-content-indented">
+          {nestedDescription && (
+            <ExtBox fontSize="body-s" color="text-body-secondary" style={{ marginBottom: '6px' }}>
+              {nestedDescription}
+            </ExtBox>
+          )}
           <SpaceBetween size="s">
             {getSortedObjectProperties(property.properties).map(({ propKey, propSchema }) => {
               return <ExtBox key={propKey}>{renderField(propKey, propSchema, childPath)}</ExtBox>;
@@ -1805,6 +1814,11 @@ const ConfigBuilder = ({
     // If property should have a section container, wrap it
     if (shouldUseContainer(key, property)) {
       const sectionTitle = property.sectionLabel as string;
+      // A top-level section's own `description` renders as help text under the
+      // heading (schema-driven, so every section gets it uniformly). Cloudscape
+      // exposes native slots: ExpandableSection.headerDescription and
+      // Header.description.
+      const sectionDescription = property.description as string | undefined;
       console.log(`Creating section container for ${key} with title: ${sectionTitle}`); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Debug logging with controlled internal data
 
       // Support collapsible top-level sections via schema property `collapsible: true`
@@ -1818,6 +1832,7 @@ const ConfigBuilder = ({
             key={key}
             variant="container"
             headerText={sectionTitle}
+            headerDescription={sectionDescription}
             expanded={isExpanded}
             onChange={({ detail }) => {
               setExpandedSections((prev) => ({ ...prev, [key]: detail.expanded }));
@@ -1829,7 +1844,14 @@ const ConfigBuilder = ({
       }
 
       return (
-        <Container key={key} header={<Header variant="h3">{sectionTitle}</Header>}>
+        <Container
+          key={key}
+          header={
+            <Header variant="h3" description={sectionDescription}>
+              {sectionTitle}
+            </Header>
+          }
+        >
           <ExtBox padding="s">{renderField(key, property)}</ExtBox>
         </Container>
       );

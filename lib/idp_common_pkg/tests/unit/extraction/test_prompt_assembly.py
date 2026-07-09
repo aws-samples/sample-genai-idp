@@ -12,10 +12,14 @@ from idp_common.extraction.prompt_assembly import (
 )
 
 
-def _cfg(mode="separate", geom="ocr_only", enabled=True):
+def _cfg(mode="separate", geom="ocr_only", enabled=True, agentic=True):
+    # agentic=True (advanced) selects the tool-based integrated prompt; agentic=
+    # False (simple) selects the 1S-TopK prompt.
     return ExtractionConfig(
         task_prompt="EXTRACT-ONLY {DOCUMENT_TEXT}",
         task_prompt_extraction_with_confidence="INTEGRATED provide_field_assessment\n<<CACHEPOINT>>\n{DOCUMENT_TEXT}",
+        task_prompt_extraction_with_confidence_topk="TOPK G1/P1 candidates\n<<CACHEPOINT>>\n{DOCUMENT_TEXT}",
+        agentic={"enabled": agentic},
         confidence={
             "enabled": enabled,
             "mode": mode,
@@ -53,21 +57,51 @@ class TestSelectExtractionTaskPrompt:
         p = select_extraction_task_prompt(_cfg(mode="integrated", enabled=False))
         assert p.startswith("EXTRACT-ONLY")
 
-    def test_integrated_uses_integrated_template(self):
-        p = select_extraction_task_prompt(_cfg(mode="integrated", geom="ocr_only"))
+    def test_advanced_integrated_uses_tool_template(self):
+        p = select_extraction_task_prompt(
+            _cfg(mode="integrated", geom="ocr_only", agentic=True)
+        )
         assert "provide_field_assessment" in p
         assert "spatial-localization" not in p  # ocr_only -> no bbox
 
-    def test_integrated_llm_grounded_appends_bbox(self):
-        p = select_extraction_task_prompt(_cfg(mode="integrated", geom="llm_grounded"))
+    def test_simple_integrated_uses_topk_template(self):
+        # Simple (non-agentic) integrated -> 1S-TopK prompt, not the tool prompt.
+        p = select_extraction_task_prompt(
+            _cfg(mode="integrated", geom="ocr_only", agentic=False)
+        )
+        assert "TOPK" in p and "provide_field_assessment" not in p
+
+    def test_simple_integrated_falls_back_to_task_prompt(self):
+        # If no TopK template is set, simple integrated falls back to task_prompt.
+        cfg = _cfg(mode="integrated", geom="ocr_only", agentic=False)
+        cfg.task_prompt_extraction_with_confidence_topk = ""
+        p = select_extraction_task_prompt(cfg)
+        assert p.startswith("EXTRACT-ONLY")
+
+    def test_advanced_integrated_llm_grounded_appends_bbox(self):
+        p = select_extraction_task_prompt(
+            _cfg(mode="integrated", geom="llm_grounded", agentic=True)
+        )
         assert "provide_field_assessment" in p
         assert "spatial-localization" in p
         # bbox spliced before the cachepoint/document marker
         assert p.index("spatial-localization") < p.index("<<CACHEPOINT>>")
 
-    def test_integrated_llm_appends_bbox(self):
-        p = select_extraction_task_prompt(_cfg(mode="integrated", geom="llm"))
+    def test_advanced_integrated_llm_appends_bbox(self):
+        p = select_extraction_task_prompt(
+            _cfg(mode="integrated", geom="llm", agentic=True)
+        )
         assert "spatial-localization" in p
+
+    def test_simple_integrated_topk_llm_appends_bbox(self):
+        # TopK + llm geometry: the bbox block splices into the TopK prompt too,
+        # before the cachepoint marker (contracts do not collide).
+        p = select_extraction_task_prompt(
+            _cfg(mode="integrated", geom="llm", agentic=False)
+        )
+        assert "TOPK" in p
+        assert "spatial-localization" in p
+        assert p.index("spatial-localization") < p.index("<<CACHEPOINT>>")
 
 
 class TestSelectConfidenceTaskPrompt:

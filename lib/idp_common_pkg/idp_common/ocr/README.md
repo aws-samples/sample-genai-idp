@@ -11,7 +11,7 @@ The OCR service is designed to process PDF documents and extract text using mult
 
 ## OCR Backend Options
 
-The service supports three OCR backends, each with different capabilities and use cases:
+The service supports four OCR backends, each with different capabilities and use cases:
 
 ### 1. Textract Backend (Default - Recommended for Assessment)
 - **Technology**: AWS Textract OCR service
@@ -19,8 +19,31 @@ The service supports three OCR backends, each with different capabilities and us
 - **Features**: Basic text detection + enhanced document analysis (tables, forms, signatures, layout)
 - **Assessment Quality**: ⭐⭐⭐ Optimal - Real OCR confidence enables accurate assessment
 - **Use Cases**: Standard document processing, when assessment is enabled, production workflows
+- **Cost**: cheapest for raw text (~$1.50/1K pages); Tables +$15/1K, Forms +$50/1K
 
-### 2. Bedrock Backend (LLM-based OCR, incl. LambdaHook)
+### 2. BDA Backend (Bedrock Data Automation standard-output OCR)
+- **Technology**: Amazon Bedrock Data Automation "standard output" used as a pure OCR engine (no blueprints/extraction).
+- **Confidence Data**: ✅ Word-level confidence + bounding boxes. (BDA's *line* confidence is unreliable, so the service reconstructs each line's confidence as the mean of its words — see `idp_common/bda/bda_ocr.py`.)
+- **Features**: Reading-order **markdown with tables and layout** in a single call — no feature flags to compose. Auto-enables the agentic extraction table tool.
+- **Assessment Quality**: ⭐⭐⭐ Real word-level confidence/geometry preserved.
+- **Cost**: flat **$10/1K pages** regardless of tables/forms/layout.
+- **Use Cases**: Table-heavy documents (bank/brokerage statements), when you want table-aware OCR + predictable pricing without composing Textract features. For plain text where you don't need tables, Textract is cheaper.
+
+**How it works**: pages are rendered to images (as with Textract), each page image is
+uploaded to S3, then processed one page at a time via the **synchronous**
+`InvokeDataAutomation` API. Per-page invocation is required because sync BDA is
+capped at ~10 pages per call; it also gives per-page concurrency and retry
+isolation. A standard-output-only **SYNC** project named
+`GENAIIDP-OCR-StandardOutput` is auto-created and reused (override via
+`ocr.bda_project_arn`). The project sets `modalityRouting: {jpeg: DOCUMENT,
+png: DOCUMENT}` and the page is passed by **`s3Uri`** (extension-bearing) so BDA
+reliably treats each page image as a document — inline `bytes` lack an
+extension and BDA misclassifies some page images as `IMAGE` (empty OCR) under
+concurrent load. BDA standard output is converted to Amazon Textract response
+format (PAGE/LINE/WORD blocks), so it flows through the same
+`textConfidence.json` / `pageData.json` path as the Textract backend.
+
+### 3. Bedrock Backend (LLM-based OCR, incl. LambdaHook)
 - **Technology**: Amazon Bedrock LLMs (Claude, Nova) for text extraction, or a custom `LambdaHook` (`model_id: "LambdaHook"`) that proxies to any inference provider.
 - **Confidence Data**:
   - Plain Bedrock LLM OCR: ❌ No confidence data (displays "No confidence data available from LLM OCR").
@@ -29,7 +52,7 @@ The service supports three OCR backends, each with different capabilities and us
 - **Assessment Quality**: ❌ for plain LLM OCR; ⭐⭐⭐ when a LambdaHook supplies `textractBlocks` confidence.
 - **Use Cases**: Challenging documents where traditional OCR fails; integrating external OCR providers via the LambdaHook feature.
 
-### 3. None Backend (Image-only)
+### 4. None Backend (Image-only)
 - **Technology**: No OCR processing
 - **Confidence Data**: ❌ No confidence data (displays "No OCR performed")
 - **Features**: Image extraction and storage only
@@ -130,7 +153,7 @@ When using the new pattern, the OCR service expects configuration in the followi
 
 ```yaml
 ocr:
-  backend: "textract"  # Options: "textract", "bedrock", "none"
+  backend: "textract"  # Options: "textract", "bda", "bedrock", "none"
   max_workers: 20
   features:
     - name: "TABLES"
@@ -140,6 +163,9 @@ ocr:
     target_width: 1024
     target_height: 1024
     preprocessing: false  # Enable adaptive binarization
+  # For BDA backend only (optional): reuse a specific standard-output SYNC
+  # project instead of the auto-managed GENAIIDP-OCR-StandardOutput project.
+  bda_project_arn: null
   # For Bedrock backend only:
   model_id: "anthropic.claude-3-sonnet-20240229-v1:0"
   system_prompt: "You are an OCR system..."

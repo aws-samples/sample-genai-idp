@@ -775,6 +775,12 @@ Resources:
               - ShouldCreateEvaluationBaselineBucket
               - !Ref EvaluationBaselineBucketName
               - !Ref EvaluationBaselineBucketName
+        # update_document_copy_status() writes EvaluationStatus (BASELINE_COPYING
+        # -> BASELINE_AVAILABLE/BASELINE_ERROR) to the tracking record. Without
+        # this the status write fails with AccessDeniedException (swallowed by
+        # the handler), so the UI never leaves NO_BASELINE/COMPLETED.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTableName
         - Statement:
             - Effect: Allow
               Action:
@@ -2345,6 +2351,7 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           INPUT_BUCKET: !Ref InputBucketName
+          CONFIGURATION_BUCKET: !Ref ConfigurationBucketName
           S3_ENDPOINT_URL: !If [HasS3EndpointUrl, !Ref S3EndpointUrl, !Ref AWS::NoValue]
       LoggingConfig:
         LogGroup: !Ref UploadResolverFunctionLogGroup
@@ -2352,6 +2359,10 @@ Resources:
         - S3WritePolicy:
             BucketName: !Ref InputBucketName
         - S3WritePolicy:
+            BucketName: !Ref ConfigurationBucketName
+        # Read access so uploadSampleDocument can copy bundled samples (and read
+        # the samples manifest) from the ConfigurationBucket into the InputBucket.
+        - S3ReadPolicy:
             BucketName: !Ref ConfigurationBucketName
         - S3WritePolicy:
             BucketName: !Ref OutputBucketName
@@ -2596,6 +2607,7 @@ Resources:
             "listConfigurationLibrary": "${ConfigurationResolverFunction}",
             "listDocuments": "${ListDocumentsGSIResolverFunction}",
             "listDocumentsByDateRange": "${ListDocumentsByDateRangeResolverFunction}",
+            "listSampleDocuments": "${UploadResolverFunction}",
             "pauseCircuitBreaker": "${CircuitBreakerResolverFunctionArn}",
             "probeCircuitBreaker": "${CircuitBreakerResolverFunctionArn}",
             "processChanges": "${ProcessChangesResolverFunction}",
@@ -2617,6 +2629,7 @@ Resources:
             "updateTestSet": "${TestSetResolverFunction}",
             "uploadDiscoveryDocument": "${DiscoveryUploadResolverFunction}",
             "uploadDocument": "${UploadResolverFunction}",
+            "uploadSampleDocument": "${UploadResolverFunction}",
             "uploadMultiDocDiscoveryZip": "${DiscoveryUploadResolverFunction}",
             "validateTestFileName": "${TestSetResolverFunction}",
             "claimReview": "${CompleteSectionReviewFunctionArn}",

@@ -270,7 +270,7 @@ def _parse_tags(tags: Optional[str]) -> Dict[str, str]:
 
 
 @click.group()
-@click.version_option(version="0.5.16")
+@click.version_option(version="0.6.0")
 def cli():
     """
     IDP CLI - Batch document processing for IDP Accelerator
@@ -2438,6 +2438,53 @@ def download_results(
 
     except Exception as e:
         logger.error(f"Error downloading results: {e}", exc_info=True)
+        console.print(f"[red]✗ Error: {e}[/red]")
+        sys.exit(1)
+
+
+@cli.command(name="use-as-baseline")
+@click.option("--stack-name", required=True, help="CloudFormation stack name")
+@click.option(
+    "--document-id",
+    required=True,
+    help="Document object key (S3 key) of a processed document, e.g. "
+    "'loan-123/package.pdf'",
+)
+@click.option("--region", help="AWS region (optional)")
+def use_as_baseline(
+    stack_name: str,
+    document_id: str,
+    region: Optional[str],
+):
+    """
+    Promote a processed document's output to the evaluation baseline.
+
+    Programmatic equivalent of the UI "Use as Evaluation Baseline" button:
+    copies the document's output into the evaluation baseline bucket and sets
+    its EvaluationStatus to BASELINE_AVAILABLE. Runs synchronously.
+
+    Examples:
+
+      idp-cli use-as-baseline --stack-name my-stack --document-id loan-123/package.pdf
+    """
+    try:
+        from idp_sdk import IDPClient
+
+        client = IDPClient(stack_name=stack_name, region=region)
+
+        console.print(
+            f"[bold blue]Copying '{document_id}' to evaluation baseline...[/bold blue]"
+        )
+
+        result = client.evaluation.use_as_baseline(document_id=document_id)
+
+        console.print(f"\n[green]✓ Baseline created for {result.document_id}[/green]")
+        console.print(f"  Files copied: {result.files_copied}")
+        console.print(f"  Evaluation status: {result.evaluation_status}")
+        console.print()
+
+    except Exception as e:
+        logger.error(f"Error using document as baseline: {e}", exc_info=True)
         console.print(f"[red]✗ Error: {e}[/red]")
         sys.exit(1)
 

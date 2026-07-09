@@ -479,6 +479,12 @@ export type FileContentsResponse = {
   size: Scalars['Int']['output'];
 };
 
+export type FilePresignedUrlResponse = {
+  contentType: Scalars['String']['output'];
+  presignedUrl: Scalars['String']['output'];
+  size: Scalars['Int']['output'];
+};
+
 export type FileUploadInfo = {
   contentType: Scalars['String']['input'];
   fileName: Scalars['String']['input'];
@@ -744,6 +750,7 @@ export type Mutation = {
   uploadDiscoveryDocument: DisPresignedUrlResponse;
   uploadDocument: PresignedUrlResponse;
   uploadMultiDocDiscoveryZip?: Maybe<TestSetUploadResponse>;
+  uploadSampleDocument: SampleDocumentUploadResponse;
 };
 
 
@@ -1139,6 +1146,13 @@ export type MutationUploadMultiDocDiscoveryZipArgs = {
   fileSize: Scalars['Int']['input'];
 };
 
+
+export type MutationUploadSampleDocumentArgs = {
+  prefix?: InputMaybe<Scalars['String']['input']>;
+  sampleId: Scalars['String']['input'];
+  version?: InputMaybe<Scalars['String']['input']>;
+};
+
 export type Page = {
   Class?: Maybe<Scalars['String']['output']>;
   Id?: Maybe<Scalars['Int']['output']>;
@@ -1227,12 +1241,12 @@ export type Query = {
    */
   getFeatureLaunchUrl?: Maybe<FeatureLaunchUrl>;
   getFileContents?: Maybe<FileContentsResponse>;
+  getFilePresignedUrl?: Maybe<FilePresignedUrlResponse>;
   getFinetuningJob?: Maybe<FinetuningJob>;
   getLatestPublishedVersion?: Maybe<LatestPublishedVersion>;
   getModelConfigLimits?: Maybe<ModelConfigLimitsResponse>;
   getMyProfile?: Maybe<User>;
   getPricing?: Maybe<PricingResponse>;
-  getSampleDocumentUrl?: Maybe<SampleDocumentUrl>;
   getStepFunctionExecution?: Maybe<StepFunctionExecutionResponse>;
   getTestRun?: Maybe<TestRun>;
   getTestRunStatus?: Maybe<TestRunStatus>;
@@ -1265,6 +1279,7 @@ export type Query = {
    * installed extensions via SigV4 — the InstalledFeature type is already @aws_iam.
    */
   listInstalledFeatures?: Maybe<Array<InstalledFeature>>;
+  listSampleDocuments?: Maybe<SampleDocumentListResponse>;
   listUsers?: Maybe<UserList>;
   queryKnowledgeBase?: Maybe<Scalars['String']['output']>;
   submitAgentQuery?: Maybe<AgentJob>;
@@ -1351,13 +1366,14 @@ export type QueryGetFileContentsArgs = {
 };
 
 
-export type QueryGetFinetuningJobArgs = {
-  jobId: Scalars['ID']['input'];
+export type QueryGetFilePresignedUrlArgs = {
+  s3Uri: Scalars['String']['input'];
+  versionId?: InputMaybe<Scalars['String']['input']>;
 };
 
 
-export type QueryGetSampleDocumentUrlArgs = {
-  s3Key: Scalars['String']['input'];
+export type QueryGetFinetuningJobArgs = {
+  jobId: Scalars['ID']['input'];
 };
 
 
@@ -1507,9 +1523,26 @@ export type RegisterFeatureInput = {
   uiBundlePath: Scalars['String']['input'];
 };
 
-export type SampleDocumentUrl = {
+export type SampleDocument = {
+  configId?: Maybe<Scalars['String']['output']>;
+  description?: Maybe<Scalars['String']['output']>;
+  fileCount?: Maybe<Scalars['Int']['output']>;
+  id: Scalars['String']['output'];
+  kind: Scalars['String']['output'];
+  name: Scalars['String']['output'];
   s3Key: Scalars['String']['output'];
-  url: Scalars['String']['output'];
+};
+
+export type SampleDocumentListResponse = {
+  error?: Maybe<Scalars['String']['output']>;
+  samples?: Maybe<Array<Maybe<SampleDocument>>>;
+  success: Scalars['Boolean']['output'];
+};
+
+export type SampleDocumentUploadResponse = {
+  error?: Maybe<Scalars['String']['output']>;
+  objectKeys?: Maybe<Array<Maybe<Scalars['String']['output']>>>;
+  success: Scalars['Boolean']['output'];
 };
 
 export type Section = {
@@ -2182,6 +2215,15 @@ export type UploadMultiDocDiscoveryZipMutationVariables = Exact<{
 
 export type UploadMultiDocDiscoveryZipMutation = { uploadMultiDocDiscoveryZip?: { testSetId: string, presignedUrl: string, objectKey: string } | null };
 
+export type UploadSampleDocumentMutationVariables = Exact<{
+  sampleId: Scalars['String']['input'];
+  prefix?: InputMaybe<Scalars['String']['input']>;
+  version?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type UploadSampleDocumentMutation = { uploadSampleDocument: { success: boolean, objectKeys?: Array<string | null> | null, error?: string | null } };
+
 export type CalculateCapacityQueryVariables = Exact<{
   input: Scalars['String']['input'];
 }>;
@@ -2276,6 +2318,14 @@ export type GetFileContentsQueryVariables = Exact<{
 
 export type GetFileContentsQuery = { getFileContents?: { content: string, contentType: string, size: number, isBinary?: boolean | null } | null };
 
+export type GetFilePresignedUrlQueryVariables = Exact<{
+  s3Uri: Scalars['String']['input'];
+  versionId?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type GetFilePresignedUrlQuery = { getFilePresignedUrl?: { presignedUrl: string, contentType: string, size: number } | null };
+
 export type GetFinetuningJobQueryVariables = Exact<{
   jobId: Scalars['ID']['input'];
 }>;
@@ -2302,13 +2352,6 @@ export type GetPricingQueryVariables = Exact<{ [key: string]: never; }>;
 
 
 export type GetPricingQuery = { getPricing?: { success: boolean, pricing?: string | null, defaultPricing?: string | null, error?: { type?: string | null, message?: string | null } | null } | null };
-
-export type GetSampleDocumentUrlQueryVariables = Exact<{
-  s3Key: Scalars['String']['input'];
-}>;
-
-
-export type GetSampleDocumentUrlQuery = { getSampleDocumentUrl?: { url: string, s3Key: string } | null };
 
 export type GetStepFunctionExecutionQueryVariables = Exact<{
   executionArn: Scalars['String']['input'];
@@ -2438,6 +2481,11 @@ export type ListFinetuningJobsQueryVariables = Exact<{
 
 
 export type ListFinetuningJobsQuery = { listFinetuningJobs?: { nextToken?: string | null, items?: Array<{ jobId: string, jobName: string, status: FinetuningJobStatus, baseModelId: string, customModelName?: string | null, testSetId: string, testSetName?: string | null, createdAt: string, updatedAt?: string | null, completedAt?: string | null, errorMessage?: string | null, trainingMetrics?: string | null, deploymentId?: string | null, deploymentStatus?: string | null, deploymentEndpoint?: string | null } | null> | null } | null };
+
+export type ListSampleDocumentsQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type ListSampleDocumentsQuery = { listSampleDocuments?: { success: boolean, error?: string | null, samples?: Array<{ id: string, name: string, description?: string | null, s3Key: string, kind: string, fileCount?: number | null, configId?: string | null } | null> | null } | null };
 
 export type ListUsersQueryVariables = Exact<{ [key: string]: never; }>;
 

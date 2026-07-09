@@ -29,6 +29,10 @@ extraction:
       min_confidence_threshold: "95.0"      # OCR confidence target (Textract)
       min_parse_success_rate: "0.90"        # Parse quality threshold
       use_confidence_data: true             # Use Textract confidence data
+      lazy_images: true                     # When pre-flight table parse succeeds, don't
+                                            # pre-load page images (table path is text-driven;
+                                            # view_image fetches on demand). Big cost saver on
+                                            # multi-page tables. false = always attach images.
     validation:
       enabled: false                        # Full JSON-Schema validation of result (off by default)
       check_formats: true                   # Enforce 'format' keywords (date/email/uuid). ISO-8601 dates.
@@ -132,8 +136,9 @@ extraction:
 
   # =========================================================================
   # PROMPT TEMPLATE VARIANTS (v0.6) — selected by settings at runtime:
-  #   confidence.mode == integrated -> task_prompt_extraction_with_confidence
-  #   confidence.mode == separate   -> task_prompt (above) + task_prompt_confidence
+  #   confidence.mode == integrated + mode == advanced -> task_prompt_extraction_with_confidence
+  #   confidence.mode == integrated + mode == simple   -> task_prompt_extraction_with_confidence_topk (1S-TopK)
+  #   confidence.mode == separate                      -> task_prompt (above) + task_prompt_confidence
   #   geometry.mode in {llm, llm_grounded} -> task_prompt_bbox appended to the
   #     active confidence-bearing prompt (integrated or confidence-only).
   # See idp_common.extraction.prompt_assembly.
@@ -223,3 +228,93 @@ extraction:
     <document_image>
     {DOCUMENT_IMAGE}
     </document_image>
+
+  # 1S-TopK INTEGRATED prompt: used when confidence.mode == integrated AND
+  # extraction.mode == simple (non-agentic). Asks the model to emit its top-K
+  # guesses with probabilities per field (default K=4). topk_resolver.py takes
+  # G1 as the value and P1 as the confidence. Requesting ranked alternatives
+  # yields better-calibrated, less-overconfident scores (Tian et al., "Just Ask
+  # for Calibration", EMNLP 2023). K is flexible — a custom prompt may request
+  # fewer; only G1/P1 are consumed (G2..GK/P2..PK are preserved for audit).
+  task_prompt_extraction_with_confidence_topk: >-
+    <background> You are an expert in document analysis and information
+    extraction. You can understand and extract key information from documents
+    classified as type:
+    {DOCUMENT_CLASS}. </background>
+    <task> Provide your 4 best guesses and the probability that each is correct
+    (0.0 to 1.0) for each attribute listed below.
+    Give ONLY the guesses and probabilities, no other words or explanation.</task>
+    <extraction-guidelines> Guidelines:
+     1. Only consider values that are present in the provided document. Do not invent attribute values.
+     2. Extract each entity candidate exactly how it is presented in the document. E.g. do not change "M" to "Monday"
+     or change the date from "01/04" to "1/04".
+     3. Format each value as directed by that attribute's description/format below.
+       If an attribute specifies a date or number format, follow it EXACTLY; only if
+       no format is specified, preserve the value as it appears in the document.
+     4. For each extracted attribute key, the value MUST be a nested object formatted
+     exactly like this:
+            {
+              "G1": "<1st most likely guess, as short as possible>",
+              "P1": <probability between 0.0 and 1.0>,
+              "G2": "<2nd most likely guess>",
+              "P2": <probability between 0.0 and 1.0>,
+              "G3": "<3rd most likely guess>",
+              "P3": <probability between 0.0 and 1.0>,
+              "G4": "<4th most likely guess>",
+              "P4": <probability between 0.0 and 1.0>
+            }
+    </extraction-guidelines>
+    If the attributes section below contains a list of attribute names and
+    descriptions, then output only those attributes, using the provided
+    descriptions as guidance for finding the correct values.
+    <attributes> {ATTRIBUTE_NAMES_AND_DESCRIPTIONS} </attributes>
+    <<CACHEPOINT>>
+    <document_image> {DOCUMENT_IMAGE} </document_image>
+    <document-text> {DOCUMENT_TEXT} </document-text>
+    <output-format>
+    Give ONLY the JSON object containing the guesses and probabilities.
+    Do not think step-by-step, do not show your work, and do not provide
+    any reasoning, justifications, or extra commentary whatsoever.
+
+    For SIMPLE attributes:
+    {
+      "simple_attribute_name": {
+        "G1": "<1st most likely guess, as short as possible>",
+        "P1": <probability between 0.0 and 1.0>,
+        "G2": "<2nd most likely guess, as short as possible>",
+        "P2": <probability between 0.0 and 1.0>,
+        "G3": "<3rd most likely guess, as short as possible>",
+        "P3": <probability between 0.0 and 1.0>,
+        "G4": "<4th most likely guess, as short as possible>",
+        "P4": <probability between 0.0 and 1.0>
+      }
+    }
+
+    For LIST attributes (assess EACH item individually):
+    {
+      "list_attribute_name": [
+        {
+          "item_attribute_1": {
+            "G1": "<1st guess>",
+            "P1": <probability>,
+            "G2": "<2nd guess>",
+            "P2": <probability>,
+            "G3": "<3rd guess>",
+            "P3": <probability>,
+            "G4": "<4th guess>",
+            "P4": <probability>
+          },
+          "item_attribute_2": {
+            "G1": "<1st guess>",
+            "P1": <probability>,
+            "G2": "<2nd guess>",
+            "P2": <probability>,
+            "G3": "<3rd guess>",
+            "P3": <probability>,
+            "G4": "<4th guess>",
+            "P4": <probability>
+          }
+        }
+      ]
+    }
+    </output-format>

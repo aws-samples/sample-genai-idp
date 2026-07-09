@@ -107,6 +107,7 @@ client.discovery.auto_detect_sections(...)
 
 # Evaluation operations (baseline comparison)
 client.evaluation.create_baseline(...)
+client.evaluation.use_as_baseline(...)
 client.evaluation.get_report(...)
 client.evaluation.get_metrics(...)
 client.evaluation.list_baselines(...)
@@ -683,6 +684,32 @@ result = client.evaluation.create_baseline(
     baseline_data=baseline,
     metadata={"created_by": "qa_team"}
 )
+```
+
+### evaluation.use_as_baseline()
+
+Promote a processed document's output to the evaluation baseline — the
+programmatic equivalent of the web UI's **Use as Evaluation Baseline** button.
+Copies the document's output into the evaluation baseline bucket and sets its
+`EvaluationStatus` to `BASELINE_AVAILABLE`. Runs synchronously.
+
+Unlike `create_baseline()` (which writes a baseline you construct yourself from
+a `baseline_data` dict), this captures an already-processed document's own
+output as the baseline.
+
+**Parameters:**
+- `document_id` (str, required): Document identifier (S3 key) of a processed document
+- `stack_name` (str, optional): Stack name override
+
+**Returns:** `UseAsBaselineResult` with `document_id`, `files_copied`, `evaluation_status`, and `timestamp`
+
+**Raises:** `IDPResourceNotFoundError` if the document has no output (e.g. not finished processing); `IDPProcessingError` if the copy fails.
+
+```python
+result = client.evaluation.use_as_baseline(
+    document_id="loan-12345/package.pdf"
+)
+print(f"Copied {result.files_copied} files; status={result.evaluation_status}")
 ```
 
 ### evaluation.get_report()

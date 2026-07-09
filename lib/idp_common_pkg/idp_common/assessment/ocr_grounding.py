@@ -161,7 +161,7 @@ def _levenshtein_sim(a: str, b: str) -> float:
     if not a or not b:
         return 0.0
     try:
-        from idp_common.evaluation.comparator import fuzz_score
+        from idp_common.evaluation.text_matching import fuzz_score
 
         return fuzz_score(a, b)
     except Exception:  # noqa: BLE001 - keep grounding resilient if eval is absent

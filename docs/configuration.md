@@ -491,7 +491,8 @@ Document class schemas support evaluation-specific extensions for fine-grained c
 
 ### Available Extensions
 
-- `x-aws-idp-evaluation-method`: Comparison method (EXACT, FUZZY, NUMERIC_EXACT, SEMANTIC, LLM, HUNGARIAN)
+- `x-aws-idp-evaluation-method`: Comparison method (EXACT, FUZZY, LEVENSHTEIN, NUMERIC_EXACT, SEMANTIC, DATE, LLM, HUNGARIAN)
+- `x-aws-idp-evaluation-method-config`: Optional comparator config (used by DATE: `dayfirst`, `tolerance`, `range_mode`)
 - `x-aws-idp-evaluation-threshold`: Minimum score to consider a match (0.0-1.0)
 - `x-aws-idp-evaluation-weight`: Field importance for weighted scoring (default: 1.0, higher values = more important)
 
@@ -678,7 +679,8 @@ Patterns 2 and 3 support multiple OCR backend engines for flexible document proc
 
 ### Available Backends
 
-- **Textract** (default): AWS Textract with advanced feature support (TABLES, FORMS, SIGNATURES, LAYOUT)
+- **Textract** (default): AWS Textract with advanced feature support (TABLES, FORMS, SIGNATURES, LAYOUT). Cheapest for raw text (~$1.50/1K pages); TABLES +$15/1K, FORMS +$50/1K.
+- **BDA**: Amazon Bedrock Data Automation "standard output" used as a pure OCR engine — reading-order markdown with **tables and layout** plus word-level confidence/bounding boxes in one call, flat **$10/1K pages**. Auto-enables the agentic extraction table tool. Best for table-heavy documents and predictable pricing without composing Textract features. (Distinct from the whole-pipeline BDA mode `use_bda`, which also does classification/extraction.)
 - **Bedrock**: LLM-based OCR using Claude/Nova models with customizable prompts for better handling of complex documents
 - **None**: Image-only processing without OCR (useful for pure visual analysis)
 
@@ -686,18 +688,33 @@ Patterns 2 and 3 support multiple OCR backend engines for flexible document proc
 
 ```yaml
 ocr:
-  backend: textract  # or "bedrock", "none"
+  backend: textract  # or "bda", "bedrock", "none"
 
   # Textract features. DEFAULT: TABLES + LAYOUT (see trade-off below).
   features:
     - name: TABLES
     - name: LAYOUT
 
+  # For BDA backend (optional): reuse a specific standard-output SYNC project
+  # instead of the auto-managed GENAIIDP-OCR-StandardOutput project.
+  bda_project_arn: null
+
   # For Bedrock backend:
   bedrock_model: us.anthropic.claude-3-5-sonnet-20241022-v2:0
   system_prompt: "You are an OCR expert..."
   task_prompt: "Extract all text from this document..."
 ```
+
+### When to choose BDA vs Textract for OCR
+
+- **BDA** — you want table-aware OCR (bank/brokerage statements, invoices) with a
+  single flat per-page price and no feature tuning. One call returns markdown
+  tables, layout, word confidence, and bounding boxes; per-page processing scales
+  past BDA's ~10-page synchronous limit automatically.
+- **Textract** — you need only raw text (cheapest), or you already tune specific
+  Textract features. For table-heavy docs, `TABLES`+`LAYOUT` on Textract (~$0.065/page)
+  is often comparable in total cost to BDA ($0.01/page) once you weigh the extra
+  Textract feature cost against BDA's flat rate; benchmark on your corpus.
 
 ### Textract features & the TABLES cost/accuracy trade-off
 

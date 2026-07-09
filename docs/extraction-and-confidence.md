@@ -52,13 +52,15 @@ They combine freely. The tables below give pros/cons and a recommendation; the r
 
 | | **`separate`** — *default* | **`integrated`** | **`off`** |
 |---|---|---|---|
-| **How it works** | A dedicated confidence inference (Simple: the standalone Assessment step; Advanced: one pass **inside each shard**) | Confidence rides on the extraction inference — no separate pass | No confidence produced |
+| **How it works** | A dedicated confidence inference (Simple: the standalone Assessment step; Advanced: one pass **inside each shard**) | Confidence rides on the extraction inference — no separate pass. **Simple** uses **1S-TopK** (the model returns top-K guesses + probabilities per field); **Advanced** has the agent emit confidence via its tools | No confidence produced |
 | **Inferences added** | +1 (Simple) / +1 per shard (Advanced) | 0 (Simple, single-shot) / 0–1 (Advanced) | 0 |
 | **Pros** | Best-calibrated (a fresh look at finalized values); can use a **cheaper model** than extraction (default Nova Lite); large lists batched reliably | Fewest inferences → lowest confidence cost; one round-trip on the simple path | Zero confidence cost |
 | **Cons** | Extra inference(s) → more cost/latency than `integrated` | On the **Simple** path everything (context + values + all confidence) must fit **one** response → truncation risk on large docs/tables; can't use a separate cheaper model | No confidence → no HITL routing, no UI confidence/threshold signals |
 | **Choose when** | **Default for almost everyone** — the calibration and cheap-model economics usually win | Small documents where one inference comfortably holds values **and** confidence, and you want to minimize round-trips | Confidence genuinely not needed (no HITL, no reliability signal) |
 
 > **Recommended defaults:** **Simple + `separate`** for most workloads; **Advanced + `separate`** for complex or large documents. Reach for `integrated` only on small docs where minimizing inferences matters, and `off` only when you don't consume confidence at all.
+
+> **Simple + `integrated` uses 1S-TopK.** On the Simple path, `integrated` mode asks the model for its **top-K guesses with probabilities** per field (`G1/P1` … `GK/PK`) in one call; the top guess becomes the value and its probability the confidence. Enumerating alternatives yields better-calibrated, less-overconfident scores than a single value + a single confidence number (Tian et al., *"Just Ask for Calibration"*, EMNLP 2023). The output `result.json` is identical in shape to `separate` mode (same `inference_result` + `explainability_info`), so HITL, evaluation, reporting, and the UI are unchanged, and the standalone Assessment step auto-skips. The prompt is editable in the UI ("Task prompt (1-Stage TopK extraction + confidence — simple)") / `extraction.task_prompt_extraction_with_confidence_topk`. See the [reference config](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/develop/config_library/unified/realkie-fcc-verified/config-1s-topk-with-ocr-image.yaml) and the [extraction library README](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/develop/lib/idp_common_pkg/idp_common/extraction/README.md#1s-topk-single-stage-extraction--confidence-simple-mode).
 
 > **Large lists & truncation are handled on every path.** Whichever combination you pick, long list fields are assessed in sequential batches (`list_batch_size`), and if the confidence model truncates a batch at its output-token ceiling the batch is **recursively split until it fits** — so you get complete per-cell coverage without tuning. See [Large-list batching](#large-list-batching-list_batch_size). For documents that are large because of a *very large single section* (not just a long list), prefer **Advanced sharding** — see [Large-Document Guidance](#8-large-document-guidance).
 
@@ -201,7 +203,20 @@ extraction:
       min_parse_success_rate: 0.90   # below this, fall back to LLM extraction
       max_empty_line_gap: 3          # tolerate page-break gaps inside a table
       auto_merge_adjacent_tables: true
+      lazy_images: true              # skip pre-loading page images when the table
+                                     # parse succeeds (big cost saver; see below)
 ```
+
+> **`lazy_images` (default `true`) — cost optimization for table documents.** When
+> a pre-flight table parse succeeds, page images are **not** attached to the
+> extraction prompt. The deterministic table tool is text/markdown-driven and never
+> reads images, and the agent can still fetch a specific page on demand via the
+> `view_image` tool. Because the agentic loop re-sends the prompt on every turn,
+> pre-loaded images are re-transmitted repeatedly and dominate cost on multi-page
+> documents (and push large documents toward context-window limits). A controlled
+> A/B measured no change in list completeness or field accuracy with images off on
+> the table path. Set `lazy_images: false` for **image-dependent corpora** where the
+> model must see page layout/marks even when a table is present.
 
 > **Requires Markdown tables in the OCR output.** Table parsing only engages when
 > OCR emits Markdown pipe-tables — i.e. **Amazon Textract with the `TABLES`

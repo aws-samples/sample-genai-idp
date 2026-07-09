@@ -62,6 +62,18 @@ def _load_field_function_map() -> Dict[str, str]:
 
 FIELD_FUNCTION_MAP: Dict[str, str] = _load_field_function_map()
 
+# Field aliases: fields served by the SAME resolver Lambda as another field.
+# Kept out of FIELD_FUNCTION_MAP (the SSM parameter that carries it) because
+# that parameter is at the 8 KB Advanced-tier ceiling — adding a full duplicate
+# ARN entry would overflow it. The alias's resolver branches on the GraphQL
+# `fieldName`, which the normalized event carries regardless.
+#   getFilePresignedUrl -> handled by the getFileContents resolver Lambda
+#     (returns a presigned S3 GET URL instead of inlining file bytes; used for
+#     files larger than Lambda's 6 MB synchronous response cap).
+FIELD_ALIASES: Dict[str, str] = {
+    "getFilePresignedUrl": "getFileContents",
+}
+
 
 def _invoke_resolver(function_arn: str, appsync_event: Dict[str, Any]) -> Any:
     """Synchronously invoke a resolver Lambda with an AppSync-shaped event."""
@@ -119,7 +131,7 @@ def handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         # CircuitBreakerEnabled=false. Treat empty as unroutable so it falls
         # through to ddb_direct (which serves a graceful disabled response for
         # getCircuitBreakerStatus) rather than invoking an empty FunctionName.
-        mapped_arn = FIELD_FUNCTION_MAP.get(field)
+        mapped_arn = FIELD_FUNCTION_MAP.get(FIELD_ALIASES.get(field, field))
         if mapped_arn:
             result = _invoke_resolver(mapped_arn, appsync_event)
         elif ddb_direct.handles(field):

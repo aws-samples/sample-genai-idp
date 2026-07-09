@@ -66,19 +66,28 @@ def _caller_in_groups(event, allowed):
         groups = [groups]
     return bool(set(allowed).intersection(groups))
 
-def handler(event, context):
-    """
-    Generates a presigned POST URL for S3 uploads through an AppSync resolver.
-    
-    Args:
-        event (dict): The event data from AppSync
-        context (object): Lambda context
-    
-    Returns:
-        dict: A dictionary containing the presigned URL data and object key
+def handler(event, context=None):
+    """Dispatch upload-related resolver operations by GraphQL field name.
+
+    Serves ``uploadDocument`` (presigned POST for local uploads),
+    ``listSampleDocuments`` (read the bundled samples manifest), and
+    ``uploadSampleDocument`` (server-side copy of a bundled sample into the
+    InputBucket). ``uploadDocument`` remains the default when no field name is
+    present so existing callers are unaffected.
     """
     logger.info(f"Received event: {json.dumps(_sanitize_for_log(event))}")
 
+    field_name = (event.get("info") or {}).get("fieldName") or "uploadDocument"
+
+    if field_name == "listSampleDocuments":
+        return _handle_list_sample_documents(event)
+    if field_name == "uploadSampleDocument":
+        return _handle_upload_sample_document(event)
+    return _handle_upload_document(event)
+
+
+def _handle_upload_document(event):
+    """Generate a presigned POST URL for a local-file S3 upload."""
     try:
         # Defense-in-depth: uploadDocument is an Admin+Author operation.
         if not _caller_in_groups(event, ("Admin", "Author")):
@@ -156,3 +165,117 @@ def handler(event, context):
     except Exception as e:
         logger.error(f"Error generating presigned URL: {str(e)}")
         raise
+
+
+# Samples manifest key within the ConfigurationBucket (mirrors the publish-time
+# _SAMPLES_MANIFEST_FILE / SAMPLES_MANIFEST_KEY default).
+_SAMPLES_MANIFEST_KEY = os.environ.get(
+    "SAMPLES_MANIFEST_KEY", "config_library/samples-manifest.json"
+)
+
+
+def _load_samples_manifest():
+    """Read and parse config_library/samples-manifest.json from the ConfigurationBucket."""
+    config_bucket = os.environ.get("CONFIGURATION_BUCKET")
+    if not config_bucket:
+        raise ValueError("CONFIGURATION_BUCKET is not configured")
+    obj = s3_client.get_object(Bucket=config_bucket, Key=_SAMPLES_MANIFEST_KEY)
+    manifest = json.loads(obj["Body"].read())
+    return config_bucket, manifest.get("samples", [])
+
+
+def _handle_list_sample_documents(event):
+    """Return the bundled sample documents from the manifest (Admin/Author/Viewer)."""
+    try:
+        if not _caller_in_groups(event, ("Admin", "Author", "Viewer")):
+            raise PermissionError(
+                "Unauthorized: listSampleDocuments requires Admin, Author, or Viewer group"
+            )
+        _, samples = _load_samples_manifest()
+        return {"success": True, "samples": samples, "error": None}
+    except PermissionError:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing sample documents: {str(e)}")
+        return {"success": False, "samples": None, "error": str(e)}
+
+
+def _handle_upload_sample_document(event):
+    """Copy a bundled sample from the ConfigurationBucket into the InputBucket.
+
+    For ``kind=document`` copies the single object; for ``kind=batch`` copies
+    every document under the sample's prefix. Stamps the config version as
+    object metadata (config-version) so downstream processing selects the right
+    configuration, mirroring the presigned-POST x-amz-meta-config-version path.
+    The InputBucket "Object Created" EventBridge rule then drives processing.
+    """
+    try:
+        if not _caller_in_groups(event, ("Admin", "Author")):
+            raise PermissionError(
+                "Unauthorized: uploadSampleDocument requires Admin or Author group"
+            )
+
+        arguments = event.get("arguments", {})
+        sample_id = arguments.get("sampleId")
+        prefix = (arguments.get("prefix") or "").strip("/")
+        version = arguments.get("version")
+        if not sample_id:
+            raise ValueError("sampleId is required")
+
+        input_bucket = os.environ.get("INPUT_BUCKET")
+        if not input_bucket:
+            raise ValueError("INPUT_BUCKET is not configured")
+
+        config_bucket, samples = _load_samples_manifest()
+        sample = next((s for s in samples if s.get("id") == sample_id), None)
+        if sample is None:
+            raise ValueError(f"Unknown sampleId: {sample_id}")
+
+        s3_key = sample.get("s3Key", "")
+        kind = sample.get("kind", "document")
+
+        # Resolve the source object keys within the ConfigurationBucket.
+        if kind == "batch":
+            source_prefix = s3_key.rstrip("/") + "/"
+            paginator = s3_client.get_paginator("list_objects_v2")
+            source_keys = [
+                obj["Key"]
+                for page in paginator.paginate(
+                    Bucket=config_bucket, Prefix=source_prefix
+                )
+                for obj in page.get("Contents", [])
+                if not obj["Key"].endswith("/")
+            ]
+        else:
+            source_keys = [s3_key]
+
+        if not source_keys:
+            raise ValueError(f"No source files found for sample: {sample_id}")
+
+        extra_args = {}
+        if version:
+            extra_args["Metadata"] = {"config-version": version}
+            extra_args["MetadataDirective"] = "REPLACE"
+
+        object_keys = []
+        for source_key in source_keys:
+            base_name = os.path.basename(source_key)
+            target_key = f"{prefix}/{base_name}" if prefix else base_name
+            s3_client.copy_object(
+                CopySource={"Bucket": config_bucket, "Key": source_key},
+                Bucket=input_bucket,
+                Key=target_key,
+                **extra_args,
+            )
+            object_keys.append(target_key)
+
+        logger.info(
+            f"Copied {len(object_keys)} sample file(s) for '{sample_id}' to "
+            f"{input_bucket}"
+        )
+        return {"success": True, "objectKeys": object_keys, "error": None}
+    except PermissionError:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading sample document: {str(e)}")
+        return {"success": False, "objectKeys": None, "error": str(e)}

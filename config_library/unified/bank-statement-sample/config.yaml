@@ -28,7 +28,7 @@ classes:
             description: Transaction date (MM/DD/YYYY)
             x-aws-idp-confidence-threshold: "0.9"
             type: string
-            x-aws-idp-evaluation-method: FUZZY
+            x-aws-idp-evaluation-method: DATE
           Description:
             description: Transaction description or merchant name
             x-aws-idp-confidence-threshold: "0.7"

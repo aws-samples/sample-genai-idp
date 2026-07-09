@@ -26,6 +26,7 @@ from pydantic import (
     ConfigDict,
     Discriminator,
     Field,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -55,6 +56,21 @@ def _parse_optional_max_tokens(v: Any) -> Optional[int]:
         v = int(v)
     v = int(v)
     return v if v > 0 else None
+
+
+def _parse_required_int(v: Any, info: ValidationInfo, cls: type) -> int:
+    """Parse a required int, falling back to the field's default on empty/None.
+
+    A stored config may carry an explicit ``null`` or empty string for a field
+    that is otherwise a required int with a default (e.g. ``list_batch_size``,
+    ``max_empty_line_gap``). Coercing that directly via ``int(None)`` raises
+    ``TypeError``, which would fail config load/validation on upgrade. Treat
+    empty/None as "use the model's declared default" instead.
+    """
+    if v is None or (isinstance(v, str) and not v.strip()):
+        default = cls.model_fields[info.field_name].default
+        return int(default) if default is not None else 0
+    return int(v)
 
 
 class ImageConfig(BaseModel):
@@ -163,6 +179,17 @@ class TableParsingConfig(BaseModel):
         "page breaks. Disable if documents contain multiple similar tables that "
         "should remain separate.",
     )
+    lazy_images: bool = Field(
+        default=True,
+        description="When the deterministic table parser successfully parses the "
+        "document's table(s) in pre-flight, do NOT pre-load page images into the "
+        "agentic extraction prompt. The table parser is text/markdown-driven and "
+        "never reads images, and the agent can still fetch a page on demand via "
+        "the view_image tool. Pre-loaded images are re-sent every agent turn and "
+        "dominate cost on multi-page documents. Set to false to always attach page "
+        "images (image-dependent corpora where the LLM must see page layout even "
+        "when a table is present).",
+    )
 
     @field_validator(
         "min_confidence_threshold", "min_parse_success_rate", mode="before"
@@ -176,11 +203,9 @@ class TableParsingConfig(BaseModel):
 
     @field_validator("max_empty_line_gap", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any, info: ValidationInfo) -> int:
+        """Parse int from string or number (empty/None -> field default)."""
+        return _parse_required_int(v, info, cls)
 
 
 class ValidationConfig(BaseModel):
@@ -267,7 +292,11 @@ class AgenticConfig(BaseModel):
             "calls provide_field_assessment in a follow-up inference within the same "
             "turn (a dedicated reflection pass over the finalized values). "
             "'single_shot': the agent emits values AND per-field confidence together "
-            "in ONE combined tool call, saving the follow-up inference. Both produce "
+            "in ONE combined tool call, saving the follow-up inference. "
+            "'topk': the agent emits, per field, its top-K guesses with probabilities "
+            "(G1/P1 … GK/PK) in ONE combined tool call; the shared topk_resolver takes "
+            "G1 as the value and P1 as the confidence — the agentic analogue of the "
+            "simple-mode 1S-TopK path, for better-calibrated scores. All three produce "
             "identical explainability_info downstream; this only changes inference "
             "mechanics. Provided so cost/latency vs. confidence-calibration can be "
             "A/B tested before choosing a default. Ignored unless "
@@ -356,10 +385,10 @@ class AgenticConfig(BaseModel):
         if v is None or (isinstance(v, str) and not v.strip()):
             return "two_step"
         v = str(v).strip().lower()
-        if v not in ("two_step", "single_shot"):
+        if v not in ("two_step", "single_shot", "topk"):
             raise ValueError(
-                "integrated_confidence_strategy must be 'two_step' or 'single_shot', "
-                f"got {v!r}"
+                "integrated_confidence_strategy must be 'two_step', 'single_shot', "
+                f"or 'topk', got {v!r}"
             )
         return v
 
@@ -564,11 +593,9 @@ class ConfidenceConfig(BaseModel):
 
     @field_validator("list_batch_size", mode="before")
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any, info: ValidationInfo) -> int:
+        """Parse int from string or number (empty/None -> field default)."""
+        return _parse_required_int(v, info, cls)
 
     @field_validator("max_escalation_rounds", mode="before")
     @classmethod
@@ -722,9 +749,24 @@ class ExtractionConfig(BaseModel):
     task_prompt_extraction_with_confidence: str = Field(
         default="",
         description=(
-            "Task prompt template for INTEGRATED extraction+confidence — used when "
-            "extraction.confidence.mode == 'integrated', where a single inference "
-            "emits each value AND its confidence. Populated from system defaults."
+            "Task prompt template for INTEGRATED extraction+confidence in AGENTIC "
+            "(advanced) mode — used when extraction.confidence.mode == 'integrated' "
+            "and extraction.mode == 'advanced', where the agent calls the "
+            "provide_field_assessment tool after extracting. Populated from system "
+            "defaults."
+        ),
+    )
+    task_prompt_extraction_with_confidence_topk: str = Field(
+        default="",
+        description=(
+            "Task prompt template for 1-Stage TopK INTEGRATED extraction+confidence "
+            "in SIMPLE (non-agentic) mode — used when "
+            "extraction.confidence.mode == 'integrated' and extraction.mode == "
+            "'simple'. A single LLM call emits its top-K guesses with probabilities "
+            "(G1/P1 … GK/PK) per field; topk_resolver takes G1 as the value and P1 "
+            "as the confidence. Requesting ranked alternatives yields better-"
+            "calibrated confidence than single-value self-assessment. Populated "
+            "from system defaults."
         ),
     )
     # NOTE (v0.6): the confidence-only prompt lives at extraction.confidence.task_prompt
@@ -1048,6 +1090,18 @@ class SummarizationConfig(BaseModel):
         gt=0,
         description="Optional cap on output tokens. Leave empty to use the selected model's maximum output limit (recommended). If set, it must not exceed the model's limit.",
     )
+    max_extraction_array_items: int = Field(
+        default=50,
+        ge=0,
+        description=(
+            "When injecting EXTRACTION_RESULTS into the summarization prompt, any "
+            "array longer than this is elided to its first/last few items plus a "
+            "'... (N items total)' marker. A summary needs counts/totals, not "
+            "every row, and the full pretty-printed list is the dominant token "
+            "term that overflows the model context window on large documents. "
+            "0 disables elision (inject the full arrays)."
+        ),
+    )
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
     @classmethod
@@ -1062,6 +1116,14 @@ class SummarizationConfig(BaseModel):
     def parse_int(cls, v: Any) -> Optional[int]:
         """Parse optional max_tokens (empty/0 -> None = use model max)."""
         return _parse_optional_max_tokens(v)
+
+    @field_validator("max_extraction_array_items", mode="before")
+    @classmethod
+    def parse_array_cap(cls, v: Any) -> int:
+        """Parse the array cap (empty string -> default 50)."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return 50
+        return int(v)
 
 
 class ChatConfig(BaseModel):
@@ -1150,7 +1212,16 @@ class OCRConfig(BaseModel):
         description="Pipeline hooks invoked after OCR (Feature Platform)",
     )
     backend: str = Field(
-        default="textract", description="OCR backend (textract or bedrock)"
+        default="textract",
+        description="OCR backend: 'textract', 'bedrock' (LLM OCR), 'bda' (Bedrock Data Automation), or 'none' (image-only)",
+    )
+    bda_project_arn: Optional[str] = Field(
+        default=None,
+        description=(
+            "ARN of a Bedrock Data Automation standard-output SYNC project used "
+            "when backend='bda'. If unset, a standard-output OCR project is "
+            "auto-created and reused."
+        ),
     )
     model_id: Optional[str] = Field(
         default=None,
@@ -1258,11 +1329,9 @@ class ErrorAnalyzerParameters(BaseModel):
         mode="before",
     )
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any, info: ValidationInfo) -> int:
+        """Parse int from string or number (empty/None -> field default)."""
+        return _parse_required_int(v, info, cls)
 
 
 class ErrorAnalyzerConfig(BaseModel):
@@ -1941,11 +2010,9 @@ class RuleValidationConfig(BaseModel):
         mode="before",
     )
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any, info: ValidationInfo) -> int:
+        """Parse int from string or number (empty/None -> field default)."""
+        return _parse_required_int(v, info, cls)
 
 
 class EvaluationLLMMethodConfig(BaseModel):
@@ -2144,11 +2211,9 @@ class MultiDocumentDiscoveryConfig(BaseModel):
         mode="before",
     )
     @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
+    def parse_int(cls, v: Any, info: ValidationInfo) -> int:
+        """Parse int from string or number (empty/None -> field default)."""
+        return _parse_required_int(v, info, cls)
 
     @field_validator("max_tokens", mode="before")
     @classmethod

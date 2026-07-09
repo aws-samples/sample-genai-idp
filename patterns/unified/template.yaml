@@ -289,8 +289,8 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: OCR Configuration
-            description: "Not used when BDA is enabled - BDA handles OCR internally"
+            sectionLabel: OCR
+            description: "Extracts text from document pages. Enable Textract features (LAYOUT, TABLES, FORMS) or use the BDA backend to add layout, tables, and forms support."
             dependsOn: { field: "use_bda", value: false }
             required:
               - features
@@ -328,8 +328,17 @@ Resources:
               backend:
                 type: string
                 title: OCR backend
-                description: "OCR backend to use: 'textract' for AWS Textract, 'bedrock' for LLM-based OCR, 'none' for image-only processing without OCR"
-                enum: ["textract", "bedrock", "none"]
+                description: >-
+                  OCR engine. 'textract' (default): AWS Textract — cheapest for
+                  plain text ($1.50/1K pages raw) and best when you need only raw
+                  text or already tune specific Textract features (Tables
+                  $15/1K, Forms $50/1K). 'bda': Amazon Bedrock Data Automation —
+                  flat $10/1K pages returning markdown with tables and layout
+                  plus word-level confidence/bounding boxes in one call; choose
+                  it for table-aware OCR (enables the extraction table tool) and
+                  predictable pricing without composing Textract features.
+                  'bedrock': LLM-based OCR. 'none': image-only, no OCR.
+                enum: ["textract", "bedrock", "bda", "none"]
                 default: "textract"
                 order: 1
               model_id:
@@ -788,8 +797,8 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Classification Configuration
-            description: "Not used when BDA is enabled - BDA handles classification internally"
+            sectionLabel: Classification
+            description: "Assigns a class to each page/section. LLM-powered classification is skipped when only a single class is defined in the Document Schema (all pages are assigned to that class), or when a document name or page content matches a class's RegEx rule."
             dependsOn: { field: "use_bda", value: false }
             required:
               - model
@@ -1060,8 +1069,8 @@ Resources:
             format: section
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Extraction Configuration
-            description: "Not used when BDA is enabled - BDA handles extraction internally"
+            sectionLabel: Extraction
+            description: "Extracts structured attributes from each section. LLM-powered extraction is skipped for any section whose class has no attributes defined in the Document Schema (an empty extraction result is recorded)."
             dependsOn: { field: "use_bda", value: false }
             required:
               - model
@@ -1087,28 +1096,21 @@ Resources:
                 properties:
                   max_concurrent_batches:
                     type: number
-                    description: "Only used when Agentic Extraction is enabled. Max concurrent extraction agents. 1 = single pass (default). >1 SHARDS the section's pages into token-budgeted ranges (each agent sees ONLY its pages, not the whole document) and runs them concurrently - this both speeds up long documents AND prevents context-window overflow. Acts as an upper bound on parallelism and shard count. Higher values increase Bedrock requests-per-minute; tune to your quota."
+                    description: "Max concurrent extraction agents / shards. 1 = single pass. >1 shards a section's pages into ranges (each agent sees only its pages) and runs them concurrently — speeds up long documents and avoids context-window overflow. Higher values raise Bedrock requests/min; tune to your quota. Default: 10."
                     minimum: 1
                     maximum: 10
-                    default: 1
+                    default: 10
                     order: 1
-                  shard_token_budget:
-                    type: number
-                    description: "Only used when concurrent extraction is active (max_concurrent_batches > 1). Target maximum input tokens (estimated ~chars/4) of OCR text per shard. Pages are grouped so each shard stays under this budget, creating as many shards as needed (capped by max_concurrent_batches). The default (8000) reliably shards large documents so a single agent never has to emit a giant table in one Bedrock call (the read-timeout failure mode). Lower this if shards still overflow the model context; raise it for large-context models (e.g. 1M-context Claude)."
-                    minimum: 1000
-                    maximum: 900000
-                    default: 8000
-                    order: 2
                   max_pages_per_shard:
                     type: number
-                    description: "Only used when concurrent extraction is active (max_concurrent_batches > 1). Page-count ceiling per shard. A shard is closed once it holds this many pages even if its OCR text is still under shard_token_budget - so a document with unusually compact pages still shards on page count (tokens AND pages both bound a shard). This guarantees large docs shard regardless of text density. 0 = disabled (token budget alone bounds shards). Default: 5."
+                    description: "Max pages per shard (wall-clock guard). Shard token budget is auto-sized from the model's context window, but a shard is still capped at this many pages so very large documents can't collapse into one long-running agent. 0 = page cap off (token budget alone). Default: 5."
                     minimum: 0
                     maximum: 100
                     default: 5
-                    order: 3
+                    order: 2
                   table_parsing:
                     type: object
-                    sectionLabel: Table Parsing Tool
+                    sectionLabel: Table Parsing Tool (Requires OCR TABLES enabled)
                     description: "Only used when Agentic Extraction is enabled. Gives the agent a deterministic parse_table tool that extracts well-formatted Markdown tables from OCR output without LLM inference - faster and more reliable for large/dense tables (bank statements, transaction logs). The agent decides when to use it based on table quality."
                     order: 4
                     properties:
@@ -1119,35 +1121,46 @@ Resources:
                         default: false
                       min_confidence_threshold:
                         type: number
-                        description: "Only used when this tool is enabled. Minimum average OCR text confidence (Textract 0-100 scale) for the agent to prefer table parsing over LLM extraction. Included in the agent system prompt as guidance. Default: 95."
+                        description: "Minimum average OCR text confidence (Textract 0-100 scale) for the agent to prefer table parsing over LLM extraction. Included in the agent system prompt as guidance. Default: 95."
                         minimum: 0
                         maximum: 100
                         default: 95
                         order: 1
+                        dependsOn: { field: "enabled", value: true }
                       min_parse_success_rate:
                         type: number
-                        description: "Only used when this tool is enabled. Minimum parse_success_rate from the parse_table tool for the agent to trust parsed results. Below this threshold, the agent falls back to LLM extraction. Default: 0.9."
+                        description: "Minimum parse_success_rate from the parse_table tool for the agent to trust parsed results. Below this threshold, the agent falls back to LLM extraction. Default: 0.9."
                         minimum: 0
                         maximum: 1
                         default: 0.9
                         order: 2
+                        dependsOn: { field: "enabled", value: true }
                       use_confidence_data:
                         type: boolean
-                        description: "Only used when this tool is enabled. Load and provide OCR confidence data to the parse_table tool for quality assessment. Requires text_confidence_uri from Textract OCR (no effect with other OCR backends). Default: on."
+                        description: "Load and provide OCR confidence data to the parse_table tool for quality assessment. Requires text_confidence_uri from Textract OCR (no effect with other OCR backends). Default: on."
                         default: true
                         order: 3
+                        dependsOn: { field: "enabled", value: true }
                       max_empty_line_gap:
                         type: number
-                        description: "Only used when this tool is enabled. Maximum consecutive empty lines tolerated inside a table before treating it as a boundary - helps recover tables split by OCR page breaks. Higher = more tolerant but may merge unrelated tables. Tuning: 2 for high-quality OCR, 3 standard, 5-7 for noisy documents. Default: 3."
+                        description: "Maximum consecutive empty lines tolerated inside a table before treating it as a boundary - helps recover tables split by OCR page breaks. Higher = more tolerant but may merge unrelated tables. Tuning: 2 for high-quality OCR, 3 standard, 5-7 for noisy documents. Default: 3."
                         minimum: 0
                         maximum: 10
                         default: 3
                         order: 4
+                        dependsOn: { field: "enabled", value: true }
                       auto_merge_adjacent_tables:
                         type: boolean
-                        description: "Only used when this tool is enabled. Automatically merge consecutive tables with identical columns (recovers tables split by page breaks). Disable if a document legitimately contains multiple separate tables with the same columns. Default: on."
+                        description: "Automatically merge consecutive tables with identical columns (recovers tables split by page breaks). Disable if a document legitimately contains multiple separate tables with the same columns. Default: on."
                         default: true
                         order: 5
+                        dependsOn: { field: "enabled", value: true }
+                      lazy_images:
+                        type: boolean
+                        description: "When a table parse succeeds, skip pre-loading page images into the extraction prompt (the parser is text-driven; the agent can still fetch a page via view_image). Big cost saver on multi-page documents. Turn off for image-dependent corpora where the model must see page layout even when a table is present. Default: on."
+                        default: true
+                        order: 6
+                        dependsOn: { field: "enabled", value: true }
                   validation:
                     type: object
                     sectionLabel: Schema Validation & Escalation
@@ -1161,20 +1174,23 @@ Resources:
                         default: false
                       check_formats:
                         type: boolean
-                        description: "Only used when validation is enabled. Enforce JSON-Schema 'format' keywords (date, date-time, email, uri, uuid, ...). Note: 'format: date' means ISO-8601 (YYYY-MM-DD); disable this if your schema uses 'format: date' for non-ISO values such as MM/DD/YYYY (or use a 'pattern' instead). Default: on."
+                        description: "Enforce JSON-Schema 'format' keywords (date, date-time, email, uri, uuid, ...). Note: 'format: date' means ISO-8601 (YYYY-MM-DD); disable this if your schema uses 'format: date' for non-ISO values such as MM/DD/YYYY (or use a 'pattern' instead). Default: on."
                         order: 1
                         default: true
+                        dependsOn: { field: "enabled", value: true }
                       fail_action:
                         type: string
-                        description: "Only used when validation is enabled. What to do when validation still fails after the agent's own retries. 'warn': record the outcome in metadata and proceed. 'escalate': re-extract only the failing fields with the Escalation Model (roughly doubles that section's cost, still far cheaper than human review), then warn if still invalid. 'reject': mark the section as failed so downstream/HITL can act. Default: escalate."
+                        description: "What to do when validation still fails after the agent's own retries. 'warn': record the outcome in metadata and proceed. 'escalate': re-extract only the failing fields with the Escalation Model (roughly doubles that section's cost, still far cheaper than human review), then warn if still invalid. 'reject': mark the section as failed so downstream/HITL can act. Default: escalate."
                         enum: ["warn", "escalate", "reject"]
                         order: 2
                         default: "escalate"
+                        dependsOn: { field: "enabled", value: true }
                       escalation_model:
                         type: string
-                        description: "Only used when Fail Action is 'escalate'. Stronger Bedrock model used to re-extract failing fields. Select blank to retry with the extraction model. Can be overridden per document class via the 'x-aws-idp-extraction-escalation-model' schema extension in the Document Schema editor."
+                        description: "Stronger Bedrock model used to re-extract failing fields (used when Fail Action is 'escalate'). Select blank to retry with the extraction model. Can be overridden per document class via the 'x-aws-idp-extraction-escalation-model' schema extension in the Document Schema editor."
                         order: 3
                         dependsOn: { field: "fail_action", value: "escalate" }
+                        hideWhen: { field: "extraction.agentic.validation.enabled", value: false }
                         enum:
                           - ""
                           - "us.amazon.nova-lite-v1:0"
@@ -1234,11 +1250,12 @@ Resources:
                         default: ""
                       min_population_ratio:
                         type: number
-                        description: "Only used when validation is enabled. Advisory completeness threshold (0-1). After extraction, the fraction of schema-defined fields that came back populated is computed; if it falls below this value a warning is logged and metadata.population_check is flagged (catches silent loss such as nested fields returning null or a table extracting zero rows). Advisory only - never fails extraction. Set to 0 to disable. Default: 0.5."
+                        description: "Advisory completeness threshold (0-1). After extraction, the fraction of schema-defined fields that came back populated is computed; if it falls below this value a warning is logged and metadata.population_check is flagged (catches silent loss such as nested fields returning null or a table extracting zero rows). Advisory only - never fails extraction. Set to 0 to disable. Default: 0.5."
                         minimum: 0
                         maximum: 1
                         order: 4
                         default: 0.5
+                        dependsOn: { field: "enabled", value: true }
               image:
                 type: object
                 sectionLabel: Image Processing Settings
@@ -1407,11 +1424,20 @@ Resources:
                 hideWhen: { field: "extraction.confidence.mode", value: "integrated" }
               task_prompt_extraction_with_confidence:
                 type: string
-                title: Task prompt (extraction + confidence)
+                title: Task prompt (extraction + confidence — advanced/agentic)
                 format: textarea
-                description: "INTEGRATED task prompt — used when Confidence Assessment mode is 'integrated' (one inference emits each value AND its confidence). Instruct the model to call provide_field_assessment. The bounding-box block (Bounding-box Geometry section) is appended automatically when Geometry mode is 'llm' or 'llm_grounded'."
+                description: "INTEGRATED task prompt for ADVANCED (agentic) mode — used when Confidence Assessment mode is 'integrated' and Extraction mode is 'advanced'. Instructs the agent to call the provide_field_assessment tool after extracting. The bounding-box block (Bounding-box Geometry section) is appended automatically when Geometry mode is 'llm' or 'llm_grounded'."
                 order: 14
                 dependsOn: { field: "extraction.confidence.mode", value: "integrated" }
+                hideWhen: { field: "extraction.mode", value: "simple" }
+              task_prompt_extraction_with_confidence_topk:
+                type: string
+                title: Task prompt (1-Stage TopK extraction + confidence — simple)
+                format: textarea
+                description: "1-Stage TopK INTEGRATED task prompt for SIMPLE (non-agentic) mode — used when Confidence Assessment mode is 'integrated' and Extraction mode is 'simple'. A single LLM call emits its top-K guesses with probabilities per field (G1/P1 … GK/PK); the top guess becomes the value and its probability the confidence. Requesting ranked alternatives yields better-calibrated confidence than single-value self-assessment."
+                order: 15
+                dependsOn: { field: "extraction.confidence.mode", value: "integrated" }
+                hideWhen: { field: "extraction.mode", value: "advanced" }
               custom_prompt_lambda_arn:
                 type: string
                 title: Custom Prompt Lambda ARN
@@ -1460,7 +1486,7 @@ Resources:
                     minimum: 1
                     default: 25
                     order: 2
-                    hideWhen: { field: "extraction.confidence.mode", value: "off" }
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
                   model:
                     type: string
                     title: Confidence model
@@ -1537,6 +1563,7 @@ Resources:
                     defaultExpanded: false
                     description: "Advanced inference tuning (sampling + reasoning effort). Defaults are sensible; most users never change these."
                     order: 5
+                    dependsOn: { field: "extraction.confidence.mode", value: "separate" }
                     properties:
                       temperature:
                         type: number
@@ -1667,12 +1694,12 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Human-in-the-Loop (HITL) Review
-            description: "Route low-confidence extractions to human review. Requires Confidence Assessment to be enabled (Extraction → Confidence scoring mode must not be 'off') so fields carry a confidence score."
+            sectionLabel: Human-in-the-Loop (HITL) Review (Optional)
+            description: "Route low-confidence extractions to human review. Requires Confidence Assessment to be enabled."
             properties:
               enabled:
                 type: boolean
-                title: Enable HITL review
+                title: Enabled
                 description: "Enable Human-in-the-Loop review for low-confidence extractions."
                 default: false
                 order: 0
@@ -1690,10 +1717,12 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Summarization Configuration
+            sectionLabel: Summarization (Optional)
+            description: "Generates a natural-language summary of the document."
             properties:
               enabled:
                 type: boolean
+                title: Enabled
                 description: Enable or disable document summarization
                 default: true
                 order: 0
@@ -1879,11 +1908,12 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Evaluation Configuration
+            sectionLabel: Evaluation (Optional)
+            description: "Scores extraction results against baseline ground-truth data to measure accuracy."
             properties:
               enabled:
                 type: boolean
-                title: Enable evaluation
+                title: Enabled
                 description: Enable or disable evaluation processing
                 default: true
                 order: 0
@@ -2010,8 +2040,8 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Discovery Configuration
-            description: Configuration for document class discovery functionality
+            sectionLabel: Discovery
+            description: "Analyzes sample documents to auto-generate class definitions and extraction schemas."
             properties:
               without_ground_truth:
                 order: 0
@@ -2450,8 +2480,8 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Agent Configuration
-            description: Configuration for AI agents used in the system
+            sectionLabel: Agent Companion
+            description: "Configures the AI agents used for interactive analysis (e.g. chat companion, error analysis)."
             properties:
               chat_companion:
                 type: object
@@ -2576,17 +2606,14 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Chat-with-Document Configuration
+            sectionLabel: Chat-with-Document
             description: >-
               Controls the interactive "Chat with Document" feature on the
-              Document Detail screen. This uses the model configured here
-              (independent from summarization). The full document text is
-              sent in a single prompt, so a large-context model is
-              recommended.
+              Document Detail screen.
             properties:
               enabled:
                 type: boolean
-                title: Enable chat
+                title: Enabled
                 description: Enable or disable the Chat-with-Document feature
                 default: true
                 order: 0
@@ -2705,10 +2732,12 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Rule Validation Configuration
+            sectionLabel: Rule Validation (Optional)
+            description: "Validates extracted data against business rules for matching policy classes. Requires one or more policy classes to be configured."
             properties:
               enabled:
                 type: boolean
+                title: Enabled
                 description: Enable or disable rule validation processing
                 default: true
                 order: 0
@@ -3801,6 +3830,28 @@ Resources:
               Condition:
                 StringLike:
                   "lambda:FunctionName": "GENAIIDP-*"
+            # Bedrock Data Automation permissions for the 'bda' OCR backend.
+            # Sync InvokeDataAutomation on the auto-managed standard-output
+            # project + the standard data-automation profile.
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeDataAutomation
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:data-automation-project/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:data-automation-profile/*.data-automation-v1"
+                - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:data-automation-profile/*.data-automation-v1"
+            # Control-plane actions to find-or-create the OCR standard-output project.
+            - Effect: Allow
+              Action:
+                - bedrock:CreateDataAutomationProject
+                - bedrock:GetDataAutomationProject
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:data-automation-project/*"
+            # ListDataAutomationProjects is a collection op without resource-level scoping.
+            - Effect: Allow
+              Action:
+                - bedrock:ListDataAutomationProjects
+              Resource: "*"
 
   OCRFunctionLogGroup:
     Type: AWS::Logs::LogGroup

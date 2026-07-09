@@ -26,11 +26,30 @@ _The GenAIIDP Web Interface showing the document tracking dashboard with status 
 - Manage multiple configuration versions — create, compare, activate, and delete versions (see [configuration-versions.md](configuration-versions.md))
 - Retain, view, compare, and delete **document versions** — every processing run of a document is kept and viewable read-only (see [document-versions.md](document-versions.md))
 - **Confidence threshold configuration** for HITL (Human-in-the-Loop) triggering through the Assessment & HITL Configuration section
-- Document upload from local computer
+- Document upload from your local computer, or from the **bundled sample documents** shipped with the deployment (no local download needed)
 - Knowledge base querying for document collections
 - "Chat with document" from the detailed view of the document
 - **Document Process Flow visualization** for detailed workflow execution monitoring and troubleshooting
 - **Document Analytics** for querying and visualizing processed document data
+
+## Upload Documents
+
+The **Upload Documents** panel accepts documents from two sources, selected with the **Document source** toggle:
+
+- **From my computer** — pick one or more files with the file picker (or drag-and-drop). Files are uploaded directly to the InputBucket via a presigned POST and processed automatically.
+- **Sample documents** — choose from the sample documents bundled with the deployment (e.g. a multi-page bank statement, a lending package, a batch of W-2 forms). Selecting a sample copies it server-side into the InputBucket — no local download required. This is the easiest way to try the accelerator or evaluate a configuration preset end-to-end.
+
+In both modes you can set an optional **folder prefix** and pick the **Configuration Version** used to process the document(s).
+
+### One-click config for samples
+
+Many bundled samples are tuned for a specific configuration preset in the [Configuration Library](configuration-versions.md) (for example, the bank-statement sample pairs with the `bank-statement-sample` config). When you select such a sample:
+
+- If the associated configuration is **not yet imported**, a pre-checked **"Also import and use its configuration"** checkbox appears. Leaving it checked imports the preset from the library as a new (non-active) configuration version and processes the sample with it. Uncheck it to process the sample under the currently selected version instead.
+- If the associated configuration is **already imported**, that version is preselected automatically.
+- Samples with no associated configuration are simply uploaded under the selected version.
+
+The bundled sample documents and their config associations are published to the deployment's ConfigurationBucket at deploy time (under `samples/`, described by `config_library/samples-manifest.json`).
 
 ## Edit Sections
 

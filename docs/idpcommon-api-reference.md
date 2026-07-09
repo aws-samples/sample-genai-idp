@@ -195,7 +195,7 @@ service = EvaluationService(region="us-east-1", config=config)
 document = service.evaluate_document(actual_document, expected_document)
 ```
 
-**Features:** Multiple comparison methods (EXACT, FUZZY, SEMANTIC, NUMERIC_EXACT, LLM), per-attribute and per-document metrics, visual evaluation reports.
+**Features:** Multiple comparison methods (EXACT, FUZZY, LEVENSHTEIN, SEMANTIC, NUMERIC_EXACT, DATE, LLM, HUNGARIAN), per-attribute and per-document metrics, visual evaluation reports.
 
 ### Rule Validation (`idp_common.rule_validation`)
 
