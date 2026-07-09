@@ -289,7 +289,7 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: OCR Configuration
+            sectionLabel: OCR
             description: "Extracts text from document pages. Enable Textract features (LAYOUT, TABLES, FORMS) or use the BDA backend to add layout, tables, and forms support."
             dependsOn: { field: "use_bda", value: false }
             required:
@@ -797,7 +797,7 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Classification Configuration
+            sectionLabel: Classification
             description: "Assigns a class to each page/section. LLM-powered classification is skipped when only a single class is defined in the Document Schema (all pages are assigned to that class), or when a document name or page content matches a class's RegEx rule."
             dependsOn: { field: "use_bda", value: false }
             required:
@@ -1069,7 +1069,7 @@ Resources:
             format: section
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Extraction Configuration
+            sectionLabel: Extraction
             description: "Extracts structured attributes from each section. LLM-powered extraction is skipped for any section whose class has no attributes defined in the Document Schema (an empty extraction result is recorded)."
             dependsOn: { field: "use_bda", value: false }
             required:
@@ -1686,8 +1686,8 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Human-in-the-Loop (HITL) Review
-            description: "Route low-confidence extractions to human review. Requires Confidence Assessment to be enabled (Extraction → Confidence scoring mode must not be 'off') so fields carry a confidence score."
+            sectionLabel: Human-in-the-Loop (HITL) Review (Optional)
+            description: "Route low-confidence extractions to human review. Requires Confidence Assessment to be enabled."
             properties:
               enabled:
                 type: boolean
@@ -1709,8 +1709,8 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Summarization Configuration
-            description: "Generates a natural-language summary of the document. Skipped when disabled here."
+            sectionLabel: Summarization (Optional)
+            description: "Generates a natural-language summary of the document."
             properties:
               enabled:
                 type: boolean
@@ -1900,11 +1900,12 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Evaluation Configuration
+            sectionLabel: Evaluation (Optional)
+            description: "Scores extraction results against baseline ground-truth data to measure accuracy."
             properties:
               enabled:
                 type: boolean
-                title: Enable evaluation
+                title: Enabled
                 description: Enable or disable evaluation processing
                 default: true
                 order: 0
@@ -2031,8 +2032,8 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Discovery Configuration
-            description: Configuration for document class discovery functionality
+            sectionLabel: Discovery
+            description: "Analyzes sample documents to auto-generate class definitions and extraction schemas."
             properties:
               without_ground_truth:
                 order: 0
@@ -2471,8 +2472,8 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Agent Configuration
-            description: Configuration for AI agents used in the system
+            sectionLabel: Agent Companion
+            description: "Configures the AI agents used for interactive analysis (e.g. chat companion, error analysis)."
             properties:
               chat_companion:
                 type: object
@@ -2597,17 +2598,14 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Chat-with-Document Configuration
+            sectionLabel: Chat-with-Document
             description: >-
               Controls the interactive "Chat with Document" feature on the
-              Document Detail screen. This uses the model configured here
-              (independent from summarization). The full document text is
-              sent in a single prompt, so a large-context model is
-              recommended.
+              Document Detail screen.
             properties:
               enabled:
                 type: boolean
-                title: Enable chat
+                title: Enabled
                 description: Enable or disable the Chat-with-Document feature
                 default: true
                 order: 0
@@ -2726,8 +2724,8 @@ Resources:
             type: object
             collapsible: true
             defaultExpanded: false
-            sectionLabel: Rule Validation Configuration
-            description: "Validates extracted data against business rules for matching policy classes. Skipped when disabled here, or when no policy classes are configured."
+            sectionLabel: Rule Validation (Optional)
+            description: "Validates extracted data against business rules for matching policy classes. Requires one or more policy classes to be configured."
             properties:
               enabled:
                 type: boolean
