@@ -203,7 +203,20 @@ extraction:
       min_parse_success_rate: 0.90   # below this, fall back to LLM extraction
       max_empty_line_gap: 3          # tolerate page-break gaps inside a table
       auto_merge_adjacent_tables: true
+      lazy_images: true              # skip pre-loading page images when the table
+                                     # parse succeeds (big cost saver; see below)
 ```
+
+> **`lazy_images` (default `true`) — cost optimization for table documents.** When
+> a pre-flight table parse succeeds, page images are **not** attached to the
+> extraction prompt. The deterministic table tool is text/markdown-driven and never
+> reads images, and the agent can still fetch a specific page on demand via the
+> `view_image` tool. Because the agentic loop re-sends the prompt on every turn,
+> pre-loaded images are re-transmitted repeatedly and dominate cost on multi-page
+> documents (and push large documents toward context-window limits). A controlled
+> A/B measured no change in list completeness or field accuracy with images off on
+> the table path. Set `lazy_images: false` for **image-dependent corpora** where the
+> model must see page layout/marks even when a table is present.
 
 > **Requires Markdown tables in the OCR output.** Table parsing only engages when
 > OCR emits Markdown pipe-tables — i.e. **Amazon Textract with the `TABLES`
