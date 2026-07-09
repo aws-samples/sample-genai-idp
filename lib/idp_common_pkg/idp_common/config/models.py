@@ -1079,6 +1079,18 @@ class SummarizationConfig(BaseModel):
         gt=0,
         description="Optional cap on output tokens. Leave empty to use the selected model's maximum output limit (recommended). If set, it must not exceed the model's limit.",
     )
+    max_extraction_array_items: int = Field(
+        default=50,
+        ge=0,
+        description=(
+            "When injecting EXTRACTION_RESULTS into the summarization prompt, any "
+            "array longer than this is elided to its first/last few items plus a "
+            "'... (N items total)' marker. A summary needs counts/totals, not "
+            "every row, and the full pretty-printed list is the dominant token "
+            "term that overflows the model context window on large documents. "
+            "0 disables elision (inject the full arrays)."
+        ),
+    )
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
     @classmethod
@@ -1093,6 +1105,14 @@ class SummarizationConfig(BaseModel):
     def parse_int(cls, v: Any) -> Optional[int]:
         """Parse optional max_tokens (empty/0 -> None = use model max)."""
         return _parse_optional_max_tokens(v)
+
+    @field_validator("max_extraction_array_items", mode="before")
+    @classmethod
+    def parse_array_cap(cls, v: Any) -> int:
+        """Parse the array cap (empty string -> default 50)."""
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return 50
+        return int(v)
 
 
 class ChatConfig(BaseModel):
