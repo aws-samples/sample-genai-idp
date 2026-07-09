@@ -41,6 +41,7 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 _lambda = boto3.client("lambda")
 _ssm = boto3.client("ssm")
 
+
 # {fieldName: resolverFunctionArn} — fields routed to existing resolver Lambdas.
 # The map can hold ~60 full ARNs (>4KB), exceeding the Lambda env-var limit, so
 # it is stored in an SSM parameter (FIELD_FUNCTION_MAP_PARAM) and loaded once at
@@ -70,8 +71,14 @@ FIELD_FUNCTION_MAP: Dict[str, str] = _load_field_function_map()
 #   getFilePresignedUrl -> handled by the getFileContents resolver Lambda
 #     (returns a presigned S3 GET URL instead of inlining file bytes; used for
 #     files larger than Lambda's 6 MB synchronous response cap).
+#   listSampleDocuments / uploadSampleDocument -> handled by the uploadDocument
+#     resolver Lambda (UploadResolverFunction), which branches on the GraphQL
+#     fieldName. Aliased rather than mapped so their duplicate ARN entries stay
+#     out of the 8 KB SSM parameter.
 FIELD_ALIASES: Dict[str, str] = {
     "getFilePresignedUrl": "getFileContents",
+    "listSampleDocuments": "uploadDocument",
+    "uploadSampleDocument": "uploadDocument",
 }
 
 
@@ -122,7 +129,12 @@ def handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
 
     if not field:
         return _http_response(
-            400, {"errors": [{"message": "missing operation field", "errorType": "BadRequest"}]}
+            400,
+            {
+                "errors": [
+                    {"message": "missing operation field", "errorType": "BadRequest"}
+                ]
+            },
         )
 
     try:
@@ -139,16 +151,29 @@ def handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         else:
             return _http_response(
                 404,
-                {"errors": [{"message": f"unknown operation: {field}", "errorType": "NotFound"}]},
+                {
+                    "errors": [
+                        {
+                            "message": f"unknown operation: {field}",
+                            "errorType": "NotFound",
+                        }
+                    ]
+                },
             )
     except PermissionError as e:
         logger.warning("Authorization denied for %s: %s", field, e)
-        return _http_response(403, {"errors": [{"message": str(e), "errorType": "Unauthorized"}]})
+        return _http_response(
+            403, {"errors": [{"message": str(e), "errorType": "Unauthorized"}]}
+        )
     except (ValueError, KeyError) as e:
         logger.warning("Bad request for %s: %s", field, e)
-        return _http_response(400, {"errors": [{"message": str(e), "errorType": "BadRequest"}]})
+        return _http_response(
+            400, {"errors": [{"message": str(e), "errorType": "BadRequest"}]}
+        )
     except Exception as e:  # noqa: BLE001
         logger.error("Dispatch error for %s: %s", field, e, exc_info=True)
-        return _http_response(500, {"errors": [{"message": str(e), "errorType": "InternalError"}]})
+        return _http_response(
+            500, {"errors": [{"message": str(e), "errorType": "InternalError"}]}
+        )
 
     return _http_response(200, result)
