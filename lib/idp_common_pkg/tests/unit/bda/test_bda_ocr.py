@@ -15,6 +15,8 @@ from unittest.mock import MagicMock
 
 from idp_common.bda.bda_ocr import (
     OCR_PROJECT_NAME,
+    _map_point,
+    _normalize_corners,
     bda_standard_output_to_textract_blocks,
     build_ocr_project_override_config,
     build_ocr_project_standard_output_config,
@@ -171,10 +173,116 @@ def test_geometry_is_normalized_boundingbox_and_polygon():
     out = bda_standard_output_to_textract_blocks(_sample_standard_output())
     line1 = next(b for b in out["Blocks"] if b.get("Id") == "line-1")
     bb = line1["Geometry"]["BoundingBox"]
-    assert bb == {"Left": 0.1, "Top": 0.2, "Width": 0.3, "Height": 0.05}
+    # BoundingBox is derived from the polygon envelope; compare with tolerance
+    # since (left + width) - left can introduce tiny float error.
+    assert bb["Left"] == pytest.approx(0.1)
+    assert bb["Top"] == pytest.approx(0.2)
+    assert bb["Width"] == pytest.approx(0.3)
+    assert bb["Height"] == pytest.approx(0.05)
     poly = line1["Geometry"]["Polygon"]
-    assert poly[0] == {"X": 0.1, "Y": 0.2}
+    assert poly[0] == {"X": pytest.approx(0.1), "Y": pytest.approx(0.2)}
     assert poly[2] == {"X": pytest.approx(0.4), "Y": pytest.approx(0.25)}
+
+
+@pytest.mark.unit
+def test_normalize_corners_treats_identity_as_no_mapping():
+    """Unit-square corners (a clean, un-rectified page) => no mapping needed."""
+    assert _normalize_corners([[0, 0], [1, 0], [1, 1], [0, 1]]) is None
+    # Near-identity within tolerance is also treated as identity.
+    assert (
+        _normalize_corners(
+            [[1e-8, -3e-6], [1.0000074, -4e-8], [0.9999999, 1.0000025], [-4e-7, 1.0]]
+        )
+        is None
+    )
+
+
+@pytest.mark.unit
+def test_normalize_corners_rejects_malformed():
+    assert _normalize_corners(None) is None
+    assert _normalize_corners([[0, 0], [1, 0], [1, 1]]) is None  # only 3 corners
+    assert _normalize_corners([[0, 0], [1, 0], [1, 1], ["x", 1]]) is None
+    # Accepts {x, y} dict form as well as [x, y] pairs.
+    assert _normalize_corners(
+        [
+            {"x": 0.1, "y": 0.0},
+            {"x": 0.9, "y": 0.1},
+            {"x": 0.8, "y": 1.0},
+            {"x": 0.0, "y": 0.9},
+        ]
+    ) == [(0.1, 0.0), (0.9, 0.1), (0.8, 1.0), (0.0, 0.9)]
+
+
+@pytest.mark.unit
+def test_map_point_bilinear_over_corners():
+    """Bilinear map: (0,0)->TL, (1,0)->TR, (1,1)->BR, (0,1)->BL, (.5,.5)->center."""
+    corners = [(0.1, 0.0), (0.9, 0.1), (0.8, 1.0), (0.0, 0.9)]
+    assert _map_point(0.0, 0.0, corners) == pytest.approx((0.1, 0.0))
+    assert _map_point(1.0, 0.0, corners) == pytest.approx((0.9, 0.1))
+    assert _map_point(1.0, 1.0, corners) == pytest.approx((0.8, 1.0))
+    assert _map_point(0.0, 1.0, corners) == pytest.approx((0.0, 0.9))
+    cx = (0.1 + 0.9 + 0.8 + 0.0) / 4
+    cy = (0.0 + 0.1 + 1.0 + 0.9) / 4
+    assert _map_point(0.5, 0.5, corners) == pytest.approx((cx, cy))
+
+
+@pytest.mark.unit
+def test_geometry_mapped_back_to_original_space_when_rectified():
+    """A rectified (skewed) page maps boxes back into original-image space.
+
+    BDA returns boxes normalized against its internally-rectified image; the
+    stored page image and UI overlay use original-image space. With non-identity
+    corners the converter must re-project, producing a quadrilateral polygon and
+    an axis-aligned envelope that lands on the tilted text (not the deskewed
+    grid). Regression test for BDA-OCR bounding boxes being visibly offset on
+    skewed scans while Textract's were fine.
+    """
+    payload = _sample_standard_output()
+    # Simulate a page rotated ~clockwise: rectified corners fall on a tilted quad
+    # in the original image (TL, TR, BR, BL).
+    corners = [[0.1, 0.0], [0.9, 0.1], [0.8, 1.0], [0.0, 0.9]]
+    payload["pages"][0]["asset_metadata"] = {"corners": corners}
+
+    out = bda_standard_output_to_textract_blocks(payload)
+    line1 = next(b for b in out["Blocks"] if b.get("Id") == "line-1")
+    geom = line1["Geometry"]
+
+    # Raw BDA box for line-1 is left=0.1, top=0.2, width=0.3, height=0.05. Mapped
+    # through the tilted quad it is NO LONGER the raw rectangle.
+    bb = geom["BoundingBox"]
+    assert bb != {"Left": 0.1, "Top": 0.2, "Width": 0.3, "Height": 0.05}
+
+    # Every mapped polygon vertex must equal the bilinear map of the raw corner.
+    raw_corners = [(0.1, 0.2), (0.4, 0.2), (0.4, 0.25), (0.1, 0.25)]
+    corner_pts = [(c[0], c[1]) for c in corners]
+    for poly_pt, (u, v) in zip(geom["Polygon"], raw_corners):
+        exp_x, exp_y = _map_point(u, v, corner_pts)
+        assert poly_pt["X"] == pytest.approx(exp_x)
+        assert poly_pt["Y"] == pytest.approx(exp_y)
+
+    # BoundingBox is the axis-aligned envelope of that polygon.
+    xs = [p["X"] for p in geom["Polygon"]]
+    ys = [p["Y"] for p in geom["Polygon"]]
+    assert bb["Left"] == pytest.approx(min(xs))
+    assert bb["Top"] == pytest.approx(min(ys))
+    assert bb["Width"] == pytest.approx(max(xs) - min(xs))
+    assert bb["Height"] == pytest.approx(max(ys) - min(ys))
+
+
+@pytest.mark.unit
+def test_identity_corners_leave_geometry_unchanged():
+    """A clean page (identity corners) must pass geometry through untouched."""
+    payload = _sample_standard_output()
+    payload["pages"][0]["asset_metadata"] = {
+        "corners": [[0, 0], [1, 0], [1, 1], [0, 1]]
+    }
+    out = bda_standard_output_to_textract_blocks(payload)
+    line1 = next(b for b in out["Blocks"] if b.get("Id") == "line-1")
+    bb = line1["Geometry"]["BoundingBox"]
+    assert bb["Left"] == pytest.approx(0.1)
+    assert bb["Top"] == pytest.approx(0.2)
+    assert bb["Width"] == pytest.approx(0.3)
+    assert bb["Height"] == pytest.approx(0.05)
 
 
 @pytest.mark.unit
