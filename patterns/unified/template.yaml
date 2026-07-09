@@ -290,7 +290,7 @@ Resources:
             collapsible: true
             defaultExpanded: false
             sectionLabel: OCR Configuration
-            description: "Not used when BDA is enabled - BDA handles OCR internally"
+            description: "Extracts text from document pages. Enable Textract features (LAYOUT, TABLES, FORMS) or use the BDA backend to add layout, tables, and forms support."
             dependsOn: { field: "use_bda", value: false }
             required:
               - features
@@ -798,7 +798,7 @@ Resources:
             collapsible: true
             defaultExpanded: false
             sectionLabel: Classification Configuration
-            description: "Not used when BDA is enabled - BDA handles classification internally"
+            description: "Assigns a class to each page/section. LLM-powered classification is skipped when only a single class is defined in the Document Schema (all pages are assigned to that class), or when a document name or page content matches a class's RegEx rule."
             dependsOn: { field: "use_bda", value: false }
             required:
               - model
@@ -1070,7 +1070,7 @@ Resources:
             collapsible: true
             defaultExpanded: false
             sectionLabel: Extraction Configuration
-            description: "Not used when BDA is enabled - BDA handles extraction internally"
+            description: "Extracts structured attributes from each section. LLM-powered extraction is skipped for any section whose class has no attributes defined in the Document Schema (an empty extraction result is recorded)."
             dependsOn: { field: "use_bda", value: false }
             required:
               - model
@@ -1117,7 +1117,7 @@ Resources:
                     order: 3
                   table_parsing:
                     type: object
-                    sectionLabel: Table Parsing Tool
+                    sectionLabel: Table Parsing Tool (Requires OCR TABLES enabled)
                     description: "Only used when Agentic Extraction is enabled. Gives the agent a deterministic parse_table tool that extracts well-formatted Markdown tables from OCR output without LLM inference - faster and more reliable for large/dense tables (bank statements, transaction logs). The agent decides when to use it based on table quality."
                     order: 4
                     properties:
@@ -1691,7 +1691,7 @@ Resources:
             properties:
               enabled:
                 type: boolean
-                title: Enable HITL review
+                title: Enabled
                 description: "Enable Human-in-the-Loop review for low-confidence extractions."
                 default: false
                 order: 0
@@ -1710,9 +1710,11 @@ Resources:
             collapsible: true
             defaultExpanded: false
             sectionLabel: Summarization Configuration
+            description: "Generates a natural-language summary of the document. Skipped when disabled here."
             properties:
               enabled:
                 type: boolean
+                title: Enabled
                 description: Enable or disable document summarization
                 default: true
                 order: 0
@@ -2725,9 +2727,11 @@ Resources:
             collapsible: true
             defaultExpanded: false
             sectionLabel: Rule Validation Configuration
+            description: "Validates extracted data against business rules for matching policy classes. Skipped when disabled here, or when no policy classes are configured."
             properties:
               enabled:
                 type: boolean
+                title: Enabled
                 description: Enable or disable rule validation processing
                 default: true
                 order: 0
