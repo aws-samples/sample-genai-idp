@@ -167,6 +167,8 @@ class DocumentEvaluationResult:
             "<th style='padding: 8px; border: 1px solid #ddd; text-align: left;'>Actual Value</th>"
             "<th style='padding: 8px; border: 1px solid #ddd; text-align: center;'>Match</th>"
             "<th style='padding: 8px; border: 1px solid #ddd; text-align: center;'>Score</th>"
+            "<th style='padding: 8px; border: 1px solid #ddd; text-align: center;'>Weight</th>"
+            "<th style='padding: 8px; border: 1px solid #ddd; text-align: left;'>Method</th>"
             "<th style='padding: 8px; border: 1px solid #ddd; text-align: left;'>Reason</th>"
             "</tr></thead><tbody>"
         )
@@ -178,6 +180,10 @@ class DocumentEvaluationResult:
             actual_val = str(fc.get("actual_value", ""))[:100]
             match = fc.get("match", False)
             score = fc.get("score", 0.0)
+            weight = fc.get("weight")
+            # Per-field comparison method (annotated in service.py); fall back to
+            # empty when comparing results produced before this was surfaced.
+            method = fc.get("evaluation_method", "")
             reason = fc.get("reason", "")
 
             # Escape HTML special characters
@@ -199,6 +205,15 @@ class DocumentEvaluationResult:
                 if reason
                 else ""
             )
+            method_escaped = (
+                str(method)
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                if method
+                else ""
+            )
+            weight_str = f"{weight:.2f}" if weight is not None else "1.00"
 
             # Style based on match status
             row_style = "background: #d4edda;" if match else "background: #f8d7da;"
@@ -212,6 +227,8 @@ class DocumentEvaluationResult:
                 f"<td style='padding: 8px; border: 1px solid #ddd;'>{actual_val}</td>"
                 f"<td style='padding: 8px; border: 1px solid #ddd; text-align: center;'>{match_symbol}</td>"
                 f"<td style='padding: 8px; border: 1px solid #ddd; text-align: center;'>{score:.3f}</td>"
+                f"<td style='padding: 8px; border: 1px solid #ddd; text-align: center;'>{weight_str}</td>"
+                f"<td style='padding: 8px; border: 1px solid #ddd; font-size: 0.85em;'>{method_escaped}</td>"
                 f"<td style='padding: 8px; border: 1px solid #ddd; font-size: 0.85em;'>{reason_escaped}</td>"
                 "</tr>"
             )
