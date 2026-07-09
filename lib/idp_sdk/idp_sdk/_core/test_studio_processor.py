@@ -46,15 +46,16 @@ class TestStudioProcessor:
             return self._resolver_arn
 
         try:
-            # TestResultsResolverFunctionArn is in the nested AppSync stack, not main stack
+            # TestResultsResolverFunctionArn is in the nested API resolver
+            # stack (APIRESOLVERSTACK), not the main stack
             resolver_arn = self.stack_info.get_nested_stack_output(
-                nested_stack_pattern="appsync",
+                nested_stack_pattern="apiresolver",
                 output_key="TestResultsResolverFunctionArn",
             )
 
             if not resolver_arn:
                 raise IDPResourceNotFoundError(
-                    "TestResultsResolverFunctionArn not found in nested AppSync stack. "
+                    "TestResultsResolverFunctionArn not found in nested API resolver stack. "
                     "Ensure Test Studio is enabled in your stack."
                 )
 
@@ -271,10 +272,10 @@ class TestStudioProcessor:
         Raises:
             IDPProcessingError: If abort operation fails
         """
-        # Get AbortTestRunsResolverFunction ARN from nested AppSync stack
+        # Get AbortTestRunsResolverFunction ARN from nested API resolver stack
         try:
             abort_function_arn = self.stack_info.get_nested_stack_output(
-                nested_stack_pattern="appsync",
+                nested_stack_pattern="apiresolver",
                 output_key="AbortTestRunsResolverFunctionArn",
             )
         except IDPResourceNotFoundError:

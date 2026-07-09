@@ -7,6 +7,19 @@ make lint               # Full lint (ruff + format + ARN + buildspec + UI + code
 make test               # All tests
 make typecheck          # basedpyright
 ```
+
+**Before opening an MR** (not needed on every commit), also run the SRT
+security scan so new findings are known and addressed up front — CI runs it
+on MRs to `develop` and will fail on HIGH open findings:
+```bash
+make srt-scan           # requires one-time `make srt-setup`; ~5–10 min
+# or: make srt          # clean → setup → scan → optional interactive fix
+```
+Locally the scan exits 0 even with findings — read the
+`OPEN HIGH PRIORITY SECURITY ISSUES` table it prints (or `.srt/issues.json`),
+don't rely on the exit code. Fix real issues; for false positives use
+`make srt-fix` to suppress **with a specific justification** and commit the
+updated `scripts/srt/issues.json`.
 Or use the convenience command:
 ```bash
 make commit             # lint + test + auto-generate commit message + push
