@@ -194,10 +194,13 @@ BoundingBox.displayName = 'BoundingBox';
 
 // Build the canonical Stickler comparison key for a field from its render path.
 // e.g. path=["LineItems", 0, "Description"] -> "LineItems[0].Description".
-// The "Document Data" synthetic root and undefined segments are ignored, and
-// numeric segments become "[index]" subscripts on the preceding field name.
-const buildComparisonKey = (path: (string | number)[], fieldKey: string | number): string => {
-  const segments = [...path, fieldKey].filter((p) => p !== undefined && p !== 'Document Data');
+// NOTE: `path` already INCLUDES the current field key (children are rendered
+// with path={[...path, key]} and array items with path={[...path, index]}), so
+// the field key must NOT be appended again here. The "Document Data" synthetic
+// root and undefined segments are ignored, and numeric segments become
+// "[index]" subscripts on the preceding field name.
+const buildComparisonKey = (path: (string | number)[]): string => {
+  const segments = path.filter((p) => p !== undefined && p !== 'Document Data');
   let key = '';
   for (const seg of segments) {
     if (typeof seg === 'number') {
@@ -449,9 +452,15 @@ const FormFieldRenderer = memo<Record<string, any>>(
         // First, try an exact match on the canonical comparison key
         // (e.g. "LineItems[0].Description" or "checks[0].bankInfo.bank"). This
         // is how per-list-item leaf fields arrive - as flat entries carrying the
-        // backend-annotated per-field evaluation_method and weight.
-        const comparisonKey = buildComparisonKey(path, fieldKey);
-        const keyedDetail = findNestedComparisonDetail(evaluationResults, sectionId, comparisonKey);
+        // backend-annotated per-field evaluation_method and weight. Restrict this
+        // to scalar (non-object, non-array) leaves; object/array nodes have their
+        // own group/array eval handling and must not be driven by an aggregate
+        // detail that happens to share their path.
+        const isScalarLeaf = value === null || typeof value !== 'object';
+        const comparisonKey = isScalarLeaf ? buildComparisonKey(path) : '';
+        const keyedDetail = comparisonKey
+          ? findNestedComparisonDetail(evaluationResults, sectionId, comparisonKey)
+          : null;
         if (keyedDetail) {
           evalResult = {
             matched: keyedDetail.match,

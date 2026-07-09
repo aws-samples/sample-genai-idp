@@ -1431,8 +1431,11 @@ class EvaluationService:
                 comparator = leaf_schema.get("x-aws-stickler-comparator")
                 threshold = leaf_schema.get("x-aws-stickler-threshold")
                 weight = leaf_schema.get("x-aws-stickler-weight")
+                # A nested field that is itself a list uses Hungarian matching;
+                # surface its field-level match threshold like the top-level table.
+                list_match_threshold = leaf_schema.get("x-aws-stickler-match-threshold")
             else:
-                comparator = threshold = weight = None
+                comparator = threshold = weight = list_match_threshold = None
 
             fc["evaluation_method"] = _format_evaluation_method(
                 comparator_method=comparator,
@@ -1440,6 +1443,7 @@ class EvaluationService:
                 actual_value=fc.get("actual_value"),
                 field_specific_threshold=threshold,
                 match_threshold=match_threshold,
+                list_match_threshold=list_match_threshold,
             )
             # Default to 1.00 (Stickler's default weight) when not configured,
             # matching the top-level table's weight fallback.
