@@ -1317,7 +1317,7 @@
   {
     "source": "Checkov",
     "path": "nested/api-resolvers/template.yaml",
-    "line": 2751,
+    "line": 2868,
     "issue": "Ensure WAF prevents message lookup in Log4j2. See CVE-2021-44228 aka log4jshell",
     "check_id": "CKV_AWS_192",
     "priority": "HIGH",
@@ -1390,5 +1390,17 @@
     "firstDetectedAt": "2026-07-07T03:02:04.773Z",
     "assessmentCount": 2,
     "suppressionReason": "Accepted: HTTP API stage CloudWatch logging omitted for sample-solution scope; resolver Lambdas log to CloudWatch."
+  },
+  {
+    "source": "Bandit",
+    "path": "lib/idp_common_pkg/tests/unit/bedrock/test_sizing.py",
+    "line": 78,
+    "issue": "Possible hardcoded password: 'shard_token_budget'",
+    "fix": "Remove hardcoded password strings from source code. Create a .env file named after the Python file (e.g., for script.py create script.env in the same directory) containing the ACTUAL secret values extracted from the code. Update the Python code to: 1) add 'from dotenv import load_dotenv' import if not present, 2) call load_dotenv('script.env') near the top of the file to load the environment file, 3) use os.environ.get() to read the values. Add *.env to the project root .gitignore.",
+    "check_id": "B105",
+    "priority": "High",
+    "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
+    "status": "suppressed",
+    "suppressionReason": "False positive: 'shard_token_budget' is a config key name for a token-count budget (LLM context sizing) in a test assertion, not a credential. Bandit flags any string containing 'token'."
   }
 ]
