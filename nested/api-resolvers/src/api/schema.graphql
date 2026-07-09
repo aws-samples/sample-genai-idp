@@ -521,6 +521,17 @@ type FileContentsResponse @aws_cognito_user_pools @aws_iam {
   isBinary: Boolean
 }
 
+# Presigned GET URL for reading a file's bytes directly from S3, bypassing the
+# resolver Lambda (whose synchronous response is capped at 6 MB). Used by the UI
+# to view/download large section result.json files. The browser fetches
+# `presignedUrl` directly from S3; `size`/`contentType` are returned so the UI
+# can decide how to handle the content without a second round-trip.
+type FilePresignedUrlResponse @aws_cognito_user_pools @aws_iam {
+  presignedUrl: String!
+  contentType: String!
+  size: Int!
+}
+
 type StepFunctionExecutionStep @aws_cognito_user_pools @aws_iam {
   name: String!
   type: String!
@@ -1156,6 +1167,11 @@ type Query @aws_cognito_user_pools @aws_iam {
     nextToken: String
   ): DocumentPage
   getFileContents(s3Uri: String!, versionId: String): FileContentsResponse
+  # Returns a short-lived presigned GET URL so the browser can fetch a file's
+  # bytes directly from S3 — used for files too large to proxy through
+  # getFileContents (Lambda's 6 MB synchronous response cap). Same access model
+  # as getFileContents: any authenticated user, bucket allow-list enforced.
+  getFilePresignedUrl(s3Uri: String!, versionId: String): FilePresignedUrlResponse
   getStepFunctionExecution(executionArn: String!): StepFunctionExecutionResponse
 
   # Document version history (processing runs). All authenticated users may
