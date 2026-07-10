@@ -38,10 +38,26 @@ def _validate_key(key: str) -> None:
         raise ValueError("s3Key must be a bundled sample under 'samples/'")
 
 
-def handler(event, context):
+def _caller_in_groups(event, allowed) -> bool:
+    """Defense-in-depth RBAC check against the caller's Cognito groups, matching
+    the sibling listSampleDocuments resolver in upload_resolver/index.py."""
+    groups = (event.get("identity") or {}).get("claims", {}).get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [groups]
+    return bool(set(allowed).intersection(groups))
+
+
+def handler(event, context=None):
     args = event.get("arguments", {}) or {}
     key = args.get("s3Key", "")
     logger.info("getSampleDocumentUrl request for key=%s", key)
+
+    # Parity with listSampleDocuments: viewing a sample is an Admin/Author/Viewer
+    # operation. Raises PermissionError -> the dispatcher maps it to a 403.
+    if not _caller_in_groups(event, ("Admin", "Author", "Viewer")):
+        raise PermissionError(
+            "Unauthorized: getSampleDocumentUrl requires Admin, Author, or Viewer group"
+        )
 
     _validate_key(key)
     if not CONFIGURATION_BUCKET:

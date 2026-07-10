@@ -1173,6 +1173,7 @@ type Query @aws_cognito_user_pools @aws_iam {
   ): DocumentPage
   getFileContents(s3Uri: String!, versionId: String): FileContentsResponse
   getSampleDocumentUrl(s3Key: String!): SampleDocumentUrl
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
   # Returns a short-lived presigned GET URL so the browser can fetch a file's
   # bytes directly from S3 — used for files too large to proxy through
   # getFileContents (Lambda's 6 MB synchronous response cap). Same access model

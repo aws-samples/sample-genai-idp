@@ -48,19 +48,37 @@ const sampleClient = generateClient();
 // clickable link; on click it presigns via getSampleDocumentUrl and opens the
 // document (single doc) or downloads the zip (batch) in a new tab.
 const SampleDocLink = ({ s3key, children }: { s3key?: string; children?: React.ReactNode }): React.JSX.Element => {
+  const [failed, setFailed] = useState(false);
   const open = async (): Promise<void> => {
     if (!s3key) return;
+    setFailed(false);
     try {
       const resp = await sampleClient.graphql({ query: getSampleDocumentUrl, variables: { s3Key: s3key } });
       const url = (resp as { data?: { getSampleDocumentUrl?: { url?: string } } })?.data?.getSampleDocumentUrl?.url;
-      if (url) window.open(url, '_blank', 'noopener,noreferrer');
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      } else {
+        setFailed(true);
+      }
     } catch (err) {
       logger.error('Failed to open sample document', err);
+      setFailed(true);
     }
   };
   // No href: Cloudscape Link with only onFollow runs the action without any
   // route navigation (matches the WelcomeContent Quick Start link pattern).
-  return <Link onFollow={open}>{children}</Link>;
+  // On failure show an inline notice so the click isn't silently swallowed.
+  return (
+    <>
+      <Link onFollow={open}>{children}</Link>
+      {failed && (
+        <>
+          {' '}
+          <StatusIndicator type="error">Could not open sample</StatusIndicator>
+        </>
+      )}
+    </>
+  );
 };
 
 const markdownComponents = { sampledoc: SampleDocLink } as unknown as Record<string, React.ComponentType<Record<string, unknown>>>;
