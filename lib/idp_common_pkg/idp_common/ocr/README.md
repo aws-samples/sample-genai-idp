@@ -44,16 +44,27 @@ format (PAGE/LINE/WORD blocks), so it flows through the same
 `textConfidence.json` / `pageData.json` path as the Textract backend.
 
 > **Geometry / rectification:** BDA internally deskews (perspective-corrects)
-> each page and returns bounding boxes normalized against that *rectified*
-> image, while the pipeline stores and the UI overlays the *original* page image.
-> On a skewed/rotated scan this offsets every box (visibly misaligned overlays in
-> the Page/Section Visual Editors); clean, axis-aligned pages coincide and look
-> fine. `bda_ocr.py` corrects this by reading each page's
-> `asset_metadata.corners` (where the rectified corners fall in the original
-> image, 0–1) and bilinearly mapping every box back into original-image space, so
-> BDA geometry agrees with Textract's (which is never rectified). A rectified
-> axis-aligned box becomes a quadrilateral `Polygon` with an axis-aligned
-> `BoundingBox` envelope. The mapping is a no-op when corners are identity/absent.
+> each page — and may crop/rectify to a document *sub-region* (e.g. a driver's
+> license occupying part of the page) — then returns bounding boxes and
+> `asset_metadata.corners` normalized against that *rectified crop*, while the
+> pipeline stores and the UI overlays the *original* page image. Left uncorrected
+> this offsets every box (visibly misaligned overlays in the Page/Section Visual
+> Editors): a skewed scan tilts them, and a sub-region crop squeezes them into a
+> band. `bda_ocr.py` corrects both by, for each page:
+> 1. rescaling `corners` from rectified-crop space into original-image 0–1 space
+>    using `original_image_size / (rectified_image_width_pixels,
+>    rectified_image_height_pixels)` — so the corner quad covers the crop's true
+>    place on the page (the converter takes `original_image_size` from the OCR
+>    service, which knows the stored `image.jpg` dimensions); then
+> 2. bilinearly mapping every box's corners through that quad into original-image
+>    space.
+>
+> This makes BDA geometry agree with Textract's (which is never rectified),
+> verified to within ~0.001 of Textract centers on skewed and cropped pages. A
+> rectified axis-aligned box becomes a quadrilateral `Polygon` with an
+> axis-aligned `BoundingBox` envelope. The mapping is a no-op when corners are
+> identity/absent, or when `original_image_size` is unavailable (falls back to
+> treating corners as already page-normalized).
 
 ### 3. Bedrock Backend (LLM-based OCR, incl. LambdaHook)
 - **Technology**: Amazon Bedrock LLMs (Claude, Nova) for text extraction, or a custom `LambdaHook` (`model_id: "LambdaHook"`) that proxies to any inference provider.

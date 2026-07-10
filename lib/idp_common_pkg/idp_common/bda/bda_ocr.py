@@ -62,26 +62,34 @@ _CORNERS_IDENTITY_TOL = 1e-3
 
 def _normalize_corners(
     corners: Optional[Any],
+    scale: tuple[float, float] = (1.0, 1.0),
 ) -> Optional[List[tuple[float, float]]]:
     """Coerce BDA ``asset_metadata.corners`` to four (x, y) tuples, or None.
 
-    Corners are the original-image (0-1) positions of the rectified image's four
-    corners, ordered top-left, top-right, bottom-right, bottom-left. Returns None
-    when absent/malformed, or when the quad is effectively the unit square (an
-    identity rectification, so no mapping is required).
+    Corners give the rectified image's four corners, ordered top-left, top-right,
+    bottom-right, bottom-left. **BDA normalizes them against the rectified crop,
+    not the original page**, so when BDA rectifies to a tight sub-region (e.g. a
+    driver's license occupying part of a page) the raw values only span that
+    fraction of the page. ``scale`` = (original_w / rectified_w,
+    original_h / rectified_h) rescales them into original-image 0-1 space; pass
+    (1, 1) when the frames already match (or the scale is unknown).
+
+    Returns None when absent/malformed, or when the scaled quad is effectively
+    the unit square (an identity rectification, so no mapping is required).
     """
     if not isinstance(corners, (list, tuple)) or len(corners) != 4:
         return None
+    sx, sy = scale
     pts: List[tuple[float, float]] = []
     for c in corners:
         if isinstance(c, (list, tuple)) and len(c) == 2:
             try:
-                pts.append((float(c[0]), float(c[1])))
+                pts.append((float(c[0]) * sx, float(c[1]) * sy))
             except (TypeError, ValueError):
                 return None
         elif isinstance(c, dict) and "x" in c and "y" in c:
             try:
-                pts.append((float(c["x"]), float(c["y"])))
+                pts.append((float(c["x"]) * sx, float(c["y"]) * sy))
             except (TypeError, ValueError):
                 return None
         else:
@@ -188,6 +196,7 @@ def _first_bbox(unit: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 def bda_standard_output_to_textract_blocks(
     standard_output: Union[str, Dict[str, Any]],
     page_index: Optional[int] = None,
+    original_image_size: Optional[tuple[int, int]] = None,
 ) -> Dict[str, Any]:
     """Convert a BDA document standard-output payload to a Textract-format dict.
 
@@ -198,6 +207,14 @@ def bda_standard_output_to_textract_blocks(
         page_index: If provided, only lines/words on this 0-based page index are
             included (used when a payload spans multiple pages). When None, all
             lines/words are included (the common single-page-invocation case).
+        original_image_size: ``(width, height)`` in pixels of the original page
+            image fed to BDA. Needed to correctly place boxes when BDA rectifies
+            to a sub-region of the page: BDA's ``corners`` are normalized against
+            the rectified crop (``asset_metadata.rectified_image_*_pixels``), so
+            they must be rescaled by original/rectified to land in original-image
+            space. When omitted, corners are assumed already in original-image
+            space (correct for full-page rectification; may misplace boxes when
+            BDA cropped to a sub-region).
 
     Returns:
         ``{"DocumentMetadata": {"Pages": 1}, "Blocks": [...]}`` with PAGE, LINE
@@ -212,14 +229,30 @@ def bda_standard_output_to_textract_blocks(
 
     # Rectification corners are per-page (asset_metadata.corners). Map each
     # page_index to its normalized corners so every box can be re-projected into
-    # original-image space; None means identity/absent (no mapping needed).
+    # original-image space; None means identity/absent (no mapping needed). BDA
+    # normalizes corners against the *rectified* crop, so rescale by
+    # original/rectified when we know both dimensions (see arg docstring).
     corners_by_page: Dict[Optional[int], Optional[List[tuple[float, float]]]] = {}
     for page in standard_output.get("pages", []) or []:
         if not isinstance(page, dict):
             continue
         asset_meta = page.get("asset_metadata") or {}
+        scale = (1.0, 1.0)
+        if original_image_size:
+            rect_w = asset_meta.get("rectified_image_width_pixels")
+            rect_h = asset_meta.get("rectified_image_height_pixels")
+            orig_w, orig_h = original_image_size
+            if (
+                isinstance(rect_w, (int, float))
+                and isinstance(rect_h, (int, float))
+                and rect_w > 0
+                and rect_h > 0
+                and orig_w > 0
+                and orig_h > 0
+            ):
+                scale = (orig_w / rect_w, orig_h / rect_h)
         corners_by_page[page.get("page_index")] = _normalize_corners(
-            asset_meta.get("corners")
+            asset_meta.get("corners"), scale
         )
 
     def _corners_for(unit: Dict[str, Any]) -> Optional[List[tuple[float, float]]]:

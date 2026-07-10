@@ -198,6 +198,29 @@ def test_normalize_corners_treats_identity_as_no_mapping():
 
 
 @pytest.mark.unit
+def test_normalize_corners_rescales_by_scale_factor():
+    """corners are normalized to the rectified crop; scale lifts them to page."""
+    # A crop half the page's width and a third its height => scale (2, 3).
+    corners = [[0.05, 0.02], [0.45, 0.0], [0.45, 0.30], [0.05, 0.32]]
+    out = _normalize_corners(corners, scale=(2.0, 3.0))
+    assert out == [
+        (pytest.approx(0.10), pytest.approx(0.06)),
+        (pytest.approx(0.90), pytest.approx(0.00)),
+        (pytest.approx(0.90), pytest.approx(0.90)),
+        (pytest.approx(0.10), pytest.approx(0.96)),
+    ]
+
+
+@pytest.mark.unit
+def test_normalize_corners_identity_after_scale_is_no_mapping():
+    """If scaling makes the quad the unit square, treat as identity (no map)."""
+    # rectified corners at half scale that, times (2, 2), become the unit square.
+    assert _normalize_corners(
+        [[0.0, 0.0], [0.5, 0.0], [0.5, 0.5], [0.0, 0.5]], scale=(2.0, 2.0)
+    ) is None
+
+
+@pytest.mark.unit
 def test_normalize_corners_rejects_malformed():
     assert _normalize_corners(None) is None
     assert _normalize_corners([[0, 0], [1, 0], [1, 1]]) is None  # only 3 corners
@@ -267,6 +290,54 @@ def test_geometry_mapped_back_to_original_space_when_rectified():
     assert bb["Top"] == pytest.approx(min(ys))
     assert bb["Width"] == pytest.approx(max(xs) - min(xs))
     assert bb["Height"] == pytest.approx(max(ys) - min(ys))
+
+
+@pytest.mark.unit
+def test_subregion_crop_rescales_corners_with_original_image_size():
+    """BDA rectifying to a page sub-region: corners normalized to the crop.
+
+    Regression test for the driver's-license case: BDA cropped/rectified to the
+    card (a fraction of the page) and reported ``corners`` normalized against
+    that rectified crop, so without the original-image size the boxes were
+    squeezed into a small band near the top. Passing ``original_image_size``
+    (with the rectified pixel dims in asset_metadata) rescales corners into
+    original-image space so geometry lands on the real text.
+    """
+    payload = _sample_standard_output()
+    # Original page 1000x1000; BDA rectified to a 500x300 crop => scale (2, 3.33).
+    # The crop's corners (in rectified 0-1) sit in the page's upper-left region.
+    payload["pages"][0]["asset_metadata"] = {
+        "rectified_image_width_pixels": 500,
+        "rectified_image_height_pixels": 300,
+        "corners": [[0.10, 0.05], [0.40, 0.05], [0.40, 0.25], [0.10, 0.25]],
+    }
+
+    # Without the size, corners are used as-is (band near the top-left).
+    out_nosize = bda_standard_output_to_textract_blocks(payload)
+    line_nosize = next(b for b in out_nosize["Blocks"] if b.get("Id") == "line-1")
+    # With the size, corners are rescaled by (1000/500, 1000/300) = (2, 3.33).
+    out_sized = bda_standard_output_to_textract_blocks(
+        payload, original_image_size=(1000, 1000)
+    )
+    line_sized = next(b for b in out_sized["Blocks"] if b.get("Id") == "line-1")
+
+    scaled_corners = [
+        (0.10 * 2, 0.05 * (1000 / 300)),
+        (0.40 * 2, 0.05 * (1000 / 300)),
+        (0.40 * 2, 0.25 * (1000 / 300)),
+        (0.10 * 2, 0.25 * (1000 / 300)),
+    ]
+    raw_corners = [(0.1, 0.2), (0.4, 0.2), (0.4, 0.25), (0.1, 0.25)]
+    for poly_pt, (u, v) in zip(line_sized["Geometry"]["Polygon"], raw_corners):
+        exp_x, exp_y = _map_point(u, v, scaled_corners)
+        assert poly_pt["X"] == pytest.approx(exp_x)
+        assert poly_pt["Y"] == pytest.approx(exp_y)
+
+    # The sized mapping must reach further down the page than the unsized one
+    # (the whole point of the fix): larger max-Y for the same source box.
+    y_nosize = max(p["Y"] for p in line_nosize["Geometry"]["Polygon"])
+    y_sized = max(p["Y"] for p in line_sized["Geometry"]["Polygon"])
+    assert y_sized > y_nosize
 
 
 @pytest.mark.unit
