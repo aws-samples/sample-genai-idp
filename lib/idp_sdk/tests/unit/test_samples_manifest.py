@@ -77,10 +77,12 @@ def test_indexes_docs_batches_and_skips_noise(publisher_in_tmp):
     # Unknown file → filename-derived name.
     assert by_id["Nuveen"]["name"] == "Nuveen"
 
-    # Batch subdir counts its docs and uses a trailing-slash key.
+    # Batch subdir counts its docs and uses a trailing-slash key, and lists
+    # each inner file's s3Key so the agent can link a representative example.
     assert by_id["w2"]["kind"] == "batch"
     assert by_id["w2"]["fileCount"] == 2
     assert by_id["w2"]["s3Key"] == "samples/w2/"
+    assert by_id["w2"]["files"] == ["samples/w2/W2_0.pdf", "samples/w2/W2_1.pdf"]
 
     # Written to disk.
     assert _read_manifest(tmp_path) == manifest

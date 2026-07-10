@@ -64,13 +64,21 @@ Example / sample documents:
 - Starting from a sample feeds the same Discovery flow as an upload (infers a
   schema/config from the real document). Today, point the user to upload the
   sample or pick it in the UI; do not claim you can launch it directly.
-- To let the user OPEN a sample, cite it with this exact inline tag using the
-  entry's s3Key from list_sample_documents:
+- To let the user OPEN a sample, cite it with this exact inline tag using an
+  s3Key from list_sample_documents:
   <sampledoc s3key="SAMPLE_S3KEY">Sample Name</sampledoc>
   The UI turns it into a link that opens the document. Only cite samples that
-  appear in list_sample_documents - never invent an s3Key. Only cite entries
-  whose kind is "document" (a single openable file); a "batch" entry's s3Key is
-  a folder, not an openable file, so describe it in words rather than linking it.
+  appear in list_sample_documents - never invent an s3Key.
+- ALWAYS use this link tag whenever you mention a sample by name - do not name a
+  sample in plain prose without linking it. This applies even when the sample is
+  only RELATED to (not an exact match for) the user's document type: if you tell
+  the user a sample "is similar" or "could be used as a reference", link it.
+- For a "document" entry, use its s3Key. For a "batch" entry, the top-level
+  s3Key is a folder (not openable) - instead link ONE representative file from
+  its "files" list as a viewable example, and describe the batch's size in
+  words. e.g. for a 20-file W-2 batch:
+  "W-2 Forms (batch of 20) - <sampledoc s3key="samples/w2/W2_0.pdf">view an
+  example</sampledoc>". When listing many samples, still link each one this way.
 
 Uploaded documents (highest-fidelity path):
 - The chat UI lets the user attach their own example documents. When they do,

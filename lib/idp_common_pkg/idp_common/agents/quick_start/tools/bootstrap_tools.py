@@ -451,7 +451,8 @@ def list_sample_documents() -> str:
 
     Use this when the user asks what example or sample documents are available
     (e.g. "what examples do you have?"). Returns each sample's id, name,
-    description, kind ("document" or "batch"), and fileCount. Tell the user they
+    description, kind ("document" or "batch"), fileCount, s3Key, and (for
+    batches) a "files" list of the individual document s3Keys. Tell the user they
     can either upload their own documents or start from one of these samples;
     describe the relevant ones rather than dumping the whole list.
     """

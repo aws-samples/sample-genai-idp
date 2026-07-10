@@ -88,3 +88,14 @@ def test_zip_served_as_attachment(resolver):
     s3.put_object(Bucket=CONFIG_BUCKET, Key="samples/w2.zip", Body=b"PK\x03\x04")
     result = resolver.handler(_event("samples/w2.zip", groups=("Admin",)))
     assert "response-content-disposition=attachment" in result["url"]
+
+
+@pytest.mark.unit
+def test_presigns_nested_batch_file(resolver):
+    # A representative file inside a batch folder (samples/<batch>/<file>) is
+    # openable inline — this is how the agent links one example from a batch.
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.put_object(Bucket=CONFIG_BUCKET, Key="samples/w2/W2_0.pdf", Body=b"%PDF w2")
+    result = resolver.handler(_event("samples/w2/W2_0.pdf", groups=("Viewer",)))
+    assert result["s3Key"] == "samples/w2/W2_0.pdf"
+    assert "response-content-disposition=inline" in result["url"]
