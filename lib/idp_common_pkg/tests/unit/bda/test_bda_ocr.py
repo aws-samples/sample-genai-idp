@@ -215,9 +215,12 @@ def test_normalize_corners_rescales_by_scale_factor():
 def test_normalize_corners_identity_after_scale_is_no_mapping():
     """If scaling makes the quad the unit square, treat as identity (no map)."""
     # rectified corners at half scale that, times (2, 2), become the unit square.
-    assert _normalize_corners(
-        [[0.0, 0.0], [0.5, 0.0], [0.5, 0.5], [0.0, 0.5]], scale=(2.0, 2.0)
-    ) is None
+    assert (
+        _normalize_corners(
+            [[0.0, 0.0], [0.5, 0.0], [0.5, 0.5], [0.0, 0.5]], scale=(2.0, 2.0)
+        )
+        is None
+    )
 
 
 @pytest.mark.unit
