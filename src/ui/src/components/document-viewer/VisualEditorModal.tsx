@@ -26,8 +26,9 @@ import generateS3PresignedUrl from '../common/generate-s3-presigned-url';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import { useDocumentVersion } from '../../contexts/document-version';
+import useUserRole from '../../hooks/use-user-role';
 import { getFieldConfidenceInfo } from '../common/confidence-alerts-utils';
-import { getFileContents, uploadDocument } from '../../graphql/generated';
+import { getFileContents, uploadDocument, completeSectionReview } from '../../graphql/generated';
 import JSONEditorTab from './JSONEditorTab';
 import type { BoxProps } from '@cloudscape-design/components';
 import EditHistoryTab from './EditHistoryTab';
@@ -1967,6 +1968,10 @@ const VisualEditorModal = ({
 }: VisualEditorModalProps) => {
   const { currentCredentials, user } = useAppContext();
   const { settings } = useSettingsContext();
+  // Role flags from the Cognito token (reliable regardless of how the modal was
+  // opened). Reviewers (Admin/Reviewer) cannot call uploadDocument (Admin/Author
+  // only), so their edits must be saved via completeSectionReview — see handleSaveChanges.
+  const { canWrite, canReview } = useUserRole();
   // Pin page-image previews to the selected run when viewing a past version.
   const { versionIdForUri, runId: viewingRunId } = useDocumentVersion();
   const [pageImages, setPageImages] = useState<Record<string, string>>({});
@@ -2288,6 +2293,14 @@ const VisualEditorModal = ({
       const [, outputBucketFromUri, outputFileKey] = outputUriMatch;
       logger.info('💾 Parsed output URI:', { bucket: outputBucketFromUri, key: outputFileKey });
 
+      // Reviewers are NOT authorized to call the `uploadDocument` mutation
+      // (restricted to Admin/Author by RBAC). They persist HITL edits through
+      // the reviewer-permitted `completeSectionReview` mutation instead.
+      // Derive this from the Cognito token (canReview && !canWrite = reviewer,
+      // not Admin/Author) rather than relying solely on the `isReviewerOnly`
+      // prop, which some SectionsPanel FileViewer entry points hardcode to false.
+      const isReviewerOnly = (canReview && !canWrite) || Boolean(sectionData?.isReviewerOnly);
+
       const results: {
         predictions: { success: boolean; changedFields: string[] } | null;
         baseline: { success: boolean; changedFields: string[] } | null;
@@ -2341,69 +2354,119 @@ const VisualEditorModal = ({
         editHistory.push(editEntry);
         dataToSave._editHistory = editHistory;
 
-        // Use the exact same path from the original output URI
-        logger.info('💾 Prediction file path:', outputFileKey);
+        // Reviewers are NOT authorized to call the `uploadDocument` mutation
+        // (restricted to Admin/Author by RBAC). They persist their HITL edits
+        // through the reviewer-permitted `completeSectionReview` mutation, which
+        // writes the full JSON to the section's output URI server-side (no
+        // presigned URL needed) and records the section as reviewed. The
+        // Admin/Author presigned-upload path is preserved below.
+        if (isReviewerOnly) {
+          const reviewObjectKey = (sectionDocItem?.ObjectKey ||
+            sectionDocItem?.objectKey ||
+            sectionDocItem?.key ||
+            sectionDocItem?.Key ||
+            sectionDocItem?.id ||
+            sectionDocItem?.Id) as string | undefined;
+          const reviewSectionId = (sectionData?.Id ?? sectionData?.SectionId) as string | number | undefined;
 
-        // Extract prefix (directory) and filename for uploadDocument
-        const predictionPrefix = outputFileKey.substring(0, outputFileKey.lastIndexOf('/'));
-        const predictionFilename = outputFileKey.split('/').pop() ?? outputFileKey;
-
-        const predictionUploadResponse = await client.graphql({
-          query: uploadDocument,
-          variables: {
-            fileName: predictionFilename,
-            prefix: predictionPrefix,
-            contentType: 'application/json',
-            bucket: outputBucketFromUri,
-          },
-        });
-
-        const predUploadData = predictionUploadResponse.data.uploadDocument;
-        const predictionPresignedUrl = predUploadData.presignedUrl;
-        const predictionUsePost = predUploadData.usePostMethod?.toLowerCase() === 'true';
-
-        // Upload the JSON data
-        const predictionContent = JSON.stringify(dataToSave, null, 2);
-
-        if (predictionUsePost) {
-          // POST method using presigned POST data (contains url + fields)
-          const presignedPostData = JSON.parse(predictionPresignedUrl);
-          const formData = new FormData();
-
-          // Add all required fields from presigned POST data
-          Object.entries(presignedPostData.fields).forEach(([key, fieldValue]) => {
-            formData.append(key, fieldValue as string);
-          });
-
-          // Append the file content as last field (required for S3 presigned POST)
-          const blob = new Blob([predictionContent], { type: 'application/json' });
-          formData.append('file', blob, predictionFilename);
-
-          logger.info('📤 Uploading predictions via presigned POST to:', presignedPostData.url);
-          const uploadResponse = await fetch(presignedPostData.url, {
-            method: 'POST',
-            body: formData,
-          });
-
-          if (!uploadResponse.ok) {
-            const errorText = await uploadResponse.text().catch(() => 'Could not read error response');
-            throw new Error(`Prediction upload failed: ${errorText}`);
+          if (!reviewObjectKey) {
+            throw new Error('Cannot determine document object key for saving reviewer changes');
           }
-        } else {
-          // PUT method (standard presigned URL)
-          await fetch(predictionPresignedUrl, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: predictionContent,
+          if (reviewSectionId === undefined || reviewSectionId === null) {
+            throw new Error('Cannot determine section id for saving reviewer changes');
+          }
+
+          logger.info('💾 Saving prediction changes via completeSectionReview (reviewer path):', {
+            objectKey: reviewObjectKey,
+            sectionId: reviewSectionId,
           });
+
+          const reviewResponse = await client.graphql({
+            query: completeSectionReview,
+            variables: {
+              objectKey: reviewObjectKey,
+              sectionId: String(reviewSectionId),
+              // editedData is AWSJSON — send the full JSON structure as a string.
+              // The resolver saves it verbatim to the section's output URI.
+              editedData: JSON.stringify(dataToSave),
+            },
+          });
+
+          if (!reviewResponse?.data?.completeSectionReview) {
+            throw new Error('completeSectionReview returned no data');
+          }
+          logger.info('✅ Predictions saved via completeSectionReview');
+        } else {
+          // Admin/Author path: request a presigned upload URL and write to S3 directly.
+          // Use the exact same path from the original output URI
+          logger.info('💾 Prediction file path:', outputFileKey);
+
+          // Extract prefix (directory) and filename for uploadDocument
+          const predictionPrefix = outputFileKey.substring(0, outputFileKey.lastIndexOf('/'));
+          const predictionFilename = outputFileKey.split('/').pop() ?? outputFileKey;
+
+          const predictionUploadResponse = await client.graphql({
+            query: uploadDocument,
+            variables: {
+              fileName: predictionFilename,
+              prefix: predictionPrefix,
+              contentType: 'application/json',
+              bucket: outputBucketFromUri,
+            },
+          });
+
+          const predUploadData = predictionUploadResponse.data.uploadDocument;
+          const predictionPresignedUrl = predUploadData.presignedUrl;
+          const predictionUsePost = predUploadData.usePostMethod?.toLowerCase() === 'true';
+
+          // Upload the JSON data
+          const predictionContent = JSON.stringify(dataToSave, null, 2);
+
+          if (predictionUsePost) {
+            // POST method using presigned POST data (contains url + fields)
+            const presignedPostData = JSON.parse(predictionPresignedUrl);
+            const formData = new FormData();
+
+            // Add all required fields from presigned POST data
+            Object.entries(presignedPostData.fields).forEach(([key, fieldValue]) => {
+              formData.append(key, fieldValue as string);
+            });
+
+            // Append the file content as last field (required for S3 presigned POST)
+            const blob = new Blob([predictionContent], { type: 'application/json' });
+            formData.append('file', blob, predictionFilename);
+
+            logger.info('📤 Uploading predictions via presigned POST to:', presignedPostData.url);
+            const uploadResponse = await fetch(presignedPostData.url, {
+              method: 'POST',
+              body: formData,
+            });
+
+            if (!uploadResponse.ok) {
+              const errorText = await uploadResponse.text().catch(() => 'Could not read error response');
+              throw new Error(`Prediction upload failed: ${errorText}`);
+            }
+          } else {
+            // PUT method (standard presigned URL)
+            await fetch(predictionPresignedUrl, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: predictionContent,
+            });
+          }
+
+          logger.info('✅ Predictions saved successfully');
         }
 
         results.predictions = { success: true, changedFields: [...predictionChanges.keys()] };
-        logger.info('✅ Predictions saved successfully');
       }
 
-      // Save baseline if changed
-      if (baselineChangeCount > 0 && localBaselineData) {
+      // Save baseline if changed.
+      // Baseline edits are an evaluation/Author feature and require the
+      // `uploadDocument` mutation (Admin/Author only). Reviewers cannot write to
+      // the EvaluationBaselineBucket, so skip the baseline save for reviewers to
+      // avoid an Unauthorized error (they should not be editing baselines).
+      if (baselineChangeCount > 0 && localBaselineData && !isReviewerOnly) {
         logger.info('💾 Saving baseline changes...', { count: baselineChangeCount });
 
         // Add edit history metadata with combined changes (same as predictions)
