@@ -139,5 +139,42 @@ class TestHandleUpdateMigratesBeforeMerge:
         _assert_customizations_survived(saved["config"])
 
 
+class TestAgenticEnabledRequiresMode:
+    """Regression for the Step-8 Nuveen timeout: a config that sets
+    ``extraction.agentic.enabled: true`` but omits ``extraction.mode`` has its
+    ``agentic.enabled`` SILENTLY reset to False on upload.
+
+    In v0.6 ``extraction.mode`` is authoritative and ``agentic.enabled`` is
+    derived from it (ExtractionConfig.reconcile_mode_and_agentic). When the
+    delta omits ``mode``, the merge inherits the default's ``mode: simple``,
+    which then forces ``agentic.enabled=False`` — overriding the ``true`` the
+    author intended. The whole doc then runs traditional single-pass extraction
+    and (for a large 17-page/532-row doc) times out the 900s Lambda.
+
+    The fix is to set ``extraction.mode: advanced`` in the config; these tests
+    pin that contract so the footgun is caught if the config regresses.
+    """
+
+    def test_agentic_enabled_without_mode_is_silently_disabled(self):
+        """Documents the footgun: agentic.enabled=true + no mode -> disabled."""
+        merged = merge_config_with_defaults(
+            {"extraction": {"agentic": {"enabled": True}}}, pattern="pattern-2"
+        )
+        cfg = IDPConfig(**merged)
+        # The default's mode ('simple') wins and disables agentic.
+        assert cfg.extraction.mode == "simple"
+        assert cfg.extraction.agentic.enabled is False
+
+    def test_mode_advanced_keeps_agentic_enabled(self):
+        """The fix: mode=advanced makes agentic.enabled survive the merge."""
+        merged = merge_config_with_defaults(
+            {"extraction": {"mode": "advanced", "agentic": {"enabled": True}}},
+            pattern="pattern-2",
+        )
+        cfg = IDPConfig(**merged)
+        assert cfg.extraction.mode == "advanced"
+        assert cfg.extraction.agentic.enabled is True
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

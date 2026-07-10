@@ -90,6 +90,7 @@ classification:
     dpi: null
     preprocessing: null
 extraction:
+  mode: advanced
   model: us.anthropic.claude-sonnet-4-6
   model_lambda_hook_arn: null
   system_prompt: >-
