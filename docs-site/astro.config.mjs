@@ -109,6 +109,14 @@ export default defineConfig({
           ],
         },
         {
+          label: "Benchmarks & Performance",
+          items: [
+            { label: "Benchmark Results", slug: "benchmark-results" },
+            { label: "Benchmarking Guide", slug: "benchmarking" },
+            { label: "Extraction Scaling Guide", slug: "extraction-scaling-guide" },
+          ],
+        },
+        {
           label: "AI Agents & Analytics",
           items: [
             { label: "Agent Analysis", slug: "agent-analysis" },
