@@ -2922,6 +2922,7 @@ Resources:
 
   ApiWafWebACL:
     Type: AWS::WAFv2::WebACL
+    # checkov:skip=CKV_AWS_192: "This WebACL uses DefaultAction: Block with an IP allowlist, so only explicitly allowlisted IPv4 ranges reach the API at all. The Log4Shell (CVE-2021-44228) managed rule group is defense-in-depth that is not required for this already-closed posture; the backend is Python (no Log4j2)."
     Condition: IsWafEnabled
     Properties:
       Name: !Sub "${StackName}-api-acl"
