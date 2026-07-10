@@ -353,6 +353,99 @@ class TestMergeAdjacentTables:
         merged = _merge_adjacent_tables(tables, proximity_threshold=10)
         assert len(merged) == 2, "Should not merge distant tables"
 
+    def test_merge_blank_continuation_header(self):
+        """Continuation pages that lose a header label still merge.
+
+        Regression test for the Nuveen large-table timeout: a multi-page table
+        keeps its header on page 1 (``Fund Name``) but the header cell is blank
+        on continuation pages. The strict-equality merge left the rows split
+        across multiple tables; placeholder-tolerant merging must collapse them
+        into one and keep the named column so every row is keyed by ``Fund Name``.
+        """
+        from idp_common.extraction.tools.table_parser import _merge_adjacent_tables
+
+        tables = [
+            {
+                "header_line": "| Fund Name | Ticker |",
+                "separator_line": "|---|---|",
+                "data_lines": ["| Alpha Fund | AAA |"],
+                "start_line_idx": 0,
+                "end_line_idx": 2,
+                "gaps_recovered": 0,
+            },
+            {
+                # Continuation page: first header cell blank
+                "header_line": "|  | Ticker |",
+                "separator_line": "|---|---|",
+                "data_lines": ["| Beta Fund | BBB |", "| Gamma Fund | CCC |"],
+                "start_line_idx": 4,
+                "end_line_idx": 6,
+                "gaps_recovered": 0,
+            },
+        ]
+
+        merged = _merge_adjacent_tables(tables, proximity_threshold=10)
+        assert len(merged) == 1, "Blank continuation header should still merge"
+        assert len(merged[0]["data_lines"]) == 3, "Should have all 3 rows"
+        assert merged[0]["merged_tables"] == 1, "Should track merge count"
+        # The retained header must keep the real column name, not the blank cell,
+        # so downstream column derivation keys every row under 'Fund Name'.
+        assert _split_table_row(merged[0]["header_line"]) == ["Fund Name", "Ticker"]
+
+    def test_merge_unnamed_placeholder_header(self):
+        """A ``_unnamed_*`` placeholder header cell does not block merging."""
+        from idp_common.extraction.tools.table_parser import _merge_adjacent_tables
+
+        tables = [
+            {
+                "header_line": "| _unnamed_0 | Ticker |",
+                "separator_line": "|---|---|",
+                "data_lines": ["| Alpha Fund | AAA |"],
+                "start_line_idx": 0,
+                "end_line_idx": 2,
+                "gaps_recovered": 0,
+            },
+            {
+                "header_line": "| Fund Name | Ticker |",
+                "separator_line": "|---|---|",
+                "data_lines": ["| Beta Fund | BBB |"],
+                "start_line_idx": 4,
+                "end_line_idx": 6,
+                "gaps_recovered": 0,
+            },
+        ]
+
+        merged = _merge_adjacent_tables(tables, proximity_threshold=10)
+        assert len(merged) == 1, "Placeholder header should still merge"
+        # The named cell from the second fragment fills the placeholder.
+        assert _split_table_row(merged[0]["header_line"]) == ["Fund Name", "Ticker"]
+
+    def test_no_merge_genuinely_different_named_columns(self):
+        """Two named-but-different columns must NOT merge (no false positives)."""
+        from idp_common.extraction.tools.table_parser import _merge_adjacent_tables
+
+        tables = [
+            {
+                "header_line": "| Fund Name | Ticker |",
+                "separator_line": "|---|---|",
+                "data_lines": ["| Alpha Fund | AAA |"],
+                "start_line_idx": 0,
+                "end_line_idx": 2,
+                "gaps_recovered": 0,
+            },
+            {
+                "header_line": "| City | Country |",
+                "separator_line": "|---|---|",
+                "data_lines": ["| NYC | USA |"],
+                "start_line_idx": 4,
+                "end_line_idx": 6,
+                "gaps_recovered": 0,
+            },
+        ]
+
+        merged = _merge_adjacent_tables(tables, proximity_threshold=10)
+        assert len(merged) == 2, "Distinct named columns must not merge"
+
 
 # =============================================================================
 # Single table parsing tests
