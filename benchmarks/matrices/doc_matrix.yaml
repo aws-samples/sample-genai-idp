@@ -42,8 +42,12 @@ reference:
   - {id: bank_real, testset: samples-tables,       config: bank-statement-sample, n: 1, tag: real=bankstmt}
 
 # --- Doc groupings referenced by suites in config_matrix.yaml ------------------
+# NOTE: core_docs are all bank_statement-class (transaction-list) documents, scored
+# against that schema. kv_form is a FLAT key/value form and must NOT be scored under
+# the bank_statement schema (it pins scalar_accuracy to a meaningless ~0.04); it needs
+# its own doc-class config (future work) — so it is intentionally excluded here.
 groups:
-  core_docs:      [tiny_form, small_narrow, med_narrow, large_narrow, wide_400, manylists_400, longdesc_100, kv_form, realkie, ocr_bench]
+  core_docs:      [tiny_form, small_narrow, med_narrow, large_narrow, wide_400, manylists_400, longdesc_100, realkie, ocr_bench]
   scaling_series: [scale_25, scale_100, scale_400, scale_800, scale_1200, scale_1600, scale_3200]
   all:            "*"
 

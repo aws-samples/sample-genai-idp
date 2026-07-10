@@ -4,9 +4,11 @@
 Resolver-free — reads S3 + DynamoDB directly so it works on any stack version.
 All AWS access uses the 'default' profile (the deployment account).
 """
+
+import json
 import os
 import re
-import json
+
 import boto3
 import yaml
 
@@ -20,8 +22,9 @@ _session = None
 def session():
     global _session
     if _session is None:
-        _session = boto3.Session(profile_name=os.environ.get("AWS_PROFILE", "default"),
-                                 region_name=REGION)
+        _session = boto3.Session(
+            profile_name=os.environ.get("AWS_PROFILE", "default"), region_name=REGION
+        )
     return _session
 
 
@@ -39,7 +42,7 @@ def load_pricing():
     table = {}
     for entry in raw["pricing"]:
         units = {}
-        for u in (entry.get("units") or []):
+        for u in entry.get("units") or []:
             try:
                 units[u["name"]] = float(u["price"])
             except (TypeError, ValueError):
@@ -95,9 +98,11 @@ def doc_metering(tracking, run_id, doc_name):
     """Metering map from the doc# tracking row. Handles Map or JSON-string."""
     pk = f"doc#{run_id}/{doc_name}"
     try:
-        r = ddb().get_item(TableName=tracking,
-                           Key={"PK": {"S": pk}, "SK": {"S": "none"}},
-                           ProjectionExpression="Metering")
+        r = ddb().get_item(
+            TableName=tracking,
+            Key={"PK": {"S": pk}, "SK": {"S": "none"}},
+            ProjectionExpression="Metering",
+        )
         item = r.get("Item")
         if not item or "Metering" not in item:
             return {}
@@ -109,10 +114,18 @@ def doc_metering(tracking, run_id, doc_name):
         return {}
 
 
-def doc_row(tracking, run_id, doc_name, attrs="ObjectStatus,EvaluationStatus,WorkflowStartTime,CompletionTime,PageCount,WorkflowStatus"):
+def doc_row(
+    tracking,
+    run_id,
+    doc_name,
+    attrs="ObjectStatus,EvaluationStatus,WorkflowStartTime,CompletionTime,PageCount,WorkflowStatus",
+):
     pk = f"doc#{run_id}/{doc_name}"
-    r = ddb().get_item(TableName=tracking, Key={"PK": {"S": pk}, "SK": {"S": "none"}},
-                       ProjectionExpression=attrs)
+    r = ddb().get_item(
+        TableName=tracking,
+        Key={"PK": {"S": pk}, "SK": {"S": "none"}},
+        ProjectionExpression=attrs,
+    )
     it = r.get("Item", {})
     return {k: ddb_to_py(v) for k, v in it.items()}
 
@@ -121,9 +134,12 @@ def poll_run(tracking, run_id):
     """Count per-doc statuses for a run via scan+contains. Returns dict."""
     obj = evl = tot = fail = 0
     st = {}
-    kw = {"TableName": tracking, "FilterExpression": "contains(PK, :r)",
-          "ExpressionAttributeValues": {":r": {"S": f"doc#{run_id}/"}},
-          "ProjectionExpression": "ObjectStatus, EvaluationStatus"}
+    kw = {
+        "TableName": tracking,
+        "FilterExpression": "contains(PK, :r)",
+        "ExpressionAttributeValues": {":r": {"S": f"doc#{run_id}/"}},
+        "ProjectionExpression": "ObjectStatus, EvaluationStatus",
+    }
     while True:
         r = ddb().scan(**kw)
         for it in r.get("Items", []):
@@ -139,14 +155,23 @@ def poll_run(tracking, run_id):
         if "LastEvaluatedKey" not in r:
             break
         kw["ExclusiveStartKey"] = r["LastEvaluatedKey"]
-    return {"total": tot, "obj_done": obj, "eval_done": evl, "failed": fail, "statuses": st}
+    return {
+        "total": tot,
+        "obj_done": obj,
+        "eval_done": evl,
+        "failed": fail,
+        "statuses": st,
+    }
 
 
 # ----------------------------------------------------------------------------- S3
 def list_doc_prefixes(bucket, run_id):
     docs = []
-    for p in s3().get_paginator("list_objects_v2").paginate(
-            Bucket=bucket, Prefix=f"{run_id}/", Delimiter="/"):
+    for p in (
+        s3()
+        .get_paginator("list_objects_v2")
+        .paginate(Bucket=bucket, Prefix=f"{run_id}/", Delimiter="/")
+    ):
         for cp in p.get("CommonPrefixes", []):
             docs.append(cp["Prefix"])
     return docs
@@ -160,7 +185,11 @@ def get_json(bucket, key):
 
 
 def iter_section_results(bucket, doc_prefix):
-    for pg in s3().get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=doc_prefix + "sections/"):
+    for pg in (
+        s3()
+        .get_paginator("list_objects_v2")
+        .paginate(Bucket=bucket, Prefix=doc_prefix + "sections/")
+    ):
         for o in pg.get("Contents", []):
             if o["Key"].endswith("result.json"):
                 sec = get_json(bucket, o["Key"])

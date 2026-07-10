@@ -9,10 +9,11 @@ Usage:
       --run <runId> --doc <docName> [--truth <truth.json>] [--label L]
 Prints a JSON score object.
 """
+
+import argparse
+import json
 import os
 import sys
-import json
-import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lib  # noqa: E402
@@ -23,9 +24,12 @@ def _wall(row):
     if not st or not ct:
         return None
     from datetime import datetime
+
+    def _parse(s):
+        return datetime.fromisoformat(str(s).replace("Z", ""))
+
     try:
-        f = lambda s: datetime.fromisoformat(str(s).replace("Z", ""))
-        return (f(ct) - f(st)).total_seconds()
+        return (_parse(ct) - _parse(st)).total_seconds()
     except Exception:
         return None
 
@@ -67,7 +71,11 @@ def score_synthetic(bucket, doc_prefix, truth):
         "n_gaps": len(truth_ids - extracted),
         "scalar_accuracy": round(scalar_hits / scalar_tot, 4) if scalar_tot else None,
         "mean_confidence": round(sum(confs) / len(confs), 4) if confs else None,
-        "pct_conf_below_0.9": round(100 * sum(1 for c in confs if c < 0.9) / len(confs), 1) if confs else None,
+        "pct_conf_below_0.9": round(
+            100 * sum(1 for c in confs if c < 0.9) / len(confs), 1
+        )
+        if confs
+        else None,
         "n_conf_leaves": len(confs),
     }
 
@@ -81,15 +89,17 @@ def score_reference(bucket, doc_prefix):
         acc = ev.get("overall_metrics", {}).get("weighted_overall_score")
         pf = 0
         corr_conf, wrong_conf = [], []
-        for sec in (ev.get("section_results") or ev.get("sections") or []):
-            for a in (sec.get("attributes") or []):
+        for sec in ev.get("section_results") or ev.get("sections") or []:
+            for a in sec.get("attributes") or []:
                 if "fail" in str(a.get("failure_type") or "").lower():
                     pf += 1
                 c = a.get("confidence")
                 if isinstance(c, (int, float)):
                     (corr_conf if a.get("matched") else wrong_conf).append(c)
         if corr_conf and wrong_conf:
-            sep = round(sum(corr_conf) / len(corr_conf) - sum(wrong_conf) / len(wrong_conf), 4)
+            sep = round(
+                sum(corr_conf) / len(corr_conf) - sum(wrong_conf) / len(wrong_conf), 4
+            )
     confs = []
     for sec in lib.iter_section_results(bucket, doc_prefix):
         lib.walk_confidence(sec.get("explainability_info"), confs)
@@ -98,7 +108,11 @@ def score_reference(bucket, doc_prefix):
         "parse_failures": pf,
         "calibration_separation": sep,
         "mean_confidence": round(sum(confs) / len(confs), 4) if confs else None,
-        "pct_conf_below_0.9": round(100 * sum(1 for c in confs if c < 0.9) / len(confs), 1) if confs else None,
+        "pct_conf_below_0.9": round(
+            100 * sum(1 for c in confs if c < 0.9) / len(confs), 1
+        )
+        if confs
+        else None,
         "n_conf_leaves": len(confs),
     }
 
@@ -117,14 +131,23 @@ def score_doc(bucket, tracking, run_id, doc_name, truth=None):
     tok = {}
     for k, units in (metering or {}).items():
         if isinstance(units, dict):
-            for u in ("inputTokens", "outputTokens", "cacheReadInputTokens", "cacheWriteInputTokens"):
+            for u in (
+                "inputTokens",
+                "outputTokens",
+                "cacheReadInputTokens",
+                "cacheWriteInputTokens",
+            ):
                 if u in units:
                     tok[u] = tok.get(u, 0) + int(units[u])
     out = {
-        "doc": doc_name, "status": status, "success": status == "COMPLETED",
+        "doc": doc_name,
+        "status": status,
+        "success": status == "COMPLETED",
         "page_count": row.get("PageCount"),
-        "wall_s": _wall(row), "cost": round(cost, 4),
-        "cost_by_phase": by_phase, "tokens": tok,
+        "wall_s": _wall(row),
+        "cost": round(cost, 4),
+        "cost_by_phase": by_phase,
+        "tokens": tok,
     }
     if truth:
         out.update(score_synthetic(bucket, doc_prefix, truth))

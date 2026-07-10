@@ -18,7 +18,7 @@ axes:
     textract_layout:  {use_bda: false, ocr.backend: textract, ocr.features: [LAYOUT]}
     textract_tables:  {use_bda: false, ocr.backend: textract, ocr.features: [TABLES, LAYOUT]}
     bda:              {use_bda: true}
-    bedrock_llm:      {use_bda: false, ocr.backend: bedrock}   # LLM-based OCR (Nova)
+    bedrock_llm:      {use_bda: false, ocr.backend: bedrock, ocr.task_prompt: "Extract all text from this document image: {DOCUMENT_IMAGE}. Preserve the layout, including paragraphs, tables (as markdown pipe-tables), and formatting."}   # LLM-based OCR (Nova)
   extraction_mode:                         # extraction.mode (+ agentic.enabled derived)
     simple:   {extraction.mode: simple}
     advanced: {extraction.mode: advanced}  # agentic sharding + table tool
@@ -94,8 +94,20 @@ sweeps:
 # Suites — named subsets so a PR can run a cheap smoke test and a release can run
 # the full study. run_matrix.py --suite <name>.
 # -----------------------------------------------------------------------------
+#
+# repeats: N runs per (cell × doc). Cost of the AGENTIC path varies run-to-run
+# (agent turn count is non-deterministic — spreads have been observed ~4x), so a
+# single sample cannot resolve a cost DIFFERENCE between configs. Cost claims and
+# cost-regression detection require repeats>=5 (see the `cost` suite and
+# aggregate.py cell_stats CV / compare_cells). Accuracy/completeness are stable at
+# repeats=1, so the broad matrices stay at 1 to bound spend; use `cost` (or
+# --repeats) when the question is dollars.
 suites:
   smoke:   {cells: [core-tt-simple-sep, core-tt-adv-sep], docs: [small_narrow, tiny_form], repeats: 1}
   core:    {cells: "core_cells", docs: "core_docs", repeats: 1}
   full:    {cells: "core_cells+sweeps", docs: "all", repeats: 1}
   scaling: {cells: [core-tt-simple-sep, core-tt-adv-sep], docs: "scaling_series", repeats: 1}
+  # cost: purpose-built to DETECT COST DIFFERENCES between configs with confidence.
+  # A representative mid-size list doc, the cost-decision-relevant cells, repeated
+  # enough that per-cell cost mean±stdev separates real gaps from agentic noise.
+  cost:    {cells: [core-tt-simple-sep, core-tt-adv-sep, core-tt-adv-int, core-tl-adv-sep, core-bda-adv-sep], docs: [med_narrow], repeats: 5}

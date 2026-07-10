@@ -12,17 +12,20 @@ Usage:
 Safety: never mutates Config#default; uploads Config#bench-* versions only.
 Idempotent test-set registration. --estimate prints projected cost/time and exits.
 """
+
+# ruff: noqa: E402  (local sibling import requires the sys.path bootstrap first)
+import argparse
+import datetime
+import json
 import os
+import subprocess
 import sys
 import time
-import json
-import argparse
-import subprocess
-import datetime
+
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import lib  # noqa: E402
+import lib
 
 BENCH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO = os.path.dirname(BENCH)
@@ -42,18 +45,32 @@ def resolve_stack(stack):
     s3c = lib.s3()
     buckets = [b["Name"] for b in s3c.list_buckets()["Buckets"]]
     pfx = stack.lower()
+
     def find(sub):
         for b in buckets:
             if b.startswith(pfx) and sub in b:
                 return b
         return None
+
     ddbc = lib.ddb()
     tables = ddbc.list_tables()["TableNames"]
+
     def findt(sub):
+        # Prefer the exact "<stack>-<sub>-<suffix>" table; skip look-alikes such as
+        # BootstrapTrackingTable / DiscoveryTrackingTable / ChatDocument*Table.
+        exact = f"{stack}-{sub}-"
         for t in tables:
-            if t.startswith(stack) and sub in t and "Discovery" not in t:
+            if t.startswith(exact):
+                return t
+        for t in tables:  # fallback: contains, excluding known decoys
+            if (
+                t.startswith(stack)
+                and sub in t
+                and not any(x in t for x in ("Bootstrap", "Discovery", "Chat"))
+            ):
                 return t
         return None
+
     return {
         "testset_bucket": find("testsetbucket"),
         "output_bucket": find("outputbucket"),
@@ -66,27 +83,40 @@ def register_testset(stack, res, doc_id, pdf_path):
     """Upload PDF + put a testset# metadata row (idempotent)."""
     tsb = res["testset_bucket"]
     key = f"bench-{doc_id}/input/{os.path.basename(pdf_path)}"
-    sh(f'AWS_PROFILE=default aws s3 cp "{pdf_path}" s3://{tsb}/{key} --region {lib.REGION}')
+    sh(
+        f'AWS_PROFILE=default aws s3 cp "{pdf_path}" s3://{tsb}/{key} --region {lib.REGION}'
+    )
     now = datetime.datetime.utcnow().isoformat() + "Z"
-    item = {"PK": {"S": f"testset#bench-{doc_id}"}, "SK": {"S": "metadata"},
-            "ItemType": {"S": "testset"}, "id": {"S": f"bench-{doc_id}"},
-            "name": {"S": f"bench-{doc_id}"}, "filePattern": {"S": f"bench-{doc_id}/input/"},
-            "fileCount": {"N": "1"}, "status": {"S": "READY"},
-            "createdAt": {"S": now}, "InitialEventTime": {"S": now}}
+    item = {
+        "PK": {"S": f"testset#bench-{doc_id}"},
+        "SK": {"S": "metadata"},
+        "ItemType": {"S": "testset"},
+        "id": {"S": f"bench-{doc_id}"},
+        "name": {"S": f"bench-{doc_id}"},
+        "filePattern": {"S": f"bench-{doc_id}/input/"},
+        "fileCount": {"N": "1"},
+        "status": {"S": "READY"},
+        "createdAt": {"S": now},
+        "InitialEventTime": {"S": now},
+    }
     lib.ddb().put_item(TableName=res["tracking_table"], Item=item)
 
 
 def upload_config(stack, version, path):
-    r = sh(f'PYTHONPATH={REPO}/lib/idp_common_pkg AWS_PROFILE=default idp-cli config-upload '
-           f'--stack-name {stack} --config-file "{path}" --config-version {version} '
-           f'--version-description "benchmark {version}" --region {lib.REGION}')
+    r = sh(
+        f"PYTHONPATH={REPO}/lib/idp_common_pkg AWS_PROFILE=default idp-cli config-upload "
+        f'--stack-name {stack} --config-file "{path}" --config-version {version} '
+        f'--version-description "benchmark {version}" --region {lib.REGION}'
+    )
     return "uploaded successfully" in (r.stdout + r.stderr)
 
 
 def launch(stack, testset_id, version, context):
-    r = sh(f'PYTHONPATH={REPO}/lib/idp_common_pkg AWS_PROFILE=default idp-cli run-inference '
-           f'--stack-name {stack} --test-set {testset_id} --config-version {version} '
-           f'--number-of-files 1 --context "{context}" --region {lib.REGION}')
+    r = sh(
+        f"PYTHONPATH={REPO}/lib/idp_common_pkg AWS_PROFILE=default idp-cli run-inference "
+        f"--stack-name {stack} --test-set {testset_id} --config-version {version} "
+        f'--number-of-files 1 --context "{context}" --region {lib.REGION}'
+    )
     for line in (r.stdout + r.stderr).splitlines():
         if "Test run started" in line:
             return line.split()[-1]
@@ -100,15 +130,19 @@ def load_plan(suite, klass):
     # cells: read the index written by make_configs.py
     idx_path = os.path.join(CONFIGS, f"_index_{suite}_{klass}.yaml")
     if not os.path.exists(idx_path):
-        sys.exit(f"Run make_configs.py --suite {suite} --class {klass} first ({idx_path} missing)")
+        sys.exit(
+            f"Run make_configs.py --suite {suite} --class {klass} first ({idx_path} missing)"
+        )
     cells = yaml.safe_load(open(idx_path))["cells"]
-    # docs
+    # docs: may be an explicit list, a named group, or "*"
     dg = suite_spec["docs"]
     groups = docm["groups"]
-    if dg in groups:
-        doc_ids = groups[dg] if groups[dg] != "*" else [d["id"] for d in docm["synthetic"]]
-    elif isinstance(dg, list):
+    if isinstance(dg, list):
         doc_ids = dg
+    elif dg in groups:
+        doc_ids = (
+            groups[dg] if groups[dg] != "*" else [d["id"] for d in docm["synthetic"]]
+        )
     else:
         doc_ids = [dg]
     return cells, doc_ids, int(suite_spec.get("repeats", 1))
@@ -123,6 +157,13 @@ def main():
     ap.add_argument("--max-inflight", type=int, default=6)
     ap.add_argument("--poll-interval", type=int, default=30)
     ap.add_argument("--timeout-min", type=int, default=60)
+    ap.add_argument(
+        "--repeats",
+        type=int,
+        default=None,
+        help="Override the suite's repeats (N runs per cell×doc). "
+        "Use >=5 for reliable cost-variance comparison of agentic cells.",
+    )
     a = ap.parse_args()
 
     res = resolve_stack(a.stack)
@@ -132,14 +173,20 @@ def main():
             sys.exit(f"could not resolve {k} for stack {a.stack}")
 
     cells, doc_ids, repeats = load_plan(a.suite, a.klass)
+    if a.repeats is not None:
+        repeats = a.repeats
     # only synthetic docs handled by this class run here; reference docs use their own config
     pairs = [(c, d, r) for c in cells for d in doc_ids for r in range(repeats)]
-    print(f"plan: {len(cells)} cells x {len(doc_ids)} docs x {repeats} = {len(pairs)} runs")
+    print(
+        f"plan: {len(cells)} cells x {len(doc_ids)} docs x {repeats} = {len(pairs)} runs"
+    )
 
     if a.estimate:
         print("(estimate) doc ids:", doc_ids)
-        print("(estimate) cell ids:", [c['cell'] for c in cells])
-        print("Run without --estimate to execute. Large docs/advanced cells dominate cost/time.")
+        print("(estimate) cell ids:", [c["cell"] for c in cells])
+        print(
+            "Run without --estimate to execute. Large docs/advanced cells dominate cost/time."
+        )
         return
 
     run_stamp = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
@@ -160,11 +207,12 @@ def main():
     # 3. launch with an in-flight cap; poll
     runmap = []
     inflight = []
+
     def poll_done(rid):
         st = lib.poll_run(res["tracking_table"], rid)
         return st["obj_done"] + st["failed"] >= 1  # 1 doc/run
 
-    for (c, d, rep) in pairs:
+    for c, d, rep in pairs:
         pdf = os.path.join(DOCS, d + ".pdf")
         if not os.path.exists(pdf):
             continue  # reference docs handled separately
@@ -172,22 +220,38 @@ def main():
             time.sleep(a.poll_interval)
         ctx = f"bench-{c['cell']}-{d}-r{rep}"
         rid = launch(a.stack, f"bench-{d}", c["version"], ctx)
-        rec = {"cell": c["cell"], "resolved": c["resolved"], "doc": d, "repeat": rep,
-               "run_id": rid, "doc_name": os.path.basename(pdf),
-               "truth": os.path.join(DOCS, d + ".pdf.truth.json")}
+        rec = {
+            "cell": c["cell"],
+            "resolved": c["resolved"],
+            "doc": d,
+            "repeat": rep,
+            "run_id": rid,
+            "doc_name": os.path.basename(pdf),
+            "truth": os.path.join(DOCS, d + ".pdf.truth.json"),
+        }
         runmap.append(rec)
         if rid:
             inflight.append(rid)
         print(f"  launched {ctx} -> {rid}")
-        json.dump({"stack": a.stack, "suite": a.suite, "class": a.klass,
-                   "resources": res, "runs": runmap},
-                  open(os.path.join(outdir, "runmap.json"), "w"), indent=2)
+        json.dump(
+            {
+                "stack": a.stack,
+                "suite": a.suite,
+                "class": a.klass,
+                "resources": res,
+                "runs": runmap,
+            },
+            open(os.path.join(outdir, "runmap.json"), "w"),
+            indent=2,
+        )
 
     # 4. drain
     print("draining...")
     deadline = time.time() + a.timeout_min * 60
     while time.time() < deadline:
-        pending = [r["run_id"] for r in runmap if r["run_id"] and not poll_done(r["run_id"])]
+        pending = [
+            r["run_id"] for r in runmap if r["run_id"] and not poll_done(r["run_id"])
+        ]
         if not pending:
             break
         print(f"  {len(pending)} runs pending...")

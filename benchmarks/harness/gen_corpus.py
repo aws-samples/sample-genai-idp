@@ -6,10 +6,11 @@ Deterministic: same matrix -> same bytes.
 
 Usage: python3 benchmarks/harness/gen_corpus.py [--only <id,id>] [--series scaling]
 """
-import os
-import sys
+
 import argparse
 import importlib.util
+import os
+
 import yaml
 
 BENCH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -19,7 +20,9 @@ MATRIX = os.path.join(BENCH, "matrices", "doc_matrix.yaml")
 
 
 def load_gen(name):
-    spec = importlib.util.spec_from_file_location(name, os.path.join(GENDIR, name + ".py"))
+    spec = importlib.util.spec_from_file_location(
+        name, os.path.join(GENDIR, name + ".py")
+    )
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -44,13 +47,23 @@ def main():
         if gen_name not in gens:
             gens[gen_name] = load_gen(gen_name)
         out = os.path.join(DOCS, spec["id"] + ".pdf")
-        params = {k: v for k, v in spec.items() if k not in ("id", "gen", "tag", "series")}
+        params = {
+            k: v for k, v in spec.items() if k not in ("id", "gen", "tag", "series")
+        }
         info = gens[gen_name].build(out=out, **params)
-        rec = {"id": spec["id"], "gen": gen_name, "pdf": out,
-               "truth": out + ".truth.json", **info,
-               "tag": spec.get("tag"), "series": spec.get("series")}
+        rec = {
+            "id": spec["id"],
+            "gen": gen_name,
+            "pdf": out,
+            "truth": out + ".truth.json",
+            **info,
+            "tag": spec.get("tag"),
+            "series": spec.get("series"),
+        }
         manifest.append(rec)
-        print(f"  {spec['id']:16s} gen={gen_name} pages={info.get('pages')} rows={info.get('rows','-')}")
+        print(
+            f"  {spec['id']:16s} gen={gen_name} pages={info.get('pages')} rows={info.get('rows', '-')}"
+        )
     man_path = os.path.join(BENCH, "corpus", "manifest.yaml")
     # merge with existing manifest (don't clobber other-series entries)
     existing = {}
@@ -59,7 +72,9 @@ def main():
             existing[r["id"]] = r
     for r in manifest:
         existing[r["id"]] = r
-    yaml.safe_dump({"docs": list(existing.values())}, open(man_path, "w"), sort_keys=False)
+    yaml.safe_dump(
+        {"docs": list(existing.values())}, open(man_path, "w"), sort_keys=False
+    )
     print(f"corpus manifest -> {man_path} ({len(existing)} docs)")
 
 
