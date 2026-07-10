@@ -88,6 +88,62 @@ def _needs_migration(config: Dict[str, Any]) -> bool:
     return _has_legacy_markers(config)
 
 
+def _pin_extraction_mode_from_agentic(config: Dict[str, Any]) -> bool:
+    """Pin ``extraction.mode`` from ``extraction.agentic.enabled`` when mode is absent.
+
+    In v0.6 ``extraction.mode`` is authoritative and ``extraction.agentic.enabled``
+    is DERIVED from it (see ``ExtractionConfig.reconcile_mode_and_agentic``). A config
+    that sets ``agentic.enabled`` but omits ``mode`` is a footgun: after the delta is
+    deep-merged onto the v0.6 defaults (which carry ``mode: simple``), the merged config
+    has ``mode='simple'`` + ``agentic.enabled=true`` and ``reconcile`` then SILENTLY
+    flips ``agentic.enabled`` back to false — the author asked for advanced/agentic
+    extraction and silently got simple single-pass.
+
+    Because migration is applied to the DELTA before the merge, pinning ``mode`` here
+    makes the author's intent WIN the merge instead of being overridden by the default's
+    ``mode``. Returns True if it changed the config.
+
+    Idempotent and safe:
+    - No-op when ``agentic.enabled`` is absent (a sparse delta that never mentions it).
+    - No-op when ``extraction.mode`` is already set — an explicit ``mode`` is
+      authoritative and is NEVER overridden (a second migration pass finds mode set
+      and does nothing).
+    """
+    extraction = config.get("extraction")
+    if not isinstance(extraction, dict):
+        return False
+    agentic = extraction.get("agentic")
+    if not isinstance(agentic, dict) or "enabled" not in agentic:
+        return False
+    existing_mode = extraction.get("mode")
+    if existing_mode is not None and str(existing_mode).strip() != "":
+        # Explicit mode wins; never override the author's stated mode.
+        return False
+    extraction["mode"] = (
+        "advanced" if _coerce_bool(agentic.get("enabled")) else "simple"
+    )
+    return True
+
+
+def _coerce_bool(value: Any) -> bool:
+    """Interpret an ``enabled`` value the same way Pydantic v2 coerces a bool.
+
+    The migration runs BEFORE Pydantic validation, so this must agree with how
+    ``AgenticConfig.enabled`` (a ``bool`` field) will ultimately parse the value —
+    otherwise a truthy input like ``1`` or ``"yes"`` would be pinned to
+    ``mode: simple`` and then get flipped off, resurrecting the footgun. Unknown /
+    invalid values fall back to ``bool(value)``; Pydantic surfaces the real error
+    at validation time.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes", "on", "t", "y")
+    return bool(value)
+
+
 def migrate_v05_to_v06(config: Dict[str, Any]) -> Dict[str, Any]:
     """Return a v0.6-shaped copy of ``config``.
 
@@ -96,10 +152,22 @@ def migrate_v05_to_v06(config: Dict[str, Any]) -> Dict[str, Any]:
     """
     if not isinstance(config, dict):
         return config
-    if not _needs_migration(config):
-        return config
 
+    needs = _needs_migration(config)
     result = copy.deepcopy(config)
+
+    # Footgun guard (applies to BOTH v0.5 and already-v0.6-stamped deltas): if the
+    # delta sets extraction.agentic.enabled but omits extraction.mode, pin mode from
+    # agentic.enabled so the author's intent survives the deep-merge onto the v0.6
+    # defaults (which carry mode: simple) instead of being silently reverted by
+    # reconcile_mode_and_agentic. See _pin_extraction_mode_from_agentic.
+    mode_pinned = _pin_extraction_mode_from_agentic(result)
+
+    if not needs:
+        # Already v0.6 with no legacy assessment markers: nothing to reshape. Return
+        # the pinned copy only if the footgun guard actually changed something,
+        # otherwise the original (preserves object identity for the pure no-op case).
+        return result if mode_pinned else config
 
     extraction = result.get("extraction")
     extraction = extraction if isinstance(extraction, dict) else {}

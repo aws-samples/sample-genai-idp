@@ -265,14 +265,77 @@ def _find_tables_in_text(
     return tables
 
 
+def _is_placeholder_header_cell(cell: str) -> bool:
+    """Return True for a header cell that carries no real column name.
+
+    OCR of a table that continues across a page break frequently drops the
+    repeated header text on continuation pages, so the first column (or any
+    column) can come back blank — which later becomes an ``_unnamed_N``
+    placeholder in :func:`_parse_single_table`. Such cells must not block the
+    merge of otherwise-identical table fragments.
+    """
+    stripped = cell.strip()
+    return not stripped or stripped.startswith("_unnamed_")
+
+
+def _headers_mergeable(prev_cols: list[str], curr_cols: list[str]) -> bool:
+    """Whether two header rows describe the same columns for merge purposes.
+
+    Equal-length headers are considered mergeable when every position either
+    matches exactly (case/whitespace-insensitive) or one side is a placeholder
+    (blank / ``_unnamed_*``). This recovers the common page-break artifact where
+    a continuation page loses only the (usually first) header label while all
+    other columns line up. A pure exact match still qualifies.
+    """
+    if len(prev_cols) != len(curr_cols):
+        return False
+    for prev_cell, curr_cell in zip(prev_cols, curr_cols):
+        if prev_cell.strip().lower() == curr_cell.strip().lower():
+            continue
+        if _is_placeholder_header_cell(prev_cell) or _is_placeholder_header_cell(
+            curr_cell
+        ):
+            continue
+        return False
+    return True
+
+
+def _upgrade_header_line(prev_header: str, curr_header: str) -> str:
+    """Fill placeholder cells in ``prev_header`` from ``curr_header``.
+
+    When merging fragments, keep every real column name: if the retained
+    (previous) header has a blank/``_unnamed_*`` cell but the incoming fragment
+    names that column, adopt the named value. This ensures the merged table's
+    columns (derived from ``header_line`` downstream) key EVERY row consistently
+    — otherwise continuation rows would be keyed under ``_unnamed_0`` and lose,
+    e.g., the fund name on most rows.
+    """
+    prev_cols = _split_table_row(prev_header)
+    curr_cols = _split_table_row(curr_header)
+    if len(prev_cols) != len(curr_cols):
+        return prev_header
+    if not any(_is_placeholder_header_cell(c) for c in prev_cols):
+        return prev_header
+    upgraded = [
+        curr
+        if _is_placeholder_header_cell(prev) and not _is_placeholder_header_cell(curr)
+        else prev
+        for prev, curr in zip(prev_cols, curr_cols)
+    ]
+    return "| " + " | ".join(upgraded) + " |"
+
+
 def _merge_adjacent_tables(
     tables: list[dict[str, Any]], proximity_threshold: int = 10
 ) -> list[dict[str, Any]]:
     """
-    Merge consecutive tables that have identical column structure.
+    Merge consecutive tables that have the same column structure.
 
     This recovers from table splits caused by OCR artifacts like page breaks,
-    where a single logical table gets parsed as multiple separate tables.
+    where a single logical table gets parsed as multiple separate tables. Header
+    rows are compared with placeholder tolerance (see :func:`_headers_mergeable`)
+    so a continuation page that lost a header label (blank / ``_unnamed_*`` cell)
+    still merges; the retained header is upgraded to keep every real column name.
 
     Args:
         tables: List of parsed table dicts from _find_tables_in_text
@@ -296,8 +359,12 @@ def _merge_adjacent_tables(
         # Calculate proximity (line gap between tables)
         line_gap = table["start_line_idx"] - prev["end_line_idx"]
 
-        # Merge if columns match and tables are close together
-        if prev_cols == curr_cols and line_gap <= proximity_threshold:
+        # Merge if columns match (placeholder-tolerant) and tables are close
+        if _headers_mergeable(prev_cols, curr_cols) and line_gap <= proximity_threshold:
+            # Preserve every real column name when a fragment fills a blank header
+            prev["header_line"] = _upgrade_header_line(
+                prev["header_line"], table["header_line"]
+            )
             # Merge data rows into previous table
             prev["data_lines"].extend(table["data_lines"])
             prev["end_line_idx"] = table["end_line_idx"]

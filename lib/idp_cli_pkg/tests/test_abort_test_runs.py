@@ -126,9 +126,12 @@ class TestAbortTestRuns:
         from idp_sdk._core.test_studio_processor import TestStudioProcessor
         from idp_sdk.exceptions import IDPResourceNotFoundError
 
+        # get_nested_stack_output raises ValueError when the stack/output is
+        # missing; abort_test_runs catches that and re-raises the friendlier
+        # IDPResourceNotFoundError below.
         with patch("idp_sdk._core.test_studio_processor.StackInfo") as mock_si:
-            mock_si.return_value.get_nested_stack_output.side_effect = (
-                IDPResourceNotFoundError("Function not found")
+            mock_si.return_value.get_nested_stack_output.side_effect = ValueError(
+                "Function not found"
             )
 
             processor = TestStudioProcessor("test-stack", "us-east-1")

@@ -1172,16 +1172,17 @@ PARALLEL_TEST_STEPS = [
         "Test Studio",
         "Test Studio evaluation (idp-cli test-result)",
     ),
-    # Step 8 temporarily disabled: the July 8 large-tables extraction changes
-    # made the Nuveen agentic run hang past the 1h command timeout (was ~9
-    # min), blowing the pipeline's 2h budget. Re-enable once the extraction
-    # regression is fixed.
-    # (
-    #     test_step8_agentic_extraction,
-    #     "Step 8",
-    #     "Agentic extraction",
-    #     "Agentic extraction with large tables",
-    # ),
+    # Step 8: the earlier hang was NOT an extraction regression — nuveen.yaml set
+    # extraction.agentic.enabled without extraction.mode, so the merge silently
+    # reverted to simple single-pass, which times out on the 532-row/17-page doc.
+    # Fixed by converting nuveen.yaml to native v0.6 (mode: advanced); live-
+    # validated at ~305s extraction / 532 rows. Re-enabled.
+    (
+        test_step8_agentic_extraction,
+        "Step 8",
+        "Agentic extraction",
+        "Agentic extraction with large tables",
+    ),
     (
         test_step9_single_doc_discovery,
         "Step 9",

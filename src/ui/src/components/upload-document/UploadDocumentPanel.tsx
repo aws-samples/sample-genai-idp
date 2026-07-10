@@ -288,8 +288,12 @@ const UploadDocumentPanel = (): React.JSX.Element => {
     setError(null);
 
     try {
-      // Optionally import + use the sample's associated configuration.
+      // Default to the version selected in the dropdown. When the sample has an
+      // already-imported config, handleSampleChange pre-selects it, but the user
+      // can override that choice — so we honor whatever is currently selected.
       let versionToUse = selectedVersion?.value;
+      // Only when the sample's associated config is not yet imported and the user
+      // opted into auto-import do we import it and use it for processing.
       if (activeSample.configId && autoImportConfig && !configAlreadyImported) {
         try {
           versionToUse = await importConfigVersion(activeSample.configId);
@@ -298,8 +302,6 @@ const UploadDocumentPanel = (): React.JSX.Element => {
           setIsUploading(false);
           return;
         }
-      } else if (activeSample.configId && configAlreadyImported) {
-        versionToUse = activeSample.configId;
       }
 
       const result = await uploadSample(activeSample.id, prefix || '', versionToUse);
@@ -408,7 +410,10 @@ const UploadDocumentPanel = (): React.JSX.Element => {
         )}
 
         {isSampleMode && activeSample?.configId && configAlreadyImported && (
-          <Alert type="info">Using the already-imported &ldquo;{activeSample.configId}&rdquo; configuration version for this sample.</Alert>
+          <Alert type="info">
+            This sample is tuned for the already-imported &ldquo;{activeSample.configId}&rdquo; configuration version, which has been
+            pre-selected above. You can choose a different version if you prefer.
+          </Alert>
         )}
 
         <Button

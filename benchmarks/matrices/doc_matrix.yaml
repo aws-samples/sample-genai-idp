@@ -1,0 +1,60 @@
+# =============================================================================
+# Benchmark document matrix
+# =============================================================================
+# Two corpora (per the ground-truth strategy):
+#   A. SYNTHETIC (exact GT) — generated with known field values + SEQ-tagged list
+#      rows, so completeness/accuracy/scaling are measured EXACTLY. Controls size,
+#      list count, row width, OCR-noise.
+#   B. REFERENCE (real, labeled) — existing test sets with human/curated baselines,
+#      for real-world accuracy (messy documents the synthetic set can't emulate).
+# Each doc names its GT source and the config-class it should run under.
+# =============================================================================
+
+# --- A. Synthetic, exact ground truth (generators in corpus/generators) --------
+synthetic:
+  # generator: bank_statement (list-heavy, the scaling workhorse)
+  #   params: rows, cols(3|8), lists, desc_len(short|long), ocr_noise(0..1)
+  - {id: tiny_form,       gen: bank_statement, rows: 5,    cols: 3, lists: 1, tag: doc_type=form}
+  - {id: small_narrow,    gen: bank_statement, rows: 100,  cols: 3, lists: 1, tag: size=small}
+  - {id: med_narrow,      gen: bank_statement, rows: 400,  cols: 3, lists: 1, tag: size=medium}
+  - {id: large_narrow,    gen: bank_statement, rows: 800,  cols: 3, lists: 1, tag: size=large}
+  - {id: xl_narrow,       gen: bank_statement, rows: 1600, cols: 3, lists: 1, tag: size=xl}
+  # scaling series (row-count sweep for the scaling suite)
+  - {id: scale_25,        gen: bank_statement, rows: 25,   cols: 3, lists: 1, series: scaling}
+  - {id: scale_100,       gen: bank_statement, rows: 100,  cols: 3, lists: 1, series: scaling}
+  - {id: scale_400,       gen: bank_statement, rows: 400,  cols: 3, lists: 1, series: scaling}
+  - {id: scale_800,       gen: bank_statement, rows: 800,  cols: 3, lists: 1, series: scaling}
+  - {id: scale_1200,      gen: bank_statement, rows: 1200, cols: 3, lists: 1, series: scaling}
+  - {id: scale_1600,      gen: bank_statement, rows: 1600, cols: 3, lists: 1, series: scaling}
+  - {id: scale_3200,      gen: bank_statement, rows: 3200, cols: 3, lists: 1, series: scaling}
+  # list-content variation (isolate row-count vs width vs #lists vs noise)
+  - {id: wide_400,        gen: bank_statement, rows: 400,  cols: 8, lists: 1, tag: shape=wide}
+  - {id: manylists_400,   gen: bank_statement, rows: 400,  cols: 3, lists: 8, tag: shape=manylists}
+  - {id: longdesc_100,    gen: bank_statement, rows: 100,  cols: 3, lists: 1, desc_len: long, tag: shape=longtext}
+  - {id: noisy_400,       gen: bank_statement, rows: 400,  cols: 3, lists: 1, ocr_noise: 0.15, tag: shape=noisy}
+  # a non-list doc type for breadth (flat key/value form)
+  - {id: kv_form,         gen: kv_form,        fields: 25,  tag: doc_type=keyvalue}
+
+# --- B. Reference, real labeled sets (already in the stack testset bucket) ------
+reference:
+  - {id: realkie,   testset: realkie-fcc-verified, config: realkie-fcc-verified, n: 20, tag: real=forms}
+  - {id: ocr_bench, testset: ocr-benchmark,        config: ocr-benchmark,        n: 20, tag: real=mixed}
+  - {id: bank_real, testset: samples-tables,       config: bank-statement-sample, n: 1, tag: real=bankstmt}
+
+# --- Doc groupings referenced by suites in config_matrix.yaml ------------------
+# NOTE: core_docs are all bank_statement-class (transaction-list) documents, scored
+# against that schema. kv_form is a FLAT key/value form and must NOT be scored under
+# the bank_statement schema (it pins scalar_accuracy to a meaningless ~0.04); it needs
+# its own doc-class config (future work) — so it is intentionally excluded here.
+groups:
+  core_docs:      [tiny_form, small_narrow, med_narrow, large_narrow, wide_400, manylists_400, longdesc_100, realkie, ocr_bench]
+  scaling_series: [scale_25, scale_100, scale_400, scale_800, scale_1200, scale_1600, scale_3200]
+  all:            "*"
+
+# Notes:
+# - Synthetic docs carry exact GT (corpus/manifest.yaml -> <id>.truth.json). Accuracy
+#   = field-exact match; list completeness = distinct SEQ recovered / total; plus the
+#   truncation point (longest contiguous prefix) and dup/gap counts.
+# - Reference docs use the stack's evaluation baseline (weighted_overall_score).
+# - Each synthetic doc runs under the matching generator's schema/config class; the
+#   bank_statement class carries the Transactions list; kv_form a flat schema.
