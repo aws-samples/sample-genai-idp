@@ -899,9 +899,10 @@ class Document:
             Full Document object with all content restored
         """
         import logging
-        from urllib.parse import urlparse
 
         import boto3
+
+        from idp_common.utils import parse_s3_uri
 
         logger = logging.getLogger(__name__)
         s3_client = boto3.client("s3")
@@ -912,8 +913,7 @@ class Document:
             if not s3_uri:
                 raise ValueError("No s3_uri found in compressed data")
 
-            parsed_uri = urlparse(s3_uri)
-            s3_key = parsed_uri.path.lstrip("/")
+            _, s3_key = parse_s3_uri(s3_uri)
 
             # Retrieve full document from S3
             response = s3_client.get_object(Bucket=bucket, Key=s3_key)
