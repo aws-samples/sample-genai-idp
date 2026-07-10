@@ -139,5 +139,52 @@ class TestHandleUpdateMigratesBeforeMerge:
         _assert_customizations_survived(saved["config"])
 
 
+class TestAgenticEnabledPinsMode:
+    """Regression for the Step-8 Nuveen timeout: a config that sets
+    ``extraction.agentic.enabled: true`` but omits ``extraction.mode``.
+
+    In v0.6 ``extraction.mode`` is authoritative and ``agentic.enabled`` is
+    derived from it (ExtractionConfig.reconcile_mode_and_agentic). Historically
+    such a delta had its ``agentic.enabled`` SILENTLY reset to False on upload:
+    the merge inherited the default's ``mode: simple``, which forced
+    ``agentic.enabled=False`` — overriding the ``true`` the author intended.
+    The whole doc then ran traditional single-pass extraction and (for a large
+    17-page/532-row doc) timed out the 900s Lambda.
+
+    The durable fix (``_pin_extraction_mode_from_agentic`` in the v0.5->v0.6
+    migration, applied to the delta BEFORE the merge) pins ``mode`` from
+    ``agentic.enabled`` so the author's intent wins the merge. These tests pin
+    that contract. See also test_config_migration_hardening.py.
+    """
+
+    def test_agentic_enabled_without_mode_pins_advanced(self):
+        """The fix: agentic.enabled=true with no mode is pinned to advanced."""
+        merged = merge_config_with_defaults(
+            {"extraction": {"agentic": {"enabled": True}}}, pattern="pattern-2"
+        )
+        cfg = IDPConfig(**merged)
+        assert cfg.extraction.mode == "advanced"
+        assert cfg.extraction.agentic.enabled is True
+
+    def test_agentic_disabled_without_mode_pins_simple(self):
+        """agentic.enabled=false with no mode is pinned to simple."""
+        merged = merge_config_with_defaults(
+            {"extraction": {"agentic": {"enabled": False}}}, pattern="pattern-2"
+        )
+        cfg = IDPConfig(**merged)
+        assert cfg.extraction.mode == "simple"
+        assert cfg.extraction.agentic.enabled is False
+
+    def test_explicit_mode_advanced_keeps_agentic_enabled(self):
+        """An explicit mode=advanced is authoritative and survives the merge."""
+        merged = merge_config_with_defaults(
+            {"extraction": {"mode": "advanced", "agentic": {"enabled": True}}},
+            pattern="pattern-2",
+        )
+        cfg = IDPConfig(**merged)
+        assert cfg.extraction.mode == "advanced"
+        assert cfg.extraction.agentic.enabled is True
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
