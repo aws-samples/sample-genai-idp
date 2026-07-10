@@ -187,7 +187,7 @@ class StackInfo:
 
         Args:
             nested_stack_pattern: Pattern to match nested stack LogicalResourceId
-                                (case-insensitive, e.g., "appsync" matches "AppSyncStack")
+                                (case-insensitive, e.g., "apiresolver" matches "APIRESOLVERSTACK")
             output_key: Output key to retrieve from the nested stack
 
         Returns:
