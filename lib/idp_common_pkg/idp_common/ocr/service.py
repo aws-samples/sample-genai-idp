@@ -1001,6 +1001,10 @@ class OcrService:
                     content_type="image/jpeg",
                 )
 
+            # Dimensions of the stored page image (image.jpg) the UI overlays on;
+            # forwarded so BDA rectification corners map into its coordinate space.
+            _bda_img_size = self._image_size_from_bytes(img_data)
+
             (
                 raw_ocr_content,
                 extracted_text,
@@ -1009,7 +1013,11 @@ class OcrService:
                 parsed_text_key,
                 metering,
             ) = self._write_bda_page_artifacts(
-                f"s3://{output_bucket}/{bda_image_key}", output_bucket, prefix, page_id
+                f"s3://{output_bucket}/{bda_image_key}",
+                output_bucket,
+                prefix,
+                page_id,
+                original_image_size=_bda_img_size,
             )
             page_data_raw = raw_ocr_content
             page_data_text = extracted_text
@@ -1245,7 +1253,8 @@ class OcrService:
 
         elif self.backend == "bda":
             # BDA reads the page image already uploaded to S3 (image_key) by
-            # s3Uri so extension-based modality routing applies.
+            # s3Uri so extension-based modality routing applies. Pass the stored
+            # image's dimensions so BDA rectification corners map into its space.
             (
                 raw_ocr_content,
                 extracted_text,
@@ -1254,7 +1263,11 @@ class OcrService:
                 parsed_text_key,
                 metering,
             ) = self._write_bda_page_artifacts(
-                f"s3://{output_bucket}/{image_key}", output_bucket, prefix, page_id
+                f"s3://{output_bucket}/{image_key}",
+                output_bucket,
+                prefix,
+                page_id,
+                original_image_size=self._image_size_from_bytes(img_bytes),
             )
             page_data_raw = raw_ocr_content
             page_data_text = extracted_text
@@ -1982,8 +1995,30 @@ class OcrService:
                     self.region, account_id, partition
                 )
 
+    @staticmethod
+    def _image_size_from_bytes(
+        img_bytes: Optional[bytes],
+    ) -> Optional[Tuple[int, int]]:
+        """Return ``(width, height)`` of image bytes, or None if undecodable.
+
+        Used to give the BDA converter the original page-image dimensions so it
+        can rescale rectification corners into original-image space.
+        """
+        if not img_bytes:
+            return None
+        try:
+            from PIL import Image as _PILImage
+
+            with _PILImage.open(io.BytesIO(img_bytes)) as im:
+                return im.size
+        except Exception:
+            logger.warning("Could not determine page image size for BDA geometry")
+            return None
+
     def _run_bda_ocr(
-        self, image_s3_uri: str
+        self,
+        image_s3_uri: str,
+        original_image_size: Optional[Tuple[int, int]] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, Any], str, Dict[str, Any]]:
         """Run BDA standard-output OCR on a single page image.
 
@@ -1998,6 +2033,13 @@ class OcrService:
         document text extraction. Inline bytes carry no extension and BDA falls
         back to content-based classification, which under concurrent load
         misclassifies some pages as IMAGE and yields empty OCR.
+
+        Args:
+            image_s3_uri: S3 URI of the page image to OCR.
+            original_image_size: ``(width, height)`` of that image, passed to the
+                converter so BDA's rectification corners (normalized against the
+                rectified crop) are rescaled into original-image space. Without
+                it, boxes are misplaced when BDA rectifies to a page sub-region.
 
         Returns:
             Tuple of (raw_ocr_blocks, text_confidence_data, parsed_text, metering).
@@ -2020,7 +2062,9 @@ class OcrService:
         if isinstance(standard_output, str):
             standard_output = json.loads(standard_output)
 
-        raw_ocr_blocks = bda_ocr.bda_standard_output_to_textract_blocks(standard_output)
+        raw_ocr_blocks = bda_ocr.bda_standard_output_to_textract_blocks(
+            standard_output, original_image_size=original_image_size
+        )
         parsed_text = bda_ocr.extract_markdown(standard_output)
         text_confidence_data = self._generate_text_confidence_data(raw_ocr_blocks)
         # Metering key maps to the pricing.yaml entry `bda/documents-standard`
@@ -2030,15 +2074,24 @@ class OcrService:
         return raw_ocr_blocks, text_confidence_data, parsed_text, metering
 
     def _write_bda_page_artifacts(
-        self, image_s3_uri: str, output_bucket: str, prefix: str, page_id: int
+        self,
+        image_s3_uri: str,
+        output_bucket: str,
+        prefix: str,
+        page_id: int,
+        original_image_size: Optional[Tuple[int, int]] = None,
     ) -> Tuple[Dict[str, Any], str, str, str, str, Dict[str, Any]]:
         """Run BDA OCR for a page image (in S3) and persist artifacts.
+
+        ``original_image_size`` (``(width, height)`` of the page image) is
+        forwarded to the converter so BDA rectification corners are rescaled into
+        original-image space (see ``_run_bda_ocr``).
 
         Returns (page_data_raw, page_data_text, raw_text_key, text_confidence_key,
         parsed_text_key, metering) so callers can build page_data + result dict.
         """
         raw_ocr_blocks, text_confidence_data, parsed_text, metering = self._run_bda_ocr(
-            image_s3_uri
+            image_s3_uri, original_image_size=original_image_size
         )
 
         raw_text_key = f"{prefix}/pages/{page_id}/rawText.json"
