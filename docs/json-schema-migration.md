@@ -197,7 +197,9 @@ The web UI provides two ways to create/edit document schemas:
    - Click "Add Class" to choose between:
      - **Custom Class** — define your own class with custom fields
      - **Standard Class** — import from 35+ pre-built document types (Invoice, Receipt, W-2, Bank Statement, Payslip, Driver License, Passport, tax forms, insurance cards, certificates, and more) derived from AWS BDA standard blueprints. Imported classes are fully editable.
-   - Add/edit document types and properties visually
+   - Add/edit document types and properties visually. A newly-created class shows an **Add first attribute** button; the **Add Attribute** dialog has an **Add another** option that saves the field and immediately starts a new one, so you can add several attributes without reopening the dialog.
+   - **Show Preview** opens a **Diagram** tab (a visual entity-relationship map of the classes and their `$ref`/array references), alongside **JSON Schema** and **Statistics** tabs.
+   - **Export** offers **Export all** (every document type) or **Export "&lt;class&gt;"** (the selected document type plus only the shared classes it references) as downloaded JSON. See the [Schema Builder Guide](web-ui.md#document-schema-builder).
 
 2. **JSON View** - Direct JSON editing with validation
    - Navigate to Configuration → JSON View
@@ -367,4 +369,4 @@ properties:
 - [Configuration Best Practices](idp-configuration-best-practices.md)
 - [Web UI Documentation](web-ui.md)
 - [JSON Schema Specification](https://json-schema.org/draft/2020-12/schema)
-- [Schema Builder Guide](web-ui.md#schema-builder)
+- [Schema Builder Guide](web-ui.md#document-schema-builder)
