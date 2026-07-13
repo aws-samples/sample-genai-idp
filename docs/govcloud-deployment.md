@@ -6,10 +6,31 @@ title: "GovCloud Deployment Guide"
 
 ## Overview
 
-The GenAI IDP Accelerator now supports "headless" deployment to AWS GovCloud regions through a specialized template generation script. This solution addresses two key GovCloud requirements:
+The GenAI IDP Accelerator supports two ways to deploy to AWS GovCloud regions:
+
+- **Full Web UI (`--govcloud`) — recommended for most users.** The interactive
+  React Web UI **is now supported in GovCloud**. GovCloud no longer requires a
+  headless deployment. The UI is hosted on **API Gateway** (an S3 proxy on the
+  REST API) instead of CloudFront, and works with **VPC support and/or WAF,
+  both optional** — set `ApiGatewayVisibility=PRIVATE` for VPC-only access and
+  `WAFAllowedIPv4Ranges` to restrict by IP. See
+  [Keeping the Web UI in GovCloud: `--govcloud`](#keeping-the-web-ui-in-govcloud---govcloud).
+- **Headless (`--headless`) — API-only / no UI.** For programmatic-only
+  deployments that intentionally remove the UI (and AppSync/Cognito-UI/WAF)
+  entirely. See the [deployment packages](#deployment-packages) below.
+
+Both paths address two GovCloud requirements:
 
 1. **ARN Partition Compatibility**: All ARN references use `arn:${AWS::Partition}:` instead of `arn:aws:` to work in both commercial and GovCloud regions
-2. **Service Compatibility**: Removes services not available in GovCloud (AppSync, CloudFront, WAF, Cognito UI components)
+2. **Service Compatibility**: Removes services not available in GovCloud. `--govcloud` removes CloudFront and Lambda Function URLs (and forces API Gateway UI hosting); `--headless` additionally removes the entire UI, AppSync, Cognito UI components, and WAF.
+
+> **Chat is unavailable with `--govcloud`.** Both the agent chat and
+> document-chat features stream their responses over a **Lambda Function URL**,
+> which does not exist in GovCloud (and the codebase has no non-streaming chat
+> transport). `--govcloud` therefore removes that Function URL, and the **chat
+> features are disabled** in GovCloud. Everything else in the UI (document
+> processing, extraction, evaluation, Test Studio, discovery, knowledge base,
+> configuration) works normally.
 
 For details on what services are removed vs. retained, see [GovCloud Architecture](./govcloud-architecture.md).
 
@@ -121,11 +142,14 @@ The `--govcloud` flag transforms the template to:
 - Remove every `AWS::CloudFront::*` resource and force `WebUIHosting=APIGateway`,
   so the Web UI is served as an S3 proxy on the same REST API that backs it (see
   [API Gateway Hosting](./apigateway-hosting.md)).
-- Remove the `AWS::Lambda::Url` resource (the chat-streaming Function URL) and
-  its permission, since [Lambda Function URLs are not available in GovCloud](https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/govcloud-lambda.html).
-  The UI degrades gracefully — the **agent chat streaming** feature is
-  unavailable in GovCloud; everything else (document processing, extraction,
-  evaluation, Test Studio, discovery) works normally.
+- Remove the `AWS::Lambda::Url` resource (the chat streaming endpoint) and its
+  permission, since [Lambda Function URLs are not available in GovCloud](https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/govcloud-lambda.html).
+  The agent-chat and document-chat features deliver responses **only** over this
+  Function URL (there is no non-streaming chat transport in the codebase), so
+  **chat is disabled** in GovCloud. Everything else in the UI — document
+  processing, extraction, evaluation, Test Studio, discovery, knowledge base,
+  configuration — works normally. Sending a chat message in a `--govcloud`
+  deployment surfaces a "stream URL not configured" error in the chat panel.
 
 The rest of the UI (Cognito, the REST API, WAF) is retained.
 
