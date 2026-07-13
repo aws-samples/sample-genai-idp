@@ -8291,6 +8291,14 @@ Resources:
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     DependsOn: ExternalIdentityProviderReady
+    # MAINTENANCE NOTE: In APIGateway hosting mode the WebUIClientOAuthUrls custom
+    # resource does a read-modify-write of this client (to add the execute-api
+    # CallbackURLs/LogoutURLs post-deploy — see that resource). Its Lambda
+    # preserves a fixed list of this client's writable properties when calling
+    # UpdateUserPoolClient. If you add a new writable property here (e.g.
+    # AuthSessionValidity, AnalyticsConfiguration), also add it to that Lambda's
+    # preserve list (WebUIClientOAuthUrlsFunction InlineCode), or the custom
+    # resource will silently reset it on update.
     Properties:
       ClientName: !Sub "${AWS::StackName}-Client"
       AllowedOAuthFlows:
@@ -8512,6 +8520,15 @@ Resources:
       UserPoolClientId: !Ref UserPoolClient
       # HttpApiEndpoint is ".../api"; the SPA is served at that path.
       WebUIBaseUrl: !GetAtt APIRESOLVERSTACK.Outputs.HttpApiEndpoint
+      # Drift guard: UserPoolClient declaratively owns CallbackURLs/LogoutURLs
+      # (which in APIGateway mode contain only the localhost placeholder), while
+      # this custom resource merges in the execute-api URLs. If UserPoolClient is
+      # re-materialized on a later stack update, CloudFormation would reset its
+      # URL lists back to the placeholder. Changing this property on every
+      # publish (BUILD_DATE_TIME is substituted at build time) forces the custom
+      # resource to re-run on each deploy, so it re-applies the execute-api URLs
+      # (its read-modify-write is idempotent and always removes the placeholder).
+      Rerun: "<BUILD_DATE_TIME>"
 
   ##########################################################################
   # External Identity Provider (SAML/OIDC Federation)
@@ -10107,6 +10124,13 @@ Resources:
             Principal:
               Service: !Sub "apigateway.${AWS::URLSuffix}"
             Action: sts:AssumeRole
+            # Confused-deputy guard: only API Gateway in THIS account may assume
+            # the role (the role can only read this one private bucket, so the
+            # blast radius is already tiny, but this matches the hardening used
+            # elsewhere in the template).
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
       PermissionsBoundary:
         !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Policies:
