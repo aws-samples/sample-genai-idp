@@ -16,9 +16,11 @@ export interface AppContextValue {
   authState: string;
   awsConfig: Record<string, unknown> | undefined;
   errorMessage: string | undefined;
+  successMessage: string | undefined;
   currentCredentials: unknown;
   currentSession: unknown;
   setErrorMessage: React.Dispatch<React.SetStateAction<string | undefined>>;
+  setSuccessMessage: React.Dispatch<React.SetStateAction<string | undefined>>;
   user: AuthUser | undefined;
   navigationOpen: boolean;
   setNavigationOpen: React.Dispatch<React.SetStateAction<boolean>>;

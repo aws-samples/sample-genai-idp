@@ -75,17 +75,30 @@ Parameters:
   # Use scripts/check-vpc-endpoints.sh to auto-detect and generate the correct deploy command.
   # ──────────────────────────────────────────────────────────
 
-  CreateAppSyncApiEndpoint:
+  CreateExecuteApiEndpoint:
     Type: String
     Default: "true"
     AllowedValues: ["true", "false"]
-    Description: Create the appsync-api Interface endpoint. Set to "false" if already exists.
+    Description: >-
+      Create the execute-api Interface endpoint. Required when the IDP stack is
+      deployed with ApiGatewayVisibility=PRIVATE (the private REST API — which
+      also serves the Web UI when WebUIHosting=APIGateway — is reachable only via
+      this endpoint). Set to "false" if it already exists.
+
+  CreateAppSyncApiEndpoint:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      DEPRECATED (AppSync removed; the UI/API transport is now a REST API — see
+      CreateExecuteApiEndpoint). Left for backward compatibility; defaults off.
 
   CreateAppSyncControlEndpoint:
     Type: String
-    Default: "true"
+    Default: "false"
     AllowedValues: ["true", "false"]
-    Description: Create the appsync (control plane) Interface endpoint. Set to "false" if already exists.
+    Description: >-
+      DEPRECATED (AppSync removed). Left for backward compatibility; defaults off.
 
   CreateSqsEndpoint:
     Type: String
@@ -198,6 +211,7 @@ Parameters:
 Conditions:
   CreateGatewayEndpoints: !Not
     - !Equals [ !Join [ "", !Ref RouteTableIds ], "" ]
+  ShouldCreateExecuteApiEndpoint: !Equals [ !Ref CreateExecuteApiEndpoint, "true" ]
   ShouldCreateAppSyncApiEndpoint: !Equals [ !Ref CreateAppSyncApiEndpoint, "true" ]
   ShouldCreateAppSyncControlEndpoint: !Equals [ !Ref CreateAppSyncControlEndpoint, "true" ]
   ShouldCreateSqsEndpoint: !Equals [ !Ref CreateSqsEndpoint, "true" ]
@@ -224,8 +238,8 @@ Resources:
   # Allows inbound HTTPS (443) from:
   #   1. The Lambda security group (Lambda → AWS service calls)
   #   2. The VPC CIDR (browser clients inside the VPC — WorkSpaces, VPN,
-  #      bastion — making direct AppSync GraphQL requests to the Interface
-  #      Endpoint without going through the ALB)
+  #      bastion — reaching the private REST API / Web UI via the execute-api
+  #      Interface Endpoint)
   ##########################################################################
 
   VpcEndpointSecurityGroup:
@@ -243,7 +257,7 @@ Resources:
           FromPort: 443
           ToPort: 443
           CidrIp: !Ref VpcCidr
-          Description: "Allow HTTPS from VPC clients (WorkSpaces, VPN, bastion) for browser AppSync access"
+          Description: "Allow HTTPS from VPC clients (WorkSpaces, VPN, bastion) reaching the private REST API / Web UI"
       Tags:
         - Key: Name
           Value: !Sub "${IDPStackName}-vpc-endpoints-sg"
@@ -256,8 +270,8 @@ Resources:
 
   # Egress rule on the Lambda SG allowing it to reach these VPC endpoints.
   # Required when the Lambda SG does not have a default 0.0.0.0/0 egress
-  # (e.g. in hardened private-mode deployments where the ALB stack's
-  # LambdaToEndpointEgress is the only egress rule present).
+  # (e.g. in hardened private-mode deployments where a restrictive egress rule
+  # is the only one present).
   LambdaToVpcEndpointsEgress:
     Type: AWS::EC2::SecurityGroupEgress
     Properties:
@@ -271,6 +285,29 @@ Resources:
   ##########################################################################
   # AppSync Endpoints
   ##########################################################################
+
+  # execute-api endpoint — required for ApiGatewayVisibility=PRIVATE. The
+  # private REST API (and the Web UI, when WebUIHosting=APIGateway) is reachable
+  # only through this endpoint. PrivateDnsEnabled makes the regional execute-api
+  # hostname resolve to it inside the VPC.
+  ExecuteApiVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: ShouldCreateExecuteApiEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.execute-api"
+      VpcEndpointType: Interface
+      SubnetIds: !Ref SubnetIds
+      SecurityGroupIds:
+        - !Ref VpcEndpointSecurityGroup
+      PrivateDnsEnabled: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${IDPStackName}-execute-api"
+        - Key: IDPStack
+          Value: !Ref IDPStackName
+        - Key: Environment
+          Value: !Ref EnvironmentTag
 
   AppSyncApiVpcEndpoint:
     Type: AWS::EC2::VPCEndpoint

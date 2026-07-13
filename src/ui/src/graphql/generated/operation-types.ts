@@ -981,6 +981,7 @@ export type MutationStartMultiDocDiscoveryArgs = {
   configVersion: Scalars['String']['input'];
   s3Bucket?: InputMaybe<Scalars['String']['input']>;
   s3Prefix?: InputMaybe<Scalars['String']['input']>;
+  saveMode?: InputMaybe<Scalars['String']['input']>;
   zipFileName?: InputMaybe<Scalars['String']['input']>;
   zipFileSize?: InputMaybe<Scalars['Int']['input']>;
 };
@@ -1126,6 +1127,7 @@ export type MutationUploadDiscoveryDocumentArgs = {
   pageLabels?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
   pageRanges?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
   prefix?: InputMaybe<Scalars['String']['input']>;
+  saveMode?: InputMaybe<Scalars['String']['input']>;
   skipJobCreation?: InputMaybe<Scalars['Boolean']['input']>;
   version?: InputMaybe<Scalars['String']['input']>;
 };
@@ -1247,6 +1249,7 @@ export type Query = {
   getModelConfigLimits?: Maybe<ModelConfigLimitsResponse>;
   getMyProfile?: Maybe<User>;
   getPricing?: Maybe<PricingResponse>;
+  getSampleDocumentUrl?: Maybe<SampleDocumentUrl>;
   getStepFunctionExecution?: Maybe<StepFunctionExecutionResponse>;
   getTestRun?: Maybe<TestRun>;
   getTestRunStatus?: Maybe<TestRunStatus>;
@@ -1374,6 +1377,11 @@ export type QueryGetFilePresignedUrlArgs = {
 
 export type QueryGetFinetuningJobArgs = {
   jobId: Scalars['ID']['input'];
+};
+
+
+export type QueryGetSampleDocumentUrlArgs = {
+  s3Key: Scalars['String']['input'];
 };
 
 
@@ -1543,6 +1551,11 @@ export type SampleDocumentUploadResponse = {
   error?: Maybe<Scalars['String']['output']>;
   objectKeys?: Maybe<Array<Maybe<Scalars['String']['output']>>>;
   success: Scalars['Boolean']['output'];
+};
+
+export type SampleDocumentUrl = {
+  s3Key: Scalars['String']['output'];
+  url: Scalars['String']['output'];
 };
 
 export type Section = {
@@ -2110,6 +2123,7 @@ export type StartMultiDocDiscoveryMutationVariables = Exact<{
   configVersion: Scalars['String']['input'];
   zipFileName?: InputMaybe<Scalars['String']['input']>;
   zipFileSize?: InputMaybe<Scalars['Int']['input']>;
+  saveMode?: InputMaybe<Scalars['String']['input']>;
 }>;
 
 
@@ -2190,6 +2204,7 @@ export type UploadDiscoveryDocumentMutationVariables = Exact<{
   pageLabels?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>> | InputMaybe<Scalars['String']['input']>>;
   skipJobCreation?: InputMaybe<Scalars['Boolean']['input']>;
   discoveryType?: InputMaybe<Scalars['String']['input']>;
+  saveMode?: InputMaybe<Scalars['String']['input']>;
 }>;
 
 
@@ -2352,6 +2367,13 @@ export type GetPricingQueryVariables = Exact<{ [key: string]: never; }>;
 
 
 export type GetPricingQuery = { getPricing?: { success: boolean, pricing?: string | null, defaultPricing?: string | null, error?: { type?: string | null, message?: string | null } | null } | null };
+
+export type GetSampleDocumentUrlQueryVariables = Exact<{
+  s3Key: Scalars['String']['input'];
+}>;
+
+
+export type GetSampleDocumentUrlQuery = { getSampleDocumentUrl?: { url: string, s3Key: string } | null };
 
 export type GetStepFunctionExecutionQueryVariables = Exact<{
   executionArn: Scalars['String']['input'];

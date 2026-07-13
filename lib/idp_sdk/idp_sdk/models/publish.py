@@ -24,6 +24,14 @@ class PublishResult(BaseModel):
     headless_template_url: Optional[str] = Field(
         default=None, description="S3 URL of the headless template (if --headless)"
     )
+    govcloud_template_path: Optional[str] = Field(
+        default=None,
+        description="Local path to the GovCloud (CloudFront-free) template (if --govcloud)",
+    )
+    govcloud_template_url: Optional[str] = Field(
+        default=None,
+        description="S3 URL of the GovCloud (CloudFront-free) template (if --govcloud)",
+    )
     bucket: Optional[str] = Field(
         default=None, description="S3 bucket name used for artifacts"
     )

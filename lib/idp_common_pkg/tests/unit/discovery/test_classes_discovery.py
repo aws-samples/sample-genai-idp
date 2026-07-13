@@ -203,6 +203,45 @@ class TestClassesDiscovery:
             # Verify BedrockClient was initialized with correct region
             mock_bedrock_client.assert_called_once_with(region="us-west-2")
 
+    def test_init_target_version_missing_falls_back_to_active(self, mock_config):
+        """A not-yet-created target version (e.g. a fresh 'quickstart') must not
+        fail init: load the active/default config for discovery settings while
+        keeping the target version as the write target."""
+        with (
+            patch("boto3.resource"),
+            patch("idp_common.bedrock.BedrockClient"),
+            patch(
+                "idp_common.discovery.classes_discovery.ConfigurationReader"
+            ) as mock_config_reader,
+            patch("idp_common.discovery.classes_discovery.ConfigurationManager"),
+            patch.dict("os.environ", {"CONFIGURATION_TABLE_NAME": "test-config-table"}),
+        ):
+            mock_reader_instance = mock_config_reader.return_value
+            # version="quickstart" doesn't exist yet -> ValueError; the None
+            # (active/default) fallback then succeeds.
+            mock_reader_instance.get_merged_configuration.side_effect = [
+                ValueError("No Version quickstart configuration found"),
+                mock_config,
+            ]
+
+            service = ClassesDiscovery(
+                input_bucket="test-bucket",
+                input_prefix="test-document.pdf",
+                region="us-west-2",
+                version="quickstart",
+            )
+
+            # Write target is preserved so the class is saved into quickstart.
+            assert service.version == "quickstart"
+            # Settings came from the fallback (active/default) config.
+            assert (
+                service.without_gt_config.model_id
+                == "anthropic.claude-3-sonnet-20240229-v1:0"
+            )
+            calls = mock_reader_instance.get_merged_configuration.call_args_list
+            assert calls[0].kwargs["version"] == "quickstart"
+            assert calls[1].kwargs["version"] is None
+
     def test_init_with_default_region(self, mock_config):
         """Test initialization with default region from environment."""
         with (

@@ -4,51 +4,12 @@
 """Unit tests for synthesis.catalog (asset index + LLM matcher)."""
 
 import json
-import os
 from unittest.mock import Mock
 
 import pytest
 from idp_common.synthesis import catalog
 
 pytestmark = pytest.mark.unit
-
-
-def _write_generator_schema(root, name, title, description, with_sample=False):
-    sdir = os.path.join(root, name)
-    os.makedirs(sdir, exist_ok=True)
-    with open(os.path.join(sdir, "schema.json"), "w") as fh:
-        json.dump(
-            {
-                "$schema": "http://json-schema.org/draft-07/schema#",
-                "title": title,
-                "description": description,
-                "type": "object",
-                "properties": {"x": {"type": "string"}},
-            },
-            fh,
-        )
-    if with_sample:
-        samples = os.path.join(sdir, "samples")
-        os.makedirs(samples, exist_ok=True)
-        with open(os.path.join(samples, "ref.pdf"), "wb") as fh:
-            fh.write(b"%PDF-1.4 fake")
-
-
-class TestIndexGeneratorSchemas:
-    def test_indexes_schema_dirs_and_samples(self, tmp_path):
-        root = str(tmp_path)
-        _write_generator_schema(root, "invoice", "Invoice", "A commercial invoice")
-        _write_generator_schema(
-            root, "fcc-invoice", "FCC-Invoice", "An FCC invoice", with_sample=True
-        )
-        entries = catalog.index_generator_schemas(root)
-        assert {e.name for e in entries} == {"Invoice", "FCC-Invoice"}
-        fcc = next(e for e in entries if e.name == "FCC-Invoice")
-        assert len(fcc.sample_pdfs) == 1
-        assert fcc.source == "generator"
-
-    def test_missing_root_is_empty(self):
-        assert catalog.index_generator_schemas("/no/such/dir") == []
 
 
 class TestIndexConfigClasses:
@@ -70,16 +31,17 @@ class TestIndexConfigClasses:
 
 
 class TestBuildCatalog:
-    def test_combines_both_sources(self, tmp_path):
-        root = str(tmp_path)
-        _write_generator_schema(root, "invoice", "Invoice", "An invoice")
+    def test_indexes_config_classes(self):
         entries = catalog.build_catalog(
-            generator_schemas_root=root,
             config_classes=[
                 {"x-aws-idp-document-type": "W2", "description": "Tax form"}
             ],
         )
-        assert {e.source for e in entries} == {"generator", "config"}
+        assert {e.source for e in entries} == {"config"}
+        assert entries[0].name == "W2"
+
+    def test_empty_when_no_classes(self):
+        assert catalog.build_catalog() == []
 
 
 class TestMatchCatalog:

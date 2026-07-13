@@ -1,1 +1,0 @@
-{"gen": "bank_statement", "rows": 5, "cols": 3, "lists": 1, "desc_len": "short", "ocr_noise": 0.0, "fields": {"Account Number": "000123456789", "Statement Period": "01/01/2024 - 12/31/2024"}, "seq_ids": ["SEQ00000", "SEQ00001", "SEQ00002", "SEQ00003", "SEQ00004"], "per_list": null, "list_key": "Transactions"}

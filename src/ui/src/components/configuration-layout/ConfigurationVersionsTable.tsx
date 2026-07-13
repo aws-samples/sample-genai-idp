@@ -15,6 +15,7 @@ import {
   Badge,
   SegmentedControl,
   CollectionPreferences,
+  Modal,
 } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 
@@ -42,6 +43,13 @@ interface ConfigurationVersionsTableProps {
 }
 
 type TypeFilter = 'all' | 'managed' | 'custom';
+
+// One-line explanations shown on hover for the version Type/state badges.
+const BADGE_TOOLTIPS = {
+  managed: 'Stack-managed: shipped with the solution and overwritten on stack updates; not directly editable.',
+  custom: 'Custom: a user-created version you can freely edit, save, and delete.',
+  active: 'Active: the version used to process newly uploaded documents.',
+};
 
 const PAGE_SIZE_OPTIONS = [
   { value: 5, label: '5 versions' },
@@ -80,6 +88,8 @@ const ConfigurationVersionsTable = ({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [preferences, setPreferences] = useState(DEFAULT_PREFERENCES);
+  // Versions confirmed for deletion (drives the confirmation modal).
+  const [pendingDeleteVersions, setPendingDeleteVersions] = useState<string[] | null>(null);
 
   // Helper: treat both managed flag and 'default' version as managed
   const isVersionManaged = (v: ConfigVersion): boolean => v.managed === true || v.versionName === 'default';
@@ -96,38 +106,6 @@ const ConfigurationVersionsTable = ({
   const customCount = useMemo(() => versions.filter((v) => !isVersionManaged(v)).length, [versions]);
 
   const allColumnDefinitions = [
-    {
-      id: 'select',
-      header: (
-        <input
-          type="checkbox"
-          checked={selectedVersionsForCompare.length === filteredByType.length && filteredByType.length > 0}
-          onChange={(e) => {
-            if (e.target.checked) {
-              const allVersionNames = filteredByType.map((v) => v.versionName);
-              allVersionNames.forEach((versionName) => {
-                if (!selectedVersionsForCompare.includes(versionName)) {
-                  onVersionSelectForCompare?.(versionName, true);
-                }
-              });
-            } else {
-              selectedVersionsForCompare.forEach((versionName) => {
-                onVersionSelectForCompare?.(versionName, false);
-              });
-            }
-          }}
-          title="Select/Deselect All"
-        />
-      ),
-      cell: (item: ConfigVersion) => (
-        <input
-          type="checkbox"
-          checked={selectedVersionsForCompare.includes(item.versionName)}
-          onChange={(e) => onVersionSelectForCompare?.(item.versionName, e.target.checked)}
-        />
-      ),
-      width: 50,
-    },
     {
       id: 'versionName',
       header: 'Version Name',
@@ -155,8 +133,20 @@ const ConfigurationVersionsTable = ({
       header: 'Type',
       cell: (item: ConfigVersion) => (
         <SpaceBetween direction="horizontal" size="xxs">
-          {isVersionManaged(item) ? <Badge color="blue">Managed</Badge> : <Badge color="grey">Custom</Badge>}
-          {item.isActive && <Badge color="green">Active</Badge>}
+          {isVersionManaged(item) ? (
+            <span title={BADGE_TOOLTIPS.managed}>
+              <Badge color="blue">Managed</Badge>
+            </span>
+          ) : (
+            <span title={BADGE_TOOLTIPS.custom}>
+              <Badge color="grey">Custom</Badge>
+            </span>
+          )}
+          {item.isActive && (
+            <span title={BADGE_TOOLTIPS.active}>
+              <Badge color="green">Active</Badge>
+            </span>
+          )}
         </SpaceBetween>
       ),
       sortingComparator: (a: ConfigVersion, b: ConfigVersion) => {
@@ -188,9 +178,16 @@ const ConfigurationVersionsTable = ({
     },
   ];
 
-  // Filter column definitions based on visible content preferences
-  // Always include the select column, then only show columns the user has enabled
-  const columnDefinitions = allColumnDefinitions.filter((col) => col.id === 'select' || preferences.visibleContent.includes(col.id));
+  // Filter column definitions based on visible content preferences.
+  // (Row selection is handled by the Table's native selectionType, not a column.)
+  const columnDefinitions = allColumnDefinitions.filter((col) => preferences.visibleContent.includes(col.id));
+
+  // Map the parent's selectedVersionsForCompare (names) to the item objects the
+  // Cloudscape Table expects for controlled multi-selection.
+  const selectedItems = useMemo(
+    () => filteredByType.filter((v) => selectedVersionsForCompare.includes(v.versionName)),
+    [filteredByType, selectedVersionsForCompare],
+  );
 
   const { items, collectionProps, paginationProps, filteredItemsCount, filterProps } = useCollection(filteredByType, {
     pagination: { pageSize: preferences.pageSize },
@@ -239,6 +236,26 @@ const ConfigurationVersionsTable = ({
         loadingText="Loading versions..."
         resizableColumns
         stripedRows
+        selectionType="multi"
+        selectedItems={selectedItems}
+        onSelectionChange={({ detail }) => {
+          const newNames = detail.selectedItems.map((v) => v.versionName);
+          // Diff against current selection and emit per-item toggles so the
+          // parent's existing handler contract is preserved.
+          filteredByType.forEach((v) => {
+            const wasSelected = selectedVersionsForCompare.includes(v.versionName);
+            const isSelected = newNames.includes(v.versionName);
+            if (wasSelected !== isSelected) {
+              onVersionSelectForCompare?.(v.versionName, isSelected);
+            }
+          });
+        }}
+        trackBy="versionName"
+        ariaLabels={{
+          selectionGroupLabel: 'Version selection',
+          allItemsSelectionLabel: () => 'Select all versions',
+          itemSelectionLabel: (_sel, item) => `Select version ${item.versionName}`,
+        }}
         wrapLines={preferences.wrapLines}
         empty={
           <Box margin={{ vertical: 'xs' }} textAlign="center" color="inherit">
@@ -294,7 +311,8 @@ const ConfigurationVersionsTable = ({
                   }
 
                   setDeleteError(null);
-                  onDeleteVersions?.(selectedVersionsForCompare);
+                  // Confirm before the destructive delete (S5).
+                  setPendingDeleteVersions(selectedVersionsForCompare);
                 }}
                 disabled={selectedVersionsForCompare.length === 0}
               >
@@ -351,6 +369,48 @@ const ConfigurationVersionsTable = ({
           />
         }
       />
+
+      {/* Delete confirmation (S5): destructive delete requires explicit confirm. */}
+      <Modal
+        visible={!!pendingDeleteVersions}
+        onDismiss={() => setPendingDeleteVersions(null)}
+        header="Delete configuration versions"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={() => setPendingDeleteVersions(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  if (pendingDeleteVersions) {
+                    onDeleteVersions?.(pendingDeleteVersions);
+                  }
+                  setPendingDeleteVersions(null);
+                }}
+              >
+                Delete
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="s">
+          <Box>
+            {pendingDeleteVersions && pendingDeleteVersions.length === 1
+              ? `Permanently delete the configuration version "${pendingDeleteVersions[0]}"? This action cannot be undone.`
+              : `Permanently delete these ${pendingDeleteVersions?.length ?? 0} configuration versions? This action cannot be undone.`}
+          </Box>
+          {pendingDeleteVersions && pendingDeleteVersions.length > 1 && (
+            <ul>
+              {pendingDeleteVersions.map((name) => (
+                <li key={name}>{name}</li>
+              ))}
+            </ul>
+          )}
+        </SpaceBetween>
+      </Modal>
     </SpaceBetween>
   );
 };

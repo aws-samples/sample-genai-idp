@@ -24,7 +24,7 @@ This document outlines the AWS services used by the GenAI Intelligent Document P
 | **Amazon SQS** | Queues documents for processing and handles throttling | ✓ | ✓ |
 | **Amazon EventBridge** | Triggers document processing workflows when files are uploaded | ✓ | ✓ |
 | **Amazon CloudFront** | Delivers the web UI with global distribution (default hosting mode) | ✓ | ✓ |
-| **Elastic Load Balancing (ALB)** | Alternative web UI hosting via Application Load Balancer for VPC-based deployments (see [ALB Hosting](./alb-hosting.md)) | ✓ | ✓ |
+| **Amazon API Gateway** | Backs the web UI's data API, and can alternatively serve the web UI itself (S3 proxy) for VPC-based deployments (see [API Gateway Hosting](./apigateway-hosting.md)) | ✓ | ✓ |
 | **Amazon ECR** | Stores container images for the pattern processing Lambda functions (OCR, classification, extraction, etc., which are deployed as container images) | ✓ | ✓ |
 | **AWS CloudFormation** | Deploys and manages the solution infrastructure | ✓ | |
 | **AWS SAM** | Simplifies serverless application deployment | ✓ | |
@@ -177,6 +177,10 @@ The solution creates various IAM roles to run different components of the system
   * `s3:GetObject`, `s3:PutObject`, `s3:ListBucket`
   * `lambda:InvokeFunction`
 
+* **API Gateway CloudWatch Logging Role** (created when `LogLevel` is `INFO` or `DEBUG`):
+  * Managed policy `AmazonAPIGatewayPushToCloudWatchLogs` (assumed by `apigateway.amazonaws.com`)
+  * Registered as the account-level API Gateway CloudWatch role (`AWS::ApiGateway::Account`) to enable REST API stage access logging. This setting is per account per region and is retained on stack deletion so other stacks' logging keeps working.
+
 * **Cognito Authentication Role**:
   * `appsync:GraphQL`
   * `s3:GetObject` (for UI assets and buckets)
@@ -266,7 +270,7 @@ When deploying this solution, consider the following security best practices:
    * Enable encryption for DynamoDB tables
 
 2. **Network Security**:
-   * Use CloudFront security features (geo-restrictions, HTTPS, etc.) or ALB security groups for [VPC-based hosting](./alb-hosting.md)
+   * Use CloudFront security features (geo-restrictions, HTTPS, etc.) or a private API Gateway endpoint for [VPC-based hosting](./apigateway-hosting.md)
    * Configure AWS WAF to protect web interfaces
 
 3. **Authentication**:

@@ -30,11 +30,16 @@ benchmarks/
     aggregate.py             – roll runs into results tables + compare to a baseline
     lib.py                   – shared: pricing, DDB metering, S3, GT matching
   results/
-    <release>/               – committed per-release results (JSON + CSV + summary)
-    baseline.json            – the reference release results for regression comparison
+    <release>/               – committed per-release results (JSON + CSV + summary + meta)
+    baseline.json            – the reference (previous published release) for regression comparison
   paper/
-    BENCHMARK_PAPER.md       – the results paper (text/tables/figures)
-    figures/                 – generated charts
+    README.md                – pointer: papers now live in docs/benchmarking/ (single source)
+    figures/                 – harness scratch charts (aggregate.py --figures)
+
+Published papers (single source of truth) live under docs/benchmarking/:
+  docs/benchmarking/index.md            – how the suite works (this design guide)
+  docs/benchmarking/config-guidance.md  – "which config?" (evergreen, per release)
+  docs/benchmarking/releases/           – release-vs-release audit trail (one file per release)
 ```
 
 ## Quick start
@@ -46,9 +51,15 @@ python3 benchmarks/harness/gen_corpus.py
 # 2. run the matrix against a deployed stack (see METHODOLOGY for stack setup)
 AWS_PROFILE=default python3 benchmarks/harness/run_matrix.py --stack <STACK> --suite core
 # 3. score + aggregate
-AWS_PROFILE=default python3 benchmarks/harness/aggregate.py --run <run-dir> --out results/<release>
-# 4. (re)build the paper
-python3 benchmarks/harness/aggregate.py --paper
+AWS_PROFILE=default python3 benchmarks/harness/aggregate.py --run <run-dir> --out benchmarks/results/<release>
+# 4. figures (charts land in benchmarks/paper/figures/; copy cited ones into images/)
+python3 benchmarks/harness/aggregate.py --figures benchmarks/results/<release>/summary.json
+```
+
+**Per release cycle — one command** produces the release-vs-release audit-trail entry
+(deploy previous published release → run → upgrade to develop → run → compare → write doc):
+```bash
+make benchmark-release VERSION=0.6.0 PREV=0.5.16
 ```
 
 Or via the skill: `/run-benchmarks` (see `.claude/skills/run-benchmarks.md`).

@@ -1752,6 +1752,10 @@ STDERR:
                         "name": name,
                         "description": desc,
                         "s3Key": f"samples/{entry}/",
+                        # s3Key of each file in the batch (the folder prefix is
+                        # not openable; individual files are). Lets the agent
+                        # cite one representative document as a viewable example.
+                        "files": [f"samples/{entry}/{f}" for f in docs],
                         "kind": "batch",
                         "fileCount": len(docs),
                         "configId": config_id,
@@ -2746,9 +2750,6 @@ STDERR:
             "nested/bedrockkb": [
                 "nested/bedrockkb/src",
                 "nested/bedrockkb/template.yaml",
-            ],
-            "nested/alb-hosting": [
-                "nested/alb-hosting/template.yaml",
             ],
             "nested/multi-doc-discovery": [
                 LIB_DEPENDENCY,

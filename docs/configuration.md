@@ -52,8 +52,8 @@ For comprehensive documentation, see [configuration-versions.md](configuration-v
 
 ### Configuration Management Features
 
-- **Save Changes**: Save your current configuration changes. The button is **enabled only when you have unsaved changes** (comparing your edits against the last saved configuration). After a successful save, a confirmation banner is displayed.
-- **Unsaved Changes Indicator**: Individual fields with unsaved edits display an orange dot next to the field label, and an info banner with a "Discard changes" button appears when the configuration form has unsaved edits.
+- **Save Changes**: Save your current configuration changes. The button is **enabled only when you have unsaved changes** (comparing your edits against the last saved configuration); when it's disabled on a stack-managed version, hovering it explains why. After a successful save, a confirmation banner **and** a brief success toast (top-right notification area) are shown. Less-frequent actions (Export, Save as default, Restore default (All), Save as Version, and BDA sync) are grouped under an **Actions** menu next to Save changes.
+- **Unsaved Changes Indicator**: Individual fields with unsaved edits display an orange dot next to the field label, and an info banner with a "Discard changes" button appears when the configuration form has unsaved edits (shown on all versions, including the stack-managed `default`).
 - **Browser Navigation Guard**: The browser warns before leaving the page when unsaved configuration changes exist (both on browser close/refresh and SPA navigation).
 - **Save as Default**: Save your current version's configuration as the new default baseline. This replaces the existing default configuration. **Warning**: Default configurations may be overwritten during solution upgrades - export your configuration first for backup.
 - **Restore Default (All)**: Reset the current version's configuration back to the default values, replacing all customizations.
@@ -303,11 +303,11 @@ Key parameters that can be configured during CloudFormation deployment:
 - `DataRetentionInDays`: Set retention period for documents and tracking records (default: 365 days)
 - `ErrorThreshold`: Number of workflow errors that trigger alerts (default: 1)
 - `ExecutionTimeThresholdMs`: Maximum acceptable execution time before alerting (default: 30000 ms)
-- `LogLevel`: Set logging level (DEBUG, INFO, WARN, ERROR)
+- `LogLevel`: Set logging level (DEBUG, INFO, WARN, ERROR). At `INFO` or `DEBUG`, access logging is also enabled on the web UI's REST API stage (request metadata only — no request/response bodies), capturing requests that fail before reaching a Lambda (e.g. authorizer 401/403s, WAF blocks)
 - `WAFAllowedIPv4Ranges`: IP restrictions for web UI access (default: allow all)
 - `CloudFrontPriceClass`: Set CloudFront price class for UI distribution (CloudFront hosting only)
 - `CloudFrontAllowedGeos`: Optional geographic restrictions for UI access (CloudFront hosting only)
-- `WebUIHosting`: Select hosting mode — `CloudFront` (default) or `ALB` for VPC-based hosting (see [ALB Hosting](./alb-hosting.md))
+- `WebUIHosting`: Select hosting mode — `CloudFront` (default) or `APIGateway` for VPC-based hosting (see [API Gateway Hosting](./apigateway-hosting.md))
 - `CustomConfigPath`: Optional S3 URI to a custom configuration file that overrides pattern presets. Leave blank to use selected pattern configuration. Example: s3://my-bucket/custom-config/config.yaml
 
 ### Integration and Tracing Parameters

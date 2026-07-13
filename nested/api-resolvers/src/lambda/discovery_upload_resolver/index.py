@@ -32,6 +32,50 @@ dynamodb = boto3.resource('dynamodb')
 sfn_client = boto3.client('stepfunctions')
 
 
+def _clear_version_schema(version, discovery_type='classes'):
+    """Clear the discovered-schema list for a config version before discovery.
+
+    Implements the "Replace" save mode: rather than augmenting the version's
+    existing schema, we blank it out once here — up front, before any discovery
+    jobs are enqueued — so the subsequent per-job merges (which append/dedupe by
+    $id in ClassesDiscovery._merge_and_save_class) rebuild the list from scratch.
+
+    Clearing once in the resolver (not per job) is what makes Replace correct for
+    multi-section discovery, where a single submission spawns N jobs that each
+    merge one class into the same version.
+
+    - classes discovery clears ``classes``
+    - rules/policy discovery clears ``policy_classes``
+
+    A no-op if the version doesn't exist yet or has no config stored.
+    """
+    if not version:
+        return
+
+    key = 'policy_classes' if discovery_type == 'rules' else 'classes'
+    try:
+        from idp_common.config.configuration_manager import ConfigurationManager
+
+        config_manager = ConfigurationManager()
+        existing = config_manager.get_raw_configuration("Config", version=version) or {}
+        current = existing.get(key) or []
+        if not current:
+            logger.info(
+                f"Replace mode: version '{version}' has no '{key}' to clear — nothing to do"
+            )
+            return
+        logger.info(
+            f"Replace mode: clearing {len(current)} '{key}' entries from version '{version}'"
+        )
+        existing[key] = []
+        config_manager.save_raw_configuration("Config", existing, version=version)
+    except Exception as e:
+        # Surface the failure — silently augmenting when the user asked to
+        # replace would be worse than failing the request.
+        logger.error(f"Failed to clear '{key}' for version '{version}': {e}")
+        raise
+
+
 def _caller_in_groups(event, allowed):
     """Defense-in-depth RBAC check against the caller's Cognito groups.
 
@@ -134,6 +178,9 @@ def handle_upload_discovery_document(event, context):
         page_labels = arguments.get('pageLabels') or []
         skip_job_creation = arguments.get('skipJobCreation', False)
         discovery_type = arguments.get('discoveryType', 'classes')
+        # saveMode: 'replace' clears the version's discovered schema up front so
+        # discovery rebuilds it; 'augment' (default) keeps existing classes.
+        save_mode = arguments.get('saveMode') or 'augment'
 
         if not file_name:
             raise ValueError("fileName is required")
@@ -164,6 +211,11 @@ def handle_upload_discovery_document(event, context):
         # skipJobCreation=True is used by the auto-detect sections flow which only needs
         # a presigned URL to upload the document, without creating any discovery jobs.
         if not skip_job_creation:
+            # Replace mode: clear the target version's schema ONCE, before
+            # enqueuing any jobs, so a multi-section submission (N jobs) rebuilds
+            # the class list from scratch rather than each job clobbering the last.
+            if save_mode == 'replace':
+                _clear_version_schema(version, discovery_type=discovery_type)
             if page_ranges and len(page_ranges) > 0:
                 logger.info(f"Creating {len(page_ranges)} discovery jobs for page ranges: {page_ranges}")
                 for i, page_range in enumerate(page_ranges):
@@ -335,12 +387,19 @@ def handle_start_multi_doc_discovery(event, context):
     config_version = arguments.get('configVersion')
     zip_file_name = arguments.get('zipFileName')
     zip_file_size = arguments.get('zipFileSize')
+    save_mode = arguments.get('saveMode') or 'augment'
 
     if not config_version:
         raise ValueError("configVersion is required")
 
     if not s3_bucket and not zip_file_name:
         raise ValueError("Either s3Bucket/s3Prefix or zipFileName is required")
+
+    # Replace mode: clear the version's classes before the Step Functions
+    # pipeline runs, so the Save step (which merges each discovered class via
+    # ClassesDiscovery._merge_and_save_class) rebuilds the list from scratch.
+    if save_mode == 'replace':
+        _clear_version_schema(config_version, discovery_type='classes')
 
     job_id = str(uuid.uuid4())
     bucket = s3_bucket or os.environ.get('DISCOVERY_BUCKET', '')

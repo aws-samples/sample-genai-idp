@@ -176,6 +176,29 @@ check-arn-partitions: ## Check CloudFormation templates for hardcoded ARN partit
 				echo -e "$(YELLOW)  Example: 'lambda.amazonaws.com' should be 'lambda.\$${AWS::URLSuffix}'$(NC)"; \
 				FOUND_ISSUES=1; \
 			fi; \
+			CONSOLE_MATCHES=$$(grep -n "console\.aws\.amazon\.com\|s3\.console\.aws\.amazon\.com" "$$template" | grep -v "^[0-9]*:[[:space:]]*#" | grep -v "Domain:" | grep -v "Description:" | grep -v "Comment:" || true); \
+			if [ -n "$$CONSOLE_MATCHES" ]; then \
+				echo -e "$(RED)ERROR: Found hardcoded AWS console domain references in $$template:$(NC)"; \
+				echo "$$CONSOLE_MATCHES" | sed 's/^/  /'; \
+				echo -e "$(YELLOW)  Console URLs must be partition-aware for GovCloud (console.amazonaws-us-gov.com).$(NC)"; \
+				echo -e "$(YELLOW)  Use !FindInMap [ConsoleDomainMap, !Ref \"AWS::Partition\", Domain] and the$(NC)"; \
+				echo -e "$(YELLOW)  regional host form 'https://\$${AWS::Region}.\$${ConsoleDomain}/...' (works for S3 too).$(NC)"; \
+				FOUND_ISSUES=1; \
+			fi; \
+		fi; \
+	done; \
+	for asl in patterns/*/statemachine/*.asl.json options/*/statemachine/*.asl.json feature-platform/*/statemachine/*.asl.json; do \
+		if [ -f "$$asl" ]; then \
+			echo "Checking $$asl..."; \
+			ASL_MATCHES=$$(grep -n "arn:aws:" "$$asl" | grep -v "arn:\$${Partition}:" || true); \
+			if [ -n "$$ASL_MATCHES" ]; then \
+				echo -e "$(RED)ERROR: Found hardcoded 'arn:aws:' references in $$asl:$(NC)"; \
+				echo "$$ASL_MATCHES" | sed 's/^/  /'; \
+				echo -e "$(YELLOW)  State-machine ASL uses DefinitionSubstitutions, so these should use$(NC)"; \
+				echo -e "$(YELLOW)  'arn:\$${Partition}:' (add 'Partition: !Ref AWS::Partition' to$(NC)"; \
+				echo -e "$(YELLOW)  DefinitionSubstitutions). Hardcoded 'aws' breaks Step Functions in GovCloud.$(NC)"; \
+				FOUND_ISSUES=1; \
+			fi; \
 		fi; \
 	done; \
 	if [ $$FOUND_ISSUES -eq 0 ]; then \
@@ -524,3 +547,26 @@ endif
 		$(if $(NO_WAIT),,--wait) \
 		$(EXTRA_ARGS)
 
+
+##@ Benchmarking
+
+.PHONY: benchmark-release
+# The release-cycle benchmark is skill-driven (it needs judgment: cross-version config
+# compatibility, corefast scoping, failure honesty). This target is a thin wrapper that
+# invokes Claude Code to run the `run-benchmarks` skill for a prev-published-vs-develop
+# comparison, producing docs/benchmarking/releases/v<VERSION>.md.
+#
+# Usage:
+#   make benchmark-release VERSION=0.6.0 PREV=0.5.16
+#   make benchmark-release VERSION=0.6.0 PREV=0.5.16 STACK_NAME=idpbench0516   # reuse a stack
+benchmark-release: ## Run the release-vs-release benchmark audit trail (Usage: make benchmark-release VERSION=... PREV=... [STACK_NAME=...])
+ifndef VERSION
+	$(error VERSION is not set. Usage: make benchmark-release VERSION=0.6.0 PREV=0.5.16)
+endif
+ifndef PREV
+	$(error PREV is not set (previous PUBLISHED release). Usage: make benchmark-release VERSION=0.6.0 PREV=0.5.16)
+endif
+	@command -v claude >/dev/null 2>&1 || { echo -e "$(RED)claude CLI not found. Run the 'run-benchmarks' skill manually (see .claude/skills/run-benchmarks.md).$(NC)"; exit 1; }
+	@echo -e "$(CYAN)Invoking Claude Code to run the release benchmark (v$(PREV) published -> v$(VERSION) develop)...$(NC)"
+	@echo -e "$(YELLOW)This deploys/upgrades a real stack and runs live Bedrock jobs (~1-2h, costs \$$). Ctrl-C to abort.$(NC)"
+	claude --dangerously-skip-permissions -p "Use the run-benchmarks skill to produce the release-cycle audit-trail entry comparing the previous PUBLISHED release v$(PREV) to the current develop prerelease v$(VERSION). Follow the skill's 'Release-cycle audit trail' procedure end to end: deploy the published v$(PREV) template$(if $(STACK_NAME), (reuse stack $(STACK_NAME))), run the corefast suite with --native-upload, save + promote baseline, upgrade the SAME stack in place to develop via --from-code --clean-build, re-run corefast, aggregate + compare + figures, then write docs/benchmarking/releases/v$(VERSION).md and append a row to docs/benchmarking/releases/README.md. Work autonomously and report the deltas."

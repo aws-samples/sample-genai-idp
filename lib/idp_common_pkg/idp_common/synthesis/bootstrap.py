@@ -34,7 +34,6 @@ class BootstrapRequest:
     augment: bool = False
     model_id: Optional[str] = None
     example_doc_keys: List[str] = field(default_factory=list)
-    generator_schemas_root: Optional[str] = None
 
 
 @dataclass
@@ -68,10 +67,7 @@ def resolve_schema(
         _report(10.0, "Example documents provided; use Discovery to infer schema")
         return None, "user_docs_pending", None
 
-    entries = catalog_mod.build_catalog(
-        generator_schemas_root=request.generator_schemas_root,
-        config_classes=config_classes,
-    )
+    entries = catalog_mod.build_catalog(config_classes=config_classes)
     seed_schema: Optional[Dict[str, Any]] = None
     matched_name: Optional[str] = None
     if entries:

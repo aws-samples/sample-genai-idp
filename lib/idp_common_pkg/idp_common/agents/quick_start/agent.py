@@ -11,8 +11,10 @@ import strands
 
 from ..common.strands_bedrock_model import create_strands_bedrock_model
 from .tools import (
+    activate_config_version,
     author_schema_from_prompt,
     create_config_version,
+    get_class_schema,
     list_available_extensions,
     list_config_versions,
     list_sample_documents,
@@ -38,12 +40,23 @@ Follow this flow:
    fields to the user in readable form and ask them to confirm or request
    changes. Use refine_schema to iterate. Schema authoring/refinement is cheap;
    iterate freely.
+   - Whenever you discuss or draft a document type (whether it came from a
+     catalog match or from scratch), ALSO call list_sample_documents and check
+     for a bundled sample of the SAME document type. If one exists, cite it as a
+     reference example with the <sampledoc> link tag (see "Example / sample
+     documents") so the user can open the real document. e.g. if the user asks
+     about driver licenses and a "California Driver License" sample exists, link
+     it. search_catalog matches the user's existing configs, NOT the bundled
+     samples, so you must check list_sample_documents separately to find one.
 4. When the user approves the schema, call create_config_version to create a
-   runnable config version. Tell them it is created but not activated. To view
-   or activate it, they go to Configuration > View/Edit Configuration in the
-   left navigation and pick the version by name from the version selector. Do
-   NOT invent other navigation paths or UI labels - if you are unsure where
-   something is, say so rather than guessing.
+   runnable config version, then call activate_config_version with that version
+   name so it becomes the active configuration and the user can start processing
+   documents right away without any manual steps. Confirm in plain language that
+   it is ready to use. If they later want to switch or review configurations,
+   they can go to Configuration > View/Edit Configuration in the left navigation
+   and pick a version by name from the version selector. Do NOT invent other
+   navigation paths or UI labels - if you are unsure where something is, say so
+   rather than guessing.
 5. The highest-fidelity way to improve a schema is to attach real example
    documents (see below), which run through Discovery. Suggest this when it
    would help.
@@ -56,6 +69,21 @@ Example / sample documents:
 - Starting from a sample feeds the same Discovery flow as an upload (infers a
   schema/config from the real document). Today, point the user to upload the
   sample or pick it in the UI; do not claim you can launch it directly.
+- To let the user OPEN a sample, cite it with this exact inline tag using an
+  s3Key from list_sample_documents:
+  <sampledoc s3key="SAMPLE_S3KEY">Sample Name</sampledoc>
+  The UI turns it into a link that opens the document. Only cite samples that
+  appear in list_sample_documents - never invent an s3Key.
+- ALWAYS use this link tag whenever you mention a sample by name - do not name a
+  sample in plain prose without linking it. This applies even when the sample is
+  only RELATED to (not an exact match for) the user's document type: if you tell
+  the user a sample "is similar" or "could be used as a reference", link it.
+- For a "document" entry, use its s3Key. For a "batch" entry, the top-level
+  s3Key is a folder (not openable) - instead link ONE representative file from
+  its "files" list as a viewable example, and describe the batch's size in
+  words. e.g. for a 20-file W-2 batch:
+  "W-2 Forms (batch of 20) - <sampledoc s3key="samples/w2/W2_0.pdf">view an
+  example</sampledoc>". When listing many samples, still link each one this way.
 
 Uploaded documents (highest-fidelity path):
 - The chat UI lets the user attach their own example documents. When they do,
@@ -70,9 +98,19 @@ Uploaded documents (highest-fidelity path):
   takes a few minutes. The results arrive as a separate message (below).
 - When you receive such an upload-result message, summarize the discovered
   document types clearly, note they were added to the configuration, and ask
-  whether the user wants to refine any of the schemas (use refine_schema).
+  whether the user wants to refine any of the schemas.
   Schemas inferred from real documents are higher fidelity than prompt-only
   drafts - prefer them when available.
+- IMPORTANT: Discovery saved its schema into a configuration version, but its
+  actual fields are NOT visible in this conversation (you did not author them).
+  So BEFORE you answer any question about the discovered fields ("is field X
+  included?", "what fields do we have?") OR refine them, you MUST first call
+  get_class_schema to read the real field list from that version. Do not guess
+  from a catalog template or your earlier draft - read the actual discovered
+  schema. The upload-result message names the version it saved to (and
+  list_config_versions shows versions + their class names). Then, to refine,
+  pass that schema as schema_text to refine_schema and save with
+  create_config_version into the SAME version.
 
 Scope (you are "Quick Start"):
 - You handle setup: schema authoring and config versions. A separate "Agent
@@ -113,7 +151,9 @@ def create_quick_start_agent(
         author_schema_from_prompt,
         refine_schema,
         create_config_version,
+        activate_config_version,
         list_config_versions,
+        get_class_schema,
         list_sample_documents,
         list_available_extensions,
     ]

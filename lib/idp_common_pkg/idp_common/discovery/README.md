@@ -113,6 +113,32 @@ result = discovery.discovery_classes_with_document(
 | `parse_page_range()` | Static method to parse page range strings (e.g., `"3-5"`) |
 | `extract_pdf_pages()` | Static method to extract a subset of pages from a PDF |
 
+## Saving Discovered Schema (Augment vs. Replace)
+
+When `save_to_config=True`, discovered classes are persisted to a target
+configuration version via `ClassesDiscovery._merge_and_save_class()`. This
+method is **always additive**: it reads the version's existing `classes`, keys
+them by `$id` (falling back to `x-aws-idp-document-type`), and inserts each newly
+discovered class — overwriting only a class with the same identifier. It never
+deletes classes the user curated.
+
+The UI's **Save mode** selector controls whether the target version's schema is
+cleared *before* discovery runs:
+
+| Save mode | Behavior |
+|-----------|----------|
+| `augment` (default) | Existing classes are kept; discovered classes are merged in (dedup by `$id`). |
+| `replace` | The target version's schema list is cleared **once, up front** in the discovery upload resolver, then discovery merges the new classes into the now-empty list. |
+
+Replace is implemented in the resolver
+(`nested/api-resolvers/src/lambda/discovery_upload_resolver/index.py`,
+`_clear_version_schema()`), **not** inside `_merge_and_save_class()`. Clearing
+once before enqueuing jobs is what makes Replace correct for multi-section and
+multi-document discovery, where a single submission produces *N* jobs that each
+merge one class into the same version — clearing per-job would leave only the
+last class. Class discovery clears `classes`; Policy Discovery clears
+`policy_classes`. All other config sections are preserved.
+
 ## Configuration
 
 Discovery uses configuration from DynamoDB (loaded via `get_config()`). Key settings:

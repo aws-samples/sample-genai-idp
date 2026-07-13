@@ -2,101 +2,172 @@
 title: "GovCloud Architecture"
 ---
 
+Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+SPDX-License-Identifier: MIT-0
+
 # GovCloud Architecture
 
-This document describes the architectural differences between the standard (commercial AWS) and GovCloud deployments of the GenAI IDP Accelerator.
+This document describes the architectural differences between the standard
+(commercial AWS) deployment and the two GovCloud deployment variants of the
+GenAI IDP Accelerator.
 
-For deployment instructions, see [GovCloud Deployment Guide](./govcloud-deployment.md).
+For deployment instructions and how to choose between the variants, see the
+[GovCloud Deployment Guide](./govcloud-deployment.md).
+
+## Two GovCloud Variants
+
+GovCloud lacks two services the standard template uses — **Amazon CloudFront**
+and **Lambda Function URLs** — so the standard template cannot deploy there.
+`idp-cli` provides two mutually exclusive template transforms:
+
+| | **`--govcloud`** (Web UI) | **`--headless`** |
+|---|---|---|
+| **What is removed** | Only CloudFront and Lambda Function URLs | The entire UI and everything that serves it (see below) |
+| **Web UI** | ✅ Full React UI, served by API Gateway | ❌ Removed |
+| **Authentication** | Cognito (as in commercial) | IAM; optional OAuth2 for the Jobs API |
+| **Chat / agents / Test Studio / HITL / knowledge base** | ✅ Retained | ❌ Removed |
+
+> `--headless` is not GovCloud-specific — it works in any region. See the
+> [Headless Deployment Guide](./headless-deployment.md).
 
 ## Architecture Comparison
 
-### Standard AWS Deployment
+### Standard AWS Deployment (commercial)
 
 ```mermaid
 graph TB
     A[Users] --> B[CloudFront Distribution]
     B --> C[React Web UI]
-    C --> D[AppSync GraphQL API]
+    C --> D[API Gateway REST API<br/>UI resolvers]
     D --> E[Cognito Authentication]
-    E --> F[Core Processing Engine]
+    D --> F[Core Processing Engine]
     F --> G[Document Workflows]
     G --> H[S3 Storage]
 ```
 
-### GovCloud Deployment
+### GovCloud `--govcloud` (Web UI, no CloudFront)
+
+```mermaid
+graph TB
+    A[Users] --> B[API Gateway REST API<br/>serves Web UI + UI resolvers]
+    B --> E[Cognito Authentication]
+    B --> F[Core Processing Engine]
+    F --> G[Document Workflows]
+    G --> H[S3 Storage]
+```
+
+The same REST API that backs the UI also serves the UI's static assets as an
+S3 proxy (`WebUIHosting=APIGateway` — see
+[API Gateway Hosting](./apigateway-hosting.md)). Chat works without the
+streaming Function URL by falling back to a non-streaming polling path — see
+[Chat in GovCloud](./govcloud-deployment.md#chat-in-govcloud-non-streaming).
+
+### GovCloud `--headless`
 
 ```mermaid
 graph TB
     A[Direct S3 Upload] --> F[Core Processing Engine]
+    I[IDP CLI / SDK] --> F
+    K[Optional Jobs REST API] --> F
     F --> G[Document Workflows]
     G --> H[S3 Storage]
-    I[CLI Tools] --> F
-    J[SDK Integration] --> F
-    K[REST API] --> F
 ```
 
-## Services Removed in GovCloud
+## What `--govcloud` Removes
 
-The following services are automatically removed from the GovCloud template:
+Only the two resource families that do not exist in GovCloud:
 
-### Web UI Components (11 resources removed)
+- **All `AWS::CloudFront::*` resources** (distribution, origin access control,
+  security headers policy) and the CloudFront-only parameters/conditions. The
+  Web UI is instead served by API Gateway.
+- **The `AWS::Lambda::Url` resource** — the chat *streaming* endpoint. The UI
+  auto-detects its absence and polls for chat answers instead; the final
+  answer is identical.
 
-- CloudFront distribution and origin access identity
-- WebUI S3 bucket and build pipeline
-- CodeBuild project for UI deployment
-- Security headers policy
+Everything else — Cognito authentication, the UI REST API, WAF, agents, MCP,
+Test Studio, HITL, knowledge base, discovery, configuration UI — is retained
+and works as in commercial regions.
 
-### API Layer (136 resources removed)
+## What `--headless` Removes
 
-- AppSync GraphQL API and schema
-- All GraphQL resolvers and data sources (50+ resolvers)
-- Lambda resolver functions (20+ functions)
-- **Test Studio Resources (36 resources)**: All test management Lambda functions, AppSync resolvers, data sources, SQS queues, and supporting infrastructure added in v0.4.6
-- API authentication and authorization
-- Chat infrastructure (ChatMessagesTable, ChatSessionsTable)
-- Agent chat processors and resolvers
+The headless transform strips the following resource groups (matching the
+`HeadlessTemplateTransformer` in
+`lib/idp_sdk/idp_sdk/_core/template_transform.py`):
 
-### Authentication (14 resources removed)
+### Web UI Hosting
 
-- Cognito User Pool and Identity Pool
-- User pool client and domain
-- Admin user and group management
-- Email verification functions
+- CloudFront distribution, origin access control, and security headers policy
+- Web UI S3 bucket and its CodeBuild build/deploy pipeline
 
-### WAF Security (6 resources removed)
+### UI API Layer
 
-- WAF WebACL and IP sets
-- IP set updater functions
-- CloudFront protection rules
+- The API Gateway REST API nested stack (`APIRESOLVERSTACK`) hosting the
+  dispatcher and all UI resolver Lambdas — including Test Studio, evaluation,
+  configuration, and document-query resolvers. (This stack replaced the
+  former AWS AppSync GraphQL API, which has been removed from the solution
+  entirely.)
+- UI-only resolver Lambdas in the main template (capacity planning, version
+  check, fine-tuning)
+- API Gateway Web UI hosting resources (S3 proxy role, Cognito OAuth callback
+  registration)
 
-### Agent & Analytics Features (14 resources removed)
+### Authentication
 
-- AgentTable and agent job tracking
-- Agent request handler and processor functions
-- **MCP/AgentCore Gateway Resources (7 resources)**: MCP integration components that depend on Cognito authentication (AgentCoreAnalyticsLambdaFunction, AgentCoreGatewayManagerFunction, AgentCoreGatewayExecutionRole, AgentCoreGateway, ExternalAppClient, and log groups)
+- Cognito User Pool, Identity Pool, user pool client and domain
+- Admin user and group management (Admin, Author, Reviewer, Viewer groups)
+- Email domain verification functions
+- External Identity Provider (SAML/OIDC) integration
+
+### WAF Security
+
+- WAF WebACL, IP sets, and IP set updater functions
+
+### Agents & MCP
+
+- Agent table, agent request handler and processor functions
+- AgentCore Gateway and MCP integration resources (gateway manager, analytics
+  Lambda, MCP handler, connector/resource-server clients)
 - External MCP agent credentials secret
-- Knowledge base query functions
-- Chat with document features
-- Text-to-SQL query capabilities
+- Text-to-SQL / analytics query capabilities
 
-### HITL Support (11 resources removed)
+### Chat
 
-- SageMaker A2I Human-in-the-Loop
-- Private workforce configuration
-- Human review workflows
-- A2I flow definition and human task UI
-- Cognito client for A2I integration
+- Chat-with-document processor and the chat streaming Function URL family
+- The Step Functions → UI status publisher (fed real-time document status to
+  the web UI)
+
+### HITL (Human-in-the-Loop)
+
+- SageMaker A2I flow definition, human task UI, and private workforce
+  configuration
+- Users table and user management functions
+- Section review workflow resolvers
+
+### Knowledge Base
+
+- Bedrock Knowledge Base nested stack (`DOCUMENTKB`) and query functions
+
+### Discovery & Feature Platform
+
+- Discovery bucket, queues, tracking table, processor functions, blueprint
+  optimization, and the multi-doc discovery state machine
+- The Feature Platform nested stack (`EnableFeaturePlatform` is forced off)
 
 ## Core Services Retained
 
-The following essential services remain available in all [deployment packages](./govcloud-deployment.md#deployment-packages):
+All core document-processing functionality is retained in both variants:
 
 ### Document Processing
 
-- ✅ Pattern 2 only (Textract + Bedrock) — Pattern 1 (BDA) and Pattern 3 (Textract + SageMaker + Bedrock) require services not available in GovCloud
-- ✅ Complete 6-step pipeline (OCR, Classification, Extraction, Assessment, Summarization, Evaluation)
-- ✅ Step Functions workflows
-- ✅ Lambda function processing
+- ✅ Unified processing workflow with both modes:
+  - **Pipeline mode** (Textract OCR + Bedrock classification/extraction) —
+    the GovCloud default, via the `lending-package-sample-govcloud`
+    configuration preset (pins GovCloud-available Bedrock models)
+  - **BDA mode** (`use_bda: true`) — Amazon Bedrock Data Automation is
+    available in `us-gov-west-1` (planned for `us-gov-east-1`)
+- ✅ Complete pipeline (OCR, Classification, Extraction, Assessment,
+  Summarization, Evaluation)
+- ✅ Step Functions workflows and Lambda processing
 - ✅ Custom prompt Lambda integration
 
 ### Storage & Data
@@ -120,32 +191,36 @@ The following essential services remain available in all [deployment packages](.
 - ✅ Post-processing Lambda hooks
 - ✅ Evaluation and reporting systems
 
-## Limitations and Workarounds
+## Headless Limitations and Workarounds
+
+These apply to `--headless` only — the `--govcloud` variant keeps the full UI.
 
 ### ❌ Removed Features
 
-- Web-based user interface
-- Real-time document status updates via websockets
-- Interactive configuration management
+- Web-based user interface and interactive configuration management
+- Document status monitoring in the UI
 - User authentication and authorization via Cognito
-- CloudFront content delivery and caching
 - WAF security rules and IP filtering
-- Analytics query interface
-- Document knowledge base chat interface
+- Agent chat, chat with document, and analytics query interfaces
+- Human-in-the-loop review workflows
+- Document knowledge base
 
 ### ✅ Available Workarounds
 
-- Use S3 direct upload or [Batch Jobs REST API](./govcloud-batch-api.md) instead of web UI
-- Monitor through CloudWatch instead of real-time UI (see [GovCloud Operations](./govcloud-operations.md))
-- Edit configuration files in S3 directly
-- Use CLI/SDK for authentication needs
-- Access content directly from S3
-- Implement custom security at application level
-- Query data through Athena directly
-- Use the lookup function for document queries
+- Use S3 direct upload, `idp-cli`, the SDK, or the optional
+  [Batch Jobs REST API](./govcloud-batch-api.md) instead of the web UI
+- Monitor through CloudWatch dashboards and the Step Functions console (see
+  [GovCloud Operations](./govcloud-operations.md))
+- Manage configuration via `idp-cli deploy --custom-config` or the
+  Configuration bucket
+- Use IAM (or the Jobs API's OAuth2 client credentials) for authentication
+- Access processing results directly from the Output S3 bucket
+- Query evaluation/reporting data through Athena directly
 
 ## Related Documentation
 
-- [GovCloud Deployment Guide](./govcloud-deployment.md) — prerequisites, deployment packages, and deploy commands
+- [GovCloud Deployment Guide](./govcloud-deployment.md) — prerequisites, deployment options, and deploy commands
 - [Batch Jobs REST API](./govcloud-batch-api.md) — API reference, authentication, and bastion tunnel setup
 - [GovCloud Operations](./govcloud-operations.md) — monitoring, troubleshooting, and best practices
+- [API Gateway Hosting](./apigateway-hosting.md) — how the Web UI is served without CloudFront
+- [Headless Deployment Guide](./headless-deployment.md) — headless mode in general (Commercial and GovCloud)

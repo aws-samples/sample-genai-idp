@@ -46,8 +46,79 @@ AWS_PROFILE=default python3 benchmarks/harness/aggregate.py --run benchmarks/res
 python3 benchmarks/harness/aggregate.py --compare benchmarks/results/<release>/summary.json --baseline benchmarks/results/baseline.json
 python3 benchmarks/harness/aggregate.py --figures benchmarks/results/<release>/summary.json
 
-# 6. update the paper (benchmarks/paper/BENCHMARK_PAPER.md) with the new tables/figures
+# 6. update the published papers under docs/benchmarking/ (see "Output docs" below)
 ```
+
+## Output docs (single source of truth = docs/benchmarking/)
+
+Papers are published from `docs/benchmarking/` (symlinked into the Starlight site by
+`docs-site/setup.sh`; sidebar in `docs-site/astro.config.mjs`). Do NOT create parallel
+copies under `benchmarks/paper/` — that caused drift and is retired (see
+`benchmarks/paper/README.md`).
+
+| File | Purpose | Cadence |
+|------|---------|---------|
+| `docs/benchmarking/index.md` | how the suite works (design guide) | edit when the harness changes |
+| `docs/benchmarking/config-guidance.md` | "which config should I pick?" (cross-config, one release) | refresh per release |
+| `docs/benchmarking/releases/vX.Y.Z.md` | **release-vs-release** audit trail (one file per release, never overwritten) | one NEW file per release |
+| `docs/benchmarking/releases/README.md` | audit-trail index table | append one row per release |
+
+Figures: `aggregate.py --figures` writes to `benchmarks/paper/figures/` (scratch); copy
+the ones you cite into `images/benchmark-<release>-<name>.png`. Docs reference them as
+`../../images/...` (from `docs/benchmarking/`) or `../../../images/...` (from `releases/`).
+
+## Release-cycle audit trail — "prev published release vs current develop"
+
+This is the once-per-release deliverable and the reason the harness is version-agnostic.
+It creates ONE new `docs/benchmarking/releases/v<NEW>.md` comparing the previous
+**published** release to the current **develop** prerelease, on the same stack, with
+**byte-identical configs** (only the code version differs). Entry point:
+`make benchmark-release VERSION=<new> PREV=<published>` (which just invokes this skill).
+
+Procedure (drive it yourself — several steps need judgment):
+
+1. **Deploy the PREV published release.** Find the public template URL in `README.md`
+   (`s3://aws-ml-blog-<region>/artifacts/genai-idp/idp-main.yaml`); confirm its
+   Description says `(v<PREV>)`. `idp-cli deploy --stack-name <S> --template-url <url>
+   --admin-email <you> --region us-west-2 --wait`.
+2. **Generate the `corefast` grid** (`gen_corpus.py`; `make_configs.py --suite corefast`).
+   Use `corefast` (≤100-row docs) for the A/B — advanced-mode granular assessment on
+   ≥400-row docs times out the 900s Lambda on older releases (retries ~2h then fails).
+3. **Run on PREV with `--native-upload`** (`run_matrix.py --suite corefast --native-upload`).
+   Native-upload is REQUIRED: idp-cli's config-upload force-migrates v0.5→v0.6 and drops
+   the top-level `assessment` block older stacks need.
+4. **Score** → `benchmarks/results/v<PREV>/`; **promote to baseline.json**.
+5. **Upgrade the SAME stack in place**: `idp-cli deploy --stack-name <S> --from-code .
+   --clean-build --region us-west-2 --wait`. Verify `UPDATE_COMPLETE` + Description shows
+   `v<NEW>`.
+6. **Re-run `corefast` on the upgraded stack** (`--native-upload`, identical config files).
+7. **Score** → `benchmarks/results/v<NEW>/`; **compare** (`aggregate.py --compare` new vs
+   PREV) + `--figures`; copy cited charts to `images/benchmark-v<NEW>-*.png`.
+8. **Write `docs/benchmarking/releases/v<NEW>.md`** (use the previous release file as the
+   template) and **append a row** to `docs/benchmarking/releases/README.md`.
+
+### Cross-version config compatibility the harness handles (do NOT regress these)
+
+Running the v0.6-native suite against an older stack requires these, all already in the
+harness — verify they still hold when the schema evolves:
+- **Shared control model.** Older clients reject newer models (v0.5.16's bedrock client
+  sends deprecated `temperature` → Sonnet 5 `ValidationException`). Hold `extraction.model`
+  at a model BOTH versions run (`default_cell.extraction_model`, currently `sonnet46`).
+  Capability-only deltas (e.g. "vN unlocks Sonnet 5") are documented, not in the A/B grid.
+- **`make_configs.py`** merges each cell with system defaults (so all step prompts are
+  populated for old stacks that don't merge custom configs at runtime), re-injects a
+  top-level `assessment` block from `compat/v0516-base-assessment.yaml` (old stacks read
+  it; v0.6 ignores it via `extra="ignore"`), mirrors `confidence.list_batch_size` into
+  `assessment.granular.list_batch_size` (equal Bedrock call counts = fair cost), sanitizes
+  non-positive `max_tokens`/`shard_token_budget` (old validators enforce `gt=0`), and
+  disables summarization (unscored; its default model hits the temperature bug).
+- **`compat/native_upload.py`** writes configs verbatim (bypasses idp-cli migration).
+- **`run_matrix.launch()`** invokes the TestRunner Lambda directly (finds it whether it's
+  under `APPSYNCSTACK` (v0.5.x) or `APIRESOLVERSTACK` (v0.6)).
+- **Validate against the OLD model** before running: `git worktree add -f --detach <wt>
+  v<PREV>` then `IDPConfig.model_validate(cfg)` from `<wt>/lib/idp_common_pkg`.
+- **Honesty:** report any cell that can't complete on a version (e.g. old-release
+  advanced+large-list timeouts) as a finding, not a silent omission.
 
 ## Stack setup
 - Use a deployed stack you own (e.g. IDPBattery0708). The harness resolves its

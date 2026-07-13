@@ -1,0 +1,221 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Self-contained test VPC for the CI "API Gateway Web UI hosting (VPC/PRIVATE)"
+  deployment test. Provides everything an IDP stack deployed with
+  WebUIHosting=APIGateway + ApiGatewayVisibility=PRIVATE + DeployInVPC=true
+  needs, WITHOUT standing up the full ~20-endpoint air-gapped fabric:
+
+    * 2 private subnets (2 AZs) with a NAT Gateway for egress, so in-VPC
+      Lambdas reach AWS service endpoints over the internet via NAT (no need
+      for per-service interface endpoints in a throwaway CI VPC).
+    * A Lambda security group (443 egress) — passed as LambdaSecurityGroupId.
+    * ONE execute-api interface endpoint — the private REST API (and the Web UI
+      served on it) is reachable only through this VPCE; its id is passed as
+      ApiGatewayVpcEndpointId. Private DNS enabled so the regional execute-api
+      hostname resolves to the endpoint inside the VPC.
+
+  This is a TEST fixture (no VPC flow logs, permissive egress). Delete it after
+  the IDP stack is torn down.
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Default: 10.20.0.0/16
+  PrivateSubnet1Cidr:
+    Type: String
+    Default: 10.20.1.0/24
+  PrivateSubnet2Cidr:
+    Type: String
+    Default: 10.20.2.0/24
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.20.0.0/28
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    # checkov:skip=CKV_AWS_178: "VPC flow logs not required for a throwaway CI test VPC."
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-vpc"
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnet1Cidr
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-1"
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PrivateSubnet2Cidr
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-2"
+
+  # Public subnet hosting the NAT gateway.
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref PublicSubnetCidr
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-public"
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-igw"
+
+  IGWAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-public-rt"
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: IGWAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRTA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  NATGatewayEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+      SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-nat"
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-private-rt"
+
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGateway
+
+  PrivateSubnet1RTA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RTA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  # Security group for in-VPC IDP Lambdas. Allows all outbound (reaches AWS
+  # services via NAT) and is passed as the IDP stack's LambdaSecurityGroupId.
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    # checkov:skip=CKV_AWS_382: "Test VPC — permissive egress so Lambdas reach AWS services via NAT."
+    Properties:
+      GroupDescription: !Sub "${AWS::StackName} IDP Lambda SG (test)"
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: "Allow all outbound (AWS services via NAT)"
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-lambda-sg"
+
+  # Security group for the execute-api interface endpoint: allow 443 from the
+  # VPC CIDR so in-VPC clients (and the private REST API's callers) reach it.
+  EndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "${AWS::StackName} execute-api VPCE SG (test)"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VpcCidr
+          Description: "HTTPS from within the VPC"
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: "Allow all outbound"
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-vpce-sg"
+
+  # The single interface endpoint the PRIVATE REST API requires. Private DNS
+  # makes "<api-id>.execute-api.<region>.amazonaws.com" resolve to this VPCE
+  # inside the VPC.
+  ExecuteApiEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.execute-api"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref EndpointSecurityGroup
+
+Outputs:
+  VpcId:
+    Description: VPC ID — pass as the IDP stack's VpcId
+    Value: !Ref VPC
+  PrivateSubnetIds:
+    Description: Comma-separated private subnet IDs — PrivateSubnetIds / LambdaSubnetIds
+    Value: !Sub "${PrivateSubnet1},${PrivateSubnet2}"
+  LambdaSecurityGroupId:
+    Description: Lambda SG — pass as LambdaSecurityGroupId
+    Value: !Ref LambdaSecurityGroup
+  ApiGatewayVpcEndpointId:
+    Description: execute-api interface endpoint id — pass as ApiGatewayVpcEndpointId
+    Value: !Ref ExecuteApiEndpoint

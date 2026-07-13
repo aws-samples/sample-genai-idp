@@ -92,7 +92,9 @@ The table includes a **type filter** (All / Managed / Custom) and a **preference
 - **Create (Import)**: Import a configuration file (JSON/YAML) or from the Configuration Library as a new version
 - **Activate**: Set a selected version as the active version for processing
 - **Compare**: Select 2+ versions to view a side-by-side diff (exportable as CSV/JSON)
-- **Delete**: Remove selected versions (cannot delete the active version or `default`)
+- **Delete**: Remove selected versions (cannot delete the active version, `default`, or managed versions); a confirmation dialog lists the affected versions before deletion
+
+> The versions table uses standard checkboxes for row selection. Managed/Custom/Active badges show a short description of what each means on hover.
 
 ### Editing a Version
 
@@ -106,8 +108,9 @@ When you open a version in the configuration editor:
 #### Unsaved Changes Indicator
 
 - Individual fields with unsaved edits display an **orange dot** (●) next to the field label
-- An **info banner** appears at the top: *"You have unsaved changes. Click Save changes to persist, or Discard changes to revert."*
+- An **info banner** appears at the top: *"You have unsaved changes. Click Save changes to persist, or Discard changes to revert."* — this appears for **all** versions, including the stack-managed `default` (where the banner instead points you to **Save as Version**, since Save changes is disabled)
 - The **Discard changes** button reloads the last-saved configuration from the server
+- A successful save (or Save as Version / Reset to Default) also shows a brief **success toast** in the top-right notification area, visible even when scrolled deep in a long form
 
 #### Browser Navigation Guard
 
@@ -129,7 +132,8 @@ The editor protects against accidental data loss:
 Select two or more versions using the checkboxes, then click **Compare Selected**:
 
 - A modal displays all settings that differ between the selected versions
-- Differences are shown field-by-field with each version's value in its own column
+- Differences are shown field-by-field with each version's full value in its own column (long values scroll rather than truncate)
+- When exactly **two** versions are compared, each differing value is rendered as a word-level inline diff — added text is highlighted green and removed text red — making prompt and description edits easy to spot
 - Export the comparison as **CSV** or **JSON** for offline review
 
 ### Export and Import

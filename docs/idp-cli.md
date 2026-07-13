@@ -351,7 +351,16 @@ idp-cli deploy \
     --headless \
     --wait
 
-# Deploy to GovCloud (headless + from-code are both required)
+# Deploy to GovCloud WITH the full Web UI (--govcloud; --from-code is required)
+idp-cli deploy \
+    --stack-name my-idp-govcloud \
+    --region us-gov-west-1 \
+    --from-code . \
+    --govcloud \
+    --admin-email user@example.com \
+    --wait
+
+# Deploy to GovCloud headless (no UI; --from-code is required)
 idp-cli deploy \
     --stack-name my-idp-govcloud \
     --region us-gov-west-1 \
@@ -364,7 +373,7 @@ idp-cli deploy \
 
 #### Resource tagging
 
-`--tags "key=value,key2=value2"` applies **CloudFormation stack-level tags**. CloudFormation adds them to the stack and automatically propagates them to all taggable resources it creates — including the nested stacks (pattern, API resolvers, KB, discovery, ALB hosting, feature platform) and their resources — so you tag the whole deployment in one place.
+`--tags "key=value,key2=value2"` applies **CloudFormation stack-level tags**. CloudFormation adds them to the stack and automatically propagates them to all taggable resources it creates — including the nested stacks (pattern, API resolvers, KB, discovery, feature platform) and their resources — so you tag the whole deployment in one place.
 
 Notes and caveats:
 

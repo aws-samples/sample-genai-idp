@@ -61,6 +61,9 @@ const safeSchema = {
     // CustomLink React component in DocumentsQueryLayout.tsx via the
     // `components` prop.
     'documentid',
+    // Custom tag emitted by the Quick Start agent to reference a bundled sample
+    // document; mapped to a click-to-open component via the `components` prop.
+    'sampledoc',
     // Table structure tags used by rule validation summary
     'colgroup',
     'col',
@@ -75,6 +78,7 @@ const safeSchema = {
     ...defaultSchema.attributes,
     p: [...(defaultSchema.attributes?.p ?? []), ['style', /^white-space:\s*pre-line;?$/i]],
     documentid: ['href', 'title', 'className'],
+    sampledoc: ['s3key', 'title', 'className'],
     code: [...(defaultSchema.attributes?.code ?? []), 'className'],
     span: [...(defaultSchema.attributes?.span ?? []), 'className', 'style'],
     div: [...(defaultSchema.attributes?.div ?? []), 'className'],

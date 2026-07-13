@@ -21,7 +21,7 @@ const initialNotifications: Omit<Notification, 'onDismiss'>[] = [
 ];
 
 const useNotifications = (): Notification[] => {
-  const { errorMessage, setErrorMessage } = useAppContext();
+  const { errorMessage, setErrorMessage, successMessage, setSuccessMessage } = useAppContext();
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
@@ -108,6 +108,33 @@ const useNotifications = (): Notification[] => {
     setNotifications((current) => [...current, errorNotification]);
     setErrorMessage('');
   }, [errorMessage, notifications]);
+
+  useEffect(() => {
+    // adds success messages to notifications; auto-dismisses after a few seconds
+    // so transient confirmations (e.g. "Configuration saved") don't linger.
+    if (!successMessage) {
+      return undefined;
+    }
+
+    const id = performance.now();
+    const successNotification: Notification = {
+      type: 'success',
+      content: successMessage,
+      dismissible: true,
+      dismissLabel: 'Dismiss message',
+      id,
+      onDismiss: () => {
+        setNotifications((current) => current.filter((i) => i.id !== id));
+      },
+    };
+    setNotifications((current) => [...current, successNotification]);
+    setSuccessMessage('');
+
+    const timer = setTimeout(() => {
+      setNotifications((current) => current.filter((i) => i.id !== id));
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [successMessage]);
 
   return notifications;
 };
