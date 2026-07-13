@@ -368,6 +368,35 @@ def list_config_versions_impl() -> str:
     return json.dumps({"versions": out})
 
 
+def get_class_schema_impl(version_name: str, class_name: str = "") -> str:
+    from idp_common.config.configuration_manager import ConfigurationManager
+
+    if not version_name:
+        return json.dumps({"error": "version_name is required"})
+    config_manager = ConfigurationManager()
+    raw = config_manager.get_raw_configuration("Config", version_name)
+    if not raw:
+        return json.dumps({"error": f"Config version '{version_name}' not found"})
+    classes = raw.get("classes", [])
+    if class_name:
+        target = next((c for c in classes if _class_id(c) == class_name), None)
+    elif len(classes) == 1:
+        target = classes[0]
+    else:
+        target = None
+    if target is None:
+        return json.dumps(
+            {
+                "error": f"Class '{class_name}' not found in version '{version_name}'"
+                if class_name
+                else f"Version '{version_name}' has {len(classes)} classes; "
+                "specify class_name",
+                "availableClasses": [_class_id(c) for c in classes if _class_id(c)],
+            }
+        )
+    return json.dumps({"versionName": version_name, "schema": target})
+
+
 def generate_from_existing_config_impl(
     version_name: str,
     class_name: str,
@@ -593,6 +622,24 @@ def list_config_versions() -> str:
     and a document class.
     """
     return list_config_versions_impl()
+
+
+@strands.tool
+def get_class_schema(version_name: str, class_name: str = "") -> str:
+    """Read the full field schema of a document class from a configuration version.
+
+    Use this to see the actual fields in a configuration - especially one created
+    by Discovery from an uploaded document, whose fields are NOT otherwise visible
+    in this conversation. Call it to answer questions like "is field X included?"
+    and to get the current schema before refining it (pass the returned "schema"
+    to refine_schema as schema_text). If the version has exactly one class,
+    class_name is optional.
+
+    Args:
+        version_name: The configuration version (e.g. from list_config_versions).
+        class_name: The document class to read; optional if the version has one.
+    """
+    return get_class_schema_impl(version_name, class_name)
 
 
 @strands.tool

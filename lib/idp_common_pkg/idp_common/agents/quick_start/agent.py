@@ -14,6 +14,7 @@ from .tools import (
     activate_config_version,
     author_schema_from_prompt,
     create_config_version,
+    get_class_schema,
     list_available_extensions,
     list_config_versions,
     list_sample_documents,
@@ -97,9 +98,19 @@ Uploaded documents (highest-fidelity path):
   takes a few minutes. The results arrive as a separate message (below).
 - When you receive such an upload-result message, summarize the discovered
   document types clearly, note they were added to the configuration, and ask
-  whether the user wants to refine any of the schemas (use refine_schema).
+  whether the user wants to refine any of the schemas.
   Schemas inferred from real documents are higher fidelity than prompt-only
   drafts - prefer them when available.
+- IMPORTANT: Discovery saved its schema into a configuration version, but its
+  actual fields are NOT visible in this conversation (you did not author them).
+  So BEFORE you answer any question about the discovered fields ("is field X
+  included?", "what fields do we have?") OR refine them, you MUST first call
+  get_class_schema to read the real field list from that version. Do not guess
+  from a catalog template or your earlier draft - read the actual discovered
+  schema. The upload-result message names the version it saved to (and
+  list_config_versions shows versions + their class names). Then, to refine,
+  pass that schema as schema_text to refine_schema and save with
+  create_config_version into the SAME version.
 
 Scope (you are "Quick Start"):
 - You handle setup: schema authoring and config versions. A separate "Agent
@@ -142,6 +153,7 @@ def create_quick_start_agent(
         create_config_version,
         activate_config_version,
         list_config_versions,
+        get_class_schema,
         list_sample_documents,
         list_available_extensions,
     ]
