@@ -279,6 +279,19 @@ def create_config_version_impl(schema_text: str, version_name: str = "") -> str:
     return json.dumps({"config_version": version, "activated": False})
 
 
+def activate_config_version_impl(version_name: str) -> str:
+    from idp_common.config.configuration_manager import ConfigurationManager
+
+    if not version_name:
+        return json.dumps({"activated": False, "error": "version_name is required"})
+    try:
+        ConfigurationManager().activate_version(version_name)
+        return json.dumps({"config_version": version_name, "activated": True})
+    except Exception as e:
+        logger.error(f"Error activating config version '{version_name}': {e}")
+        return json.dumps({"activated": False, "error": str(e)})
+
+
 def request_document_generation_impl(
     schema_text: str,
     config_version: str,
@@ -524,8 +537,25 @@ def create_config_version(schema_text: str, version_name: str = "") -> str:
         version_name: Optional version name; auto-generated if omitted.
 
     The config is immediately usable for extraction; it is NOT auto-activated.
+    Call activate_config_version to make it the active configuration.
     """
     return create_config_version_impl(schema_text, version_name)
+
+
+@strands.tool
+def activate_config_version(version_name: str) -> str:
+    """Make a configuration version the active one used to process documents.
+
+    Activates the named version and deactivates all others, so newly uploaded
+    documents are processed with it. Call this after create_config_version (or
+    after the user confirms) so the user can start processing without manually
+    activating in the Configuration page.
+
+    Args:
+        version_name: The config version to activate (e.g. the value returned by
+            create_config_version).
+    """
+    return activate_config_version_impl(version_name)
 
 
 @strands.tool

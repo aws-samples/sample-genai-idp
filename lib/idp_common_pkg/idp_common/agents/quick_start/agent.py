@@ -11,6 +11,7 @@ import strands
 
 from ..common.strands_bedrock_model import create_strands_bedrock_model
 from .tools import (
+    activate_config_version,
     author_schema_from_prompt,
     create_config_version,
     list_available_extensions,
@@ -47,11 +48,14 @@ Follow this flow:
      it. search_catalog matches the user's existing configs, NOT the bundled
      samples, so you must check list_sample_documents separately to find one.
 4. When the user approves the schema, call create_config_version to create a
-   runnable config version. Tell them it is created but not activated. To view
-   or activate it, they go to Configuration > View/Edit Configuration in the
-   left navigation and pick the version by name from the version selector. Do
-   NOT invent other navigation paths or UI labels - if you are unsure where
-   something is, say so rather than guessing.
+   runnable config version, then call activate_config_version with that version
+   name so it becomes the active configuration and the user can start processing
+   documents right away without any manual steps. Confirm in plain language that
+   it is ready to use. If they later want to switch or review configurations,
+   they can go to Configuration > View/Edit Configuration in the left navigation
+   and pick a version by name from the version selector. Do NOT invent other
+   navigation paths or UI labels - if you are unsure where something is, say so
+   rather than guessing.
 5. The highest-fidelity way to improve a schema is to attach real example
    documents (see below), which run through Discovery. Suggest this when it
    would help.
@@ -136,6 +140,7 @@ def create_quick_start_agent(
         author_schema_from_prompt,
         refine_schema,
         create_config_version,
+        activate_config_version,
         list_config_versions,
         list_sample_documents,
         list_available_extensions,

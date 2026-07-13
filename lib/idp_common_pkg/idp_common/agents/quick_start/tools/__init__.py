@@ -4,6 +4,7 @@
 """Tools for the Quick Start Agent."""
 
 from .bootstrap_tools import (
+    activate_config_version,
     author_schema_from_prompt,
     check_generator_availability,
     create_config_version,
@@ -22,6 +23,7 @@ __all__ = [
     "author_schema_from_prompt",
     "refine_schema",
     "create_config_version",
+    "activate_config_version",
     "check_generator_availability",
     "estimate_generation_cost",
     "request_document_generation",
