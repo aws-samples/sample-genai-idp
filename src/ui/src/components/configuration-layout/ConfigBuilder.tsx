@@ -18,6 +18,7 @@ import {
   ExpandableSection,
   Modal,
   Tabs,
+  Alert,
 } from '@cloudscape-design/components';
 import type { BoxProps } from '@cloudscape-design/components';
 import SchemaBuilder from '../json-schema-builder/SchemaBuilder';
@@ -1650,7 +1651,26 @@ const ConfigBuilder = ({
         </SpaceBetween>
       );
     } else if (property.type === 'boolean') {
-      input = <Toggle checked={!!displayValue} onChange={({ detail }) => updateValue(path, detail.checked)} />;
+      // The use_bda toggle changes the entire pipeline shape (Textract-based
+      // OCR/Classification/Extraction vs. Bedrock Data Automation). Surface an
+      // inline warning (S4) when the pending value differs from what's saved, so
+      // the large section swap isn't a silent surprise.
+      const isUseBda = path === 'use_bda';
+      const savedUseBda = isUseBda && mergedConfig ? !!getValueAtPath(mergedConfig, 'use_bda') : undefined;
+      const useBdaChanged = isUseBda && savedUseBda !== undefined && savedUseBda !== !!displayValue;
+      const toggle = <Toggle checked={!!displayValue} onChange={({ detail }) => updateValue(path, detail.checked)} />;
+      input = useBdaChanged ? (
+        <SpaceBetween size="xs">
+          {toggle}
+          <Alert type="warning">
+            {displayValue
+              ? 'Switching to BDA mode replaces the Textract OCR / Classification / Extraction steps with Bedrock Data Automation. Those sections are hidden and BDA settings apply instead. Save to keep this change.'
+              : 'Switching off BDA mode restores the Textract-based OCR / Classification / Extraction pipeline and hides the BDA settings. Save to keep this change.'}
+          </Alert>
+        </SpaceBetween>
+      ) : (
+        toggle
+      );
     } else if (property.type === 'array' || property.type === 'list') {
       // This should not happen if renderField is working correctly
       console.error(`Incorrectly trying to render array as input field: ${path}`);

@@ -33,6 +33,7 @@ import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import useConfigurationLibrary from '../../hooks/use-configuration-library';
 import useUserRole from '../../hooks/use-user-role';
 import useSettingsContext from '../../contexts/settings';
+import useAppContext from '../../contexts/app';
 import ConfigBuilder from './ConfigBuilder';
 import ConfigurationVersionsTable from './ConfigurationVersionsTable';
 import ConfigurationComparison from './ConfigurationComparison';
@@ -46,6 +47,13 @@ const logger = new ConsoleLogger('ConfigurationLayout');
 // Shown as the disabled-reason tooltip on actions that cannot run against the
 // stack-managed `default` version (the user must first create an editable copy).
 const STACK_MANAGED_DISABLED_REASON = 'This is the stack-managed default version — use Save as Version to create an editable copy.';
+
+// One-line explanations shown on hover for the version Type/state badges.
+const BADGE_TOOLTIPS = {
+  managed: 'Stack-managed: shipped with the solution and overwritten on stack updates; not directly editable.',
+  custom: 'Custom: a user-created version you can freely edit, save, and delete.',
+  active: 'Active: the version used to process newly uploaded documents.',
+};
 
 // Utility function to normalize boolean values from strings (same as use-configuration.js)
 interface SchemaProperty {
@@ -189,6 +197,10 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
   // Get user role for scope and permissions
   const { isAdmin, canWrite } = useUserRole();
+
+  // App-wide success toast (sticky Flashbar region) so save confirmation is
+  // visible even when the user is scrolled deep into a long config form (C1).
+  const { setSuccessMessage } = useAppContext();
 
   // Get active version name — prefer first scoped version over system active
   const activeVersionName = useMemo(() => {
@@ -1506,6 +1518,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
       if (success) {
         setSaveSuccess(true);
+        setSuccessMessage(saveAsDefault ? 'Configuration saved as new default.' : 'Configuration saved successfully.');
         if (saveAsDefault) {
           setShowSaveAsDefaultModal(false);
         }
@@ -1544,6 +1557,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
       if (result.success) {
         setSaveSuccess(true);
+        setSuccessMessage(`Saved as new version "${saveAsVersionName}".`);
         setShowSaveAsVersionModal(false);
         setSaveAsVersionName('');
         setSaveAsVersionDescription('');
@@ -1613,6 +1627,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
       if (success) {
         setSaveSuccess(true);
+        setSuccessMessage('Configuration reset to default.');
         setShowResetModal(false);
         // Refresh to show the restored default configuration
         await fetchConfiguration(currentVersionName);
@@ -2425,11 +2440,19 @@ const ConfigurationLayout = (): React.JSX.Element => {
                 {currentVersion?.description ? ` - ${currentVersion.description}` : ''}
               </span>
               {currentVersion?.managed || currentVersionName === 'default' ? (
-                <Badge color="blue">Managed</Badge>
+                <span title={BADGE_TOOLTIPS.managed}>
+                  <Badge color="blue">Managed</Badge>
+                </span>
               ) : (
-                <Badge color="grey">Custom</Badge>
+                <span title={BADGE_TOOLTIPS.custom}>
+                  <Badge color="grey">Custom</Badge>
+                </span>
               )}
-              {currentVersion?.isActive && <Badge color="green">Active</Badge>}
+              {currentVersion?.isActive && (
+                <span title={BADGE_TOOLTIPS.active}>
+                  <Badge color="green">Active</Badge>
+                </span>
+              )}
             </SpaceBetween>
           </Header>
         }

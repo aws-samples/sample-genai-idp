@@ -24,6 +24,7 @@ const AppContent = (): React.JSX.Element => {
   const { authStatus: authState, user } = useAuthenticator((context) => [context.authStatus, context.user]);
   const { currentSession, currentCredentials } = useCurrentSessionCreds({});
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
+  const [successMessage, setSuccessMessage] = useState<string | undefined>();
   const [navigationOpen, setNavigationOpen] = useState<boolean>(true);
   const [activeTestRuns, setActiveTestRuns] = useState<AppActiveTestRun[]>([]);
 
@@ -39,9 +40,11 @@ const AppContent = (): React.JSX.Element => {
     authState,
     awsConfig,
     errorMessage,
+    successMessage,
     currentCredentials,
     currentSession,
     setErrorMessage,
+    setSuccessMessage,
     user,
     navigationOpen,
     setNavigationOpen,
