@@ -6,10 +6,31 @@ title: "GovCloud Deployment Guide"
 
 ## Overview
 
-The GenAI IDP Accelerator now supports "headless" deployment to AWS GovCloud regions through a specialized template generation script. This solution addresses two key GovCloud requirements:
+The GenAI IDP Accelerator supports two ways to deploy to AWS GovCloud regions:
+
+- **Full Web UI (`--govcloud`) — recommended for most users.** The interactive
+  React Web UI **is now supported in GovCloud**. GovCloud no longer requires a
+  headless deployment. The UI is hosted on **API Gateway** (an S3 proxy on the
+  REST API) instead of CloudFront, and works with **VPC support and/or WAF,
+  both optional** — set `ApiGatewayVisibility=PRIVATE` for VPC-only access and
+  `WAFAllowedIPv4Ranges` to restrict by IP. See
+  [Keeping the Web UI in GovCloud: `--govcloud`](#keeping-the-web-ui-in-govcloud---govcloud).
+- **Headless (`--headless`) — API-only / no UI.** For programmatic-only
+  deployments that intentionally remove the UI (and AppSync/Cognito-UI/WAF)
+  entirely. See the [deployment packages](#deployment-packages) below.
+
+Both paths address two GovCloud requirements:
 
 1. **ARN Partition Compatibility**: All ARN references use `arn:${AWS::Partition}:` instead of `arn:aws:` to work in both commercial and GovCloud regions
-2. **Service Compatibility**: Removes services not available in GovCloud (AppSync, CloudFront, WAF, Cognito UI components)
+2. **Service Compatibility**: Removes services not available in GovCloud. `--govcloud` removes CloudFront and Lambda Function URLs (and forces API Gateway UI hosting); `--headless` additionally removes the entire UI, AppSync, Cognito UI components, and WAF.
+
+> **Chat is unavailable with `--govcloud`.** Both the agent chat and
+> document-chat features stream their responses over a **Lambda Function URL**,
+> which does not exist in GovCloud (and the codebase has no non-streaming chat
+> transport). `--govcloud` therefore removes that Function URL, and the **chat
+> features are disabled** in GovCloud. Everything else in the UI (document
+> processing, extraction, evaluation, Test Studio, discovery, knowledge base,
+> configuration) works normally.
 
 For details on what services are removed vs. retained, see [GovCloud Architecture](./govcloud-architecture.md).
 
@@ -101,6 +122,69 @@ Choose the command that matches your desired [deployment package](#deployment-pa
 > **Legacy**: The `scripts/generate_govcloud_template.py` script is deprecated. Use `idp-cli deploy --headless --from-code .` instead.
 
 > **Note on `--headless`**: The CLI flag both strips UI/AppSync/Cognito/WAF resources from the template and automatically sets the `EnableHeadless=true` stack parameter (which enables the Jobs REST API). You do not need to pass `EnableHeadless=true` in `--parameters` — it's set for you.
+
+### Keeping the Web UI in GovCloud: `--govcloud`
+
+`--headless` removes the Web UI entirely. If you **want the full Web UI in
+GovCloud**, use `--govcloud` instead. GovCloud lacks two services the standard
+UI template uses — Amazon CloudFront and Lambda Function URLs — so the standard
+template fails to even validate there:
+
+```
+E3006 Resource type 'AWS::CloudFront::OriginAccessControl' does not exist in 'us-gov-west-1'
+E3006 Resource type 'AWS::CloudFront::ResponseHeadersPolicy' does not exist in 'us-gov-west-1'
+E3006 Resource type 'AWS::CloudFront::Distribution' does not exist in 'us-gov-west-1'
+E3006 Resource type 'AWS::Lambda::Url' does not exist in 'us-gov-west-1'
+```
+
+The `--govcloud` flag transforms the template to:
+
+- Remove every `AWS::CloudFront::*` resource and force `WebUIHosting=APIGateway`,
+  so the Web UI is served as an S3 proxy on the same REST API that backs it (see
+  [API Gateway Hosting](./apigateway-hosting.md)).
+- Remove the `AWS::Lambda::Url` resource (the chat streaming endpoint) and its
+  permission, since [Lambda Function URLs are not available in GovCloud](https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/govcloud-lambda.html).
+  The agent-chat and document-chat features deliver responses **only** over this
+  Function URL (there is no non-streaming chat transport in the codebase), so
+  **chat is disabled** in GovCloud. Everything else in the UI — document
+  processing, extraction, evaluation, Test Studio, discovery, knowledge base,
+  configuration — works normally. Sending a chat message in a `--govcloud`
+  deployment surfaces a "stream URL not configured" error in the chat panel.
+
+The rest of the UI (Cognito, the REST API, WAF) is retained.
+
+`--govcloud` is available on both `idp-cli publish` and `idp-cli deploy`, and is
+**mutually exclusive with `--headless`** (headless removes the UI; `--govcloud`
+keeps it).
+
+```bash
+# Full UI in GovCloud, private (VPC-only) hosting + WAF
+idp-cli deploy \
+  --stack-name my-idp-govcloud \
+  --region us-gov-west-1 \
+  --from-code . \
+  --govcloud \
+  --wait \
+  --parameters "ApiGatewayVisibility=PRIVATE,DeployInVPC=true,VpcId=vpc-xxxxxxxx,PrivateSubnetIds=subnet-a,subnet-b,LambdaSubnetIds=subnet-a,subnet-b,LambdaSecurityGroupId=sg-xxxxxxxx,ApiGatewayVpcEndpointId=vpce-xxxxxxxx"
+
+# Or just publish the GovCloud template variant (uploads idp-govcloud.yaml)
+idp-cli publish --source-dir . --region us-gov-west-1 --govcloud
+```
+
+For a public (regional, internet-facing) API Gateway UI in GovCloud, omit the
+`ApiGatewayVisibility=PRIVATE`/VPC parameters. To restrict access by IP, set
+`WAFAllowedIPv4Ranges`. See [API Gateway Hosting](./apigateway-hosting.md) for
+the full hosting model.
+
+> The transformed template is written to `.aws-sam/idp-govcloud.yaml` and
+> (for `publish`) uploaded as `idp-govcloud.yaml`. It is **validated against a
+> GovCloud region with a region-aware `cfn-lint`** immediately after the
+> transform — if any GovCloud-unsupported resource type survived (an `E3006`
+> error), the `publish`/`deploy` **fails loudly** instead of surfacing the
+> problem only at deploy time. The lint uses the target GovCloud region when you
+> deploy to one, or `us-gov-west-1` by default when building from a commercial
+> region. `cfn-lint` runs fully offline (no credentials); if it is not installed
+> the gate is skipped with a warning.
 
 #### Option A: Vanilla (no API, no VPC)
 
