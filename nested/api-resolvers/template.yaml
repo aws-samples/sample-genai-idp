@@ -360,6 +360,9 @@ Conditions:
   # True when this REST API should also serve the Web UI SPA via S3 proxy
   # (WebUIHosting=APIGateway).
   ServeWebUICondition: !Equals [!Ref ServeWebUI, "true"]
+  # Inverse of ServeWebUICondition — used to gate the no-Web-UI API deployment
+  # so the stage always references a deployment that actually exists.
+  DoNotServeWebUICondition: !Not [!Equals [!Ref ServeWebUI, "true"]]
 
 Resources:
   AbortWorkflowResolverFunctionLogGroup:
@@ -2972,22 +2975,19 @@ Resources:
   # repoints the stage. Update HttpApiStage.DeploymentId to match.
   #
   # Bumped CorsV2 -> WebUIV3 when the ServeWebUI S3-proxy routes were added.
-  # DependsOn lists the Web UI methods so they are included in this deployment
-  # snapshot when ServeWebUI=true. A DependsOn entry whose target resource is
-  # dropped by a false Condition is ignored by CloudFormation, so listing the
-  # conditional methods here is safe in CloudFront mode too.
-  HttpApiDeploymentWebUIV3:
+  #
+  # A Deployment's DependsOn CANNOT reference a resource dropped by a false
+  # Condition — CloudFormation fails with "Unresolved resource dependencies
+  # [WebUIRootMethod, WebUIProxyMethod]" (it does NOT silently ignore them).
+  # So there are TWO condition-gated deployment resources with the same suffix:
+  #   * WithWebUI  — includes the S3-proxy methods in DependsOn (ServeWebUI=true)
+  #   * NoWebUI    — omits them (ServeWebUI=false / CloudFront default)
+  # The stage selects whichever exists via Fn::If. Bump BOTH logical-id suffixes
+  # (…WebUIV3 -> …WebUIV4) whenever methods/CORS/gateway-responses change, so a
+  # fresh snapshot reaches the stage.
+  HttpApiDeploymentWithWebUIV3:
     Type: AWS::ApiGateway::Deployment
-    # E3005: listing the ServeWebUI-conditional methods in DependsOn is
-    # deliberate. CloudFormation IGNORES a DependsOn entry whose target is
-    # dropped by a false condition, so this is safe in CloudFront mode; in
-    # APIGateway mode it guarantees the S3-proxy methods are created before the
-    # deployment snapshot so they reach the stage.
-    Metadata:
-      cfn-lint:
-        config:
-          ignore_checks:
-            - E3005
+    Condition: ServeWebUICondition
     DependsOn:
       - HttpApiMethod
       - HttpApiOptionsMethod
@@ -2995,13 +2995,26 @@ Resources:
       - WebUIProxyMethod
     Properties:
       RestApiId: !Ref HttpApi
-      Description: !Sub "Dispatcher API deployment for ${StackName} (CORS + optional Web UI proxy)"
+      Description: !Sub "Dispatcher API deployment for ${StackName} (CORS + Web UI proxy)"
+
+  HttpApiDeploymentNoWebUIV3:
+    Type: AWS::ApiGateway::Deployment
+    Condition: DoNotServeWebUICondition
+    DependsOn:
+      - HttpApiMethod
+      - HttpApiOptionsMethod
+    Properties:
+      RestApiId: !Ref HttpApi
+      Description: !Sub "Dispatcher API deployment for ${StackName} (CORS)"
 
   HttpApiStage:
     Type: AWS::ApiGateway::Stage
     Properties:
       RestApiId: !Ref HttpApi
-      DeploymentId: !Ref HttpApiDeploymentWebUIV3
+      DeploymentId: !If
+        - ServeWebUICondition
+        - !Ref HttpApiDeploymentWithWebUIV3
+        - !Ref HttpApiDeploymentNoWebUIV3
       StageName: api
 
   HttpApiDispatcherPermission:
