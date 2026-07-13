@@ -2543,20 +2543,32 @@ const VisualEditorModal = ({
         logger.info('✅ Baseline saved successfully');
       }
 
-      // Success! Reset change tracking and update originals
+      // Success! Reset change tracking and update originals for what was saved.
       setOriginalPredictionData(JSON.parse(JSON.stringify(localJsonData)));
-      if (localBaselineData) {
-        setOriginalBaselineData(JSON.parse(JSON.stringify(localBaselineData)));
-      }
       setPredictionChanges(new Map());
-      setBaselineChanges(new Map());
 
-      // Show success message
+      // Baseline edits are only persisted on the Admin/Author path. For reviewers
+      // the baseline save is skipped, so keep their baseline changes (and the
+      // "unsaved" indicator) rather than silently discarding them and falsely
+      // reporting success.
+      const baselineSkippedForReviewer = isReviewerOnly && baselineChangeCount > 0;
+      if (!baselineSkippedForReviewer) {
+        if (localBaselineData) {
+          setOriginalBaselineData(JSON.parse(JSON.stringify(localBaselineData)));
+        }
+        setBaselineChanges(new Map());
+      }
+
+      // Show an accurate message about what was (and wasn't) saved.
       const savedItems = [];
       if (results.predictions) savedItems.push(`${results.predictions.changedFields.length} prediction field(s)`);
       if (results.baseline) savedItems.push(`${results.baseline.changedFields.length} baseline field(s)`);
 
-      alert(`✅ Successfully saved:\n${savedItems.join('\n')}`);
+      let saveMessage = savedItems.length > 0 ? `✅ Successfully saved:\n${savedItems.join('\n')}` : 'ℹ️ No changes were saved.';
+      if (baselineSkippedForReviewer) {
+        saveMessage += `\n\n⚠️ ${baselineChangeCount} baseline edit(s) were NOT saved — editing evaluation baselines requires an Author or Admin role.`;
+      }
+      alert(saveMessage);
     } catch (error) {
       logger.error('❌ Error saving changes:', error);
       setSaveError((error as Error).message || 'Failed to save changes');
