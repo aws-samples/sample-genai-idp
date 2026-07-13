@@ -3057,7 +3057,12 @@ Resources:
   # The stage selects whichever exists via Fn::If. Bump BOTH logical-id suffixes
   # (…WebUIV3 -> …WebUIV4) whenever methods/CORS/gateway-responses change, so a
   # fresh snapshot reaches the stage.
-  HttpApiDeploymentWithWebUIV3:
+  # V3 -> V4: the OPTIONS MOCK integration gained ContentHandling: CONVERT_TO_TEXT
+  # (CORS preflight fix). That is a method/integration change, so the deployment
+  # logical id MUST be bumped to force a fresh snapshot onto the stage — mutating
+  # an existing Deployment does not re-snapshot. Without the bump the stack update
+  # succeeds but the stage keeps serving the pre-fix snapshot (preflight 500s).
+  HttpApiDeploymentWithWebUIV4:
     Type: AWS::ApiGateway::Deployment
     Condition: ServeWebUICondition
     DependsOn:
@@ -3069,7 +3074,7 @@ Resources:
       RestApiId: !Ref HttpApi
       Description: !Sub "Dispatcher API deployment for ${StackName} (CORS + Web UI proxy)"
 
-  HttpApiDeploymentNoWebUIV3:
+  HttpApiDeploymentNoWebUIV4:
     Type: AWS::ApiGateway::Deployment
     Condition: DoNotServeWebUICondition
     DependsOn:
@@ -3136,8 +3141,8 @@ Resources:
       RestApiId: !Ref HttpApi
       DeploymentId: !If
         - ServeWebUICondition
-        - !Ref HttpApiDeploymentWithWebUIV3
-        - !Ref HttpApiDeploymentNoWebUIV3
+        - !Ref HttpApiDeploymentWithWebUIV4
+        - !Ref HttpApiDeploymentNoWebUIV4
       StageName: api
       # JSON access-log format: request metadata only, never bodies. The error
       # and authorizer fields are what diagnose requests that never reach the
