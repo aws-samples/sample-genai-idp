@@ -153,8 +153,14 @@ For a public (regional, internet-facing) API Gateway UI in GovCloud, omit the
 the full hosting model.
 
 > The transformed template is written to `.aws-sam/idp-govcloud.yaml` and
-> (for `publish`) uploaded as `idp-govcloud.yaml`. It is validated against the
-> target GovCloud region before deployment.
+> (for `publish`) uploaded as `idp-govcloud.yaml`. It is **validated against a
+> GovCloud region with a region-aware `cfn-lint`** immediately after the
+> transform — if any GovCloud-unsupported resource type survived (an `E3006`
+> error), the `publish`/`deploy` **fails loudly** instead of surfacing the
+> problem only at deploy time. The lint uses the target GovCloud region when you
+> deploy to one, or `us-gov-west-1` by default when building from a commercial
+> region. `cfn-lint` runs fully offline (no credentials); if it is not installed
+> the gate is skipped with a warning.
 
 #### Option A: Vanilla (no API, no VPC)
 

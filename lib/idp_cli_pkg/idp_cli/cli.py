@@ -527,6 +527,7 @@ def deploy(
 
             import boto3 as _boto3
             import requests
+            from idp_sdk.operations.publish import DEFAULT_GOVCLOUD_LINT_REGION
 
             with tempfile.TemporaryDirectory() as tmpdir:
                 local_template = os.path.join(tmpdir, "idp-main.yaml")
@@ -538,9 +539,17 @@ def deploy(
 
                 govcloud_template = os.path.join(tmpdir, "idp-govcloud.yaml")
                 client_tmp = IDPClient(region=region)
+                # Lint against the actual deploy region when it is GovCloud;
+                # otherwise fall back to the default GovCloud lint region.
+                gc_lint_region = (
+                    region
+                    if region and region.startswith("us-gov-")
+                    else DEFAULT_GOVCLOUD_LINT_REGION
+                )
                 transform_result = client_tmp.publish.transform_template_govcloud(
                     source_template=local_template,
                     output_path=govcloud_template,
+                    lint_region=gc_lint_region,
                 )
                 if not transform_result.success:
                     console.print(

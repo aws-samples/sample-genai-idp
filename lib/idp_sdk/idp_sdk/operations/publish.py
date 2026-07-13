@@ -9,13 +9,58 @@ into the SDK.
 """
 
 import os
-from typing import Optional
+import re
+import shutil
+import subprocess
+from typing import List, Optional, Tuple
 from urllib.parse import quote
 
 import boto3
 
 from idp_sdk.exceptions import IDPConfigurationError, IDPStackError
 from idp_sdk.models.publish import PublishResult, TemplateTransformResult
+
+# Default GovCloud region to lint the transformed template against when the
+# publish/deploy is being run from a commercial region (the common case: build
+# in us-east-1, deploy the artifact into GovCloud). cfn-lint's per-region
+# resource spec is what surfaces E3006 "resource type does not exist in
+# <region>" for CloudFront / Lambda::Url, so the lint region must be a GovCloud
+# region even when the build region is commercial.
+DEFAULT_GOVCLOUD_LINT_REGION = "us-gov-west-1"
+
+
+def _cfn_lint_region_errors(
+    template_path: str, region: str
+) -> Tuple[bool, List[str], str]:
+    """Run region-aware cfn-lint on a template.
+
+    Returns (ran, errors, note):
+      - ran:    True if cfn-lint actually executed; False if it is not installed
+                (caller decides whether a skip is acceptable).
+      - errors: list of ``E####`` error lines (warnings are ignored here).
+      - note:   human-readable status/skip message.
+
+    cfn-lint is a fully offline static linter with a bundled per-region resource
+    spec — no AWS credentials or network access are required. IMPORTANT: the
+    template path MUST come before ``--region`` (``cfn-lint <file> --region
+    <r>``); with the flag first, cfn-lint consumes the filename as a region value
+    and errors out without linting.
+    """
+    if not shutil.which("cfn-lint"):
+        return (False, [], "cfn-lint not installed — skipping GovCloud lint check")
+
+    result = subprocess.run(
+        ["cfn-lint", template_path, "--region", region],
+        capture_output=True,
+        text=True,
+    )
+    output = (result.stdout or "") + (result.stderr or "")
+    errors = [
+        line.strip()
+        for line in output.splitlines()
+        if re.match(r"^E\d{4}\b", line.strip())
+    ]
+    return (True, errors, f"cfn-lint ran for region {region}")
 
 
 class PublishOperation:
@@ -161,12 +206,21 @@ class PublishOperation:
             # the full Web UI but removes AWS::CloudFront::* resources and forces
             # API Gateway hosting (the only GovCloud-viable option).
             if govcloud:
+                # Lint against the deploy region if it is already GovCloud;
+                # otherwise (building from a commercial region) lint against the
+                # default GovCloud region so E3006 checks still apply.
+                lint_region = (
+                    region
+                    if region and region.startswith("us-gov-")
+                    else DEFAULT_GOVCLOUD_LINT_REGION
+                )
                 govcloud_result = self.transform_template_govcloud(
                     source_template=template_path,
                     output_path=os.path.join(
                         source_dir, ".aws-sam", "idp-govcloud.yaml"
                     ),
                     verbose=verbose,
+                    lint_region=lint_region,
                 )
                 if not govcloud_result.success:
                     return PublishResult(
@@ -345,6 +399,7 @@ class PublishOperation:
         output_path: Optional[str] = None,
         *,
         verbose: bool = False,
+        lint_region: Optional[str] = DEFAULT_GOVCLOUD_LINT_REGION,
     ) -> TemplateTransformResult:
         """Transform a template for GovCloud (CloudFront-free, API-Gateway hosting).
 
@@ -353,11 +408,20 @@ class PublishOperation:
         and cause ``E3006`` errors) and forces ``WebUIHosting=APIGateway`` so the
         UI is served as an S3 proxy on the REST API.
 
+        After the transform, the output template is linted with a region-aware
+        ``cfn-lint`` (``lint_region``, default ``us-gov-west-1``) so that any
+        remaining GovCloud-unsupported resource type (``E3006``) fails the
+        transform loudly rather than surfacing only at deploy time. The lint is
+        offline (no credentials). It is skipped gracefully if cfn-lint is not
+        installed. Pass ``lint_region=None`` to disable the lint gate.
+
         Args:
             source_template: Path to the source CloudFormation YAML template.
             output_path: Path to write the transformed template. Defaults to
                 appending ``-govcloud`` to the source filename.
             verbose: If True, enable verbose logging.
+            lint_region: GovCloud region to lint the transformed template
+                against, or None to skip the region-aware lint gate.
 
         Returns:
             TemplateTransformResult with paths and status.
@@ -378,17 +442,35 @@ class PublishOperation:
         try:
             transformer = GovCloudTemplateTransformer(verbose=verbose)
             success = transformer.transform(source_template, output_path)
-            if success:
+            if not success:
                 return TemplateTransformResult(
-                    success=True,
+                    success=False,
                     input_path=source_template,
                     output_path=output_path,
+                    error="GovCloud template transformation failed validation",
                 )
+
+            # Region-aware cfn-lint gate: catch any GovCloud-unsupported resource
+            # type (E3006) that survived the transform, against a GovCloud region.
+            if lint_region:
+                ran, errors, note = _cfn_lint_region_errors(output_path, lint_region)
+                if ran and errors:
+                    preview = "\n".join(errors[:10])
+                    return TemplateTransformResult(
+                        success=False,
+                        input_path=source_template,
+                        output_path=output_path,
+                        error=(
+                            f"GovCloud template still has cfn-lint errors for "
+                            f"{lint_region} (a resource type unsupported in "
+                            f"GovCloud likely survived the transform):\n{preview}"
+                        ),
+                    )
+
             return TemplateTransformResult(
-                success=False,
+                success=True,
                 input_path=source_template,
                 output_path=output_path,
-                error="GovCloud template transformation failed validation",
             )
         except Exception as e:
             return TemplateTransformResult(
