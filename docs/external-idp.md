@@ -94,7 +94,7 @@ The Cognito values you'll need for IdP configuration:
 - **SAML Entity ID**: `urn:amazon:cognito:sp:<user-pool-id>`
 - **OIDC Redirect URI**: `https://<cognito-domain>/oauth2/idpresponse`
 
-> **Custom domain in front of the Web UI?** The redirect URIs you register in the IdP are still the Cognito URLs above — they do **not** change when the application is fronted by a custom domain (e.g. `https://idp.your-org.com`). In this architecture Cognito brokers the federation, so the IdP only ever sees Cognito's `idpresponse` endpoint. The custom domain is configured separately via the `CustomDomainUrl` stack parameter, which adds it to the Cognito App Client's `CallbackURLs` and to all S3 bucket CORS origins. See [ALB Hosting → Custom Domain](./alb-hosting.md#custom-domain-in-front-of-alb).
+> **Custom domain in front of the Web UI?** The redirect URIs you register in the IdP are still the Cognito URLs above — they do **not** change when the application is fronted by a custom domain (e.g. `https://idp.your-org.com`). In this architecture Cognito brokers the federation, so the IdP only ever sees Cognito's `idpresponse` endpoint. The custom domain is configured separately via the `CustomDomainUrl` stack parameter, which adds it to the Cognito App Client's `CallbackURLs` and to all S3 bucket CORS origins. See [API Gateway Hosting → OAuth / Cognito callbacks](./apigateway-hosting.md#oauth--cognito-callbacks).
 
 ---
 

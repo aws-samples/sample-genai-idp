@@ -666,17 +666,6 @@ class HeadlessTemplateTransformer:
             if func_name in resources:
                 self._clean_tracking_function(resources, func_name)
 
-        # Clean ALB hosting nested stack parameters
-        if "ALBHOSTINGSTACK" in resources:
-            alb_stack_params = (
-                resources["ALBHOSTINGSTACK"].get("Properties", {}).get("Parameters", {})
-            )
-            if "WebUIBucketName" in alb_stack_params:
-                alb_stack_params["WebUIBucketName"] = ""
-                logger.debug(
-                    "Replaced WebUIBucketName with empty string in ALBHOSTINGSTACK"
-                )
-
         # Clean nested stack parameters (PATTERNSTACK)
         for stack_name in ["PATTERNSTACK"]:
             if stack_name in resources:

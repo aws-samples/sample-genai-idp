@@ -18,7 +18,7 @@ Headless is **not specific to GovCloud**. It is available in **any supported reg
 - **Cost optimization** — remove UI-adjacent resources when they won't be used.
 - **GovCloud** — headless is **required** in AWS GovCloud regions (`us-gov-*`) because the UI-layer services (CloudFront, AppSync, Cognito, WAF for CloudFront) are not available there. See also [GovCloud Deployment](./govcloud-deployment.md) for GovCloud-specific considerations.
 
-> **If you want the Web UI but cannot use CloudFront** (for example, private-network / VPC-only requirements in a Commercial region), use [ALB Hosting](./alb-hosting.md) instead — ALB hosting keeps the full UI while serving it from within a VPC.
+> **If you want the Web UI but cannot use CloudFront** (for example, private-network / VPC-only requirements in a Commercial region), use [API Gateway Hosting](./apigateway-hosting.md) instead — API Gateway hosting keeps the full UI while serving it from the existing REST API, within a VPC when combined with `ApiGatewayVisibility=PRIVATE`.
 
 ## What Gets Removed in Headless Mode
 
@@ -310,12 +310,12 @@ The following features depend on the UI/AppSync/Cognito stack and are therefore 
 | Evaluation / metrics | Athena queries on the reporting database, `idp-cli test-result` / `test-compare`, reporting S3 outputs |
 | Authentication / RBAC | Implement at the application / network layer (IAM, API Gateway authorizers, VPC, SSO) |
 
-## When to Choose Headless vs. Standard vs. ALB Hosting
+## When to Choose Headless vs. Standard vs. API Gateway Hosting
 
 | Requirement | Recommended mode |
 |---|---|
 | You want the full Web UI, deployed with defaults | **Standard** (CloudFront + CloudFormation) |
-| You want the full Web UI but cannot use CloudFront (private network / VPC-only) | **[ALB Hosting](./alb-hosting.md)** |
+| You want the full Web UI but cannot use CloudFront (private network / VPC-only) | **[API Gateway Hosting](./apigateway-hosting.md)** |
 | You only need the backend (API / pipeline), no UI | **Headless** (this guide) |
 | Deploying to AWS **GovCloud** | **Headless** (required) + see [GovCloud Deployment](./govcloud-deployment.md) |
 | Organization prohibits CloudFront / Cognito / AppSync / WAF | **Headless** |
@@ -347,6 +347,6 @@ The following features depend on the UI/AppSync/Cognito stack and are therefore 
 - [IDP CLI](./idp-cli.md) — `deploy --headless`, `publish --headless`
 - [IDP SDK](./idp-sdk.md) — `publish.build()`, `publish.transform_template_headless()`
 - [GovCloud Deployment](./govcloud-deployment.md) — GovCloud-specific requirements and defaults
-- [ALB Hosting](./alb-hosting.md) — Deploying the Web UI inside a VPC (alternative to headless when you still want the UI)
+- [API Gateway Hosting](./apigateway-hosting.md) — Deploying the Web UI inside a VPC (alternative to headless when you still want the UI)
 - [Deployment in Private Network](./deployment-private-network.md) — Private-network deployment guidance
 - [Deployment Guide](./deployment.md) — General build / publish / deploy reference

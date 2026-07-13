@@ -146,9 +146,9 @@ incrementally:
   message-handling code, only sourced from the stream instead of a subscription —
   so the chat UX is unchanged.
 - **Hosting-agnostic:** because the browser hits the Function URL directly, token
-  streaming works identically under CloudFront or the ALB hosting option (an
-  ALB-as-Lambda-target buffers responses and can't stream, which is exactly why
-  the streaming endpoint is a direct Function URL). The UI's CSP `connect-src`
+  streaming works identically under CloudFront or the API Gateway hosting option
+  (API Gateway buffers responses and can't stream, which is exactly why the
+  streaming endpoint is a direct Function URL). The UI's CSP `connect-src`
   allows `https://*.on.aws` so the browser can reach `*.lambda-url.<region>.on.aws`.
 
 ## 4. Security & RBAC parity
@@ -303,5 +303,5 @@ published under a different account.
 - [API RBAC test script](../scripts/README.md) (`scripts/test_api_rbac.py`)
 - [Architecture](architecture.md)
 - [GovCloud deployment](govcloud-deployment.md)
-- [ALB hosting](alb-hosting.md)
+- [API Gateway hosting](apigateway-hosting.md)
 - [Migrating an external/marketplace feature](extensions/MIGRATION-PROMPT-appsync-removal.md)
