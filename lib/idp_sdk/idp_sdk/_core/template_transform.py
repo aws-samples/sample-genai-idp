@@ -79,6 +79,16 @@ class HeadlessTemplateTransformer:
             "CalculateCapacityResolverFunctionLogGroup",
             "VersionCheckResolverFunction",
             "VersionCheckResolverFunctionLogGroup",
+            # API-Gateway Web UI hosting (WebUIHosting=APIGateway). These only
+            # exist to serve the Web UI as an S3 proxy on the UI REST API and to
+            # register its Cognito OAuth callback URLs — meaningless in headless
+            # mode, and they reference removed resources (APIRESOLVERSTACK,
+            # UserPool, UserPoolClient, WebUIBucket), so strip them.
+            "WebUIProxyRole",
+            "WebUIClientOAuthUrls",
+            "WebUIClientOAuthUrlsFunction",
+            "WebUIClientOAuthUrlsRole",
+            "WebUIClientOAuthUrlsLogGroup",
         }
 
         self.auth_resources: Set[str] = {
