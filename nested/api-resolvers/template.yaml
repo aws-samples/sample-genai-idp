@@ -2743,10 +2743,13 @@ Resources:
     Properties:
       Name: !Sub "${StackName}-api"
       # Treat all media as binary so the S3-proxy web-UI routes (ServeWebUI)
-      # can return images/fonts/js/css bytes intact. The JSON /op transport is
-      # unaffected: the dispatcher base64-decodes isBase64Encoded request bodies
-      # (idp_common.api_adapter._parse_body) and returns a JSON string response,
-      # which API Gateway passes through unchanged.
+      # can return images/fonts/js/css bytes intact. The JSON /op POST transport
+      # is unaffected: the dispatcher base64-decodes isBase64Encoded request
+      # bodies (idp_common.api_adapter._parse_body) and returns a JSON string
+      # response, which API Gateway passes through unchanged. The CORS OPTIONS
+      # preflight, however, DOES need CONVERT_TO_TEXT on its MOCK integration
+      # (see HttpApiOptionsMethod) — otherwise */* makes API Gateway try to
+      # base64-encode the empty preflight body and it 500s.
       BinaryMediaTypes:
         - "*/*"
       EndpointConfiguration: !If
@@ -2829,10 +2832,18 @@ Resources:
         method.request.path.field: true
       Integration:
         Type: MOCK
+        # The API sets BinaryMediaTypes: */* (so the S3-proxy web-UI routes can
+        # return raw bytes). Browsers send Accept: */* on the CORS preflight, so
+        # without CONVERT_TO_TEXT API Gateway tries to base64-encode this MOCK
+        # response as binary and the preflight fails with a 500 (which blocks the
+        # subsequent POST with a browser "Failed to fetch"). Forcing text handling
+        # on both the integration and its response keeps the preflight a clean 200.
+        ContentHandling: CONVERT_TO_TEXT
         RequestTemplates:
           application/json: '{"statusCode": 200}'
         IntegrationResponses:
           - StatusCode: "200"
+            ContentHandling: CONVERT_TO_TEXT
             ResponseParameters:
               method.response.header.Access-Control-Allow-Origin: "'*'"
               method.response.header.Access-Control-Allow-Headers: "'authorization,content-type'"
