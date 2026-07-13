@@ -5,10 +5,10 @@
     "class": "bank_statement",
     "commit": "4c063b647",
     "pricing_sha256": "c7675fb7769025065cbcd055120bf2b3e85f9d755d9f3c77b1d176d434c8660f",
-    "scored_at": "2026-07-13T03:16:57.982969Z",
+    "scored_at": "2026-07-13T04:22:34.920860Z",
     "region": "us-west-2",
-    "stack_version": "0.5.16 (published aws-ml-blog template)",
-    "note": "Full 10-cell grid x 3 docs (<=100 rows). Extraction model held at sonnet-4-6 (shared control; v0.5.16 cannot run sonnet-5). Summarization disabled. See project memory for cross-version config compat fixes."
+    "stack_version": "0.6.0.dev18 (in-place --from-code upgrade of the v0.5.16 stack)",
+    "note": "Same IDPbench0516 stack upgraded from v0.5.16. IDENTICAL native-uploaded configs (byte-for-byte) as the v0.5.16 run; only stack code differs. Extraction=sonnet-4-6 control, summarization disabled."
   },
   "rows": [
     {
@@ -25,24 +25,24 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-tiny_form-20260713-024505",
+      "run_id": "bench-tiny_form-20260713-035007",
       "status": "COMPLETED",
       "success": true,
       "page_count": 1.0,
-      "wall_s": 29.585624,
-      "cost": 0.0331,
+      "wall_s": 13.54273,
+      "cost": 0.0319,
       "cost_by_phase": {
-        "Summarization": 2e-05,
-        "Classification": 3e-05,
-        "Extraction": 0.01645,
-        "GranularAssessment": 0.00137,
-        "OCR": 0.01519
+        "OCR": 0.01511,
+        "Classification": 2e-05,
+        "Extraction": 0.01643,
+        "Assessment": 0.0003,
+        "Summarization": 1e-05
       },
       "tokens": {
-        "inputTokens": 4327,
-        "outputTokens": 1933,
-        "cacheReadInputTokens": 20488,
-        "cacheWriteInputTokens": 1529
+        "inputTokens": 3638,
+        "outputTokens": 757,
+        "cacheReadInputTokens": 673,
+        "cacheWriteInputTokens": 393
       },
       "rows_truth": 5,
       "rows_extracted": 5,
@@ -51,9 +51,9 @@
       "dups": 0,
       "n_gaps": 0,
       "scalar_accuracy": 1.0,
-      "mean_confidence": 0.9975,
+      "mean_confidence": 0.9936,
       "pct_conf_below_0.9": 0.0,
-      "n_conf_leaves": 31
+      "n_conf_leaves": 22
     },
     {
       "cell": "core-tt-simple-sep",
@@ -69,24 +69,24 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-small_narrow-20260713-024509",
+      "run_id": "bench-small_narrow-20260713-035012",
       "status": "COMPLETED",
       "success": true,
       "page_count": 3.0,
-      "wall_s": 112.666439,
-      "cost": 0.169,
+      "wall_s": 107.893327,
+      "cost": 0.1502,
       "cost_by_phase": {
-        "Summarization": 2e-05,
-        "Classification": 3e-05,
+        "OCR": 0.04518,
+        "Classification": 1e-05,
         "Extraction": 0.09463,
-        "GranularAssessment": 0.02916,
-        "OCR": 0.0452
+        "Assessment": 0.01035,
+        "Summarization": 1e-05
       },
       "tokens": {
-        "inputTokens": 25054,
-        "outputTokens": 20504,
-        "cacheReadInputTokens": 1198750,
-        "cacheWriteInputTokens": 28888
+        "inputTokens": 19609,
+        "outputTokens": 20552,
+        "cacheReadInputTokens": 73448,
+        "cacheWriteInputTokens": 0
       },
       "rows_truth": 100,
       "rows_extracted": 100,
@@ -95,9 +95,9 @@
       "dups": 0,
       "n_gaps": 0,
       "scalar_accuracy": 1.0,
-      "mean_confidence": 0.9991,
-      "pct_conf_below_0.9": 0.0,
-      "n_conf_leaves": 313
+      "mean_confidence": 0.985,
+      "pct_conf_below_0.9": 1.0,
+      "n_conf_leaves": 307
     },
     {
       "cell": "core-tt-simple-sep",
@@ -113,24 +113,24 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-longdesc_100-20260713-024516",
+      "run_id": "bench-longdesc_100-20260713-035020",
       "status": "COMPLETED",
       "success": true,
       "page_count": 3.0,
-      "wall_s": 125.027662,
-      "cost": 0.194,
+      "wall_s": 123.4924,
+      "cost": 0.1675,
       "cost_by_phase": {
-        "Summarization": 2e-05,
-        "Classification": 4e-05,
-        "Extraction": 0.11348,
-        "GranularAssessment": 0.03521,
-        "OCR": 0.0453
+        "OCR": 0.04524,
+        "Classification": 2e-05,
+        "Extraction": 0.10974,
+        "Assessment": 0.01249,
+        "Summarization": 1e-05
       },
       "tokens": {
-        "inputTokens": 25774,
-        "outputTokens": 33808,
-        "cacheReadInputTokens": 1395975,
-        "cacheWriteInputTokens": 24130
+        "inputTokens": 21576,
+        "outputTokens": 22828,
+        "cacheReadInputTokens": 72529,
+        "cacheWriteInputTokens": 15915
       },
       "rows_truth": 100,
       "rows_extracted": 100,
@@ -139,9 +139,9 @@
       "dups": 0,
       "n_gaps": 0,
       "scalar_accuracy": 0.5,
-      "mean_confidence": 0.787,
-      "pct_conf_below_0.9": 20.0,
-      "n_conf_leaves": 476
+      "mean_confidence": 0.7931,
+      "pct_conf_below_0.9": 28.7,
+      "n_conf_leaves": 307
     },
     {
       "cell": "core-tt-simple-int",
@@ -157,24 +157,24 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-tiny_form-20260713-024526",
+      "run_id": "bench-tiny_form-20260713-035032",
       "status": "COMPLETED",
       "success": true,
       "page_count": 1.0,
-      "wall_s": 25.495224,
-      "cost": 0.0328,
+      "wall_s": 25.652962,
+      "cost": 0.0594,
       "cost_by_phase": {
-        "Summarization": 3e-05,
-        "Classification": 2e-05,
-        "Extraction": 0.01645,
-        "GranularAssessment": 0.0011,
-        "OCR": 0.01519
+        "OCR": 0.01517,
+        "Classification": 1e-05,
+        "Extraction": 0.04417,
+        "Assessment": 2e-05,
+        "Summarization": 1e-05
       },
       "tokens": {
-        "inputTokens": 4327,
-        "outputTokens": 1933,
-        "cacheReadInputTokens": 22017,
-        "cacheWriteInputTokens": 0
+        "inputTokens": 2224,
+        "outputTokens": 1894,
+        "cacheReadInputTokens": 0,
+        "cacheWriteInputTokens": 1101
       },
       "rows_truth": 5,
       "rows_extracted": 5,
@@ -183,9 +183,9 @@
       "dups": 0,
       "n_gaps": 0,
       "scalar_accuracy": 1.0,
-      "mean_confidence": 0.9975,
+      "mean_confidence": 0.9759,
       "pct_conf_below_0.9": 0.0,
-      "n_conf_leaves": 31
+      "n_conf_leaves": 17
     },
     {
       "cell": "core-tt-simple-int",
@@ -201,23 +201,23 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-small_narrow-20260713-024538",
+      "run_id": "bench-small_narrow-20260713-035048",
       "status": "COMPLETED",
       "success": true,
       "page_count": 3.0,
-      "wall_s": 108.978783,
-      "cost": 0.1678,
+      "wall_s": 179.753603,
+      "cost": 0.523,
       "cost_by_phase": {
-        "Summarization": 2e-05,
+        "OCR": 0.04521,
         "Classification": 2e-05,
-        "Extraction": 0.09466,
-        "GranularAssessment": 0.02789,
-        "OCR": 0.0452
+        "Extraction": 0.47771,
+        "Assessment": 2e-05,
+        "Summarization": 1e-05
       },
       "tokens": {
-        "inputTokens": 25054,
-        "outputTokens": 20353,
-        "cacheReadInputTokens": 1227638,
+        "inputTokens": 8164,
+        "outputTokens": 26606,
+        "cacheReadInputTokens": 1101,
         "cacheWriteInputTokens": 0
       },
       "rows_truth": 100,
@@ -226,10 +226,10 @@
       "truncation_prefix": 100,
       "dups": 0,
       "n_gaps": 0,
-      "scalar_accuracy": 1.0,
-      "mean_confidence": 0.9993,
-      "pct_conf_below_0.9": 0.0,
-      "n_conf_leaves": 310
+      "scalar_accuracy": 0.5,
+      "mean_confidence": 0.9884,
+      "pct_conf_below_0.9": 0.3,
+      "n_conf_leaves": 302
     },
     {
       "cell": "core-tt-simple-int",
@@ -245,35 +245,35 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-longdesc_100-20260713-024554",
+      "run_id": "bench-longdesc_100-20260713-035107",
       "status": "COMPLETED",
       "success": true,
       "page_count": 3.0,
-      "wall_s": 123.04711,
-      "cost": 0.191,
+      "wall_s": 36.672404,
+      "cost": 0.1345,
       "cost_by_phase": {
-        "Summarization": 3e-05,
+        "OCR": 0.04525,
         "Classification": 2e-05,
-        "Extraction": 0.11347,
-        "GranularAssessment": 0.03222,
-        "OCR": 0.04526
+        "Extraction": 0.08923,
+        "Assessment": 1e-05,
+        "Summarization": 1e-05
       },
       "tokens": {
-        "inputTokens": 25469,
-        "outputTokens": 27079,
-        "cacheReadInputTokens": 1391418,
+        "inputTokens": 9776,
+        "outputTokens": 3324,
+        "cacheReadInputTokens": 1101,
         "cacheWriteInputTokens": 0
       },
       "rows_truth": 100,
-      "rows_extracted": 100,
-      "completeness_recall": 1.0,
-      "truncation_prefix": 100,
+      "rows_extracted": 10,
+      "completeness_recall": 0.1,
+      "truncation_prefix": 10,
       "dups": 0,
-      "n_gaps": 0,
+      "n_gaps": 90,
       "scalar_accuracy": 0.5,
-      "mean_confidence": 0.7455,
-      "pct_conf_below_0.9": 24.2,
-      "n_conf_leaves": 384
+      "mean_confidence": 0.7372,
+      "pct_conf_below_0.9": 34.4,
+      "n_conf_leaves": 32
     },
     {
       "cell": "core-tt-simple-off",
@@ -289,18 +289,18 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-tiny_form-20260713-024613",
+      "run_id": "bench-tiny_form-20260713-035130",
       "status": "COMPLETED",
       "success": true,
       "page_count": 1.0,
-      "wall_s": 14.496472,
+      "wall_s": 12.490655,
       "cost": 0.0316,
       "cost_by_phase": {
-        "Summarization": 2e-05,
-        "Classification": 2e-05,
-        "Extraction": 0.01644,
-        "GranularAssessment": 3e-05,
-        "OCR": 0.01513
+        "OCR": 0.01512,
+        "Classification": 1e-05,
+        "Extraction": 0.01642,
+        "Assessment": 3e-05,
+        "Summarization": 1e-05
       },
       "tokens": {
         "inputTokens": 3180,
@@ -333,18 +333,18 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-small_narrow-20260713-024634",
+      "run_id": "bench-small_narrow-20260713-035157",
       "status": "COMPLETED",
       "success": true,
       "page_count": 3.0,
-      "wall_s": 43.67942,
-      "cost": 0.1401,
+      "wall_s": 40.292376,
+      "cost": 0.1399,
       "cost_by_phase": {
-        "Summarization": 2e-05,
+        "OCR": 0.04523,
         "Classification": 2e-05,
-        "Extraction": 0.0948,
-        "GranularAssessment": 2e-05,
-        "OCR": 0.0452
+        "Extraction": 0.09461,
+        "Assessment": 2e-05,
+        "Summarization": 1e-05
       },
       "tokens": {
         "inputTokens": 9120,
@@ -377,22 +377,22 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-longdesc_100-20260713-024658",
+      "run_id": "bench-longdesc_100-20260713-035227",
       "status": "COMPLETED",
       "success": true,
       "page_count": 3.0,
-      "wall_s": 45.760828,
-      "cost": 0.1587,
+      "wall_s": 41.835872,
+      "cost": 0.155,
       "cost_by_phase": {
-        "Summarization": 2e-05,
+        "OCR": 0.04526,
         "Classification": 2e-05,
-        "Extraction": 0.1134,
-        "GranularAssessment": 3e-05,
-        "OCR": 0.04527
+        "Extraction": 0.10969,
+        "Assessment": 2e-05,
+        "Summarization": 1e-05
       },
       "tokens": {
         "inputTokens": 10732,
-        "outputTokens": 4585,
+        "outputTokens": 4373,
         "cacheReadInputTokens": 0,
         "cacheWriteInputTokens": 0
       },
@@ -421,24 +421,24 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-tiny_form-20260713-024811",
+      "run_id": "bench-tiny_form-20260713-035303",
       "status": "COMPLETED",
       "success": true,
       "page_count": 1.0,
-      "wall_s": 28.757293,
-      "cost": 0.086,
+      "wall_s": 23.93104,
+      "cost": 0.0839,
       "cost_by_phase": {
-        "Summarization": 2e-05,
+        "OCR": 0.01512,
         "Classification": 2e-05,
-        "Extraction": 0.06938,
-        "GranularAssessment": 0.00147,
-        "OCR": 0.01512
+        "Extraction": 0.06858,
+        "Assessment": 0.00016,
+        "Summarization": 2e-05
       },
       "tokens": {
-        "inputTokens": 1568,
-        "outputTokens": 3568,
-        "cacheReadInputTokens": 32821,
-        "cacheWriteInputTokens": 12322
+        "inputTokens": 756,
+        "outputTokens": 1289,
+        "cacheReadInputTokens": 12387,
+        "cacheWriteInputTokens": 11803
       },
       "rows_truth": 5,
       "rows_extracted": 5,
@@ -447,9 +447,9 @@
       "dups": 0,
       "n_gaps": 0,
       "scalar_accuracy": 1.0,
-      "mean_confidence": 0.9983,
+      "mean_confidence": 0.9677,
       "pct_conf_below_0.9": 0.0,
-      "n_conf_leaves": 52
+      "n_conf_leaves": 22
     },
     {
       "cell": "core-tt-adv-sep",
@@ -465,24 +465,24 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-small_narrow-20260713-024843",
+      "run_id": "bench-small_narrow-20260713-035344",
       "status": "COMPLETED",
       "success": true,
       "page_count": 3.0,
-      "wall_s": 151.275026,
-      "cost": 0.5737,
+      "wall_s": 90.690409,
+      "cost": 0.3661,
       "cost_by_phase": {
-        "Summarization": 2e-05,
+        "OCR": 0.04517,
         "Classification": 2e-05,
-        "Extraction": 0.5008,
-        "GranularAssessment": 0.02761,
-        "OCR": 0.04524
+        "Extraction": 0.31904,
+        "Assessment": 0.00189,
+        "Summarization": 1e-05
       },
       "tokens": {
-        "inputTokens": 98093,
-        "outputTokens": 24030,
-        "cacheReadInputTokens": 1336368,
-        "cacheWriteInputTokens": 16435
+        "inputTokens": 34514,
+        "outputTokens": 13685,
+        "cacheReadInputTokens": 85110,
+        "cacheWriteInputTokens": 16563
       },
       "rows_truth": 100,
       "rows_extracted": 100,
@@ -491,9 +491,9 @@
       "dups": 0,
       "n_gaps": 0,
       "scalar_accuracy": 1.0,
-      "mean_confidence": 0.9955,
+      "mean_confidence": 0.95,
       "pct_conf_below_0.9": 0.0,
-      "n_conf_leaves": 310
+      "n_conf_leaves": 307
     },
     {
       "cell": "core-tt-adv-sep",
@@ -509,24 +509,24 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-longdesc_100-20260713-024918",
+      "run_id": "bench-longdesc_100-20260713-035428",
       "status": "COMPLETED",
       "success": true,
       "page_count": 3.0,
-      "wall_s": 247.638659,
-      "cost": 1.2934,
+      "wall_s": 180.722261,
+      "cost": 0.5265,
       "cost_by_phase": {
-        "Summarization": 2e-05,
-        "Classification": 3e-05,
-        "Extraction": 1.21321,
-        "GranularAssessment": 0.03486,
-        "OCR": 0.04527
+        "OCR": 0.04526,
+        "Classification": 2e-05,
+        "Extraction": 0.47874,
+        "Assessment": 0.00252,
+        "Summarization": 1e-05
       },
       "tokens": {
-        "inputTokens": 263894,
-        "outputTokens": 39382,
-        "cacheReadInputTokens": 1574243,
-        "cacheWriteInputTokens": 54244
+        "inputTokens": 48716,
+        "outputTokens": 23821,
+        "cacheReadInputTokens": 62287,
+        "cacheWriteInputTokens": 13689
       },
       "rows_truth": 100,
       "rows_extracted": 100,
@@ -535,9 +535,9 @@
       "dups": 0,
       "n_gaps": 0,
       "scalar_accuracy": 1.0,
-      "mean_confidence": 0.976,
-      "pct_conf_below_0.9": 0.0,
-      "n_conf_leaves": 453
+      "mean_confidence": 0.6073,
+      "pct_conf_below_0.9": 65.1,
+      "n_conf_leaves": 307
     },
     {
       "cell": "core-tt-adv-int",
@@ -553,24 +553,24 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-tiny_form-20260713-024957",
+      "run_id": "bench-tiny_form-20260713-035516",
       "status": "COMPLETED",
       "success": true,
       "page_count": 1.0,
-      "wall_s": 29.960016,
-      "cost": 0.0427,
+      "wall_s": 27.34761,
+      "cost": 0.1007,
       "cost_by_phase": {
-        "Summarization": 2e-05,
+        "OCR": 0.01513,
         "Classification": 2e-05,
-        "Extraction": 0.02612,
-        "GranularAssessment": 0.0014,
-        "OCR": 0.01514
+        "Extraction": 0.08554,
+        "Assessment": 2e-05,
+        "Summarization": 1e-05
       },
       "tokens": {
-        "inputTokens": 1568,
-        "outputTokens": 3018,
-        "cacheReadInputTokens": 45143,
-        "cacheWriteInputTokens": 0
+        "inputTokens": 1001,
+        "outputTokens": 1386,
+        "cacheReadInputTokens": 24282,
+        "cacheWriteInputTokens": 12141
       },
       "rows_truth": 5,
       "rows_extracted": 5,
@@ -579,9 +579,9 @@
       "dups": 0,
       "n_gaps": 0,
       "scalar_accuracy": 1.0,
-      "mean_confidence": 0.997,
+      "mean_confidence": 0.99,
       "pct_conf_below_0.9": 0.0,
-      "n_conf_leaves": 40
+      "n_conf_leaves": 22
     },
     {
       "cell": "core-tt-adv-int",
@@ -597,24 +597,24 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-small_narrow-20260713-025039",
+      "run_id": "bench-small_narrow-20260713-035608",
       "status": "COMPLETED",
       "success": true,
       "page_count": 3.0,
-      "wall_s": 149.610367,
-      "cost": 0.5132,
+      "wall_s": 137.60918,
+      "cost": 0.5489,
       "cost_by_phase": {
-        "Summarization": 2e-05,
+        "OCR": 0.04518,
         "Classification": 2e-05,
-        "Extraction": 0.43837,
-        "GranularAssessment": 0.02966,
-        "OCR": 0.04517
+        "Extraction": 0.50369,
+        "Assessment": 2e-05,
+        "Summarization": 2e-05
       },
       "tokens": {
-        "inputTokens": 98093,
-        "outputTokens": 32480,
-        "cacheReadInputTokens": 1352803,
-        "cacheWriteInputTokens": 0
+        "inputTokens": 47657,
+        "outputTokens": 14234,
+        "cacheReadInputTokens": 101190,
+        "cacheWriteInputTokens": 16865
       },
       "rows_truth": 100,
       "rows_extracted": 100,
@@ -623,9 +623,9 @@
       "dups": 0,
       "n_gaps": 0,
       "scalar_accuracy": 1.0,
-      "mean_confidence": 0.9968,
+      "mean_confidence": 0.9895,
       "pct_conf_below_0.9": 0.0,
-      "n_conf_leaves": 481
+      "n_conf_leaves": 307
     },
     {
       "cell": "core-tt-adv-int",
@@ -641,24 +641,24 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-longdesc_100-20260713-025124",
+      "run_id": "bench-longdesc_100-20260713-035704",
       "status": "COMPLETED",
       "success": true,
       "page_count": 3.0,
-      "wall_s": 225.677538,
-      "cost": 1.4354,
+      "wall_s": 182.768245,
+      "cost": 0.8286,
       "cost_by_phase": {
-        "Summarization": 2e-05,
+        "OCR": 0.04526,
         "Classification": 2e-05,
-        "Extraction": 1.35775,
-        "GranularAssessment": 0.03231,
-        "OCR": 0.04528
+        "Extraction": 0.78333,
+        "Assessment": 2e-05,
+        "Summarization": 1e-05
       },
       "tokens": {
-        "inputTokens": 348044,
-        "outputTokens": 33699,
-        "cacheReadInputTokens": 1644693,
-        "cacheWriteInputTokens": 0
+        "inputTokens": 111472,
+        "outputTokens": 18348,
+        "cacheReadInputTokens": 134069,
+        "cacheWriteInputTokens": 13827
       },
       "rows_truth": 100,
       "rows_extracted": 100,
@@ -667,9 +667,9 @@
       "dups": 0,
       "n_gaps": 0,
       "scalar_accuracy": 1.0,
-      "mean_confidence": 0.6907,
-      "pct_conf_below_0.9": 30.4,
-      "n_conf_leaves": 431
+      "mean_confidence": 0.6317,
+      "pct_conf_below_0.9": 65.1,
+      "n_conf_leaves": 307
     },
     {
       "cell": "core-tl-simple-sep",
@@ -685,24 +685,24 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-tiny_form-20260713-025212",
+      "run_id": "bench-tiny_form-20260713-035803",
       "status": "COMPLETED",
       "success": true,
       "page_count": 1.0,
-      "wall_s": 19.635374,
-      "cost": 0.0218,
+      "wall_s": 14.132018,
+      "cost": 0.0207,
       "cost_by_phase": {
-        "Summarization": 3e-05,
-        "Classification": 3e-05,
-        "Extraction": 0.01629,
-        "GranularAssessment": 0.00136,
-        "OCR": 0.00413
+        "OCR": 0.00412,
+        "Classification": 2e-05,
+        "Extraction": 0.01627,
+        "Assessment": 0.00029,
+        "Summarization": 1e-05
       },
       "tokens": {
-        "inputTokens": 4278,
-        "outputTokens": 2691,
-        "cacheReadInputTokens": 22017,
-        "cacheWriteInputTokens": 0
+        "inputTokens": 3589,
+        "outputTokens": 757,
+        "cacheReadInputTokens": 673,
+        "cacheWriteInputTokens": 393
       },
       "rows_truth": 5,
       "rows_extracted": 5,
@@ -711,9 +711,9 @@
       "dups": 0,
       "n_gaps": 0,
       "scalar_accuracy": 1.0,
-      "mean_confidence": 0.9981,
+      "mean_confidence": 0.9936,
       "pct_conf_below_0.9": 0.0,
-      "n_conf_leaves": 46
+      "n_conf_leaves": 22
     },
     {
       "cell": "core-tl-simple-sep",
@@ -729,420 +729,24 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-small_narrow-20260713-025302",
+      "run_id": "bench-small_narrow-20260713-035907",
       "status": "COMPLETED",
       "success": true,
       "page_count": 3.0,
-      "wall_s": 109.792918,
-      "cost": 0.1328,
+      "wall_s": 84.665272,
+      "cost": 0.1143,
       "cost_by_phase": {
-        "Summarization": 3e-05,
-        "Classification": 3e-05,
+        "OCR": 0.01227,
+        "Classification": 2e-05,
         "Extraction": 0.0926,
-        "GranularAssessment": 0.02796,
-        "OCR": 0.01218
+        "Assessment": 0.00939,
+        "Summarization": 1e-05
       },
       "tokens": {
-        "inputTokens": 24378,
-        "outputTokens": 20689,
-        "cacheReadInputTokens": 1227609,
-        "cacheWriteInputTokens": 0
-      },
-      "rows_truth": 100,
-      "rows_extracted": 100,
-      "completeness_recall": 1.0,
-      "truncation_prefix": 100,
-      "dups": 0,
-      "n_gaps": 0,
-      "scalar_accuracy": 1.0,
-      "mean_confidence": 0.9989,
-      "pct_conf_below_0.9": 0.0,
-      "n_conf_leaves": 316
-    },
-    {
-      "cell": "core-tl-simple-sep",
-      "doc": "longdesc_100.pdf",
-      "repeat": 0,
-      "resolved": {
-        "ocr": "textract_layout",
-        "extraction_mode": "simple",
-        "assessment": "separate",
-        "geometry": "ocr_only",
-        "escalation": "off",
-        "extraction_model": "sonnet46",
-        "confidence_model": "nova_lite",
-        "reasoning_effort": "low"
-      },
-      "run_id": "bench-longdesc_100-20260713-025356",
-      "status": "COMPLETED",
-      "success": true,
-      "page_count": 3.0,
-      "wall_s": 118.516968,
-      "cost": 0.1794,
-      "cost_by_phase": {
-        "Summarization": 2e-05,
-        "Classification": 0.00012,
-        "Extraction": 0.13619,
-        "GranularAssessment": 0.0308,
-        "OCR": 0.01228
-      },
-      "tokens": {
-        "inputTokens": 26108,
-        "outputTokens": 22762,
-        "cacheReadInputTokens": 1448829,
-        "cacheWriteInputTokens": 0
-      },
-      "rows_truth": 100,
-      "rows_extracted": 100,
-      "completeness_recall": 1.0,
-      "truncation_prefix": 100,
-      "dups": 0,
-      "n_gaps": 0,
-      "scalar_accuracy": 1.0,
-      "mean_confidence": 0.9831,
-      "pct_conf_below_0.9": 0.6,
-      "n_conf_leaves": 309
-    },
-    {
-      "cell": "core-tl-adv-sep",
-      "doc": "tiny_form.pdf",
-      "repeat": 0,
-      "resolved": {
-        "ocr": "textract_layout",
-        "extraction_mode": "advanced",
-        "assessment": "separate",
-        "geometry": "ocr_only",
-        "escalation": "off",
-        "extraction_model": "sonnet46",
-        "confidence_model": "nova_lite",
-        "reasoning_effort": "low"
-      },
-      "run_id": "bench-tiny_form-20260713-025453",
-      "status": "COMPLETED",
-      "success": true,
-      "page_count": 1.0,
-      "wall_s": 28.016134,
-      "cost": 0.0502,
-      "cost_by_phase": {
-        "Summarization": 2e-05,
-        "Classification": 2e-05,
-        "Extraction": 0.04443,
-        "GranularAssessment": 0.0016,
-        "OCR": 0.00413
-      },
-      "tokens": {
-        "inputTokens": 1568,
-        "outputTokens": 4201,
-        "cacheReadInputTokens": 40116,
-        "cacheWriteInputTokens": 4929
-      },
-      "rows_truth": 5,
-      "rows_extracted": 5,
-      "completeness_recall": 1.0,
-      "truncation_prefix": 5,
-      "dups": 0,
-      "n_gaps": 0,
-      "scalar_accuracy": 1.0,
-      "mean_confidence": 0.9975,
-      "pct_conf_below_0.9": 0.0,
-      "n_conf_leaves": 64
-    },
-    {
-      "cell": "core-tl-adv-sep",
-      "doc": "small_narrow.pdf",
-      "repeat": 0,
-      "resolved": {
-        "ocr": "textract_layout",
-        "extraction_mode": "advanced",
-        "assessment": "separate",
-        "geometry": "ocr_only",
-        "escalation": "off",
-        "extraction_model": "sonnet46",
-        "confidence_model": "nova_lite",
-        "reasoning_effort": "low"
-      },
-      "run_id": "bench-small_narrow-20260713-025553",
-      "status": "COMPLETED",
-      "success": true,
-      "page_count": 3.0,
-      "wall_s": 194.178971,
-      "cost": 0.8524,
-      "cost_by_phase": {
-        "Summarization": 2e-05,
-        "Classification": 3e-05,
-        "Extraction": 0.81043,
-        "GranularAssessment": 0.02978,
-        "OCR": 0.01218
-      },
-      "tokens": {
-        "inputTokens": 170285,
-        "outputTokens": 36869,
-        "cacheReadInputTokens": 1392400,
-        "cacheWriteInputTokens": 13191
-      },
-      "rows_truth": 100,
-      "rows_extracted": 100,
-      "completeness_recall": 1.0,
-      "truncation_prefix": 100,
-      "dups": 0,
-      "n_gaps": 0,
-      "scalar_accuracy": 1.0,
-      "mean_confidence": 0.9969,
-      "pct_conf_below_0.9": 0.0,
-      "n_conf_leaves": 491
-    },
-    {
-      "cell": "core-tl-adv-sep",
-      "doc": "longdesc_100.pdf",
-      "repeat": 0,
-      "resolved": {
-        "ocr": "textract_layout",
-        "extraction_mode": "advanced",
-        "assessment": "separate",
-        "geometry": "ocr_only",
-        "escalation": "off",
-        "extraction_model": "sonnet46",
-        "confidence_model": "nova_lite",
-        "reasoning_effort": "low"
-      },
-      "run_id": "bench-longdesc_100-20260713-025656",
-      "status": "COMPLETED",
-      "success": true,
-      "page_count": 3.0,
-      "wall_s": 225.480699,
-      "cost": 0.5914,
-      "cost_by_phase": {
-        "Summarization": 2e-05,
-        "Classification": 3e-05,
-        "Extraction": 0.54602,
-        "GranularAssessment": 0.03306,
-        "OCR": 0.01232
-      },
-      "tokens": {
-        "inputTokens": 76964,
-        "outputTokens": 36943,
-        "cacheReadInputTokens": 1631505,
-        "cacheWriteInputTokens": 14597
-      },
-      "rows_truth": 100,
-      "rows_extracted": 100,
-      "completeness_recall": 1.0,
-      "truncation_prefix": 100,
-      "dups": 0,
-      "n_gaps": 0,
-      "scalar_accuracy": 1.0,
-      "mean_confidence": 0.8733,
-      "pct_conf_below_0.9": 11.3,
-      "n_conf_leaves": 453
-    },
-    {
-      "cell": "core-bda-simple-sep",
-      "doc": "tiny_form.pdf",
-      "repeat": 0,
-      "resolved": {
-        "ocr": "bda",
-        "extraction_mode": "simple",
-        "assessment": "separate",
-        "geometry": "ocr_only",
-        "escalation": "off",
-        "extraction_model": "sonnet46",
-        "confidence_model": "nova_lite",
-        "reasoning_effort": "low"
-      },
-      "run_id": "bench-tiny_form-20260713-025803",
-      "status": "COMPLETED",
-      "success": true,
-      "page_count": 1.0,
-      "wall_s": 19.779908,
-      "cost": 0.0327,
-      "cost_by_phase": {
-        "Summarization": 2e-05,
-        "Classification": 2e-05,
-        "Extraction": 0.01645,
-        "GranularAssessment": 0.00111,
-        "OCR": 0.01513
-      },
-      "tokens": {
-        "inputTokens": 4327,
-        "outputTokens": 1933,
-        "cacheReadInputTokens": 22017,
-        "cacheWriteInputTokens": 0
-      },
-      "rows_truth": 5,
-      "rows_extracted": 5,
-      "completeness_recall": 1.0,
-      "truncation_prefix": 5,
-      "dups": 0,
-      "n_gaps": 0,
-      "scalar_accuracy": 1.0,
-      "mean_confidence": 0.9975,
-      "pct_conf_below_0.9": 0.0,
-      "n_conf_leaves": 31
-    },
-    {
-      "cell": "core-bda-simple-sep",
-      "doc": "small_narrow.pdf",
-      "repeat": 0,
-      "resolved": {
-        "ocr": "bda",
-        "extraction_mode": "simple",
-        "assessment": "separate",
-        "geometry": "ocr_only",
-        "escalation": "off",
-        "extraction_model": "sonnet46",
-        "confidence_model": "nova_lite",
-        "reasoning_effort": "low"
-      },
-      "run_id": "bench-small_narrow-20260713-025918",
-      "status": "COMPLETED",
-      "success": true,
-      "page_count": 3.0,
-      "wall_s": 112.017857,
-      "cost": 0.1679,
-      "cost_by_phase": {
-        "Summarization": 3e-05,
-        "Classification": 2e-05,
-        "Extraction": 0.09477,
-        "GranularAssessment": 0.02789,
-        "OCR": 0.04519
-      },
-      "tokens": {
-        "inputTokens": 25054,
-        "outputTokens": 20357,
-        "cacheReadInputTokens": 1227638,
-        "cacheWriteInputTokens": 0
-      },
-      "rows_truth": 100,
-      "rows_extracted": 100,
-      "completeness_recall": 1.0,
-      "truncation_prefix": 100,
-      "dups": 0,
-      "n_gaps": 0,
-      "scalar_accuracy": 1.0,
-      "mean_confidence": 0.9994,
-      "pct_conf_below_0.9": 0.0,
-      "n_conf_leaves": 310
-    },
-    {
-      "cell": "core-bda-simple-sep",
-      "doc": "longdesc_100.pdf",
-      "repeat": 0,
-      "resolved": {
-        "ocr": "bda",
-        "extraction_mode": "simple",
-        "assessment": "separate",
-        "geometry": "ocr_only",
-        "escalation": "off",
-        "extraction_model": "sonnet46",
-        "confidence_model": "nova_lite",
-        "reasoning_effort": "low"
-      },
-      "run_id": "bench-longdesc_100-20260713-030036",
-      "status": "COMPLETED",
-      "success": true,
-      "page_count": 3.0,
-      "wall_s": 118.419699,
-      "cost": 0.1971,
-      "cost_by_phase": {
-        "Summarization": 2e-05,
-        "Classification": 3e-05,
-        "Extraction": 0.11474,
-        "GranularAssessment": 0.03698,
-        "OCR": 0.04529
-      },
-      "tokens": {
-        "inputTokens": 26096,
-        "outputTokens": 44991,
-        "cacheReadInputTokens": 1448784,
-        "cacheWriteInputTokens": 0
-      },
-      "rows_truth": 100,
-      "rows_extracted": 100,
-      "completeness_recall": 1.0,
-      "truncation_prefix": 100,
-      "dups": 0,
-      "n_gaps": 0,
-      "scalar_accuracy": 0.5,
-      "mean_confidence": 0.8442,
-      "pct_conf_below_0.9": 14.0,
-      "n_conf_leaves": 680
-    },
-    {
-      "cell": "core-bda-adv-sep",
-      "doc": "tiny_form.pdf",
-      "repeat": 0,
-      "resolved": {
-        "ocr": "bda",
-        "extraction_mode": "advanced",
-        "assessment": "separate",
-        "geometry": "ocr_only",
-        "escalation": "off",
-        "extraction_model": "sonnet46",
-        "confidence_model": "nova_lite",
-        "reasoning_effort": "low"
-      },
-      "run_id": "bench-tiny_form-20260713-030159",
-      "status": "COMPLETED",
-      "success": true,
-      "page_count": 1.0,
-      "wall_s": 29.879071,
-      "cost": 0.061,
-      "cost_by_phase": {
-        "Summarization": 3e-05,
-        "Classification": 3e-05,
-        "Extraction": 0.04418,
-        "GranularAssessment": 0.00162,
-        "OCR": 0.01515
-      },
-      "tokens": {
-        "inputTokens": 1568,
-        "outputTokens": 4166,
-        "cacheReadInputTokens": 40165,
-        "cacheWriteInputTokens": 4978
-      },
-      "rows_truth": 5,
-      "rows_extracted": 5,
-      "completeness_recall": 1.0,
-      "truncation_prefix": 5,
-      "dups": 0,
-      "n_gaps": 0,
-      "scalar_accuracy": 1.0,
-      "mean_confidence": 0.9977,
-      "pct_conf_below_0.9": 0.0,
-      "n_conf_leaves": 64
-    },
-    {
-      "cell": "core-bda-adv-sep",
-      "doc": "small_narrow.pdf",
-      "repeat": 0,
-      "resolved": {
-        "ocr": "bda",
-        "extraction_mode": "advanced",
-        "assessment": "separate",
-        "geometry": "ocr_only",
-        "escalation": "off",
-        "extraction_model": "sonnet46",
-        "confidence_model": "nova_lite",
-        "reasoning_effort": "low"
-      },
-      "run_id": "bench-small_narrow-20260713-030325",
-      "status": "COMPLETED",
-      "success": true,
-      "page_count": 3.0,
-      "wall_s": 173.271114,
-      "cost": 0.5657,
-      "cost_by_phase": {
-        "Summarization": 2e-05,
-        "Classification": 3e-05,
-        "Extraction": 0.49162,
-        "GranularAssessment": 0.02878,
-        "OCR": 0.04521
-      },
-      "tokens": {
-        "inputTokens": 78297,
-        "outputTokens": 27757,
-        "cacheReadInputTokens": 1286578,
-        "cacheWriteInputTokens": 45359
+        "inputTokens": 18923,
+        "outputTokens": 20318,
+        "cacheReadInputTokens": 56065,
+        "cacheWriteInputTokens": 17372
       },
       "rows_truth": 100,
       "rows_extracted": 100,
@@ -1153,7 +757,403 @@
       "scalar_accuracy": 1.0,
       "mean_confidence": 0.9949,
       "pct_conf_below_0.9": 0.0,
-      "n_conf_leaves": 310
+      "n_conf_leaves": 307
+    },
+    {
+      "cell": "core-tl-simple-sep",
+      "doc": "longdesc_100.pdf",
+      "repeat": 0,
+      "resolved": {
+        "ocr": "textract_layout",
+        "extraction_mode": "simple",
+        "assessment": "separate",
+        "geometry": "ocr_only",
+        "escalation": "off",
+        "extraction_model": "sonnet46",
+        "confidence_model": "nova_lite",
+        "reasoning_effort": "low"
+      },
+      "run_id": "bench-longdesc_100-20260713-040014",
+      "status": "COMPLETED",
+      "success": true,
+      "page_count": 3.0,
+      "wall_s": 181.003679,
+      "cost": 0.1524,
+      "cost_by_phase": {
+        "OCR": 0.01224,
+        "Classification": 2e-05,
+        "Extraction": 0.12096,
+        "Assessment": 0.01919,
+        "Summarization": 1e-05
+      },
+      "tokens": {
+        "inputTokens": 23329,
+        "outputTokens": 34530,
+        "cacheReadInputTokens": 99610,
+        "cacheWriteInputTokens": 16072
+      },
+      "rows_truth": 100,
+      "rows_extracted": 100,
+      "completeness_recall": 1.0,
+      "truncation_prefix": 100,
+      "dups": 0,
+      "n_gaps": 0,
+      "scalar_accuracy": 1.0,
+      "mean_confidence": 0.988,
+      "pct_conf_below_0.9": 0.0,
+      "n_conf_leaves": 307
+    },
+    {
+      "cell": "core-tl-adv-sep",
+      "doc": "tiny_form.pdf",
+      "repeat": 0,
+      "resolved": {
+        "ocr": "textract_layout",
+        "extraction_mode": "advanced",
+        "assessment": "separate",
+        "geometry": "ocr_only",
+        "escalation": "off",
+        "extraction_model": "sonnet46",
+        "confidence_model": "nova_lite",
+        "reasoning_effort": "low"
+      },
+      "run_id": "bench-tiny_form-20260713-040125",
+      "status": "COMPLETED",
+      "success": true,
+      "page_count": 1.0,
+      "wall_s": 23.061152,
+      "cost": 0.0723,
+      "cost_by_phase": {
+        "OCR": 0.00412,
+        "Classification": 2e-05,
+        "Extraction": 0.06804,
+        "Assessment": 0.00016,
+        "Summarization": 1e-05
+      },
+      "tokens": {
+        "inputTokens": 756,
+        "outputTokens": 1267,
+        "cacheReadInputTokens": 12371,
+        "cacheWriteInputTokens": 11721
+      },
+      "rows_truth": 5,
+      "rows_extracted": 5,
+      "completeness_recall": 1.0,
+      "truncation_prefix": 5,
+      "dups": 0,
+      "n_gaps": 0,
+      "scalar_accuracy": 1.0,
+      "mean_confidence": 0.9677,
+      "pct_conf_below_0.9": 0.0,
+      "n_conf_leaves": 22
+    },
+    {
+      "cell": "core-tl-adv-sep",
+      "doc": "small_narrow.pdf",
+      "repeat": 0,
+      "resolved": {
+        "ocr": "textract_layout",
+        "extraction_mode": "advanced",
+        "assessment": "separate",
+        "geometry": "ocr_only",
+        "escalation": "off",
+        "extraction_model": "sonnet46",
+        "confidence_model": "nova_lite",
+        "reasoning_effort": "low"
+      },
+      "run_id": "bench-small_narrow-20260713-040241",
+      "status": "COMPLETED",
+      "success": true,
+      "page_count": 3.0,
+      "wall_s": 106.142128,
+      "cost": 0.2892,
+      "cost_by_phase": {
+        "OCR": 0.01218,
+        "Classification": 2e-05,
+        "Extraction": 0.27506,
+        "Assessment": 0.00189,
+        "Summarization": 1e-05
+      },
+      "tokens": {
+        "inputTokens": 14261,
+        "outputTokens": 16551,
+        "cacheReadInputTokens": 49433,
+        "cacheWriteInputTokens": 13225
+      },
+      "rows_truth": 100,
+      "rows_extracted": 100,
+      "completeness_recall": 1.0,
+      "truncation_prefix": 100,
+      "dups": 0,
+      "n_gaps": 0,
+      "scalar_accuracy": 1.0,
+      "mean_confidence": 0.95,
+      "pct_conf_below_0.9": 0.0,
+      "n_conf_leaves": 307
+    },
+    {
+      "cell": "core-tl-adv-sep",
+      "doc": "longdesc_100.pdf",
+      "repeat": 0,
+      "resolved": {
+        "ocr": "textract_layout",
+        "extraction_mode": "advanced",
+        "assessment": "separate",
+        "geometry": "ocr_only",
+        "escalation": "off",
+        "extraction_model": "sonnet46",
+        "confidence_model": "nova_lite",
+        "reasoning_effort": "low"
+      },
+      "run_id": "bench-longdesc_100-20260713-040405",
+      "status": "COMPLETED",
+      "success": true,
+      "page_count": 3.0,
+      "wall_s": 123.605177,
+      "cost": 0.3151,
+      "cost_by_phase": {
+        "OCR": 0.01228,
+        "Classification": 2e-05,
+        "Extraction": 0.30046,
+        "Assessment": 0.0023,
+        "Summarization": 1e-05
+      },
+      "tokens": {
+        "inputTokens": 21410,
+        "outputTokens": 17360,
+        "cacheReadInputTokens": 73857,
+        "cacheWriteInputTokens": 14597
+      },
+      "rows_truth": 100,
+      "rows_extracted": 100,
+      "completeness_recall": 1.0,
+      "truncation_prefix": 100,
+      "dups": 0,
+      "n_gaps": 0,
+      "scalar_accuracy": 1.0,
+      "mean_confidence": 0.9174,
+      "pct_conf_below_0.9": 32.6,
+      "n_conf_leaves": 307
+    },
+    {
+      "cell": "core-bda-simple-sep",
+      "doc": "tiny_form.pdf",
+      "repeat": 0,
+      "resolved": {
+        "ocr": "bda",
+        "extraction_mode": "simple",
+        "assessment": "separate",
+        "geometry": "ocr_only",
+        "escalation": "off",
+        "extraction_model": "sonnet46",
+        "confidence_model": "nova_lite",
+        "reasoning_effort": "low"
+      },
+      "run_id": "bench-tiny_form-20260713-040533",
+      "status": "COMPLETED",
+      "success": true,
+      "page_count": 1.0,
+      "wall_s": 15.237134,
+      "cost": 0.032,
+      "cost_by_phase": {
+        "OCR": 0.01516,
+        "Classification": 2e-05,
+        "Extraction": 0.01648,
+        "Assessment": 0.00031,
+        "Summarization": 1e-05
+      },
+      "tokens": {
+        "inputTokens": 3638,
+        "outputTokens": 757,
+        "cacheReadInputTokens": 673,
+        "cacheWriteInputTokens": 393
+      },
+      "rows_truth": 5,
+      "rows_extracted": 5,
+      "completeness_recall": 1.0,
+      "truncation_prefix": 5,
+      "dups": 0,
+      "n_gaps": 0,
+      "scalar_accuracy": 1.0,
+      "mean_confidence": 0.9936,
+      "pct_conf_below_0.9": 0.0,
+      "n_conf_leaves": 22
+    },
+    {
+      "cell": "core-bda-simple-sep",
+      "doc": "small_narrow.pdf",
+      "repeat": 0,
+      "resolved": {
+        "ocr": "bda",
+        "extraction_mode": "simple",
+        "assessment": "separate",
+        "geometry": "ocr_only",
+        "escalation": "off",
+        "extraction_model": "sonnet46",
+        "confidence_model": "nova_lite",
+        "reasoning_effort": "low"
+      },
+      "run_id": "bench-small_narrow-20260713-040705",
+      "status": "COMPLETED",
+      "success": true,
+      "page_count": 3.0,
+      "wall_s": 117.526118,
+      "cost": 0.1541,
+      "cost_by_phase": {
+        "OCR": 0.04518,
+        "Classification": 2e-05,
+        "Extraction": 0.09462,
+        "Assessment": 0.01427,
+        "Summarization": 1e-05
+      },
+      "tokens": {
+        "inputTokens": 20544,
+        "outputTokens": 30269,
+        "cacheReadInputTokens": 61927,
+        "cacheWriteInputTokens": 18199
+      },
+      "rows_truth": 100,
+      "rows_extracted": 100,
+      "completeness_recall": 1.0,
+      "truncation_prefix": 100,
+      "dups": 0,
+      "n_gaps": 0,
+      "scalar_accuracy": 1.0,
+      "mean_confidence": 0.9958,
+      "pct_conf_below_0.9": 0.0,
+      "n_conf_leaves": 307
+    },
+    {
+      "cell": "core-bda-simple-sep",
+      "doc": "longdesc_100.pdf",
+      "repeat": 0,
+      "resolved": {
+        "ocr": "bda",
+        "extraction_mode": "simple",
+        "assessment": "separate",
+        "geometry": "ocr_only",
+        "escalation": "off",
+        "extraction_model": "sonnet46",
+        "confidence_model": "nova_lite",
+        "reasoning_effort": "low"
+      },
+      "run_id": "bench-longdesc_100-20260713-040841",
+      "status": "COMPLETED",
+      "success": true,
+      "page_count": 3.0,
+      "wall_s": 122.344089,
+      "cost": 0.1675,
+      "cost_by_phase": {
+        "OCR": 0.04532,
+        "Classification": 2e-05,
+        "Extraction": 0.10971,
+        "Assessment": 0.01245,
+        "Summarization": 1e-05
+      },
+      "tokens": {
+        "inputTokens": 21576,
+        "outputTokens": 23004,
+        "cacheReadInputTokens": 72529,
+        "cacheWriteInputTokens": 15915
+      },
+      "rows_truth": 100,
+      "rows_extracted": 100,
+      "completeness_recall": 1.0,
+      "truncation_prefix": 100,
+      "dups": 0,
+      "n_gaps": 0,
+      "scalar_accuracy": 0.5,
+      "mean_confidence": 0.765,
+      "pct_conf_below_0.9": 28.7,
+      "n_conf_leaves": 307
+    },
+    {
+      "cell": "core-bda-adv-sep",
+      "doc": "tiny_form.pdf",
+      "repeat": 0,
+      "resolved": {
+        "ocr": "bda",
+        "extraction_mode": "advanced",
+        "assessment": "separate",
+        "geometry": "ocr_only",
+        "escalation": "off",
+        "extraction_model": "sonnet46",
+        "confidence_model": "nova_lite",
+        "reasoning_effort": "low"
+      },
+      "run_id": "bench-tiny_form-20260713-041022",
+      "status": "COMPLETED",
+      "success": true,
+      "page_count": 1.0,
+      "wall_s": 23.598099,
+      "cost": 0.058,
+      "cost_by_phase": {
+        "OCR": 0.01512,
+        "Classification": 2e-05,
+        "Extraction": 0.04275,
+        "Assessment": 0.00016,
+        "Summarization": 1e-05
+      },
+      "tokens": {
+        "inputTokens": 756,
+        "outputTokens": 1272,
+        "cacheReadInputTokens": 19212,
+        "cacheWriteInputTokens": 4978
+      },
+      "rows_truth": 5,
+      "rows_extracted": 5,
+      "completeness_recall": 1.0,
+      "truncation_prefix": 5,
+      "dups": 0,
+      "n_gaps": 0,
+      "scalar_accuracy": 1.0,
+      "mean_confidence": 0.95,
+      "pct_conf_below_0.9": 0.0,
+      "n_conf_leaves": 22
+    },
+    {
+      "cell": "core-bda-adv-sep",
+      "doc": "small_narrow.pdf",
+      "repeat": 0,
+      "resolved": {
+        "ocr": "bda",
+        "extraction_mode": "advanced",
+        "assessment": "separate",
+        "geometry": "ocr_only",
+        "escalation": "off",
+        "extraction_model": "sonnet46",
+        "confidence_model": "nova_lite",
+        "reasoning_effort": "low"
+      },
+      "run_id": "bench-small_narrow-20260713-041208",
+      "status": "COMPLETED",
+      "success": true,
+      "page_count": 3.0,
+      "wall_s": 93.095944,
+      "cost": 0.3664,
+      "cost_by_phase": {
+        "OCR": 0.04518,
+        "Classification": 2e-05,
+        "Extraction": 0.31918,
+        "Assessment": 0.00197,
+        "Summarization": 1e-05
+      },
+      "tokens": {
+        "inputTokens": 34756,
+        "outputTokens": 13777,
+        "cacheReadInputTokens": 85114,
+        "cacheWriteInputTokens": 17206
+      },
+      "rows_truth": 100,
+      "rows_extracted": 100,
+      "completeness_recall": 1.0,
+      "truncation_prefix": 100,
+      "dups": 0,
+      "n_gaps": 0,
+      "scalar_accuracy": 1.0,
+      "mean_confidence": 0.9498,
+      "pct_conf_below_0.9": 0.0,
+      "n_conf_leaves": 307
     },
     {
       "cell": "core-bda-adv-sep",
@@ -1169,24 +1169,24 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-longdesc_100-20260713-030453",
+      "run_id": "bench-longdesc_100-20260713-041357",
       "status": "COMPLETED",
       "success": true,
       "page_count": 3.0,
-      "wall_s": 221.418384,
-      "cost": 1.1837,
+      "wall_s": 153.656338,
+      "cost": 0.5152,
       "cost_by_phase": {
-        "Summarization": 2e-05,
-        "Classification": 3e-05,
-        "Extraction": 1.10245,
-        "GranularAssessment": 0.03592,
-        "OCR": 0.04529
+        "OCR": 0.04533,
+        "Classification": 1e-05,
+        "Extraction": 0.46789,
+        "Assessment": 0.00192,
+        "Summarization": 2e-05
       },
       "tokens": {
-        "inputTokens": 253760,
-        "outputTokens": 42373,
-        "cacheReadInputTokens": 1545553,
-        "cacheWriteInputTokens": 54243
+        "inputTokens": 48099,
+        "outputTokens": 20948,
+        "cacheReadInputTokens": 61586,
+        "cacheWriteInputTokens": 13689
       },
       "rows_truth": 100,
       "rows_extracted": 100,
@@ -1195,9 +1195,9 @@
       "dups": 0,
       "n_gaps": 0,
       "scalar_accuracy": 1.0,
-      "mean_confidence": 0.8371,
-      "pct_conf_below_0.9": 15.5,
-      "n_conf_leaves": 560
+      "mean_confidence": 0.95,
+      "pct_conf_below_0.9": 0.0,
+      "n_conf_leaves": 307
     },
     {
       "cell": "core-llm-simple-sep",
@@ -1213,24 +1213,24 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-tiny_form-20260713-030626",
+      "run_id": "bench-tiny_form-20260713-041550",
       "status": "COMPLETED",
       "success": true,
       "page_count": 1.0,
-      "wall_s": 19.615489,
-      "cost": 0.0187,
+      "wall_s": 17.593897,
+      "cost": 0.0176,
       "cost_by_phase": {
-        "Summarization": 2e-05,
+        "OCR": 0.00075,
         "Classification": 2e-05,
-        "Extraction": 0.01642,
-        "OCR": 0.00073,
-        "GranularAssessment": 0.00146
+        "Extraction": 0.0165,
+        "Assessment": 0.00031,
+        "Summarization": 1e-05
       },
       "tokens": {
-        "inputTokens": 4736,
-        "outputTokens": 3395,
-        "cacheReadInputTokens": 18909,
-        "cacheWriteInputTokens": 174
+        "inputTokens": 3929,
+        "outputTokens": 966,
+        "cacheReadInputTokens": 622,
+        "cacheWriteInputTokens": 76
       },
       "rows_truth": 5,
       "rows_extracted": 1,
@@ -1241,7 +1241,7 @@
       "scalar_accuracy": 1.0,
       "mean_confidence": 0.95,
       "pct_conf_below_0.9": 0.0,
-      "n_conf_leaves": 55
+      "n_conf_leaves": 22
     },
     {
       "cell": "core-llm-simple-sep",
@@ -1257,24 +1257,24 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-small_narrow-20260713-030809",
+      "run_id": "bench-small_narrow-20260713-041748",
       "status": "COMPLETED",
       "success": true,
       "page_count": 3.0,
-      "wall_s": 122.049206,
-      "cost": 0.1297,
+      "wall_s": 56.808065,
+      "cost": 0.1046,
       "cost_by_phase": {
-        "Summarization": 2e-05,
-        "Classification": 3e-05,
-        "Extraction": 0.10076,
-        "OCR": 0.00714,
-        "GranularAssessment": 0.0217
+        "OCR": 0.00711,
+        "Classification": 2e-05,
+        "Extraction": 0.09484,
+        "Assessment": 0.00265,
+        "Summarization": 1e-05
       },
       "tokens": {
-        "inputTokens": 41886,
-        "outputTokens": 33125,
-        "cacheReadInputTokens": 575289,
-        "cacheWriteInputTokens": 1494
+        "inputTokens": 15587,
+        "outputTokens": 12571,
+        "cacheReadInputTokens": 2275,
+        "cacheWriteInputTokens": 990
       },
       "rows_truth": 100,
       "rows_extracted": 62,
@@ -1283,9 +1283,9 @@
       "dups": 38,
       "n_gaps": 38,
       "scalar_accuracy": 1.0,
-      "mean_confidence": 0.9496,
-      "pct_conf_below_0.9": 0.4,
-      "n_conf_leaves": 500
+      "mean_confidence": 0.9536,
+      "pct_conf_below_0.9": 0.0,
+      "n_conf_leaves": 307
     },
     {
       "cell": "core-llm-simple-sep",
@@ -1301,23 +1301,23 @@
         "confidence_model": "nova_lite",
         "reasoning_effort": "low"
       },
-      "run_id": "bench-longdesc_100-20260713-030955",
+      "run_id": "bench-longdesc_100-20260713-041950",
       "status": "COMPLETED",
       "success": true,
       "page_count": 3.0,
-      "wall_s": 129.091673,
-      "cost": 0.1815,
+      "wall_s": 62.587076,
+      "cost": 0.1375,
       "cost_by_phase": {
-        "Summarization": 2e-05,
-        "Classification": 3e-05,
-        "Extraction": 0.14,
-        "OCR": 0.00966,
-        "GranularAssessment": 0.03176
+        "OCR": 0.00973,
+        "Classification": 2e-05,
+        "Extraction": 0.12477,
+        "Assessment": 0.003,
+        "Summarization": 2e-05
       },
       "tokens": {
-        "inputTokens": 47962,
-        "outputTokens": 77160,
-        "cacheReadInputTokens": 573361,
+        "inputTokens": 18171,
+        "outputTokens": 16313,
+        "cacheReadInputTokens": 3391,
         "cacheWriteInputTokens": 0
       },
       "rows_truth": 100,
@@ -1326,10 +1326,10 @@
       "truncation_prefix": 100,
       "dups": 0,
       "n_gaps": 0,
-      "scalar_accuracy": 0.5,
-      "mean_confidence": 0.6536,
-      "pct_conf_below_0.9": 32.7,
-      "n_conf_leaves": 1321
+      "scalar_accuracy": 1.0,
+      "mean_confidence": 0.6283,
+      "pct_conf_below_0.9": 32.6,
+      "n_conf_leaves": 307
     }
   ],
   "cell_stats": {
@@ -1350,11 +1350,11 @@
       "max_repeat": 1,
       "cost": {
         "n": 3,
-        "mean": 0.13203,
-        "stdev": 0.08659,
-        "cv": 0.6558,
-        "min": 0.0331,
-        "max": 0.194
+        "mean": 0.11653,
+        "stdev": 0.0738,
+        "cv": 0.6333,
+        "min": 0.0319,
+        "max": 0.1675
       },
       "completeness_recall": {
         "n": 3,
@@ -1382,11 +1382,11 @@
       },
       "wall_s": {
         "n": 3,
-        "mean": 89.09324,
-        "stdev": 51.90441,
-        "cv": 0.5826,
-        "min": 29.58562,
-        "max": 125.02766
+        "mean": 81.64282,
+        "stdev": 59.48991,
+        "cv": 0.7287,
+        "min": 13.54273,
+        "max": 123.4924
       }
     },
     "core-tt-simple-int": {
@@ -1406,25 +1406,25 @@
       "max_repeat": 1,
       "cost": {
         "n": 3,
-        "mean": 0.13053,
-        "stdev": 0.08543,
-        "cv": 0.6545,
-        "min": 0.0328,
-        "max": 0.191
+        "mean": 0.23897,
+        "stdev": 0.24883,
+        "cv": 1.0413,
+        "min": 0.0594,
+        "max": 0.523
       },
       "completeness_recall": {
         "n": 3,
-        "mean": 1.0,
-        "stdev": 0.0,
-        "cv": 0.0,
-        "min": 1.0,
+        "mean": 0.7,
+        "stdev": 0.51962,
+        "cv": 0.7423,
+        "min": 0.1,
         "max": 1.0
       },
       "scalar_accuracy": {
         "n": 3,
-        "mean": 0.83333,
+        "mean": 0.66667,
         "stdev": 0.28868,
-        "cv": 0.3464,
+        "cv": 0.433,
         "min": 0.5,
         "max": 1.0
       },
@@ -1438,11 +1438,11 @@
       },
       "wall_s": {
         "n": 3,
-        "mean": 85.84037,
-        "stdev": 52.7317,
-        "cv": 0.6143,
-        "min": 25.49522,
-        "max": 123.04711
+        "mean": 80.69299,
+        "stdev": 85.96575,
+        "cv": 1.0653,
+        "min": 25.65296,
+        "max": 179.7536
       }
     },
     "core-tt-simple-off": {
@@ -1462,11 +1462,11 @@
       "max_repeat": 1,
       "cost": {
         "n": 3,
-        "mean": 0.11013,
-        "stdev": 0.06864,
-        "cv": 0.6233,
+        "mean": 0.10883,
+        "stdev": 0.06731,
+        "cv": 0.6185,
         "min": 0.0316,
-        "max": 0.1587
+        "max": 0.155
       },
       "completeness_recall": {
         "n": 3,
@@ -1494,11 +1494,11 @@
       },
       "wall_s": {
         "n": 3,
-        "mean": 34.64557,
-        "stdev": 17.48064,
-        "cv": 0.5046,
-        "min": 14.49647,
-        "max": 45.76083
+        "mean": 31.53963,
+        "stdev": 16.51494,
+        "cv": 0.5236,
+        "min": 12.49066,
+        "max": 41.83587
       }
     },
     "core-tt-adv-sep": {
@@ -1518,11 +1518,11 @@
       "max_repeat": 1,
       "cost": {
         "n": 3,
-        "mean": 0.65103,
-        "stdev": 0.6074,
-        "cv": 0.933,
-        "min": 0.086,
-        "max": 1.2934
+        "mean": 0.3255,
+        "stdev": 0.22408,
+        "cv": 0.6884,
+        "min": 0.0839,
+        "max": 0.5265
       },
       "completeness_recall": {
         "n": 3,
@@ -1550,11 +1550,11 @@
       },
       "wall_s": {
         "n": 3,
-        "mean": 142.55699,
-        "stdev": 109.7008,
-        "cv": 0.7695,
-        "min": 28.75729,
-        "max": 247.63866
+        "mean": 98.4479,
+        "stdev": 78.68294,
+        "cv": 0.7992,
+        "min": 23.93104,
+        "max": 180.72226
       }
     },
     "core-tt-adv-int": {
@@ -1574,11 +1574,11 @@
       "max_repeat": 1,
       "cost": {
         "n": 3,
-        "mean": 0.66377,
-        "stdev": 0.70845,
-        "cv": 1.0673,
-        "min": 0.0427,
-        "max": 1.4354
+        "mean": 0.49273,
+        "stdev": 0.36719,
+        "cv": 0.7452,
+        "min": 0.1007,
+        "max": 0.8286
       },
       "completeness_recall": {
         "n": 3,
@@ -1606,11 +1606,11 @@
       },
       "wall_s": {
         "n": 3,
-        "mean": 135.08264,
-        "stdev": 98.66422,
-        "cv": 0.7304,
-        "min": 29.96002,
-        "max": 225.67754
+        "mean": 115.90834,
+        "stdev": 79.95054,
+        "cv": 0.6898,
+        "min": 27.34761,
+        "max": 182.76825
       }
     },
     "core-tl-simple-sep": {
@@ -1630,11 +1630,11 @@
       "max_repeat": 1,
       "cost": {
         "n": 3,
-        "mean": 0.11133,
-        "stdev": 0.08096,
-        "cv": 0.7272,
-        "min": 0.0218,
-        "max": 0.1794
+        "mean": 0.0958,
+        "stdev": 0.06777,
+        "cv": 0.7074,
+        "min": 0.0207,
+        "max": 0.1524
       },
       "completeness_recall": {
         "n": 3,
@@ -1662,11 +1662,11 @@
       },
       "wall_s": {
         "n": 3,
-        "mean": 82.64842,
-        "stdev": 54.74496,
-        "cv": 0.6624,
-        "min": 19.63537,
-        "max": 118.51697
+        "mean": 93.26699,
+        "stdev": 83.76771,
+        "cv": 0.8981,
+        "min": 14.13202,
+        "max": 181.00368
       }
     },
     "core-tl-adv-sep": {
@@ -1686,11 +1686,11 @@
       "max_repeat": 1,
       "cost": {
         "n": 3,
-        "mean": 0.498,
-        "stdev": 0.40917,
-        "cv": 0.8216,
-        "min": 0.0502,
-        "max": 0.8524
+        "mean": 0.22553,
+        "stdev": 0.13333,
+        "cv": 0.5912,
+        "min": 0.0723,
+        "max": 0.3151
       },
       "completeness_recall": {
         "n": 3,
@@ -1718,11 +1718,11 @@
       },
       "wall_s": {
         "n": 3,
-        "mean": 149.22527,
-        "stdev": 106.13053,
-        "cv": 0.7112,
-        "min": 28.01613,
-        "max": 225.4807
+        "mean": 84.26949,
+        "stdev": 53.72229,
+        "cv": 0.6375,
+        "min": 23.06115,
+        "max": 123.60518
       }
     },
     "core-bda-simple-sep": {
@@ -1742,11 +1742,11 @@
       "max_repeat": 1,
       "cost": {
         "n": 3,
-        "mean": 0.13257,
-        "stdev": 0.08771,
-        "cv": 0.6616,
-        "min": 0.0327,
-        "max": 0.1971
+        "mean": 0.11787,
+        "stdev": 0.07466,
+        "cv": 0.6335,
+        "min": 0.032,
+        "max": 0.1675
       },
       "completeness_recall": {
         "n": 3,
@@ -1774,11 +1774,11 @@
       },
       "wall_s": {
         "n": 3,
-        "mean": 83.40582,
-        "stdev": 55.19455,
-        "cv": 0.6618,
-        "min": 19.77991,
-        "max": 118.4197
+        "mean": 85.03578,
+        "stdev": 60.49538,
+        "cv": 0.7114,
+        "min": 15.23713,
+        "max": 122.34409
       }
     },
     "core-bda-adv-sep": {
@@ -1798,11 +1798,11 @@
       "max_repeat": 1,
       "cost": {
         "n": 3,
-        "mean": 0.60347,
-        "stdev": 0.5623,
-        "cv": 0.9318,
-        "min": 0.061,
-        "max": 1.1837
+        "mean": 0.3132,
+        "stdev": 0.2332,
+        "cv": 0.7446,
+        "min": 0.058,
+        "max": 0.5152
       },
       "completeness_recall": {
         "n": 3,
@@ -1830,11 +1830,11 @@
       },
       "wall_s": {
         "n": 3,
-        "mean": 141.52286,
-        "stdev": 99.6383,
-        "cv": 0.704,
-        "min": 29.87907,
-        "max": 221.41838
+        "mean": 90.11679,
+        "stdev": 65.08028,
+        "cv": 0.7222,
+        "min": 23.5981,
+        "max": 153.65634
       }
     },
     "core-llm-simple-sep": {
@@ -1854,11 +1854,11 @@
       "max_repeat": 1,
       "cost": {
         "n": 3,
-        "mean": 0.10997,
-        "stdev": 0.08317,
-        "cv": 0.7564,
-        "min": 0.0187,
-        "max": 0.1815
+        "mean": 0.08657,
+        "stdev": 0.06195,
+        "cv": 0.7156,
+        "min": 0.0176,
+        "max": 0.1375
       },
       "completeness_recall": {
         "n": 3,
@@ -1870,10 +1870,10 @@
       },
       "scalar_accuracy": {
         "n": 3,
-        "mean": 0.83333,
-        "stdev": 0.28868,
-        "cv": 0.3464,
-        "min": 0.5,
+        "mean": 1.0,
+        "stdev": 0.0,
+        "cv": 0.0,
+        "min": 1.0,
         "max": 1.0
       },
       "weighted_accuracy": {
@@ -1886,11 +1886,11 @@
       },
       "wall_s": {
         "n": 3,
-        "mean": 90.25212,
-        "stdev": 61.27438,
-        "cv": 0.6789,
-        "min": 19.61549,
-        "max": 129.09167
+        "mean": 45.66301,
+        "stdev": 24.4797,
+        "cv": 0.5361,
+        "min": 17.5939,
+        "max": 62.58708
       }
     }
   }

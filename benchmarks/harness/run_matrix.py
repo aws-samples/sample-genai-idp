@@ -102,7 +102,30 @@ def register_testset(stack, res, doc_id, pdf_path):
     lib.ddb().put_item(TableName=res["tracking_table"], Item=item)
 
 
-def upload_config(stack, version, path):
+def upload_config(stack, version, path, res=None, native=False):
+    """Upload a config version. Default path uses idp-cli (which migrates the
+    config to v0.6 storage). `native=True` writes the config VERBATIM to the
+    ConfigurationTable (compat/native_upload), bypassing the forced v0.5->v0.6
+    migration — REQUIRED for v0.5.16 stacks, whose assessment step reads a
+    top-level `assessment` block that the migration would drop."""
+    if native:
+        import yaml as _yaml
+
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "compat"))
+        import native_upload
+
+        try:
+            native_upload.upload(
+                res["config_table"],
+                version,
+                _yaml.safe_load(open(path)),
+                region=lib.REGION,
+                profile=os.environ.get("AWS_PROFILE", "default"),
+            )
+            return True
+        except Exception as e:
+            print(f"    native upload error: {e}")
+            return False
     r = sh(
         f"PYTHONPATH={REPO}/lib/idp_common_pkg AWS_PROFILE=default idp-cli config-upload "
         f'--stack-name {stack} --config-file "{path}" --config-version {version} '
@@ -111,16 +134,62 @@ def upload_config(stack, version, path):
     return "uploaded successfully" in (r.stdout + r.stderr)
 
 
-def launch(stack, testset_id, version, context):
-    r = sh(
-        f"PYTHONPATH={REPO}/lib/idp_common_pkg AWS_PROFILE=default idp-cli run-inference "
-        f"--stack-name {stack} --test-set {testset_id} --config-version {version} "
-        f'--number-of-files 1 --context "{context}" --region {lib.REGION}'
-    )
-    for line in (r.stdout + r.stderr).splitlines():
-        if "Test run started" in line:
-            return line.split()[-1]
+_LAMBDA_FNS = None
+
+
+def _find_fn(stack, needle):
+    """Locate a Lambda by (stack-prefix + substring), scanning ALL functions so
+    it finds runners nested under APPSYNCSTACK (v0.5.x) or APIRESOLVERSTACK
+    (v0.6). Version-agnostic: idp-cli only discovers main-stack resources and
+    fails on v0.5.x where TestRunnerFunction lives in a nested stack."""
+    global _LAMBDA_FNS
+    if _LAMBDA_FNS is None:
+        lam = lib.session().client("lambda", region_name=lib.REGION)
+        _LAMBDA_FNS = []
+        for page in lam.get_paginator("list_functions").paginate():
+            _LAMBDA_FNS += [f["FunctionName"] for f in page["Functions"]]
+    for fn in _LAMBDA_FNS:
+        if stack in fn and needle in fn:
+            return fn
     return None
+
+
+def launch(stack, testset_id, version, context):
+    """Invoke the TestRunner Lambda directly and return its testRunId (which is
+    the S3/DDB run-id prefix the scorer keys on)."""
+    lam = lib.session().client("lambda", region_name=lib.REGION)
+    runner = _find_fn(stack, "TestRunnerFunction")
+    resolver = _find_fn(stack, "TestSetResolverFunction")
+    if resolver:  # register/refresh test sets (non-fatal)
+        try:
+            lam.invoke(
+                FunctionName=resolver,
+                Payload=json.dumps(
+                    {"info": {"fieldName": "getTestSets"}, "arguments": {}}
+                ),
+            )
+        except Exception:
+            pass
+    if not runner:
+        return None
+    payload = {
+        "arguments": {
+            "input": {
+                "testSetId": testset_id,
+                "configVersion": version,
+                "numberOfFiles": 1,
+                "context": context,
+            }
+        }
+    }
+    try:
+        resp = lam.invoke(FunctionName=runner, Payload=json.dumps(payload))
+        result = json.loads(resp["Payload"].read())
+    except Exception:
+        return None
+    if "errorMessage" in result:
+        return None
+    return result.get("testRunId")
 
 
 def load_plan(suite, klass):
@@ -154,6 +223,12 @@ def main():
     ap.add_argument("--suite", default="core")
     ap.add_argument("--class", dest="klass", default="bank_statement")
     ap.add_argument("--estimate", action="store_true")
+    ap.add_argument(
+        "--native-upload",
+        action="store_true",
+        help="Write configs verbatim to the ConfigurationTable (bypass idp-cli's "
+        "v0.5->v0.6 migration). REQUIRED for v0.5.16 stacks.",
+    )
     ap.add_argument("--max-inflight", type=int, default=6)
     ap.add_argument("--poll-interval", type=int, default=30)
     ap.add_argument("--timeout-min", type=int, default=60)
@@ -201,7 +276,9 @@ def main():
             print(f"  registered bench-{d}")
     # 2. upload configs (unique versions)
     for c in {cc["version"]: cc for cc in cells}.values():
-        ok = upload_config(a.stack, c["version"], c["path"])
+        ok = upload_config(
+            a.stack, c["version"], c["path"], res=res, native=a.native_upload
+        )
         print(f"  config {c['version']}: {'ok' if ok else 'FAIL'}")
 
     # 3. launch with an in-flight cap; poll
