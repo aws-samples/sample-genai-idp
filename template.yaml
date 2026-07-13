@@ -10145,13 +10145,14 @@ Resources:
             Principal:
               Service: !Sub "apigateway.${AWS::URLSuffix}"
             Action: sts:AssumeRole
-            # Confused-deputy guard: only API Gateway in THIS account may assume
-            # the role (the role can only read this one private bucket, so the
-            # blast radius is already tiny, but this matches the hardening used
-            # elsewhere in the template).
-            Condition:
-              StringEquals:
-                "aws:SourceAccount": !Ref "AWS::AccountId"
+            # NOTE: do NOT add an aws:SourceAccount / aws:SourceArn confused-deputy
+            # condition here. When API Gateway assumes an *integration credentials*
+            # role for an AWS-service (S3) proxy integration it does NOT populate
+            # aws:SourceAccount in the STS request context, so the condition never
+            # matches and every Web UI request fails with a 500 ("API Gateway does
+            # not have permission to assume the provided role"). The confused-deputy
+            # risk is already negligible: this role can only s3:GetObject from the
+            # single private Web UI bucket (see the WebUIBucketRead policy below).
       PermissionsBoundary:
         !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Policies:
