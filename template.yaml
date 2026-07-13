@@ -8261,7 +8261,7 @@ Resources:
                 - !If
                   - HasCustomDomain
                   - !Sub "${CustomDomainUrl}/"
-                  - "the ApplicationWebURL shown in the CloudFormation stack Outputs"
+                  - "The ApplicationWebURL is shown in the CloudFormation stack Outputs"
       AutoVerifiedAttributes:
         - email
       EmailConfiguration:
