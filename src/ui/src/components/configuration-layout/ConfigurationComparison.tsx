@@ -224,10 +224,6 @@ const ConfigurationComparison = ({ versions, configs }: ConfigurationComparisonP
     URL.revokeObjectURL(url);
   };
 
-  // Debug logging
-  console.log('Configs received:', configs);
-  console.log('Differences found:', differences);
-
   // Create column definitions with equal width distribution
   const totalColumns = versions.length + 1; // +1 for field column
   const equalWidth = Math.floor(100 / totalColumns);

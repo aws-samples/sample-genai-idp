@@ -539,6 +539,10 @@ const ConfigBuilder = ({
   // For handling dropdown selection in modal
   const [showNameAsDropdown, setShowNameAsDropdown] = useState(false);
 
+  // State for the "expand editor" modal used to edit large text (e.g. prompts) in a
+  // roomy full-height textarea instead of the cramped inline field.
+  const [expandEditor, setExpandEditor] = useState<{ path: string; label: string } | null>(null);
+
   // State for tab selection - use controlled props if provided, otherwise local state
   const [localActiveTabId, setLocalActiveTabId] = useState('configuration');
   const activeTabId = onTabChange ? controlledActiveTabId : localActiveTabId;
@@ -744,23 +748,10 @@ const ConfigBuilder = ({
     onChange?.(newValues);
   };
 
-  // Debug: Check if isCustomized function is properly passed
-  console.log('ConfigBuilder received isCustomized:', typeof isCustomized, !!isCustomized);
-
   // Define renderField first as a function declaration
   function renderField(key: string, property: SchemaProperty, path = ''): React.JSX.Element | null {
     const currentPath = path ? `${path}.${key}` : key;
     const value = getValueAtPath(formValues, currentPath);
-
-    // Add debugging for granular assessment
-    if (currentPath.includes('granular')) {
-      console.log(`DEBUG: Rendering granular field '${key}' at path '${currentPath}':`, {
-        // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Debug logging with controlled internal data
-        property,
-        value,
-        formValues: getValueAtPath(formValues, 'extraction.confidence'),
-      });
-    }
 
     // For objects with properties, ensure the object exists in formValues.
     // Exception: a `ghostGroup` object is a purely visual grouping whose own
@@ -836,21 +827,6 @@ const ConfigBuilder = ({
       // Get the current value of the dependency field
       const dependencyValue = getValueAtPath(formValues, dependencyPath);
 
-      // Enhanced debug logging for dependency checking
-      console.log(`DEBUG renderField dependency check for ${key}:`, {
-        // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Debug logging with controlled internal data
-        key,
-        currentPath,
-        dependencyField,
-        dependencyPath,
-        dependencyValue,
-        dependencyValueType: typeof dependencyValue,
-        dependencyValues,
-        dependencyValuesTypes: dependencyValues.map((v) => typeof v),
-        isNestedAttribute: currentPath.includes('groupAttributes[') || currentPath.includes('listItemTemplate.itemAttributes['),
-        shouldHide: dependencyValue === undefined || !dependencyValues.includes(dependencyValue),
-      });
-
       // Special handling for boolean dependencies
       let normalizedDependencyValue = dependencyValue;
       let normalizedDependencyValues = dependencyValues;
@@ -899,12 +875,6 @@ const ConfigBuilder = ({
         }
       } else if (normalizedDependencyValue === undefined || !normalizedDependencyValues.includes(normalizedDependencyValue)) {
         // If dependency value doesn't match any required values, hide this field
-        console.log(`Hiding field ${key} due to dependency mismatch:`, {
-          // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Data from trusted internal source only
-          normalizedDependencyValue,
-          normalizedDependencyValues,
-          includes: normalizedDependencyValues.includes(normalizedDependencyValue),
-        });
         return null; // Don't render this field
       }
     }
@@ -1107,7 +1077,6 @@ const ConfigBuilder = ({
     const values = (getValueAtPath(formValues, path) || []) as Record<string, unknown>[];
 
     // Add debug info
-    console.log(`Rendering list field: ${key}, type: ${property.type}, path: ${path}`, property, values); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Debug logging with controlled internal data
 
     // Get list item display settings from schema metadata
     const columnCount = property.columns ? parseInt(String(property.columns), 10) : 2;
@@ -1315,16 +1284,6 @@ const ConfigBuilder = ({
                           }
                         });
 
-                        // Add debugging to see field distribution
-                        console.log(`Field distribution for ${key}:`, {
-                          // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Debug logging with controlled internal data
-                          totalProperties: propEntries.length,
-                          requestedColumns: columnCount,
-                          visibleRegularFields: regularProps.length,
-                          specialFields: specialProps.length,
-                          hiddenByDependencies: propEntries.length - regularProps.length - specialProps.length,
-                        });
-
                         // Enhanced column distribution algorithm - only for visible fields
                         const distributeFieldsToColumns = (
                           fields: { propKey: string; propSchema: SchemaProperty }[],
@@ -1371,16 +1330,6 @@ const ConfigBuilder = ({
 
                         // Calculate maximum rows needed
                         const maxRows = Math.max(...fieldColumns.map((col) => col.length));
-
-                        // Validation and debugging for field distribution
-                        console.log(`Distribution result for ${key}:`, {
-                          // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Debug logging with controlled internal data
-                          actualColumnCount,
-                          maxRows,
-                          columnLengths: fieldColumns.map((col) => col.length),
-                          totalFieldsDistributed: fieldColumns.reduce((sum, col) => sum + col.length, 0),
-                          hasDescription: !!descriptionField,
-                        });
 
                         // Render the regular fields using HTML table for guaranteed columns
                         const renderedRegularFields = (
@@ -1568,14 +1517,12 @@ const ConfigBuilder = ({
 
     // If this is an object type, it should be rendered as an object field, not an input field
     if (property.type === 'object') {
-      console.log(`Redirecting object type ${key} to renderObjectField`); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Debug logging with controlled internal data
       return renderObjectField(key, property, path.substring(0, path.lastIndexOf('.')) || '') ?? <></>;
     }
 
     let input;
 
     // Add debug info
-    console.log(`Rendering input field: ${key}, type: ${property.type}, path: ${path}`, { property, value }); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Debug logging with controlled internal data
 
     // Check if we're trying to render an array as an input field (which would be incorrect)
     if (Array.isArray(value) && (property.type === 'array' || property.type === 'list')) {
@@ -1628,13 +1575,11 @@ const ConfigBuilder = ({
         const result = onResetToDefault(path) as unknown as { path: string; defaultValue: unknown } | void;
         if (result && (result as { defaultValue: unknown }).defaultValue !== undefined) {
           updateValue((result as { path: string }).path, (result as { defaultValue: unknown }).defaultValue);
-          console.log(`Restored default value for ${path} (unsaved - click Save to persist)`); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Data from trusted internal source only
         } else if (defaultConfig) {
           // Fallback: get default value directly
           const defaultValue = getValueAtPath(defaultConfig, path);
           if (defaultValue !== undefined) {
             updateValue(path, defaultValue);
-            console.log(`Restored default value for ${path} from defaultConfig`); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Data from trusted internal source only
           }
         }
       } else if (defaultConfig) {
@@ -1642,7 +1587,6 @@ const ConfigBuilder = ({
         const defaultValue = getValueAtPath(defaultConfig, path);
         if (defaultValue !== undefined) {
           updateValue(path, defaultValue);
-          console.log(`Restored default value for ${path} from defaultConfig`); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Data from trusted internal source only
         }
       }
     };
@@ -1680,13 +1624,30 @@ const ConfigBuilder = ({
         path.toLowerCase().includes('prompt') ||
         path.toLowerCase().includes('description'))
     ) {
+      // Prompt fields hold large, structured text (placeholders, <<CACHEPOINT>>),
+      // so give them more rows and an "Expand editor" affordance that opens a
+      // roomy full-height editor modal. Plain descriptions stay compact.
+      const isPromptField = path.toLowerCase().includes('prompt');
       input = (
-        <Textarea
-          value={displayValue !== undefined && displayValue !== null ? String(displayValue) : ''}
-          onChange={({ detail }) => updateValue(path, detail.value)}
-          rows={3}
-          className="expandable-textarea"
-        />
+        <SpaceBetween size="xxs">
+          <Textarea
+            value={displayValue !== undefined && displayValue !== null ? String(displayValue) : ''}
+            onChange={({ detail }) => updateValue(path, detail.value)}
+            rows={isPromptField ? 8 : 3}
+            className="expandable-textarea"
+          />
+          {isPromptField && (
+            <Box textAlign="right">
+              <Button
+                variant="inline-link"
+                iconName="expand"
+                onClick={() => setExpandEditor({ path, label: getFieldLabel(key, property) })}
+              >
+                Expand editor
+              </Button>
+            </Box>
+          )}
+        </SpaceBetween>
       );
     } else if (property.type === 'boolean') {
       input = <Toggle checked={!!displayValue} onChange={({ detail }) => updateValue(path, detail.checked)} />;
@@ -1786,12 +1747,6 @@ const ConfigBuilder = ({
 
   // Render each top-level property
   const renderTopLevelProperty = ({ key, property }: { key: string; property: SchemaProperty }) => {
-    // Debug info for sections
-    console.log(
-      `Rendering top level property: ${key}, type: ${property.type}, sectionLabel: ${property.sectionLabel}`, // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Debug logging with controlled internal data
-      property,
-    );
-
     // Check top-level dependsOn before rendering (hides entire sections when dependency not met)
     if (property.dependsOn) {
       const depField = property.dependsOn.field;
@@ -1819,7 +1774,6 @@ const ConfigBuilder = ({
       // exposes native slots: ExpandableSection.headerDescription and
       // Header.description.
       const sectionDescription = property.description as string | undefined;
-      console.log(`Creating section container for ${key} with title: ${sectionTitle}`); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Debug logging with controlled internal data
 
       // Support collapsible top-level sections via schema property `collapsible: true`
       // defaultExpanded controls whether section starts expanded (defaults to true for backward compat)
@@ -2000,6 +1954,33 @@ const ConfigBuilder = ({
               />
             )}
           </FormField>
+        )}
+      </Modal>
+
+      {/* Expand editor for large text fields (prompts): a roomy full-height editor
+          that writes straight back to the same form path as the inline textarea. */}
+      <Modal
+        visible={!!expandEditor}
+        onDismiss={() => setExpandEditor(null)}
+        size="max"
+        header={expandEditor ? `Edit ${expandEditor.label}` : 'Edit'}
+        footer={
+          <ExtBox float="right">
+            <Button variant="primary" onClick={() => setExpandEditor(null)}>
+              Done
+            </Button>
+          </ExtBox>
+        }
+      >
+        {expandEditor && (
+          <Textarea
+            value={((): string => {
+              const v = getValueAtPath(formValues, expandEditor.path);
+              return v !== undefined && v !== null ? String(v) : '';
+            })()}
+            onChange={({ detail }) => updateValue(expandEditor.path, detail.value)}
+            rows={28}
+          />
         )}
       </Modal>
     </ExtBox>

@@ -41,17 +41,37 @@ const ToolsPanel = (): React.JSX.Element => (
   >
     <div>
       <p>
-        Edit and manage the IDP processing configuration. Default values are set by the system during deployment. Any customized values will
-        override the defaults.
+        View and edit the configuration that drives document processing — models, prompts, document classes, and each pipeline stage (OCR,
+        Classification, Extraction, and optional steps like Summarization and Evaluation).
       </p>
-      <h3>Features</h3>
+
+      <h3>Versions</h3>
+      <p>
+        Each configuration is a self-contained <strong>version</strong>. The <strong>default</strong> version is managed by the stack and is
+        read-only — it is overwritten on stack upgrades. To customize it, open it and click <strong>Save as Version</strong> to create an
+        editable copy. Use the <strong>Configuration Versions</strong> table at the top of the page to open, activate, compare, import, or
+        delete versions.
+      </p>
+
+      <h3>Editing</h3>
       <ul>
-        <li>Edit configuration in YAML or JSON using the built-in code editor</li>
-        <li>Use the visual Config Builder to construct configurations without writing code</li>
-        <li>Manage configuration versions — compare, restore, or roll back changes</li>
-        <li>Import pre-built configurations from the Configuration Library</li>
-        <li>Sync configuration with BDA (Business Document Automation) projects</li>
-        <li>Reset customized values back to system defaults</li>
+        <li>
+          Switch between <strong>Form View</strong> (guided fields with inline help), <strong>JSON View</strong>, and{' '}
+          <strong>YAML View</strong> (raw editing) using the view toggle.
+        </li>
+        <li>
+          Use the <strong>Document Schema</strong> and <strong>Policy Schema</strong> tabs to edit document classes and validation rules,
+          and the <strong>Prompt Preview</strong> tab to see the exact prompts sent to the model.
+        </li>
+        <li>
+          Edited fields show an orange dot; a per-field <strong>Restore default</strong> resets a single value. An unsaved-changes banner
+          offers <strong>Discard changes</strong>, and the app warns you before navigating away with unsaved edits.
+        </li>
+        <li>
+          <strong>Save changes</strong> persists your edits to an editable version. <strong>Refresh</strong> reloads the saved configuration
+          from the server. Additional actions (Export, Save as default, Restore default (All), and BDA sync) are in the{' '}
+          <strong>Actions</strong> menu.
+        </li>
       </ul>
     </div>
   </HelpPanel>
