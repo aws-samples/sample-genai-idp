@@ -364,7 +364,7 @@ idp-cli deploy \
 
 #### Resource tagging
 
-`--tags "key=value,key2=value2"` applies **CloudFormation stack-level tags**. CloudFormation adds them to the stack and automatically propagates them to all taggable resources it creates — including the nested stacks (pattern, API resolvers, KB, discovery, ALB hosting, feature platform) and their resources — so you tag the whole deployment in one place.
+`--tags "key=value,key2=value2"` applies **CloudFormation stack-level tags**. CloudFormation adds them to the stack and automatically propagates them to all taggable resources it creates — including the nested stacks (pattern, API resolvers, KB, discovery, feature platform) and their resources — so you tag the whole deployment in one place.
 
 Notes and caveats:
 

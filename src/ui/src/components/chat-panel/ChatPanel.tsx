@@ -11,10 +11,16 @@ import { sendChatDocumentMessage, onChatDocumentMessageUpdate } from '../../grap
 import useConfiguration from '../../hooks/use-configuration';
 import useCurrentSessionCreds from '../../hooks/use-current-session-creds';
 import { streamChat, type StreamCredentials } from '../../api/stream-client';
+import { pollForAssistantReply, fetchAssistantKeys } from '../../api/chat-poll';
+import { streamUrl } from '../../aws-exports';
 import SafeMarkdown from '../common/SafeMarkdown';
 import './ChatPanel.css';
 
 const useHttpApiTransport = true;
+// Stream when a Lambda Function URL is configured (VITE_STREAM_URL); otherwise
+// (e.g. GovCloud, where Function URLs don't exist) send over the REST API and
+// poll getChatMessages for the final answer — see api/chat-poll.ts.
+const streamingAvailable = Boolean(streamUrl);
 
 interface ChatMessage {
   role: string; // 'user' | 'ai' | 'loader'
@@ -147,6 +153,9 @@ const ChatPanel = ({ objectKey, configVersion = 'default' }: ChatPanelProps): Re
 
   const textareaRef = useRef<HTMLInputElement>(null);
   const rowIdRef = useRef(0);
+  // Aborts an in-flight non-streaming poll on document switch / unmount so it
+  // does not keep running (up to its timeout) against a stale session.
+  const pollAbortRef = useRef<AbortController | null>(null);
 
   // Cognito Identity Pool credentials for SigV4-signing the streaming request
   // (httpapi transport only). Unused under the appsync transport.
@@ -156,13 +165,23 @@ const ChatPanel = ({ objectKey, configVersion = 'default' }: ChatPanelProps): Re
   // when the document changes so we can't cross-contaminate sessions.
   const [sessionId, setSessionId] = useState<string>(() => generateSessionId());
   useEffect(() => {
-    // Fresh document → fresh session + clear chat history.
+    // Fresh document → fresh session + clear chat history. Abort any poll from
+    // the previous document so it can't apply a stale answer.
+    pollAbortRef.current?.abort();
     setSessionId(generateSessionId());
     setChatMessages([]);
     setCurrentStatus(null);
     setIsWaiting(false);
     setError(null);
   }, [objectKey]);
+
+  // Abort any in-flight poll on unmount.
+  useEffect(
+    () => () => {
+      pollAbortRef.current?.abort();
+    },
+    [],
+  );
 
   // Fetch the config for this document's version. We use this for two things:
   //   1) Populate the model-selector dropdown from schema.chat.properties.model.enum
@@ -366,7 +385,7 @@ const ChatPanel = ({ objectKey, configVersion = 'default' }: ChatPanelProps): Re
     setCurrentStatus({ status: 'QUEUED', label: defaultStatusLabel('QUEUED') });
 
     try {
-      if (useHttpApiTransport) {
+      if (useHttpApiTransport && streamingAvailable) {
         // Stream directly from the IAM-authed Lambda Function URL. Each SSE
         // event has the same shape the AppSync subscription delivered, so we
         // feed them straight into handleUpdate. streamChat resolves when the
@@ -386,6 +405,47 @@ const ChatPanel = ({ objectKey, configVersion = 'default' }: ChatPanelProps): Re
           credentials: creds,
           onEvent: (event) => handleUpdate(event as ChatDocumentUpdate),
         });
+      } else if (useHttpApiTransport && !streamingAvailable) {
+        // No Function URL (e.g. GovCloud): send over the REST API (async-invokes
+        // the processor, which persists the final message), then POLL
+        // getChatMessages for the answer. No live token streaming — the loader
+        // bubble stays until the full answer lands, delivered via a synthetic
+        // assistant_final event so the existing handleUpdate path renders it.
+        // Baseline the existing assistant messages BEFORE sending so the poll
+        // matches only the new reply (clock-independent).
+        const knownAssistantKeys = await fetchAssistantKeys(client, sessionId);
+        pollAbortRef.current?.abort();
+        pollAbortRef.current = new AbortController();
+        setCurrentStatus({ status: 'CALLING_MODEL', label: defaultStatusLabel('CALLING_MODEL') });
+        await client.graphql({
+          query: sendChatDocumentMessage,
+          variables: {
+            sessionId,
+            prompt,
+            method: 'chat',
+            s3Uri: objectKey,
+            modelId: effectiveModelId,
+          },
+        });
+        const reply = await pollForAssistantReply({
+          client,
+          sessionId,
+          knownAssistantKeys,
+          signal: pollAbortRef.current.signal,
+        });
+        if (reply) {
+          handleUpdate({
+            sessionId,
+            method: 'assistant_final',
+            status: 'COMPLETE',
+            content: reply.content,
+            modelId: effectiveModelId,
+          } as ChatDocumentUpdate);
+        } else {
+          throw new Error(
+            'Timed out waiting for the response. The request may still be processing — reopen the document to see the answer.',
+          );
+        }
       } else {
         await client.graphql({
           query: sendChatDocumentMessage,
@@ -399,6 +459,8 @@ const ChatPanel = ({ objectKey, configVersion = 'default' }: ChatPanelProps): Re
         });
       }
     } catch (err) {
+      // A cancelled/aborted poll (document switch, unmount) is not a user error.
+      if ((err as { name?: string })?.name === 'AbortError') return;
       // Extract a useful error message.
       const gqlErr = err as { errors?: { message: string; errorType?: string }[]; message?: string };
       let errorMessage = 'Failed to send message. Please try again.';

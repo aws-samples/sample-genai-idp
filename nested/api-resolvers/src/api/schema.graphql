@@ -939,6 +939,7 @@ type Mutation {
     pageLabels: [String]
     skipJobCreation: Boolean
     discoveryType: String
+    saveMode: String
   ): DisPresignedUrlResponse!
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   autoDetectSections(
@@ -953,6 +954,7 @@ type Mutation {
     configVersion: String!
     zipFileName: String
     zipFileSize: Int
+    saveMode: String
   ): MultiDocDiscoveryJob
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   uploadMultiDocDiscoveryZip(

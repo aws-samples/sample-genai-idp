@@ -8,6 +8,13 @@ import { resolve } from 'path';
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
+  // Public base path. Defaults to '/' (CloudFront hosting / local dev). When the
+  // Web UI is served from API Gateway (WebUIHosting=APIGateway) the SPA lives
+  // under the REST API stage prefix (/api), so CodeBuild sets
+  // VITE_UI_BASE_PATH=/api/ and Vite rewrites all asset URLs and the manifest to
+  // that base. Must be an absolute directory path ending in '/'.
+  base: process.env.VITE_UI_BASE_PATH || '/',
+
   plugins: [
     react({
       // Use automatic JSX runtime (React 17+)

@@ -26,6 +26,7 @@ import {
   Link,
   TextFilter,
   Tiles,
+  RadioGroup,
   Pagination,
   CollectionPreferences,
 } from '@cloudscape-design/components';
@@ -43,6 +44,7 @@ import { DISCOVERY_JOB_PATH } from '../../routes/constants';
 import { SUPPORTED_DISCOVERY_EXTENSIONS } from '../common/constants';
 import PdfPageSelector from './PdfPageSelector';
 import type { PageRange } from './PdfPageSelector';
+import CreateDiscoveryVersionModal from './CreateDiscoveryVersionModal';
 
 const client = generateClient();
 
@@ -109,7 +111,7 @@ export const shouldShowClassesDiscoveryControls = (discoveryType: 'classes' | 'r
 const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {}): React.JSX.Element => {
   const navigate = useNavigate();
   const { settings } = useSettingsContext();
-  const { versions, loading: versionsLoading, getVersionOptions } = useConfigurationVersions();
+  const { versions, loading: versionsLoading, getVersionOptions, fetchVersions } = useConfigurationVersions();
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [groundTruthFile, setGroundTruthFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -120,6 +122,10 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
   const [isLoadingJobs, setIsLoadingJobs] = useState(false);
   const [isValidatingJson, setIsValidatingJson] = useState(false);
   const [selectedVersion, setSelectedVersion] = useState<SelectProps.Option | null>(null);
+  // Save mode: 'augment' (default) adds to the version's existing schema;
+  // 'replace' clears it first so discovery rebuilds the schema from scratch.
+  const [saveMode, setSaveMode] = useState<'augment' | 'replace'>('augment');
+  const [showCreateVersionModal, setShowCreateVersionModal] = useState(false);
   const [, setTick] = useState(0); // Force re-render for elapsed time
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [filterText, setFilterText] = useState('');
@@ -423,6 +429,7 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
           pageRanges: pageRangeStrings,
           pageLabels: pageLabelStrings,
           discoveryType,
+          saveMode,
         },
       });
 
@@ -770,17 +777,52 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
 
           <FormField
             label="Configuration Version"
-            description="Select which configuration version to save the discovered document schema to"
+            description="Select which configuration version to save the discovered document schema to, or create a new one"
           >
-            <Select
-              selectedOption={selectedVersion}
-              onChange={({ detail }) => setSelectedVersion(detail.selectedOption)}
-              options={getVersionOptions()}
-              placeholder={versions.length === 0 ? 'Loading versions...' : 'Select configuration version'}
-              disabled={isUploading || versionsLoading || versions.length === 0}
-              loadingText="Loading versions..."
+            <SpaceBetween size="xs" direction="horizontal" alignItems="end">
+              <Select
+                selectedOption={selectedVersion}
+                onChange={({ detail }) => setSelectedVersion(detail.selectedOption)}
+                options={getVersionOptions()}
+                placeholder={versions.length === 0 ? 'Loading versions...' : 'Select configuration version'}
+                disabled={isUploading || versionsLoading || versions.length === 0}
+                loadingText="Loading versions..."
+              />
+              <Button iconName="add-plus" onClick={() => setShowCreateVersionModal(true)} disabled={isUploading}>
+                Create new version
+              </Button>
+            </SpaceBetween>
+          </FormField>
+
+          <FormField
+            label="Save mode"
+            description="Choose whether discovered classes are added to the version's existing schema or replace it"
+          >
+            <RadioGroup
+              value={saveMode}
+              onChange={({ detail }) => setSaveMode(detail.value as 'augment' | 'replace')}
+              items={[
+                {
+                  value: 'augment',
+                  label: 'Add to existing schema',
+                  description: 'Keep the existing document classes and add/update discovered ones (classes with the same name are overwritten).',
+                },
+                {
+                  value: 'replace',
+                  label: 'Replace existing schema',
+                  description: 'Remove all existing document classes in the selected version, then save only the newly discovered ones.',
+                },
+              ]}
             />
           </FormField>
+
+          {saveMode === 'replace' && selectedVersion && (
+            <Alert type="warning">
+              Replace mode removes all existing document classes in version <strong>{selectedVersion.value}</strong>{' '}
+              <strong>immediately, before discovery runs</strong>, then saves the newly discovered schema. If discovery fails, the version is
+              left with no classes. This cannot be undone — consider creating a new version instead.
+            </Alert>
+          )}
 
           <ColumnLayout columns={2}>
             <FormField label="Document File" description="Select the document to analyze">
@@ -1079,6 +1121,17 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
             }}
           />
         }
+      />
+
+      <CreateDiscoveryVersionModal
+        visible={showCreateVersionModal}
+        onDismiss={() => setShowCreateVersionModal(false)}
+        defaultSourceVersion={selectedVersion?.value ?? null}
+        onCreated={async (versionName) => {
+          setShowCreateVersionModal(false);
+          await fetchVersions();
+          setSelectedVersion({ label: versionName, value: versionName });
+        }}
       />
     </SpaceBetween>
   );

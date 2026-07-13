@@ -56,14 +56,14 @@ The GenAI Intelligent Document Processing (GenAIIDP) Accelerator demonstrates st
   - Enforce TLS 1.2 or greater protocol in the CloudFront security policy
   - Configure secure response headers (X-Content-Type-Options, X-Frame-Options, Content-Security-Policy)
   - Restrict viewer access using signed URLs or cookies for sensitive content
-- **ALB Hosting Security** (ALB hosting mode — see [ALB Hosting](./alb-hosting.md)):
-  - Use internal ALB scheme to restrict access to VPC-connected users
-  - Configure `ALBAllowedCIDRs` to limit ingress to specific network ranges
-  - Use a CA-signed or ACM-issued certificate (avoid self-signed in production)
-  - Enable VPC Flow Logs to monitor traffic to the ALB and S3 VPC endpoint
+- **API Gateway Hosting Security** (API Gateway hosting mode — see [API Gateway Hosting](./apigateway-hosting.md)):
+  - Set `ApiGatewayVisibility=PRIVATE` (with `DeployInVPC=true`) to restrict access to VPC-connected users via an execute-api interface endpoint
+  - Configure `WAFAllowedIPv4Ranges` to limit ingress to specific network ranges (stage-level WAFv2)
+  - No ACM certificate is required — the execute-api endpoint uses AWS-managed TLS
+  - Enable VPC Flow Logs to monitor traffic to the execute-api interface endpoint
 - **Additional WAF Protection**: 
-  - Deploy a WAF WebACL with GLOBAL scope in the us-east-1 region (CloudFront) or REGIONAL scope (ALB)
-  - Associate this WAF with the CloudFront distribution or ALB to protect the UI
+  - Deploy a WAF WebACL with GLOBAL scope in the us-east-1 region (CloudFront) or REGIONAL scope (API Gateway)
+  - Associate this WAF with the CloudFront distribution or the API Gateway stage to protect the UI
   - Enable core rule sets (AWS Managed Rules) including protections against XSS and SQL injection
   - Create custom rules for specific application threats
 - **Sensitive Data Discovery**: Consider enabling [Amazon Macie](https://docs.aws.amazon.com/macie/latest/user/what-is-macie.html) on document S3 buckets to automatically discover and classify sensitive data (PII, financial data, credentials) in processed documents. Macie operates as a decoupled service requiring no changes to the accelerator.

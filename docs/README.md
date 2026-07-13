@@ -79,7 +79,7 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 
 - [Well-Architected Framework Assessment](./well-architected.md) - Analysis based on AWS Well-Architected Framework
 - [AWS Services & IAM Roles](./aws-services-and-roles.md) - AWS services used and IAM role requirements
-- [ALB Hosting](./alb-hosting.md) - ALB+S3 hosting to serve the full Web UI from within a VPC (alternative to CloudFront)
+- [API Gateway Hosting](./apigateway-hosting.md) - Serve the full Web UI from the existing API Gateway REST API (S3 proxy), within a VPC when combined with `ApiGatewayVisibility=PRIVATE` (alternative to CloudFront)
 - [GovCloud Deployment](./govcloud-deployment.md) - GovCloud-specific considerations on top of headless deployment
 - [EU Region Model Support](./eu-region-model-support.md) - Model availability in EU regions
 

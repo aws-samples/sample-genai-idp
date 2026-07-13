@@ -261,10 +261,32 @@ Parameters:
     Type: String
     Default: ""
     Description: Cognito User Pool id — JWT authorizer issuer for the HTTP API.
-  UserPoolClientId:
+  # ------------------------------------------------------------------ #
+  # Web UI hosting via API Gateway S3 proxy (WebUIHosting=APIGateway). When
+  # ServeWebUI=true the REST API also serves the React SPA directly from the
+  # Web UI S3 bucket via S3 proxy integrations (GET / and GET /{proxy+}). This
+  # co-locates the UI on the SAME REST API + stage as the /op transport, so it
+  # inherits the private-endpoint (ApiGatewayVisibility=PRIVATE) and stage-level
+  # WAFv2 configuration for free. Empty/false for CloudFront hosting.
+  # ------------------------------------------------------------------ #
+  ServeWebUI:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Set to "true" when WebUIHosting=APIGateway — adds S3-proxy routes that
+      serve the React SPA from the Web UI bucket on this REST API's stage.
+  WebUIBucketName:
     Type: String
     Default: ""
-    Description: Cognito User Pool Client id — JWT authorizer audience.
+    Description: Name of the Web UI S3 bucket (required when ServeWebUI=true).
+  WebUIProxyRoleArn:
+    Type: String
+    Default: ""
+    Description: >-
+      ARN of the IAM role API Gateway assumes to read objects from the Web UI
+      bucket for the S3 proxy integration (required when ServeWebUI=true).
+
   # Main-template resolver function ARNs the dispatcher must invoke (the rest
   # are defined in this nested stack and referenced via GetAtt).
   CompleteSectionReviewFunctionArn:
@@ -335,6 +357,12 @@ Conditions:
   IsWafEnabled: !Not [!Equals [!Join [",", !Ref WAFAllowedIPv4Ranges], "0.0.0.0/0"]]
   HasMLflowLoggerFunction: !Not [!Equals [!Ref MLflowLoggerFunctionArn, ""]]
   CircuitBreakerEnabledCondition: !Equals [!Ref CircuitBreakerEnabled, "true"]
+  # True when this REST API should also serve the Web UI SPA via S3 proxy
+  # (WebUIHosting=APIGateway).
+  ServeWebUICondition: !Equals [!Ref ServeWebUI, "true"]
+  # Inverse of ServeWebUICondition — used to gate the no-Web-UI API deployment
+  # so the stage always references a deployment that actually exists.
+  DoNotServeWebUICondition: !Not [!Equals [!Ref ServeWebUI, "true"]]
 
 Resources:
   AbortWorkflowResolverFunctionLogGroup:
@@ -1231,6 +1259,11 @@ Resources:
           # ChatSessionsTable is consulted to verify that the calling Cognito
           # user owns the requested sessionId before returning messages.
           CHAT_SESSIONS_TABLE: !Ref ChatSessionsTableName
+          # Document-chat sessions are owned in a separate table (keyed by
+          # sessionId with ownerSub). This resolver also serves document chat in
+          # the non-streaming (GovCloud) poll path, so it verifies ownership
+          # against this table too.
+          CHAT_DOCUMENT_SESSIONS_TABLE: !Ref ChatDocumentSessionsTable
           # Feature flag to disable ownership enforcement in case of legacy
           # session migration. Defaults to "true" (enforce). Customers should
           # only set this to "false" temporarily during data backfill.
@@ -1244,6 +1277,9 @@ Resources:
         # that the caller owns the requested sessionId (authorization check).
         - DynamoDBReadPolicy:
             TableName: !Ref ChatSessionsTableName
+        # Same ownership check for document-chat sessions.
+        - DynamoDBReadPolicy:
+            TableName: !Ref ChatDocumentSessionsTable
         - Statement:
             - Effect: Allow
               Action:
@@ -2755,6 +2791,13 @@ Resources:
     Type: AWS::ApiGateway::RestApi
     Properties:
       Name: !Sub "${StackName}-api"
+      # Treat all media as binary so the S3-proxy web-UI routes (ServeWebUI)
+      # can return images/fonts/js/css bytes intact. The JSON /op transport is
+      # unaffected: the dispatcher base64-decodes isBase64Encoded request bodies
+      # (idp_common.api_adapter._parse_body) and returns a JSON string response,
+      # which API Gateway passes through unchanged.
+      BinaryMediaTypes:
+        - "*/*"
       EndpointConfiguration: !If
         - IsPrivateApi
         - Types: [PRIVATE]
@@ -2877,6 +2920,107 @@ Resources:
         gatewayresponse.header.Access-Control-Allow-Headers: "'authorization,content-type'"
         gatewayresponse.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
 
+  # ---- Web UI S3 proxy (ServeWebUI=true / WebUIHosting=APIGateway) ----
+  # Serve the React SPA from the Web UI bucket directly through this REST API,
+  # on the same stage as the /op transport. Two GET routes:
+  #   GET /            -> s3://<bucket>/index.html   (SPA shell)
+  #   GET /{proxy+}    -> s3://<bucket>/{proxy}      (assets, favicon, etc.)
+  # The explicit /op resource takes precedence over the greedy {proxy+} (API
+  # Gateway matches specific path parts before catch-all), so the transport
+  # route is unaffected. Both GETs are AuthorizationType NONE — the browser
+  # fetches the SPA shell/assets with no JWT (auth happens later inside the app
+  # against /op). Stage-level WAF (IsWafEnabled) and the PRIVATE endpoint policy
+  # still apply to these routes. The app uses HashRouter, so client-side deep
+  # links live in the URL fragment and need no server-side rewrite; only the
+  # real files (index.html + hashed assets) must resolve.
+  #
+  # NOTE on base path: assets are referenced at absolute /assets/... but the API
+  # serves under the stage prefix /api. The UI is therefore built with Vite
+  # base=/api/ in this mode (see WEB_UI_HOSTING/VITE_UI_BASE_PATH in the root
+  # CodeBuild project) so asset URLs become /api/assets/... and map through the
+  # {proxy+} route to the correct S3 keys.
+  WebUIRootMethod:
+    Type: AWS::ApiGateway::Method
+    Condition: ServeWebUICondition
+    Properties:
+      RestApiId: !Ref HttpApi
+      ResourceId: !GetAtt HttpApi.RootResourceId
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: GET
+        Credentials: !Ref WebUIProxyRoleArn
+        Uri: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}:s3:path/${WebUIBucketName}/index.html"
+        PassthroughBehavior: WHEN_NO_MATCH
+        IntegrationResponses:
+          - StatusCode: "200"
+            ContentHandling: CONVERT_TO_BINARY
+            ResponseParameters:
+              method.response.header.Content-Type: "integration.response.header.Content-Type"
+          - StatusCode: "404"
+            SelectionPattern: "4\\d{2}"
+          - StatusCode: "500"
+            SelectionPattern: "5\\d{2}"
+      MethodResponses:
+        - StatusCode: "200"
+          ResponseParameters:
+            method.response.header.Content-Type: true
+        - StatusCode: "404"
+        - StatusCode: "500"
+
+  WebUIProxyResource:
+    Type: AWS::ApiGateway::Resource
+    Condition: ServeWebUICondition
+    Properties:
+      RestApiId: !Ref HttpApi
+      ParentId: !GetAtt HttpApi.RootResourceId
+      PathPart: "{proxy+}"
+
+  WebUIProxyMethod:
+    Type: AWS::ApiGateway::Method
+    Condition: ServeWebUICondition
+    Properties:
+      RestApiId: !Ref HttpApi
+      ResourceId: !Ref WebUIProxyResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      RequestParameters:
+        method.request.path.proxy: true
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: GET
+        Credentials: !Ref WebUIProxyRoleArn
+        Uri: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}:s3:path/${WebUIBucketName}/{proxy}"
+        RequestParameters:
+          integration.request.path.proxy: "method.request.path.proxy"
+        PassthroughBehavior: WHEN_NO_MATCH
+        IntegrationResponses:
+          - StatusCode: "200"
+            # Return the S3 object bytes verbatim. With BinaryMediaTypes: */*,
+            # CONVERT_TO_BINARY makes API Gateway pass the raw payload through
+            # for binary assets (images, fonts, wasm) instead of base64.
+            ContentHandling: CONVERT_TO_BINARY
+            ResponseParameters:
+              method.response.header.Content-Type: "integration.response.header.Content-Type"
+          # A missing S3 key surfaces as an S3 4xx (403 AccessDenied / 404
+          # NoSuchKey) -> mapped to a 404 response. This is fine for the SPA:
+          # the app uses HashRouter, so client-side routes live in the URL
+          # fragment (/api/#/...) and are served by index.html at "/" — deep
+          # links never hit the server as a distinct path, so no rewrite-to-
+          # index.html fallback is needed. Only genuinely nonexistent asset
+          # paths return 404, which is the correct behavior.
+          - StatusCode: "404"
+            SelectionPattern: "4\\d{2}"
+          - StatusCode: "500"
+            SelectionPattern: "5\\d{2}"
+      MethodResponses:
+        - StatusCode: "200"
+          ResponseParameters:
+            method.response.header.Content-Type: true
+        - StatusCode: "404"
+        - StatusCode: "500"
+
   # NB: an AWS::ApiGateway::Deployment only snapshots the API when the resource
   # itself is REPLACED (new logical id) — mutating a property like Description on
   # the existing resource does NOT create a new deployment, so method/CORS
@@ -2884,20 +3028,48 @@ Resources:
   # methods/resources/gateway-responses change, BUMP THE LOGICAL ID SUFFIX below
   # (…CorsV2 -> …CorsV3 -> …) so CloudFormation creates a fresh snapshot and
   # repoints the stage. Update HttpApiStage.DeploymentId to match.
-  HttpApiDeploymentCorsV2:
+  #
+  # Bumped CorsV2 -> WebUIV3 when the ServeWebUI S3-proxy routes were added.
+  #
+  # A Deployment's DependsOn CANNOT reference a resource dropped by a false
+  # Condition — CloudFormation fails with "Unresolved resource dependencies
+  # [WebUIRootMethod, WebUIProxyMethod]" (it does NOT silently ignore them).
+  # So there are TWO condition-gated deployment resources with the same suffix:
+  #   * WithWebUI  — includes the S3-proxy methods in DependsOn (ServeWebUI=true)
+  #   * NoWebUI    — omits them (ServeWebUI=false / CloudFront default)
+  # The stage selects whichever exists via Fn::If. Bump BOTH logical-id suffixes
+  # (…WebUIV3 -> …WebUIV4) whenever methods/CORS/gateway-responses change, so a
+  # fresh snapshot reaches the stage.
+  HttpApiDeploymentWithWebUIV3:
     Type: AWS::ApiGateway::Deployment
+    Condition: ServeWebUICondition
+    DependsOn:
+      - HttpApiMethod
+      - HttpApiOptionsMethod
+      - WebUIRootMethod
+      - WebUIProxyMethod
+    Properties:
+      RestApiId: !Ref HttpApi
+      Description: !Sub "Dispatcher API deployment for ${StackName} (CORS + Web UI proxy)"
+
+  HttpApiDeploymentNoWebUIV3:
+    Type: AWS::ApiGateway::Deployment
+    Condition: DoNotServeWebUICondition
     DependsOn:
       - HttpApiMethod
       - HttpApiOptionsMethod
     Properties:
       RestApiId: !Ref HttpApi
-      Description: !Sub "Dispatcher API deployment for ${StackName} (with CORS)"
+      Description: !Sub "Dispatcher API deployment for ${StackName} (CORS)"
 
   HttpApiStage:
     Type: AWS::ApiGateway::Stage
     Properties:
       RestApiId: !Ref HttpApi
-      DeploymentId: !Ref HttpApiDeploymentCorsV2
+      DeploymentId: !If
+        - ServeWebUICondition
+        - !Ref HttpApiDeploymentWithWebUIV3
+        - !Ref HttpApiDeploymentNoWebUIV3
       StageName: api
 
   HttpApiDispatcherPermission:

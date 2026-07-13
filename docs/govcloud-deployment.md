@@ -6,10 +6,35 @@ title: "GovCloud Deployment Guide"
 
 ## Overview
 
-The GenAI IDP Accelerator now supports "headless" deployment to AWS GovCloud regions through a specialized template generation script. This solution addresses two key GovCloud requirements:
+The GenAI IDP Accelerator supports two ways to deploy to AWS GovCloud regions:
+
+- **Full Web UI (`--govcloud`) — recommended for most users.** The interactive
+  React Web UI **is now supported in GovCloud**. GovCloud no longer requires a
+  headless deployment. The UI is hosted on **API Gateway** (an S3 proxy on the
+  REST API) instead of CloudFront, and works with **VPC support and/or WAF,
+  both optional** — set `ApiGatewayVisibility=PRIVATE` for VPC-only access and
+  `WAFAllowedIPv4Ranges` to restrict by IP. See
+  [Keeping the Web UI in GovCloud: `--govcloud`](#keeping-the-web-ui-in-govcloud---govcloud).
+- **Headless (`--headless`) — API-only / no UI.** For programmatic-only
+  deployments that intentionally remove the UI (and AppSync/Cognito-UI/WAF)
+  entirely. See the [deployment packages](#deployment-packages) below.
+
+Both paths address two GovCloud requirements:
 
 1. **ARN Partition Compatibility**: All ARN references use `arn:${AWS::Partition}:` instead of `arn:aws:` to work in both commercial and GovCloud regions
-2. **Service Compatibility**: Removes services not available in GovCloud (AppSync, CloudFront, WAF, Cognito UI components)
+2. **Service Compatibility**: Removes services not available in GovCloud. `--govcloud` removes CloudFront and Lambda Function URLs (and forces API Gateway UI hosting); `--headless` additionally removes the entire UI, AppSync, Cognito UI components, and WAF.
+
+> **Chat works in GovCloud, but without live streaming.** In commercial
+> regions, agent chat and document chat stream their responses token-by-token
+> over a **Lambda Function URL**, which does not exist in GovCloud. `--govcloud`
+> removes that Function URL, so the Web UI automatically falls back to a
+> **non-streaming** chat path: it sends the message over the REST API and polls
+> for the final answer. The user experience is **"spinner, then the full answer
+> appears at once"** instead of watching it type out — and intermediate agent
+> progress (e.g. "calling tool X…") is not shown. The final answer is identical.
+> Everything else in the UI (document processing, extraction, evaluation, Test
+> Studio, discovery, knowledge base, configuration) works normally. See
+> [Chat in GovCloud (non-streaming)](#chat-in-govcloud-non-streaming) for details.
 
 For details on what services are removed vs. retained, see [GovCloud Architecture](./govcloud-architecture.md).
 
@@ -101,6 +126,92 @@ Choose the command that matches your desired [deployment package](#deployment-pa
 > **Legacy**: The `scripts/generate_govcloud_template.py` script is deprecated. Use `idp-cli deploy --headless --from-code .` instead.
 
 > **Note on `--headless`**: The CLI flag both strips UI/AppSync/Cognito/WAF resources from the template and automatically sets the `EnableHeadless=true` stack parameter (which enables the Jobs REST API). You do not need to pass `EnableHeadless=true` in `--parameters` — it's set for you.
+
+### Keeping the Web UI in GovCloud: `--govcloud`
+
+`--headless` removes the Web UI entirely. If you **want the full Web UI in
+GovCloud**, use `--govcloud` instead. GovCloud lacks two services the standard
+UI template uses — Amazon CloudFront and Lambda Function URLs — so the standard
+template fails to even validate there:
+
+```
+E3006 Resource type 'AWS::CloudFront::OriginAccessControl' does not exist in 'us-gov-west-1'
+E3006 Resource type 'AWS::CloudFront::ResponseHeadersPolicy' does not exist in 'us-gov-west-1'
+E3006 Resource type 'AWS::CloudFront::Distribution' does not exist in 'us-gov-west-1'
+E3006 Resource type 'AWS::Lambda::Url' does not exist in 'us-gov-west-1'
+```
+
+The `--govcloud` flag transforms the template to:
+
+- Remove every `AWS::CloudFront::*` resource and force `WebUIHosting=APIGateway`,
+  so the Web UI is served as an S3 proxy on the same REST API that backs it (see
+  [API Gateway Hosting](./apigateway-hosting.md)).
+- Remove the `AWS::Lambda::Url` resource (the chat *streaming* endpoint) and its
+  permission, since [Lambda Function URLs are not available in GovCloud](https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/govcloud-lambda.html).
+  Chat still works — the UI automatically switches to a **non-streaming** path
+  (see [Chat in GovCloud](#chat-in-govcloud-non-streaming) below).
+
+The rest of the UI (Cognito, the REST API, WAF) is retained.
+
+### Chat in GovCloud (non-streaming)
+
+With `--govcloud`, both **agent chat** and **document chat** work, but the answer
+is delivered **without live token streaming**:
+
+- **Commercial (streaming):** the browser opens a streaming connection to a
+  Lambda Function URL and renders the answer token-by-token, showing intermediate
+  agent progress ("thinking…", "calling tool X…").
+- **GovCloud (`--govcloud`, non-streaming):** the browser sends the chat message
+  over the **REST API** (`/op`), which asynchronously invokes the same chat
+  processor. The processor writes the final answer to the chat-messages table,
+  and the UI **polls** for it. The user sees a spinner until the complete answer
+  appears at once. Intermediate progress is not shown, and there is no
+  token-by-token animation. **The final answer is identical to streaming.**
+
+This is auto-detected: the UI streams when a Function URL is configured
+(`VITE_STREAM_URL`) and polls when it is not — no configuration flag is needed.
+The polling path reuses the existing Cognito-authed REST API, so it inherits the
+same `ApiGatewayVisibility=PRIVATE` / WAF posture as the rest of the UI. Long
+agent turns are supported (the processor runs up to its Lambda timeout; the UI
+polls for up to 5 minutes).
+
+> **Why non-streaming?** Lambda Function URLs — the only streaming transport in
+> the codebase — do not exist in GovCloud. Polling delivers the same answer
+> without them. Commercial deployments keep full streaming; the two paths share
+> one codebase via the `VITE_STREAM_URL`-empty auto-detection.
+
+`--govcloud` is available on both `idp-cli publish` and `idp-cli deploy`, and is
+**mutually exclusive with `--headless`** (headless removes the UI; `--govcloud`
+keeps it).
+
+```bash
+# Full UI in GovCloud, private (VPC-only) hosting + WAF
+idp-cli deploy \
+  --stack-name my-idp-govcloud \
+  --region us-gov-west-1 \
+  --from-code . \
+  --govcloud \
+  --wait \
+  --parameters "ApiGatewayVisibility=PRIVATE,DeployInVPC=true,VpcId=vpc-xxxxxxxx,PrivateSubnetIds=subnet-a,subnet-b,LambdaSubnetIds=subnet-a,subnet-b,LambdaSecurityGroupId=sg-xxxxxxxx,ApiGatewayVpcEndpointId=vpce-xxxxxxxx"
+
+# Or just publish the GovCloud template variant (uploads idp-govcloud.yaml)
+idp-cli publish --source-dir . --region us-gov-west-1 --govcloud
+```
+
+For a public (regional, internet-facing) API Gateway UI in GovCloud, omit the
+`ApiGatewayVisibility=PRIVATE`/VPC parameters. To restrict access by IP, set
+`WAFAllowedIPv4Ranges`. See [API Gateway Hosting](./apigateway-hosting.md) for
+the full hosting model.
+
+> The transformed template is written to `.aws-sam/idp-govcloud.yaml` and
+> (for `publish`) uploaded as `idp-govcloud.yaml`. It is **validated against a
+> GovCloud region with a region-aware `cfn-lint`** immediately after the
+> transform — if any GovCloud-unsupported resource type survived (an `E3006`
+> error), the `publish`/`deploy` **fails loudly** instead of surfacing the
+> problem only at deploy time. The lint uses the target GovCloud region when you
+> deploy to one, or `us-gov-west-1` by default when building from a commercial
+> region. `cfn-lint` runs fully offline (no credentials); if it is not installed
+> the gate is skipped with a warning.
 
 #### Option A: Vanilla (no API, no VPC)
 

@@ -9,13 +9,58 @@ into the SDK.
 """
 
 import os
-from typing import Optional
+import re
+import shutil
+import subprocess
+from typing import List, Optional, Tuple
 from urllib.parse import quote
 
 import boto3
 
 from idp_sdk.exceptions import IDPConfigurationError, IDPStackError
 from idp_sdk.models.publish import PublishResult, TemplateTransformResult
+
+# Default GovCloud region to lint the transformed template against when the
+# publish/deploy is being run from a commercial region (the common case: build
+# in us-east-1, deploy the artifact into GovCloud). cfn-lint's per-region
+# resource spec is what surfaces E3006 "resource type does not exist in
+# <region>" for CloudFront / Lambda::Url, so the lint region must be a GovCloud
+# region even when the build region is commercial.
+DEFAULT_GOVCLOUD_LINT_REGION = "us-gov-west-1"
+
+
+def _cfn_lint_region_errors(
+    template_path: str, region: str
+) -> Tuple[bool, List[str], str]:
+    """Run region-aware cfn-lint on a template.
+
+    Returns (ran, errors, note):
+      - ran:    True if cfn-lint actually executed; False if it is not installed
+                (caller decides whether a skip is acceptable).
+      - errors: list of ``E####`` error lines (warnings are ignored here).
+      - note:   human-readable status/skip message.
+
+    cfn-lint is a fully offline static linter with a bundled per-region resource
+    spec — no AWS credentials or network access are required. IMPORTANT: the
+    template path MUST come before ``--region`` (``cfn-lint <file> --region
+    <r>``); with the flag first, cfn-lint consumes the filename as a region value
+    and errors out without linting.
+    """
+    if not shutil.which("cfn-lint"):
+        return (False, [], "cfn-lint not installed — skipping GovCloud lint check")
+
+    result = subprocess.run(
+        ["cfn-lint", template_path, "--region", region],
+        capture_output=True,
+        text=True,
+    )
+    output = (result.stdout or "") + (result.stderr or "")
+    errors = [
+        line.strip()
+        for line in output.splitlines()
+        if re.match(r"^E\d{4}\b", line.strip())
+    ]
+    return (True, errors, f"cfn-lint ran for region {region}")
 
 
 class PublishOperation:
@@ -44,6 +89,7 @@ class PublishOperation:
         region: Optional[str] = None,
         *,
         headless: bool = False,
+        govcloud: bool = False,
         public: bool = False,
         max_workers: Optional[int] = None,
         clean_build: bool = False,
@@ -64,6 +110,9 @@ class PublishOperation:
             prefix: S3 key prefix for artifacts. Default: ``idp-cli``.
             region: AWS region. Falls back to client region or boto3 default.
             headless: If True, also generate a headless (no-UI) template variant.
+            govcloud: If True, also generate a GovCloud template variant that
+                removes AWS::CloudFront::* resources and forces API Gateway
+                hosting (keeps the full UI). For deployment in GovCloud regions.
             public: If True, make S3 artifacts publicly readable.
             max_workers: Maximum concurrent build workers. Default: auto-detect.
             clean_build: If True, delete all checksum files to force full rebuild.
@@ -107,8 +156,11 @@ class PublishOperation:
             publish_args.extend(["--max-workers", str(max_workers)])
         if verbose:
             publish_args.append("--verbose")
-        if no_validate or headless:
-            # Skip validation in publish if headless — we'll validate the headless template
+        if no_validate or headless or govcloud:
+            # Skip main-template validation when headless/govcloud — the base
+            # template still contains resources (UI/CloudFront) that don't
+            # validate in the target region; we validate the transformed
+            # template instead after generating it.
             publish_args.append("--no-validate")
         if clean_build:
             publish_args.append("--clean-build")
@@ -147,6 +199,70 @@ class PublishOperation:
 
             headless_template_path = None
             headless_template_url = None
+            govcloud_template_path = None
+            govcloud_template_url = None
+
+            # Generate GovCloud (CloudFront-free) template if requested. Keeps
+            # the full Web UI but removes AWS::CloudFront::* resources and forces
+            # API Gateway hosting (the only GovCloud-viable option).
+            if govcloud:
+                # Lint against the deploy region if it is already GovCloud;
+                # otherwise (building from a commercial region) lint against the
+                # default GovCloud region so E3006 checks still apply.
+                lint_region = (
+                    region
+                    if region and region.startswith("us-gov-")
+                    else DEFAULT_GOVCLOUD_LINT_REGION
+                )
+                govcloud_result = self.transform_template_govcloud(
+                    source_template=template_path,
+                    output_path=os.path.join(
+                        source_dir, ".aws-sam", "idp-govcloud.yaml"
+                    ),
+                    verbose=verbose,
+                    lint_region=lint_region,
+                )
+                if not govcloud_result.success:
+                    return PublishResult(
+                        success=False,
+                        template_path=template_path,
+                        template_url=template_url,
+                        bucket=bucket_full,
+                        prefix=prefix,
+                        version=version,
+                        error=(
+                            "GovCloud template transformation failed: "
+                            f"{govcloud_result.error}"
+                        ),
+                    )
+                govcloud_template_path = govcloud_result.output_path
+                s3_client = boto3.client("s3", region_name=region)
+                gc_key = f"{prefix}/idp-govcloud.yaml"
+                s3_client.upload_file(
+                    govcloud_template_path,
+                    bucket_full,
+                    gc_key,
+                    ExtraArgs={"ContentType": "text/yaml"},
+                )
+                govcloud_template_url = (
+                    f"https://s3.{region}.amazonaws.com/{bucket_full}/{gc_key}"
+                )
+                if not no_validate:
+                    try:
+                        cf_client = boto3.client("cloudformation", region_name=region)
+                        cf_client.validate_template(TemplateURL=govcloud_template_url)
+                    except Exception as e:
+                        return PublishResult(
+                            success=False,
+                            template_path=template_path,
+                            template_url=template_url,
+                            govcloud_template_path=govcloud_template_path,
+                            govcloud_template_url=govcloud_template_url,
+                            bucket=bucket_full,
+                            prefix=prefix,
+                            version=version,
+                            error=f"GovCloud template validation failed: {e}",
+                        )
 
             # Generate headless template if requested
             if headless:
@@ -202,6 +318,8 @@ class PublishOperation:
                 template_url=template_url,
                 headless_template_path=headless_template_path,
                 headless_template_url=headless_template_url,
+                govcloud_template_path=govcloud_template_path,
+                govcloud_template_url=govcloud_template_url,
                 bucket=bucket_full,
                 prefix=prefix,
                 version=version,
@@ -275,12 +393,99 @@ class PublishOperation:
                 error=str(e),
             )
 
+    def transform_template_govcloud(
+        self,
+        source_template: str,
+        output_path: Optional[str] = None,
+        *,
+        verbose: bool = False,
+        lint_region: Optional[str] = DEFAULT_GOVCLOUD_LINT_REGION,
+    ) -> TemplateTransformResult:
+        """Transform a template for GovCloud (CloudFront-free, API-Gateway hosting).
+
+        Unlike the headless transform, this KEEPS the full Web UI but removes the
+        ``AWS::CloudFront::*`` resources (which do not exist in GovCloud regions
+        and cause ``E3006`` errors) and forces ``WebUIHosting=APIGateway`` so the
+        UI is served as an S3 proxy on the REST API.
+
+        After the transform, the output template is linted with a region-aware
+        ``cfn-lint`` (``lint_region``, default ``us-gov-west-1``) so that any
+        remaining GovCloud-unsupported resource type (``E3006``) fails the
+        transform loudly rather than surfacing only at deploy time. The lint is
+        offline (no credentials). It is skipped gracefully if cfn-lint is not
+        installed. Pass ``lint_region=None`` to disable the lint gate.
+
+        Args:
+            source_template: Path to the source CloudFormation YAML template.
+            output_path: Path to write the transformed template. Defaults to
+                appending ``-govcloud`` to the source filename.
+            verbose: If True, enable verbose logging.
+            lint_region: GovCloud region to lint the transformed template
+                against, or None to skip the region-aware lint gate.
+
+        Returns:
+            TemplateTransformResult with paths and status.
+        """
+        from idp_sdk._core.template_transform import GovCloudTemplateTransformer
+
+        if not os.path.exists(source_template):
+            return TemplateTransformResult(
+                success=False,
+                input_path=source_template,
+                error=f"Source template not found: {source_template}",
+            )
+
+        if not output_path:
+            base, ext = os.path.splitext(source_template)
+            output_path = f"{base}-govcloud{ext}"
+
+        try:
+            transformer = GovCloudTemplateTransformer(verbose=verbose)
+            success = transformer.transform(source_template, output_path)
+            if not success:
+                return TemplateTransformResult(
+                    success=False,
+                    input_path=source_template,
+                    output_path=output_path,
+                    error="GovCloud template transformation failed validation",
+                )
+
+            # Region-aware cfn-lint gate: catch any GovCloud-unsupported resource
+            # type (E3006) that survived the transform, against a GovCloud region.
+            if lint_region:
+                ran, errors, note = _cfn_lint_region_errors(output_path, lint_region)
+                if ran and errors:
+                    preview = "\n".join(errors[:10])
+                    return TemplateTransformResult(
+                        success=False,
+                        input_path=source_template,
+                        output_path=output_path,
+                        error=(
+                            f"GovCloud template still has cfn-lint errors for "
+                            f"{lint_region} (a resource type unsupported in "
+                            f"GovCloud likely survived the transform):\n{preview}"
+                        ),
+                    )
+
+            return TemplateTransformResult(
+                success=True,
+                input_path=source_template,
+                output_path=output_path,
+            )
+        except Exception as e:
+            return TemplateTransformResult(
+                success=False,
+                input_path=source_template,
+                error=str(e),
+            )
+
     def print_deployment_urls(
         self,
         template_url: str,
         region: str,
         *,
         headless_template_url: Optional[str] = None,
+        govcloud_template_url: Optional[str] = None,
         stack_name: str = "IDP",
     ) -> None:
         """Print deployment URLs and 1-click launch links.
@@ -289,6 +494,7 @@ class PublishOperation:
             template_url: S3 URL of the main template.
             region: AWS region.
             headless_template_url: S3 URL of the headless template (optional).
+            govcloud_template_url: S3 URL of the GovCloud template (optional).
             stack_name: Default stack name for launch URL.
         """
         if "us-gov" in region:
@@ -319,3 +525,15 @@ class PublishOperation:
             print(f"  {headless_template_url}")
             print("\n🚀 Headless 1-Click Launch:")
             print(f"  {headless_launch_url}")
+
+        if govcloud_template_url:
+            encoded_gc = quote(govcloud_template_url, safe=":/?#[]@!$&'()*+,;=")
+            gc_launch_url = (
+                f"https://{region}.console.{domain}/cloudformation/home?"
+                f"region={region}#/stacks/create/review?"
+                f"templateURL={encoded_gc}&stackName={stack_name}"
+            )
+            print("\n🏛️  GovCloud Template URL (CloudFront-free, API Gateway hosting):")
+            print(f"  {govcloud_template_url}")
+            print("\n🚀 GovCloud 1-Click Launch:")
+            print(f"  {gc_launch_url}")

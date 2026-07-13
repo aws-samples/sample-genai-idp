@@ -475,55 +475,14 @@ Parameters:
     Default: CloudFront
     AllowedValues:
       - CloudFront
-      - ALB
+      - APIGateway
     Description: >-
-      Frontend hosting method. Use CloudFront for public/standard deployments.
-      Use ALB for GovCloud or private network deployments that require
-      VPC-based hosting.
-
-  ALBVpcId:
-    Type: String
-    Default: ""
-    Description: >-
-      (Required when WebUIHosting=ALB or ApiGatewayVisibility=PRIVATE) VPC ID.
-      When using ALB hosting, this is the VPC for the ALB and S3 VPC endpoint.
-      When using the private REST API (ApiGatewayVisibility=PRIVATE), this VPC ID is
-      also used for the Lambda security group - the private REST API requires all
-      Lambda functions to be in the same VPC as the API Gateway VPC endpoint, so
-      ALB hosting and the private REST API always use the same VPC.
-
-  ALBSubnetIds:
-    Type: CommaDelimitedList
-    Default: ""
-    Description: >-
-      (Required when WebUIHosting=ALB) Comma-separated subnet IDs for the ALB
-      (minimum 2 subnets in different AZs).
-
-  ALBCertificateArn:
-    Type: String
-    Default: ""
-    Description: >-
-      (Required when WebUIHosting=ALB) ACM certificate ARN for the ALB HTTPS
-      listener. Can be ACM-issued or imported (including self-signed). Use
-      scripts/generate_self_signed_cert.sh for demo/testing.
-
-  ALBScheme:
-    Type: String
-    Default: internal
-    AllowedValues:
-      - internal
-      - internet-facing
-    Description: >-
-      (ALB hosting only) ALB scheme. Use 'internal' for private network access,
-      'internet-facing' for public access.
-
-  ALBAllowedCIDRs:
-    Type: String
-    Default: ""
-    Description: >-
-      (ALB hosting only) Comma-separated CIDR ranges allowed to access the ALB.
-      Leave empty to automatically use the VPC CIDR range (recommended for
-      internal ALBs). Specify explicit CIDRs to override.
+      Frontend hosting method. Use CloudFront (default) for public/standard
+      deployments. Use APIGateway for GovCloud or private-network deployments
+      that require VPC-based hosting: the Web UI is served as an S3 proxy on the
+      same REST API that already backs the UI, so it inherits the API's
+      visibility (set ApiGatewayVisibility=PRIVATE for VPC-only access) and its
+      optional WAFv2 IP allow-list (WAFAllowedIPv4Ranges).
 
   S3VpcEndpointIdOverride:
     Type: String
@@ -531,10 +490,10 @@ Parameters:
     Description: >
       Optional. Existing S3 Interface VPC Endpoint ID (vpce-...) from a central
       network account. When provided, presigned S3 URLs for browser uploads use
-      this endpoint instead of the one auto-provisioned in the ALB stack.
-      Leave empty in standard private-mode (ALB) deployments to use the
-      stack-provisioned endpoint. When this is set you MUST also set
-      S3VpcEndpointDnsNameOverride.
+      this endpoint. Leave empty for standard deployments (browser uploads then
+      use the global/regional S3 endpoint). When this is set you MUST also set
+      S3VpcEndpointDnsNameOverride, and S3PresignedUrlViaVpcEndpoint must be
+      "true" to take effect.
 
   S3VpcEndpointDnsNameOverride:
     Type: String
@@ -559,19 +518,19 @@ Parameters:
       Optional. Public-facing custom domain URL through which end users access
       the Web UI (e.g. https://idp.example.com). Required when the application
       is fronted by a customer-owned DNS alias, an Okta/SAML/OIDC SSO domain,
-      or any origin other than the auto-generated ALB or CloudFront URL. When
-      set, this origin is added to all S3 bucket CORS AllowedOrigins and to
+      or any origin other than the auto-generated API Gateway or CloudFront URL.
+      When set, this origin is added to all S3 bucket CORS AllowedOrigins and to
       Cognito App Client CallbackURLs / LogoutURLs so that browser uploads
       and OAuth redirects succeed from the custom domain. The Web UI also
       switches to using window.location.origin for OAuth redirects, which
-      keeps both the ALB URL and the custom domain working simultaneously.
-      Must include scheme (https://) and lowercase host only — no uppercase,
-      no trailing slash, no path. Lowercase is required because the Web UI's
-      Amplify config lowercases the redirect URL before sending it to
-      Cognito (browsers normalize the Origin header host to lowercase), and
+      keeps both the API Gateway URL and the custom domain working
+      simultaneously. Must include scheme (https://) and lowercase host only —
+      no uppercase, no trailing slash, no path. Lowercase is required because
+      the Web UI's Amplify config lowercases the redirect URL before sending it
+      to Cognito (browsers normalize the Origin header host to lowercase), and
       Cognito matches CallbackURLs case-sensitively after that. Leave empty
-      for standard deployments where the ALB or CloudFront URL is the only
-      browser entry point.
+      for standard deployments where the API Gateway or CloudFront URL is the
+      only browser entry point.
 
   S3PresignedUrlViaVpcEndpoint:
     Type: String
@@ -596,9 +555,10 @@ Parameters:
       - PRIVATE
     Description: >-
       GLOBAL = regional internet-facing REST API; PRIVATE = private REST API
-      reachable only via the VPC interface endpoint (requires WebUIHosting=ALB,
+      reachable only via the VPC interface endpoint (requires DeployInVPC=true,
       VpcId, ApiGatewayVpcEndpointId, LambdaSubnetIds) and all Lambdas deployed
-      in-VPC.
+      in-VPC. When WebUIHosting=APIGateway the Web UI is served on this same
+      REST API, so PRIVATE also makes the Web UI VPC-only.
 
   LambdaSubnetIds:
     Type: CommaDelimitedList
@@ -607,7 +567,7 @@ Parameters:
       (Required when ApiGatewayVisibility=PRIVATE) Comma-separated private subnet
       IDs for Lambda functions. Should be private subnets with no direct
       internet route - Lambda traffic reaches AWS services via VPC endpoints.
-      Can be the same as ALBSubnetIds for simpler deployments, or different
+      Can be the same as PrivateSubnetIds for simpler deployments, or different
       private subnets for stricter network isolation. Minimum 2 subnets in
       different Availability Zones recommended.
 
@@ -1038,6 +998,25 @@ Rules:
       - Assert: !Not [ !Equals [ !Ref LambdaSecurityGroupId, "" ] ]
         AssertDescription: "LambdaSecurityGroupId is required when DeployInVPC=true"
 
+  # A PRIVATE REST API is reachable only from inside the VPC, and its resolver
+  # Lambdas (plus the Lambda security group) must live in that VPC. So
+  # ApiGatewayVisibility=PRIVATE requires the standard VPC-secured-mode params.
+  # (Formerly this coupling was implicit via WebUIHosting=ALB, which has been
+  # removed.)
+  PrivateApiRequiresVPC:
+    RuleCondition: !Equals [ !Ref ApiGatewayVisibility, "PRIVATE" ]
+    Assertions:
+      - Assert: !Equals [ !Ref DeployInVPC, "true" ]
+        AssertDescription: "ApiGatewayVisibility=PRIVATE requires DeployInVPC=true"
+      - Assert: !Not [ !Equals [ !Ref VpcId, "" ] ]
+        AssertDescription: "VpcId is required when ApiGatewayVisibility=PRIVATE"
+      - Assert: !Not [ !Equals [ !Ref ApiGatewayVpcEndpointId, "" ] ]
+        AssertDescription: "ApiGatewayVpcEndpointId (execute-api interface endpoint) is required when ApiGatewayVisibility=PRIVATE"
+      # NB: LambdaSubnetIds (a CommaDelimitedList) is validated operationally —
+      # Fn::Join is not permitted in the Rules block, and an empty-list assertion
+      # has no cheap Rules-safe form. PrivateSubnetIds/VpcId coverage above plus
+      # the DeployInVPCRequiresParams rule catch the common misconfiguration.
+
   # Bastion host is a developer-convenience layered on top of VPC-secured mode.
   # It shares the customer-supplied VPC, so DeployInVPC must be true as well.
   BastionRequiresVPC:
@@ -1069,13 +1048,12 @@ Rules:
   S3PresignedUrlViaVpcEndpointRequiresEndpoint:
     RuleCondition: !Equals [ !Ref S3PresignedUrlViaVpcEndpoint, "true" ]
     Assertions:
-      - Assert: !Or
-          - !Not [ !Equals [ !Ref S3VpcEndpointIdOverride, "" ] ]
-          - !Equals [ !Ref WebUIHosting, "ALB" ]
+      - Assert: !Not [ !Equals [ !Ref S3VpcEndpointIdOverride, "" ] ]
         AssertDescription: >-
           S3PresignedUrlViaVpcEndpoint=true requires an S3 VPC Interface Endpoint.
-          Either set S3VpcEndpointIdOverride (BYO endpoint) or use WebUIHosting=ALB
-          (which auto-provisions an endpoint).
+          Provide one via S3VpcEndpointIdOverride / S3VpcEndpointDnsNameOverride
+          (APIGateway hosting serves the UI through API Gateway's internal S3
+          integration and does not auto-provision an S3 VPC endpoint).
 
 Conditions:
   # API transport: API Gateway REST API + polling + Lambda response streaming is
@@ -1148,7 +1126,10 @@ Conditions:
       - !Condition HasExternalIdP
       - !Condition HasExternalIdPGroupMapping
   UseCloudFrontHosting: !Equals [ !Ref WebUIHosting, "CloudFront" ]
-  UseALBHosting: !Equals [ !Ref WebUIHosting, "ALB" ]
+  # APIGateway hosting: the Web UI SPA is served as an S3 proxy on the existing
+  # api-resolvers REST API (same stage as the /op transport), so it inherits the
+  # API's GLOBAL/PRIVATE visibility and optional stage-level WAFv2.
+  UseApiGatewayHosting: !Equals [ !Ref WebUIHosting, "APIGateway" ]
   HasS3VpcEndpointOverride: !Not [!Equals [!Ref S3VpcEndpointIdOverride, ""]]
   # True when a customer-owned domain (DNS alias, Okta/SAML SSO domain, etc.)
   # fronts the application. Drives three template behaviours:
@@ -1159,16 +1140,17 @@ Conditions:
   #      land back on the custom domain.
   #   3. Sets VITE_CLOUDFRONT_DOMAIN to "" at Web UI build time, which makes
   #      Amplify use window.location.origin for redirectSignIn /
-  #      redirectSignOut. This keeps the ALB and the custom domain working
-  #      side-by-side instead of pinning OAuth to a single host.
+  #      redirectSignOut. This keeps the API Gateway URL and the custom domain
+  #      working side-by-side instead of pinning OAuth to a single host.
   HasCustomDomain: !Not [!Equals [!Ref CustomDomainUrl, ""]]
-  # True when an S3 VPC Interface Endpoint EXISTS (either auto-provisioned by
-  # ALB stack or customer-provided via override). Used for:
+  # True when an S3 VPC Interface Endpoint EXISTS (customer-provided via the
+  # override params). Used for:
   #   - Backend Lambda S3 access (HasS3VpcEndpointAndVpc)
-  #   - Infrastructure references (WebUI bucket policy, ALB target group)
-  # NOTE: This condition does NOT control presigner URL injection.
-  # For presigner control, see UseS3VpcEndpointForPresigner.
-  HasS3VpcEndpoint: !Or [!Condition UseALBHosting, !Condition HasS3VpcEndpointOverride]
+  #   - Presigner URL injection is controlled separately (see below).
+  # NOTE: APIGateway hosting does NOT provision an S3 VPC endpoint — API Gateway
+  # reaches the Web UI bucket over AWS-internal networking. This condition is
+  # therefore driven solely by the BYO override.
+  HasS3VpcEndpoint: !Condition HasS3VpcEndpointOverride
   # True when presigner Lambdas should generate S3 URLs targeting the VPC
   # Interface Endpoint (for browser uploads). Triggered by explicit opt-in
   # or by BYO endpoint override (which always implies presigner usage).
@@ -1304,19 +1286,14 @@ Metadata:
           - CloudFrontPriceClass
           - CloudFrontAllowedGeos
       - Label:
-          default: "ALB Hosting (when WebUIHosting=ALB)"
+          default: "API Gateway Hosting (when WebUIHosting=APIGateway)"
         Parameters:
-          - ALBVpcId
-          - ALBSubnetIds
-          - ALBCertificateArn
-          - ALBScheme
-          - ALBAllowedCIDRs
           - S3PresignedUrlViaVpcEndpoint
           - S3VpcEndpointIdOverride
           - S3VpcEndpointDnsNameOverride
           - CustomDomainUrl
       - Label:
-          default: "Private Network (ApiGatewayVisibility=PRIVATE requires ALB hosting)"
+          default: "Private Network (ApiGatewayVisibility=PRIVATE — VPC-only REST API + Web UI)"
         Parameters:
           - ApiGatewayVisibility
           - LambdaSubnetIds
@@ -1436,16 +1413,6 @@ Metadata:
         default: "MLflow Tracking Server ARN"
       WebUIHosting:
         default: "Web UI Hosting Method"
-      ALBVpcId:
-        default: "ALB - VPC ID"
-      ALBSubnetIds:
-        default: "ALB - Subnet IDs"
-      ALBCertificateArn:
-        default: "ALB - ACM Certificate ARN"
-      ALBScheme:
-        default: "ALB - Scheme (internal/internet-facing)"
-      ALBAllowedCIDRs:
-        default: "ALB - Allowed CIDR Ranges"
       S3PresignedUrlViaVpcEndpoint:
         default: "Route Browser S3 Uploads via VPC Endpoint"
       ApiGatewayVisibility:
@@ -1453,11 +1420,11 @@ Metadata:
       LambdaSubnetIds:
         default: "Lambda Subnet IDs (required when ApiGatewayVisibility=PRIVATE)"
       S3VpcEndpointIdOverride:
-        default: "ALB - S3 Interface VPC Endpoint ID (BYO endpoint, optional)"
+        default: "S3 Interface VPC Endpoint ID (BYO endpoint, optional)"
       S3VpcEndpointDnsNameOverride:
-        default: "ALB - S3 Interface VPC Endpoint Regional DNS Name (BYO endpoint, optional)"
+        default: "S3 Interface VPC Endpoint Regional DNS Name (BYO endpoint, optional)"
       CustomDomainUrl:
-        default: "ALB - Custom Domain URL (https://host, no trailing slash, optional)"
+        default: "Custom Domain URL (https://host, no trailing slash, optional)"
       ArtifactsBucketKmsKeyArn:
         default: "Artifacts Bucket KMS Key ARN (optional, for pre-created KMS-encrypted bucket)"
       CircuitBreakerEnabled:
@@ -1694,10 +1661,11 @@ Resources:
             - UseS3VpcEndpointForPresigner
             - !Sub
               - "https://bucket.${VpceDnsName}"
-              - VpceDnsName: !If
-                  - HasS3VpcEndpointOverride
-                  - !Ref S3VpcEndpointDnsNameOverride
-                  - !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointDnsName
+              # Only the BYO override provides an S3 VPC endpoint now (APIGateway
+              # hosting uses API Gateway's internal S3 integration, no VPCE). The
+              # S3PresignedUrlViaVpcEndpointRequiresEndpoint rule guarantees the
+              # override is set whenever UseS3VpcEndpointForPresigner is true.
+              - VpceDnsName: !Ref S3VpcEndpointDnsNameOverride
             - !Ref AWS::NoValue
       LoggingConfig:
         LogGroup: !Ref ApiHandlerLogGroup
@@ -2018,10 +1986,11 @@ Resources:
             - HasS3VpcEndpointAndVpc
             - !Sub
               - "https://bucket.${VpceDnsName}"
-              - VpceDnsName: !If
-                  - HasS3VpcEndpointOverride
-                  - !Ref S3VpcEndpointDnsNameOverride
-                  - !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointDnsName
+              # Only the BYO override provides an S3 VPC endpoint now (APIGateway
+              # hosting uses API Gateway's internal S3 integration, no VPCE). The
+              # S3PresignedUrlViaVpcEndpointRequiresEndpoint rule guarantees the
+              # override is set whenever UseS3VpcEndpointForPresigner is true.
+              - VpceDnsName: !Ref S3VpcEndpointDnsNameOverride
             - !Ref AWS::NoValue
       LoggingConfig:
         LogGroup:
@@ -2747,10 +2716,7 @@ Resources:
           - UseS3VpcEndpointForPresigner
           - !Sub
             - "https://bucket.${VpceDnsName}"
-            - VpceDnsName: !If
-                - HasS3VpcEndpointOverride
-                - !Ref S3VpcEndpointDnsNameOverride
-                - !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointDnsName
+            - VpceDnsName: !Ref S3VpcEndpointDnsNameOverride
           - ""
 
         # Private REST API config — private endpoint + WAF + in-VPC resolver
@@ -2782,8 +2748,22 @@ Resources:
         # stack builds the HTTP API + JWT authorizer + dispatcher Lambda. The
         # dispatcher needs the main-template resolver function ARNs (the rest are
         # defined in the nested stack). ApiTransport is no longer passed.
+        # NB: UserPoolClientId is intentionally NOT passed. The nested stack only
+        # needs the pool id (authorizer ProviderARNs); the client id is unused
+        # there. Omitting it removes an APIRESOLVERSTACK -> UserPoolClient
+        # dependency edge, so UserPoolClient.CallbackURLs can safely reference
+        # this stack's HttpApiEndpoint output (WebUIHosting=APIGateway) without a
+        # circular dependency.
         UserPoolId: !Ref UserPool
-        UserPoolClientId: !Ref UserPoolClient
+
+        # Web UI hosting via API Gateway S3 proxy (WebUIHosting=APIGateway). When
+        # enabled, this REST API also serves the React SPA from the Web UI bucket
+        # on the same stage, so the UI inherits the API's PRIVATE/GLOBAL
+        # visibility and stage-level WAF.
+        ServeWebUI: !If [UseApiGatewayHosting, "true", "false"]
+        WebUIBucketName: !If [UseApiGatewayHosting, !Ref WebUIBucket, ""]
+        WebUIProxyRoleArn: !If [UseApiGatewayHosting, !GetAtt WebUIProxyRole.Arn, ""]
+
         CompleteSectionReviewFunctionArn: !GetAtt CompleteSectionReviewFunction.Arn
         UserManagementFunctionArn: !GetAtt UserManagementFunction.Arn
         FinetuningJobsResolverFunctionArn: !GetAtt FinetuningJobsResolverFunction.Arn
@@ -3182,32 +3162,6 @@ Resources:
             Condition:
               StringEquals:
                 "AWS:SourceAccount": !Ref "AWS::AccountId"
-          - !If
-            - UseALBHosting
-            - Sid: AllowALBAccessLogs
-              Effect: Allow
-              Principal:
-                Service: !Sub "logdelivery.elasticloadbalancing.${AWS::URLSuffix}"
-              Action:
-                - s3:PutObject
-              Resource: !Sub "${LoggingBucket.Arn}/alb-access-logs/*"
-              Condition:
-                StringEquals:
-                  "aws:SourceAccount": !Ref "AWS::AccountId"
-            - !Ref AWS::NoValue
-          - !If
-            - UseALBHosting
-            - Sid: AllowALBAccessLogsBucketACL
-              Effect: Allow
-              Principal:
-                Service: !Sub "logdelivery.elasticloadbalancing.${AWS::URLSuffix}"
-              Action:
-                - s3:GetBucketAcl
-              Resource: !Sub "${LoggingBucket.Arn}"
-              Condition:
-                StringEquals:
-                  "aws:SourceAccount": !Ref "AWS::AccountId"
-            - !Ref AWS::NoValue
           - Sid: EnforceSSLOnly
             Effect: Deny
             Principal: "*"
@@ -3242,7 +3196,11 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt GetLowercaseAlbUrl.Lowercase
+                # APIGateway hosting: the browser origin is the execute-api host
+                # (scheme+host only — the /api stage path is not part of the CORS
+                # Origin). A single-wildcard origin avoids a bucket->API-stack
+                # dependency cycle while matching the REST API's regional host.
+                - !Sub "https://*.execute-api.${AWS::Region}.${AWS::URLSuffix}"
               # For local development only
               - "http://localhost:3000"
               # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
@@ -3330,7 +3288,11 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt GetLowercaseAlbUrl.Lowercase
+                # APIGateway hosting: the browser origin is the execute-api host
+                # (scheme+host only — the /api stage path is not part of the CORS
+                # Origin). A single-wildcard origin avoids a bucket->API-stack
+                # dependency cycle while matching the REST API's regional host.
+                - !Sub "https://*.execute-api.${AWS::Region}.${AWS::URLSuffix}"
               # For local development only
               - "http://localhost:3000"
               # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
@@ -3467,7 +3429,11 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt GetLowercaseAlbUrl.Lowercase
+                # APIGateway hosting: the browser origin is the execute-api host
+                # (scheme+host only — the /api stage path is not part of the CORS
+                # Origin). A single-wildcard origin avoids a bucket->API-stack
+                # dependency cycle while matching the REST API's regional host.
+                - !Sub "https://*.execute-api.${AWS::Region}.${AWS::URLSuffix}"
               # For local development only
               - "http://localhost:3000"
               # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
@@ -3681,10 +3647,11 @@ Resources:
             - HasS3VpcEndpointAndVpc
             - !Sub
               - "https://bucket.${VpceDnsName}"
-              - VpceDnsName: !If
-                  - HasS3VpcEndpointOverride
-                  - !Ref S3VpcEndpointDnsNameOverride
-                  - !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointDnsName
+              # Only the BYO override provides an S3 VPC endpoint now (APIGateway
+              # hosting uses API Gateway's internal S3 integration, no VPCE). The
+              # S3PresignedUrlViaVpcEndpointRequiresEndpoint rule guarantees the
+              # override is set whenever UseS3VpcEndpointForPresigner is true.
+              - VpceDnsName: !Ref S3VpcEndpointDnsNameOverride
             - !Ref AWS::NoValue
       Policies:
         - S3CrudPolicy:
@@ -3964,7 +3931,11 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt GetLowercaseAlbUrl.Lowercase
+                # APIGateway hosting: the browser origin is the execute-api host
+                # (scheme+host only — the /api stage path is not part of the CORS
+                # Origin). A single-wildcard origin avoids a bucket->API-stack
+                # dependency cycle while matching the REST API's regional host.
+                - !Sub "https://*.execute-api.${AWS::Region}.${AWS::URLSuffix}"
               # For local development only
               - "http://localhost:3000"
               # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
@@ -4100,7 +4071,11 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt GetLowercaseAlbUrl.Lowercase
+                # APIGateway hosting: the browser origin is the execute-api host
+                # (scheme+host only — the /api stage path is not part of the CORS
+                # Origin). A single-wildcard origin avoids a bucket->API-stack
+                # dependency cycle while matching the REST API's regional host.
+                - !Sub "https://*.execute-api.${AWS::Region}.${AWS::URLSuffix}"
               # For local development only
               - "http://localhost:3000"
               # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
@@ -4180,7 +4155,11 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt GetLowercaseAlbUrl.Lowercase
+                # APIGateway hosting: the browser origin is the execute-api host
+                # (scheme+host only — the /api stage path is not part of the CORS
+                # Origin). A single-wildcard origin avoids a bucket->API-stack
+                # dependency cycle while matching the REST API's regional host.
+                - !Sub "https://*.execute-api.${AWS::Region}.${AWS::URLSuffix}"
               # For local development only
               - "http://localhost:3000"
               # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
@@ -4245,13 +4224,6 @@ Resources:
     Properties:
       ServiceToken: !GetAtt GetDomainLambda.Arn
       InputString: !Ref AWS::StackName
-
-  GetLowercaseAlbUrl:
-    Type: Custom::GetLowercaseAlbUrl
-    Condition: UseALBHosting
-    Properties:
-      ServiceToken: !GetAtt GetDomainLambda.Arn
-      InputString: !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
 
   ReportingDatabase:
     Type: AWS::Glue::Database
@@ -4666,7 +4638,11 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt GetLowercaseAlbUrl.Lowercase
+                # APIGateway hosting: the browser origin is the execute-api host
+                # (scheme+host only — the /api stage path is not part of the CORS
+                # Origin). A single-wildcard origin avoids a bucket->API-stack
+                # dependency cycle while matching the REST API's regional host.
+                - !Sub "https://*.execute-api.${AWS::Region}.${AWS::URLSuffix}"
               # For local development only
               - "http://localhost:3000"
               # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
@@ -4763,14 +4739,16 @@ Resources:
                   "AWS:SourceArn": !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
             - !Ref AWS::NoValue
           - !If
-            - UseALBHosting
+            # APIGateway hosting: allow the API Gateway S3-proxy role to read the
+            # SPA objects. Same-account access also works via the role's identity
+            # policy (WebUIProxyRole), but the explicit resource grant keeps the
+            # bucket's access model self-documenting and robust to future changes.
+            - UseApiGatewayHosting
             - Effect: Allow
-              Principal: "*"
+              Principal:
+                AWS: !GetAtt WebUIProxyRole.Arn
               Action: s3:GetObject
               Resource: !Sub "${WebUIBucket.Arn}/*"
-              Condition:
-                StringEquals:
-                  "aws:sourceVpce": !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointId
             - !Ref AWS::NoValue
           - Effect: "Deny"
             Action:
@@ -6978,6 +6956,12 @@ Resources:
           TRACKING_TABLE_NAME: !Ref TrackingTable
           USERS_TABLE_NAME: !Ref UsersTable
           APPSYNC_API_URL: ""
+          # Non-streaming (GovCloud poll) path: persist the final chat message to
+          # the ChatMessages table so the UI can poll getChatMessages for it when
+          # no Lambda Function URL is available. Harmless in streaming/commercial
+          # mode (the persist runs but the UI streams and ignores it).
+          CHAT_MESSAGES_TABLE: !Ref ChatMessagesTable
+          DATA_RETENTION_DAYS: !Ref DataRetentionInDays
           GUARDRAIL_ID_AND_VERSION:
             !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
           BEDROCK_ASSUME_ROLE_ARN:
@@ -6997,6 +6981,9 @@ Resources:
             TableName: !Ref ConfigurationTable
         - DynamoDBReadPolicy:
             TableName: !Ref TrackingTable
+        # Write final chat messages for the non-streaming (GovCloud poll) path.
+        - DynamoDBWritePolicy:
+            TableName: !Ref ChatMessagesTable
         - Statement:
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.
@@ -7333,8 +7320,8 @@ Resources:
   # with Lambda response streaming via a direct Function URL
   # (InvokeMode=RESPONSE_STREAM, AuthType=AWS_IAM). The browser SigV4-signs the
   # request with the authenticated Cognito Identity Pool role and reads the SSE
-  # body incrementally. Works identically under CloudFront or ALB because the
-  # Function URL is addressed directly by the browser.
+  # body incrementally. Works identically under CloudFront or API Gateway
+  # hosting because the Function URL is addressed directly by the browser.
   #
   # The function runs a tiny FastAPI app under the AWS Lambda Web Adapter (LWA)
   # and drives the SAME chat_with_document_processor / agent_chat_processor logic
@@ -8165,7 +8152,7 @@ Resources:
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}/"
-          - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
+          - !Sub "${APIRESOLVERSTACK.Outputs.HttpApiEndpoint}/"
         # Custom domain entries — both with and without trailing slash because
         # browsers and OAuth libraries vary in normalisation. Cognito matches
         # callback URLs case-sensitively after exact-string compare, so we add
@@ -8182,7 +8169,7 @@ Resources:
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}/"
-          - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
+          - !Sub "${APIRESOLVERSTACK.Outputs.HttpApiEndpoint}/"
         - !If [HasCustomDomain, !Ref CustomDomainUrl, !Ref "AWS::NoValue"]
         - !If [HasCustomDomain, !Sub "${CustomDomainUrl}/", !Ref "AWS::NoValue"]
         - !Sub "https://${AWS::Region}.quicksight.aws.amazon.com/sn/oauthcallback"
@@ -8249,10 +8236,20 @@ Resources:
               <p>AWS GenAIIDP Team</p>
               <p>
               <p><em>Stack: ${AWS::StackName}, v<VERSION>, <BUILD_DATE_TIME></em>
+            # WebUIURL for the invite email. In CloudFront mode this is the
+            # distribution URL. In APIGateway mode the UI URL is an output of
+            # APIRESOLVERSTACK, which is created AFTER the UserPool — referencing
+            # it here would create a circular dependency — so we use the custom
+            # domain when set, otherwise direct the user to the stack's
+            # ApplicationWebURL output. (The email is only used for the initial
+            # temporary-password login; the URL is always in the stack Outputs.)
             - WebUIURL: !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}/"
-                - !GetAtt GetLowercaseAlbUrl.Lowercase
+                - !If
+                  - HasCustomDomain
+                  - !Sub "${CustomDomainUrl}/"
+                  - "the ApplicationWebURL shown in the CloudFormation stack Outputs"
       AutoVerifiedAttributes:
         - email
       EmailConfiguration:
@@ -8303,6 +8300,14 @@ Resources:
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     DependsOn: ExternalIdentityProviderReady
+    # MAINTENANCE NOTE: In APIGateway hosting mode the WebUIClientOAuthUrls custom
+    # resource does a read-modify-write of this client (to add the execute-api
+    # CallbackURLs/LogoutURLs post-deploy — see that resource). Its Lambda
+    # preserves a fixed list of this client's writable properties when calling
+    # UpdateUserPoolClient. If you add a new writable property here (e.g.
+    # AuthSessionValidity, AnalyticsConfiguration), also add it to that Lambda's
+    # preserve list (WebUIClientOAuthUrlsFunction InlineCode), or the custom
+    # resource will silently reset it on update.
     Properties:
       ClientName: !Sub "${AWS::StackName}-Client"
       AllowedOAuthFlows:
@@ -8313,29 +8318,43 @@ Resources:
         - email
         - phone
         - profile
+      # NOTE: APIGateway hosting URLs are NOT listed here. The Web UI's URL in
+      # that mode is an output of APIRESOLVERSTACK, which (transitively, via
+      # FeaturePlatformStack's UserPoolClient dependency) is created AFTER this
+      # client — referencing it here would be a circular dependency. Instead the
+      # WebUIClientOAuthUrls custom resource appends the API Gateway callback /
+      # logout URLs to this client after both stacks exist. CloudFront hosting
+      # has no such ordering constraint, so its URLs are declared inline.
       CallbackURLs:
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}"
-          - !GetAtt GetLowercaseAlbUrl.Lowercase
+          - !Ref "AWS::NoValue"
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}/"
-          - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
+          - !Ref "AWS::NoValue"
         # Custom domain — both forms (no trailing slash and trailing slash)
         # so OAuth redirects match regardless of how the browser normalises.
         - !If [HasCustomDomain, !Ref CustomDomainUrl, !Ref "AWS::NoValue"]
         - !If [HasCustomDomain, !Sub "${CustomDomainUrl}/", !Ref "AWS::NoValue"]
+        # Placeholder so the list is never empty in APIGateway mode without a
+        # custom domain (Cognito requires >=1 callback URL when OAuth flows are
+        # enabled); the real URL is added by WebUIClientOAuthUrls post-deploy.
+        - !If
+          - UseApiGatewayHosting
+          - !If [HasCustomDomain, !Ref "AWS::NoValue", "https://localhost/apigw-placeholder"]
+          - !Ref "AWS::NoValue"
       LogoutURLs: !If
         - HasExternalIdP
         - - !If
             - UseCloudFrontHosting
             - !Sub "https://${CloudFrontDistribution.DomainName}"
-            - !GetAtt GetLowercaseAlbUrl.Lowercase
+            - !Ref "AWS::NoValue"
           - !If
             - UseCloudFrontHosting
             - !Sub "https://${CloudFrontDistribution.DomainName}/"
-            - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
+            - !Ref "AWS::NoValue"
           - !If [HasCustomDomain, !Ref CustomDomainUrl, !Ref "AWS::NoValue"]
           - !If [HasCustomDomain, !Sub "${CustomDomainUrl}/", !Ref "AWS::NoValue"]
         - !Ref AWS::NoValue
@@ -8364,6 +8383,161 @@ Resources:
           - !Ref ExternalIdPName
         - - COGNITO
       UserPoolId: !Ref UserPool
+
+  ##########################################################################
+  # Web UI OAuth callback registration for APIGateway hosting.
+  #
+  # When WebUIHosting=APIGateway the Web UI URL is an output of
+  # APIRESOLVERSTACK, which is created AFTER UserPoolClient (via the
+  # FeaturePlatformStack -> UserPoolClient dependency chain). Declaring the API
+  # Gateway callback/logout URLs directly on UserPoolClient would therefore be a
+  # circular dependency. Instead this custom resource runs AFTER both stacks
+  # exist and merges the API Gateway URLs into the existing client via a
+  # read-modify-write (describe -> add URLs -> update). Nothing depends on this
+  # resource, so it introduces no cycle. It also removes the creation-time
+  # localhost placeholder. Only created for APIGateway hosting.
+  ##########################################################################
+  WebUIClientOAuthUrlsRole:
+    Type: AWS::IAM::Role
+    Condition: UseApiGatewayHosting
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: ManageUserPoolClientCallbacks
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cognito-idp:DescribeUserPoolClient
+                  - cognito-idp:UpdateUserPoolClient
+                Resource: !GetAtt UserPool.Arn
+
+  WebUIClientOAuthUrlsFunction:
+    Type: AWS::Serverless::Function
+    Condition: UseApiGatewayHosting
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function only calls Cognito control-plane APIs; no VPC access required"
+          - id: W92
+            reason: "Custom resource scales on demand; no reserved concurrency needed"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function only calls AWS APIs; no VPC access required"
+    # checkov:skip=CKV_AWS_115: "Reserved concurrency not required for a one-shot custom resource"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Description: !Sub "Registers API Gateway Web UI OAuth callback/logout URLs on the Cognito client for ${AWS::StackName}"
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 60
+      MemorySize: 128
+      Role: !GetAtt WebUIClientOAuthUrlsRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref WebUIClientOAuthUrlsLogGroup
+      InlineCode: |
+        import boto3
+        import cfnresponse
+
+        PLACEHOLDER = "https://localhost/apigw-placeholder"
+        cognito = boto3.client("cognito-idp")
+
+        def _apply(pool_id, client_id, base_url, remove=False):
+            # base_url ends with '/api'; register both with and without trailing
+            # slash to tolerate browser/OAuth-lib normalisation differences.
+            urls = {base_url, base_url + "/"}
+            resp = cognito.describe_user_pool_client(
+                UserPoolId=pool_id, ClientId=client_id
+            )
+            client = resp["UserPoolClient"]
+            cb = set(client.get("CallbackURLs") or [])
+            lo = set(client.get("LogoutURLs") or [])
+            cb.discard(PLACEHOLDER)
+            lo.discard(PLACEHOLDER)
+            if remove:
+                cb -= urls
+                lo -= urls
+            else:
+                cb |= urls
+                lo |= urls
+            # Preserve every writable field cognito requires on update.
+            update = {
+                "UserPoolId": pool_id,
+                "ClientId": client_id,
+                "CallbackURLs": sorted(cb),
+                "LogoutURLs": sorted(lo),
+            }
+            for k in (
+                "ClientName", "RefreshTokenValidity", "AccessTokenValidity",
+                "IdTokenValidity", "TokenValidityUnits", "ReadAttributes",
+                "WriteAttributes", "ExplicitAuthFlows", "SupportedIdentityProviders",
+                "AllowedOAuthFlows", "AllowedOAuthScopes",
+                "AllowedOAuthFlowsUserPoolClient", "PreventUserExistenceErrors",
+                "EnableTokenRevocation",
+            ):
+                if k in client:
+                    update[k] = client[k]
+            cognito.update_user_pool_client(**update)
+
+        def handler(event, context):
+            props = event.get("ResourceProperties", {})
+            pool_id = props.get("UserPoolId")
+            client_id = props.get("UserPoolClientId")
+            base_url = (props.get("WebUIBaseUrl") or "").rstrip("/")
+            try:
+                if event["RequestType"] == "Delete":
+                    if base_url:
+                        _apply(pool_id, client_id, base_url, remove=True)
+                else:
+                    if base_url:
+                        _apply(pool_id, client_id, base_url, remove=False)
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+            except Exception as e:  # noqa: BLE001
+                # Never block stack delete on a best-effort URL cleanup.
+                if event["RequestType"] == "Delete":
+                    cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                else:
+                    print(f"Error: {e}")
+                    cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
+
+  WebUIClientOAuthUrlsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: UseApiGatewayHosting
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  WebUIClientOAuthUrls:
+    Type: Custom::WebUIClientOAuthUrls
+    Condition: UseApiGatewayHosting
+    Properties:
+      ServiceToken: !GetAtt WebUIClientOAuthUrlsFunction.Arn
+      UserPoolId: !Ref UserPool
+      UserPoolClientId: !Ref UserPoolClient
+      # HttpApiEndpoint is ".../api"; the SPA is served at that path.
+      WebUIBaseUrl: !GetAtt APIRESOLVERSTACK.Outputs.HttpApiEndpoint
+      # Drift guard: UserPoolClient declaratively owns CallbackURLs/LogoutURLs
+      # (which in APIGateway mode contain only the localhost placeholder), while
+      # this custom resource merges in the execute-api URLs. If UserPoolClient is
+      # re-materialized on a later stack update, CloudFormation would reset its
+      # URL lists back to the placeholder. Changing this property on every
+      # publish (BUILD_DATE_TIME is substituted at build time) forces the custom
+      # resource to re-run on each deploy, so it re-applies the execute-api URLs
+      # (its read-modify-write is idempotent and always removes the placeholder).
+      Rerun: "<BUILD_DATE_TIME>"
 
   ##########################################################################
   # External Identity Provider (SAML/OIDC Federation)
@@ -8961,10 +9135,10 @@ Resources:
     Condition: UsePrivateApi
     Properties:
       GroupDescription: !Sub "Security group for ${AWS::StackName} Lambda functions in VPC (private REST API mode)"
-      # ALBVpcId is used here because ApiGatewayVisibility=PRIVATE always requires
-      # WebUIHosting=ALB — a private REST API is only accessible from inside
-      # the VPC, so the browser must also be inside the VPC via the internal ALB.
-      VpcId: !Ref ALBVpcId
+      # ApiGatewayVisibility=PRIVATE always requires DeployInVPC=true (the
+      # private REST API is reachable only from inside the VPC), so the standard
+      # VpcId supplied for VPC-secured mode is the VPC the Lambdas attach to.
+      VpcId: !Ref VpcId
       SecurityGroupEgress:
         - IpProtocol: tcp
           FromPort: 443
@@ -9941,31 +10115,41 @@ Resources:
               RestrictionType: none
 
   ##########################################################################
-  # ALB Hosting (alternative to CloudFront for GovCloud / private networks)
+  # API Gateway Web UI Hosting (alternative to CloudFront for GovCloud /
+  # private networks). The SPA is served as an S3 proxy on the existing
+  # api-resolvers REST API (see nested/api-resolvers ServeWebUI). This IAM role
+  # is what API Gateway assumes to read the Web UI bucket for that integration.
   ##########################################################################
 
-  ALBHOSTINGSTACK:
-    Type: AWS::CloudFormation::Stack
-    Condition: UseALBHosting
+  WebUIProxyRole:
+    Type: AWS::IAM::Role
+    Condition: UseApiGatewayHosting
     Properties:
-      TemplateURL: ./nested/alb-hosting/.aws-sam/packaged.yaml
-      Parameters:
-        VpcId: !Ref ALBVpcId
-        SubnetIds: !Join [",", !Ref ALBSubnetIds]
-        CertificateArn: !Ref ALBCertificateArn
-        ALBScheme: !Ref ALBScheme
-        ALBAllowedCIDRs: !Ref ALBAllowedCIDRs
-        WebUIBucketName: !Ref WebUIBucket
-        StackName: !Ref AWS::StackName
-        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
-        LoggingBucketName: !Ref LoggingBucket
-        # In private mode the same S3 VPCE is used by app Lambdas; pass the
-        # Lambda SG so the ALB stack opens 443 from it on the endpoint SG.
-        # Empty when DeployInVPC=false — the nested stack treats empty as no-op.
-        LambdaSecurityGroupId: !If
-          - DeployInVPC
-          - !Ref LambdaSecurityGroupId
-          - ""
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "apigateway.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+            # Confused-deputy guard: only API Gateway in THIS account may assume
+            # the role (the role can only read this one private bucket, so the
+            # blast radius is already tiny, but this matches the hardening used
+            # elsewhere in the template).
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref "AWS::AccountId"
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: WebUIBucketRead
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "${WebUIBucket.Arn}/*"
 
   UICodeBuildServiceRole:
     Type: AWS::IAM::Role
@@ -10112,7 +10296,7 @@ Resources:
                     echo "Invalidating CloudFront Distribution"
                     aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --paths '/*'
                   else
-                    echo "ALB hosting mode - skipping CloudFront invalidation"
+                    echo "APIGateway hosting mode - skipping CloudFront invalidation"
                   fi
           artifacts:
             files:
@@ -10183,19 +10367,29 @@ Resources:
               - !Ref ExternalIdPAutoLogin
               - "false"
           - Name: VITE_CLOUDFRONT_DOMAIN
-            # When a custom domain is configured, leave this empty so
-            # aws-exports.js falls back to window.location.origin for
-            # OAuth redirectSignIn / redirectSignOut. That fallback makes
-            # the same build work whether the user lands on the ALB URL,
-            # the CloudFront URL, or the custom domain — the Amplify OAuth
-            # flow always starts and returns on the same origin.
+            # OAuth redirect origin baked into aws-exports.js. When a custom
+            # domain is configured, leave this empty so aws-exports.js falls back
+            # to window.location.origin for OAuth redirectSignIn / redirectSignOut
+            # — the same build then works from the CloudFront URL, the API
+            # Gateway URL, or the custom domain (the Amplify OAuth flow always
+            # starts and returns on the same origin). For APIGateway hosting the
+            # UI is served under the /api stage path, so the redirect URL is the
+            # HttpApiEndpoint (which already ends in /api) plus a trailing slash.
             Value: !If
               - HasCustomDomain
               - ""
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}/"
-                - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
+                - !Sub "${APIRESOLVERSTACK.Outputs.HttpApiEndpoint}/"
+          # Vite base path. APIGateway hosting serves the SPA under the REST API
+          # stage prefix (/api), so assets must be emitted with base=/api/ and
+          # the SPA public path set accordingly. CloudFront serves at root (/).
+          - Name: VITE_UI_BASE_PATH
+            Value: !If
+              - UseCloudFrontHosting
+              - "/"
+              - "/api/"
           - Name: VITE_TEST_SET_BUCKET_NAME
             Value: !Ref TestSetBucket
           - Name: VITE_INPUT_BUCKET_NAME
@@ -11134,7 +11328,9 @@ Outputs:
     Value: !If
       - UseCloudFrontHosting
       - !Sub "https://${CloudFrontDistribution.DomainName}/"
-      - !GetAtt GetLowercaseAlbUrl.Lowercase
+      # APIGateway hosting: the SPA is served on the REST API stage; the
+      # HttpApiEndpoint already ends in /api, so append a trailing slash.
+      - !Sub "${APIRESOLVERSTACK.Outputs.HttpApiEndpoint}/"
   S3InstallBucket:
     Description: Install S3 bucket name
     Value: !Ref InputBucket
