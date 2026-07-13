@@ -363,6 +363,12 @@ Conditions:
   # Inverse of ServeWebUICondition — used to gate the no-Web-UI API deployment
   # so the stage always references a deployment that actually exists.
   DoNotServeWebUICondition: !Not [!Equals [!Ref ServeWebUI, "true"]]
+  # API Gateway access logs are enabled at INFO and DEBUG. Access logs (unlike
+  # execution logs) never contain request/response bodies, and capture requests
+  # that fail before reaching the dispatcher Lambda (authorizer 401/403s, WAF
+  # blocks, S3-proxy Web UI routes).
+  EnableApiAccessLogs:
+    !Or [!Equals [!Ref LogLevel, "DEBUG"], !Equals [!Ref LogLevel, "INFO"]]
 
 Resources:
   AbortWorkflowResolverFunctionLogGroup:
@@ -3007,6 +3013,57 @@ Resources:
       RestApiId: !Ref HttpApi
       Description: !Sub "Dispatcher API deployment for ${StackName} (CORS)"
 
+  # DependsOn: the stage rejects AccessLogSetting until the account-level
+  # CloudWatch role is set. The stage itself cannot DependsOn ApiGatewayAccount
+  # (DependsOn cannot name a resource dropped by a false Condition — see the
+  # deployment NB above), so the ordering is chained through this log group,
+  # which shares the condition: Stage -> (GetAtt) -> LogGroup -> Account.
+  HttpApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: EnableApiAccessLogs
+    DependsOn: ApiGatewayAccount
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      RetentionInDays: !Ref LogRetentionDays
+
+  # REST API stages (unlike HTTP APIs) reject AccessLogSetting unless the
+  # account-level API Gateway CloudWatch role is set ("CloudWatch Logs role ARN
+  # must be set in account settings to enable logging"). AWS::ApiGateway::Account
+  # is a PER-ACCOUNT PER-REGION singleton: multiple stacks that declare it
+  # overwrite each other (last writer wins), which is harmless here because
+  # every writer grants the same managed policy. DeletionPolicy: Retain keeps
+  # stack deletion from clearing the account setting out from under other
+  # stacks still using it (the role itself is retained for the same reason).
+  ApiGatewayCloudWatchRole:
+    Type: AWS::IAM::Role
+    Condition: EnableApiAccessLogs
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "apigateway.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+
+  ApiGatewayAccount:
+    Type: AWS::ApiGateway::Account
+    Condition: EnableApiAccessLogs
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      CloudWatchRoleArn: !GetAtt ApiGatewayCloudWatchRole.Arn
+
   HttpApiStage:
     Type: AWS::ApiGateway::Stage
     Properties:
@@ -3016,6 +3073,15 @@ Resources:
         - !Ref HttpApiDeploymentWithWebUIV3
         - !Ref HttpApiDeploymentNoWebUIV3
       StageName: api
+      # JSON access-log format: request metadata only, never bodies. The error
+      # and authorizer fields are what diagnose requests that never reach the
+      # dispatcher Lambda.
+      AccessLogSetting: !If
+        - EnableApiAccessLogs
+        - DestinationArn: !GetAtt HttpApiAccessLogGroup.Arn
+          Format: >-
+            {"requestId":"$context.requestId","extendedRequestId":"$context.extendedRequestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","path":"$context.path","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationStatus":"$context.integrationStatus","integrationLatency":"$context.integrationLatency","integrationError":"$context.integration.error","errorMessage":"$context.error.message","errorResponseType":"$context.error.responseType","authorizerError":"$context.authorizer.error","authorizerStatus":"$context.authorizer.status","principalId":"$context.authorizer.principalId","wafStatus":"$context.wafResponseCode","userAgent":"$context.identity.userAgent"}
+        - !Ref AWS::NoValue
 
   HttpApiDispatcherPermission:
     Type: AWS::Lambda::Permission
