@@ -36,6 +36,18 @@ Mappings:
     lending-package-sample-govcloud:
       ConfigPath: "lending-package-sample-govcloud"
 
+  # AWS Management Console domain per partition. Output console-URLs must use the
+  # partition-correct domain: hardcoded "console.aws.amazon.com" links break in
+  # GovCloud (they must be "console.amazonaws-us-gov.com"). Consumed in Outputs
+  # via !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain].
+  ConsoleDomainMap:
+    aws:
+      Domain: "console.aws.amazon.com"
+    aws-us-gov:
+      Domain: "console.amazonaws-us-gov.com"
+    aws-cn:
+      Domain: "console.amazonaws.cn"
+
 Parameters:
   # NOTE: the legacy ApiTransport parameter has been removed. The UI/backend
   # now always use the API Gateway REST API + polling + Lambda response
@@ -11348,16 +11360,22 @@ Outputs:
     Value: !Ref DiscoveryBucket
   S3InputBucketConsoleURL:
     Description: Input S3 bucket console URL
-    Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${InputBucket}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/s3/buckets/${InputBucket}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   S3DiscoveryBucketConsoleURL:
     Description: Discovery S3 bucket console URL
-    Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${DiscoveryBucket}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/s3/buckets/${DiscoveryBucket}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   S3OutputBucketName:
     Description: Output S3 bucket name
     Value: !Ref OutputBucket
   S3OutputBucketConsoleURL:
     Description: Output S3 bucket console URL
-    Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${OutputBucket}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/s3/buckets/${OutputBucket}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   S3ReportingBucketName:
     Description: Reporting S3 bucket name
     Value: !If
@@ -11367,8 +11385,9 @@ Outputs:
   S3ReportingBucketConsoleURL:
     Description: Reporting S3 bucket console URL
     Value: !Sub
-      - https://s3.console.aws.amazon.com/s3/buckets/${Bucket}
-      - Bucket: !If
+      - https://${AWS::Region}.${ConsoleDomain}/s3/buckets/${Bucket}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
+        Bucket: !If
           - ShouldCreateReportingBucket
           - !Ref ReportingBucket
           - !Ref ReportingBucketName
@@ -11384,8 +11403,9 @@ Outputs:
   S3EvaluationBaselineBucketConsoleURL:
     Description: Evaluation Baseline S3 bucket console URL
     Value: !Sub
-      - https://s3.console.aws.amazon.com/s3/buckets/${Bucket}
-      - Bucket: !If
+      - https://${AWS::Region}.${ConsoleDomain}/s3/buckets/${Bucket}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
+        Bucket: !If
           - ShouldCreateEvaluationBaselineBucket
           - !Ref EvaluationBaselineBucket
           - !Ref EvaluationBaselineBucketName
@@ -11394,61 +11414,82 @@ Outputs:
     Value: !Ref ConfigurationBucket
   S3ConfigurationBucketConsoleURL:
     Description: Configuration S3 bucket console URL
-    Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${ConfigurationBucket}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/s3/buckets/${ConfigurationBucket}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   S3TestSetBucketName:
     Description: Test Set S3 bucket name
     Value: !Ref TestSetBucket
   S3TestSetBucketConsoleURL:
     Description: Test Set S3 bucket console URL
-    Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${TestSetBucket}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/s3/buckets/${TestSetBucket}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   StateMachineArn:
     Description: Step Functions State machine ARN
     Value: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
   StateMachineConsoleURL:
     Description: Step Functions State machine console URL
     Value: !Sub
-      - https://${AWS::Region}.console.aws.amazon.com/states/home?region=${AWS::Region}#/statemachines/view/${StateMachineArn}
-      - StateMachineArn: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
+      - https://${AWS::Region}.${ConsoleDomain}/states/home?region=${AWS::Region}#/statemachines/view/${StateMachineArn}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
+        StateMachineArn: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
 
   CWDashboardConsoleName:
     Description: Name of the merged CloudWatch dashboard
     Value: !GetAtt MergedDashboard.DashboardName
   CWDashboardConsoleURL:
     Description: URL of the merged CloudWatch dashboard
-    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${MergedDashboard.DashboardName}"
+    Value: !Sub
+      - "https://${AWS::Region}.${ConsoleDomain}/cloudwatch/home?region=${AWS::Region}#dashboards:name=${MergedDashboard.DashboardName}"
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   SNSAlertsTopicARN:
     Description: SNS Topic ARN for alerts
     Value: !Ref AlertsTopic
   SNSAlertsTopicConsoleURL:
     Description: SNS Topic console URL
-    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/sns/v3/home?region=${AWS::Region}#/topic/${AlertsTopic}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/sns/v3/home?region=${AWS::Region}#/topic/${AlertsTopic}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   DynamoDBTrackingTableConsoleURL:
     Description: DynamoDB table console URL
-    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${TrackingTable}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${TrackingTable}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   DynamoDBConcurrencyTableConsoleURL:
     Description: DynamoDB table console URL
-    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${ConcurrencyTable}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${ConcurrencyTable}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   DynamoDBConfigurationTableConsoleURL:
     Description: DynamoDB table console URL
-    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${ConfigurationTable}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${ConfigurationTable}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   DynamoDBAgentTableName:
     Description: Name of the DynamoDB table for agent job tracking
     Value: !Ref AgentTable
   DynamoDBAgentTableConsoleURL:
     Description: DynamoDB table console URL for agent job tracking
-    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${AgentTable}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${AgentTable}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   LambdaLookupFunctionName:
     Description: Name of the Lookup function
     Value: !Ref LookupFunction
   LambdaLookupFunctionConsoleURL:
     Description: Lambda function console URL
-    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/lambda/home?region=${AWS::Region}#/functions/${LookupFunction}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/lambda/home?region=${AWS::Region}#/functions/${LookupFunction}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   SQSDocumentQueueUrl:
     Description: SQS Queue URL
     Value: !Ref DocumentQueue
   SQSDocumentQueueConsoleURL:
     Description: SQS Queue console URL
-    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/sqs/v2/home?region=${AWS::Region}#/queues/${DocumentQueue}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/sqs/v2/home?region=${AWS::Region}#/queues/${DocumentQueue}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   # NOTE: Federation VITE_ vars below will be empty when ExternalIdPName is not set.
   # This is expected — !Sub blocks cannot conditionally omit lines. Empty values are
   # harmless in .env files. The CodeBuild section uses !If for build-time optimization.
@@ -11485,7 +11526,9 @@ Outputs:
         - "VITE_BDA_TOKENS_PER_PAGE=2000"
   ExternalMCPAgentsSecretConsoleURL:
     Description: External MCP Agents secret console URL - configure MCP server credentials here (JSON array format)
-    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/secretsmanager/secret?name=${AWS::StackName}/external-mcp-agents/credentials&region=${AWS::Region}"
+    Value: !Sub
+      - "https://${AWS::Region}.${ConsoleDomain}/secretsmanager/secret?name=${AWS::StackName}/external-mcp-agents/credentials&region=${AWS::Region}"
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   IDPCommonBaseLayerArn:
     Description: ARN of IDP Common Base Layer
     Value: !Ref IDPCommonBaseLayer
@@ -11540,7 +11583,9 @@ Outputs:
     Value: !GetAtt MCPConnectorClient.ClientSecret
   MCPContentBucketConsoleURL:
     Description: MCP server content bucket console URL
-    Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${MCPContentBucket}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/s3/buckets/${MCPContentBucket}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   LambdaVpcSecurityGroupId:
     Condition: UsePrivateApi
     Description: >-
