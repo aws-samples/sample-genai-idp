@@ -138,8 +138,7 @@ const AgentChatLayout = ({
     if (active && active.versionName !== 'default') {
       return active.versionName;
     }
-    const existingNonDefault = versions.find((v) => v.versionName !== 'default');
-    return existingNonDefault?.versionName || 'quickstart';
+    return 'quickstart';
   }, [versions]);
 
   const handleUploadComplete = useCallback(
@@ -149,8 +148,12 @@ const AgentChatLayout = ({
       const typeCount = result.clustersFound || result.classNames.length;
       const summary =
         `I uploaded ${result.totalDocuments} document(s). ${discoveryKind} discovery inferred ` +
-        `${typeCount} document type(s): ${names}. These were added to my configuration. ` +
-        `Please summarize what was discovered and ask whether I want to refine the schema.`;
+        `${typeCount} document type(s): ${names}, saved and ready to use. Please summarize what was ` +
+        `found in plain language for a first-time user. Briefly explain, in one plain sentence, that ` +
+        `this was saved as a reusable "configuration" that tells the system what to pull out of these ` +
+        `documents (introduce the term gently, do not assume I already know it). Then ask whether I'd ` +
+        `like to adjust any fields or start processing my documents. Keep it concise; save deeper ` +
+        `configuration-version details for if I ask.`;
       setAttachedFiles([]);
       setUploadError(null);
       setCompletedJobId(result.jobId);
