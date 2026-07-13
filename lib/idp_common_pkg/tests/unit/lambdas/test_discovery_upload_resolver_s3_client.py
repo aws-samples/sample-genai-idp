@@ -85,7 +85,10 @@ def test_clear_version_schema_classes(monkeypatch):
 def test_clear_version_schema_rules_clears_policy_classes(monkeypatch):
     monkeypatch.setenv("AWS_REGION", "us-east-1")
     mod = _reload()
-    existing = {"policy_classes": [{"x-aws-idp-policy-type": "P"}], "classes": [{"$id": "A"}]}
+    existing = {
+        "policy_classes": [{"x-aws-idp-policy-type": "P"}],
+        "classes": [{"$id": "A"}],
+    }
     manager = _mock_config_manager(monkeypatch, existing)
 
     mod._clear_version_schema("v1", discovery_type="rules")
