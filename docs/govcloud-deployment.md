@@ -105,20 +105,29 @@ Choose the command that matches your desired [deployment package](#deployment-pa
 ### Keeping the Web UI in GovCloud: `--govcloud`
 
 `--headless` removes the Web UI entirely. If you **want the full Web UI in
-GovCloud**, use `--govcloud` instead. GovCloud has no Amazon CloudFront, so the
-standard (CloudFront-hosted) UI template fails to even validate there:
+GovCloud**, use `--govcloud` instead. GovCloud lacks two services the standard
+UI template uses — Amazon CloudFront and Lambda Function URLs — so the standard
+template fails to even validate there:
 
 ```
 E3006 Resource type 'AWS::CloudFront::OriginAccessControl' does not exist in 'us-gov-west-1'
 E3006 Resource type 'AWS::CloudFront::ResponseHeadersPolicy' does not exist in 'us-gov-west-1'
 E3006 Resource type 'AWS::CloudFront::Distribution' does not exist in 'us-gov-west-1'
+E3006 Resource type 'AWS::Lambda::Url' does not exist in 'us-gov-west-1'
 ```
 
-The `--govcloud` flag transforms the template to remove every
-`AWS::CloudFront::*` resource and forces `WebUIHosting=APIGateway`, so the Web UI
-is served as an S3 proxy on the same REST API that backs it (see
-[API Gateway Hosting](./apigateway-hosting.md)). The rest of the UI (Cognito,
-the REST API, WAF) is retained.
+The `--govcloud` flag transforms the template to:
+
+- Remove every `AWS::CloudFront::*` resource and force `WebUIHosting=APIGateway`,
+  so the Web UI is served as an S3 proxy on the same REST API that backs it (see
+  [API Gateway Hosting](./apigateway-hosting.md)).
+- Remove the `AWS::Lambda::Url` resource (the chat-streaming Function URL) and
+  its permission, since [Lambda Function URLs are not available in GovCloud](https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/govcloud-lambda.html).
+  The UI degrades gracefully — the **agent chat streaming** feature is
+  unavailable in GovCloud; everything else (document processing, extraction,
+  evaluation, Test Studio, discovery) works normally.
+
+The rest of the UI (Cognito, the REST API, WAF) is retained.
 
 `--govcloud` is available on both `idp-cli publish` and `idp-cli deploy`, and is
 **mutually exclusive with `--headless`** (headless removes the UI; `--govcloud`

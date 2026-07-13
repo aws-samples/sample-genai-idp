@@ -1203,9 +1203,15 @@ class GovCloudTemplateTransformer:
         template = self._remove_cloudfront_outputs(template)
         template = self._remove_cloudfront_policy_statements(template)
         template = self._clean_parameter_groups(template)
-        # 3. Force WebUIHosting=APIGateway.
+        # 3. Remove AWS::Lambda::Url resources — Lambda Function URLs are NOT
+        #    available in GovCloud (per the AWS GovCloud Lambda docs), so they
+        #    also raise E3006. The only one is the chat-streaming endpoint; the
+        #    UI degrades gracefully (chat streaming disabled) when its
+        #    VITE_STREAM_URL is empty.
+        template = self._remove_lambda_function_urls(template)
+        # 4. Force WebUIHosting=APIGateway.
         template = self._force_apigateway_hosting(template)
-        # 4. Partition + description.
+        # 5. Partition + description.
         template = self._update_arn_partitions(template)
         template = self._update_description(template)
         return template
@@ -1306,6 +1312,133 @@ class GovCloudTemplateTransformer:
                 del outputs[name]
                 logger.debug(f"Removed CloudFront-conditioned output: {name}")
         return template
+
+    def _remove_lambda_function_urls(self, template: Dict[str, Any]) -> Dict[str, Any]:
+        """Remove AWS::Lambda::Url resources (unavailable in GovCloud).
+
+        Also removes the associated AWS::Lambda::Permission statements that grant
+        lambda:InvokeFunctionUrl for those URLs, drops any Outputs that GetAtt the
+        removed URL's FunctionUrl, and blanks CodeBuild env / test-env references
+        (e.g. VITE_STREAM_URL) so the UI build still succeeds. The Web UI degrades
+        gracefully — the only Function URL here is the chat-streaming endpoint,
+        which is simply disabled when its stream URL is empty.
+        """
+        resources = template.get("Resources", {})
+        url_resources = {
+            name
+            for name, res in resources.items()
+            if isinstance(res, dict) and res.get("Type") == "AWS::Lambda::Url"
+        }
+        if not url_resources:
+            return template
+
+        # Remove the URL resources themselves.
+        for name in url_resources:
+            del resources[name]
+            logger.debug(f"Removed AWS::Lambda::Url resource: {name}")
+
+        # Remove Lambda permissions that grant InvokeFunctionUrl (they only exist
+        # to authorize the now-removed Function URLs).
+        for name in list(resources.keys()):
+            res = resources[name]
+            if (
+                not isinstance(res, dict)
+                or res.get("Type") != "AWS::Lambda::Permission"
+            ):
+                continue
+            action = res.get("Properties", {}).get("Action", "")
+            if action == "lambda:InvokeFunctionUrl":
+                del resources[name]
+                logger.debug(f"Removed InvokeFunctionUrl permission: {name}")
+
+        # Remove Outputs that reference a removed URL's .FunctionUrl.
+        outputs = template.get("Outputs", {})
+        for name in list(outputs.keys()):
+            if self._references_function_url(outputs[name], url_resources):
+                del outputs[name]
+                logger.debug(
+                    f"Removed output referencing a removed Function URL: {name}"
+                )
+
+        # Blank remaining .FunctionUrl references (e.g. VITE_STREAM_URL in the UI
+        # CodeBuild env, or Fn::Sub'd values) so nothing dangles. The UI treats an
+        # empty VITE_STREAM_URL as "chat streaming disabled".
+        removed = self._blank_function_url_refs(resources, url_resources)
+        removed += self._blank_function_url_refs(outputs, url_resources)
+        if removed:
+            logger.info(
+                f"Blanked {removed} reference(s) to removed Lambda Function URL(s)"
+            )
+        logger.info(
+            f"Removed {len(url_resources)} AWS::Lambda::Url resource(s) "
+            "(not available in GovCloud)"
+        )
+        return template
+
+    @staticmethod
+    def _references_function_url(node: Any, url_names: Set[str]) -> bool:
+        """True if node contains a GetAtt/Sub referencing <url>.FunctionUrl."""
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == "Fn::GetAtt":
+                    parts = v if isinstance(v, list) else str(v).split(".")
+                    if (
+                        len(parts) >= 2
+                        and parts[0] in url_names
+                        and parts[1] == "FunctionUrl"
+                    ):
+                        return True
+                if k == "Fn::Sub":
+                    s = v[0] if isinstance(v, list) else v
+                    if isinstance(s, str):
+                        for u in url_names:
+                            if f"{u}.FunctionUrl" in s:
+                                return True
+                if GovCloudTemplateTransformer._references_function_url(v, url_names):
+                    return True
+        elif isinstance(node, list):
+            return any(
+                GovCloudTemplateTransformer._references_function_url(x, url_names)
+                for x in node
+            )
+        return False
+
+    def _blank_function_url_refs(self, node: Any, url_names: Set[str]) -> int:
+        """Replace {Fn::GetAtt: [url, FunctionUrl]} / Fn::Sub with "" in-place.
+
+        Returns the number of references blanked.
+        """
+        count = 0
+        if isinstance(node, dict):
+            for k, v in list(node.items()):
+                if isinstance(v, dict) and "Fn::GetAtt" in v:
+                    ga = v["Fn::GetAtt"]
+                    parts = ga if isinstance(ga, list) else str(ga).split(".")
+                    if (
+                        len(parts) >= 2
+                        and parts[0] in url_names
+                        and parts[1] == "FunctionUrl"
+                    ):
+                        node[k] = ""
+                        count += 1
+                        continue
+                if isinstance(v, dict) and "Fn::Sub" in v:
+                    s = v["Fn::Sub"]
+                    sub_str = s[0] if isinstance(s, list) else s
+                    if isinstance(sub_str, str) and any(
+                        f"{u}.FunctionUrl" in sub_str for u in url_names
+                    ):
+                        # Replace the ${url.FunctionUrl} token with empty string.
+                        for u in url_names:
+                            sub_str = sub_str.replace(f"${{{u}.FunctionUrl}}", "")
+                        node[k] = sub_str
+                        count += 1
+                        continue
+                count += self._blank_function_url_refs(v, url_names)
+        elif isinstance(node, list):
+            for x in node:
+                count += self._blank_function_url_refs(x, url_names)
+        return count
 
     def _remove_cloudfront_policy_statements(
         self, template: Dict[str, Any]
@@ -1415,15 +1548,28 @@ class GovCloudTemplateTransformer:
 
     # ---- Validation ----
 
+    # Resource types that do not exist in GovCloud regions and would raise
+    # cfn-lint E3006 (and fail deployment) if left in the template.
+    GOVCLOUD_UNSUPPORTED_TYPE_PREFIXES = ("AWS::CloudFront::",)
+    GOVCLOUD_UNSUPPORTED_TYPES = frozenset({"AWS::Lambda::Url"})
+
     def validate_no_cloudfront(self, template: Dict[str, Any]) -> bool:
-        """Assert no AWS::CloudFront::* types or dangling CloudFront refs remain."""
+        """Assert no GovCloud-unsupported resource types or dangling refs remain.
+
+        Checks for AWS::CloudFront::* and AWS::Lambda::Url (both raise E3006 in
+        GovCloud), plus dangling references to the removed CloudFront resources /
+        condition. (Name kept for backwards compatibility.)
+        """
         issues: List[str] = []
         resources = template.get("Resources", {})
         for name, res in resources.items():
             rtype = res.get("Type", "") if isinstance(res, dict) else ""
-            if isinstance(rtype, str) and rtype.startswith("AWS::CloudFront::"):
+            if isinstance(rtype, str) and (
+                rtype.startswith(self.GOVCLOUD_UNSUPPORTED_TYPE_PREFIXES)
+                or rtype in self.GOVCLOUD_UNSUPPORTED_TYPES
+            ):
                 issues.append(
-                    f"CloudFront resource type still present: {name} ({rtype})"
+                    f"GovCloud-unsupported resource type still present: {name} ({rtype})"
                 )
 
         # No reference to a removed CloudFront logical id should survive.
@@ -1442,5 +1588,8 @@ class GovCloudTemplateTransformer:
             for issue in issues:
                 logger.error(f"GovCloud validation issue: {issue}")
             return False
-        logger.info("✅ GovCloud template contains no CloudFront resources or refs")
+        logger.info(
+            "✅ GovCloud template contains no CloudFront / Lambda-URL resources or "
+            "dangling refs"
+        )
         return True

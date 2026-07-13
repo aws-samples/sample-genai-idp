@@ -103,6 +103,35 @@ def _template_with_cloudfront():
                     }
                 },
             },
+            # A Lambda Function URL (not available in GovCloud) + its permission.
+            "ChatStreamProcessorUrl": {
+                "Type": "AWS::Lambda::Url",
+                "Properties": {"AuthType": "AWS_IAM"},
+            },
+            "ChatStreamProcessorUrlPermission": {
+                "Type": "AWS::Lambda::Permission",
+                "Properties": {"Action": "lambda:InvokeFunctionUrl"},
+            },
+            # A resource that references the Function URL (like the UI CodeBuild
+            # env var VITE_STREAM_URL) — must be blanked, not left dangling.
+            "UICodeBuildProject": {
+                "Type": "AWS::CodeBuild::Project",
+                "Properties": {
+                    "Environment": {
+                        "EnvironmentVariables": [
+                            {
+                                "Name": "VITE_STREAM_URL",
+                                "Value": {
+                                    "Fn::GetAtt": [
+                                        "ChatStreamProcessorUrl",
+                                        "FunctionUrl",
+                                    ]
+                                },
+                            }
+                        ]
+                    }
+                },
+            },
             # A LoggingBucket policy with the CloudFront-service statement.
             "LoggingBucketPolicy": {
                 "Type": "AWS::S3::BucketPolicy",
@@ -139,7 +168,11 @@ def _template_with_cloudfront():
                         {"Fn::Sub": "${APIRESOLVERSTACK.Outputs.HttpApiEndpoint}/"},
                     ]
                 }
-            }
+            },
+            # An output that GetAtts the removed Function URL — must be dropped.
+            "ChatStreamUrlOutput": {
+                "Value": {"Fn::GetAtt": ["ChatStreamProcessorUrl", "FunctionUrl"]}
+            },
         },
     }
 
@@ -210,6 +243,34 @@ def test_cloudfront_service_policy_statement_removed():
     assert "KeepThis" in sids
 
 
+def test_lambda_function_url_and_permission_removed():
+    """AWS::Lambda::Url (unavailable in GovCloud) + its InvokeFunctionUrl perm go."""
+    t = GovCloudTemplateTransformer()
+    result = t.apply_transforms(_template_with_cloudfront())
+    resources = result["Resources"]
+    assert "ChatStreamProcessorUrl" not in resources
+    assert "ChatStreamProcessorUrlPermission" not in resources
+    # No AWS::Lambda::Url type anywhere.
+    assert not [
+        n
+        for n, r in resources.items()
+        if isinstance(r, dict) and r.get("Type") == "AWS::Lambda::Url"
+    ]
+
+
+def test_function_url_reference_blanked_not_dangling():
+    """VITE_STREAM_URL (GetAtt <url>.FunctionUrl) is blanked, not left dangling."""
+    t = GovCloudTemplateTransformer()
+    result = t.apply_transforms(_template_with_cloudfront())
+    env = result["Resources"]["UICodeBuildProject"]["Properties"]["Environment"][
+        "EnvironmentVariables"
+    ]
+    stream = next(e for e in env if e["Name"] == "VITE_STREAM_URL")
+    assert stream["Value"] == ""
+    # The output that GetAtt'd the URL is dropped entirely.
+    assert "ChatStreamUrlOutput" not in result.get("Outputs", {})
+
+
 def test_no_dangling_cloudfront_references():
     """Nothing may reference a removed CloudFront resource or the removed condition."""
     t = GovCloudTemplateTransformer()
@@ -248,7 +309,13 @@ def test_real_template_has_no_cloudfront_after_transform():
 
     # No CloudFront resource types remain.
     assert _all_cloudfront_types(result) == []
-    # No dangling refs / condition (the transform's own validator).
+    # No AWS::Lambda::Url remains (also raises E3006 in GovCloud).
+    assert not [
+        n
+        for n, r in result["Resources"].items()
+        if isinstance(r, dict) and r.get("Type") == "AWS::Lambda::Url"
+    ]
+    # No GovCloud-unsupported resource types + no dangling CloudFront refs.
     assert t.validate_no_cloudfront(result) is True
     # Hosting forced to APIGateway; the API-Gateway hosting wiring survives.
     assert result["Parameters"]["WebUIHosting"]["AllowedValues"] == ["APIGateway"]
