@@ -46,8 +46,22 @@ _CHAT_SESSIONS_TABLE = os.environ.get("CHAT_SESSIONS_TABLE")
 _DATA_RETENTION_DAYS = int(os.environ.get("DATA_RETENTION_DAYS", "30"))
 
 
-def _persist_chat_turn(session_id, user_id, surface, prompt, assistant_text):
+def _persist_chat_turn(
+    session_id, user_id, surface, prompt, assistant_text, persist_user_message=True
+):
+    """Persist a chat turn to the history tables.
+
+    ``persist_user_message=False`` is used when the invoker (the agent_chat
+    resolver on the non-streaming path) has ALREADY stored the user message and
+    session metadata — then only the assistant reply is written here, and the
+    session messageCount is bumped by 1 instead of 2.
+    """
     if not session_id or not user_id:
+        logger.warning(
+            "No caller identity for session %s; skipping chat history write "
+            "(assistant reply will NOT be visible to the polling UI path)",
+            session_id,
+        )
         return
     if not _CHAT_MESSAGES_TABLE or not _CHAT_SESSIONS_TABLE:
         logger.warning("Chat persistence tables not configured; skipping history write")
@@ -58,17 +72,18 @@ def _persist_chat_turn(session_id, user_id, surface, prompt, assistant_text):
         sessions_table = dynamodb.Table(_CHAT_SESSIONS_TABLE)
         expires_after = int(time.time()) + (_DATA_RETENTION_DAYS * 24 * 60 * 60)
         user_ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-        messages_table.put_item(
-            Item={
-                "PK": session_id,
-                "SK": user_ts,
-                "role": "user",
-                "content": prompt,
-                "timestamp": user_ts,
-                "isProcessing": False,
-                "ExpiresAfter": expires_after,
-            }
-        )
+        if persist_user_message:
+            messages_table.put_item(
+                Item={
+                    "PK": session_id,
+                    "SK": user_ts,
+                    "role": "user",
+                    "content": prompt,
+                    "timestamp": user_ts,
+                    "isProcessing": False,
+                    "ExpiresAfter": expires_after,
+                }
+            )
         if assistant_text:
             assistant_ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
             messages_table.put_item(
@@ -83,23 +98,26 @@ def _persist_chat_turn(session_id, user_id, surface, prompt, assistant_text):
                 }
             )
         last_message = prompt[:100] + "..." if len(prompt) > 100 else prompt
+        # Count only the messages THIS call stored.
+        stored_count = (1 if persist_user_message else 0) + (1 if assistant_text else 0)
         existing = sessions_table.get_item(
             Key={"userId": user_id, "sessionId": session_id}
         ).get("Item")
         if existing:
-            sessions_table.update_item(
-                Key={"userId": user_id, "sessionId": session_id},
-                UpdateExpression=(
-                    "SET updatedAt = :ts, messageCount = messageCount + :inc, "
-                    "lastMessage = :last, surface = :surface"
-                ),
-                ExpressionAttributeValues={
-                    ":ts": user_ts,
-                    ":inc": 2 if assistant_text else 1,
-                    ":last": last_message,
-                    ":surface": surface,
-                },
-            )
+            if stored_count:
+                sessions_table.update_item(
+                    Key={"userId": user_id, "sessionId": session_id},
+                    UpdateExpression=(
+                        "SET updatedAt = :ts, messageCount = messageCount + :inc, "
+                        "lastMessage = :last, surface = :surface"
+                    ),
+                    ExpressionAttributeValues={
+                        ":ts": user_ts,
+                        ":inc": stored_count,
+                        ":last": last_message,
+                        ":surface": surface,
+                    },
+                )
         else:
             title = prompt.strip()
             if len(title) > 50:
@@ -111,6 +129,9 @@ def _persist_chat_turn(session_id, user_id, surface, prompt, assistant_text):
                     "title": title,
                     "createdAt": user_ts,
                     "updatedAt": user_ts,
+                    # The user message exists in the session even when the
+                    # resolver stored it (persist_user_message=False), so the
+                    # count includes it either way on first write.
                     "messageCount": 2 if assistant_text else 1,
                     "lastMessage": last_message,
                     "surface": surface,
@@ -872,7 +893,10 @@ def handler(event, context):
         enable_code_intelligence = event.get("enableCodeIntelligence", True)
         method = event.get("method", "chat")
         caller_sub = event.get("callerSub", "")
-        
+        # False when invoked by the agent_chat resolver (non-streaming path),
+        # which already stored the user message + session metadata itself.
+        persist_user_message = event.get("persistUserMessage", True)
+
         # Validate required parameters
         if not prompt or not session_id:
             error_msg = "prompt and sessionId are required"
@@ -945,7 +969,14 @@ def handler(event, context):
             )
             logger.info(f"Streaming completed successfully for session {session_id}")
             surface = "quick_start" if method == "quick_start" else "chat"
-            _persist_chat_turn(session_id, caller_sub, surface, prompt, final_text)
+            _persist_chat_turn(
+                session_id,
+                caller_sub,
+                surface,
+                prompt,
+                final_text,
+                persist_user_message=persist_user_message,
+            )
         finally:
             # Clean up orchestrator resources (MCP clients, etc.)
             try:

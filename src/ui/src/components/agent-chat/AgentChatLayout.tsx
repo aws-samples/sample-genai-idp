@@ -544,7 +544,21 @@ const AgentChatLayout = ({
           ) : (
             <>
               {renderedMessages}
-              {waitingForResponse && <LoadingBar variant="gen-ai-masked" />}
+              {waitingForResponse && (
+                <div className="chat-message-wrapper assistant-message" aria-live="polite">
+                  <div className="message-container">
+                    <div className="message-content">
+                      <Box color="text-body-secondary" fontSize="body-s" padding={{ bottom: 'xxs' }}>
+                        <Spinner size="normal" />
+                        <Box variant="span" padding={{ left: 'xs' }}>
+                          Working on your request… this can take a minute.
+                        </Box>
+                      </Box>
+                      <LoadingBar variant="gen-ai-masked" />
+                    </div>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
