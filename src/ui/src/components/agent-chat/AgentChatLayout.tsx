@@ -145,9 +145,11 @@ const AgentChatLayout = ({
   const handleUploadComplete = useCallback(
     (result: QuickStartUploadResult) => {
       const names = result.classNames.length ? result.classNames.join(', ') : 'document type(s)';
+      const discoveryKind = result.totalDocuments === 1 ? 'Single-document' : 'Multi-document';
+      const typeCount = result.clustersFound || result.classNames.length;
       const summary =
-        `I uploaded ${result.totalDocuments} document(s). Multi-document discovery inferred ` +
-        `${result.clustersFound} document type(s): ${names}. These were added to my configuration. ` +
+        `I uploaded ${result.totalDocuments} document(s). ${discoveryKind} discovery inferred ` +
+        `${typeCount} document type(s): ${names}. These were added to my configuration. ` +
         `Please summarize what was discovered and ask whether I want to refine the schema.`;
       setAttachedFiles([]);
       setUploadError(null);
@@ -243,8 +245,10 @@ const AgentChatLayout = ({
 
     let messageToSend: string;
     if (hasFiles) {
+      const isSingle = filesAttachedCount === 1 && !attachedFiles[0]?.name.toLowerCase().endsWith('.zip');
+      const discoveryKind = isSingle ? 'single-document' : 'multi-document';
       const note =
-        `[${filesAttachedCount} document(s) attached — multi-document Discovery is now running on them ` +
+        `[${filesAttachedCount} document(s) attached — ${discoveryKind} Discovery is now running on them ` +
         `in the background. Acknowledge it's processing and that you'll summarize the results when they ` +
         `arrive; do not ask me to upload again.]`;
       messageToSend = prompt.trim() ? `${prompt.trim()}\n\n${note}` : note;
