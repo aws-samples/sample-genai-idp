@@ -51,7 +51,7 @@
         },
         "BDA_InvokeDataAutomation": {
             "Type": "Task",
-            "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+            "Resource": "arn:${Partition}:states:::lambda:invoke.waitForTaskToken",
             "Parameters": {
                 "FunctionName": "${InvokeBDALambdaArn}",
                 "Payload": {
@@ -181,7 +181,7 @@
         },
         "PostOcrHook": {
             "Type": "Task",
-            "Resource": "arn:aws:states:::lambda:invoke",
+            "Resource": "arn:${Partition}:states:::lambda:invoke",
             "Parameters": {
                 "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
                 "Payload": {
@@ -230,7 +230,7 @@
         },
         "PostClassificationHook": {
             "Type": "Task",
-            "Resource": "arn:aws:states:::lambda:invoke",
+            "Resource": "arn:${Partition}:states:::lambda:invoke",
             "Parameters": {
                 "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
                 "Payload": {
@@ -312,7 +312,7 @@
                             "States": {
                                 "ShardExtractionStep": {
                                     "Type": "Task",
-                                    "Resource": "arn:aws:states:::lambda:invoke",
+                                    "Resource": "arn:${Partition}:states:::lambda:invoke",
                                     "Parameters": {
                                         "FunctionName": "${ShardRuntimeFunctionArn}",
                                         "Payload": {
@@ -424,7 +424,7 @@
                     },
                     "PostExtractionHook": {
                         "Type": "Task",
-                        "Resource": "arn:aws:states:::lambda:invoke",
+                        "Resource": "arn:${Partition}:states:::lambda:invoke",
                         "Parameters": {
                             "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
                             "Payload": {
@@ -648,7 +648,7 @@
         },
         "PostRuleValidationHook": {
             "Type": "Task",
-            "Resource": "arn:aws:states:::lambda:invoke",
+            "Resource": "arn:${Partition}:states:::lambda:invoke",
             "Parameters": {
                 "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
                 "Payload": {
@@ -714,7 +714,7 @@
         },
         "PostSummarizationHook": {
             "Type": "Task",
-            "Resource": "arn:aws:states:::lambda:invoke",
+            "Resource": "arn:${Partition}:states:::lambda:invoke",
             "Parameters": {
                 "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
                 "Payload": {

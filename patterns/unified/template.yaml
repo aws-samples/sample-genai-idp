@@ -5455,6 +5455,11 @@ Resources:
       Name: !Sub "${AWS::StackName}-DocumentProcessingWorkflow"
       DefinitionUri: statemachine/workflow.asl.json
       DefinitionSubstitutions:
+        # Partition for service-integration ARNs (arn:${Partition}:states:::...).
+        # Hardcoded 'aws' breaks in GovCloud — Step Functions validates the
+        # partition and fails states like PostOcrHook with "resource belongs to a
+        # different partition ... Expected 'aws-us-gov', was 'aws'".
+        Partition: !Ref AWS::Partition
         # BDA branch functions
         InvokeBDALambdaArn: !GetAtt InvokeBDAFunction.Arn
         BDAProcessResultsLambdaArn: !GetAtt BDAProcessResultsFunction.Arn

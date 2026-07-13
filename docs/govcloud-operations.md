@@ -99,7 +99,7 @@ If documents are queuing up and not processing:
 
 ## Related Documentation
 
-- [GovCloud Deployment Guide](./govcloud-deployment.md) — prerequisites, deployment packages, and deploy commands
+- [GovCloud Deployment Guide](./govcloud-deployment.md) — prerequisites, deployment options, and deploy commands
 - [GovCloud Architecture](./govcloud-architecture.md) — services removed vs. retained, limitations, and workarounds
 - [Batch Jobs REST API](./govcloud-batch-api.md) — API reference, authentication, and bastion tunnel setup
 - [VPC Deployment Guide](./vpc-secured-mode.md) — VPC endpoints, security groups, and network configuration

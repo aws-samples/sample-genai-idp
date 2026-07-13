@@ -4,7 +4,7 @@ title: "GovCloud Batch Jobs REST API"
 
 # GovCloud Batch Jobs REST API
 
-This document covers the Batch Jobs REST API available in GovCloud deployments that include the [Headless API](./govcloud-deployment.md#deployment-packages) deployment package.
+This document covers the Batch Jobs REST API available in GovCloud deployments that include the [Jobs REST API](./govcloud-deployment.md#option-b-headless--jobs-rest-api-all-lambdas-in-vpc) deployment option (`EnableHeadless=true`).
 
 ## Overview
 
@@ -198,7 +198,7 @@ curl ${API_GATEWAY_ENDPOINT}/jobs/{job_id} \
 
 ## Private API Access via Bastion Tunnel
 
-If you deployed with the [Bastion package](./govcloud-deployment.md#option-d-headless-api--vpc-secured-mode--bastion-development), you can access the private API Gateway from your local machine.
+If you deployed with the [Bastion option](./govcloud-deployment.md#option-c-option-b--bastion-host-development), you can access the private API Gateway from your local machine.
 
 ### Prerequisites
 
@@ -236,6 +236,6 @@ curl -X POST {api-endpoint}/jobs \
 
 ## Related Documentation
 
-- [GovCloud Deployment Guide](./govcloud-deployment.md) — prerequisites, deployment packages, and deploy commands
+- [GovCloud Deployment Guide](./govcloud-deployment.md) — prerequisites, deployment options, and deploy commands
 - [GovCloud Architecture](./govcloud-architecture.md) — services removed vs. retained, limitations
 - [GovCloud Operations](./govcloud-operations.md) — monitoring, troubleshooting, and best practices

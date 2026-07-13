@@ -351,7 +351,16 @@ idp-cli deploy \
     --headless \
     --wait
 
-# Deploy to GovCloud (headless + from-code are both required)
+# Deploy to GovCloud WITH the full Web UI (--govcloud; --from-code is required)
+idp-cli deploy \
+    --stack-name my-idp-govcloud \
+    --region us-gov-west-1 \
+    --from-code . \
+    --govcloud \
+    --admin-email user@example.com \
+    --wait
+
+# Deploy to GovCloud headless (no UI; --from-code is required)
 idp-cli deploy \
     --stack-name my-idp-govcloud \
     --region us-gov-west-1 \

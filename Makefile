@@ -176,6 +176,29 @@ check-arn-partitions: ## Check CloudFormation templates for hardcoded ARN partit
 				echo -e "$(YELLOW)  Example: 'lambda.amazonaws.com' should be 'lambda.\$${AWS::URLSuffix}'$(NC)"; \
 				FOUND_ISSUES=1; \
 			fi; \
+			CONSOLE_MATCHES=$$(grep -n "console\.aws\.amazon\.com\|s3\.console\.aws\.amazon\.com" "$$template" | grep -v "^[0-9]*:[[:space:]]*#" | grep -v "Domain:" | grep -v "Description:" | grep -v "Comment:" || true); \
+			if [ -n "$$CONSOLE_MATCHES" ]; then \
+				echo -e "$(RED)ERROR: Found hardcoded AWS console domain references in $$template:$(NC)"; \
+				echo "$$CONSOLE_MATCHES" | sed 's/^/  /'; \
+				echo -e "$(YELLOW)  Console URLs must be partition-aware for GovCloud (console.amazonaws-us-gov.com).$(NC)"; \
+				echo -e "$(YELLOW)  Use !FindInMap [ConsoleDomainMap, !Ref \"AWS::Partition\", Domain] and the$(NC)"; \
+				echo -e "$(YELLOW)  regional host form 'https://\$${AWS::Region}.\$${ConsoleDomain}/...' (works for S3 too).$(NC)"; \
+				FOUND_ISSUES=1; \
+			fi; \
+		fi; \
+	done; \
+	for asl in patterns/*/statemachine/*.asl.json options/*/statemachine/*.asl.json feature-platform/*/statemachine/*.asl.json; do \
+		if [ -f "$$asl" ]; then \
+			echo "Checking $$asl..."; \
+			ASL_MATCHES=$$(grep -n "arn:aws:" "$$asl" | grep -v "arn:\$${Partition}:" || true); \
+			if [ -n "$$ASL_MATCHES" ]; then \
+				echo -e "$(RED)ERROR: Found hardcoded 'arn:aws:' references in $$asl:$(NC)"; \
+				echo "$$ASL_MATCHES" | sed 's/^/  /'; \
+				echo -e "$(YELLOW)  State-machine ASL uses DefinitionSubstitutions, so these should use$(NC)"; \
+				echo -e "$(YELLOW)  'arn:\$${Partition}:' (add 'Partition: !Ref AWS::Partition' to$(NC)"; \
+				echo -e "$(YELLOW)  DefinitionSubstitutions). Hardcoded 'aws' breaks Step Functions in GovCloud.$(NC)"; \
+				FOUND_ISSUES=1; \
+			fi; \
 		fi; \
 	done; \
 	if [ $$FOUND_ISSUES -eq 0 ]; then \
