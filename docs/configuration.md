@@ -303,7 +303,7 @@ Key parameters that can be configured during CloudFormation deployment:
 - `DataRetentionInDays`: Set retention period for documents and tracking records (default: 365 days)
 - `ErrorThreshold`: Number of workflow errors that trigger alerts (default: 1)
 - `ExecutionTimeThresholdMs`: Maximum acceptable execution time before alerting (default: 30000 ms)
-- `LogLevel`: Set logging level (DEBUG, INFO, WARN, ERROR)
+- `LogLevel`: Set logging level (DEBUG, INFO, WARN, ERROR). At `INFO` or `DEBUG`, access logging is also enabled on the web UI's REST API stage (request metadata only — no request/response bodies), capturing requests that fail before reaching a Lambda (e.g. authorizer 401/403s, WAF blocks)
 - `WAFAllowedIPv4Ranges`: IP restrictions for web UI access (default: allow all)
 - `CloudFrontPriceClass`: Set CloudFront price class for UI distribution (CloudFront hosting only)
 - `CloudFrontAllowedGeos`: Optional geographic restrictions for UI access (CloudFront hosting only)
