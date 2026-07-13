@@ -9,7 +9,7 @@
 | **System** | GenAI Intelligent Document Processing (IDP) Accelerator |
 | **Architecture** | Unified (Pipeline + BDA modes) |
 | **Methodology** | STRIDE |
-| **Total Threats** | 62 |
+| **Total Threats** | 64 |
 | **Classification** | Internal |
 
 ## Overview
@@ -108,7 +108,7 @@ threat-modeling/
 | CHAT | Companion Chat | 5 | Very High (9) | [companion-chat.md](feature-threats/companion-chat.md) |
 | MCP | MCP Integration | 6 | Critical (8) | [mcp-integration.md](feature-threats/mcp-integration.md) |
 | KB | Knowledge Base | 4 | High (6) | [knowledge-base.md](feature-threats/knowledge-base.md) |
-| AUTH | Authentication/RBAC | 6 | High (6) | [rbac-authentication.md](feature-threats/rbac-authentication.md) |
+| AUTH | Authentication/RBAC | 8 | High (6) | [rbac-authentication.md](feature-threats/rbac-authentication.md) |
 | SDK | SDK/CLI | 4 | High (6) | [sdk-cli.md](feature-threats/sdk-cli.md) |
 | HOOK | Lambda Hooks | 5 | Critical (8) | [lambda-hooks.md](feature-threats/lambda-hooks.md) |
 | UI | Web UI | 5 | High (6) | [web-ui.md](feature-threats/web-ui.md) |
@@ -128,5 +128,6 @@ threat-modeling/
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.1 | 2026-07-13 | RBAC doc updated to REST-dispatcher architecture (AppSync removed); added AUTH.T07 (config-version scope bypass / fail-open scope lookup) and AUTH.T08 (silently-ignored schema auth directives); documented the automated authorization test harness (`make api-test` / `make api-test-static`) as a control; 62 → 64 threats |
 | 2.0 | 2025-03-19 | Complete rework: unified architecture, removed Pattern 3/SageMaker, added 9 feature-specific threat analyses (agents, chat, MCP, KB, RBAC, SDK, hooks, UI, reporting), expanded from 31 to 62 threats |
 | 1.0 | 2024-12-01 | Initial threat model with 3 separate patterns (BDA, Textract+Bedrock, Textract+SageMaker+Bedrock) |

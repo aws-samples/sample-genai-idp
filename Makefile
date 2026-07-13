@@ -276,6 +276,28 @@ test-circuit-breaker: ## Run only circuit breaker tests
 	    src/lambda/queue_processor/test_check_circuit_breaker.py \
 	    src/lambda/workflow_tracker/test_notify_circuit_breaker.py
 
+api-test-static: ## Static RBAC/authorization scan of all API operations (no AWS; CI-safe)
+	@echo "Running static API RBAC scan..."
+	$(PYTHON) scripts/sdlc/scan_api_rbac.py $(if $(STRICT),--strict,)
+
+# Usage: make api-test STACK_NAME=<stack-name> [REGION=<region>] [REPORT_DIR=<dir>] [NO_TEARDOWN=1]
+# Runs the static scan first, then dynamic tests against the deployed stack:
+# creates temporary Cognito users (one per group + a config-version-scoped
+# Author), exercises every API op across all roles + unauthenticated + token
+# negatives, and tears the test users down afterward. Requires AWS creds for the
+# deployment account (see CLAUDE.md — use AWS_PROFILE=default).
+api-test: api-test-static ## Full RBAC test: static scan + live API tests (requires STACK_NAME)
+ifndef STACK_NAME
+	$(error STACK_NAME is not set. Usage: make api-test STACK_NAME=<stack-name> [REGION=...])
+endif
+	@echo "Running dynamic API RBAC tests against stack $(STACK_NAME)..."
+	$(PYTHON) scripts/test_api_rbac.py \
+	    --stack-name $(STACK_NAME) \
+	    $(if $(REGION),--region $(REGION),) \
+	    --report-dir $(if $(REPORT_DIR),$(REPORT_DIR),./api-test-results) \
+	    $(if $(NO_TEARDOWN),--no-teardown,)
+	@echo -e "$(GREEN)✅ API RBAC report written to $(if $(REPORT_DIR),$(REPORT_DIR),./api-test-results)$(NC)"
+
 ##@ UI Development
 # Usage: make ui-start STACK_NAME=<stack-name>
 ui-start: ## Start UI dev server (requires STACK_NAME for .env generation)
