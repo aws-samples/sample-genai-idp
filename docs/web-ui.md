@@ -206,6 +206,27 @@ Pattern-1 uses **Bedrock Data Automation (BDA)** with automatic page management.
 - **Alternative Workflows**: Available options like "View Page Text", Configuration updates, and document reprocessing
 - **Future Considerations**: Guidance on using Pattern-2/Pattern-3 for fine-grained page control
 
+## Document Schema Builder
+
+The **Document Schema** tab on the Configuration page provides a visual **Schema Builder** for defining the document types (classes) and fields (attributes) that extraction produces — a JSON Schema Draft 2020-12 editor that requires no hand-editing of JSON. (The same builder powers the **Policy Schema** tab for rule validation.)
+
+### Layout
+
+A three-pane master-detail: the **class list** (left, split into **Document Types** and reusable **Shared Classes**), the **attribute list** for the selected class (middle), and a **property inspector** for the selected class or attribute (right). Document types become top-level schemas; shared classes are referenced from attributes via `$ref` (single object) or `items.$ref` (array/list of that class).
+
+### Key Capabilities
+
+- **Add Class**: create a **Custom Class**, or import a **Standard Class** from 35+ pre-built document types derived from AWS BDA blueprints (fully editable after import).
+- **Add Attribute**: add fields to the selected class. The dialog includes an **Add another** button that saves the current field and immediately starts a new one, so multiple attributes can be added without reopening the dialog. A newly-created class with no fields shows an **Add first attribute** button.
+- **Show Preview**: opens preview tabs for the schema:
+  - **Diagram** — a graphical entity-relationship view. Each class is a node listing its attributes; relationships are drawn as labelled edges (**solid** arrow = a single referenced object, **dashed** arrow = an array/list of that class). Document types are colored and laid out on the left, referenced shared classes to the right by reference depth. Click a node to open that class in the editor.
+  - **JSON Schema** — the exported JSON Schema (one per document type, each carrying only the `$defs` it references).
+  - **Statistics** — attribute counts and type distribution for the selected class.
+- **Export**: download the schema as JSON — **Export all** (every document type) or **Export "&lt;class&gt;"** (the currently-selected document type plus only the shared classes it references).
+- **Reorder / edit / remove**: drag attributes to reorder; click any class or attribute to edit its properties, constraints, few-shot examples, and per-class overrides in the inspector.
+
+For the schema format itself and how to author it by hand, see the [JSON Schema Migration Guide](json-schema-migration.md).
+
 ## Prompt Preview
 
 The **Prompt Preview** tab in the Configuration page allows you to see exactly what prompts are sent to the LLM for each processing step, with configuration-derived placeholders filled in using your actual class definitions and schemas.
