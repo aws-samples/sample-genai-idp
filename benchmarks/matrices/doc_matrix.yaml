@@ -48,6 +48,12 @@ reference:
 # its own doc-class config (future work) — so it is intentionally excluded here.
 groups:
   core_docs:      [tiny_form, small_narrow, med_narrow, large_narrow, wide_400, manylists_400, longdesc_100, realkie, ocr_bench]
+  # corefast: the reliably-completable subset (all lists <=100 rows). Advanced/
+  # agentic mode + granular assessment on >=400-row docs TIMES OUT the 900s
+  # assessment Lambda on v0.5.16 (Step Functions then retries up to 8x @2.5x
+  # backoff -> ~2h/doc before failing), so a full-grid cross-version A/B must use
+  # docs whose assessment fits one Lambda invocation on BOTH versions.
+  corefast:       [tiny_form, small_narrow, longdesc_100]
   scaling_series: [scale_25, scale_100, scale_400, scale_800, scale_1200, scale_1600, scale_3200]
   all:            "*"
 

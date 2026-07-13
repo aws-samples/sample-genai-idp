@@ -75,6 +75,42 @@ def apply_axis(cfg, axes, axis_name, choice):
         )
 
 
+# v0.5.16 sourced its assessment/confidence prompt from a top-level `assessment`
+# block in the stored config; v0.6 moved this under `extraction.confidence` and
+# sources prompts from system defaults at runtime. To run the SAME config file on
+# both a v0.5.16 and a v0.6 stack (apples-to-apples version A/B), we inject a
+# self-contained top-level `assessment` block: v0.5.16 reads it, v0.6 ignores it
+# (IDPConfig extra="ignore" drops it, keeping extraction.confidence authoritative).
+_V0516_ASSESS = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "compat", "v0516-base-assessment.yaml"
+)
+
+
+def inject_v0516_assessment(cfg, axes, resolved):
+    """Add a top-level `assessment` block honored by v0.5.16 stacks.
+
+    enabled = (assessment axis != off); model = the cell's confidence model so the
+    separate-pass assessment on v0.5.16 uses the same model v0.6 uses for
+    extraction.confidence. No-op on v0.6 (dropped by extra="ignore")."""
+    base = yaml.safe_load(open(_V0516_ASSESS))["assessment"]
+    a = copy.deepcopy(base)
+    a["enabled"] = resolved.get("assessment", "separate") != "off"
+    # confidence model axis -> the same value v0.6 puts in extraction.confidence.model
+    cm_axis = resolved.get("confidence_model", "nova_lite")
+    cm = axes["confidence_model"][cm_axis].get("extraction.confidence.model")
+    if cm:
+        a["model"] = cm
+    # Mirror v0.6's confidence BATCH SIZE into v0.5.16's granular assessment so the
+    # two versions issue comparable numbers of Bedrock calls (fair cost/latency
+    # A/B). v0.5.16's base default is list_batch_size=1 (one Bedrock call PER list
+    # row -> ~25x more calls than v0.6's default 25, crippling large-list cells).
+    conf = cfg.get("extraction", {}).get("confidence", {})
+    lbs = conf.get("list_batch_size")
+    if lbs:
+        a.setdefault("granular", {})["list_batch_size"] = str(lbs)
+    cfg["assessment"] = a
+
+
 def build_cell(base_path, axes, default_cell, cell):
     """cell: dict with id + any axis overrides. Missing axes take default_cell."""
     cfg = yaml.safe_load(open(base_path))
@@ -84,8 +120,47 @@ def build_cell(base_path, axes, default_cell, cell):
     resolved.update({k: _norm(v) for k, v in cell.items() if k in axes})
     for axis_name, choice in resolved.items():
         apply_axis(cfg, axes, axis_name, choice)
-    merge_config_with_defaults(copy.deepcopy(cfg), validate=True)  # validate
-    return cfg, resolved
+    # Fully merge with system defaults so ALL step prompts are populated. v0.6
+    # sources prompts from system defaults at runtime, but v0.5.16 uses a stored
+    # CUSTOM config verbatim (no runtime merge) -> empty extraction/classification
+    # prompts would crash Bedrock ("system[0].text length 0"). Merging makes the
+    # config self-contained and runnable on BOTH versions from identical bytes.
+    merged = merge_config_with_defaults(copy.deepcopy(cfg), validate=True)
+    # Re-inject the top-level `assessment` block (merge drops it into
+    # extraction.confidence): v0.5.16 reads assessment, v0.6 ignores it.
+    inject_v0516_assessment(merged, axes, resolved)
+    sanitize_for_v0516(merged)
+    # Disable summarization on BOTH versions: it's an unscored late step, and its
+    # default model (sonnet-5) is rejected by v0.5.16's bedrock client (sends
+    # deprecated `temperature`), which would fail otherwise-successful docs.
+    # Turning it off keeps the two versions identical and the pipeline focused on
+    # the scored phases (OCR/classification/extraction/assessment).
+    merged.setdefault("summarization", {})["enabled"] = False
+    return merged, resolved
+
+
+def sanitize_for_v0516(node):
+    """v0.6 stores empty/0 `max_tokens` (and `shard_token_budget`) to mean
+    "use model default"; v0.5.16's IDPConfig enforces gt=0 and REJECTS the whole
+    config at load if any is 0/''. Recursively fill non-positive values with the
+    v0.5.16 field defaults so the shared config passes both validators. These are
+    steps' token caps — the fill matches each version's own default, so behavior
+    on the exercised steps (OCR/classification/extraction/assessment) is unchanged."""
+    DEFAULTS = {"max_tokens": 10000, "shard_token_budget": 40000}
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k in DEFAULTS:
+                try:
+                    bad = v in (None, "", 0) or int(v) <= 0
+                except (TypeError, ValueError):
+                    bad = True
+                if bad:
+                    node[k] = DEFAULTS[k]
+            else:
+                sanitize_for_v0516(v)
+    elif isinstance(node, list):
+        for v in node:
+            sanitize_for_v0516(v)
 
 
 def cells_for_suite(matrix, suite):

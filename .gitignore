@@ -46,6 +46,7 @@ docs-site/.astro/
 docs-site/dist/
 docs-site/src/content/docs/*.md
 docs-site/src/content/docs/extensions/
+docs-site/src/content/docs/benchmarking/
 docs-site/src/content/images
 docs-site/public/images
 

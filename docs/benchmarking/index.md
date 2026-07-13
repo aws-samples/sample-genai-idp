@@ -10,12 +10,28 @@ types/sizes** and **configuration options**, then quantifies every result on sev
 dimensions. It exists to serve two audiences:
 
 - **Users** — an empirical, transparent basis for choosing configuration options
-  (the published results are in the [Benchmark Results](./benchmark-results.md) paper).
+  (the published results are in the [Configuration Guidance](./config-guidance.md) paper).
 - **Maintainers** — a regression gate: re-run the same matrix on any change and diff
   against a committed baseline to catch accuracy/cost/robustness regressions.
 
 > To *run* it, see the `run-benchmarks` skill and `benchmarks/matrices/METHODOLOGY.md`.
 > This page explains how it is designed and what the numbers mean.
+
+## The three benchmark documents
+
+This section of the docs holds three distinct, non-overlapping documents. Keep them
+separate — they answer different questions and are regenerated on different cadences:
+
+| Document | Question it answers | Cadence |
+|----------|--------------------|---------|
+| **This guide** (`index.md`) | *How does the suite work and what do the numbers mean?* | Evergreen; edit when the harness changes. |
+| [Configuration Guidance](./config-guidance.md) | *Which config (OCR / mode / assessment / model) should I pick?* — cross-config at one release | Refreshed per release. |
+| [Release Audit Trail](./releases/) | *Is upgrading from the last published release safe / cheaper / faster?* — release-vs-release | **One new entry per release** (never overwritten). |
+
+The release audit trail is the durable history: `docs/benchmarking/releases/vX.Y.Z.md`
+compares each `develop` prerelease to the previous **published** release, and the
+[index](./releases/) table links them all. Raw data lives (unpublished) under
+`benchmarks/results/<release>/`.
 
 ## What it measures (seven dimensions)
 
@@ -82,9 +98,18 @@ reference test sets to reference, with each doc's ground-truth pointer and confi
 | Suite | Scope | Use |
 |-------|-------|-----|
 | `smoke` | 2 cells × 2 tiny docs | Per-PR gate (minutes) |
-| `core` | 10 decision cells × ~10 docs | Standard release run |
+| `corefast` | 10 decision cells × 3 docs (≤100 rows) | **Release-vs-release A/B** — the grid that completes on *both* the previous published release and the new one (see note) |
+| `core` | 10 decision cells × ~7 synthetic docs | Standard single-release run |
 | `scaling` | simple vs advanced across the size series | The completeness-cliff study |
+| `cost` | cost-decision cells × 1 mid doc, repeats≥5 | Cost-difference detection (variance-aware) |
 | `full` | core + all one-axis sweeps | The deep study for the paper (expensive) |
+
+> **Why `corefast` for release comparisons.** Advanced (agentic) mode + granular
+> assessment on ≥400-row list documents can exceed the 900 s assessment-Lambda timeout
+> on older releases (e.g. v0.5.16), which then retry for hours before failing. A grid
+> that must complete on **both** the old and new release therefore uses the ≤100-row
+> `corefast` docs. Larger-doc behavior is covered by the single-release `core`/`scaling`
+> suites against the current release only.
 
 ## Regression thresholds
 
@@ -99,9 +124,30 @@ new failure, calibration-separation −0.03. Improvements ≥ +0.02 accuracy are
 - Any cell capped or skipped for cost is logged in `meta.json`, never silently dropped.
 - Costs are **estimates** from `pricing.yaml` (intro pricing may apply); the rate date is stated.
 
-## Maintaining results per release
+## Maintaining the release audit trail — one command per release
 
-After a trusted release run, promote its summary to the baseline
-(`cp results/<release>/summary.json results/baseline.json`) and commit the release
-directory + updated baseline + refreshed [paper](./benchmark-results.md). This keeps a
-per-release history in the repo and makes the next release's comparison automatic.
+Each release cycle, produce one new audit-trail entry comparing the **previous
+published release** to the current **`develop`** prerelease:
+
+```bash
+make benchmark-release VERSION=0.6.0 PREV=0.5.16
+```
+
+This single target (see the repo `Makefile` and the `run-benchmarks` skill):
+
+1. Deploys / reuses a stack from the **published PREV** template, runs `corefast`
+   (native-upload configs, held at a shared control model both versions can run).
+2. Upgrades the **same stack** in place to `develop` HEAD (`--from-code --clean-build`)
+   and re-runs `corefast` with **byte-identical** configs (only the code version differs).
+3. Aggregates both, diffs them, and scaffolds
+   `docs/benchmarking/releases/v<VERSION>.md` from the template + appends a row to the
+   [audit-trail index](./releases/).
+4. Promotes the PREV summary to `benchmarks/results/baseline.json`.
+
+Commit the new `docs/benchmarking/releases/v<VERSION>.md`, its figures under `images/`,
+the `benchmarks/results/{vPREV,vVERSION}/` data dirs, and the updated `baseline.json`
+and `releases/README.md`. That is the durable, per-release audit trail.
+
+> The step-by-step mechanics (and the cross-version config-compatibility handling the
+> harness performs) are documented in the `run-benchmarks` skill and
+> `benchmarks/matrices/METHODOLOGY.md`.

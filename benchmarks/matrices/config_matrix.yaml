@@ -34,6 +34,7 @@ axes:
     on:  {extraction.confidence.escalation_enabled: true}
     off: {extraction.confidence.escalation_enabled: false}
   extraction_model:                        # extraction.model
+    sonnet46:     {extraction.model: us.anthropic.claude-sonnet-4-6}
     sonnet5:      {extraction.model: us.anthropic.claude-sonnet-5}
     sonnet5_1m:   {extraction.model: us.anthropic.claude-sonnet-5:1m}
     nova_pro:     {extraction.model: us.amazon.nova-pro-v1:0}
@@ -56,7 +57,11 @@ default_cell:
   escalation: "off"          # OFF in the isolate-a-knob baseline so escalation cost
                              # doesn't confound cross-cell cost comparisons; the
                              # escalation sweep turns it on explicitly.
-  extraction_model: sonnet5
+  extraction_model: sonnet46   # shared control: Sonnet 5 is rejected by v0.5.16's
+                               # bedrock client (sends deprecated `temperature`), so
+                               # the version A/B holds the model at sonnet-4-6, which
+                               # BOTH v0.5.16 and v0.6 run. Sonnet-5 capability is a
+                               # documented v0.6-only delta, not part of the matrix.
   confidence_model: nova_lite
   reasoning_effort: low
 
@@ -105,6 +110,10 @@ sweeps:
 suites:
   smoke:   {cells: [core-tt-simple-sep, core-tt-adv-sep], docs: [small_narrow, tiny_form], repeats: 1}
   core:    {cells: "core_cells", docs: "core_docs", repeats: 1}
+  # corefast: full 10-cell grid on the <=100-row docs only, so advanced-mode
+  # assessment completes on v0.5.16 (see corefast group note). This is the clean
+  # apples-to-apples version A/B grid.
+  corefast: {cells: "core_cells", docs: "corefast", repeats: 1}
   full:    {cells: "core_cells+sweeps", docs: "all", repeats: 1}
   scaling: {cells: [core-tt-simple-sep, core-tt-adv-sep], docs: "scaling_series", repeats: 1}
   # cost: purpose-built to DETECT COST DIFFERENCES between configs with confidence.
