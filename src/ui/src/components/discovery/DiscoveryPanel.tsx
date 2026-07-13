@@ -818,8 +818,9 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
 
           {saveMode === 'replace' && selectedVersion && (
             <Alert type="warning">
-              Replace mode will remove all existing document classes in version <strong>{selectedVersion.value}</strong> before saving the
-              discovered schema. This cannot be undone.
+              Replace mode removes all existing document classes in version <strong>{selectedVersion.value}</strong>{' '}
+              <strong>immediately, before discovery runs</strong>, then saves the newly discovered schema. If discovery fails, the version is
+              left with no classes. This cannot be undone — consider creating a new version instead.
             </Alert>
           )}
 

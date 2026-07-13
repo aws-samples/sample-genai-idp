@@ -30,6 +30,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from datetime import datetime
 
 import boto3
 from botocore.exceptions import ClientError
@@ -81,6 +82,71 @@ def set_sink(sink) -> None:  # noqa: ANN001
     """
     global _active_sink
     _active_sink = sink
+
+
+# --- Non-streaming persistence (GovCloud poll path) ----------------------
+#
+# In commercial regions the browser streams the answer live over the Lambda
+# Function URL, and this processor never needs to persist chat messages. In
+# GovCloud (no Lambda Function URLs) the UI instead POLLS getChatMessages, so
+# the final assistant message must be written to the ChatMessages table.
+#
+# IMPORTANT: this is gated on there being NO active emission sink. The streaming
+# endpoint (chat_stream_processor) installs a sink via set_sink() before calling
+# the handler; the async/poll path (send_chat_document_message_resolver -> Event
+# invoke) does NOT. So persistence runs ONLY on the non-streaming path — commercial
+# streaming deployments keep their prior behavior (no server-side doc-chat message
+# storage). We gate on the sink rather than CHAT_MESSAGES_TABLE because BOTH the
+# streaming and standalone functions have that env var set, so it alone would not
+# distinguish the two paths.
+_CHAT_MESSAGES_TABLE = os.environ.get("CHAT_MESSAGES_TABLE") or ""
+_DATA_RETENTION_DAYS = int(os.environ.get("DATA_RETENTION_DAYS", "30"))
+
+
+def _persist_chat_messages(session_id: str, prompt: str, assistant_text: str) -> None:
+    """Write the user prompt + final assistant reply to the ChatMessages table.
+
+    Keyed by ``PK=sessionId`` / ``SK=<iso timestamp>`` — the same shape
+    getChatMessages queries and returns in chronological order. Best-effort:
+    never raises (a persistence failure must not fail the chat turn).
+
+    No-op when an emission sink is active (i.e. running behind the streaming
+    endpoint), so only the non-streaming/poll path persists.
+    """
+    if _active_sink is not None:
+        return
+    if not _CHAT_MESSAGES_TABLE or not session_id:
+        return
+    try:
+        table = _dynamodb.Table(_CHAT_MESSAGES_TABLE)
+        expires_after = int(time.time()) + (_DATA_RETENTION_DAYS * 24 * 60 * 60)
+        user_ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        table.put_item(
+            Item={
+                "PK": session_id,
+                "SK": user_ts,
+                "role": "user",
+                "content": prompt,
+                "timestamp": user_ts,
+                "isProcessing": False,
+                "ExpiresAfter": expires_after,
+            }
+        )
+        if assistant_text:
+            assistant_ts = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            table.put_item(
+                Item={
+                    "PK": session_id,
+                    "SK": assistant_ts,
+                    "role": "assistant",
+                    "content": assistant_text,
+                    "timestamp": assistant_ts,
+                    "isProcessing": False,
+                    "ExpiresAfter": expires_after,
+                }
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.error("Failed to persist chat-doc messages for %s: %s", session_id, e)
 
 
 def _emit(
@@ -682,6 +748,9 @@ def handler(event, _context):  # noqa: ANN001
             model_id=selected_model_id,
             is_processing=False,
         )
+        # Persist for the non-streaming (GovCloud poll) path. No-op when
+        # CHAT_MESSAGES_TABLE is unset (commercial/streaming builds).
+        _persist_chat_messages(session_id, prompt, cleaned)
         return {"ok": True, "turnId": turn_id}
 
     except Exception as e:  # noqa: BLE001
@@ -693,4 +762,7 @@ def handler(event, _context):  # noqa: ANN001
             content=str(e),
             is_processing=False,
         )
+        # Persist the error as the assistant reply so a polling client sees a
+        # terminal message instead of waiting until timeout.
+        _persist_chat_messages(session_id, prompt, f"Error: {e}")
         return {"ok": False, "error": str(e)}

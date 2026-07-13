@@ -8,10 +8,19 @@ import { sendAgentChatMessage, onAgentChatMessageUpdate, getChatMessages } from 
 import { useAgentChatContext } from '../contexts/agentChat';
 import type { ChatMessage } from '../types/agent-chat';
 import { streamChat, type StreamCredentials, type StreamEvent } from '../api/stream-client';
+import { pollForAssistantReply, fetchAssistantKeys } from '../api/chat-poll';
+import { streamUrl } from '../aws-exports';
 import useCurrentSessionCreds from './use-current-session-creds';
 
 const logger = new ConsoleLogger('useAgentChat');
 const client = generateClient();
+// Chat responses are delivered by streaming from the Lambda Function URL when
+// one is configured (VITE_STREAM_URL). When it is absent — e.g. AWS GovCloud,
+// where Lambda Function URLs do not exist — we fall back to sending the message
+// over the REST API and POLLING getChatMessages for the final answer (no live
+// streaming; see api/chat-poll.ts). Auto-detected so commercial keeps streaming
+// and GovCloud "just works" with no extra flag.
+const streamingAvailable = Boolean(streamUrl);
 const useHttpApiTransport = true;
 
 interface AgentChatConfig {
@@ -63,6 +72,17 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
   const { messages, isLoading, waitingForResponse, error, sessionId } = agentChatState;
 
   const sentMessagesRef = useRef(new Set<string>());
+
+  // AbortController for the non-streaming poll path, so an in-flight poll is
+  // cancelled on cancelResponse()/unmount rather than running for the full
+  // timeout against a switched or unmounted session.
+  const pollAbortRef = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      pollAbortRef.current?.abort();
+    },
+    [],
+  );
 
   // Cognito Identity Pool credentials for SigV4-signing the streaming request
   // (httpapi transport only). Unused under the appsync transport.
@@ -881,7 +901,7 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
     updateMessages((prevMessages) => [...prevMessages, userMessage]);
 
     try {
-      if (useHttpApiTransport) {
+      if (useHttpApiTransport && streamingAvailable) {
         // Stream directly from the IAM-authed Lambda Function URL. Each SSE
         // event has the same shape onAgentChatMessageUpdate delivered, so we
         // feed them straight into addMessage. streamChat resolves when the
@@ -902,6 +922,59 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
           credentials: creds,
           onEvent: (event: StreamEvent) => addMessage(event as unknown as ChatMessage),
         });
+        return undefined;
+      }
+
+      if (useHttpApiTransport && !streamingAvailable) {
+        // No Function URL (e.g. GovCloud): send the message over the REST API
+        // (async-invokes the processor), then POLL getChatMessages for the
+        // final assistant reply. No live streaming — the user sees a spinner
+        // until the full answer lands. Baseline the existing assistant messages
+        // BEFORE sending so the poll matches only the NEW reply (clock-
+        // independent — no client/server timestamp comparison).
+        const knownAssistantKeys = await fetchAssistantKeys(client, sessionId);
+        pollAbortRef.current?.abort();
+        pollAbortRef.current = new AbortController();
+
+        await client.graphql({
+          query: agentConfig.mutation,
+          variables: {
+            prompt,
+            sessionId,
+            method: agentConfig.method,
+            enableCodeIntelligence: options.enableCodeIntelligence,
+          },
+        } as unknown as Parameters<typeof client.graphql>[0]);
+
+        try {
+          const reply = await pollForAssistantReply({
+            client,
+            sessionId,
+            knownAssistantKeys,
+            signal: pollAbortRef.current.signal,
+          });
+          if (reply) {
+            addMessage({
+              role: 'assistant',
+              content: reply.content,
+              messageType: reply.messageType ?? 'assistant_final_response',
+              method: reply.messageType ?? 'assistant_final_response',
+              isProcessing: false,
+              sessionId,
+              timestamp: reply.timestamp,
+              id: `assistant-${reply.timestamp}`,
+            } as unknown as ChatMessage);
+          } else {
+            throw new Error(
+              'Timed out waiting for the assistant response. The request may still be processing — try reloading the chat session.',
+            );
+          }
+        } catch (pollErr) {
+          // A cancelled/aborted poll (session switch, unmount, cancel) is not an
+          // error to surface to the user.
+          if ((pollErr as { name?: string })?.name === 'AbortError') return undefined;
+          throw pollErr;
+        }
         return undefined;
       }
 
@@ -943,6 +1016,8 @@ const useAgentChat = (config: Partial<AgentChatConfig> = {}): UseAgentChatReturn
 
   // Cancel waiting for response
   const cancelResponse = (): void => {
+    // Abort an in-flight non-streaming poll so it stops immediately.
+    pollAbortRef.current?.abort();
     updateAgentChatState({ waitingForResponse: false });
     logger.info('Response cancelled by user');
   };
