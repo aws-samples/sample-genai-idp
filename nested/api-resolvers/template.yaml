@@ -1368,6 +1368,62 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
+  GetSampleDocumentResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      RetentionInDays: !Ref LogRetentionDays
+
+  # Presigns bundled sample documents (ConfigurationBucket samples/ prefix) so
+  # the Quick Start agent can link them.
+  GetSampleDocumentResolverFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+          - id: W12
+            reason: "Lambda requires CloudWatch logs permissions"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for API resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ./src/lambda/get_sample_document_resolver
+      Description: Presign bundled sample documents for the Quick Start agent
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          CONFIGURATION_BUCKET: !Ref ConfigurationBucketName
+          S3_ENDPOINT_URL: !If [HasS3EndpointUrl, !Ref S3EndpointUrl, !Ref AWS::NoValue]
+      LoggingConfig:
+        LogGroup: !Ref GetSampleDocumentResolverFunctionLogGroup
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${ConfigurationBucketName}/samples/*"
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+
   GetStepFunctionExecutionResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -2573,6 +2629,7 @@ Resources:
             "getConfigurationLibraryFile": "${ConfigurationResolverFunction}",
             "getDocumentCount": "${ListDocumentsGSIResolverFunction}",
             "getFileContents": "${GetFileContentsResolverFunction}",
+            "getSampleDocumentUrl": "${GetSampleDocumentResolverFunction}",
             "getModelConfigLimits": "${ConfigurationResolverFunction}",
             "getPricing": "${ConfigurationResolverFunction}",
             "getStepFunctionExecution": "${GetStepFunctionExecutionResolverFunction}",
@@ -2586,7 +2643,6 @@ Resources:
             "listConfigurationLibrary": "${ConfigurationResolverFunction}",
             "listDocuments": "${ListDocumentsGSIResolverFunction}",
             "listDocumentsByDateRange": "${ListDocumentsByDateRangeResolverFunction}",
-            "listSampleDocuments": "${UploadResolverFunction}",
             "pauseCircuitBreaker": "${CircuitBreakerResolverFunctionArn}",
             "probeCircuitBreaker": "${CircuitBreakerResolverFunctionArn}",
             "processChanges": "${ProcessChangesResolverFunction}",
@@ -2608,7 +2664,6 @@ Resources:
             "updateTestSet": "${TestSetResolverFunction}",
             "uploadDiscoveryDocument": "${DiscoveryUploadResolverFunction}",
             "uploadDocument": "${UploadResolverFunction}",
-            "uploadSampleDocument": "${UploadResolverFunction}",
             "uploadMultiDocDiscoveryZip": "${DiscoveryUploadResolverFunction}",
             "validateTestFileName": "${TestSetResolverFunction}",
             "claimReview": "${CompleteSectionReviewFunctionArn}",
@@ -3039,6 +3094,7 @@ Resources:
 
   ApiWafWebACL:
     Type: AWS::WAFv2::WebACL
+    # checkov:skip=CKV_AWS_192: "This WebACL uses DefaultAction: Block with an IP allowlist, so only explicitly allowlisted IPv4 ranges reach the API at all. The Log4Shell (CVE-2021-44228) managed rule group is defense-in-depth that is not required for this already-closed posture; the backend is Python (no Log4j2)."
     Condition: IsWafEnabled
     Properties:
       Name: !Sub "${StackName}-api-acl"

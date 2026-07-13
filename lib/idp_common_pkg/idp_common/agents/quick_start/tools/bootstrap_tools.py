@@ -207,11 +207,7 @@ def _all_config_classes() -> list:
 
 
 def search_catalog_impl(description: str) -> str:
-    schemas_root = os.environ.get("GENERATOR_SCHEMAS_ROOT")
-    entries = catalog_mod.build_catalog(
-        generator_schemas_root=schemas_root,
-        config_classes=_all_config_classes(),
-    )
+    entries = catalog_mod.build_catalog(config_classes=_all_config_classes())
     if not entries:
         return json.dumps({"matched": False, "reason": "Catalog is empty"})
     match = catalog_mod.match_catalog(description, entries)
@@ -281,6 +277,19 @@ def create_config_version_impl(schema_text: str, version_name: str = "") -> str:
         schema, version, config_manager=config_manager
     )
     return json.dumps({"config_version": version, "activated": False})
+
+
+def activate_config_version_impl(version_name: str) -> str:
+    from idp_common.config.configuration_manager import ConfigurationManager
+
+    if not version_name:
+        return json.dumps({"activated": False, "error": "version_name is required"})
+    try:
+        ConfigurationManager().activate_version(version_name)
+        return json.dumps({"config_version": version_name, "activated": True})
+    except Exception as e:
+        logger.error(f"Error activating config version '{version_name}': {e}")
+        return json.dumps({"activated": False, "error": str(e)})
 
 
 def request_document_generation_impl(
@@ -357,6 +366,35 @@ def list_config_versions_impl() -> str:
             }
         )
     return json.dumps({"versions": out})
+
+
+def get_class_schema_impl(version_name: str, class_name: str = "") -> str:
+    from idp_common.config.configuration_manager import ConfigurationManager
+
+    if not version_name:
+        return json.dumps({"error": "version_name is required"})
+    config_manager = ConfigurationManager()
+    raw = config_manager.get_raw_configuration("Config", version_name)
+    if not raw:
+        return json.dumps({"error": f"Config version '{version_name}' not found"})
+    classes = raw.get("classes", [])
+    if class_name:
+        target = next((c for c in classes if _class_id(c) == class_name), None)
+    elif len(classes) == 1:
+        target = classes[0]
+    else:
+        target = None
+    if target is None:
+        return json.dumps(
+            {
+                "error": f"Class '{class_name}' not found in version '{version_name}'"
+                if class_name
+                else f"Version '{version_name}' has {len(classes)} classes; "
+                "specify class_name",
+                "availableClasses": [_class_id(c) for c in classes if _class_id(c)],
+            }
+        )
+    return json.dumps({"versionName": version_name, "schema": target})
 
 
 def generate_from_existing_config_impl(
@@ -455,7 +493,8 @@ def list_sample_documents() -> str:
 
     Use this when the user asks what example or sample documents are available
     (e.g. "what examples do you have?"). Returns each sample's id, name,
-    description, kind ("document" or "batch"), and fileCount. Tell the user they
+    description, kind ("document" or "batch"), fileCount, s3Key, and (for
+    batches) a "files" list of the individual document s3Keys. Tell the user they
     can either upload their own documents or start from one of these samples;
     describe the relevant ones rather than dumping the whole list.
     """
@@ -527,8 +566,25 @@ def create_config_version(schema_text: str, version_name: str = "") -> str:
         version_name: Optional version name; auto-generated if omitted.
 
     The config is immediately usable for extraction; it is NOT auto-activated.
+    Call activate_config_version to make it the active configuration.
     """
     return create_config_version_impl(schema_text, version_name)
+
+
+@strands.tool
+def activate_config_version(version_name: str) -> str:
+    """Make a configuration version the active one used to process documents.
+
+    Activates the named version and deactivates all others, so newly uploaded
+    documents are processed with it. Call this after create_config_version (or
+    after the user confirms) so the user can start processing without manually
+    activating in the Configuration page.
+
+    Args:
+        version_name: The config version to activate (e.g. the value returned by
+            create_config_version).
+    """
+    return activate_config_version_impl(version_name)
 
 
 @strands.tool
@@ -566,6 +622,24 @@ def list_config_versions() -> str:
     and a document class.
     """
     return list_config_versions_impl()
+
+
+@strands.tool
+def get_class_schema(version_name: str, class_name: str = "") -> str:
+    """Read the full field schema of a document class from a configuration version.
+
+    Use this to see the actual fields in a configuration - especially one created
+    by Discovery from an uploaded document, whose fields are NOT otherwise visible
+    in this conversation. Call it to answer questions like "is field X included?"
+    and to get the current schema before refining it (pass the returned "schema"
+    to refine_schema as schema_text). If the version has exactly one class,
+    class_name is optional.
+
+    Args:
+        version_name: The configuration version (e.g. from list_config_versions).
+        class_name: The document class to read; optional if the version has one.
+    """
+    return get_class_schema_impl(version_name, class_name)
 
 
 @strands.tool

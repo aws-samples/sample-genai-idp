@@ -52,12 +52,29 @@ class ClassesDiscovery:
         try:
             self.config_reader = ConfigurationReader()
             self.config_manager = ConfigurationManager()
-            self.config: IDPConfig = cast(
-                IDPConfig,
-                self.config_reader.get_merged_configuration(
-                    as_model=True, version=self.version
-                ),
-            )
+            try:
+                self.config: IDPConfig = cast(
+                    IDPConfig,
+                    self.config_reader.get_merged_configuration(
+                        as_model=True, version=self.version
+                    ),
+                )
+            except ValueError:
+                # The target version doesn't exist yet (e.g. a fresh "quickstart"
+                # version that will be created when we save the discovered class).
+                # Discovery only needs the discovery settings, which come from the
+                # active/default config, so load that for settings while keeping
+                # self.version as the write target.
+                logger.info(
+                    f"Version '{self.version}' not found; loading active/default "
+                    "config for discovery settings and creating it on save."
+                )
+                self.config = cast(
+                    IDPConfig,
+                    self.config_reader.get_merged_configuration(
+                        as_model=True, version=None
+                    ),
+                )
         except Exception as e:
             logger.error(f"Failed to load configuration from DynamoDB: {e}")
             raise Exception(f"Failed to load configuration from DynamoDB: {str(e)}")

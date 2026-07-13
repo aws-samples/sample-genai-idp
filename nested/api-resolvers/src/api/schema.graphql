@@ -521,6 +521,11 @@ type FileContentsResponse @aws_cognito_user_pools @aws_iam {
   isBinary: Boolean
 }
 
+type SampleDocumentUrl @aws_cognito_user_pools @aws_iam {
+  url: String!
+  s3Key: String!
+}
+
 # Presigned GET URL for reading a file's bytes directly from S3, bypassing the
 # resolver Lambda (whose synchronous response is capped at 6 MB). Used by the UI
 # to view/download large section result.json files. The browser fetches
@@ -1169,6 +1174,8 @@ type Query @aws_cognito_user_pools @aws_iam {
     nextToken: String
   ): DocumentPage
   getFileContents(s3Uri: String!, versionId: String): FileContentsResponse
+  getSampleDocumentUrl(s3Key: String!): SampleDocumentUrl
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
   # Returns a short-lived presigned GET URL so the browser can fetch a file's
   # bytes directly from S3 — used for files too large to proxy through
   # getFileContents (Lambda's 6 MB synchronous response cap). Same access model

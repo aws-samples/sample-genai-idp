@@ -22,6 +22,8 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import { DISCOVERY_JOB_PATH } from '../../routes/constants';
 import { SupportPromptGroup, LoadingBar } from '@cloudscape-design/chat-components';
 import SafeMarkdown from '../common/SafeMarkdown';
+import { generateClient } from '../../api/client-shim';
+import { getSampleDocumentUrl } from '../../graphql/generated';
 
 import useAgentChat from '../../hooks/use-agent-chat';
 import useAppContext from '../../contexts/app';
@@ -39,6 +41,47 @@ import './AgentChatLayout.css';
 import type { ChatMessage } from '../../types/agent-chat';
 
 const logger = new ConsoleLogger('AgentChatLayout');
+
+const sampleClient = generateClient();
+
+// Renders <sampledoc s3key="samples/..."> emitted by the Quick Start agent as a
+// clickable link; on click it presigns via getSampleDocumentUrl and opens the
+// document (single doc) or downloads the zip (batch) in a new tab.
+const SampleDocLink = ({ s3key, children }: { s3key?: string; children?: React.ReactNode }): React.JSX.Element => {
+  const [failed, setFailed] = useState(false);
+  const open = async (): Promise<void> => {
+    if (!s3key) return;
+    setFailed(false);
+    try {
+      const resp = await sampleClient.graphql({ query: getSampleDocumentUrl, variables: { s3Key: s3key } });
+      const url = (resp as { data?: { getSampleDocumentUrl?: { url?: string } } })?.data?.getSampleDocumentUrl?.url;
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      } else {
+        setFailed(true);
+      }
+    } catch (err) {
+      logger.error('Failed to open sample document', err);
+      setFailed(true);
+    }
+  };
+  // No href: Cloudscape Link with only onFollow runs the action without any
+  // route navigation (matches the WelcomeContent Quick Start link pattern).
+  // On failure show an inline notice so the click isn't silently swallowed.
+  return (
+    <>
+      <Link onFollow={open}>{children}</Link>
+      {failed && (
+        <>
+          {' '}
+          <StatusIndicator type="error">Could not open sample</StatusIndicator>
+        </>
+      )}
+    </>
+  );
+};
+
+const markdownComponents = { sampledoc: SampleDocLink } as unknown as Record<string, React.ComponentType<Record<string, unknown>>>;
 
 interface AgentConfig {
   agentType?: string;
@@ -95,17 +138,25 @@ const AgentChatLayout = ({
     if (active && active.versionName !== 'default') {
       return active.versionName;
     }
-    const existingNonDefault = versions.find((v) => v.versionName !== 'default');
-    return existingNonDefault?.versionName || 'quickstart';
+    return 'quickstart';
   }, [versions]);
 
   const handleUploadComplete = useCallback(
     (result: QuickStartUploadResult) => {
       const names = result.classNames.length ? result.classNames.join(', ') : 'document type(s)';
+      const discoveryKind = result.totalDocuments === 1 ? 'Single-document' : 'Multi-document';
+      const typeCount = result.clustersFound || result.classNames.length;
       const summary =
-        `I uploaded ${result.totalDocuments} document(s). Multi-document discovery inferred ` +
-        `${result.clustersFound} document type(s): ${names}. These were added to my configuration. ` +
-        `Please summarize what was discovered and ask whether I want to refine the schema.`;
+        `I uploaded ${result.totalDocuments} document(s). ${discoveryKind} discovery inferred ` +
+        `${typeCount} document type(s): ${names}, saved and ready to use. Please summarize what was ` +
+        `found in plain language for a first-time user. Briefly explain, in one plain sentence, that ` +
+        `this was saved as a reusable "configuration" that tells the system what to pull out of these ` +
+        `documents (introduce the term gently, do not assume I already know it). Then ask whether I'd ` +
+        `like to adjust any fields or start processing my documents. Keep it concise; save deeper ` +
+        `configuration-version details for if I ask.\n\n` +
+        `[Discovery saved the schema to configuration version "${result.configVersion}". Its fields ` +
+        `are not shown here — call get_class_schema for version "${result.configVersion}" before ` +
+        `answering questions about the fields or refining them.]`;
       setAttachedFiles([]);
       setUploadError(null);
       setCompletedJobId(result.jobId);
@@ -200,8 +251,10 @@ const AgentChatLayout = ({
 
     let messageToSend: string;
     if (hasFiles) {
+      const isSingle = filesAttachedCount === 1 && !attachedFiles[0]?.name.toLowerCase().endsWith('.zip');
+      const discoveryKind = isSingle ? 'single-document' : 'multi-document';
       const note =
-        `[${filesAttachedCount} document(s) attached — multi-document Discovery is now running on them ` +
+        `[${filesAttachedCount} document(s) attached — ${discoveryKind} Discovery is now running on them ` +
         `in the background. Acknowledge it's processing and that you'll summarize the results when they ` +
         `arrive; do not ask me to upload again.]`;
       messageToSend = prompt.trim() ? `${prompt.trim()}\n\n${note}` : note;
@@ -477,7 +530,7 @@ const AgentChatLayout = ({
                 }
 
                 // Handle regular text messages (preserve existing functionality)
-                return <SafeMarkdown>{contentText}</SafeMarkdown>;
+                return <SafeMarkdown components={markdownComponents}>{contentText}</SafeMarkdown>;
               })()}
             </div>
           </div>
