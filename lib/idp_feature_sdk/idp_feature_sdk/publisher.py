@@ -89,7 +89,7 @@ class FeaturePublisher:
             )
             result = subprocess.run(
                 manifest.ui.buildCommand,
-                shell=True,
+                shell=True,  # nosec B602 - runs manifest author's own command
                 cwd=self.project_dir,
                 check=False,
                 capture_output=True,
@@ -116,7 +116,7 @@ class FeaturePublisher:
             )
             result = subprocess.run(
                 manifest.agentSource.packageCommand,
-                shell=True,
+                shell=True,  # nosec B602 - runs manifest author's own command
                 cwd=self.project_dir,
                 check=False,
                 capture_output=True,

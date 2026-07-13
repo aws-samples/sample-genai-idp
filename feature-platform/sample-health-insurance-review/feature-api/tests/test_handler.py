@@ -37,7 +37,7 @@ def _claim_row(doc_id: str, status: str, updated_at: str) -> dict:
         "failCount": 1 if status == "REVIEW_REQUIRED" else 0,
         "notFoundCount": 0,
         "totalRules": 5,
-        "recommendationCounts": {"Pass": 4, "Fail": 1},
+        "recommendationCounts": {"Pass": 4, "Fail": 1},  # nosec B105 - rule counter fixture
         "policyTypes": ["global_periods"],
         "summaryJsonUri": _SUMMARY_URI,
         "summaryMdUri": _MD_URI,
@@ -88,7 +88,7 @@ def stack(aws_credentials, monkeypatch):
             Key=_SUMMARY_KEY,
             Body=json.dumps(
                 {
-                    "rule_summary": {"global_periods": {"Pass": 4, "Fail": 1}},
+                    "rule_summary": {"global_periods": {"Pass": 4, "Fail": 1}},  # nosec B105 - rule counter fixture
                     "rule_details": {
                         "global_periods": {
                             "rules": [
@@ -104,7 +104,7 @@ def stack(aws_credentials, monkeypatch):
                     "supporting_pages": ["1", "2"],
                     "overall_statistics": {
                         "total_rules": 5,
-                        "recommendation_counts": {"Pass": 4, "Fail": 1},
+                        "recommendation_counts": {"Pass": 4, "Fail": 1},  # nosec B105 - rule counter fixture
                     },
                 }
             ).encode("utf-8"),
