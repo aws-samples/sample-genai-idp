@@ -1256,6 +1256,11 @@ Resources:
           # ChatSessionsTable is consulted to verify that the calling Cognito
           # user owns the requested sessionId before returning messages.
           CHAT_SESSIONS_TABLE: !Ref ChatSessionsTableName
+          # Document-chat sessions are owned in a separate table (keyed by
+          # sessionId with ownerSub). This resolver also serves document chat in
+          # the non-streaming (GovCloud) poll path, so it verifies ownership
+          # against this table too.
+          CHAT_DOCUMENT_SESSIONS_TABLE: !Ref ChatDocumentSessionsTable
           # Feature flag to disable ownership enforcement in case of legacy
           # session migration. Defaults to "true" (enforce). Customers should
           # only set this to "false" temporarily during data backfill.
@@ -1269,6 +1274,9 @@ Resources:
         # that the caller owns the requested sessionId (authorization check).
         - DynamoDBReadPolicy:
             TableName: !Ref ChatSessionsTableName
+        # Same ownership check for document-chat sessions.
+        - DynamoDBReadPolicy:
+            TableName: !Ref ChatDocumentSessionsTable
         - Statement:
             - Effect: Allow
               Action:

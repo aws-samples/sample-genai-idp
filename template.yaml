@@ -6956,6 +6956,12 @@ Resources:
           TRACKING_TABLE_NAME: !Ref TrackingTable
           USERS_TABLE_NAME: !Ref UsersTable
           APPSYNC_API_URL: ""
+          # Non-streaming (GovCloud poll) path: persist the final chat message to
+          # the ChatMessages table so the UI can poll getChatMessages for it when
+          # no Lambda Function URL is available. Harmless in streaming/commercial
+          # mode (the persist runs but the UI streams and ignores it).
+          CHAT_MESSAGES_TABLE: !Ref ChatMessagesTable
+          DATA_RETENTION_DAYS: !Ref DataRetentionInDays
           GUARDRAIL_ID_AND_VERSION:
             !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
           BEDROCK_ASSUME_ROLE_ARN:
@@ -6975,6 +6981,9 @@ Resources:
             TableName: !Ref ConfigurationTable
         - DynamoDBReadPolicy:
             TableName: !Ref TrackingTable
+        # Write final chat messages for the non-streaming (GovCloud poll) path.
+        - DynamoDBWritePolicy:
+            TableName: !Ref ChatMessagesTable
         - Statement:
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.

@@ -24,13 +24,17 @@ Both paths address two GovCloud requirements:
 1. **ARN Partition Compatibility**: All ARN references use `arn:${AWS::Partition}:` instead of `arn:aws:` to work in both commercial and GovCloud regions
 2. **Service Compatibility**: Removes services not available in GovCloud. `--govcloud` removes CloudFront and Lambda Function URLs (and forces API Gateway UI hosting); `--headless` additionally removes the entire UI, AppSync, Cognito UI components, and WAF.
 
-> **Chat is unavailable with `--govcloud`.** Both the agent chat and
-> document-chat features stream their responses over a **Lambda Function URL**,
-> which does not exist in GovCloud (and the codebase has no non-streaming chat
-> transport). `--govcloud` therefore removes that Function URL, and the **chat
-> features are disabled** in GovCloud. Everything else in the UI (document
-> processing, extraction, evaluation, Test Studio, discovery, knowledge base,
-> configuration) works normally.
+> **Chat works in GovCloud, but without live streaming.** In commercial
+> regions, agent chat and document chat stream their responses token-by-token
+> over a **Lambda Function URL**, which does not exist in GovCloud. `--govcloud`
+> removes that Function URL, so the Web UI automatically falls back to a
+> **non-streaming** chat path: it sends the message over the REST API and polls
+> for the final answer. The user experience is **"spinner, then the full answer
+> appears at once"** instead of watching it type out — and intermediate agent
+> progress (e.g. "calling tool X…") is not shown. The final answer is identical.
+> Everything else in the UI (document processing, extraction, evaluation, Test
+> Studio, discovery, knowledge base, configuration) works normally. See
+> [Chat in GovCloud (non-streaming)](#chat-in-govcloud-non-streaming) for details.
 
 For details on what services are removed vs. retained, see [GovCloud Architecture](./govcloud-architecture.md).
 
@@ -142,16 +146,39 @@ The `--govcloud` flag transforms the template to:
 - Remove every `AWS::CloudFront::*` resource and force `WebUIHosting=APIGateway`,
   so the Web UI is served as an S3 proxy on the same REST API that backs it (see
   [API Gateway Hosting](./apigateway-hosting.md)).
-- Remove the `AWS::Lambda::Url` resource (the chat streaming endpoint) and its
+- Remove the `AWS::Lambda::Url` resource (the chat *streaming* endpoint) and its
   permission, since [Lambda Function URLs are not available in GovCloud](https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/govcloud-lambda.html).
-  The agent-chat and document-chat features deliver responses **only** over this
-  Function URL (there is no non-streaming chat transport in the codebase), so
-  **chat is disabled** in GovCloud. Everything else in the UI — document
-  processing, extraction, evaluation, Test Studio, discovery, knowledge base,
-  configuration — works normally. Sending a chat message in a `--govcloud`
-  deployment surfaces a "stream URL not configured" error in the chat panel.
+  Chat still works — the UI automatically switches to a **non-streaming** path
+  (see [Chat in GovCloud](#chat-in-govcloud-non-streaming) below).
 
 The rest of the UI (Cognito, the REST API, WAF) is retained.
+
+### Chat in GovCloud (non-streaming)
+
+With `--govcloud`, both **agent chat** and **document chat** work, but the answer
+is delivered **without live token streaming**:
+
+- **Commercial (streaming):** the browser opens a streaming connection to a
+  Lambda Function URL and renders the answer token-by-token, showing intermediate
+  agent progress ("thinking…", "calling tool X…").
+- **GovCloud (`--govcloud`, non-streaming):** the browser sends the chat message
+  over the **REST API** (`/op`), which asynchronously invokes the same chat
+  processor. The processor writes the final answer to the chat-messages table,
+  and the UI **polls** for it. The user sees a spinner until the complete answer
+  appears at once. Intermediate progress is not shown, and there is no
+  token-by-token animation. **The final answer is identical to streaming.**
+
+This is auto-detected: the UI streams when a Function URL is configured
+(`VITE_STREAM_URL`) and polls when it is not — no configuration flag is needed.
+The polling path reuses the existing Cognito-authed REST API, so it inherits the
+same `ApiGatewayVisibility=PRIVATE` / WAF posture as the rest of the UI. Long
+agent turns are supported (the processor runs up to its Lambda timeout; the UI
+polls for up to 5 minutes).
+
+> **Why non-streaming?** Lambda Function URLs — the only streaming transport in
+> the codebase — do not exist in GovCloud. Polling delivers the same answer
+> without them. Commercial deployments keep full streaming; the two paths share
+> one codebase via the `VITE_STREAM_URL`-empty auto-detection.
 
 `--govcloud` is available on both `idp-cli publish` and `idp-cli deploy`, and is
 **mutually exclusive with `--headless`** (headless removes the UI; `--govcloud`
