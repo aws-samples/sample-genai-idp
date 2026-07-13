@@ -170,6 +170,15 @@ def handler(event, context):
         # Invoke the agent chat processor for user messages
         # The processor will handle the orchestrator creation and streaming response
         if not is_assistant_response and AGENT_CHAT_PROCESSOR_FUNCTION:
+            # Thread the caller identity through to the processor. Without it,
+            # the processor's _persist_chat_turn silently skips writing the
+            # final assistant message, and the non-streaming (polling) UI path
+            # never sees a reply. Use the same username-first resolution the
+            # session-ownership check in get_agent_chat_messages uses, so the
+            # processor updates the SAME ChatSessionsTable record this resolver
+            # created above.
+            identity = event.get("identity", {})
+            caller_sub = identity.get("username") or identity.get("sub") or ""
             lambda_client.invoke(
                 FunctionName=AGENT_CHAT_PROCESSOR_FUNCTION,
                 InvocationType="Event",
@@ -178,7 +187,12 @@ def handler(event, context):
                     "prompt": prompt,
                     "method": method,
                     "timestamp": timestamp,
-                    "enableCodeIntelligence": enable_code_intelligence
+                    "enableCodeIntelligence": enable_code_intelligence,
+                    "callerSub": caller_sub,
+                    # This resolver already stored the user message and session
+                    # metadata above — tell the processor to persist only the
+                    # assistant reply, or every turn would be double-written.
+                    "persistUserMessage": False
                 })
             )
             logger.info(f"Invoked agent chat processor for session: {session_id} (Code Intelligence: {enable_code_intelligence})")
