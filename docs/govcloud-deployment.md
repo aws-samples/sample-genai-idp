@@ -102,6 +102,51 @@ Choose the command that matches your desired [deployment package](#deployment-pa
 
 > **Note on `--headless`**: The CLI flag both strips UI/AppSync/Cognito/WAF resources from the template and automatically sets the `EnableHeadless=true` stack parameter (which enables the Jobs REST API). You do not need to pass `EnableHeadless=true` in `--parameters` — it's set for you.
 
+### Keeping the Web UI in GovCloud: `--govcloud`
+
+`--headless` removes the Web UI entirely. If you **want the full Web UI in
+GovCloud**, use `--govcloud` instead. GovCloud has no Amazon CloudFront, so the
+standard (CloudFront-hosted) UI template fails to even validate there:
+
+```
+E3006 Resource type 'AWS::CloudFront::OriginAccessControl' does not exist in 'us-gov-west-1'
+E3006 Resource type 'AWS::CloudFront::ResponseHeadersPolicy' does not exist in 'us-gov-west-1'
+E3006 Resource type 'AWS::CloudFront::Distribution' does not exist in 'us-gov-west-1'
+```
+
+The `--govcloud` flag transforms the template to remove every
+`AWS::CloudFront::*` resource and forces `WebUIHosting=APIGateway`, so the Web UI
+is served as an S3 proxy on the same REST API that backs it (see
+[API Gateway Hosting](./apigateway-hosting.md)). The rest of the UI (Cognito,
+the REST API, WAF) is retained.
+
+`--govcloud` is available on both `idp-cli publish` and `idp-cli deploy`, and is
+**mutually exclusive with `--headless`** (headless removes the UI; `--govcloud`
+keeps it).
+
+```bash
+# Full UI in GovCloud, private (VPC-only) hosting + WAF
+idp-cli deploy \
+  --stack-name my-idp-govcloud \
+  --region us-gov-west-1 \
+  --from-code . \
+  --govcloud \
+  --wait \
+  --parameters "ApiGatewayVisibility=PRIVATE,DeployInVPC=true,VpcId=vpc-xxxxxxxx,PrivateSubnetIds=subnet-a,subnet-b,LambdaSubnetIds=subnet-a,subnet-b,LambdaSecurityGroupId=sg-xxxxxxxx,ApiGatewayVpcEndpointId=vpce-xxxxxxxx"
+
+# Or just publish the GovCloud template variant (uploads idp-govcloud.yaml)
+idp-cli publish --source-dir . --region us-gov-west-1 --govcloud
+```
+
+For a public (regional, internet-facing) API Gateway UI in GovCloud, omit the
+`ApiGatewayVisibility=PRIVATE`/VPC parameters. To restrict access by IP, set
+`WAFAllowedIPv4Ranges`. See [API Gateway Hosting](./apigateway-hosting.md) for
+the full hosting model.
+
+> The transformed template is written to `.aws-sam/idp-govcloud.yaml` and
+> (for `publish`) uploaded as `idp-govcloud.yaml`. It is validated against the
+> target GovCloud region before deployment.
+
 #### Option A: Vanilla (no API, no VPC)
 
 ```bash

@@ -65,6 +65,7 @@ def _build_from_local_code(
     stack_name: str,
     *,
     headless: bool = False,
+    govcloud: bool = False,
     bucket_basename: Optional[str] = None,
     prefix: Optional[str] = None,
     public: bool = False,
@@ -117,6 +118,7 @@ def _build_from_local_code(
             prefix=prefix,
             region=region,
             headless=headless,
+            govcloud=govcloud,
             public=public,
             max_workers=max_workers,
             clean_build=clean_build,
@@ -130,6 +132,13 @@ def _build_from_local_code(
             sys.exit(1)
 
         console.print()
+
+        # Return govcloud template if govcloud mode
+        if govcloud and result.govcloud_template_path:
+            console.print(
+                f"[green]✓ Build complete (GovCloud). Template: {result.govcloud_template_path}[/green]"
+            )
+            return result.govcloud_template_path, result.govcloud_template_url
 
         # Return headless template if headless mode
         if headless and result.headless_template_path:
@@ -352,6 +361,15 @@ def cli():
     help="Deploy headless (no UI/AppSync/Cognito/WAF) — for API-only or GovCloud deployments",
 )
 @click.option(
+    "--govcloud",
+    is_flag=True,
+    help=(
+        "Deploy the GovCloud template variant: removes all AWS::CloudFront::* "
+        "resources (unavailable in GovCloud) and forces API Gateway Web UI "
+        "hosting, keeping the full UI. Mutually exclusive with --headless."
+    ),
+)
+@click.option(
     "--bucket-basename",
     default=None,
     help="S3 bucket basename for artifacts — region is appended automatically (auto-generated if not provided, used with --from-code)",
@@ -399,6 +417,7 @@ def deploy(
     region: Optional[str],
     role_arn: Optional[str],
     headless: bool,
+    govcloud: bool,
     bucket_basename: Optional[str],
     prefix: Optional[str],
     public: bool,
@@ -448,6 +467,14 @@ def deploy(
             )
             sys.exit(1)
 
+        if headless and govcloud:
+            console.print(
+                "[red]✗ Error: --headless and --govcloud are mutually exclusive. "
+                "--headless removes the UI entirely; --govcloud keeps the UI but "
+                "removes CloudFront and uses API Gateway hosting.[/red]"
+            )
+            sys.exit(1)
+
         # Auto-detect region if not provided
         if not region:
             import boto3
@@ -467,6 +494,7 @@ def deploy(
                 region,
                 stack_name,
                 headless=headless,
+                govcloud=govcloud,
                 bucket_basename=bucket_basename,
                 prefix=prefix,
                 public=public,
@@ -479,6 +507,64 @@ def deploy(
         elif template_file:
             template_path = os.path.abspath(template_file)
             console.print(f"[bold]Using local template: {template_path}[/bold]")
+
+        # Handle govcloud mode for pre-built templates (no --from-code).
+        # Download the default template, strip CloudFront + force API Gateway
+        # hosting, upload the transformed template, and deploy that.
+        elif govcloud and not template_url:
+            console.print("[bold cyan]Generating GovCloud template...[/bold cyan]")
+            if region in TEMPLATE_URLS:
+                source_url = TEMPLATE_URLS[region]
+            else:
+                supported_regions = ", ".join(TEMPLATE_URLS.keys())
+                raise ValueError(
+                    f"Region '{region}' is not supported for --govcloud without "
+                    f"--from-code/--template-url. Supported regions: {supported_regions}. "
+                    f"Use --from-code or --template-url explicitly."
+                )
+
+            import tempfile
+
+            import boto3 as _boto3
+            import requests
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                local_template = os.path.join(tmpdir, "idp-main.yaml")
+                console.print(f"[dim]Downloading template from {source_url}...[/dim]")
+                resp = requests.get(source_url, timeout=60)
+                resp.raise_for_status()
+                with open(local_template, "wb") as f:
+                    f.write(resp.content)
+
+                govcloud_template = os.path.join(tmpdir, "idp-govcloud.yaml")
+                client_tmp = IDPClient(region=region)
+                transform_result = client_tmp.publish.transform_template_govcloud(
+                    source_template=local_template,
+                    output_path=govcloud_template,
+                )
+                if not transform_result.success:
+                    console.print(
+                        f"[red]✗ GovCloud transformation failed: {transform_result.error}[/red]"
+                    )
+                    sys.exit(1)
+
+                sts = _boto3.client("sts", region_name=region)
+                account_id = sts.get_caller_identity()["Account"]
+                bucket_name = f"idp-accelerator-artifacts-{account_id}-{region}"
+                s3 = _boto3.client("s3", region_name=region)
+                s3_key = "idp-cli/idp-govcloud.yaml"
+                s3.upload_file(
+                    govcloud_template,
+                    bucket_name,
+                    s3_key,
+                    ExtraArgs={"ContentType": "text/yaml"},
+                )
+                template_url = (
+                    f"https://s3.{region}.amazonaws.com/{bucket_name}/{s3_key}"
+                )
+                console.print(
+                    f"[green]✓ GovCloud template uploaded: {template_url}[/green]"
+                )
 
         # Handle headless mode for pre-built templates (no --from-code)
         elif headless and not template_url:
@@ -5546,6 +5632,15 @@ def multi_discover(
 @click.option(
     "--headless", is_flag=True, help="Also generate a headless (no-UI) template variant"
 )
+@click.option(
+    "--govcloud",
+    is_flag=True,
+    help=(
+        "Also generate a GovCloud template variant: removes all AWS::CloudFront::* "
+        "resources (unavailable in GovCloud) and forces API Gateway Web UI hosting. "
+        "Keeps the full UI."
+    ),
+)
 @click.option("--public", is_flag=True, help="Make S3 artifacts publicly readable")
 @click.option(
     "--max-workers",
@@ -5573,6 +5668,7 @@ def publish(
     prefix: Optional[str],
     region: str,
     headless: bool,
+    govcloud: bool,
     public: bool,
     max_workers: Optional[int],
     clean_build: bool,
@@ -5615,6 +5711,7 @@ def publish(
             prefix=prefix,
             region=region,
             headless=headless,
+            govcloud=govcloud,
             public=public,
             max_workers=max_workers,
             clean_build=clean_build,
@@ -5633,6 +5730,7 @@ def publish(
             template_url=result.template_url or "",
             region=region,
             headless_template_url=result.headless_template_url,
+            govcloud_template_url=result.govcloud_template_url,
         )
         console.print()
         console.print("[bold green]✅ Publish complete![/bold green]")

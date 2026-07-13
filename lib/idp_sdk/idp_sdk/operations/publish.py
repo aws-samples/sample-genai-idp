@@ -44,6 +44,7 @@ class PublishOperation:
         region: Optional[str] = None,
         *,
         headless: bool = False,
+        govcloud: bool = False,
         public: bool = False,
         max_workers: Optional[int] = None,
         clean_build: bool = False,
@@ -64,6 +65,9 @@ class PublishOperation:
             prefix: S3 key prefix for artifacts. Default: ``idp-cli``.
             region: AWS region. Falls back to client region or boto3 default.
             headless: If True, also generate a headless (no-UI) template variant.
+            govcloud: If True, also generate a GovCloud template variant that
+                removes AWS::CloudFront::* resources and forces API Gateway
+                hosting (keeps the full UI). For deployment in GovCloud regions.
             public: If True, make S3 artifacts publicly readable.
             max_workers: Maximum concurrent build workers. Default: auto-detect.
             clean_build: If True, delete all checksum files to force full rebuild.
@@ -107,8 +111,11 @@ class PublishOperation:
             publish_args.extend(["--max-workers", str(max_workers)])
         if verbose:
             publish_args.append("--verbose")
-        if no_validate or headless:
-            # Skip validation in publish if headless — we'll validate the headless template
+        if no_validate or headless or govcloud:
+            # Skip main-template validation when headless/govcloud — the base
+            # template still contains resources (UI/CloudFront) that don't
+            # validate in the target region; we validate the transformed
+            # template instead after generating it.
             publish_args.append("--no-validate")
         if clean_build:
             publish_args.append("--clean-build")
@@ -147,6 +154,61 @@ class PublishOperation:
 
             headless_template_path = None
             headless_template_url = None
+            govcloud_template_path = None
+            govcloud_template_url = None
+
+            # Generate GovCloud (CloudFront-free) template if requested. Keeps
+            # the full Web UI but removes AWS::CloudFront::* resources and forces
+            # API Gateway hosting (the only GovCloud-viable option).
+            if govcloud:
+                govcloud_result = self.transform_template_govcloud(
+                    source_template=template_path,
+                    output_path=os.path.join(
+                        source_dir, ".aws-sam", "idp-govcloud.yaml"
+                    ),
+                    verbose=verbose,
+                )
+                if not govcloud_result.success:
+                    return PublishResult(
+                        success=False,
+                        template_path=template_path,
+                        template_url=template_url,
+                        bucket=bucket_full,
+                        prefix=prefix,
+                        version=version,
+                        error=(
+                            "GovCloud template transformation failed: "
+                            f"{govcloud_result.error}"
+                        ),
+                    )
+                govcloud_template_path = govcloud_result.output_path
+                s3_client = boto3.client("s3", region_name=region)
+                gc_key = f"{prefix}/idp-govcloud.yaml"
+                s3_client.upload_file(
+                    govcloud_template_path,
+                    bucket_full,
+                    gc_key,
+                    ExtraArgs={"ContentType": "text/yaml"},
+                )
+                govcloud_template_url = (
+                    f"https://s3.{region}.amazonaws.com/{bucket_full}/{gc_key}"
+                )
+                if not no_validate:
+                    try:
+                        cf_client = boto3.client("cloudformation", region_name=region)
+                        cf_client.validate_template(TemplateURL=govcloud_template_url)
+                    except Exception as e:
+                        return PublishResult(
+                            success=False,
+                            template_path=template_path,
+                            template_url=template_url,
+                            govcloud_template_path=govcloud_template_path,
+                            govcloud_template_url=govcloud_template_url,
+                            bucket=bucket_full,
+                            prefix=prefix,
+                            version=version,
+                            error=f"GovCloud template validation failed: {e}",
+                        )
 
             # Generate headless template if requested
             if headless:
@@ -202,6 +264,8 @@ class PublishOperation:
                 template_url=template_url,
                 headless_template_path=headless_template_path,
                 headless_template_url=headless_template_url,
+                govcloud_template_path=govcloud_template_path,
+                govcloud_template_url=govcloud_template_url,
                 bucket=bucket_full,
                 prefix=prefix,
                 version=version,
@@ -275,12 +339,71 @@ class PublishOperation:
                 error=str(e),
             )
 
+    def transform_template_govcloud(
+        self,
+        source_template: str,
+        output_path: Optional[str] = None,
+        *,
+        verbose: bool = False,
+    ) -> TemplateTransformResult:
+        """Transform a template for GovCloud (CloudFront-free, API-Gateway hosting).
+
+        Unlike the headless transform, this KEEPS the full Web UI but removes the
+        ``AWS::CloudFront::*`` resources (which do not exist in GovCloud regions
+        and cause ``E3006`` errors) and forces ``WebUIHosting=APIGateway`` so the
+        UI is served as an S3 proxy on the REST API.
+
+        Args:
+            source_template: Path to the source CloudFormation YAML template.
+            output_path: Path to write the transformed template. Defaults to
+                appending ``-govcloud`` to the source filename.
+            verbose: If True, enable verbose logging.
+
+        Returns:
+            TemplateTransformResult with paths and status.
+        """
+        from idp_sdk._core.template_transform import GovCloudTemplateTransformer
+
+        if not os.path.exists(source_template):
+            return TemplateTransformResult(
+                success=False,
+                input_path=source_template,
+                error=f"Source template not found: {source_template}",
+            )
+
+        if not output_path:
+            base, ext = os.path.splitext(source_template)
+            output_path = f"{base}-govcloud{ext}"
+
+        try:
+            transformer = GovCloudTemplateTransformer(verbose=verbose)
+            success = transformer.transform(source_template, output_path)
+            if success:
+                return TemplateTransformResult(
+                    success=True,
+                    input_path=source_template,
+                    output_path=output_path,
+                )
+            return TemplateTransformResult(
+                success=False,
+                input_path=source_template,
+                output_path=output_path,
+                error="GovCloud template transformation failed validation",
+            )
+        except Exception as e:
+            return TemplateTransformResult(
+                success=False,
+                input_path=source_template,
+                error=str(e),
+            )
+
     def print_deployment_urls(
         self,
         template_url: str,
         region: str,
         *,
         headless_template_url: Optional[str] = None,
+        govcloud_template_url: Optional[str] = None,
         stack_name: str = "IDP",
     ) -> None:
         """Print deployment URLs and 1-click launch links.
@@ -289,6 +412,7 @@ class PublishOperation:
             template_url: S3 URL of the main template.
             region: AWS region.
             headless_template_url: S3 URL of the headless template (optional).
+            govcloud_template_url: S3 URL of the GovCloud template (optional).
             stack_name: Default stack name for launch URL.
         """
         if "us-gov" in region:
@@ -319,3 +443,15 @@ class PublishOperation:
             print(f"  {headless_template_url}")
             print("\n🚀 Headless 1-Click Launch:")
             print(f"  {headless_launch_url}")
+
+        if govcloud_template_url:
+            encoded_gc = quote(govcloud_template_url, safe=":/?#[]@!$&'()*+,;=")
+            gc_launch_url = (
+                f"https://{region}.console.{domain}/cloudformation/home?"
+                f"region={region}#/stacks/create/review?"
+                f"templateURL={encoded_gc}&stackName={stack_name}"
+            )
+            print("\n🏛️  GovCloud Template URL (CloudFront-free, API Gateway hosting):")
+            print(f"  {govcloud_template_url}")
+            print("\n🚀 GovCloud 1-Click Launch:")
+            print(f"  {gc_launch_url}")
