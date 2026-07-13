@@ -32,3 +32,8 @@ class TestS3UtilParsing:
         """Non-S3 URI raises ValueError."""
         with pytest.raises(ValueError):
             S3Util.s3_url_to_bucket_key("https://my-bucket/path/file.pdf")
+
+    def test_s3_url_to_bucket_key_no_key(self):
+        """Bucket-only URI (no key) raises ValueError, as before this change."""
+        with pytest.raises(ValueError):
+            S3Util.s3_url_to_bucket_key("s3://my-bucket")

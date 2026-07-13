@@ -6,8 +6,10 @@ Utility functions for working with Amazon S3.
 """
 
 import json
+from typing import Any, Dict, Optional, Tuple
+
 import boto3
-from typing import Dict, Any, Tuple, Optional, Union
+
 from idp_common.utils import parse_s3_uri
 
 
