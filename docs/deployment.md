@@ -194,7 +194,8 @@ idp-cli publish --source-dir . --region <region> [--bucket-basename <bucket>] [-
 - `--verbose` or `-v`: (Optional) Enable detailed error output for debugging build failures
 - `--clean-build`: (Optional) Force a clean rebuild of all artifacts
 - `--max-workers N`: (Optional) Number of parallel build workers
-- `--headless`: (Optional) Also generate a **headless (no-UI) template variant**. Useful for API-only / pipeline integrations in Commercial regions and **required** for GovCloud deployments. See [Headless Deployment](./headless-deployment.md).
+- `--headless`: (Optional) Also generate a **headless (no-UI) template variant**. Useful for API-only / pipeline integrations. See [Headless Deployment](./headless-deployment.md).
+- `--govcloud`: (Optional) Also generate a **GovCloud template variant** that keeps the full Web UI: removes all `AWS::CloudFront::*` resources and Lambda Function URLs (unavailable in GovCloud) and forces API Gateway UI hosting. Mutually exclusive with `--headless`. See [GovCloud Deployment](./govcloud-deployment.md).
 
 **Example:**
 

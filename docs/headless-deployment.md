@@ -16,7 +16,7 @@ Headless is **not specific to GovCloud**. It is available in **any supported reg
 - **API-only / pipeline integrations** — you drive IDP from `idp-cli`, the `idp-sdk`, another application, or direct S3 uploads and don't need the Web UI.
 - **Policy / compliance constraints** — your environment restricts services the UI depends on (Cognito, CloudFront, AppSync, or WAF WebACL for CloudFront).
 - **Cost optimization** — remove UI-adjacent resources when they won't be used.
-- **GovCloud** — headless is **required** in AWS GovCloud regions (`us-gov-*`) because the UI-layer services (CloudFront, AppSync, Cognito, WAF for CloudFront) are not available there. See also [GovCloud Deployment](./govcloud-deployment.md) for GovCloud-specific considerations.
+- **GovCloud, API-only** — headless is one of two GovCloud deployment paths. It is **no longer required** there: `idp-cli deploy --govcloud` keeps the full Web UI (served by API Gateway instead of CloudFront). Choose headless in GovCloud only when you don't want the UI. See [GovCloud Deployment](./govcloud-deployment.md).
 
 > **If you want the Web UI but cannot use CloudFront** (for example, private-network / VPC-only requirements in a Commercial region), use [API Gateway Hosting](./apigateway-hosting.md) instead — API Gateway hosting keeps the full UI while serving it from the existing REST API, within a VPC when combined with `ApiGatewayVisibility=PRIVATE`.
 
@@ -317,7 +317,8 @@ The following features depend on the UI/AppSync/Cognito stack and are therefore 
 | You want the full Web UI, deployed with defaults | **Standard** (CloudFront + CloudFormation) |
 | You want the full Web UI but cannot use CloudFront (private network / VPC-only) | **[API Gateway Hosting](./apigateway-hosting.md)** |
 | You only need the backend (API / pipeline), no UI | **Headless** (this guide) |
-| Deploying to AWS **GovCloud** | **Headless** (required) + see [GovCloud Deployment](./govcloud-deployment.md) |
+| Deploying to AWS **GovCloud** with the Web UI | **`--govcloud`** — see [GovCloud Deployment](./govcloud-deployment.md) |
+| Deploying to AWS **GovCloud**, API-only | **Headless** + see [GovCloud Deployment](./govcloud-deployment.md) |
 | Organization prohibits CloudFront / Cognito / AppSync / WAF | **Headless** |
 
 ## Best Practices

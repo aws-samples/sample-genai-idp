@@ -8,6 +8,12 @@ This document describes the architectural differences between the standard (comm
 
 For deployment instructions, see [GovCloud Deployment Guide](./govcloud-deployment.md).
 
+> **Scope**: the "Services Removed" and "Limitations" sections below describe the
+> **headless** (`--headless`) GovCloud variant. The **`--govcloud`** variant keeps
+> the full Web UI (Cognito, REST API, WAF, chat, Test Studio, knowledge base) and
+> removes only CloudFront and Lambda Function URLs — see
+> [Keeping the Web UI in GovCloud](./govcloud-deployment.md#keeping-the-web-ui-in-govcloud---govcloud).
+
 ## Architecture Comparison
 
 ### Standard AWS Deployment
@@ -89,7 +95,7 @@ The following services are automatically removed from the GovCloud template:
 
 ## Core Services Retained
 
-The following essential services remain available in all [deployment packages](./govcloud-deployment.md#deployment-packages):
+The following essential services remain available in all [deployment options](./govcloud-deployment.md):
 
 ### Document Processing
 
@@ -146,6 +152,6 @@ The following essential services remain available in all [deployment packages](.
 
 ## Related Documentation
 
-- [GovCloud Deployment Guide](./govcloud-deployment.md) — prerequisites, deployment packages, and deploy commands
+- [GovCloud Deployment Guide](./govcloud-deployment.md) — prerequisites, deployment options, and deploy commands
 - [Batch Jobs REST API](./govcloud-batch-api.md) — API reference, authentication, and bastion tunnel setup
 - [GovCloud Operations](./govcloud-operations.md) — monitoring, troubleshooting, and best practices

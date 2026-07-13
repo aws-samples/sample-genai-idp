@@ -1220,7 +1220,17 @@ if result.success:
     print("Standard  :", result.template_url)
     print("Headless  :", result.headless_template_url)
 
-# Build for GovCloud (headless is required — GovCloud config defaults auto-applied)
+# Build for GovCloud WITH the Web UI (govcloud=True removes CloudFront, keeps the UI)
+result = client.publish.build(
+    source_dir=".",
+    region="us-gov-west-1",
+    govcloud=True,
+)
+if result.success:
+    print("GovCloud  :", result.govcloud_template_url)
+
+# Or build a headless (no-UI) variant for GovCloud (GovCloud config
+# defaults — ARN partitions, GovCloud preset — auto-applied for us-gov-*)
 result = client.publish.build(
     source_dir=".",
     region="us-gov-west-1",
@@ -1311,7 +1321,7 @@ deploy_result = client.stack.deploy(
 print("Deployed:", deploy_result.stack_name, deploy_result.status)
 ```
 
-For GovCloud, use `region="us-gov-west-1"` — headless mode is required and GovCloud configuration defaults are applied automatically.
+For GovCloud, use `region="us-gov-west-1"` with either `govcloud=True` (full Web UI, CloudFront removed) or `headless=True` (no UI). See the [GovCloud Deployment Guide](./govcloud-deployment.md).
 
 ---
 
