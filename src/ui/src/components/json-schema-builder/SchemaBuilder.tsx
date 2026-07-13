@@ -4,6 +4,7 @@ import {
   SpaceBetween,
   Header,
   Button,
+  ButtonDropdown,
   Box,
   Alert,
   ColumnLayout,
@@ -13,6 +14,7 @@ import {
   Select,
   Textarea,
 } from '@cloudscape-design/components';
+import type { InputProps } from '@cloudscape-design/components';
 import { useSchemaDesigner } from '../../hooks/useSchemaDesigner';
 import { useSchemaValidation } from '../../hooks/useSchemaValidation';
 import { useDebounce } from '../../hooks/useDebounce';
@@ -197,7 +199,13 @@ const SchemaBuilder = ({
     }
   };
 
-  const handleConfirmAddAttribute = (): void => {
+  // Ref to the Add Attribute name input so "Add another" can refocus it.
+  const addAttributeNameRef = useRef<InputProps.Ref>(null);
+
+  // Add the attribute currently described in the modal. When `keepOpen` is true,
+  // the modal stays open with the form reset and focus returned to the name field
+  // ("Save and Add Another") so multiple attributes can be added in a row.
+  const handleConfirmAddAttribute = (keepOpen = false): void => {
     if (newAttributeName.trim() && newAttributeType.value && selectedClassId) {
       const attrName = newAttributeName.trim();
       addAttribute(selectedClassId, attrName, newAttributeType.value);
@@ -224,11 +232,18 @@ const SchemaBuilder = ({
         updateAttribute(selectedClassId, attrName, updates);
       }
 
+      // Reset the form for the next entry.
       setNewAttributeName('');
       setNewAttributeType({ label: 'String', value: 'string' });
       setNewAttributeDescription('');
       setNewAttributeReferenceClass(null);
-      setShowAddAttributeModal(false);
+
+      if (keepOpen) {
+        // Keep the modal open and return focus to the name field for fast entry.
+        setTimeout(() => addAttributeNameRef.current?.focus(), 0);
+      } else {
+        setShowAddAttributeModal(false);
+      }
     }
   };
 
@@ -254,6 +269,42 @@ const SchemaBuilder = ({
       setShowEditClassModal(false);
     }
   };
+
+  // Download a schema array as a pretty-printed JSON file.
+  const downloadSchemaJson = (schema: unknown, filename: string): void => {
+    const blob = new Blob([JSON.stringify(schema, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Export all document types (current behavior).
+  const handleExportAll = (): void => {
+    const schema = exportSchema();
+    if (schema) {
+      downloadSchemaJson(schema, `schema-${Date.now()}.json`);
+    }
+  };
+
+  // Export only the currently-selected document type (plus its referenced shared
+  // classes). Selected class must be a document type to be an exportable unit.
+  const handleExportSelected = (): void => {
+    const cls = getSelectedClass();
+    if (!cls) return;
+    const schema = exportSchema([cls.name as string]);
+    if (schema) {
+      const safeName = String(cls.name).replace(/[^a-zA-Z0-9._-]/g, '_');
+      downloadSchemaJson(schema, `schema-${safeName}-${Date.now()}.json`);
+    }
+  };
+
+  // Whether the current selection is a document type (only doc types export cleanly
+  // as a standalone schema; shared classes are exported via the doc types that use them).
+  const selectedClassForExport = getSelectedClass();
+  const selectedIsDocType = Boolean(selectedClassForExport && selectedClassForExport[X_AWS_IDP_DOCUMENT_TYPE]);
 
   const handleWipeAll = (): void => {
     setShowWipeAllModal(true);
@@ -365,22 +416,27 @@ const SchemaBuilder = ({
                       <Button onClick={() => setShowPreview(!showPreview)} iconName={showPreview ? 'view-vertical' : 'view-horizontal'}>
                         {showPreview ? 'Hide' : 'Show'} Preview
                       </Button>
-                      <Button
-                        onClick={() => {
-                          const schema = exportSchema();
-                          const blob = new Blob([JSON.stringify(schema, null, 2)], { type: 'application/json' });
-                          const url = URL.createObjectURL(blob);
-                          const a = document.createElement('a');
-                          a.href = url;
-                          a.download = `schema-${Date.now()}.json`;
-                          a.click();
-                          URL.revokeObjectURL(url);
+                      <ButtonDropdown
+                        items={[
+                          { id: 'export-all', text: 'Export all', iconName: 'download' },
+                          {
+                            id: 'export-selected',
+                            text: selectedClassForExport ? `Export "${selectedClassForExport.name}"` : 'Export selected',
+                            iconName: 'download',
+                            disabled: !selectedIsDocType,
+                            disabledReason: selectedClassForExport
+                              ? 'Only document types export as a standalone schema. Select a document type (shared classes are included via the document types that reference them).'
+                              : `Select a ${typeLabel} type to export it on its own.`,
+                          },
+                        ]}
+                        onItemClick={({ detail }) => {
+                          if (detail.id === 'export-all') handleExportAll();
+                          else if (detail.id === 'export-selected') handleExportSelected();
                         }}
-                        iconName="download"
                         disabled={classes.length === 0}
                       >
                         Export
-                      </Button>
+                      </ButtonDropdown>
                       <Button onClick={handleWipeAll} iconName="remove" disabled={classes.length === 0}>
                         Wipe All
                       </Button>
@@ -850,7 +906,10 @@ const SchemaBuilder = ({
                 >
                   Cancel
                 </Button>
-                <Button variant="primary" onClick={handleConfirmAddAttribute} disabled={!newAttributeName.trim()}>
+                <Button variant="normal" onClick={() => handleConfirmAddAttribute(true)} disabled={!newAttributeName.trim()}>
+                  Add another
+                </Button>
+                <Button variant="primary" onClick={() => handleConfirmAddAttribute(false)} disabled={!newAttributeName.trim()}>
                   {isRuleSchema ? 'Add Rule' : 'Add Attribute'}
                 </Button>
               </SpaceBetween>
@@ -863,6 +922,7 @@ const SchemaBuilder = ({
               description={isRuleSchema ? 'The rule name' : 'The field name to extract from documents'}
             >
               <Input
+                ref={addAttributeNameRef}
                 value={newAttributeName}
                 onChange={({ detail }) => setNewAttributeName(detail.value)}
                 placeholder={isRuleSchema ? 'e.g., checkCompliance, validateSafety' : 'e.g., invoiceNumber, customerName, total'}
