@@ -100,14 +100,25 @@ class TestSaveReportingData:
         assert bucket == "test-bucket"
         assert key == "path/to/file.json"
 
-        # Test S3 URI with leading slash in key
+        # Key containing '#' must not be truncated (urlparse treated '#' as a
+        # URL fragment delimiter and silently dropped the rest of the key)
+        bucket, key = reporter._parse_s3_uri("s3://test-bucket/path/file #99.json")
+        assert bucket == "test-bucket"
+        assert key == "path/file #99.json"
+
+        # A double slash now denotes a key that genuinely starts with '/'
+        # (previously lstrip'd away, which made the key unretrievable)
         bucket, key = reporter._parse_s3_uri("s3://test-bucket//path/to/file.json")
         assert bucket == "test-bucket"
-        assert key == "path/to/file.json"
+        assert key == "/path/to/file.json"
 
         # Test invalid S3 URI
         with pytest.raises(ValueError):
             reporter._parse_s3_uri("http://test-bucket/path/to/file.json")
+
+        # Bucket-only URI (no key) raises rather than returning an empty key
+        with pytest.raises(ValueError):
+            reporter._parse_s3_uri("s3://test-bucket")
 
     def test_save_with_empty_data_to_save(
         self, mock_s3_client, document_with_evaluation_uri

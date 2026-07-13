@@ -6,9 +6,11 @@ Utility functions for working with Amazon S3.
 """
 
 import json
+from typing import Any, Dict, Optional, Tuple
+
 import boto3
-from typing import Dict, Any, Tuple, Optional, Union
-from urllib.parse import urlparse
+
+from idp_common.utils import parse_s3_uri
 
 
 class S3Util:
@@ -162,16 +164,5 @@ class S3Util:
         Raises:
             ValueError: If the URL is not a valid S3 URL
         """
-        if not s3_url.startswith("s3://"):
-            raise ValueError(f"Invalid S3 URL format: {s3_url}")
-
-        parts = s3_url[5:].split("/", 1)
-        if len(parts) != 2:
-            raise ValueError(f"Invalid S3 URI format: {s3_url}")
-
-        parsed = urlparse(s3_url)
-        bucket = parsed.netloc
-        # Remove leading slash from key
-        key = parsed.path.lstrip("/")
-
+        bucket, key = parse_s3_uri(s3_url)
         return bucket, key
