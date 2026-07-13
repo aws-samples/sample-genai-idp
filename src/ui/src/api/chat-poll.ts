@@ -14,11 +14,20 @@
 // Lambda Function URL is involved.
 //
 // Flow:
-//   1. Caller sends the chat mutation (sendAgentChatMessage /
+//   1. Caller captures a BASELINE of the assistant messages already in the
+//      session (fetchAssistantKeys) — clock-independent.
+//   2. Caller sends the chat mutation (sendAgentChatMessage /
 //      sendChatDocumentMessage) — this async-invokes the processor.
-//   2. pollForAssistantReply() polls getChatMessages until a NEW assistant
-//      message (newer than the just-sent user prompt) appears with
-//      isProcessing=false, then returns it. Times out after maxWaitMs.
+//   3. pollForAssistantReply() polls getChatMessages until an assistant message
+//      NOT in the baseline appears with isProcessing=false, then returns it.
+//      Times out after maxWaitMs. A non-transient (auth) error is surfaced
+//      immediately rather than swallowed.
+//
+// Why baseline keys instead of a timestamp bound: the user-prompt timestamp is
+// a CLIENT wall-clock value while the assistant timestamp is written with the
+// SERVER wall-clock. Comparing them is unsafe under clock skew (a fast client
+// clock would filter out every real reply). Diffing against the set of
+// pre-existing assistant messages avoids any cross-clock comparison.
 //
 
 import { getChatMessages } from '../graphql/generated';
@@ -35,31 +44,28 @@ export interface PolledChatMessage {
 
 /**
  * Structural type for the REST client's `.graphql()` — kept loose (`any` args)
- * so the app's precisely-overloaded RestGraphqlClient is assignable here. The
- * response is narrowed to what we read (`data.getChatMessages`).
+ * so the app's precisely-overloaded RestGraphqlClient is assignable here.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type GraphqlClient = { graphql: (args: any) => Promise<any> };
 
-interface PollOptions {
-  /** Amplify-compatible client exposing `.graphql({ query, variables })`. */
-  client: GraphqlClient;
-  sessionId: string;
-  /**
-   * ISO-8601 timestamp of the user prompt just sent. Only assistant messages
-   * strictly newer than this are considered the reply to this turn (so a stale
-   * final message from a previous turn is not mistaken for the new one).
-   */
-  sinceTimestamp: string;
-  /** Poll interval in ms (default 2000). */
-  intervalMs?: number;
-  /** Max total wait in ms before giving up (default 300000 = 5 min). */
-  maxWaitMs?: number;
-  /** Optional AbortSignal to cancel polling (e.g. component unmount / cancel). */
-  signal?: AbortSignal;
-}
-
 const ASSISTANT_ROLE = 'assistant';
+
+/** Stable identity of an assistant message for baseline-diffing. */
+const assistantKey = (m: PolledChatMessage): string => `${m.timestamp}|${m.content?.length ?? 0}`;
+
+/** True for errors that must NOT be retried (auth/authorization failures). */
+const isAuthError = (err: unknown): boolean => {
+  const e = err as { errors?: { errorType?: string; message?: string }[]; message?: string };
+  const parts: string[] = [];
+  if (e?.message) parts.push(e.message);
+  for (const ge of e?.errors ?? []) {
+    if (ge?.errorType) parts.push(ge.errorType);
+    if (ge?.message) parts.push(ge.message);
+  }
+  const blob = parts.join(' ').toLowerCase();
+  return blob.includes('unauthorized') || blob.includes('forbidden') || blob.includes('access denied');
+};
 
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -78,14 +84,54 @@ const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
     );
   });
 
+const fetchMessages = async (client: GraphqlClient, sessionId: string): Promise<PolledChatMessage[]> => {
+  const response = await client.graphql({ query: getChatMessages, variables: { sessionId } });
+  return (response.data?.getChatMessages as PolledChatMessage[] | undefined) ?? [];
+};
+
 /**
- * Poll getChatMessages until the assistant's final reply to this turn is
- * persisted, and return it. Resolves with `null` on timeout.
+ * Snapshot the keys of assistant messages already present in the session, to
+ * use as the poll baseline. Returns an empty set if the read fails (worst case
+ * the poll may match a pre-existing reply, but the fresh reply is newer and the
+ * newest-first sort prefers it).
+ */
+export const fetchAssistantKeys = async (client: GraphqlClient, sessionId: string): Promise<Set<string>> => {
+  try {
+    const messages = await fetchMessages(client, sessionId);
+    return new Set(messages.filter((m) => m.role === ASSISTANT_ROLE).map(assistantKey));
+  } catch {
+    return new Set<string>();
+  }
+};
+
+interface PollOptions {
+  /** Amplify-compatible client exposing `.graphql({ query, variables })`. */
+  client: GraphqlClient;
+  sessionId: string;
+  /**
+   * Keys of assistant messages that existed BEFORE this turn was sent (from
+   * fetchAssistantKeys). The reply is the first assistant message NOT in this
+   * set. Clock-independent — no client/server timestamp comparison.
+   */
+  knownAssistantKeys: Set<string>;
+  /** Poll interval in ms (default 2000). */
+  intervalMs?: number;
+  /** Max total wait in ms before giving up (default 300000 = 5 min). */
+  maxWaitMs?: number;
+  /** Optional AbortSignal to cancel polling (component unmount / session switch). */
+  signal?: AbortSignal;
+}
+
+/**
+ * Poll getChatMessages until the assistant's reply to this turn (an assistant
+ * message not in `knownAssistantKeys`, no longer processing) is persisted, and
+ * return it. Resolves with `null` on timeout. Throws on abort or on a
+ * non-transient auth error.
  */
 export const pollForAssistantReply = async ({
   client,
   sessionId,
-  sinceTimestamp,
+  knownAssistantKeys,
   intervalMs = 2000,
   maxWaitMs = 300000,
   signal,
@@ -97,22 +143,18 @@ export const pollForAssistantReply = async ({
 
     let messages: PolledChatMessage[] = [];
     try {
-      const response = await client.graphql({
-        query: getChatMessages,
-        variables: { sessionId },
-      });
-      messages = (response.data?.getChatMessages as PolledChatMessage[] | undefined) ?? [];
-    } catch {
-      // Transient read error — keep polling until the deadline.
+      messages = await fetchMessages(client, sessionId);
+    } catch (err) {
+      // Surface auth failures immediately (e.g. session-ownership denial) —
+      // retrying can never succeed and would waste the full timeout. Other
+      // (transient) read errors keep polling until the deadline.
+      if (isAuthError(err)) throw err;
       messages = [];
     }
 
-    // The newest assistant message strictly newer than the sent prompt, and no
-    // longer processing, is this turn's reply.
+    // The newest assistant message that is new this turn and finished.
     const reply = messages
-      .filter(
-        (m) => m.role === ASSISTANT_ROLE && typeof m.timestamp === 'string' && m.timestamp > sinceTimestamp && m.isProcessing !== true,
-      )
+      .filter((m) => m.role === ASSISTANT_ROLE && m.isProcessing !== true && !knownAssistantKeys.has(assistantKey(m)))
       .sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1))[0];
 
     if (reply) return reply;

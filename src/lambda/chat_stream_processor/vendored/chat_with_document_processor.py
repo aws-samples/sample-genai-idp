@@ -89,10 +89,16 @@ def set_sink(sink) -> None:  # noqa: ANN001
 # In commercial regions the browser streams the answer live over the Lambda
 # Function URL, and this processor never needs to persist chat messages. In
 # GovCloud (no Lambda Function URLs) the UI instead POLLS getChatMessages, so
-# the final assistant message must be written to the ChatMessages table. We
-# persist BOTH the user prompt and the final assistant reply here, mirroring the
-# agent-chat processor. This is a no-op when CHAT_MESSAGES_TABLE is unset
-# (streaming/commercial builds), so it adds nothing to the streaming path.
+# the final assistant message must be written to the ChatMessages table.
+#
+# IMPORTANT: this is gated on there being NO active emission sink. The streaming
+# endpoint (chat_stream_processor) installs a sink via set_sink() before calling
+# the handler; the async/poll path (send_chat_document_message_resolver -> Event
+# invoke) does NOT. So persistence runs ONLY on the non-streaming path — commercial
+# streaming deployments keep their prior behavior (no server-side doc-chat message
+# storage). We gate on the sink rather than CHAT_MESSAGES_TABLE because BOTH the
+# streaming and standalone functions have that env var set, so it alone would not
+# distinguish the two paths.
 _CHAT_MESSAGES_TABLE = os.environ.get("CHAT_MESSAGES_TABLE") or ""
 _DATA_RETENTION_DAYS = int(os.environ.get("DATA_RETENTION_DAYS", "30"))
 
@@ -103,7 +109,12 @@ def _persist_chat_messages(session_id: str, prompt: str, assistant_text: str) ->
     Keyed by ``PK=sessionId`` / ``SK=<iso timestamp>`` — the same shape
     getChatMessages queries and returns in chronological order. Best-effort:
     never raises (a persistence failure must not fail the chat turn).
+
+    No-op when an emission sink is active (i.e. running behind the streaming
+    endpoint), so only the non-streaming/poll path persists.
     """
+    if _active_sink is not None:
+        return
     if not _CHAT_MESSAGES_TABLE or not session_id:
         return
     try:

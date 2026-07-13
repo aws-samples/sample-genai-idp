@@ -11,7 +11,7 @@ import { sendChatDocumentMessage, onChatDocumentMessageUpdate } from '../../grap
 import useConfiguration from '../../hooks/use-configuration';
 import useCurrentSessionCreds from '../../hooks/use-current-session-creds';
 import { streamChat, type StreamCredentials } from '../../api/stream-client';
-import { pollForAssistantReply } from '../../api/chat-poll';
+import { pollForAssistantReply, fetchAssistantKeys } from '../../api/chat-poll';
 import { streamUrl } from '../../aws-exports';
 import SafeMarkdown from '../common/SafeMarkdown';
 import './ChatPanel.css';
@@ -153,6 +153,9 @@ const ChatPanel = ({ objectKey, configVersion = 'default' }: ChatPanelProps): Re
 
   const textareaRef = useRef<HTMLInputElement>(null);
   const rowIdRef = useRef(0);
+  // Aborts an in-flight non-streaming poll on document switch / unmount so it
+  // does not keep running (up to its timeout) against a stale session.
+  const pollAbortRef = useRef<AbortController | null>(null);
 
   // Cognito Identity Pool credentials for SigV4-signing the streaming request
   // (httpapi transport only). Unused under the appsync transport.
@@ -162,13 +165,23 @@ const ChatPanel = ({ objectKey, configVersion = 'default' }: ChatPanelProps): Re
   // when the document changes so we can't cross-contaminate sessions.
   const [sessionId, setSessionId] = useState<string>(() => generateSessionId());
   useEffect(() => {
-    // Fresh document → fresh session + clear chat history.
+    // Fresh document → fresh session + clear chat history. Abort any poll from
+    // the previous document so it can't apply a stale answer.
+    pollAbortRef.current?.abort();
     setSessionId(generateSessionId());
     setChatMessages([]);
     setCurrentStatus(null);
     setIsWaiting(false);
     setError(null);
   }, [objectKey]);
+
+  // Abort any in-flight poll on unmount.
+  useEffect(
+    () => () => {
+      pollAbortRef.current?.abort();
+    },
+    [],
+  );
 
   // Fetch the config for this document's version. We use this for two things:
   //   1) Populate the model-selector dropdown from schema.chat.properties.model.enum
@@ -398,7 +411,11 @@ const ChatPanel = ({ objectKey, configVersion = 'default' }: ChatPanelProps): Re
         // getChatMessages for the answer. No live token streaming — the loader
         // bubble stays until the full answer lands, delivered via a synthetic
         // assistant_final event so the existing handleUpdate path renders it.
-        const promptTs = new Date().toISOString();
+        // Baseline the existing assistant messages BEFORE sending so the poll
+        // matches only the new reply (clock-independent).
+        const knownAssistantKeys = await fetchAssistantKeys(client, sessionId);
+        pollAbortRef.current?.abort();
+        pollAbortRef.current = new AbortController();
         setCurrentStatus({ status: 'CALLING_MODEL', label: defaultStatusLabel('CALLING_MODEL') });
         await client.graphql({
           query: sendChatDocumentMessage,
@@ -410,7 +427,12 @@ const ChatPanel = ({ objectKey, configVersion = 'default' }: ChatPanelProps): Re
             modelId: effectiveModelId,
           },
         });
-        const reply = await pollForAssistantReply({ client, sessionId, sinceTimestamp: promptTs });
+        const reply = await pollForAssistantReply({
+          client,
+          sessionId,
+          knownAssistantKeys,
+          signal: pollAbortRef.current.signal,
+        });
         if (reply) {
           handleUpdate({
             sessionId,
@@ -437,6 +459,8 @@ const ChatPanel = ({ objectKey, configVersion = 'default' }: ChatPanelProps): Re
         });
       }
     } catch (err) {
+      // A cancelled/aborted poll (document switch, unmount) is not a user error.
+      if ((err as { name?: string })?.name === 'AbortError') return;
       // Extract a useful error message.
       const gqlErr = err as { errors?: { message: string; errorType?: string }[]; message?: string };
       let errorMessage = 'Failed to send message. Please try again.';

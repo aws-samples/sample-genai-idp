@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, it, expect, vi } from 'vitest';
 
-import { pollForAssistantReply } from '../chat-poll';
+import { pollForAssistantReply, fetchAssistantKeys } from '../chat-poll';
 
 // A fake graphql client whose getChatMessages returns a scripted sequence of
 // responses across successive poll calls.
@@ -17,12 +17,33 @@ const clientReturning = (sequence: unknown[][]) => {
   };
 };
 
-const PROMPT_TS = '2026-07-13T10:00:00.000Z';
+const noKeys = new Set<string>();
+
+describe('fetchAssistantKeys', () => {
+  it('captures a baseline of existing assistant messages', async () => {
+    const client = clientReturning([
+      [
+        { role: 'user', content: 'hi', timestamp: '2026-07-13T10:00:00.000Z' },
+        { role: 'assistant', content: 'prior answer', timestamp: '2026-07-13T09:59:00.000Z', isProcessing: false },
+      ],
+    ]);
+    const keys = await fetchAssistantKeys(client, 's1');
+    expect(keys.size).toBe(1);
+    // A message with the same key would be treated as "already seen".
+    expect(keys.has('2026-07-13T09:59:00.000Z|12')).toBe(true);
+  });
+
+  it('returns an empty set if the read fails', async () => {
+    const client = { graphql: vi.fn(async () => Promise.reject(new Error('boom'))) };
+    const keys = await fetchAssistantKeys(client, 's1');
+    expect(keys.size).toBe(0);
+  });
+});
 
 describe('pollForAssistantReply', () => {
-  it('returns the assistant reply once it appears newer than the prompt', async () => {
+  it('returns the new assistant reply not present in the baseline', async () => {
     const client = clientReturning([
-      // 1st poll: only the user message (no assistant yet).
+      // 1st poll: only the user message.
       [{ role: 'user', content: 'hi', timestamp: '2026-07-13T10:00:00.100Z', isProcessing: false }],
       // 2nd poll: assistant final reply present.
       [
@@ -34,30 +55,27 @@ describe('pollForAssistantReply', () => {
     const reply = await pollForAssistantReply({
       client,
       sessionId: 's1',
-      sinceTimestamp: PROMPT_TS,
-      intervalMs: 1, // keep the test fast
+      knownAssistantKeys: noKeys,
+      intervalMs: 1,
       maxWaitMs: 5000,
     });
 
     expect(reply?.content).toBe('hello!');
-    expect(reply?.role).toBe('assistant');
     expect(client.graphql).toHaveBeenCalledTimes(2);
   });
 
-  it('ignores a stale assistant message older than the prompt', async () => {
+  it('ignores a pre-existing (baselined) assistant message and waits for the new one', async () => {
+    const stale = { role: 'assistant', content: 'old answer', timestamp: '2026-07-13T09:59:00.000Z', isProcessing: false };
+    const known = new Set<string>([`${stale.timestamp}|${stale.content.length}`]);
     const client = clientReturning([
-      // Only a stale reply from a previous turn exists, then a fresh one lands.
-      [{ role: 'assistant', content: 'old answer', timestamp: '2026-07-13T09:59:00.000Z', isProcessing: false }],
-      [
-        { role: 'assistant', content: 'old answer', timestamp: '2026-07-13T09:59:00.000Z', isProcessing: false },
-        { role: 'assistant', content: 'new answer', timestamp: '2026-07-13T10:00:03.000Z', isProcessing: false },
-      ],
+      [stale], // only the baselined reply exists — must NOT be returned
+      [stale, { role: 'assistant', content: 'new answer', timestamp: '2026-07-13T10:00:03.000Z', isProcessing: false }],
     ]);
 
     const reply = await pollForAssistantReply({
       client,
       sessionId: 's1',
-      sinceTimestamp: PROMPT_TS,
+      knownAssistantKeys: known,
       intervalMs: 1,
       maxWaitMs: 5000,
     });
@@ -74,7 +92,7 @@ describe('pollForAssistantReply', () => {
     const reply = await pollForAssistantReply({
       client,
       sessionId: 's1',
-      sinceTimestamp: PROMPT_TS,
+      knownAssistantKeys: noKeys,
       intervalMs: 1,
       maxWaitMs: 5000,
     });
@@ -88,9 +106,9 @@ describe('pollForAssistantReply', () => {
     const reply = await pollForAssistantReply({
       client,
       sessionId: 's1',
-      sinceTimestamp: PROMPT_TS,
+      knownAssistantKeys: noKeys,
       intervalMs: 5,
-      maxWaitMs: 20, // force a quick timeout
+      maxWaitMs: 20,
     });
 
     expect(reply).toBeNull();
@@ -104,9 +122,7 @@ describe('pollForAssistantReply', () => {
         if (call === 1) throw new Error('network blip');
         return {
           data: {
-            getChatMessages: [
-              { role: 'assistant', content: 'recovered', timestamp: '2026-07-13T10:00:06.000Z', isProcessing: false },
-            ],
+            getChatMessages: [{ role: 'assistant', content: 'recovered', timestamp: '2026-07-13T10:00:06.000Z', isProcessing: false }],
           },
         };
       }),
@@ -115,12 +131,47 @@ describe('pollForAssistantReply', () => {
     const reply = await pollForAssistantReply({
       client,
       sessionId: 's1',
-      sinceTimestamp: PROMPT_TS,
+      knownAssistantKeys: noKeys,
       intervalMs: 1,
       maxWaitMs: 5000,
     });
 
     expect(reply?.content).toBe('recovered');
     expect(client.graphql).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces an auth/authorization error immediately instead of polling to timeout', async () => {
+    const client = {
+      graphql: vi.fn(async () => Promise.reject({ errors: [{ errorType: 'Unauthorized', message: 'session not found' }] })),
+    };
+
+    await expect(
+      pollForAssistantReply({
+        client,
+        sessionId: 's1',
+        knownAssistantKeys: noKeys,
+        intervalMs: 1,
+        maxWaitMs: 5000,
+      }),
+    ).rejects.toBeTruthy();
+    // Only one call — it did not retry the auth failure.
+    expect(client.graphql).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws AbortError when the signal is already aborted', async () => {
+    const client = clientReturning([[]]);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      pollForAssistantReply({
+        client,
+        sessionId: 's1',
+        knownAssistantKeys: noKeys,
+        intervalMs: 1,
+        maxWaitMs: 5000,
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
   });
 });
