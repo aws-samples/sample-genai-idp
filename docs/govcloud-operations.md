@@ -28,7 +28,7 @@ Alarms publish to an SNS topic — subscribe your team's email or pager to recei
 
 ### Log Groups
 
-All Workflow Lambda functions write to dedicated CloudWatch Log Groups with the naming convention `/{stack-name}-stack-PATTERN2STACK-{cfn-nested-stack-id}/lambda/{function}`. The functions for Pattern 2 are:
+All Workflow Lambda functions write to dedicated CloudWatch Log Groups with the naming convention `/{stack-name}-PATTERNSTACK-{cfn-nested-stack-id}/lambda/{function}`. The workflow functions are:
 ```
 OCRFunction, 
 ClassificationFunction, 

@@ -165,7 +165,7 @@ turns are supported (the UI polls for up to 5 minutes).
 ## Headless Deployment: `--headless`
 
 `--headless` removes the Web UI and everything that exists to serve it
-(AppSync/UI API resolvers, Cognito UI auth, WAF, agents, HITL, knowledge
+(UI REST API resolvers, Cognito UI auth, WAF, agents, HITL, knowledge
 base), keeping the full document-processing backend. See the
 [Headless Deployment Guide](./headless-deployment.md) for the general
 (non-GovCloud-specific) reference.
