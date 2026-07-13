@@ -4,6 +4,7 @@ mutation StartMultiDocDiscovery(
   $configVersion: String!
   $zipFileName: String
   $zipFileSize: Int
+  $saveMode: String
 ) {
   startMultiDocDiscovery(
     s3Bucket: $s3Bucket
@@ -11,6 +12,7 @@ mutation StartMultiDocDiscovery(
     configVersion: $configVersion
     zipFileName: $zipFileName
     zipFileSize: $zipFileSize
+    saveMode: $saveMode
   ) {
     jobId
     status
