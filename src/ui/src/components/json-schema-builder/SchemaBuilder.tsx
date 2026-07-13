@@ -642,6 +642,7 @@ const SchemaBuilder = ({
                       setSelectedClassId(classId);
                       setSelectedAttributeId(attributeName);
                     }}
+                    onAddAttribute={handleAddAttribute}
                     availableClasses={classes}
                     isRuleSchema={isRuleSchema}
                   />
@@ -703,7 +704,17 @@ const SchemaBuilder = ({
                 </>
               )}
 
-              {showPreview && <SchemaPreviewTabs classes={classes} selectedClassId={selectedClassId} exportedSchemas={currentSchema} />}
+              {showPreview && (
+                <SchemaPreviewTabs
+                  classes={classes}
+                  selectedClassId={selectedClassId}
+                  exportedSchemas={currentSchema}
+                  onSelectClass={(classId) => {
+                    setSelectedClassId(classId);
+                    setSelectedAttributeId(null);
+                  }}
+                />
+              )}
             </ColumnLayout>
           </Container>
         </div>
