@@ -79,6 +79,16 @@ class HeadlessTemplateTransformer:
             "CalculateCapacityResolverFunctionLogGroup",
             "VersionCheckResolverFunction",
             "VersionCheckResolverFunctionLogGroup",
+            # API-Gateway Web UI hosting (WebUIHosting=APIGateway). These only
+            # exist to serve the Web UI as an S3 proxy on the UI REST API and to
+            # register its Cognito OAuth callback URLs — meaningless in headless
+            # mode, and they reference removed resources (APIRESOLVERSTACK,
+            # UserPool, UserPoolClient, WebUIBucket), so strip them.
+            "WebUIProxyRole",
+            "WebUIClientOAuthUrls",
+            "WebUIClientOAuthUrlsFunction",
+            "WebUIClientOAuthUrlsRole",
+            "WebUIClientOAuthUrlsLogGroup",
         }
 
         self.auth_resources: Set[str] = {
@@ -665,17 +675,6 @@ class HeadlessTemplateTransformer:
         for func_name in functions_to_clean:
             if func_name in resources:
                 self._clean_tracking_function(resources, func_name)
-
-        # Clean ALB hosting nested stack parameters
-        if "ALBHOSTINGSTACK" in resources:
-            alb_stack_params = (
-                resources["ALBHOSTINGSTACK"].get("Properties", {}).get("Parameters", {})
-            )
-            if "WebUIBucketName" in alb_stack_params:
-                alb_stack_params["WebUIBucketName"] = ""
-                logger.debug(
-                    "Replaced WebUIBucketName with empty string in ALBHOSTINGSTACK"
-                )
 
         # Clean nested stack parameters (PATTERNSTACK)
         for stack_name in ["PATTERNSTACK"]:

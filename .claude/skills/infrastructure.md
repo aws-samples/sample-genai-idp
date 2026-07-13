@@ -6,10 +6,11 @@ The solution uses **nested CloudFormation stacks** via AWS SAM:
 ```
 template.yaml (Main Stack — ~349 KB)
 ├── patterns/unified/template.yaml (Unified Pattern — ~218 KB)
-├── nested/appsync/ (AppSync GraphQL API)
+├── nested/api-resolvers/ (REST API + resolver Lambdas; also serves the Web UI
+│                          as an S3 proxy when WebUIHosting=APIGateway — the
+│                          API-Gateway alternative to CloudFront)
 ├── nested/bedrockkb/ (Bedrock Knowledge Base)
 ├── nested/bda-lending-project/ (BDA resources)
-├── nested/alb-hosting/ (ALB alternative to CloudFront)
 └── nested/multi-doc-discovery/ (Discovery pipeline)
 ```
 

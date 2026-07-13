@@ -2747,9 +2747,6 @@ STDERR:
                 "nested/bedrockkb/src",
                 "nested/bedrockkb/template.yaml",
             ],
-            "nested/alb-hosting": [
-                "nested/alb-hosting/template.yaml",
-            ],
             "nested/multi-doc-discovery": [
                 LIB_DEPENDENCY,
                 "nested/multi-doc-discovery/docker_build_lambda",

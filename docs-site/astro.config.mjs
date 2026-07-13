@@ -38,7 +38,7 @@ export default defineConfig({
             { label: "Architecture", slug: "architecture" },
             { label: "Deployment", slug: "deployment" },
             { label: "Headless Deployment", slug: "headless-deployment" },
-            { label: "ALB Hosting", slug: "alb-hosting" },
+            { label: "API Gateway Hosting", slug: "apigateway-hosting" },
             { label: "Private Network Deployment", slug: "deployment-private-network" },
             { label: "VPC-Secured Mode", slug: "vpc-secured-mode" },
             { label: "Configuration", slug: "configuration" },

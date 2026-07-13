@@ -194,6 +194,36 @@ The CI/CD pipeline runs a comprehensive smoke test suite that validates all majo
 
 ---
 
+## Additional Deployment Test: API Gateway Web UI Hosting (VPC / PRIVATE)
+
+Separate from the shared-stack suite above (Steps 3–11, which run against ONE
+stack deployed with default hosting — CloudFront, no VPC), this test validates
+the **API Gateway Web UI hosting** option end-to-end **with VPC support**. It
+deploys a SECOND, throwaway IDP stack and tears it down afterward.
+
+**What it tests**:
+- `WebUIHosting=APIGateway` + `ApiGatewayVisibility=PRIVATE` + `DeployInVPC=true`
+- A self-contained test VPC (`scripts/sdlc/apigw-hosting-test-vpc.yaml`): 2
+  private subnets, a NAT gateway for egress, a Lambda SG, and the single
+  `execute-api` interface endpoint the private REST API requires.
+- The SPA is served as an S3 proxy on the private REST API; in-VPC Lambdas.
+- **Verification** (`validate_apigw_private_hosting`):
+  - The REST API `{stack}-api` has endpoint type **PRIVATE**.
+  - The stack's `ApplicationWebURL` output is the execute-api `/api` URL.
+  - (The endpoint itself is VPC-only, so it is validated structurally rather
+    than curled — CodeBuild is on a different network.)
+
+**Lifecycle**: creates the test VPC → creates per-stack IAM/boundary → deploys →
+validates → **always** tears down the IDP stack then the VPC (in a `finally`).
+
+**Gating**: runs by default; set `IDP_TEST_APIGW_VPC_HOSTING=false` to skip.
+**Implementation**: `deploy_and_test_apigw_vpc_hosting()` in
+`scripts/sdlc/codebuild_deployment.py`, invoked from `main()` after the
+shared-stack suite.
+**Duration**: ~20–30 minutes (full nested-stack create + teardown).
+
+---
+
 ## Test Studio Architecture
 
 ### Lazy Evaluation Design
