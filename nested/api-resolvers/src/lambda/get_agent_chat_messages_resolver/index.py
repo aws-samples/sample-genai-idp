@@ -62,6 +62,13 @@ dynamodb = boto3.resource("dynamodb")
 # Get environment variables
 CHAT_MESSAGES_TABLE = os.environ.get("CHAT_MESSAGES_TABLE")
 CHAT_SESSIONS_TABLE = os.environ.get("CHAT_SESSIONS_TABLE")
+# Document-chat sessions live in a separate table (PK=sessionId, ownerSub=<sub>)
+# rather than the agent ChatSessionsTable (PK=userId, SK=sessionId). This
+# resolver serves BOTH agent and document chat (the UI polls getChatMessages for
+# both in the non-streaming / GovCloud path), so ownership is verified against
+# whichever table registered the session. Optional: when unset, doc-chat
+# ownership simply isn't checked here (agent-chat behavior is unchanged).
+CHAT_DOCUMENT_SESSIONS_TABLE = os.environ.get("CHAT_DOCUMENT_SESSIONS_TABLE")
 
 # Feature flag: enforce that the calling Cognito user owns the session before
 # returning messages. Defaults to "true". An operator can set this to "false"
@@ -74,13 +81,38 @@ ENFORCE_CHAT_SESSION_OWNERSHIP = (
 )
 
 
-def _verify_session_ownership(session_id: str, user_id: str) -> bool:
-    """Return True if the given user owns the given chat session.
+def _owns_document_session(session_id: str, caller_sub: str) -> bool:
+    """Return True if caller_sub owns a DOCUMENT-chat session.
 
-    Looks up the session metadata in ChatSessionsTable (PK=userId, SK=sessionId).
-    If the session record does not exist for this user, ownership cannot be
-    established and access MUST be denied. If the sessions table is not
-    configured (early-deployment state), we log a warning and return True
+    Document-chat sessions are registered in CHAT_DOCUMENT_SESSIONS_TABLE
+    (PK=sessionId, ownerSub=<cognito sub>) by send_chat_document_message_resolver.
+    Matches against the Cognito ``sub`` specifically (that is what the doc-chat
+    resolver stores), not the username fallback used for the agent table.
+    """
+    if not CHAT_DOCUMENT_SESSIONS_TABLE or not caller_sub:
+        return False
+    try:
+        doc_sessions = dynamodb.Table(CHAT_DOCUMENT_SESSIONS_TABLE)
+        resp = doc_sessions.get_item(Key={"sessionId": session_id})
+        item = resp.get("Item")
+        return bool(item) and item.get("ownerSub") == caller_sub
+    except ClientError as e:
+        # Fail-closed for this table too.
+        logger.error(
+            f"Error verifying doc-chat session ownership for sub={caller_sub} "
+            f"session={session_id}: {e}"
+        )
+        return False
+
+
+def _verify_session_ownership(session_id: str, user_id: str, caller_sub: str) -> bool:
+    """Return True if the caller owns the given chat session.
+
+    Checks the agent ChatSessionsTable (PK=userId, SK=sessionId) first, then
+    falls back to the document-chat sessions table (keyed by sessionId with
+    ownerSub). If the session exists in neither for this caller, ownership
+    cannot be established and access MUST be denied. If the agent sessions table
+    is not configured (early-deployment state), we log a warning and return True
     to preserve functionality — operators are expected to set CHAT_SESSIONS_TABLE.
     """
     if not CHAT_SESSIONS_TABLE:
@@ -96,7 +128,8 @@ def _verify_session_ownership(session_id: str, user_id: str) -> bool:
         response = sessions_table.get_item(
             Key={"userId": user_id, "sessionId": session_id}
         )
-        return "Item" in response
+        if "Item" in response:
+            return True
     except ClientError as e:
         # Fail-closed: on any DynamoDB error during ownership check, deny access.
         logger.error(
@@ -104,6 +137,10 @@ def _verify_session_ownership(session_id: str, user_id: str) -> bool:
             f"session={session_id}: {e}"
         )
         return False
+
+    # Not an agent-chat session for this user — it may be a document-chat
+    # session (different table / key), which this resolver also serves.
+    return _owns_document_session(session_id, caller_sub)
 
 
 def handler(event, context):
@@ -135,6 +172,9 @@ def handler(event, context):
         # Get user identity from context for security
         identity = event.get("identity", {})
         user_id = identity.get("username") or identity.get("sub") or "anonymous"
+        # The Cognito sub specifically — document-chat sessions store ownerSub=sub
+        # (the agent table keys on username||sub, hence both are tracked).
+        caller_sub = identity.get("sub") or ""
 
         logger.info(
             f"Getting agent chat messages for session {session_id} (user: {user_id})"
@@ -152,7 +192,7 @@ def handler(event, context):
                     "identity in event.identity (username/sub both absent)."
                 )
                 raise Exception("Unauthorized: caller identity not available.")
-            if not _verify_session_ownership(session_id, user_id):
+            if not _verify_session_ownership(session_id, user_id, caller_sub):
                 logger.warning(
                     f"Rejecting getChatMessages: user={user_id} does not own "
                     f"session={session_id}"
