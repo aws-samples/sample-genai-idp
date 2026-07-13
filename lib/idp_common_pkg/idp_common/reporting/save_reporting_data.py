@@ -11,7 +11,6 @@ import json
 import logging
 import re
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 
 import boto3
 import pyarrow as pa
@@ -20,6 +19,7 @@ import pyarrow.parquet as pq
 from idp_common.config.models import IDPConfig
 from idp_common.models import Document
 from idp_common.s3 import get_json_content
+from idp_common.utils import parse_s3_uri
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -126,14 +126,7 @@ class SaveReportingData:
         Returns:
             Tuple of (bucket, key)
         """
-        parsed = urlparse(uri)
-        if parsed.scheme != "s3":
-            raise ValueError(f"Not an S3 URI: {uri}")
-
-        bucket = parsed.netloc
-        # Remove leading slash from key
-        key = parsed.path.lstrip("/")
-
+        bucket, key = parse_s3_uri(uri)
         return bucket, key
 
     def _infer_pyarrow_type(self, value: Any) -> pa.DataType:
