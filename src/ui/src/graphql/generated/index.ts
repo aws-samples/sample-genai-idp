@@ -1325,6 +1325,7 @@ export const startMultiDocDiscovery = /* GraphQL */ `
     $configVersion: String!
     $zipFileName: String
     $zipFileSize: Int
+    $saveMode: String
   ) {
     startMultiDocDiscovery(
       s3Bucket: $s3Bucket
@@ -1332,6 +1333,7 @@ export const startMultiDocDiscovery = /* GraphQL */ `
       configVersion: $configVersion
       zipFileName: $zipFileName
       zipFileSize: $zipFileSize
+      saveMode: $saveMode
     ) {
       jobId
       status
@@ -1490,8 +1492,8 @@ export const updateUser = /* GraphQL */ `
 ` as GeneratedMutation<UpdateUserMutationVariables, UpdateUserMutation>;
 
 export const uploadDiscoveryDocument = /* GraphQL */ `
-  mutation UploadDiscoveryDocument($fileName: String!, $contentType: String, $prefix: String, $bucket: String, $groundTruthFileName: String, $version: String, $pageRanges: [String], $pageLabels: [String], $skipJobCreation: Boolean, $discoveryType: String) {
-    uploadDiscoveryDocument(fileName: $fileName, contentType: $contentType, prefix: $prefix, bucket: $bucket, groundTruthFileName: $groundTruthFileName, version: $version, pageRanges: $pageRanges, pageLabels: $pageLabels, skipJobCreation: $skipJobCreation, discoveryType: $discoveryType) {
+  mutation UploadDiscoveryDocument($fileName: String!, $contentType: String, $prefix: String, $bucket: String, $groundTruthFileName: String, $version: String, $pageRanges: [String], $pageLabels: [String], $skipJobCreation: Boolean, $discoveryType: String, $saveMode: String) {
+    uploadDiscoveryDocument(fileName: $fileName, contentType: $contentType, prefix: $prefix, bucket: $bucket, groundTruthFileName: $groundTruthFileName, version: $version, pageRanges: $pageRanges, pageLabels: $pageLabels, skipJobCreation: $skipJobCreation, discoveryType: $discoveryType, saveMode: $saveMode) {
       presignedUrl
       objectKey
       usePostMethod

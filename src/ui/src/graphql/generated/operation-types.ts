@@ -2110,6 +2110,7 @@ export type StartMultiDocDiscoveryMutationVariables = Exact<{
   configVersion: Scalars['String']['input'];
   zipFileName?: InputMaybe<Scalars['String']['input']>;
   zipFileSize?: InputMaybe<Scalars['Int']['input']>;
+  saveMode?: InputMaybe<Scalars['String']['input']>;
 }>;
 
 
@@ -2190,6 +2191,7 @@ export type UploadDiscoveryDocumentMutationVariables = Exact<{
   pageLabels?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>> | InputMaybe<Scalars['String']['input']>>;
   skipJobCreation?: InputMaybe<Scalars['Boolean']['input']>;
   discoveryType?: InputMaybe<Scalars['String']['input']>;
+  saveMode?: InputMaybe<Scalars['String']['input']>;
 }>;
 
 
