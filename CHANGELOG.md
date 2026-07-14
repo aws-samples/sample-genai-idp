@@ -5,6 +5,8 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.6.0]
+
 This release (v0.6) reframes **per-field confidence and bounding-box geometry as
 outputs of extraction** rather than a separate assessment stage, retires the
 granular assessment service, adds robust large-list / large-document handling, and
@@ -94,6 +96,8 @@ are migrated automatically on read — no manual edit is required.** See the
 
 ### Fixed
 
+- **`idp_common` unit gate now runs the full unit suite (~810 more tests) instead of only `@pytest.mark.unit`-tagged ones.** `lib/idp_common_pkg`'s `test-unit`/`test-cicd` targets filtered on `-m "unit"`, but hundreds of real unit tests were never tagged with that marker, so CI silently collected only ~1,564 of ~2,374 tests. The filter is now `-m "not integration"` (matching `pytest.ini`'s default and the rest of the repo), and the 28 tests that had rotted while unrun are fixed so the wider suite is green: obsolete `sync_custom_with_new_default` auto-merge assertions rewritten to the current no-op snapshot contract; stale default-model/compression assertions in the discovery embedding/visual-tool tests updated (and made to use real images); the "missing assessment section" test moved to the v0.6 `extraction.confidence.task_prompt` location; `test_publish` environment tests de-mocked of a since-removed private method; a flaky concurrent-batch embedding test made order-independent (its mock keyed on input rather than call order); and two mislabeled discovery integration tests marked `@pytest.mark.integration` like their siblings. Two module-level `sys.modules` mocks (`pypdfium2` in the OCR test, `PIL` in the assessment test) were leaking globally and corrupting later test files that build real PDFs/images — they now only fall back to a `MagicMock` when the real module is genuinely absent.
+
 - **Reasoning models (Claude Sonnet 5, Sonnet/Opus 4.6+, any model with extended thinking) returned empty extractions/classifications.** These models emit `reasoningContent` blocks before the answer `text` block, but the parsers read only `content[0].get("text")` — the reasoning block — yielding an empty string and silent 0% accuracy. The parsers now concatenate all `text` blocks and skip `reasoningContent`. Affected extraction, classification, assessment, and summarization.
 
 - **Config-version scope was silently unenforced for configuration reads (fail-open).** The `ConfigurationResolverFunction`'s IAM policy granted DynamoDB access only to the ConfigurationTable, not the UsersTable, so every `allowedConfigVersions` lookup failed with `AccessDeniedException` — which the resolver treats as "no restriction", silently granting a config-version-scoped non-admin user unrestricted access to every configuration version. The role now grants `Query`/`GetItem` on the UsersTable and its indexes. Found by the new API RBAC test harness (`make api-test`).
@@ -114,6 +118,11 @@ are migrated automatically on read — no manual edit is required.** See the
 
 - **Extraction prompts respect per-field date/number formats from the Document Schema** (previously a hardcoded MM/DD/YYYY instruction overrode per-field formats), and **every list/nested-list cell gets its own confidence + bounding box** (previously a single score could apply to a whole row).
 
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.6.0.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.6.0.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.6.0.yaml`
+  
 ## [0.5.16]
 
 ### Added
