@@ -146,7 +146,10 @@ def sanitize_for_v0516(node):
     v0.5.16 field defaults so the shared config passes both validators. These are
     steps' token caps — the fill matches each version's own default, so behavior
     on the exercised steps (OCR/classification/extraction/assessment) is unchanged."""
-    DEFAULTS = {"max_tokens": 10000, "shard_token_budget": 40000}
+    # nosec B105 - the 40000 literal is an LLM token-budget default, not a
+    # credential. Bandit's hardcoded-password heuristic fires only because the
+    # dict key "shard_token_budget" contains the substring "token".
+    DEFAULTS = {"max_tokens": 10000, "shard_token_budget": 40000}  # nosec B105
     if isinstance(node, dict):
         for k, v in node.items():
             if k in DEFAULTS:
