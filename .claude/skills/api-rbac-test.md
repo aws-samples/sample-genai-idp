@@ -82,9 +82,11 @@ AWS_PROFILE=default make api-test STACK_NAME=IDP1 REGION=us-west-2
 #                        --stack-name <s> --region <r> --teardown-only)
 ```
 
-The harness **always tears down** its temp users and reverts the app client's
-auth flows on exit (even NO_TEARDOWN only skips the user delete). Exit code is
-non-zero only on **hard fails** (a real leak) — known gaps are WARNs.
+The harness **always tears down** its temp users and restores the app client's
+original auth flows on exit (even NO_TEARDOWN only skips the user delete).
+Test users get a **random per-run password** (printed when NO_TEARDOWN or
+--setup-only keeps them alive). Exit code is non-zero only on **hard fails**
+(a real leak) — known gaps are WARNs.
 
 ## Reading the report
 

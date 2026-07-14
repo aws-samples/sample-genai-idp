@@ -38,10 +38,12 @@ SAFETY
   caller fails benign validation instead of mutating real data.
 * Ops flagged skip_allowed in the YAML (live-agent / KB / chat starts) are
   exercised ONLY for their denied cells; the allowed-role call is skipped.
-* Test users (test-rbac-<role>@example.invalid) are created in setup and removed
-  in teardown. The script temporarily adds ALLOW_ADMIN_USER_PASSWORD_AUTH to the
-  UI app client and ALWAYS reverts it. The scoped user's seeded UsersTable row is
-  deleted in teardown.
+* Test users (test-rbac-<role>@example.invalid) are created in setup with a
+  random per-run password and removed in teardown. The script temporarily adds
+  ALLOW_ADMIN_USER_PASSWORD_AUTH to the UI app client and ALWAYS reverts the
+  client to its prior auth flows — even with --no-teardown, which only keeps
+  the test users. The scoped user's seeded UsersTable row is deleted in
+  teardown.
 * Nothing here is destructive to real stack data.
 
 USAGE
@@ -57,6 +59,7 @@ Requires: awscli v2 on PATH; credentials with Cognito admin + CloudFormation rea
 import argparse
 import json
 import os
+import secrets
 import subprocess
 import sys
 import time
@@ -67,7 +70,11 @@ from pathlib import Path
 
 ROLES = ["Admin", "Author", "Viewer", "Reviewer"]
 SCOPED = "ScopedAuthor"  # an Author with a restrictive allowedConfigVersions
-TEST_PW = "TestRbac!" + "Aa1" * 3  # meets typical Cognito policy; throwaway
+# Random per-run password (one test user is an Admin — a static password in a
+# public repo would be a standing credential if teardown is ever skipped/killed).
+# The "Aa1!" prefix guarantees the Cognito policy classes regardless of what
+# token_urlsafe happens to produce.
+TEST_PW = "Aa1!" + secrets.token_urlsafe(24)
 # .invalid TLD (RFC 2606) can never be a real address.
 SCOPE_VERSION = "rbac-test-scope-v1"  # a version the scoped user is limited to
 OUT_OF_SCOPE_VERSION = "default"      # exists, but outside the scoped user's set
@@ -165,10 +172,20 @@ def resolve_stack(stack, region):
     }
 
 
-def set_auth_flows(ctx, admin_auth):
-    flows = ["ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH"]
-    if admin_auth:
-        flows.append("ALLOW_ADMIN_USER_PASSWORD_AUTH")
+ADMIN_AUTH_FLOW = "ALLOW_ADMIN_USER_PASSWORD_AUTH"
+
+
+def _get_auth_flows(ctx):
+    return aws(
+        "cognito-idp", "describe-user-pool-client",
+        "--user-pool-id", ctx["user_pool"],
+        "--client-id", ctx["client"],
+        "--query", "UserPoolClient.ExplicitAuthFlows",
+        region=ctx["region"],
+    ) or []
+
+
+def _set_auth_flows(ctx, flows):
     aws(
         "cognito-idp", "update-user-pool-client",
         "--user-pool-id", ctx["user_pool"],
@@ -176,6 +193,29 @@ def set_auth_flows(ctx, admin_auth):
         "--explicit-auth-flows", *flows,
         region=ctx["region"],
     )
+
+
+def enable_admin_auth(ctx):
+    """Add ALLOW_ADMIN_USER_PASSWORD_AUTH to the app client, remembering the
+    client's original flows so restore_auth_flows() can put back exactly what
+    the operator had (not a hardcoded guess)."""
+    flows = _get_auth_flows(ctx)
+    ctx["orig_auth_flows"] = flows
+    if ADMIN_AUTH_FLOW not in flows:
+        _set_auth_flows(ctx, [*flows, ADMIN_AUTH_FLOW])
+
+
+def restore_auth_flows(ctx):
+    """Revert the app client's auth flows. With the originals captured this
+    run, restore them verbatim; otherwise (--teardown-only in a fresh process)
+    strip only the flag we add, leaving all other flows untouched."""
+    orig = ctx.get("orig_auth_flows")
+    if orig:
+        _set_auth_flows(ctx, orig)
+        return
+    cur = _get_auth_flows(ctx)
+    if ADMIN_AUTH_FLOW in cur:
+        _set_auth_flows(ctx, [f for f in cur if f != ADMIN_AUTH_FLOW])
 
 
 def _create_cognito_user(ctx, email, group):
@@ -209,7 +249,7 @@ def setup_users(ctx):
     # Scoped user: an Author in Cognito, restricted via UsersTable.
     _create_cognito_user(ctx, test_email(SCOPED), "Author")
     _seed_scoped_user(ctx)
-    set_auth_flows(ctx, admin_auth=True)
+    enable_admin_auth(ctx)
     print(
         f"Created test users: {', '.join(test_email(r) for r in ROLES)}, "
         f"{test_email(SCOPED)} (scoped to [{SCOPE_VERSION}])"
@@ -267,8 +307,7 @@ def teardown_users(ctx):
             ],
             capture_output=True, text=True,
         )
-    set_auth_flows(ctx, admin_auth=False)
-    print("Deleted test users, scoped row, and reverted app-client auth flows.")
+    print("Deleted test users and scoped row.")
 
 
 def get_token(ctx, role):
@@ -345,13 +384,16 @@ def classify(role, allowed, status, et, in_band):
         ok = _denied(status, et, in_band)
         return ok, f"{status}" if ok else f"LEAK({status}/{et})"
     if allowed == ANY:
-        if et == "Unauthorized" or in_band == "Unauthorized":
-            return False, f"unexpected Unauthorized ({status})"
+        if _denied(status, et, in_band):
+            return False, f"unexpected denial ({status}/{et}/{in_band})"
         return True, f"{status}"
     # group-restricted
     if role in allowed:
-        if et == "Unauthorized" or in_band == "Unauthorized":
-            return False, f"DENIED but allowed ({status})"
+        # Any denial shape fails here — including a bare 401/403 with no
+        # errorType (e.g. a gateway/WAF rejection), which would otherwise
+        # silently pass as "auth worked".
+        if _denied(status, et, in_band):
+            return False, f"DENIED but allowed ({status}/{et}/{in_band})"
         return True, f"{status}"
     ok = _denied(status, et, in_band)
     return ok, f"{status}" if ok else f"LEAK({status}/{et}/{in_band})"
@@ -370,7 +412,16 @@ def run_group_matrix(ops, ctx, tokens, results):
             else set(groups)
         )
         # Skip conditional ops when the feature is off (404 for everyone).
+        # NOTE: the probe below EXECUTES the op as Admin, so a `conditional`
+        # op must never also be side-effectful/skip_allowed — probe with a
+        # disallowed role instead if that combination ever appears.
         cond = o.get("conditional")
+        skip_allowed = o.get("skip_allowed", False)
+        if cond and skip_allowed:
+            raise RuntimeError(
+                f"{field}: 'conditional' + 'skip_allowed' is unsupported — "
+                "the feature probe would execute the op as Admin."
+            )
         if cond == "circuit_breaker" and not ctx.get("circuit_breaker"):
             st, *_ = call(ctx["api_base"], field, o["args"], tokens["Admin"])
             if st == 404:
@@ -386,7 +437,6 @@ def run_group_matrix(ops, ctx, tokens, results):
                 print(f"  {field:28s} SKIP (feature platform disabled)")
                 continue
 
-        skip_allowed = o.get("skip_allowed", False)
         cells = [field]
         # unauthenticated
         st, et, ib, rid = call(ctx["api_base"], field, o["args"], None)
@@ -617,13 +667,17 @@ def main():
 
     if args.teardown_only:
         teardown_users(ctx)
+        restore_auth_flows(ctx)
         return 0
     if args.setup_only:
         setup_users(ctx)
+        print(f"Setup-only: test-user password is {TEST_PW}")
         return 0
 
-    setup_users(ctx)
     try:
+        # setup inside the try so a mid-setup failure still tears down the
+        # users already created and reverts the app-client auth flows.
+        setup_users(ctx)
         tokens = {r: get_token(ctx, r) for r in ROLES}
         st = get_token(ctx, SCOPED)
         if st and len(st) > 100:
@@ -661,8 +715,13 @@ def main():
             print("ALL HARD CHECKS PASSED")
         return 1 if hard_fails else 0
     finally:
-        if not args.no_teardown:
+        if args.no_teardown:
+            print(f"--no-teardown: keeping test users (password: {TEST_PW})")
+        else:
             teardown_users(ctx)
+        # ALWAYS revert the app client's auth flows — --no-teardown only
+        # keeps the test users, never the widened auth-flow setting.
+        restore_auth_flows(ctx)
 
 
 if __name__ == "__main__":
