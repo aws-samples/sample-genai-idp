@@ -100,3 +100,6 @@ config_library/catalog.json
 config_library/samples-manifest.json
 
 .claude/worktrees/
+
+# API RBAC live-harness reports (make api-test default REPORT_DIR)
+api-test-results/
