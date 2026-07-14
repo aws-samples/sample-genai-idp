@@ -36,7 +36,9 @@ export default defineConfig({
           label: "Core",
           items: [
             { label: "Architecture", slug: "architecture" },
+            { label: "Quick Start", slug: "quick-start" },
             { label: "Deployment", slug: "deployment" },
+            { label: "AI-Guided Deployment Walkthrough", slug: "idp-deployment-ai-guide" },
             { label: "Headless Deployment", slug: "headless-deployment" },
             { label: "API Gateway Hosting", slug: "apigateway-hosting" },
             { label: "Private Network Deployment", slug: "deployment-private-network" },
@@ -84,10 +86,19 @@ export default defineConfig({
               label: "Extraction & Confidence",
               slug: "extraction-and-confidence",
             },
+            // Legacy guides consolidated into Extraction & Confidence (kept as
+            // redirect stubs so old deep links still resolve).
+            { label: "Extraction (moved)", slug: "extraction" },
+            { label: "Assessment (moved)", slug: "assessment" },
+            {
+              label: "Assessment Bounding Boxes (moved)",
+              slug: "assessment-bounding-boxes",
+            },
             { label: "Few-Shot Examples", slug: "few-shot-examples" },
             { label: "Human-in-the-Loop Review", slug: "human-review" },
             { label: "Rule Validation", slug: "rule-validation" },
             { label: "Criteria Validation", slug: "criteria-validation" },
+            { label: "Missing Page Handling", slug: "missing-page-handling" },
             {
               label: "OCR Image Sizing Guide",
               slug: "ocr-image-sizing-guide",
@@ -145,12 +156,20 @@ export default defineConfig({
               label: "Extensions",
               items: [
                 {
+                  label: "Auto Optimizer",
+                  slug: "extensions/auto-optimizer",
+                },
+                {
                   label: "Sample: Document Status (feature add-on)",
                   slug: "extensions/sample-document-status",
                 },
                 {
                   label: "Sample: Health Insurance Review",
                   slug: "extensions/sample-health-insurance-review",
+                },
+                {
+                  label: "Migration: External Feature for AppSync Removal",
+                  slug: "extensions/migration-prompt-appsync-removal",
                 },
               ],
             },
@@ -180,6 +199,7 @@ export default defineConfig({
             { label: "Cost Calculator", slug: "cost-calculator" },
             { label: "Circuit Breaker", slug: "circuit-breaker" },
             { label: "Cross-Account Bedrock", slug: "cross-account-bedrock" },
+            { label: "Version Update Indicator", slug: "version-update-indicator" },
           ],
         },
         {
@@ -212,6 +232,7 @@ export default defineConfig({
               label: "EU Region Model Support",
               slug: "eu-region-model-support",
             },
+            { label: "OpenAI GPT-5.x Models", slug: "openai-models" },
           ],
         },
         {
@@ -220,10 +241,12 @@ export default defineConfig({
             { label: "Setup: Linux", slug: "setup-development-env-linux" },
             { label: "Setup: macOS", slug: "setup-development-env-macos" },
             { label: "Setup: WSL", slug: "setup-development-env-wsl" },
+            { label: "Setup: Windows", slug: "setup-development-env-windows" },
             {
               label: "Using Notebooks",
               slug: "using-notebooks-with-idp-common",
             },
+            { label: "Dependency Mirroring", slug: "dependency-mirroring" },
           ],
         },
         {
@@ -237,19 +260,6 @@ export default defineConfig({
             },
           ],
         },
-        // AUTO-SIDEBAR-START
-        {
-          label: "New & Uncategorized",
-          items: [
-            { label: "Dependency Mirroring", slug: "dependency-mirroring" },
-            { label: "Idp Deployment Ai Guide", slug: "idp-deployment-ai-guide" },
-            { label: "Missing Page Handling", slug: "missing-page-handling" },
-            { label: "Openai Models", slug: "openai-models" },
-            { label: "Setup Development Env Windows", slug: "setup-development-env-windows" },
-            { label: "Version Update Indicator", slug: "version-update-indicator" },
-          ],
-        },
-        // AUTO-SIDEBAR-END
       ],
     }),
   ],
