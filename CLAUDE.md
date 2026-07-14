@@ -457,6 +457,7 @@ that domain:
 | `.claude/skills/infrastructure.md` | CloudFormation / SAM templates, nested stacks, GovCloud |
 | `.claude/skills/extraction-pipeline.md` | Document processing pipeline, configuration, agentic extraction |
 | `.claude/skills/code-review.md` | Pre-commit self-review checklist for your own changes |
+| `.claude/skills/api-rbac-test.md` | Verifying API authorization (Cognito groups + config-version scope) via `make api-test` / `make api-test-static`; adding a new API operation |
 | `.claude/skills/pr-review.md` | Reviewing an external GitHub PR or GitLab MR at a URL (e.g. `review <url>`) |
 | `.claude/skills/create-hf-dataset-pr.md` | Contributing a data/label correction to an external HuggingFace dataset via a community PR (parquet key-order gotcha, verification, review artifacts) |
 | `.claude/skills/testing-qa.md` | Writing tests, pytest patterns, moto, conftest setup |
