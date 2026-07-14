@@ -9,6 +9,9 @@ import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
 import useUserDisplayName from '../../hooks/use-user-display-name';
+import useDeploymentContext from '../../hooks/use-deployment-context';
+import { buildBugReportUrl, buildFeatureRequestUrl } from '../../utils/github-feedback';
+import { GITHUB_ISSUES_URL } from '../../constants/github';
 
 const logger = new ConsoleLogger('TopNavigation');
 
@@ -64,8 +67,17 @@ const GenAIIDPTopNavigation = (): React.JSX.Element => {
   const { settings } = useSettingsContext();
   const { isAdmin, isAuthor, isReviewer, isViewer, loading: roleLoading } = useUserRole();
   const { displayName } = useUserDisplayName();
+  const deploymentContext = useDeploymentContext();
   const userId = displayName || user?.username || 'user';
   const [isSignOutModalVisible, setIsSignOutModalVisiblesetVisible] = useState(false);
+
+  // Pre-filled GitHub feedback/issue links. The feedback menu is available to
+  // every role; the URLs auto-populate the issue-form environment fields from
+  // the current deployment (version/region/stack/pattern). Items use `href` +
+  // `external` so they render as real links (middle-click / open-in-new-tab
+  // work) and open in a new tab via onItemFollow.
+  const bugReportUrl = buildBugReportUrl(deploymentContext);
+  const featureRequestUrl = buildFeatureRequestUrl(deploymentContext);
 
   // Banner title is configurable per-deployment so vertical-product packs
   // (Claims, Loans, etc.) can swap the default "AWS IDP Accelerator Console"
@@ -94,6 +106,18 @@ const GenAIIDPTopNavigation = (): React.JSX.Element => {
           identity={{ href: '#', title: consoleTitle }}
           i18nStrings={{ overflowMenuTriggerText: 'More' }}
           utilities={[
+            {
+              type: 'menu-dropdown',
+              iconName: 'contact',
+              text: 'Feedback',
+              title: 'Feedback',
+              ariaLabel: 'Feedback and issue reporting',
+              items: [
+                { id: 'report-bug', text: 'Report a bug', href: bugReportUrl, external: true, iconName: 'bug' },
+                { id: 'request-feature', text: 'Request a feature', href: featureRequestUrl, external: true, iconName: 'suggestions' },
+                { id: 'view-issues', text: 'View existing issues', href: GITHUB_ISSUES_URL, external: true, iconName: 'external' },
+              ],
+            },
             {
               type: 'menu-dropdown',
               text: userDisplayText,
