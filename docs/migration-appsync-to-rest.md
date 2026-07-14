@@ -19,8 +19,7 @@ and the solution uses only long-lived, GovCloud/FedRAMP-eligible services.
 
 ## Why AppSync was removed
 
-AWS AppSync is **not available in AWS GovCloud**, is **not FedRAMP-compliant**,
-and is being de-emphasized by AWS for new development. Regulated and GovCloud
+AWS AppSync is **not available in AWS GovCloud**, and is **not FedRAMP-compliant**. Regulated and GovCloud
 deployments could not use it at all. Rather than maintain two transports, AppSync
 was **removed entirely** and replaced with services that are available in every
 partition. There is no toggle and no AppSync footprint remaining.
