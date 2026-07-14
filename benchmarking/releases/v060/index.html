@@ -1,0 +1,443 @@
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-bguv2lll"> <head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Release Benchmark: v0.6.0 vs v0.5.16 | GenAI IDP</title><link rel="canonical" href="https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/benchmarking/releases/v060/"/><link rel="sitemap" href="/accelerated-intelligent-document-processing-on-aws/sitemap-index.xml"/><link rel="shortcut icon" href="/accelerated-intelligent-document-processing-on-aws/favicon.svg" type="image/svg+xml"/><meta name="generator" content="Astro v6.3.7"/><meta name="generator" content="Starlight v0.39.2"/><meta property="og:title" content="Release Benchmark: v0.6.0 vs v0.5.16"/><meta property="og:type" content="article"/><meta property="og:url" content="https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/benchmarking/releases/v060/"/><meta property="og:locale" content="en"/><meta property="og:description" content="GenAI Intelligent Document Processing — scalable, serverless AWS solution for automated document processing"/><meta property="og:site_name" content="GenAI IDP"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="GenAI Intelligent Document Processing — scalable, serverless AWS solution for automated document processing"/><script>
+	window.StarlightThemeProvider = (() => {
+		const storedTheme =
+			typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
+		const theme =
+			storedTheme ||
+			(window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+		document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+		return {
+			updatePickers(theme = storedTheme || 'auto') {
+				document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+					const select = picker.querySelector('select');
+					if (select) select.value = theme;
+					/** @type {HTMLTemplateElement | null} */
+					const tmpl = document.querySelector(`#theme-icons`);
+					const newIcon = tmpl && tmpl.content.querySelector('.' + theme);
+					if (newIcon) {
+						const oldIcon = picker.querySelector('svg.label-icon');
+						if (oldIcon) {
+							oldIcon.replaceChildren(...newIcon.cloneNode(true).childNodes);
+						}
+					}
+				});
+			},
+		};
+	})();
+</script><template id="theme-icons"><svg aria-hidden="true" class="light astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M5 12a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1Zm.64 5-.71.71a1 1 0 0 0 0 1.41 1 1 0 0 0 1.41 0l.71-.71A1 1 0 0 0 5.64 17ZM12 5a1 1 0 0 0 1-1V3a1 1 0 0 0-2 0v1a1 1 0 0 0 1 1Zm5.66 2.34a1 1 0 0 0 .7-.29l.71-.71a1 1 0 1 0-1.41-1.41l-.66.71a1 1 0 0 0 0 1.41 1 1 0 0 0 .66.29Zm-12-.29a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.71-.71a1.004 1.004 0 1 0-1.43 1.41l.73.71ZM21 11h-1a1 1 0 0 0 0 2h1a1 1 0 0 0 0-2Zm-2.64 6A1 1 0 0 0 17 18.36l.71.71a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.76-.66ZM12 6.5a5.5 5.5 0 1 0 5.5 5.5A5.51 5.51 0 0 0 12 6.5Zm0 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm0 3.5a1 1 0 0 0-1 1v1a1 1 0 0 0 2 0v-1a1 1 0 0 0-1-1Z"/></svg><svg aria-hidden="true" class="dark astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.64 13a1 1 0 0 0-1.05-.14 8.049 8.049 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 14 11.69 1 1 0 0 0-.36-1.05Zm-9.5 6.69A8.14 8.14 0 0 1 7.08 5.22v.27a10.15 10.15 0 0 0 10.14 10.14 9.784 9.784 0 0 0 2.1-.22 8.11 8.11 0 0 1-7.18 4.32v-.04Z"/></svg><svg aria-hidden="true" class="auto astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg></template><link rel="stylesheet" href="/accelerated-intelligent-document-processing-on-aws/_astro/print.DNXP8c50.css" media="print"><link rel="stylesheet" href="/accelerated-intelligent-document-processing-on-aws/_astro/common.GSHDcnGC.css">
+<link rel="stylesheet" href="/accelerated-intelligent-document-processing-on-aws/_astro/Code.CYq6ZDRC.css"><script type="module" src="/accelerated-intelligent-document-processing-on-aws/_astro/page.B_tncCx8.js"></script></head> <body class="astro-bguv2lll"> <a href="#_top" class="astro-7q3lir66">Skip to content</a> <div class="page sl-flex astro-vrdttmbt"> <header class="header astro-vrdttmbt"><div class="header astro-kmkmnagf"> <div class="title-wrapper sl-flex astro-kmkmnagf"> <a href="/accelerated-intelligent-document-processing-on-aws/" class="site-title sl-flex astro-m46x6ez3">  <img class="light:sl-hidden print:hidden astro-m46x6ez3" alt src="/accelerated-intelligent-document-processing-on-aws/_astro/logo-dark.CDSNlVMV.svg" width="120" height="32"> <img class="dark:sl-hidden print:block astro-m46x6ez3" alt src="/accelerated-intelligent-document-processing-on-aws/_astro/logo-light.CszXvHpe.svg" width="120" height="32"> <span class="astro-m46x6ez3" translate="no"> GenAI IDP </span> </a> </div> <div class="sl-flex print:hidden astro-kmkmnagf"> <site-search class="astro-kmkmnagf astro-v37mnknz" data-translations="{&quot;placeholder&quot;:&quot;Search&quot;}"> <button data-open-modal disabled aria-label="Search" aria-keyshortcuts="Control+K" class="astro-v37mnknz"> <svg aria-hidden="true" class="astro-v37mnknz astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.71 20.29 18 16.61A9 9 0 1 0 16.61 18l3.68 3.68a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.39ZM11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z"/></svg> <span class="sl-hidden md:sl-block astro-v37mnknz" aria-hidden="true">Search</span> <kbd class="sl-hidden md:sl-flex astro-v37mnknz" style="display: none;"> <kbd class="astro-v37mnknz">Ctrl</kbd><kbd class="astro-v37mnknz">K</kbd> </kbd> </button> <dialog style="padding:0" aria-label="Search" class="astro-v37mnknz"> <div class="dialog-frame sl-flex astro-v37mnknz">  <button data-close-modal class="sl-flex md:sl-hidden astro-v37mnknz"> Cancel </button> <div class="search-container astro-v37mnknz"> <div id="starlight__search" class="astro-v37mnknz"></div> </div> </div> </dialog> </site-search>  <script>
+	(() => {
+		const openBtn = document.querySelector('button[data-open-modal]');
+		const shortcut = openBtn?.querySelector('kbd');
+		if (!openBtn || !(shortcut instanceof HTMLElement)) return;
+		const platformKey = shortcut.querySelector('kbd');
+		if (platformKey && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {
+			platformKey.textContent = '⌘';
+			openBtn.setAttribute('aria-keyshortcuts', 'Meta+K');
+		}
+		shortcut.style.display = '';
+	})();
+</script> <script type="module" src="/accelerated-intelligent-document-processing-on-aws/_astro/Search.astro_astro_type_script_index_0_lang.BFNDmi2R.js"></script>  </div> <div class="sl-hidden md:sl-flex print:hidden right-group astro-kmkmnagf"> <div class="sl-flex social-icons astro-kmkmnagf"> <a href="https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws" rel="me" class="sl-flex astro-wy4te6ga"><span class="sr-only astro-wy4te6ga">GitHub</span><svg aria-hidden="true" class="astro-wy4te6ga astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a> </div> <starlight-theme-select>  <label style="--sl-select-width: 6.25em" class="astro-4yphtoen"> <span class="sr-only astro-4yphtoen">Select theme</span> <svg aria-hidden="true" class="icon label-icon astro-4yphtoen astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg> <select autocomplete="off" class="astro-4yphtoen"> <option value="dark" class="astro-4yphtoen">Dark</option><option value="light" class="astro-4yphtoen">Light</option><option value="auto" selected class="astro-4yphtoen">Auto</option> </select> <svg aria-hidden="true" class="icon caret astro-4yphtoen astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg> </label> </starlight-theme-select>  <script>
+	StarlightThemeProvider.updatePickers();
+</script> <script type="module">const r="starlight-theme",o=e=>e==="auto"||e==="dark"||e==="light"?e:"auto",c=()=>o(typeof localStorage<"u"&&localStorage.getItem(r));function n(e){typeof localStorage<"u"&&localStorage.setItem(r,e==="light"||e==="dark"?e:"")}const l=()=>matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";function t(e){StarlightThemeProvider.updatePickers(e),document.documentElement.dataset.theme=e==="auto"?l():e,n(e)}matchMedia("(prefers-color-scheme: light)").addEventListener("change",()=>{c()==="auto"&&t("auto")});class s extends HTMLElement{constructor(){super(),t(c()),this.querySelector("select")?.addEventListener("change",a=>{a.currentTarget instanceof HTMLSelectElement&&t(o(a.currentTarget.value))})}}customElements.define("starlight-theme-select",s);</script> <script type="module">class s extends HTMLElement{constructor(){super();const e=this.querySelector("select");e&&(e.addEventListener("change",t=>{t.currentTarget instanceof HTMLSelectElement&&(window.location.pathname=t.currentTarget.value)}),window.addEventListener("pageshow",t=>{if(!t.persisted)return;const n=e.querySelector("option[selected]")?.index;n!==e.selectedIndex&&(e.selectedIndex=n??0)}))}}customElements.define("starlight-lang-select",s);</script> </div> </div></header> <nav class="sidebar print:hidden astro-vrdttmbt" aria-label="Main"> <starlight-menu-button class="print:hidden astro-jif73yzw"> <button aria-expanded="false" aria-label="Menu" aria-controls="starlight__sidebar" class="sl-flex md:sl-hidden astro-jif73yzw"> <svg aria-hidden="true" class="open-menu astro-jif73yzw astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M3 8h18a1 1 0 1 0 0-2H3a1 1 0 0 0 0 2Zm18 8H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Zm0-5H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Z"/></svg> <svg aria-hidden="true" class="close-menu astro-jif73yzw astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="m13.41 12 6.3-6.29a1.004 1.004 0 1 0-1.42-1.42L12 10.59l-6.29-6.3a1.004 1.004 0 0 0-1.42 1.42l6.3 6.29-6.3 6.29a1 1 0 0 0 0 1.42.998.998 0 0 0 1.42 0l6.29-6.3 6.29 6.3a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.42L13.41 12Z"/></svg> </button> </starlight-menu-button> <script type="module">class s extends HTMLElement{constructor(){super(),this.btn=this.querySelector("button"),this.btn.addEventListener("click",()=>this.toggleExpanded());const t=this.closest("nav");t&&t.addEventListener("keyup",e=>this.closeOnEscape(e))}setExpanded(t){this.setAttribute("aria-expanded",String(t)),document.body.toggleAttribute("data-mobile-menu-expanded",t)}toggleExpanded(){this.setExpanded(this.getAttribute("aria-expanded")!=="true")}closeOnEscape(t){t.code==="Escape"&&(this.setExpanded(!1),this.btn.focus())}}customElements.define("starlight-menu-button",s);</script>  <div id="starlight__sidebar" class="sidebar-pane astro-vrdttmbt"> <div class="sidebar-content sl-flex astro-vrdttmbt"> <sl-sidebar-state-persist data-hash="19ai0w4" class="astro-kku4brbg"> <script aria-hidden="true">
+		(() => {
+			try {
+				if (!matchMedia('(min-width: 50em)').matches) return;
+				/** @type {HTMLElement | null} */
+				const target = document.querySelector('sl-sidebar-state-persist');
+				const state = JSON.parse(sessionStorage.getItem('sl-sidebar-state') || '0');
+				if (!target || !state || target.dataset.hash !== state.hash) return;
+				window._starlightScrollRestore = state.scroll;
+				customElements.define(
+					'sl-sidebar-restore',
+					class SidebarRestore extends HTMLElement {
+						connectedCallback() {
+							try {
+								const idx = parseInt(this.dataset.index || '');
+								const details = this.closest('details');
+								if (details && typeof state.open[idx] === 'boolean') details.open = state.open[idx];
+							} catch {}
+						}
+					}
+				);
+			} catch {}
+		})();
+	</script>  <ul class="top-level astro-3ii7xxms"> <li class="astro-3ii7xxms"> <details open class="astro-3ii7xxms"> <summary class="astro-3ii7xxms"> <span class="group-label astro-3ii7xxms"> <span class="large astro-3ii7xxms">Overview</span>  </span> <svg aria-hidden="true" class="caret astro-3ii7xxms astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="0"></sl-sidebar-restore> <ul class="astro-3ii7xxms"> <li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Welcome</span>  </a> </li> </ul> </details> </li><li class="astro-3ii7xxms"> <details open class="astro-3ii7xxms"> <summary class="astro-3ii7xxms"> <span class="group-label astro-3ii7xxms"> <span class="large astro-3ii7xxms">Core</span>  </span> <svg aria-hidden="true" class="caret astro-3ii7xxms astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="1"></sl-sidebar-restore> <ul class="astro-3ii7xxms"> <li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/architecture/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Architecture</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/deployment/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Deployment</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/headless-deployment/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Headless Deployment</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/apigateway-hosting/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">API Gateway Hosting</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/deployment-private-network/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Private Network Deployment</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/vpc-secured-mode/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">VPC-Secured Mode</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/configuration/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Configuration</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/configuration-versions/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Configuration Versions</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/idp-configuration-best-practices/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Configuration Best Practices</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/json-schema-migration/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">JSON Schema Migration</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/web-ui/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Web UI</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/migration-appsync-to-rest/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">UI ⇄ Backend Transport (AppSync → REST)</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/idp-cli/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">IDP CLI</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/idp-sdk/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">IDP SDK</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/idpcommon-api-reference/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">idp_common API Reference</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/demo-videos/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Demo Videos</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/troubleshooting/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Troubleshooting</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/error-analyzer/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Error Analyzer</span>  </a> </li> </ul> </details> </li><li class="astro-3ii7xxms"> <details open class="astro-3ii7xxms"> <summary class="astro-3ii7xxms"> <span class="group-label astro-3ii7xxms"> <span class="large astro-3ii7xxms">Processing Modes</span>  </span> <svg aria-hidden="true" class="caret astro-3ii7xxms astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="2"></sl-sidebar-restore> <ul class="astro-3ii7xxms"> <li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/pattern-1/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">BDA Mode Reference</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/pattern-2/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Pipeline Mode Reference</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/discovery/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Discovery</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/policy-discovery/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Policy Discovery</span>  </a> </li> </ul> </details> </li><li class="astro-3ii7xxms"> <details open class="astro-3ii7xxms"> <summary class="astro-3ii7xxms"> <span class="group-label astro-3ii7xxms"> <span class="large astro-3ii7xxms">Document Processing Features</span>  </span> <svg aria-hidden="true" class="caret astro-3ii7xxms astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="3"></sl-sidebar-restore> <ul class="astro-3ii7xxms"> <li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/classification/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Classification</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/extraction-and-confidence/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Extraction &amp; Confidence</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/few-shot-examples/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Few-Shot Examples</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/human-review/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Human-in-the-Loop Review</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/rule-validation/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Rule Validation</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/criteria-validation/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Criteria Validation</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/ocr-image-sizing-guide/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">OCR Image Sizing Guide</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/languages/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Languages</span>  </a> </li> </ul> </details> </li><li class="astro-3ii7xxms"> <details open class="astro-3ii7xxms"> <summary class="astro-3ii7xxms"> <span class="group-label astro-3ii7xxms"> <span class="large astro-3ii7xxms">Evaluation &amp; Testing</span>  </span> <svg aria-hidden="true" class="caret astro-3ii7xxms astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="4"></sl-sidebar-restore> <ul class="astro-3ii7xxms"> <li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/evaluation/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Evaluation Framework</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/evaluation-enhanced-reporting/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Enhanced Reporting</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/test-studio/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Test Studio</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/creating-custom-test-sets/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Creating Custom Test Sets</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/mlflow-integration/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">MLflow Experiment Tracking</span>  </a> </li> </ul> </details> </li><li class="astro-3ii7xxms"> <details open class="astro-3ii7xxms"> <summary class="astro-3ii7xxms"> <span class="group-label astro-3ii7xxms"> <span class="large astro-3ii7xxms">Benchmarks &amp; Performance</span>  </span> <svg aria-hidden="true" class="caret astro-3ii7xxms astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="5"></sl-sidebar-restore> <ul class="astro-3ii7xxms"> <li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/benchmarking/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Benchmarking Guide</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/benchmarking/config-guidance/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Configuration Guidance</span>  </a> </li><li class="astro-3ii7xxms"> <details open class="astro-3ii7xxms"> <summary class="astro-3ii7xxms"> <span class="group-label astro-3ii7xxms"> <span class="large astro-3ii7xxms">Release Audit Trail</span>  </span> <svg aria-hidden="true" class="caret astro-3ii7xxms astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="6"></sl-sidebar-restore> <ul class="astro-3ii7xxms"> <li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/benchmarking/releases/readme/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Release Benchmark Audit Trail</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/benchmarking/releases/v060/" aria-current="page" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Release Benchmark: v0.6.0 vs v0.5.16</span>  </a> </li> </ul> </details> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/extraction-scaling-guide/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Extraction Scaling Guide</span>  </a> </li> </ul> </details> </li><li class="astro-3ii7xxms"> <details open class="astro-3ii7xxms"> <summary class="astro-3ii7xxms"> <span class="group-label astro-3ii7xxms"> <span class="large astro-3ii7xxms">AI Agents &amp; Analytics</span>  </span> <svg aria-hidden="true" class="caret astro-3ii7xxms astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="7"></sl-sidebar-restore> <ul class="astro-3ii7xxms"> <li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/agent-analysis/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Agent Analysis</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/agent-companion-chat/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Agent Companion Chat</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/code-intelligence/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Code Intelligence</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/knowledge-base/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Knowledge Base</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/custom-mcp-agent/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Custom MCP Agent</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/mcp-connector/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">MCP Connector</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/mcp-server/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">MCP Server</span>  </a> </li> </ul> </details> </li><li class="astro-3ii7xxms"> <details open class="astro-3ii7xxms"> <summary class="astro-3ii7xxms"> <span class="group-label astro-3ii7xxms"> <span class="large astro-3ii7xxms">Integration &amp; Extensions</span>  </span> <svg aria-hidden="true" class="caret astro-3ii7xxms astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="8"></sl-sidebar-restore> <ul class="astro-3ii7xxms"> <li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/feature-platform/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Feature Platform</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/feature-platform-developer-guide/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Feature Platform Developer Guide</span>  </a> </li><li class="astro-3ii7xxms"> <details open class="astro-3ii7xxms"> <summary class="astro-3ii7xxms"> <span class="group-label astro-3ii7xxms"> <span class="large astro-3ii7xxms">Extensions</span>  </span> <svg aria-hidden="true" class="caret astro-3ii7xxms astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="9"></sl-sidebar-restore> <ul class="astro-3ii7xxms"> <li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/extensions/sample-document-status/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Sample: Document Status (feature add-on)</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/extensions/sample-health-insurance-review/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Sample: Health Insurance Review</span>  </a> </li> </ul> </details> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/document-versions/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Document Versions</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/post-processing-lambda-hook/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Post-Processing Lambda Hook</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/lambda-hook-inference/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Lambda Hook Inference</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/nova-finetuning/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Nova Fine-Tuning</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/custom-model-finetuning/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Custom Model Fine-Tuning</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/service-tiers/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Service Tiers</span>  </a> </li> </ul> </details> </li><li class="astro-3ii7xxms"> <details open class="astro-3ii7xxms"> <summary class="astro-3ii7xxms"> <span class="group-label astro-3ii7xxms"> <span class="large astro-3ii7xxms">Monitoring &amp; Operations</span>  </span> <svg aria-hidden="true" class="caret astro-3ii7xxms astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="10"></sl-sidebar-restore> <ul class="astro-3ii7xxms"> <li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/monitoring/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Monitoring</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/reporting-database/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Reporting Database</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/capacity-planning/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Capacity Planning</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/cost-calculator/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Cost Calculator</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/circuit-breaker/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Circuit Breaker</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/cross-account-bedrock/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Cross-Account Bedrock</span>  </a> </li> </ul> </details> </li><li class="astro-3ii7xxms"> <details open class="astro-3ii7xxms"> <summary class="astro-3ii7xxms"> <span class="group-label astro-3ii7xxms"> <span class="large astro-3ii7xxms">Planning &amp; Security</span>  </span> <svg aria-hidden="true" class="caret astro-3ii7xxms astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="11"></sl-sidebar-restore> <ul class="astro-3ii7xxms"> <li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/well-architected/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Well-Architected Assessment</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/aws-services-and-roles/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">AWS Services &amp; IAM Roles</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/rbac/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Role-Based Access Control (RBAC)</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/external-idp/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">External Identity Provider</span>  </a> </li><li class="astro-3ii7xxms"> <details open class="astro-3ii7xxms"> <summary class="astro-3ii7xxms"> <span class="group-label astro-3ii7xxms"> <span class="large astro-3ii7xxms">GovCloud</span>  </span> <svg aria-hidden="true" class="caret astro-3ii7xxms astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="12"></sl-sidebar-restore> <ul class="astro-3ii7xxms"> <li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/govcloud-deployment/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Deployment</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/govcloud-architecture/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Architecture</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/govcloud-operations/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Operations</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/govcloud-batch-api/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Batch API</span>  </a> </li> </ul> </details> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/eu-region-model-support/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">EU Region Model Support</span>  </a> </li> </ul> </details> </li><li class="astro-3ii7xxms"> <details open class="astro-3ii7xxms"> <summary class="astro-3ii7xxms"> <span class="group-label astro-3ii7xxms"> <span class="large astro-3ii7xxms">Development Setup</span>  </span> <svg aria-hidden="true" class="caret astro-3ii7xxms astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="13"></sl-sidebar-restore> <ul class="astro-3ii7xxms"> <li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/setup-development-env-linux/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Setup: Linux</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/setup-development-env-macos/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Setup: macOS</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/setup-development-env-wsl/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Setup: WSL</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/using-notebooks-with-idp-common/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Using Notebooks</span>  </a> </li> </ul> </details> </li><li class="astro-3ii7xxms"> <details open class="astro-3ii7xxms"> <summary class="astro-3ii7xxms"> <span class="group-label astro-3ii7xxms"> <span class="large astro-3ii7xxms">Migration</span>  </span> <svg aria-hidden="true" class="caret astro-3ii7xxms astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="14"></sl-sidebar-restore> <ul class="astro-3ii7xxms"> <li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/migration-v05-to-v06/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">v0.5 → v0.6 Migration</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/migration-v04-to-v05/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">v0.4 → v0.5 Migration</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/migration-granular-retirement/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Granular Assessment Retirement</span>  </a> </li> </ul> </details> </li><li class="astro-3ii7xxms"> <details open class="astro-3ii7xxms"> <summary class="astro-3ii7xxms"> <span class="group-label astro-3ii7xxms"> <span class="large astro-3ii7xxms">New &amp; Uncategorized</span>  </span> <svg aria-hidden="true" class="caret astro-3ii7xxms astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </summary> <sl-sidebar-restore data-index="15"></sl-sidebar-restore> <ul class="astro-3ii7xxms"> <li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/assessment/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Assessment</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/assessment-bounding-boxes/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Assessment Bounding Boxes</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/dependency-mirroring/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Dependency Mirroring</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/extraction/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Extraction</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/idp-deployment-ai-guide/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Idp Deployment Ai Guide</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/missing-page-handling/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Missing Page Handling</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/openai-models/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Openai Models</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/setup-development-env-windows/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Setup Development Env Windows</span>  </a> </li><li class="astro-3ii7xxms"> <a href="/accelerated-intelligent-document-processing-on-aws/version-update-indicator/" class="astro-3ii7xxms"> <span class="astro-3ii7xxms">Version Update Indicator</span>  </a> </li> </ul> </details> </li> </ul>  <script aria-hidden="true">
+		(() => {
+			const scroller = document.getElementById('starlight__sidebar');
+			if (!window._starlightScrollRestore || !scroller) return;
+			scroller.scrollTop = window._starlightScrollRestore;
+			delete window._starlightScrollRestore;
+		})();
+	</script> </sl-sidebar-state-persist> <div class="md:sl-hidden"> <div class="mobile-preferences sl-flex astro-wu23bvmt"> <div class="social-icons astro-wu23bvmt"> <a href="https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws" rel="me" class="sl-flex astro-wy4te6ga"><span class="sr-only astro-wy4te6ga">GitHub</span><svg aria-hidden="true" class="astro-wy4te6ga astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a> </div> <starlight-theme-select>  <label style="--sl-select-width: 6.25em" class="astro-4yphtoen"> <span class="sr-only astro-4yphtoen">Select theme</span> <svg aria-hidden="true" class="icon label-icon astro-4yphtoen astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg> <select autocomplete="off" class="astro-4yphtoen"> <option value="dark" class="astro-4yphtoen">Dark</option><option value="light" class="astro-4yphtoen">Light</option><option value="auto" selected class="astro-4yphtoen">Auto</option> </select> <svg aria-hidden="true" class="icon caret astro-4yphtoen astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg> </label> </starlight-theme-select>  <script>
+	StarlightThemeProvider.updatePickers();
+</script>   </div> </div> </div> </div> </nav> <div class="main-frame astro-vrdttmbt">  <script type="module">const a=document.getElementById("starlight__sidebar"),n=a?.querySelector("sl-sidebar-state-persist"),o="sl-sidebar-state",i=()=>{let t=[];const e=n?.dataset.hash||"";try{const s=sessionStorage.getItem(o),r=JSON.parse(s||"{}");Array.isArray(r.open)&&r.hash===e&&(t=r.open)}catch{}return{hash:e,open:t,scroll:a?.scrollTop||0}},c=t=>{try{sessionStorage.setItem(o,JSON.stringify(t))}catch{}},d=()=>c(i()),l=(t,e)=>{const s=i();s.open[e]=t,c(s)};n?.addEventListener("click",t=>{if(!(t.target instanceof Element))return;const e=t.target.closest("summary")?.closest("details");if(!e)return;const s=e.querySelector("sl-sidebar-restore"),r=parseInt(s?.dataset.index||"");isNaN(r)||l(!e.open,r)});addEventListener("visibilitychange",()=>{document.visibilityState==="hidden"&&d()});addEventListener("pageHide",d);</script> <div class="lg:sl-flex astro-67yu43on"> <aside class="right-sidebar-container print:hidden astro-67yu43on"> <div class="right-sidebar astro-67yu43on"> <div class="lg:sl-hidden astro-pb3aqygn"><mobile-starlight-toc data-min-h="2" data-max-h="3" class="astro-doynk5tl"><nav aria-labelledby="starlight__on-this-page--mobile" class="astro-doynk5tl"><details id="starlight__mobile-toc" class="astro-doynk5tl"><summary id="starlight__on-this-page--mobile" class="sl-flex astro-doynk5tl"><span class="toggle sl-flex astro-doynk5tl">On this page<svg aria-hidden="true" class="caret astro-doynk5tl astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></span><span class="display-current astro-doynk5tl"></span></summary><div class="dropdown astro-doynk5tl"><ul class="isMobile astro-gnoq344e" style="--depth: 0;"> <li class="astro-gnoq344e" style="--depth: 0;"> <a href="#_top" class="astro-gnoq344e" style="--depth: 0;"> <span class="astro-gnoq344e" style="--depth: 0;">Overview</span> </a>  </li><li class="astro-gnoq344e" style="--depth: 0;"> <a href="#tldr" class="astro-gnoq344e" style="--depth: 0;"> <span class="astro-gnoq344e" style="--depth: 0;">TL;DR</span> </a>  </li><li class="astro-gnoq344e" style="--depth: 0;"> <a href="#methodology-notes-why-these-exact-configs" class="astro-gnoq344e" style="--depth: 0;"> <span class="astro-gnoq344e" style="--depth: 0;">Methodology notes (why these exact configs)</span> </a>  </li><li class="astro-gnoq344e" style="--depth: 0;"> <a href="#1-per-cell-summary-mean-over-the-3-corefast-docs" class="astro-gnoq344e" style="--depth: 0;"> <span class="astro-gnoq344e" style="--depth: 0;">1. Per-cell summary (mean over the 3 corefast docs)</span> </a>  </li><li class="astro-gnoq344e" style="--depth: 0;"> <a href="#2-cost--the-headline-improvement" class="astro-gnoq344e" style="--depth: 0;"> <span class="astro-gnoq344e" style="--depth: 0;">2. Cost — the headline improvement</span> </a>  </li><li class="astro-gnoq344e" style="--depth: 0;"> <a href="#3-accuracy--completeness--flat-the-safe-result" class="astro-gnoq344e" style="--depth: 0;"> <span class="astro-gnoq344e" style="--depth: 0;">3. Accuracy &amp; completeness — flat (the safe result)</span> </a>  </li><li class="astro-gnoq344e" style="--depth: 0;"> <a href="#4-the-one-regression-simple--integrated-confidence-on-long-lists" class="astro-gnoq344e" style="--depth: 0;"> <span class="astro-gnoq344e" style="--depth: 0;">4. The one regression: simple + integrated confidence on long lists</span> </a>  </li><li class="astro-gnoq344e" style="--depth: 0;"> <a href="#5-operational-finding-v0516-advanced-mode-assessment-doesnt-scale-to-large-lists" class="astro-gnoq344e" style="--depth: 0;"> <span class="astro-gnoq344e" style="--depth: 0;">5. Operational finding: v0.5.16 advanced-mode assessment doesn’t scale to large lists</span> </a>  </li><li class="astro-gnoq344e" style="--depth: 0;"> <a href="#6-reproduce" class="astro-gnoq344e" style="--depth: 0;"> <span class="astro-gnoq344e" style="--depth: 0;">6. Reproduce</span> </a>  </li> </ul></div></details></nav></mobile-starlight-toc><script type="module" src="/accelerated-intelligent-document-processing-on-aws/_astro/MobileTableOfContents.astro_astro_type_script_index_0_lang.hwBsy0Mo.js"></script></div><div class="right-sidebar-panel sl-hidden lg:sl-block astro-pb3aqygn"><div class="sl-container astro-pb3aqygn"><starlight-toc data-min-h="2" data-max-h="3"><nav aria-labelledby="starlight__on-this-page"><h2 id="starlight__on-this-page">On this page</h2><ul class="astro-gnoq344e" style="--depth: 0;"> <li class="astro-gnoq344e" style="--depth: 0;"> <a href="#_top" class="astro-gnoq344e" style="--depth: 0;"> <span class="astro-gnoq344e" style="--depth: 0;">Overview</span> </a>  </li><li class="astro-gnoq344e" style="--depth: 0;"> <a href="#tldr" class="astro-gnoq344e" style="--depth: 0;"> <span class="astro-gnoq344e" style="--depth: 0;">TL;DR</span> </a>  </li><li class="astro-gnoq344e" style="--depth: 0;"> <a href="#methodology-notes-why-these-exact-configs" class="astro-gnoq344e" style="--depth: 0;"> <span class="astro-gnoq344e" style="--depth: 0;">Methodology notes (why these exact configs)</span> </a>  </li><li class="astro-gnoq344e" style="--depth: 0;"> <a href="#1-per-cell-summary-mean-over-the-3-corefast-docs" class="astro-gnoq344e" style="--depth: 0;"> <span class="astro-gnoq344e" style="--depth: 0;">1. Per-cell summary (mean over the 3 corefast docs)</span> </a>  </li><li class="astro-gnoq344e" style="--depth: 0;"> <a href="#2-cost--the-headline-improvement" class="astro-gnoq344e" style="--depth: 0;"> <span class="astro-gnoq344e" style="--depth: 0;">2. Cost — the headline improvement</span> </a>  </li><li class="astro-gnoq344e" style="--depth: 0;"> <a href="#3-accuracy--completeness--flat-the-safe-result" class="astro-gnoq344e" style="--depth: 0;"> <span class="astro-gnoq344e" style="--depth: 0;">3. Accuracy &amp; completeness — flat (the safe result)</span> </a>  </li><li class="astro-gnoq344e" style="--depth: 0;"> <a href="#4-the-one-regression-simple--integrated-confidence-on-long-lists" class="astro-gnoq344e" style="--depth: 0;"> <span class="astro-gnoq344e" style="--depth: 0;">4. The one regression: simple + integrated confidence on long lists</span> </a>  </li><li class="astro-gnoq344e" style="--depth: 0;"> <a href="#5-operational-finding-v0516-advanced-mode-assessment-doesnt-scale-to-large-lists" class="astro-gnoq344e" style="--depth: 0;"> <span class="astro-gnoq344e" style="--depth: 0;">5. Operational finding: v0.5.16 advanced-mode assessment doesn’t scale to large lists</span> </a>  </li><li class="astro-gnoq344e" style="--depth: 0;"> <a href="#6-reproduce" class="astro-gnoq344e" style="--depth: 0;"> <span class="astro-gnoq344e" style="--depth: 0;">6. Reproduce</span> </a>  </li> </ul></nav></starlight-toc><script type="module" src="/accelerated-intelligent-document-processing-on-aws/_astro/TableOfContents.astro_astro_type_script_index_0_lang.FuRcXuRY.js"></script></div></div> </div> </aside> <div class="main-pane astro-67yu43on">  <main data-pagefind-body class="astro-bguv2lll" lang="en" dir="ltr">    <div class="content-panel astro-7nkwcw3z"> <div class="sl-container astro-7nkwcw3z"> <h1 id="_top" class="astro-j6tvhyss">Release Benchmark: v0.6.0 vs v0.5.16</h1> </div> </div> <div class="content-panel astro-7nkwcw3z"> <div class="sl-container astro-7nkwcw3z"> <div class="sl-markdown-content"> <div class="sl-heading-wrapper level-h1"><h1 id="genaiidp-release-benchmark--v0516-published-vs-v060-develop">GenAIIDP Release Benchmark — v0.5.16 (published) vs v0.6.0 (<code dir="auto">develop</code>)</h1><a class="sl-anchor-link" href="#genaiidp-release-benchmark--v0516-published-vs-v060-develop"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “GenAIIDP Release Benchmark — v0.5.16 (published) vs v0.6.0 (develop)”</span></a></div>
+<p><strong>Baseline:</strong> v0.5.16 — the latest <strong>publicly published</strong> release
+(<code dir="auto">s3://aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main.yaml</code>, Description
+<code dir="auto">(v0.5.16)</code>).
+<strong>Release under test:</strong> v0.6.0.dev18 (<code dir="auto">develop</code> @ commit <code dir="auto">4c063b647</code>).
+<strong>Method:</strong> a single stack (<code dir="auto">IDPbench0516</code>, us-west-2, account 912625584728) was
+created from the published v0.5.16 template, benchmarked, then <strong>upgraded in place</strong>
+to v0.6.0 via <code dir="auto">idp-cli deploy --from-code . --clean-build</code> and benchmarked again with
+<strong>byte-for-byte identical config files</strong>. The only variable between the two runs is
+the accelerator code version.
+<strong>Pricing:</strong> <code dir="auto">config_library/pricing.yaml</code> (sha256 <code dir="auto">c7675fb7…</code>; rates as of 2026-07;
+intro pricing may apply).</p>
+<blockquote>
+<p>Every number here is produced by <code dir="auto">benchmarks/harness/aggregate.py</code> from live runs;
+none are recalled from memory. Supporting data:
+<code dir="auto">benchmarks/results/v0.5.16/</code> and <code dir="auto">benchmarks/results/v0.6.0/</code>
+(<code dir="auto">summary.{json,csv}</code>, <code dir="auto">cell_stats.csv</code>, <code dir="auto">meta.json</code>).</p>
+</blockquote>
+<hr>
+<div class="sl-heading-wrapper level-h2"><h2 id="tldr">TL;DR</h2><a class="sl-anchor-link" href="#tldr"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “TL;DR”</span></a></div>
+<p>Upgrading from the published <strong>v0.5.16</strong> to <strong>v0.6.0</strong> is <strong>safe and cheaper</strong>:</p>
+<ol>
+<li><strong>Accuracy is identical.</strong> Mean scalar-field accuracy is <strong>0.917 on both versions</strong>;
+completeness recall is <strong>identical (0.956 → 0.956)</strong> once the single integrated-mode
+outlier below is excluded.</li>
+<li><strong>Cost drops ~⅓.</strong> Across the 30-run grid, total cost fell <strong>−32.5%</strong>
+($9.43 → $6.37). The win concentrates in the <strong>advanced (agentic) and BDA cells:
+−44% to −55%</strong>. Driven by a <strong>20× reduction in cache-read tokens</strong> (23.7M → 1.17M)
+— v0.6’s prompt-cache / agentic-tool-writeback fixes (#457) and lazy-image loading.</li>
+<li><strong>One regression to know about:</strong> <strong>simple + <em>integrated</em> confidence</strong>
+(<code dir="auto">tt-simple-int</code>) under-extracts long-description list documents on v0.6 — recall
+<strong>1.00 → 0.10</strong> on <code dir="auto">longdesc_100</code> (100-row doc) — because v0.6’s single-pass
+integrated extraction+confidence truncated the list. Integrated confidence is a
+niche mode; <strong>separate</strong> and <strong>off</strong> are unaffected. See §4.</li>
+<li><strong>Latency is flat-to-better</strong> on v0.6 (advanced cells finish ~30–40% faster).</li>
+</ol>
+<hr>
+<div class="sl-heading-wrapper level-h2"><h2 id="methodology-notes-why-these-exact-configs">Methodology notes (why these exact configs)</h2><a class="sl-anchor-link" href="#methodology-notes-why-these-exact-configs"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Methodology notes (why these exact configs)”</span></a></div>
+<p>Running the v0.6-native <code dir="auto">benchmarks/</code> suite against a v0.5.16 stack surfaced five
+genuine cross-version incompatibilities. All were resolved in the harness so the
+<strong>same config bytes run on both versions</strong>, isolating the code-version variable:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>#</th><th>Issue</th><th>Fix</th></tr></thead><tbody><tr><td>1</td><td>idp-cli finds the TestRunner only in the main stack; on v0.5.16 it lives in the nested <code dir="auto">APPSYNCSTACK</code> (v0.6: <code dir="auto">APIRESOLVERSTACK</code>).</td><td><code dir="auto">run_matrix.launch()</code> invokes the TestRunner Lambda directly (substring match over all functions).</td></tr><tr><td>2</td><td><strong>v0.5.16 cannot run Claude Sonnet 5</strong> — its Bedrock client only strips the (now-deprecated) <code dir="auto">temperature</code> param for opus-4-7/4-8, so Sonnet 5 → <code dir="auto">ValidationException</code>.</td><td>Held the extraction model at <strong><code dir="auto">claude-sonnet-4-6</code></strong> as the shared control (runs on both). “v0.6 unlocks Sonnet 5” is a capability delta, out of scope for this A/B.</td></tr><tr><td>3</td><td>v0.6 sources assessment prompts from system defaults at runtime; v0.5.16 reads a top-level <code dir="auto">assessment.task_prompt</code> from the stored config.</td><td>Configs are <strong>fully merged with system defaults</strong> and a top-level <code dir="auto">assessment</code> block is re-injected. v0.6 ignores it (<code dir="auto">extra="ignore"</code>); v0.5.16 uses it.</td></tr><tr><td>4</td><td><code dir="auto">idp-cli config-upload</code> always runs <code dir="auto">migrate_v05_to_v06</code>, which drops the top-level <code dir="auto">assessment</code> block.</td><td><code dir="auto">compat/native_upload.py</code> writes the config <strong>verbatim</strong> (gzip Binary, <code dir="auto">_config_format=full</code>) to the ConfigurationTable, bypassing migration. Used for <strong>both</strong> stacks → identical stored bytes.</td></tr><tr><td>5</td><td>v0.6 stores empty/<code dir="auto">0</code> <code dir="auto">max_tokens</code>/<code dir="auto">shard_token_budget</code> (“use model default”); v0.5.16 enforces <code dir="auto">gt=0</code> and rejects the whole config.</td><td><code dir="auto">sanitize_for_v0516()</code> fills non-positive values with each version’s own defaults.</td></tr></tbody></table>
+<p>Two deliberate scoping choices, applied <strong>identically to both versions</strong>:</p>
+<ul>
+<li><strong>Summarization disabled</strong> (<code dir="auto">summarization.enabled=false</code>): it is unscored, and its
+default model (Sonnet 5) hits issue #2 on v0.5.16.</li>
+<li><strong><code dir="auto">corefast</code> doc set</strong> (<code dir="auto">tiny_form</code> 5-row, <code dir="auto">small_narrow</code> 100-row, <code dir="auto">longdesc_100</code>
+100-row long-description). Advanced/agentic mode + granular assessment on ≥400-row
+documents <strong>times out the 900 s assessment Lambda on v0.5.16</strong>, and Step Functions
+then retries up to 8× (2.5× backoff) → ~2 h/doc before failing. A full 10-cell grid
+that completes on <strong>both</strong> versions therefore requires ≤100-row docs. This is itself
+a finding (§5).</li>
+</ul>
+<p><strong>Grid:</strong> all <strong>10 core config cells × 3 docs = 30 runs per version</strong>; both versions
+completed <strong>30/30 with 0 failures</strong>. Extraction = Sonnet 4.6, confidence model = Nova
+Lite, <code dir="auto">reasoning_effort=low</code>, geometry = ocr_only.</p>
+<hr>
+<div class="sl-heading-wrapper level-h2"><h2 id="1-per-cell-summary-mean-over-the-3-corefast-docs">1. Per-cell summary (mean over the 3 corefast docs)</h2><a class="sl-anchor-link" href="#1-per-cell-summary-mean-over-the-3-corefast-docs"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “1. Per-cell summary (mean over the 3 corefast docs)”</span></a></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>cell (OCR · mode · assess)</th><th align="right">cost/doc v0.5.16</th><th align="right">cost/doc v0.6.0</th><th align="right">Δcost</th><th align="right">recall v0.5.16</th><th align="right">recall v0.6.0</th><th align="right">wall v0.5.16</th><th align="right">wall v0.6.0</th></tr></thead><tbody><tr><td>tt-simple-off  (textract+tables · simple · off)</td><td align="right">$0.110</td><td align="right">$0.109</td><td align="right">−1%</td><td align="right">1.000</td><td align="right">1.000</td><td align="right">35s</td><td align="right">32s</td></tr><tr><td>tt-simple-sep  (textract+tables · simple · separate)</td><td align="right">$0.132</td><td align="right">$0.117</td><td align="right">−12%</td><td align="right">1.000</td><td align="right">1.000</td><td align="right">89s</td><td align="right">82s</td></tr><tr><td>tt-simple-int  (textract+tables · simple · integrated)</td><td align="right">$0.131</td><td align="right">$0.239</td><td align="right"><strong>+83%</strong></td><td align="right">1.000</td><td align="right"><strong>0.700</strong></td><td align="right">86s</td><td align="right">81s</td></tr><tr><td>tt-adv-sep     (textract+tables · advanced · separate)</td><td align="right">$0.651</td><td align="right">$0.325</td><td align="right"><strong>−50%</strong></td><td align="right">1.000</td><td align="right">1.000</td><td align="right">143s</td><td align="right">98s</td></tr><tr><td>tt-adv-int     (textract+tables · advanced · integrated)</td><td align="right">$0.664</td><td align="right">$0.493</td><td align="right">−26%</td><td align="right">1.000</td><td align="right">1.000</td><td align="right">135s</td><td align="right">116s</td></tr><tr><td>tl-simple-sep  (textract+layout · simple · separate)</td><td align="right">$0.111</td><td align="right">$0.096</td><td align="right">−14%</td><td align="right">1.000</td><td align="right">1.000</td><td align="right">83s</td><td align="right">93s</td></tr><tr><td>tl-adv-sep     (textract+layout · advanced · separate)</td><td align="right">$0.498</td><td align="right">$0.226</td><td align="right"><strong>−55%</strong></td><td align="right">1.000</td><td align="right">1.000</td><td align="right">149s</td><td align="right">84s</td></tr><tr><td>bda-simple-sep (BDA · simple · separate)</td><td align="right">$0.133</td><td align="right">$0.118</td><td align="right">−11%</td><td align="right">1.000</td><td align="right">1.000</td><td align="right">83s</td><td align="right">85s</td></tr><tr><td>bda-adv-sep    (BDA · advanced · separate)</td><td align="right">$0.603</td><td align="right">$0.313</td><td align="right"><strong>−48%</strong></td><td align="right">1.000</td><td align="right">1.000</td><td align="right">142s</td><td align="right">90s</td></tr><tr><td>llm-simple-sep (bedrock Nova OCR · simple · separate)</td><td align="right">$0.110</td><td align="right">$0.087</td><td align="right">−21%</td><td align="right">0.607</td><td align="right">0.607</td><td align="right">90s</td><td align="right">46s</td></tr></tbody></table>
+<p><code dir="auto">scalar_accuracy</code> is not shown per-cell because it is <strong>identical across versions for
+every cell</strong>; the only mean-accuracy movements at the cell level are the
+integrated-mode regression (§4) and one improvement (§4, note).</p>
+<hr>
+<div class="sl-heading-wrapper level-h2"><h2 id="2-cost--the-headline-improvement">2. Cost — the headline improvement</h2><a class="sl-anchor-link" href="#2-cost--the-headline-improvement"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “2. Cost — the headline improvement”</span></a></div>
+<p>Total cost across all 30 runs:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>scope</th><th align="right">v0.5.16</th><th align="right">v0.6.0</th><th align="right">Δ</th></tr></thead><tbody><tr><td><strong>All 30 runs</strong></td><td align="right">$9.428</td><td align="right">$6.365</td><td align="right"><strong>−32.5%</strong></td></tr><tr><td><strong>Advanced cells only</strong></td><td align="right">$7.249</td><td align="right">$4.071</td><td align="right"><strong>−43.8%</strong></td></tr></tbody></table>
+<p>Token totals across the grid (from per-doc <code dir="auto">Metering</code>):</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>unit</th><th align="right">v0.5.16</th><th align="right">v0.6.0</th><th align="right">Δ</th></tr></thead><tbody><tr><td>input</td><td align="right">1,731,564</td><td align="right">581,459</td><td align="right">−66%</td></tr><tr><td>output</td><td align="right">629,912</td><td align="right">367,885</td><td align="right">−42%</td></tr><tr><td><strong>cacheRead</strong></td><td align="right"><strong>23,743,127</strong></td><td align="right"><strong>1,167,515</strong></td><td align="right"><strong>−95%</strong></td></tr><tr><td>cacheWrite</td><td align="right">276,513</td><td align="right">247,123</td><td align="right">−11%</td></tr></tbody></table>
+<p>The dominant driver is the <strong>95% collapse in cache-read tokens</strong>. v0.5.16’s agentic
+path re-read a large cached prefix on every tool turn; v0.6’s agentic tool-writeback +
+lazy-image fixes (#457) and prompt-cache changes cut that dramatically. This is exactly
+where the advanced-cell cost savings come from.</p>
+<p><img alt="Cost per cell" loading="lazy" decoding="async" width="1560" height="600" src="/accelerated-intelligent-document-processing-on-aws/_astro/benchmark-v0.6.0-cost.TdQBfLYn_Zbgi0E.png" srcset=""></p>
+<hr>
+<div class="sl-heading-wrapper level-h2"><h2 id="3-accuracy--completeness--flat-the-safe-result">3. Accuracy &#x26; completeness — flat (the safe result)</h2><a class="sl-anchor-link" href="#3-accuracy--completeness--flat-the-safe-result"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “3. Accuracy &#x26; completeness — flat (the safe result)”</span></a></div>
+<p><img alt="Paired accuracy/recall" loading="lazy" decoding="async" width="1440" height="600" src="/accelerated-intelligent-document-processing-on-aws/_astro/benchmark-v0.6.0-accuracy.S2ku1C5K_SnWff.png" srcset=""></p>
+<ul>
+<li><strong>Scalar accuracy:</strong> mean <strong>0.917 on both</strong> versions; every (cell,doc) pair matches.</li>
+<li><strong>Completeness recall:</strong> mean 0.961 → 0.931. <strong>The entire 0.030 drop is one cell</strong>
+(<code dir="auto">tt-simple-int</code>, §4). <strong>Excluding it, recall is identical: 0.956 → 0.956.</strong></li>
+<li><code dir="auto">llm-simple-sep</code> recall (0.607) is unchanged across versions — Nova LLM-OCR drops
+rows on the multi-page <code dir="auto">small_narrow</code>/<code dir="auto">tiny_form</code> docs equally on both versions (an
+OCR-backend property, not a version effect).</li>
+</ul>
+<p>Confidence: mean confidence is comparable (0.935 → 0.910). v0.6 tends to report
+slightly lower/normalized confidence on advanced+BDA cells (e.g. bda-adv-sep 0.998 →
+0.950), consistent with v0.6’s confidence-reporting changes; no calibration regression
+was flagged.</p>
+<hr>
+<div class="sl-heading-wrapper level-h2"><h2 id="4-the-one-regression-simple--integrated-confidence-on-long-lists">4. The one regression: simple + integrated confidence on long lists</h2><a class="sl-anchor-link" href="#4-the-one-regression-simple--integrated-confidence-on-long-lists"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “4. The one regression: simple + integrated confidence on long lists”</span></a></div>
+<p><code dir="auto">core-tt-simple-int</code> (textract+tables · simple extraction · <strong>integrated</strong> confidence)
+is the only cell that got worse on v0.6:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>doc</th><th align="right">recall 5.16→6.0</th><th align="right">scalar_acc 5.16→6.0</th><th align="right">cost 5.16→6.0</th></tr></thead><tbody><tr><td>longdesc_100 (100 rows, long descriptions)</td><td align="right"><strong>1.00 → 0.10</strong></td><td align="right">0.50 → 0.50</td><td align="right">$0.19 → $0.14</td></tr><tr><td>small_narrow (100 rows)</td><td align="right">1.00 → 1.00</td><td align="right">1.00 → <strong>0.50</strong></td><td align="right">$0.17 → $0.52</td></tr><tr><td>tiny_form (5 rows)</td><td align="right">1.00 → 1.00</td><td align="right">1.00 → 1.00</td><td align="right">$0.03 → $0.06</td></tr></tbody></table>
+<p>Root cause (verified from S3 output + metering on the v0.6 run): in integrated mode
+v0.6 does extraction <strong>and</strong> confidence in a <strong>single Sonnet pass</strong> (metering shows
+exactly one <code dir="auto">Extraction/bedrock</code> call and no separate assessment call — the intended
+single-pass behavior). On the long-description document that single pass <strong>truncated
+the transaction list to 10 of 100 rows</strong>. v0.5.16’s integrated path recovered all 100
+(it effectively ran a separate assessment pass). So v0.6 integrated mode is <strong>cheaper
+per call but less robust on large/long-text lists</strong>.</p>
+<p><strong>Guidance:</strong> integrated confidence is a niche, cost-optimizing mode. For list-heavy
+documents use <strong>separate</strong> confidence (default) or <strong>advanced</strong> mode — both are
+complete and, on v0.6, also cheaper than they were on v0.5.16. This regression does
+<strong>not</strong> affect the default <code dir="auto">separate</code> or <code dir="auto">off</code> assessment modes.</p>
+<p><em>(One offsetting improvement: <code dir="auto">llm-simple-sep</code> on <code dir="auto">longdesc_100</code> improved scalar
+accuracy 0.50 → 1.00.)</em></p>
+<hr>
+<div class="sl-heading-wrapper level-h2"><h2 id="5-operational-finding-v0516-advanced-mode-assessment-doesnt-scale-to-large-lists">5. Operational finding: v0.5.16 advanced-mode assessment doesn’t scale to large lists</h2><a class="sl-anchor-link" href="#5-operational-finding-v0516-advanced-mode-assessment-doesnt-scale-to-large-lists"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “5. Operational finding: v0.5.16 advanced-mode assessment doesn’t scale to large lists”</span></a></div>
+<p>Independent of accuracy, <strong>v0.5.16 cannot reliably complete advanced (agentic) mode +
+granular assessment on ≥400-row list documents</strong>: the assessment Lambda exceeds its
+900 s timeout, and the state machine retries <code dir="auto">Sandbox.Timedout</code> up to 8× at 2.5×
+backoff (~2 h/doc) before failing. In a first full-<code dir="auto">core</code> attempt (larger docs),
+<strong>every</strong> advanced-mode cell hung on <code dir="auto">med_narrow</code>/<code dir="auto">large_narrow</code>/<code dir="auto">manylists_400</code>, while
+all simple-mode cells completed on the same docs. v0.6’s more parallel confidence
+batching handles these without timing out. This is a real robustness improvement in
+v0.6 and a reason to prefer it for large-list workloads.</p>
+<p><em>(This benchmark holds the assessment batch size equal across versions — v0.6’s
+<code dir="auto">extraction.confidence.list_batch_size=25</code> is mirrored into v0.5.16’s
+<code dir="auto">assessment.granular.list_batch_size</code> — so the timeout is a genuine engine difference,
+not a config artifact.)</em></p>
+<hr>
+<div class="sl-heading-wrapper level-h2"><h2 id="6-reproduce">6. Reproduce</h2><a class="sl-anchor-link" href="#6-reproduce"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="currentcolor" d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 0 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 1 0-1.42-1.42Zm8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 0 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 1 0 1.42 1.42l3.88-3.89a4.49 4.49 0 0 0 0-6.33ZM8.83 15.17a1 1 0 0 0 1.1.22 1 1 0 0 0 .32-.22l4.92-4.92a1 1 0 0 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42Z"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “6. Reproduce”</span></a></div>
+<div class="expressive-code"><link rel="stylesheet" href="/accelerated-intelligent-document-processing-on-aws/_astro/ec.v4551.css"><script type="module" src="/accelerated-intelligent-document-processing-on-aws/_astro/ec.0vx5m.js"></script><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">source</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">/home/ec2-user/projects/idp1/.venv/bin/activate</span><span style="--0:#D6DEEB;--1:#403F53">   </span><span style="--0:#919F9F;--1:#5F636F"># or any env with idp_common + reportlab/matplotlib</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">export</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">PYTHONPATH</span><span style="--0:#C792EA;--1:#8844AE">=</span><span style="--0:#C5E478;--1:#3B61B0">$PWD</span><span style="--0:#D6DEEB;--1:#403F53">/</span><span style="--0:#C5E478;--1:#3B61B0">lib</span><span style="--0:#D6DEEB;--1:#403F53">/</span><span style="--0:#C5E478;--1:#3B61B0">idp_common_pkg</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">AWS_PROFILE</span><span style="--0:#C792EA;--1:#8844AE">=</span><span style="--0:#ECC48D;--1:#3B61B0">default</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">aws</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">sts</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">get-caller-identity</span><span style="--0:#D6DEEB;--1:#403F53">           </span><span style="--0:#919F9F;--1:#5F636F"># confirm deployment account</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5F636F"># corpus + configs (v0.6-native, sonnet-4-6 control, v0.5.16-compat injection)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">python3</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">benchmarks/harness/gen_corpus.py</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">python3</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">benchmarks/harness/make_configs.py</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">--suite</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">corefast</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">--class</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">bank_statement</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5F636F"># run against a stack (native-upload REQUIRED so configs aren't migrated)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">AWS_PROFILE</span><span style="--0:#C792EA;--1:#8844AE">=</span><span style="--0:#ECC48D;--1:#3B61B0">default</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">python3</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">benchmarks/harness/run_matrix.py</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#F78C6C;--1:#AA0982">\</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#82AAFF;--1:#3B61B0">--stack</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">&#x3C;STACK></span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">--suite</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">corefast</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">--native-upload</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">--max-inflight</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#F78C6C;--1:#AA0982">6</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5F636F"># score + compare</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">AWS_PROFILE</span><span style="--0:#C792EA;--1:#8844AE">=</span><span style="--0:#ECC48D;--1:#3B61B0">default</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">python3</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">benchmarks/harness/aggregate.py</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">--run</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">benchmarks/results/run-&#x3C;stamp></span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">--out</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">benchmarks/results/&#x3C;rel></span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">python3</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">benchmarks/harness/aggregate.py</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">--compare</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">benchmarks/results/v0.6.0/summary.json</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">--baseline</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">benchmarks/results/v0.5.16/summary.json</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="source /home/ec2-user/projects/idp1/.venv/bin/activate   # or any env with idp_common + reportlab/matplotlibexport PYTHONPATH=$PWD/lib/idp_common_pkgAWS_PROFILE=default aws sts get-caller-identity           # confirm deployment accountpython3 benchmarks/harness/gen_corpus.pypython3 benchmarks/harness/make_configs.py --suite corefast --class bank_statementAWS_PROFILE=default python3 benchmarks/harness/run_matrix.py \    --stack <STACK> --suite corefast --native-upload --max-inflight 6AWS_PROFILE=default python3 benchmarks/harness/aggregate.py --run benchmarks/results/run-<stamp> --out benchmarks/results/<rel>python3 benchmarks/harness/aggregate.py --compare benchmarks/results/v0.6.0/summary.json --baseline benchmarks/results/v0.5.16/summary.json"><div></div></button></div></figure></div>
+<p><strong>Caveats / honesty:</strong> costs are estimates from <code dir="auto">pricing.yaml</code> (intro pricing may
+apply). Grid is 3 docs/cell (n=3), so per-cell cost CV is high — the reliable signals
+are the <strong>aggregate</strong> cost delta (−32.5% over 30 runs), the <strong>paired per-(cell,doc)</strong>
+accuracy/recall (which are exact and stable), and the token-level explanation
+(cacheRead −95%). Large-list advanced-mode cells are omitted from the head-to-head grid
+because they cannot complete on v0.5.16 (§5) — that omission is the finding, not a
+hidden failure.</p> </div> <footer class="sl-flex astro-3yyafb3n"> <div class="meta sl-flex astro-3yyafb3n">   </div> <div class="pagination-links print:hidden astro-u2l5gyhi" dir="ltr"> <a href="/accelerated-intelligent-document-processing-on-aws/benchmarking/releases/readme/" rel="prev" class="astro-u2l5gyhi"> <svg aria-hidden="true" class="astro-u2l5gyhi astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg> <span class="astro-u2l5gyhi"> Previous <br class="astro-u2l5gyhi"> <span class="link-title astro-u2l5gyhi">Release Benchmark Audit Trail</span> </span> </a> <a href="/accelerated-intelligent-document-processing-on-aws/extraction-scaling-guide/" rel="next" class="astro-u2l5gyhi"> <svg aria-hidden="true" class="astro-u2l5gyhi astro-c6vsoqas" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg> <span class="astro-u2l5gyhi"> Next <br class="astro-u2l5gyhi"> <span class="link-title astro-u2l5gyhi">Extraction Scaling Guide</span> </span> </a> </div>  </footer> </div> </div>  </main> </div> </div> </div> </div> </body></html>
