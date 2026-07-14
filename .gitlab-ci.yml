@@ -237,7 +237,10 @@ integration_tests:
 
 srt_security_review:
   stage: security_review
-  timeout: 30m  # SRT scan typically takes 5-10 minutes
+  # Cold prerequisite install (checkov+semgrep+jupyter+syft+bandit into SRT's
+  # managed venv, no pip cache) can take 10-15 min; setup.py retries once, then
+  # the scan itself runs 5-15 min. 50m leaves headroom for the worst case.
+  timeout: 50m
 
   # Use runner with more memory for SRT security scanning
   # saas-linux-medium-amd64: 4 vCPUs, 16 GB RAM
