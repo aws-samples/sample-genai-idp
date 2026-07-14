@@ -1,0 +1,14 @@
+/* Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved. */
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/* Restore chip shown when the Troubleshoot modal is minimized. Anchored to the
+   bottom-right so it doesn't collide with the Quick Start widget (bottom-right
+   launcher uses a higher z-index band); kept above page content. */
+.troubleshoot-restore-chip {
+  position: fixed;
+  bottom: 24px;
+  left: 24px;
+  z-index: 1001;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  border-radius: 20px;
+}

@@ -232,6 +232,13 @@ Troubleshoot modal footer offers two additional actions:
 > automatically — review the pre-filled form and **redact any sensitive data**
 > before submitting. See [Feedback & Issue Reporting](web-ui.md#feedback--issue-reporting).
 
+The modal stays open until you press **Close** (an outside click or Esc no longer
+dismisses it, so a running analysis — which can take ~30 seconds — is not
+interrupted). Use **Minimize** to collapse it to a restore chip while the analysis
+finishes in the background. When the Error Analyzer is run from the
+[Agent Companion Chat](agent-companion-chat.md) instead, a **Create GitHub issue**
+button appears under the answer with the same bug/feature options.
+
 ### Query Patterns
 
 #### Document-Specific Queries

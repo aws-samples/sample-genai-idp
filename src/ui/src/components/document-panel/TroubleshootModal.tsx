@@ -9,6 +9,7 @@ import { Modal, Box, SpaceBetween, Button, Spinner, Alert, Header } from '@cloud
 import { submitAgentQuery, getAgentJobStatus, listAvailableAgents } from '../../graphql/generated';
 import AgentResultDisplay from '../document-agents-layout/AgentResultDisplay';
 import AgentMessagesDisplay from '../document-agents-layout/AgentMessagesDisplay';
+import './TroubleshootModal.css';
 import useDeploymentContext from '../../hooks/use-deployment-context';
 import { buildBugReportUrl, buildFullDetailsText, type DocumentContext } from '../../utils/github-feedback';
 import { extractFindingsText } from './troubleshootFindings';
@@ -75,6 +76,9 @@ const TroubleshootModal = ({
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [_availableAgents, setAvailableAgents] = useState<AgentInfo[]>([]);
   const [copied, setCopied] = useState(false);
+  // When minimized the modal collapses to a small restore chip so the
+  // analysis keeps running (and polling continues) instead of being torn down.
+  const [minimized, setMinimized] = useState(false);
 
   const deploymentContext = useDeploymentContext();
 
@@ -198,6 +202,7 @@ const TroubleshootModal = ({
   // Auto-submit when modal opens or resume existing job
   useEffect(() => {
     if (visible) {
+      setMinimized(false); // always reopen expanded
       if (existingJob && ['PENDING', 'PROCESSING'].includes(existingJob.status)) {
         // Resume existing active job
         logger.info('Resuming existing troubleshoot job:', existingJob.jobId);
@@ -291,9 +296,40 @@ const TroubleshootModal = ({
     }
   }, [visible]);
 
+  // Live status for the minimized chip.
+  const isRunning = jobStatus === 'PENDING' || jobStatus === 'PROCESSING' || isSubmitting;
+
+  // When minimized, collapse to a restore chip. The polling/subscription
+  // effects keep running because `visible` stays true, so the analysis
+  // continues in the background and its result is ready on restore.
+  if (visible && minimized) {
+    return (
+      <div className="troubleshoot-restore-chip">
+        <Button
+          iconName={isRunning ? undefined : 'status-positive'}
+          onClick={() => setMinimized(false)}
+          ariaLabel="Restore Troubleshoot window"
+        >
+          {isRunning ? (
+            <>
+              <Spinner /> Troubleshooting…
+            </>
+          ) : (
+            'Troubleshoot results ready'
+          )}
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <Modal
-      onDismiss={onDismiss}
+      // Only the Close button dismisses. Ignore overlay-click / Esc so an
+      // in-progress analysis (which can take ~30s) is never torn down by an
+      // accidental click outside the window.
+      onDismiss={({ detail }) => {
+        if (detail.reason === 'closeButton') onDismiss();
+      }}
       visible={visible}
       size="large"
       header={<Header variant="h1">Troubleshoot Document</Header>}
@@ -310,6 +346,9 @@ const TroubleshootModal = ({
                 Report this issue on GitHub
               </Button>
             )}
+            <Button iconName="treeview-collapse" onClick={() => setMinimized(true)}>
+              Minimize
+            </Button>
             <Button variant="primary" onClick={onDismiss}>
               Close
             </Button>

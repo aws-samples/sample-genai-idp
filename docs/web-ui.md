@@ -425,7 +425,14 @@ hand-type them. There are three entry points:
   agent's findings) in addition to the environment details. A **Copy full details**
   button copies the complete environment + findings text to your clipboard for
   pasting anything the URL can't carry (long transcripts are length-capped in the
-  link).
+  link). The modal only closes via its **Close** button (clicking outside or pressing
+  Esc no longer dismisses it, so a running analysis isn't interrupted), and a
+  **Minimize** button collapses it to a small restore chip while the analysis
+  continues in the background.
+- **Create GitHub issue (Agent Companion Chat).** The [Agent Companion Chat](agent-companion-chat.md)
+  — which can also run the Error Analyzer — shows a **Create GitHub issue** button
+  under the latest agent answer, offering *Report a bug* (with the answer attached as
+  findings) or *Request a feature*.
 - **Resources & help panel.** The side navigation **Resources** section includes a
   **Report an issue** link, and the right-side info (Help) panel on the Document List
   includes a **Feedback & support** section with the same links.
