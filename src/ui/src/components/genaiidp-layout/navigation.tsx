@@ -133,6 +133,12 @@ export const adminNavItems = [
         href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws',
         external: true,
       },
+      {
+        type: 'link',
+        text: 'Report an issue',
+        href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues',
+        external: true,
+      },
     ],
   },
 ];
@@ -189,6 +195,12 @@ export const authorNavItems = [
         href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws',
         external: true,
       },
+      {
+        type: 'link',
+        text: 'Report an issue',
+        href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues',
+        external: true,
+      },
     ],
   },
 ];
@@ -232,6 +244,12 @@ export const viewerNavItems = [
         type: 'link',
         text: 'Source Code',
         href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws',
+        external: true,
+      },
+      {
+        type: 'link',
+        text: 'Report an issue',
+        href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues',
         external: true,
       },
     ],

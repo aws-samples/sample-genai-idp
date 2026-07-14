@@ -389,6 +389,10 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
       setError('Please select a document file to upload');
       return;
     }
+    if (selectedVersion?.value === 'default') {
+      setError('The "default" configuration version is read-only. Create a new version to save the discovered schema.');
+      return;
+    }
 
     setIsUploading(true);
     setUploadStatus([]);
@@ -794,6 +798,14 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
             </SpaceBetween>
           </FormField>
 
+          {selectedVersion?.value === 'default' && (
+            <Alert type="warning">
+              The <strong>default</strong> configuration version is read-only and cannot be overwritten by discovery. Click{' '}
+              <strong>Create new version</strong> to save the discovered schema to a new version (it will be seeded from{' '}
+              <strong>default</strong>).
+            </Alert>
+          )}
+
           <FormField
             label="Save mode"
             description="Choose whether discovered classes are added to the version's existing schema or replace it"
@@ -980,7 +992,9 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
               variant="primary"
               onClick={uploadFiles}
               loading={isUploading}
-              disabled={!documentFile || !selectedVersion || isUploading || isValidatingJson}
+              disabled={
+                !documentFile || !selectedVersion || selectedVersion.value === 'default' || isUploading || isValidatingJson
+              }
             >
               {pageRanges.length > 0
                 ? `Start Discovery (${pageRanges.length} section${pageRanges.length !== 1 ? 's' : ''})`
