@@ -205,13 +205,16 @@ def _meta(rm):
 
     commit = subprocess.run(
         "git rev-parse --short HEAD",
-        shell=True,
+        shell=True,  # nosec B602 - fixed local command
         capture_output=True,
         text=True,
         cwd=BENCH,
     ).stdout.strip()
     ph = subprocess.run(
-        f"sha256sum {lib.PRICING_PATH}", shell=True, capture_output=True, text=True
+        f"sha256sum {lib.PRICING_PATH}",
+        shell=True,
+        capture_output=True,
+        text=True,  # nosec B602 - fixed local command
     ).stdout.split()[:1]
     return {
         "stack": rm.get("stack"),

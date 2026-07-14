@@ -75,7 +75,7 @@ def test_overrides_short_circuit_derivation():
     assert plan.max_pages_per_shard == 3
     assert plan.list_batch_size == 7
     assert plan.overrides == {
-        "shard_token_budget": 9999,
+        "shard_token_budget": 9999,  # nosec B105 - token budget, not a secret
         "max_pages_per_shard": 3,
         "list_batch_size": 7,
     }
