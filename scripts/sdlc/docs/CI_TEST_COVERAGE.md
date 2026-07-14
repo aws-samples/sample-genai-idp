@@ -467,6 +467,101 @@ If Test Studio test fails:
 
 ---
 
+## TODO / Gap Backlog
+
+Remaining CI test-coverage gaps, ranked. Nothing here is blocking; these are
+follow-ups to harden the pipeline against regressions on `develop`. Several
+earlier gaps are **already closed** — see "Done (this cycle)" at the end.
+
+The full unit/package gate (`make test`, 34 auto-discovered roots) is green.
+What's left below is mostly integration/e2e depth plus a few cheap fast-gate
+additions.
+
+### Fast-gate additions (cheap, no live AWS account needed)
+
+- [ ] **`--govcloud` transform + cfn-lint job.** Add a `developer_tests` step that
+      runs the `GovCloudTemplateTransformer` and region-aware `cfn-lint` on the
+      transformed template (target `us-gov-west-1`). Fails the MR if a
+      GovCloud-unsupported resource (CloudFront, Lambda Function URL, etc.) is
+      reintroduced. `cfn-lint` is offline/no-credentials. **~30–45 min. Highest
+      value-for-effort of the cheap items.**
+- [ ] **`--headless` template-transform smoke.** At minimum, run the
+      `HeadlessTemplateTransformer` + cfn-lint in the fast gate to catch transform
+      breakage without a deploy. (Full headless *deploy* e2e is below.)
+- [ ] **Register the `pytest.mark.unit` marker in the per-Lambda dirs.** Several
+      Lambda test dirs emit `PytestUnknownMarkWarning: Unknown pytest.mark.unit`.
+      Harmless but noisy; add a shared `pytest.ini`/marker registration.
+
+### Integration / e2e depth (need the CI account; run in the CodeBuild suite)
+
+- [ ] **`--headless` deploy e2e.** Wire the existing `scripts/e2e_test_headless.py`
+      into the CodeBuild suite (deploy headless stack → smoke → teardown). Script
+      already exists and works; just not invoked by CI.
+- [ ] **APIGW hosting: GLOBAL variant + HTTP smoke.** Step 4b currently covers
+      **PRIVATE + VPC only**, and validates the REST API is PRIVATE *structurally*
+      — it never fetches `/api/`. Add (a) a GLOBAL-visibility APIGW hosting run,
+      and (b) an actual HTTP GET of the served UI (`/api/` + a static asset) to
+      prove the S3-proxy path returns bytes.
+- [ ] **Upgrade-in-place test. (HIGH VALUE.)** Deploy the previous released
+      version, then update the stack to the current build, then smoke. This is the
+      gap that would have caught the pricing-units rollback deadlock and the
+      GSI-projection-immutable issues. No current test exercises an update path.
+- [ ] **Deepen e2e assertions.** Most steps assert `status==COMPLETE` /
+      sections-exist. Broaden to assert expected field *values* from the known
+      sample docs (e.g. `samples/lending_package.pdf`) — near-zero added runtime,
+      catches silent accuracy regressions.
+- [ ] **`save_reporting_data` reporting-path e2e.** Unit tests were mocked off real
+      AWS; there is no e2e that actually exercises the Glue/Athena reporting write
+      path end-to-end.
+- [ ] **CloudFront (default) hosting HTTP smoke.** The shared-stack suite deploys
+      with CloudFront hosting but never HTTP-smokes the CloudFront URL.
+
+### UI
+
+- [ ] **Browser/e2e UI test (Playwright) against a deployed stack.** Today only
+      vitest units run (jsdom, no browser). A thin smoke (login → list docs → open
+      a doc) would catch integration/auth regressions the units can't.
+
+### Quarantined test roots — promote when unblocked
+
+Tracked in `scripts/run_all_tests.py` (`QUARANTINE`). Correctly excluded today,
+but revisit:
+
+- [ ] `src/lambda/ocr_benchmark_deployer` — needs `huggingface_hub` as a test dep.
+- [ ] `nested/bedrockkb/src/s3_vectors_manager` — needs the Lambda-runtime-only
+      `cfnresponse` module available under test.
+- [ ] `scripts/test_api_rbac.py` — the live RBAC harness (not a pytest suite);
+      leave excluded unless refactored.
+- [ ] `samples/lambda-hook-inference/GENAIIDP-chandra-ocr-hook` — `test_local.py`
+      is a manual run script; leave excluded or convert to real tests.
+- [ ] `lib/idp_sdk/idp_sdk/_core` — source tree with helper modules named
+      `test_*`; leave excluded (not tests).
+
+### Done (this cycle — no longer gaps)
+
+- [x] `idp_common` `-m "unit"` filter → `-m "not integration"` (recovered ~810
+      silently-skipped tests; fixed 28 rotted tests). *(PR #493)*
+- [x] Missing package/Lambda suites added to `developer_tests` via
+      `make test-packages-cicd` (~665 tests). *(PR #494)*
+- [x] `check-arn-partitions` (GovCloud ARN guard) wired into `lint-cicd`. *(PR #494)*
+- [x] API RBAC: static scan in the MR gate + live harness as CodeBuild Step 12.
+      *(PR #494)*
+- [x] SRT security scan runs fail-fast (before the ~2h integration stage) on
+      branch pipelines. *(PR #494)*
+- [x] Deployment-failure AI root-cause summary (incl. Step 4b) + failure email
+      (`FailureNotificationEmail` SNS). *(PR #494)*
+- [x] `make test` auto-discovers all test roots; a new/unregistered test dir
+      hard-fails so suites can't be silently skipped. *(PR #495)*
+- [x] Fixed the Step Functions execution-view "Running vs Failed" resolver bug and
+      `save_reporting_data` stale/real-AWS tests; both promoted into the gate.
+      *(PR #495)*
+- [x] CodeBuild role granted EC2/VPC permissions for the Step 4b hosting test.
+      *(PR #497)*
+- [x] Stopped `idp_sdk` `test_create_config` writing a stray `config.yaml` to the
+      repo root. *(PR #498)*
+
+---
+
 ## Related Documentation
 
 - [CHANGELOG.md](../../CHANGELOG.md) - Feature changes and test additions
