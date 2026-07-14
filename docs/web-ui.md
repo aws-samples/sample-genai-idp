@@ -31,6 +31,7 @@ _The GenAIIDP Web Interface showing the document tracking dashboard with status 
 - "Chat with document" from the detailed view of the document
 - **Document Process Flow visualization** for detailed workflow execution monitoring and troubleshooting
 - **Document Analytics** for querying and visualizing processed document data
+- **Feedback & issue reporting** — report bugs or request features on GitHub directly from the UI, with your deployment details pre-filled
 
 ## Upload Documents
 
@@ -406,6 +407,43 @@ https://github.com/user-attachments/assets/50607084-96d6-4833-85a6-3dc0e72b28ac
 
 1. Navigate to a document's detail page and scroll to the bottom
 2. In the text area, type in your question and you'll see an answer pop up after the document is analyzed with the Nova Pro model
+
+## Feedback & Issue Reporting
+
+The UI makes it easy to report bugs or request enhancements on the project's public
+GitHub repository, with your deployment details pre-filled so you don't have to
+hand-type them. There are three entry points:
+
+- **Feedback menu (top navigation).** A **Feedback** menu is available in the top
+  navigation bar to every user, with **Report a bug**, **Request a feature**, and
+  **View existing issues**. Bug/feature links open a pre-filled GitHub issue form in
+  a new tab.
+- **Report this issue on GitHub (Troubleshoot modal).** After running the
+  [Error Analyzer](error-analyzer.md) on a failed document, the Troubleshoot modal
+  footer offers **Report this issue on GitHub** — it pre-fills the bug form with the
+  document context (object key, status, config version, execution ARN, and the
+  agent's findings) in addition to the environment details. A **Copy full details**
+  button copies the complete environment + findings text to your clipboard for
+  pasting anything the URL can't carry (long transcripts are length-capped in the
+  link).
+- **Resources & help panel.** The side navigation **Resources** section includes a
+  **Report an issue** link, and the right-side info (Help) panel on the Document List
+  includes a **Feedback & support** section with the same links.
+
+**What gets pre-filled.** The GitHub issue forms auto-populate the AWS **Region**,
+**Processing Mode**, and an environment summary (**Version**, **Build**, **Stack
+name**) sourced from the deployment's settings. The Troubleshoot path additionally
+fills the document context and agent findings.
+
+> **Privacy note:** issues on the public repository are visible to everyone. Nothing
+> is submitted automatically — GitHub always shows you the pre-filled form to review
+> first. **Please review every field and redact any sensitive document data**
+> (names, account numbers, PII) before submitting.
+
+The links target GitHub issue *forms* (`.github/ISSUE_TEMPLATE/*.yml`). Field-level
+pre-fill takes effect once those forms are present on the repository's default
+branch; until then the links still open the new-issue form (just without the
+populated fields).
 
 ## Authentication Features
 

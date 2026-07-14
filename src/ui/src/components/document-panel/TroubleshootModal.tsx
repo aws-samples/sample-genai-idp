@@ -9,6 +9,9 @@ import { Modal, Box, SpaceBetween, Button, Spinner, Alert, Header } from '@cloud
 import { submitAgentQuery, getAgentJobStatus, listAvailableAgents } from '../../graphql/generated';
 import AgentResultDisplay from '../document-agents-layout/AgentResultDisplay';
 import AgentMessagesDisplay from '../document-agents-layout/AgentMessagesDisplay';
+import useDeploymentContext from '../../hooks/use-deployment-context';
+import { buildBugReportUrl, buildFullDetailsText, type DocumentContext } from '../../utils/github-feedback';
+import { extractFindingsText } from './troubleshootFindings';
 
 interface DocumentItem {
   objectKey: string;
@@ -71,8 +74,52 @@ const TroubleshootModal = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [_availableAgents, setAvailableAgents] = useState<AgentInfo[]>([]);
+  const [copied, setCopied] = useState(false);
+
+  const deploymentContext = useDeploymentContext();
 
   const query = `Troubleshoot ${documentItem?.objectKey} for failures or performance issues.`;
+
+  // A terminal (COMPLETED/FAILED) job with either findings or an error is worth
+  // reporting. Build the document context once so the "Report this issue"
+  // button and "Copy full details" share the same data.
+  const isTerminal = jobStatus === 'COMPLETED' || jobStatus === 'FAILED';
+  const findings = extractFindingsText(jobResult);
+  const canReport = isTerminal && (Boolean(findings) || Boolean(error));
+
+  const docContext: DocumentContext = {
+    objectKey: documentItem?.objectKey,
+    objectStatus: documentItem?.objectStatus,
+    configVersion: documentItem?.configVersion as string | undefined,
+    executionArn: documentItem?.executionArn as string | undefined,
+    jobError: error ?? undefined,
+    findings: findings || undefined,
+  };
+
+  const reportIssueUrl = buildBugReportUrl(deploymentContext, docContext);
+
+  const handleCopyFullDetails = async (): Promise<void> => {
+    const text = buildFullDetailsText(deploymentContext, docContext);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Fallback for older browsers / insecure contexts.
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+      } catch (err) {
+        logger.error('Failed to copy troubleshoot details:', err);
+      }
+      document.body.removeChild(textarea);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   // AppSync subscriptions were removed; agent job completion is detected by the
   // interval polling effect below (polls getAgentJobStatus until terminal). This
@@ -252,9 +299,21 @@ const TroubleshootModal = ({
       header={<Header variant="h1">Troubleshoot Document</Header>}
       footer={
         <Box float="right">
-          <Button variant="primary" onClick={onDismiss}>
-            Close
-          </Button>
+          <SpaceBetween direction="horizontal" size="xs">
+            {canReport && (
+              <Button iconName="copy" onClick={handleCopyFullDetails}>
+                {copied ? 'Copied' : 'Copy full details'}
+              </Button>
+            )}
+            {canReport && (
+              <Button iconName="bug" href={reportIssueUrl} target="_blank" rel="noopener noreferrer">
+                Report this issue on GitHub
+              </Button>
+            )}
+            <Button variant="primary" onClick={onDismiss}>
+              Close
+            </Button>
+          </SpaceBetween>
         </Box>
       }
     >

@@ -250,8 +250,8 @@ We welcome you to use the GitHub issue tracker to report bugs or suggest feature
 
 We provide issue templates to make this process easier:
 
-- [Bug Report Template](/.github/ISSUE_TEMPLATE/bug_report.md) - Use this template when reporting a bug
-- [Feature Request Template](/.github/ISSUE_TEMPLATE/feature_request.md) - Use this template when suggesting new functionality
+- [Bug Report Template](/.github/ISSUE_TEMPLATE/bug_report.yml) - Use this template when reporting a bug
+- [Feature Request Template](/.github/ISSUE_TEMPLATE/feature_request.yml) - Use this template when suggesting new functionality
 
 When filing an issue, please check existing open, or recently closed, issues to make sure somebody else hasn't already
 reported the issue. Please try to include as much information as you can. Details like these are incredibly useful:
