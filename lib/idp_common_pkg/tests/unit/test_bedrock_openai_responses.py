@@ -215,7 +215,9 @@ class TestInvocationAndRouting:
         fake_session = MagicMock()
         creds = MagicMock()
         creds.get_frozen_credentials.return_value = MagicMock(
-            access_key="AKIA", secret_key="secret", token=None  # nosec B106 - dummy test credential
+            access_key="AKIA",
+            secret_key="secret",
+            token=None,  # nosec B106 - dummy test credential
         )
         fake_session.get_credentials.return_value = creds
         return patch.object(oar, "get_bedrock_session", return_value=fake_session)
@@ -378,7 +380,9 @@ class TestStreamResponsesApi:
         fake_session = MagicMock()
         creds = MagicMock()
         creds.get_frozen_credentials.return_value = MagicMock(
-            access_key="AKIA", secret_key="secret", token=None  # nosec B106 - dummy test credential
+            access_key="AKIA",
+            secret_key="secret",
+            token=None,  # nosec B106 - dummy test credential
         )
         fake_session.get_credentials.return_value = creds
         return patch.object(oar, "get_bedrock_session", return_value=fake_session)

@@ -739,6 +739,18 @@ Resources:
               Resource:
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:data-automation-project/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:blueprint/*"
+        # Read-only access on UsersTable + EmailIndex so the resolver can look up
+        # the caller's allowedConfigVersions and enforce config-version scope.
+        # Without this, the scope query fails with AccessDenied, is caught, and
+        # the caller silently defaults to UNRESTRICTED (scope bypass).
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+              Resource:
+                - !Ref UsersTableArn
+                - !Sub "${UsersTableArn}/index/*"
   CopyToBaselineResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
