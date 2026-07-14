@@ -184,15 +184,21 @@ class TestGenerateEmbeddingsBatch:
             {"image_bytes": b"fake"},
         ]
 
-        with patch.object(
-            client,
-            "generate_embedding",
-            side_effect=[
-                [1.0, 2.0],
-                [3.0, 4.0],
-                [5.0, 6.0],
-            ],
-        ):
+        # generate_embeddings_batch runs items concurrently (ThreadPoolExecutor),
+        # so an ordered side_effect list would be consumed in thread-scheduling
+        # order, not item order — making the per-item assertions flaky. Map each
+        # input deterministically to its embedding instead.
+        embedding_by_key = {
+            "hello": [1.0, 2.0],
+            "world": [3.0, 4.0],
+            b"fake": [5.0, 6.0],
+        }
+
+        def _embed(**kwargs):
+            key = kwargs.get("text") or kwargs.get("image_bytes")
+            return embedding_by_key[key]
+
+        with patch.object(client, "generate_embedding", side_effect=_embed):
             results = client.generate_embeddings_batch(
                 items=items,
                 model_id="cohere.embed-english-v3",
@@ -212,21 +218,15 @@ class TestGenerateEmbeddingsBatch:
             {"text": "good2"},
         ]
 
+        # Map input → result deterministically (batch runs concurrently, so an
+        # ordered side_effect list is not reliable — see test_batch_embeddings).
         def _mock_embed(**kwargs):
             text = kwargs.get("text", "")
             if text == "bad":
                 raise ValueError("Mock failure")
-            return [1.0, 2.0]
+            return [1.0, 2.0] if text == "good" else [3.0, 4.0]
 
-        with patch.object(
-            client,
-            "generate_embedding",
-            side_effect=[
-                [1.0, 2.0],
-                ValueError("Mock failure"),
-                [3.0, 4.0],
-            ],
-        ):
+        with patch.object(client, "generate_embedding", side_effect=_mock_embed):
             results = client.generate_embeddings_batch(items=items, max_concurrent=1)
 
         assert len(results) == 3

@@ -23,238 +23,80 @@ from moto import mock_aws
 
 
 class TestSyncCustomWithNewDefault:
-    """Test sync_custom_with_new_default method."""
+    """Test sync_custom_with_new_default method.
 
-    def test_no_customizations_gets_all_new_defaults(self):
-        """When Custom == Default, updating Default should give user all new values."""
+    In the full-config design, configuration versions are independent snapshots
+    that do NOT auto-merge with Default when Default changes. The method is kept
+    only for backward compatibility and returns ``old_custom`` unchanged. These
+    tests assert that no-op contract (they previously asserted an auto-merge
+    behavior that was intentionally removed).
+    """
+
+    def test_returns_custom_unchanged_when_default_updated(self):
+        """A Default update must NOT bleed new values into the custom snapshot."""
         manager = ConfigurationManager(table_name="test-table")
 
-        # Old configs are identical (no user customizations)
         old_default = IDPConfig(extraction=ExtractionConfig(temperature=0.0, top_p=0.1))
-        old_custom = IDPConfig(extraction=ExtractionConfig(temperature=0.0, top_p=0.1))
-
-        # New default has updated values
-        new_default = IDPConfig(
-            extraction=ExtractionConfig(temperature=0.5, top_p=0.2, top_k=20.0)
-        )
-
-        # Sync
-        new_custom = manager.sync_custom_with_new_default(
-            old_default, new_default, old_custom
-        )
-
-        # User should get ALL new defaults
-        assert new_custom.extraction.temperature == 0.5
-        assert new_custom.extraction.top_p == 0.2
-        assert new_custom.extraction.top_k == 20.0
-
-    def test_preserves_user_customization(self):
-        """User's temperature customization should be preserved when Default updates top_p."""
-        manager = ConfigurationManager(table_name="test-table")
-
-        # Old default
-        old_default = IDPConfig(
-            extraction=ExtractionConfig(temperature=0.0, top_p=0.1, top_k=10.0)
-        )
-
-        # User customized temperature only
         old_custom = IDPConfig(
             extraction=ExtractionConfig(temperature=0.8, top_p=0.1, top_k=10.0)
         )
-
-        # New default changes multiple fields
         new_default = IDPConfig(
             extraction=ExtractionConfig(temperature=0.5, top_p=0.2, top_k=20.0)
         )
 
-        # Sync
         new_custom = manager.sync_custom_with_new_default(
             old_default, new_default, old_custom
         )
 
-        # User's temperature should be preserved
+        # The custom snapshot is returned verbatim — no field takes the new default.
+        assert new_custom is old_custom
         assert new_custom.extraction.temperature == 0.8
+        assert new_custom.extraction.top_p == 0.1
+        assert new_custom.extraction.top_k == 10.0
 
-        # But user should get new defaults for fields they didn't customize
-        assert new_custom.extraction.top_p == 0.2
-        assert new_custom.extraction.top_k == 20.0
-
-    def test_multiple_customizations_at_different_levels(self):
-        """Multiple user customizations across different config sections."""
+    def test_preserves_user_customizations_and_added_classes(self):
+        """User customizations at every level, incl. added classes, survive intact."""
         manager = ConfigurationManager(table_name="test-table")
 
         old_default = IDPConfig(
             extraction=ExtractionConfig(
+                model="us.amazon.nova-pro-v1:0",
                 temperature=0.0,
-                model="nova-pro-v1:0",
                 confidence=ConfidenceConfig(enabled=True, temperature=0.0),
+                image=ImageConfig(dpi=300, target_width=None),
             ),
+            classes=[],
         )
-
-        # User customized extraction.temperature and extraction.confidence.enabled
         old_custom = IDPConfig(
             extraction=ExtractionConfig(
-                temperature=0.9,
-                model="nova-pro-v1:0",
+                model="us.amazon.nova-pro-v1:0",
+                temperature=0.8,
                 confidence=ConfidenceConfig(enabled=False, temperature=0.0),
+                image=ImageConfig(dpi=600, target_width=None),
             ),
+            classes=[{"$id": "Invoice", "properties": {}}],
         )
-
-        # New default changes everything
         new_default = IDPConfig(
             extraction=ExtractionConfig(
+                model="us.amazon.nova-premier-v1:0",
                 temperature=0.5,
-                model="nova-premier-v1:0",
                 confidence=ConfidenceConfig(enabled=True, temperature=0.5),
+                image=ImageConfig(dpi=450, target_width=1024),
             ),
+            classes=[],
         )
 
         new_custom = manager.sync_custom_with_new_default(
             old_default, new_default, old_custom
         )
 
-        # User's customizations preserved
-        assert new_custom.extraction.temperature == 0.9
+        # Everything from the custom snapshot is preserved; nothing from new_default.
+        assert new_custom.extraction.temperature == 0.8
+        assert new_custom.extraction.model == "us.amazon.nova-pro-v1:0"
         assert not new_custom.extraction.confidence.enabled
-
-        # New defaults applied to non-customized fields
-        assert new_custom.extraction.model == "nova-premier-v1:0"
-        assert new_custom.extraction.confidence.temperature == 0.5
-
-    def test_nested_field_customization(self):
-        """User customized a nested field - only that field should be preserved."""
-        manager = ConfigurationManager(table_name="test-table")
-
-        old_default = IDPConfig(
-            extraction=ExtractionConfig(
-                temperature=0.0, image=ImageConfig(dpi=300, target_width=None)
-            )
-        )
-
-        # User customized only image.dpi
-        old_custom = IDPConfig(
-            extraction=ExtractionConfig(
-                temperature=0.0, image=ImageConfig(dpi=600, target_width=None)
-            )
-        )
-
-        # New default updates multiple fields
-        new_default = IDPConfig(
-            extraction=ExtractionConfig(
-                temperature=0.5, image=ImageConfig(dpi=450, target_width=1024)
-            )
-        )
-
-        new_custom = manager.sync_custom_with_new_default(
-            old_default, new_default, old_custom
-        )
-
-        # User's nested customization preserved
         assert new_custom.extraction.image.dpi == 600
-
-        # New defaults for other fields
-        assert new_custom.extraction.temperature == 0.5
-        assert new_custom.extraction.image.target_width == 1024
-
-    def test_user_added_new_field(self):
-        """User added a field not in Default - should be preserved."""
-        manager = ConfigurationManager(table_name="test-table")
-
-        old_default = IDPConfig(extraction=ExtractionConfig(temperature=0.0))
-
-        # User added notes field (allowed by extra='allow' - wait, we changed to forbid!)
-        # Let's use classes instead which is a real field
-        old_custom = IDPConfig(
-            extraction=ExtractionConfig(temperature=0.0),
-            classes=[{"$id": "UserClass", "properties": {}}],
-        )
-
-        new_default = IDPConfig(extraction=ExtractionConfig(temperature=0.5))
-
-        new_custom = manager.sync_custom_with_new_default(
-            old_default, new_default, old_custom
-        )
-
-        # User's added field should be preserved
-        assert new_custom.classes == [{"$id": "UserClass", "properties": {}}]
-
-        # New default applied
-        assert new_custom.extraction.temperature == 0.5
-
-    def test_complex_real_world_scenario(self):
-        """Complex scenario with changes at multiple levels."""
-        manager = ConfigurationManager(table_name="test-table")
-
-        # Old system default
-        old_default = IDPConfig(
-            extraction=ExtractionConfig(
-                model="us.amazon.nova-pro-v1:0",
-                temperature=0.0,
-                top_p=0.1,
-                top_k=10.0,
-                confidence=ConfidenceConfig(
-                    enabled=True, temperature=0.0, list_batch_size=25
-                ),
-            ),
-            classes=[],
-        )
-
-        # User's customizations:
-        # - Changed extraction.temperature to 0.8
-        # - Disabled confidence assessment
-        # - Added custom classes
-        old_custom = IDPConfig(
-            extraction=ExtractionConfig(
-                model="us.amazon.nova-pro-v1:0",
-                temperature=0.8,  # CUSTOM
-                top_p=0.1,
-                top_k=10.0,
-                confidence=ConfidenceConfig(
-                    enabled=False,  # CUSTOM
-                    temperature=0.0,
-                    list_batch_size=25,
-                ),
-            ),
-            classes=[{"$id": "Invoice", "properties": {}}],  # CUSTOM
-        )
-
-        # New system default (v2):
-        # - New model
-        # - Different defaults for temp/top_p
-        # - Increased top_k
-        # - Larger confidence list_batch_size
-        new_default = IDPConfig(
-            extraction=ExtractionConfig(
-                model="us.amazon.nova-premier-v1:0",  # NEW
-                temperature=0.5,  # NEW
-                top_p=0.2,  # NEW
-                top_k=20.0,  # NEW
-                confidence=ConfidenceConfig(
-                    enabled=True,
-                    temperature=0.5,  # NEW
-                    list_batch_size=50,  # NEW
-                ),
-            ),
-            classes=[],
-        )
-
-        # What should new_custom look like?
-        new_custom = manager.sync_custom_with_new_default(
-            old_default, new_default, old_custom
-        )
-
-        # User's customizations PRESERVED:
-        assert new_custom.extraction.temperature == 0.8  # User's custom value
-        assert not new_custom.extraction.confidence.enabled  # User's custom value
-        assert len(new_custom.classes) == 1  # User's custom classes
-        assert new_custom.classes[0]["$id"] == "Invoice"
-
-        # New defaults APPLIED to non-customized fields:
-        assert new_custom.extraction.model == "us.amazon.nova-premier-v1:0"
-        assert new_custom.extraction.top_p == 0.2
-        assert new_custom.extraction.top_k == 20.0
-        assert new_custom.extraction.confidence.temperature == 0.5
-        assert new_custom.extraction.confidence.list_batch_size == 50
+        assert new_custom.extraction.image.target_width is None
+        assert new_custom.classes == [{"$id": "Invoice", "properties": {}}]
 
 
 @pytest.mark.unit
