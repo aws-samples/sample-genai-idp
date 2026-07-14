@@ -24,6 +24,11 @@ __pycache__
 notebooks/examples/data
 .idea/
 .srt/
+# SRT converts notebooks to scripts (jupyter nbconvert --output "<nb>-converted")
+# to run bandit on them, and only cleans up the .py form; notebooks missing
+# language_info.file_extension get a .txt instead, which is left behind.
+*-converted.py
+*-converted.txt
 *tmp-dev-assets*
 scratch/
 .mcp.json
