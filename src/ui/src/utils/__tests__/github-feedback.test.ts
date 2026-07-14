@@ -13,34 +13,45 @@ const ctx = {
 };
 
 describe('buildEnvironmentSummary', () => {
-  it('includes version, build, and stack', () => {
+  it('includes version, build, stack, region, and mode', () => {
     const s = buildEnvironmentSummary(ctx);
-    expect(s).toContain('Version: 0.6.0.dev25');
-    expect(s).toContain('Build: 2026-07-14T12:00:00Z');
-    expect(s).toContain('Stack: IDP1');
+    expect(s).toContain('Version:');
+    expect(s).toContain('0.6.0.dev25');
+    expect(s).toContain('Build:');
+    expect(s).toContain('Stack:');
+    expect(s).toContain('IDP1');
+    expect(s).toContain('Region:');
+    expect(s).toContain('us-west-2');
+    expect(s).toContain('Processing mode:');
+    expect(s).toContain('Pipeline mode');
   });
 
   it('omits missing fields', () => {
-    expect(buildEnvironmentSummary({ version: '1.0' })).toBe('Version: 1.0');
+    expect(buildEnvironmentSummary({ version: '1.0' })).toBe('- **Version:** 1.0');
   });
 });
 
 describe('buildBugReportUrl', () => {
-  it('targets the bug_report.yml form with prefilled env fields', () => {
+  it('prefills the issue body (not a form template) with a bug label and environment', () => {
     const url = new URL(buildBugReportUrl(ctx));
     expect(url.pathname).toContain('/issues/new');
-    expect(url.searchParams.get('template')).toBe('bug_report.yml');
-    expect(url.searchParams.get('region')).toBe('us-west-2');
-    expect(url.searchParams.get('mode')).toBe('Pipeline mode');
-    expect(url.searchParams.get('version')).toContain('Version: 0.6.0.dev25');
+    expect(url.searchParams.get('template')).toBeNull();
+    expect(url.searchParams.get('labels')).toBe('bug');
+    const body = url.searchParams.get('body') ?? '';
+    expect(body).toContain('## Environment');
+    expect(body).toContain('0.6.0.dev25');
+    expect(body).toContain('us-west-2');
+    expect(body).toContain('Pipeline mode');
+    expect(body).toContain('Describe the bug');
+    expect(body).toContain('redact'); // redaction reminder
   });
 
   it('maps BDA patterns to "BDA mode"', () => {
     const url = new URL(buildBugReportUrl({ pattern: 'Pattern1 - BDA' }));
-    expect(url.searchParams.get('mode')).toBe('BDA mode');
+    expect(url.searchParams.get('body')).toContain('BDA mode');
   });
 
-  it('adds document context and title when provided', () => {
+  it('embeds document context and findings in the body when provided', () => {
     const url = new URL(
       buildBugReportUrl(ctx, {
         objectKey: 'lending_package-long.pdf',
@@ -51,25 +62,38 @@ describe('buildBugReportUrl', () => {
       }),
     );
     expect(url.searchParams.get('title')).toContain('lending_package-long.pdf');
-    const troubleshoot = url.searchParams.get('troubleshoot') ?? '';
-    expect(troubleshoot).toContain('FAILED');
-    expect(troubleshoot).toContain('The extraction step timed out.');
+    const body = url.searchParams.get('body') ?? '';
+    expect(body).toContain('FAILED');
+    expect(body).toContain('Config version:');
+    expect(body).toContain('The extraction step timed out.');
   });
 
-  it('caps oversized fields to keep the URL under GitHub limits', () => {
+  it('caps an oversized body to keep the URL under GitHub limits', () => {
     const huge = 'x'.repeat(20000);
     const url = new URL(buildBugReportUrl(ctx, { objectKey: 'a.pdf', findings: huge }));
-    const troubleshoot = url.searchParams.get('troubleshoot') ?? '';
-    expect(troubleshoot.length).toBeLessThan(6100);
-    expect(troubleshoot).toContain('truncated');
+    const body = url.searchParams.get('body') ?? '';
+    expect(body.length).toBeLessThan(6600);
+    expect(body).toContain('truncated');
   });
 });
 
 describe('buildFeatureRequestUrl', () => {
-  it('targets the feature_request.yml form', () => {
+  it('prefills the body with an enhancement label and environment', () => {
     const url = new URL(buildFeatureRequestUrl(ctx));
-    expect(url.searchParams.get('template')).toBe('feature_request.yml');
-    expect(url.searchParams.get('version')).toContain('Version: 0.6.0.dev25');
+    expect(url.searchParams.get('template')).toBeNull();
+    expect(url.searchParams.get('labels')).toBe('enhancement');
+    const body = url.searchParams.get('body') ?? '';
+    expect(body).toContain('## Environment');
+    expect(body).toContain('0.6.0.dev25');
+    expect(body).toContain("Describe the solution you'd like");
+  });
+
+  it('embeds provided context (e.g. a chat answer) in the body', () => {
+    const url = new URL(buildFeatureRequestUrl(ctx, 'It would be great if the agent could export findings.'));
+    const body = url.searchParams.get('body') ?? '';
+    expect(body).toContain('## Context');
+    expect(body).toContain('It would be great if the agent could export findings.');
+    expect(body).toContain('redact');
   });
 });
 
@@ -77,8 +101,8 @@ describe('buildFullDetailsText', () => {
   it('includes environment, findings, and the redaction reminder', () => {
     const text = buildFullDetailsText(ctx, { objectKey: 'a.pdf', findings: 'boom' });
     expect(text).toContain('## Environment');
-    expect(text).toContain('Region: us-west-2');
-    expect(text).toContain('Processing mode: Pipeline mode');
+    expect(text).toContain('us-west-2');
+    expect(text).toContain('Pipeline mode');
     expect(text).toContain('boom');
     expect(text).toContain('redact');
   });

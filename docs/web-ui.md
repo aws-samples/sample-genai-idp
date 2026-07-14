@@ -437,20 +437,24 @@ hand-type them. There are three entry points:
   **Report an issue** link, and the right-side info (Help) panel on the Document List
   includes a **Feedback & support** section with the same links.
 
-**What gets pre-filled.** The GitHub issue forms auto-populate the AWS **Region**,
-**Processing Mode**, and an environment summary (**Version**, **Build**, **Stack
-name**) sourced from the deployment's settings. The Troubleshoot path additionally
-fills the document context and agent findings.
+**What gets pre-filled.** Every link opens the GitHub new-issue page with the
+**issue body** pre-populated — an environment summary (**Version**, **Build**,
+**Stack name**, **Region**, **Processing Mode**) sourced from the deployment's
+settings, plus context: the Troubleshoot path adds the document context and agent
+findings, and the Agent Companion Chat path adds the agent's answer. The report/copy
+affordances appear once the agent job completes.
 
 > **Privacy note:** issues on the public repository are visible to everyone. Nothing
 > is submitted automatically — GitHub always shows you the pre-filled form to review
 > first. **Please review every field and redact any sensitive document data**
 > (names, account numbers, PII) before submitting.
 
-The links target GitHub issue *forms* (`.github/ISSUE_TEMPLATE/*.yml`). Field-level
-pre-fill takes effect once those forms are present on the repository's default
-branch; until then the links still open the new-issue form (just without the
-populated fields).
+The in-app links pre-fill the issue **body** directly (via `?title=&body=&labels=`),
+so the content is embedded immediately. This intentionally bypasses the `.yml` issue
+*forms* in `.github/ISSUE_TEMPLATE/` — GitHub ignores a pre-filled `body` when a form
+template is selected — so those forms apply only when a user clicks **New issue**
+directly on GitHub. Very long findings are length-capped in the URL; use **Copy full
+details** in the Troubleshoot modal to grab the complete text.
 
 ## Authentication Features
 

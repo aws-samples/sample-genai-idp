@@ -18,12 +18,15 @@ export const GITHUB_REPO_URL = `https://github.com/${GITHUB_OWNER_REPO}`;
 /** Issues list. */
 export const GITHUB_ISSUES_URL = `${GITHUB_REPO_URL}/issues`;
 
-/** New-issue endpoint (append `?template=...&<field-id>=...` to prefill a form). */
+/**
+ * New-issue endpoint. App-generated links append `?title=&body=&labels=` to
+ * pre-fill the issue body directly (see utils/github-feedback.ts). Note this
+ * bypasses the `.yml` issue *forms* in .github/ISSUE_TEMPLATE/ — GitHub ignores
+ * `body=` when a template is selected — which is intentional so content is
+ * embedded regardless of whether those forms exist on the default branch yet.
+ * The forms still apply when a user clicks "New issue" directly on GitHub.
+ */
 export const GITHUB_NEW_ISSUE_URL = `${GITHUB_ISSUES_URL}/new`;
-
-/** Issue-form template filenames (must match files in .github/ISSUE_TEMPLATE/). */
-export const GITHUB_BUG_TEMPLATE = 'bug_report.yml';
-export const GITHUB_FEATURE_TEMPLATE = 'feature_request.yml';
 
 /** Published documentation site (GitHub Pages). */
 export const DOCS_BASE_URL = `https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws`;

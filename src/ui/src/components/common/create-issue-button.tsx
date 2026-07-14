@@ -27,7 +27,9 @@ const CreateIssueButton = ({ findings, titleHint, variant = 'normal' }: CreateIs
   const deploymentContext = useDeploymentContext();
 
   const bugUrl = buildBugReportUrl(deploymentContext, findings ? { objectKey: titleHint, findings } : undefined);
-  const featureUrl = buildFeatureRequestUrl(deploymentContext);
+  // Carry the same context (e.g. the chat answer) into the feature request so
+  // "Request a feature" from chat isn't empty of context either.
+  const featureUrl = buildFeatureRequestUrl(deploymentContext, findings);
 
   return (
     <ButtonDropdown
