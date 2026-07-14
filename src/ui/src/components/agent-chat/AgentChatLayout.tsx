@@ -36,6 +36,7 @@ import TableDisplay from '../document-agents-layout/TableDisplay';
 import AgentChatHistoryDropdown from './AgentChatHistoryDropdown';
 import AgentToolComponent from './AgentToolComponent';
 import BedrockErrorMessage from './BedrockErrorMessage';
+import CreateIssueButton from '../common/create-issue-button';
 import './AgentChatLayout.css';
 
 import type { ChatMessage } from '../../types/agent-chat';
@@ -382,8 +383,17 @@ const AgentChatLayout = ({
 
   const supportPrompts = mode === 'quick_start' ? quickStartSupportPrompts : chatSupportPrompts;
 
+  // Index of the last assistant message — the "Create GitHub issue" affordance
+  // is shown only under the final answer to avoid cluttering every turn.
+  const lastAssistantIndex = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].role === 'assistant') return i;
+    }
+    return -1;
+  }, [messages]);
+
   const renderedMessages = useMemo(() => {
-    return messages.map((message: ChatMessage) => {
+    return messages.map((message: ChatMessage, messageIndex: number) => {
       let contentText = '';
       if (typeof message.content === 'string') {
         contentText = message.content;
@@ -525,19 +535,34 @@ const AgentChatLayout = ({
                       {message.parsedData.responseType === 'table' && (
                         <TableDisplay tableData={message.parsedData.data as Record<string, unknown>} />
                       )}
+
+                      {messageIndex === lastAssistantIndex && !message.isProcessing && message.parsedData.textContent && (
+                        <Box>
+                          <CreateIssueButton findings={message.parsedData.textContent} />
+                        </Box>
+                      )}
                     </SpaceBetween>
                   );
                 }
 
                 // Handle regular text messages (preserve existing functionality)
-                return <SafeMarkdown components={markdownComponents}>{contentText}</SafeMarkdown>;
+                return (
+                  <SpaceBetween size="xs">
+                    <SafeMarkdown components={markdownComponents}>{contentText}</SafeMarkdown>
+                    {messageIndex === lastAssistantIndex && !message.isProcessing && contentText.trim().length > 0 && (
+                      <Box>
+                        <CreateIssueButton findings={contentText} />
+                      </Box>
+                    )}
+                  </SpaceBetween>
+                );
               })()}
             </div>
           </div>
         </div>
       );
     });
-  }, [messages, user, collapsedSections, handleExpandedChange, userInitial]);
+  }, [messages, user, collapsedSections, handleExpandedChange, userInitial, lastAssistantIndex]);
 
   const chatContent = (
     <div className="chat-container">

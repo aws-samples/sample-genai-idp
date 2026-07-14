@@ -1,0 +1,97 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+name: Bug report
+description: Create a report to help us improve
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report!
+
+        > ⚠️ **Before submitting, please review every field below and redact any
+        > sensitive document data** (names, account numbers, PII) — issues on
+        > this repository are public.
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: To Reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Go to '...'
+        2. Click on '....'
+        3. Scroll down to '....'
+        4. See error
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: A clear and concise description of what you expected to happen.
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: If applicable, add screenshots to help explain your problem.
+  - type: input
+    id: region
+    attributes:
+      label: AWS Region
+      description: What AWS region have you deployed in?
+      placeholder: e.g. us-west-2
+  - type: input
+    id: mode
+    attributes:
+      label: Accelerator Processing Mode
+      description: Which processing mode did you deploy with? (Pipeline mode, BDA mode, or both)
+      placeholder: e.g. Pipeline mode
+  - type: textarea
+    id: version
+    attributes:
+      label: Accelerator Version / Build
+      description: Which Version did you deploy? (Please ensure the problem exists in the latest version.)
+      placeholder: |
+        Version: 0.6.0
+        Build: ...
+        Stack: ...
+  - type: textarea
+    id: stack-parameters
+    attributes:
+      label: Custom Stack Parameters
+      description: What non-default stack parameters did you configure when deploying?
+  - type: textarea
+    id: custom-config
+    attributes:
+      label: Custom Configurations
+      description: What configuration settings did you customize?
+  - type: textarea
+    id: troubleshoot
+    attributes:
+      label: Output of the 'Troubleshoot' agent (if issue is a document processing failure)
+      description: |
+        See [error analyzer](../../docs/error-analyzer.md). If you launched this
+        report from the Troubleshoot agent in the web UI, the findings are
+        pre-filled below — please review and redact sensitive data before submitting.
+  - type: markdown
+    attributes:
+      value: |
+        **Link to DeepWiki answer** — Try
+        [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws)
+        and share the response link in the field below.
+  - type: input
+    id: deepwiki
+    attributes:
+      label: DeepWiki answer link
+      description: Optional — paste a DeepWiki response link here.
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add any other context about the problem here.
