@@ -6,17 +6,18 @@ This report lists (A) suppressions that should arguably be **mitigated instead**
 (B) justifications that were **wrong or copy-pasted** and have been corrected in
 `issues.json`, and (C) the in-source suppression-marker gap that has been closed.
 
-## A. Candidates for mitigation instead of suppression (review one by one)
+## A. Candidates for mitigation instead of suppression — disposition (2026-07-14)
 
-These are correctly *recorded*, but the underlying control is cheap enough that
-fixing may be better than accepting. None is a false positive.
+Four items were flagged in the initial audit. On follow-up review, two were
+already overtaken by merges from 2026-07-13, and the other two have now been
+**mitigated in code** (this branch) rather than suppressed:
 
-| # | Finding | Where | Why reconsider | Est. effort |
-|---|---------|-------|----------------|-------------|
-| 1 | API-GW-001: no access logging on API stage | `nested/api-resolvers/template.yaml` → `HttpApiStage` | This is the production data-plane API of the deployed solution (not dev scaffolding). Access logs are the only place a denied/unauthenticated request is recorded — resolver Lambda logs only capture requests that pass the Cognito authorizer and WAF. One `AWS::Logs::LogGroup` + `AccessLogSetting` on the stage. | Small |
-| 2 | API-GW-006: no execution (CloudWatch) logging on API stage | same resource | Same reasoning as #1; `MethodSettings: LoggingLevel: ERROR` is a few lines. Could be parameter-gated to keep default cost at zero. | Small |
-| 3 | LAMBDA-004/011: no X-Ray / no alarms on `SGIngressManagerFunction`, `RegisterTargetsFunction` | `nested/alb-hosting/template.yaml` | The suppression calls these "helper/custom-resource Lambdas", which is accurate, and CFN surfaces their failures at deploy time — but `SGIngressManagerFunction` mutates security-group ingress at runtime, so a silent failure has a security consequence (stale ingress). An Errors alarm wired to the stack's existing SNS topic would be cheap. X-Ray genuinely adds little here. | Small (alarms only) |
-| 4 | B602 `shell=True` in `lib/idp_feature_sdk/idp_feature_sdk/publisher.py:92,119` | feature SDK publisher | The "manifest author controls their own environment" argument is sound *today* (local dev tool, own manifest, own cwd). It becomes wrong the moment the SDK is pointed at a third-party feature package (e.g. installing a downloaded feature). If that path is plausible on the roadmap, prefer `shlex.split` + `shell=False`, or document the trust boundary in the SDK README. Suppression is defensible; flagging because the risk is trajectory-dependent. | Small–medium |
+| # | Finding | Disposition |
+|---|---------|-------------|
+| 1 | API-GW-001: no access logging on API stage (`HttpApiStage`) | **Already fixed** by commit `7397a02ed` (PR #481): `AccessLogSetting` writes JSON request metadata (authorizer errors, WAF status, never bodies) to a KMS-encrypted log group with `LogRetentionDays` retention, on by default (`LogLevel=INFO`). Stale suppression entry removed from issues.json. |
+| 2 | API-GW-006: no execution (CloudWatch) logging on API stage | **Mitigated in this branch**: `MethodSettings` added with `LoggingLevel: ERROR` (never INFO — INFO execution logs echo request/response payloads, i.e. customer document data), `DataTraceEnabled: false`, `MetricsEnabled: true`, gated on the same `EnableApiAccessLogs` condition. The auto-created `API-Gateway-Execution-Logs_<id>/api` log group is pre-declared with stack retention + CMK. Suppression entry removed. |
+| 3 | LAMBDA-004/011 + ELB-004 on `nested/alb-hosting/template.yaml`, NET-VPC-002/KMS-007 on `scripts/alb-test-vpc.yaml` | **Moot**: PR #470 (commit `2ab556d8b`) removed ALB Web UI hosting entirely; both files are no longer in git. All 8 suppression entries pointing at them removed from issues.json. |
+| 4 | B602 `shell=True` in `lib/idp_feature_sdk/idp_feature_sdk/publisher.py` | **Mitigated in this branch**: the manifest schema gains structured list-of-steps forms (`ui.build` / `agentSource.package`, each step `{cwd, argv}`) executed with `shell=False` — no shell is invoked, eliminating the injection surface, with `cwd:` replacing the `cd &&` idiom. The legacy `buildCommand`/`packageCommand` string forms remain supported for compatibility (a single `shell=True` call site remains — `_run_legacy_shell_command` — with nosec + a runtime deprecation notice; the two original entries are consolidated into one updated suppression). All three in-repo feature manifests (feature-template, sample-feature, sample-health-insurance-review) are migrated to the structured form. |
 
 Everything else reviewed is a genuine accept/false-positive:
 

@@ -234,3 +234,82 @@ def test_failed_upload_leaves_latest_json_untouched(
         s3.get_object(Bucket=feature_bucket, Key=f"{_BASE}/latest.json")["Body"].read()
     )
     assert latest["version"] == "0.0.1"  # unchanged
+
+
+def test_structured_build_steps_run_without_shell(
+    demo_feature_project: Path, monkeypatch
+) -> None:
+    """`ui.build` steps must be exec'd as argv lists with shell=False —
+    the B602 mitigation the structured form exists for."""
+    import subprocess as _subprocess
+
+    mf = demo_feature_project / "feature.yaml"
+    mf.write_text(
+        mf.read_text().replace(
+            "ui:\n  bundlePath: feature-ui/dist/ui-bundle.js",
+            "ui:\n"
+            "  bundlePath: feature-ui/dist/ui-bundle.js\n"
+            "  build:\n"
+            "    - cwd: feature-ui\n"
+            "      argv: ['echo', 'step-one']\n"
+            "    - argv: ['echo', 'step-two']\n",
+        ),
+        encoding="utf-8",
+    )
+
+    calls = []
+    real_run = _subprocess.run
+
+    def spy_run(cmd, *a, **kw):
+        calls.append({"cmd": cmd, "shell": kw.get("shell"), "cwd": kw.get("cwd")})
+        return real_run(cmd, *a, **kw)
+
+    monkeypatch.setattr("idp_feature_sdk.publisher.subprocess.run", spy_run)
+    FeaturePublisher(demo_feature_project).build()
+
+    assert [c["cmd"] for c in calls] == [["echo", "step-one"], ["echo", "step-two"]]
+    assert all(c["shell"] is False for c in calls)
+    assert calls[0]["cwd"] == demo_feature_project / "feature-ui"
+    assert calls[1]["cwd"] == demo_feature_project
+
+
+def test_structured_build_step_failure_aborts(demo_feature_project: Path) -> None:
+    mf = demo_feature_project / "feature.yaml"
+    mf.write_text(
+        mf.read_text().replace(
+            "ui:\n  bundlePath: feature-ui/dist/ui-bundle.js",
+            "ui:\n"
+            "  bundlePath: feature-ui/dist/ui-bundle.js\n"
+            "  build:\n"
+            "    - argv: ['false']\n",
+        ),
+        encoding="utf-8",
+    )
+    import pytest as _pytest
+
+    with _pytest.raises(RuntimeError, match=r"ui\.build\[0\]"):
+        FeaturePublisher(demo_feature_project).build()
+
+
+def test_legacy_build_command_still_runs_with_deprecation(
+    demo_feature_project: Path,
+) -> None:
+    """Legacy buildCommand keeps working (shell=True path) but logs a
+    deprecation notice pointing at the structured form."""
+    from rich.console import Console
+
+    mf = demo_feature_project / "feature.yaml"
+    mf.write_text(
+        mf.read_text().replace(
+            "ui:\n  bundlePath: feature-ui/dist/ui-bundle.js",
+            "ui:\n"
+            "  bundlePath: feature-ui/dist/ui-bundle.js\n"
+            "  buildCommand: 'echo legacy-build'",
+        ),
+        encoding="utf-8",
+    )
+    console = Console(record=True)
+    FeaturePublisher(demo_feature_project, console=console).build()
+    out = console.export_text()
+    assert "deprecated" in out
+    assert "ui.buildCommand" in out
