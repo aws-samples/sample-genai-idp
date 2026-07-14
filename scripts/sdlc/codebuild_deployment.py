@@ -963,6 +963,34 @@ def test_step10_multi_doc_discovery(stack_name):
         }
 
 
+def test_step12_api_rbac(stack_name):
+    """Step 12: API RBAC authorization tests (static scan + dynamic matrix).
+
+    Runs sequentially (like Step 11) because the dynamic harness temporarily
+    enables ADMIN_USER_PASSWORD_AUTH on the UI app client and restores it —
+    safest not to interleave with the parallel suite. Creates temporary
+    Cognito users, exercises every API op across all roles + unauthenticated
+    + token negatives, then tears the users down.
+    """
+    print("Step 12: API RBAC authorization tests (static + dynamic)...")
+    report_dir = "/tmp/api-test-results"  # nosec B108
+    region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+    cmd = (
+        f"make api-test STACK_NAME={stack_name} REGION={region} REPORT_DIR={report_dir}"
+    )
+    result = run_command(cmd, check=False, timeout=1800)
+    if result.returncode != 0:
+        # Surface the report location; the full report is in the build log.
+        return {
+            "success": False,
+            "error": (
+                "API RBAC test failed (static scan or dynamic authorization "
+                f"matrix) — see {report_dir} output in build log"
+            ),
+        }
+    return {"success": True}
+
+
 def test_step11_test_compare(stack_name):
     """Step 11: Test Compare - Compare results from multiple test runs using idp-cli test-compare"""
     print("Step 11: Testing test-compare command...")
@@ -1203,6 +1231,12 @@ SEQUENTIAL_TEST_STEPS = [
         "test-compare",
         "Test comparison (idp-cli test-compare)",
     ),
+    (
+        test_step12_api_rbac,
+        "Step 12",
+        "API RBAC",
+        "API RBAC authorization tests (static scan + dynamic matrix)",
+    ),
 ]
 ALL_TEST_STEPS = PARALLEL_TEST_STEPS + SEQUENTIAL_TEST_STEPS
 
@@ -1301,24 +1335,25 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
                 "error": f"{test_name} failed: {result.get('error', 'Unknown error')}",
             }
 
-        # Run Step 11 (test-compare) sequentially after parallel tests
-        print(f"\n{'=' * 80}")
-        print("Running Step 11 (test-compare) sequentially...")
-        print(f"{'=' * 80}\n")
+        # Run the sequential steps (test-compare, API RBAC) after parallel tests
+        for func, step, name, _ in SEQUENTIAL_TEST_STEPS:
+            print(f"\n{'=' * 80}")
+            print(f"Running {step} ({name}) sequentially...")
+            print(f"{'=' * 80}\n")
 
-        result = test_step11_test_compare(stack_name)
-        if result["success"]:
-            print("✅ Step 11: test-compare passed")
-        else:
-            print(
-                f"❌ Step 11: test-compare failed: {result.get('error', 'Unknown error')}"
-            )
-            return {
-                "stack_name": stack_name,
-                "success": False,
-                "failure_type": "test",
-                "error": f"Step 11: test-compare failed: {result.get('error', 'Unknown error')}",
-            }
+            result = func(stack_name)
+            if result["success"]:
+                print(f"✅ {step}: {name} passed")
+            else:
+                print(
+                    f"❌ {step}: {name} failed: {result.get('error', 'Unknown error')}"
+                )
+                return {
+                    "stack_name": stack_name,
+                    "success": False,
+                    "failure_type": "test",
+                    "error": f"{step}: {name} failed: {result.get('error', 'Unknown error')}",
+                }
 
         print("✅ All tests passed")
         return {"stack_name": stack_name, "success": True}
@@ -1739,13 +1774,19 @@ def generate_deployment_summary(result, stack_name, template_url):
         # safe default when the field is missing (e.g. exception result dicts
         # built in main), since CF-event analysis degrades gracefully.
         if result.get("failure_type", "deploy") != "test":
-            print(f"🔍 Getting CloudFormation logs for: {stack_name}")
-            try:
-                logs = get_cloudformation_logs(stack_name)
-                print(f"✅ Retrieved {len(logs)} CF events for {stack_name}")
-            except Exception as e:
-                print(f"⚠️ Exception getting CF logs for {stack_name}: {e}")
-                logs = [{"error": f"Exception: {str(e)}", "stack_name": stack_name}]
+            # Use pre-captured events when the caller saved them before the
+            # stack was torn down (the APIGW/VPC hosting test deletes its
+            # throwaway stack in a finally block, so a post-cleanup fetch by
+            # stack name would find nothing).
+            logs = result.get("cf_events")
+            if logs is None:
+                print(f"🔍 Getting CloudFormation logs for: {stack_name}")
+                try:
+                    logs = get_cloudformation_logs(stack_name)
+                    print(f"✅ Retrieved {len(logs)} CF events for {stack_name}")
+                except Exception as e:
+                    print(f"⚠️ Exception getting CF logs for {stack_name}: {e}")
+                    logs = [{"error": f"Exception: {str(e)}", "stack_name": stack_name}]
 
             cf_prompt = dedent(f"""
             An AWS CloudFormation deployment failed. Analyze the error events to
@@ -2054,6 +2095,21 @@ def validate_apigw_private_hosting(stack_name):
     return {"success": True, "web_url": web_url}
 
 
+def _capture_cf_events(result, stack_name):
+    """Snapshot CF failure events into the result dict before stack teardown.
+
+    The APIGW hosting test deletes its throwaway stack in a finally block, so
+    the summary generator (which runs after cleanup) cannot fetch events by
+    stack name — they must be captured while the stack still exists.
+    """
+    try:
+        result["cf_events"] = get_cloudformation_logs(stack_name)
+    except Exception as e:  # noqa: BLE001
+        result["cf_events"] = [
+            {"error": f"Exception: {str(e)}", "stack_name": stack_name}
+        ]
+
+
 def deploy_and_test_apigw_vpc_hosting(admin_email, template_url):
     """Deploy + validate + tear down the APIGateway/VPC/PRIVATE hosting variant."""
     stack_name = f"{generate_stack_name()}-apigw"
@@ -2095,19 +2151,69 @@ def deploy_and_test_apigw_vpc_hosting(admin_email, template_url):
         )
         if "COMPLETE" not in status.stdout:
             result["error"] = f"Deploy status: {status.stdout.strip()}"
+            result["failure_type"] = "deploy"
+            _capture_cf_events(result, stack_name)
             return result
 
         validation = validate_apigw_private_hosting(stack_name)
         result.update(validation)
+        if not validation.get("success"):
+            result["failure_type"] = "test"
         return result
     except Exception as e:  # noqa: BLE001
         print(f"❌ APIGateway/VPC hosting test exception: {e}")
         result["error"] = str(e)
+        result["failure_type"] = "deploy"
+        _capture_cf_events(result, stack_name)
         return result
     finally:
         # Tear down IDP stack first (frees ENIs in the VPC), then the VPC.
         cleanup_stack({"stack_name": stack_name})
         delete_apigw_test_vpc(vpc_stack_name)
+
+
+def publish_summary_to_s3(summary_text):
+    """Upload the deployment summary to the SDLC source bucket.
+
+    The GitLab job fetches this file directly (deterministic key derived from
+    the CodeBuild build id) instead of scraping it out of CloudWatch Logs,
+    which truncates on long builds. Best effort — never fails the build.
+    """
+    bucket = os.environ.get("SOURCE_BUCKET", "")
+    build_id = os.environ.get("CODEBUILD_BUILD_ID", "")
+    if not bucket or not build_id:
+        print("ℹ️ Skipping summary upload (not running in CodeBuild)")
+        return
+    key = f"deploy/summaries/{build_id.split(':')[-1]}.txt"
+    try:
+        boto3.client("s3").put_object(
+            Bucket=bucket, Key=key, Body=summary_text.encode("utf-8")
+        )
+        print(f"📁 Summary uploaded to s3://{bucket}/{key}")
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠️ Failed to upload summary to S3: {e}")
+
+
+def send_failure_notification(subject, summary_text):
+    """Publish the failure summary to the SDLC SNS topic (email fan-out).
+
+    Gated on IDP_FAILURE_SNS_TOPIC (set by the pipeline template). Best
+    effort — a notification failure must never mask the build result.
+    """
+    topic_arn = os.environ.get("IDP_FAILURE_SNS_TOPIC", "")
+    if not topic_arn:
+        print("ℹ️ IDP_FAILURE_SNS_TOPIC not set — skipping failure email")
+        return
+    try:
+        boto3.client("sns").publish(
+            TopicArn=topic_arn,
+            # SNS subjects are capped at 100 chars
+            Subject=subject[:100],
+            Message=summary_text,
+        )
+        print(f"📧 Failure notification published to {topic_arn}")
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠️ Failed to publish failure notification: {e}")
 
 
 def main():
@@ -2124,6 +2230,9 @@ def main():
     ai_summary = ""
     publish_success = False
     stack_success = False
+    # One-line root cause carried onto the final 🎉/💥 line so the job result
+    # is actionable even if the AI summary generation itself breaks.
+    failure_reason = ""
 
     # Step 0: Clean up stale BDA blueprints from previous runs
     cleanup_stale_bda_blueprints()
@@ -2135,6 +2244,7 @@ def main():
         publish_success = True
     except Exception as e:
         print(f"❌ Publish failed: {e}")
+        failure_reason = f"publish/build failed: {e}"
         ai_summary = generate_publish_failure_summary(str(e))
 
     if publish_success:
@@ -2152,7 +2262,12 @@ def main():
             # Add failed result for exception cases
             result = {"stack_name": stack_name, "success": False, "error": str(e)}
 
-        # Step 3: Generate deployment summary using Bedrock (but don't print yet)
+        if not result["success"]:
+            failure_reason = result.get("error", "Unknown error")
+
+        # Step 3: Generate deployment summary using Bedrock (but don't print
+        # yet). Must run before cleanup_stack so CF events still exist for
+        # deploy-failure analysis.
         try:
             ai_summary = generate_deployment_summary(result, stack_name, template_url)
         except Exception as e:
@@ -2174,17 +2289,37 @@ def main():
                 apigw_result = deploy_and_test_apigw_vpc_hosting(
                     admin_email, template_url
                 )
-                if apigw_result.get("success"):
-                    print("✅ API Gateway / VPC hosting test passed")
-                else:
-                    stack_success = False
-                    print(
-                        "❌ API Gateway / VPC hosting test failed: "
-                        f"{apigw_result.get('error', 'Unknown error')}"
-                    )
             except Exception as e:  # noqa: BLE001
+                apigw_result = {
+                    "stack_name": f"{stack_name}-apigw",
+                    "success": False,
+                    "error": str(e),
+                    "failure_type": "deploy",
+                }
+            if apigw_result.get("success"):
+                print("✅ API Gateway / VPC hosting test passed")
+            else:
                 stack_success = False
-                print(f"❌ API Gateway / VPC hosting test exception: {e}")
+                apigw_error = apigw_result.get("error", "Unknown error")
+                print(f"❌ API Gateway / VPC hosting test failed: {apigw_error}")
+                if not failure_reason:
+                    failure_reason = f"APIGW/VPC hosting test failed: {apigw_error}"
+                # The primary summary was generated before this phase ran and
+                # may say "All Tests Passed" — analyze this failure too (its
+                # CF events were captured before the throwaway stack teardown).
+                try:
+                    apigw_summary = generate_deployment_summary(
+                        apigw_result,
+                        apigw_result.get("stack_name", f"{stack_name}-apigw"),
+                        template_url,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    apigw_summary = f"⚠️ Failed to generate APIGW summary: {e}"
+                ai_summary = (
+                    f"{ai_summary}\n\n"
+                    f"--- API Gateway / VPC hosting test (Step 4b) ---\n"
+                    f"{apigw_summary}"
+                )
         else:
             print("ℹ️ Skipping API Gateway / VPC hosting test (disabled)")
 
@@ -2192,6 +2327,7 @@ def main():
     print("\n🤖 Generating deployment summary with Bedrock...")
     if ai_summary:
         print(ai_summary)
+        publish_summary_to_s3(ai_summary)
 
     # Check final status after all cleanups are done. Use os._exit so the
     # concurrent.futures atexit hook doesn't block on abandoned test threads
@@ -2200,7 +2336,13 @@ def main():
         print(f"🎉 Stack: {stack_name} deployment completed successfully!")
         exit_code = 0
     else:
-        print(f"💥 Stack: {stack_name} deployment failed!")
+        reason_suffix = f" — {failure_reason}" if failure_reason else ""
+        print(f"💥 Stack: {stack_name} deployment failed!{reason_suffix}")
+        send_failure_notification(
+            f"IDP CI failure: {stack_name}",
+            f"Stack: {stack_name}\nRoot cause: {failure_reason or 'unknown'}\n\n"
+            f"{ai_summary or 'No AI summary available.'}",
+        )
         exit_code = 1
     sys.stdout.flush()
     sys.stderr.flush()
