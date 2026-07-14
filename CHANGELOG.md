@@ -5,6 +5,8 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.6.0]
+
 This release (v0.6) reframes **per-field confidence and bounding-box geometry as
 outputs of extraction** rather than a separate assessment stage, retires the
 granular assessment service, adds robust large-list / large-document handling, and
@@ -114,6 +116,11 @@ are migrated automatically on read — no manual edit is required.** See the
 
 - **Extraction prompts respect per-field date/number formats from the Document Schema** (previously a hardcoded MM/DD/YYYY instruction overrode per-field formats), and **every list/nested-list cell gets its own confidence + bounding box** (previously a single score could apply to a whole row).
 
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.6.0.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.6.0.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.6.0.yaml`
+  
 ## [0.5.16]
 
 ### Added
