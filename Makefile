@@ -224,32 +224,21 @@ typecheck-pr: ## Type check only files changed vs TARGET_BRANCH (default: main)
 	$(PYTHON) scripts/sdlc/typecheck_pr_changes.py $(TARGET_BRANCH)
 
 ##@ Testing
-test: ## Run all tests (idp_common, cli, sdk, feature platform, capacity, circuit breaker, config library)
-	$(MAKE) -C lib/idp_common_pkg test PYTHON=$(PYTHON)
-	cd lib/idp_cli_pkg && $(PYTHON) -m pytest -v
-	cd lib/idp_sdk && $(PYTHON) -m pytest -m "not integration" -v
-	@echo "Running idp_feature_sdk tests..."
-	cd lib/idp_feature_sdk && $(PYTHON) -m pytest -v
-	@echo "Running feature platform tests (plumbing resolvers + feature template)..."
-	cd feature-platform/main-stack-extensions && $(PYTHON) -m pytest -v
-	cd feature-platform/feature-template/feature-api && $(PYTHON) -m pytest -v
-	@echo "Running pipeline-hooks dispatcher tests..."
-	cd lib/idp_common_pkg && $(PYTHON) -m pytest tests/unit/lambdas/test_pipeline_hooks_dispatcher.py -v
-	@echo "Running capacity planning Lambda tests..."
-	cd src/lambda/calculate_capacity && $(PYTHON) -m pytest -v
-	@echo "Running circuit breaker Lambda tests..."
-	$(PYTHON) -m pytest -v \
-	    src/lambda/circuit_breaker_manager \
-	    src/lambda/queue_processor/test_check_circuit_breaker.py \
-	    src/lambda/workflow_tracker/test_notify_circuit_breaker.py
-	@echo "Running Chat-with-Document Lambda tests..."
-	$(PYTHON) -m pytest -v \
-	    src/lambda/chat_with_document_processor/tests \
-	    nested/api-resolvers/src/lambda/send_chat_document_message_resolver/tests
-	@echo "Running Chat-stream processor tests (incl. vendored-in-sync guard)..."
-	cd src/lambda/chat_stream_processor && $(PYTHON) -m pytest tests -v
-	@echo "Validating config library files..."
-	$(PYTHON) -m pytest config_library/test_config_library.py -v
+# The repo's Python tests live in ~30 separate roots (packages + per-Lambda
+# dirs), each with its own conftest/mini-environment — a single `pytest` from
+# the repo root fails because the many `tests/conftest.py` files collide. So
+# `scripts/run_all_tests.py` DISCOVERS every test directory and runs each as an
+# isolated pytest invocation. It also fails if it finds a test dir that isn't
+# registered (RUN or QUARANTINE), so new tests can never be silently skipped —
+# the gap that let the old hand-maintained list here miss ~200 Lambda tests.
+test: ## Run every non-integration test suite (auto-discovered; see scripts/run_all_tests.py)
+	$(PYTHON) scripts/run_all_tests.py
+
+test-integration-all: ## Run every integration-marked suite across all roots (requires AWS)
+	$(PYTHON) scripts/run_all_tests.py --integration
+
+test-list: ## List the discovered test roots (run vs quarantined) without running them
+	$(PYTHON) scripts/run_all_tests.py --list
 
 test-cli: ## Run only IDP CLI tests
 	@echo "Running IDP CLI tests..."
