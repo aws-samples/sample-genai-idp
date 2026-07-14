@@ -3147,6 +3147,20 @@ Resources:
     Properties:
       CloudWatchRoleArn: !GetAtt ApiGatewayCloudWatchRole.Arn
 
+  # Execution logs (MethodSettings below) go to a log group whose name API
+  # Gateway hardcodes: API-Gateway-Execution-Logs_<restApiId>/<stageName>.
+  # Pre-declaring it is the only way to get retention + CMK encryption on it —
+  # otherwise API Gateway auto-creates it with no retention and no KMS key.
+  # DependsOn ApiGatewayAccount mirrors HttpApiAccessLogGroup's ordering chain.
+  HttpApiExecutionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: EnableApiAccessLogs
+    DependsOn: ApiGatewayAccount
+    Properties:
+      LogGroupName: !Sub "API-Gateway-Execution-Logs_${HttpApi}/api"
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      RetentionInDays: !Ref LogRetentionDays
+
   HttpApiStage:
     Type: AWS::ApiGateway::Stage
     Properties:
@@ -3165,6 +3179,29 @@ Resources:
           Format: >-
             {"requestId":"$context.requestId","extendedRequestId":"$context.extendedRequestId","ip":"$context.identity.sourceIp","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","path":"$context.path","status":"$context.status","responseLength":"$context.responseLength","responseLatency":"$context.responseLatency","integrationStatus":"$context.integrationStatus","integrationLatency":"$context.integrationLatency","integrationError":"$context.integration.error","errorMessage":"$context.error.message","errorResponseType":"$context.error.responseType","authorizerError":"$context.authorizer.error","authorizerStatus":"$context.authorizer.status","principalId":"$context.authorizer.principalId","wafStatus":"$context.wafResponseCode","userAgent":"$context.identity.userAgent"}
         - !Ref AWS::NoValue
+      # Execution logs at ERROR only: INFO-level execution logging echoes full
+      # request/response payloads (customer document data) into CloudWatch,
+      # which access logs never do. ERROR captures the gateway-side failures
+      # access logs can't diagnose (integration mapping errors, MOCK/CORS
+      # template failures). DataTraceEnabled stays false for the same
+      # no-payloads reason. Logs land in HttpApiExecutionLogGroup above.
+      MethodSettings: !If
+        - EnableApiAccessLogs
+        - - ResourcePath: "/*"
+            HttpMethod: "*"
+            LoggingLevel: ERROR
+            DataTraceEnabled: false
+            MetricsEnabled: true
+        - !Ref AWS::NoValue
+      # API Gateway addresses the execution log group by its hardcoded NAME, so
+      # nothing above creates a CFN dependency on HttpApiExecutionLogGroup. This
+      # tag's !Ref forges that edge (conditionally, matching the log group's
+      # condition) so the KMS/retention-configured group exists before the stage
+      # starts logging — otherwise API Gateway auto-creates an unencrypted one.
+      Tags:
+        - Key: ExecutionLogGroup
+          Value:
+            !If [EnableApiAccessLogs, !Ref HttpApiExecutionLogGroup, "disabled"]
 
   HttpApiDispatcherPermission:
     Type: AWS::Lambda::Permission

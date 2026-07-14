@@ -56,6 +56,10 @@
       "type": "object",
       "required": ["bundlePath"],
       "additionalProperties": false,
+      "not": {
+        "required": ["buildCommand", "build"],
+        "description": "buildCommand (legacy shell string) and build (structured steps) are mutually exclusive."
+      },
       "properties": {
         "bundlePath": {
           "type": "string",
@@ -63,7 +67,11 @@
         },
         "buildCommand": {
           "type": "string",
-          "description": "Command run from project root to (re)build the bundle. Optional — if omitted, the bundle is expected to already exist."
+          "description": "DEPRECATED (runs through a shell — prefer `build`). Shell command run from project root to (re)build the bundle. Optional — if omitted and `build` is absent, the bundle is expected to already exist."
+        },
+        "build": {
+          "$ref": "#/$defs/commandSteps",
+          "description": "Structured build steps run in order to (re)build the bundle. Each step is executed WITHOUT a shell (argv exec), with an optional per-step working directory. Preferred over the legacy buildCommand string."
         }
       }
     },
@@ -161,15 +169,20 @@
       "properties": {
         "packageCommand": {
           "type": "string",
-          "description": "Shell command (run from project root) to package the agent source zip."
+          "description": "DEPRECATED (runs through a shell — prefer `package`). Shell command (run from project root) to package the agent source zip."
+        },
+        "package": {
+          "$ref": "#/$defs/commandSteps",
+          "description": "Structured packaging steps run in order to produce the agent source zip. Each step is executed WITHOUT a shell (argv exec), with an optional per-step working directory. Preferred over the legacy packageCommand string."
         },
         "artifactPath": {
           "type": "string",
           "description": "Path (relative to project root) to the packaged agent-source.zip."
         }
       },
-      "required": ["packageCommand", "artifactPath"],
-      "description": "Optional agent source packaging config. When present, the publisher runs packageCommand and uploads the resulting zip."
+      "required": ["artifactPath"],
+      "oneOf": [{ "required": ["packageCommand"] }, { "required": ["package"] }],
+      "description": "Optional agent source packaging config. When present, the publisher runs the packaging steps (or legacy packageCommand) and uploads the resulting zip."
     },
     "pack": {
       "type": "object",
@@ -205,6 +218,30 @@
         }
       },
       "description": "Optional vertical-product pack config. When present, `idp-feature-cli publish-pack` produces a single-template deployment wrapper with all artifact URLs baked in as defaults, and `idp-feature-cli deploy-pack` deploys it with minimal arguments."
+    }
+  },
+  "$defs": {
+    "commandSteps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["argv"],
+        "properties": {
+          "argv": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" },
+            "description": "Program + arguments, executed directly (no shell — no &&, |, globs, or variable expansion)."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "Working directory for this step, relative to the project root (replaces the `cd X && ...` shell idiom). Defaults to the project root."
+          }
+        }
+      },
+      "description": "Ordered list of subprocess steps run without a shell. Publishing aborts on the first non-zero exit."
     }
   }
 }
