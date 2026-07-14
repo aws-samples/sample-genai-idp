@@ -146,6 +146,21 @@ def get_installed_version(srt_dir):
         return None
 
 
+# The scanners `srt assess` hard-requires. SRT installs these into its OWN
+# managed venv at `.srt/.venv/bin/` (NOT the system PATH) and, at assess time,
+# calls checkAllInstalled() which fails with "Prerequisites not installed."
+# unless EVERY one of these executables is present. `anchore_syft` installs as
+# the `syft` binary. NOTE: contrary to older guidance, semgrep is NOT optional
+# for this SRT version — a missing semgrep blocks the scan just like any other.
+REQUIRED_SCANNERS = ["checkov", "semgrep", "bandit", "syft", "jupyter"]
+
+
+def missing_scanners(srt_dir):
+    """Return the REQUIRED_SCANNERS whose executable is absent from SRT's venv."""
+    venv_bin = srt_dir / ".venv" / "bin"
+    return [tool for tool in REQUIRED_SCANNERS if not (venv_bin / tool).exists()]
+
+
 def main():
     """Setup SRT tool."""
     project_root = Path(__file__).parent.parent.parent
@@ -264,32 +279,69 @@ def main():
         print(f"   AWS Region: {config_data['AWS_REGION']}")
         print(f"   Installation ID: {config_data['INSTALLATION_ID']}")
 
-        # Install prerequisites non-interactively using yes command
-        print("   Installing SRT prerequisites (this may take several minutes)...")
-        print("   Running: yes '' | timeout 600 ./srt config")
-        result = subprocess.run(
-            "yes '' | timeout 600 ./srt config",
-            shell=True,  # nosec B602 nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true - hardcoded pipeline, no user input
-            cwd=srt_dir,
-            capture_output=True,
-            text=True,
-            check=False,
+        # Install prerequisites non-interactively. `srt config` builds a managed
+        # venv and pip-installs all five scanners into it; a COLD install (no pip
+        # cache) of checkov+semgrep+jupyter+syft+bandit routinely needs >10 min,
+        # so give it a generous ceiling. Retry once with --reinstall-prerequisites
+        # if any scanner is missing afterward (partial install / transient PyPI).
+        # `yes ''` feeds Enter to any interactive prompt so it never blocks.
+        config_timeout = (
+            900  # 15 min/attempt; CI job timeout is 50 min (.gitlab-ci.yml)
         )
+        attempts = [
+            f"yes '' | timeout {config_timeout} ./srt config",
+            # Force reinstall on the retry to repair a partially-populated venv.
+            f"yes '' | timeout {config_timeout} ./srt config --reinstall-prerequisites",
+        ]
+        for attempt, cmd in enumerate(attempts, 1):
+            print(
+                f"   Installing SRT prerequisites (attempt {attempt}/{len(attempts)}, "
+                "this may take several minutes)..."
+            )
+            print(f"   Running: {cmd}")
+            result = subprocess.run(
+                cmd,
+                shell=True,  # nosec B602 nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true - hardcoded pipeline, no user input
+                cwd=srt_dir,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
 
-        # Log detailed output for debugging
-        print(f"   Return code: {result.returncode}")
-        if result.stdout:
-            print("   stdout (first 600 chars):")
-            print(f"   {result.stdout[:600]}")
-        if result.stderr:
-            print("   stderr (first 600 chars):")
-            print(f"   {result.stderr[:600]}")
+            # Log detailed output for debugging (rc 124 == timeout killed it)
+            print(f"   Return code: {result.returncode}")
+            if result.stdout:
+                print("   stdout (last 1500 chars):")
+                print(f"   {result.stdout[-1500:]}")
+            if result.stderr:
+                print("   stderr (last 1500 chars):")
+                print(f"   {result.stderr[-1500:]}")
 
-        if "Configuration saved!" in result.stdout or result.returncode == 0:
-            print("   ✅ Prerequisites installed successfully")
+            # The ONLY reliable success signal is that every scanner executable
+            # now exists in SRT's venv — `srt config`'s exit code / banner is not
+            # trustworthy (it prints a success banner even when a tool failed).
+            missing = missing_scanners(srt_dir)
+            if not missing:
+                print(f"   ✅ All required scanners present: {REQUIRED_SCANNERS}")
+                break
+            print(f"   ⚠️  Missing scanners after attempt {attempt}: {missing}")
         else:
-            print("   ⚠️  Prerequisites installation completed with warnings")
-            print("      (This is normal - semgrep may fail but SRT will work)")
+            # Exhausted retries with scanners still missing. `srt assess` will
+            # abort with "Prerequisites not installed."; fail loudly HERE so the
+            # setup step surfaces the real cause instead of a misleading
+            # "✅ setup complete" followed by a cryptic scan failure.
+            msg = (
+                f"SRT prerequisite scanners still missing after {len(attempts)} "
+                f"attempts: {missing_scanners(srt_dir)}. "
+                "`srt assess` requires all of "
+                f"{REQUIRED_SCANNERS} in .srt/.venv/bin/. See the './srt config' "
+                "output above for the pip/venv failure."
+            )
+            print(f"   ❌ {msg}")
+            # This block only runs under `if is_ci:`, and in CI a missing scanner
+            # MUST fail the setup step — the scan cannot run without it. Fail here
+            # rather than emit a misleading "✅ setup complete".
+            sys.exit(1)
     else:
         # Interactive configuration for local development
         if not config_file.exists():
