@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/3446854d-8c82-42d2-b826-639e8772931f
+
 ---
 title: "Quick Start"
 ---
@@ -41,6 +45,13 @@ Quick Start is available two ways:
 > [Agent Companion Chat](agent-companion-chat.md). To infer a config directly from
 > real documents, see [Discovery](discovery.md). To improve an existing config's
 > accuracy/cost, see the AutoTune extension on the Extensions page.
+
+
+
+
+https://github.com/user-attachments/assets/7096c812-08be-4716-ad37-7ae4f3797fa7
+
+
 
 ---
 
