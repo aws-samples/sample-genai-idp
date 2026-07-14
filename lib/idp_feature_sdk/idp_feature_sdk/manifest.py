@@ -27,9 +27,28 @@ class TemplateSpec:
 
 
 @dataclass(frozen=True)
+class CommandStep:
+    """One subprocess step of a structured build/package pipeline.
+
+    Executed WITHOUT a shell (``subprocess.run(argv, shell=False)``), so there
+    is no ``&&``/``|``/glob/variable expansion — ``cwd`` replaces the
+    ``cd X && ...`` shell idiom. Preferred over the legacy shell-string forms
+    (``ui.buildCommand`` / ``agentSource.packageCommand``)."""
+
+    argv: List[str]
+    cwd: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class UiSpec:
     bundlePath: str  # noqa: N815
-    buildCommand: Optional[str] = None  # noqa: N815
+    buildCommand: Optional[str] = None  # noqa: N815 — legacy shell form
+    build: List[CommandStep] = field(default_factory=list)  # structured form
+
+    @property
+    def has_build(self) -> bool:
+        """True when the manifest declares any way to build the bundle."""
+        return bool(self.build or self.buildCommand)
 
 
 @dataclass(frozen=True)
@@ -43,8 +62,9 @@ class MarketplaceSpec:
 
 @dataclass(frozen=True)
 class AgentSourceSpec:
-    packageCommand: str  # noqa: N815
     artifactPath: str  # noqa: N815
+    packageCommand: Optional[str] = None  # noqa: N815 — legacy shell form
+    package: List[CommandStep] = field(default_factory=list)  # structured form
 
 
 @dataclass(frozen=True)
@@ -161,6 +181,7 @@ def load_manifest(project_dir: Path | str) -> FeatureManifest:
         ui=UiSpec(
             bundlePath=ui["bundlePath"],
             buildCommand=ui.get("buildCommand"),
+            build=_parse_steps(ui.get("build")),
         ),
         description=raw.get("description"),
         iconUrl=raw.get("iconUrl"),
@@ -173,8 +194,9 @@ def load_manifest(project_dir: Path | str) -> FeatureManifest:
         defaultParameters=dict(raw.get("defaultParameters") or {}),
         capabilities=list(raw.get("capabilities") or []),
         agentSource=AgentSourceSpec(
-            packageCommand=agent_source_raw["packageCommand"],
             artifactPath=agent_source_raw["artifactPath"],
+            packageCommand=agent_source_raw.get("packageCommand"),
+            package=_parse_steps(agent_source_raw.get("package")),
         )
         if agent_source_raw
         else None,
@@ -190,6 +212,13 @@ def load_manifest(project_dir: Path | str) -> FeatureManifest:
     _check_paths_exist(project, manifest)
 
     return manifest
+
+
+def _parse_steps(raw: Optional[List[Dict[str, Any]]]) -> List[CommandStep]:
+    """Map a schema-validated `commandSteps` array into CommandStep objects."""
+    if not raw:
+        return []
+    return [CommandStep(argv=list(step["argv"]), cwd=step.get("cwd")) for step in raw]
 
 
 def _parse_pack(raw: Dict[str, Any]) -> PackSpec:
@@ -222,15 +251,30 @@ def _check_paths_exist(project: Path, manifest: FeatureManifest) -> None:
         raise ManifestError(
             f"template file not found at {template} (from feature.yaml -> template.path)"
         )
-    # UI bundle may not exist yet (publisher runs `ui.buildCommand` first), so only check when
-    # buildCommand is unset.
-    if not manifest.ui.buildCommand:
+    # UI bundle may not exist yet (publisher runs the ui build steps first), so
+    # only check when neither build form is declared.
+    if not manifest.ui.has_build:
         bundle = project / manifest.ui.bundlePath
         if not bundle.is_file():
             raise ManifestError(
-                f"ui bundle not found at {bundle} and feature.yaml has no ui.buildCommand "
-                f"to build it. Either add a buildCommand or commit the pre-built bundle."
+                f"ui bundle not found at {bundle} and feature.yaml has no ui.build "
+                f"steps (or legacy ui.buildCommand) to build it. Either add build "
+                f"steps or commit the pre-built bundle."
             )
+    # Step cwd directories must exist — a typo'd cwd would otherwise only
+    # surface as a FileNotFoundError mid-publish.
+    for label, steps in (
+        ("ui.build", manifest.ui.build),
+        (
+            "agentSource.package",
+            manifest.agentSource.package if manifest.agentSource else [],
+        ),
+    ):
+        for i, step in enumerate(steps):
+            if step.cwd is not None:
+                cwd = project / step.cwd
+                if not cwd.is_dir():
+                    raise ManifestError(f"{label}[{i}].cwd directory not found: {cwd}")
     # A declared config preset must exist on disk — the publisher uploads it
     # verbatim, and the feature stack's ui-deployer downloads it at install
     # to apply via applyFeatureConfigPreset. A missing file would only surface

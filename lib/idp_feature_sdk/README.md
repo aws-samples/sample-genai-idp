@@ -27,7 +27,7 @@ the end-to-end authoring walkthrough see the
 - **AWS SAM CLI** (`sam`) on `PATH` — required by `build`, `publish`, and
   `deploy` to package the feature's Lambda functions. Without it those commands
   fail fast with a clear message.
-- **Node.js** (only if the feature's `ui.buildCommand` runs a bundler).
+- **Node.js** (only if the feature's `ui.build` steps run a bundler).
 
 ## Install (editable)
 
@@ -144,6 +144,39 @@ Typical output of `publish`:
 🚀 Launch Stack URL (placeholder MAINSTACKNAME):
 https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?...
 ```
+
+## Build & package commands in `feature.yaml`
+
+The publisher can (re)build the UI bundle and package agent source before
+uploading. Declare the commands as **structured step lists** — each step is an
+`argv` array executed directly (`shell=False`, so no `&&`, pipes, globs, or
+variable expansion), with an optional `cwd` relative to the project root:
+
+```yaml
+ui:
+  bundlePath: feature-ui/dist/ui-bundle.js
+  build:
+    - cwd: feature-ui
+      argv: ["npm", "ci"]
+    - cwd: feature-ui
+      argv: ["npm", "run", "build"]
+
+agentSource:
+  artifactPath: dist/agent-source.zip
+  package:
+    - argv: ["python3", "scripts/package_agent.py"]
+```
+
+Steps run in order; publishing aborts on the first non-zero exit. Because no
+shell is involved, there is no command-injection surface (Bandit B602) and the
+manifest stays portable across shells/OSes. Anything that genuinely needs shell
+features belongs in a script the step invokes (e.g.
+`argv: ["bash", "scripts/build.sh"]`).
+
+The legacy single-string forms (`ui.buildCommand`, `agentSource.packageCommand`)
+are still accepted for existing manifests but are **deprecated** — they run
+through a shell and emit a runtime deprecation notice. A manifest may declare
+either the structured or the legacy form, not both.
 
 ## Library API
 
