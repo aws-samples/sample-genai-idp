@@ -100,13 +100,27 @@ def complete_section_review(
 
     # Find the section and get its output URI
     section_output_uri = None
+    section_found = False
     for section in document.sections:
         if section.section_id == section_id:
+            section_found = True
             section_output_uri = section.extraction_result_uri
             break
 
-    # Save edited data to S3 if provided
-    if edited_data and section_output_uri:
+    # If the caller supplied edited data, we MUST be able to persist it. Fail
+    # loudly instead of marking the section reviewed with the edits silently
+    # dropped (which would return success while losing the reviewer's work).
+    if edited_data:
+        if not section_found:
+            raise ValueError(
+                f"Cannot save edited data: section '{section_id}' not found in "
+                f"document '{object_key}'"
+            )
+        if not section_output_uri:
+            raise ValueError(
+                f"Cannot save edited data: section '{section_id}' in document "
+                f"'{object_key}' has no output URI to write to"
+            )
         save_edited_data_to_s3(section_output_uri, edited_data)
 
     # Get current pending and completed sections from document model
