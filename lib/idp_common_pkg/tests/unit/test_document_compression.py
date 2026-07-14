@@ -187,6 +187,12 @@ class TestDocumentCompression:
         with (
             patch("boto3.client") as mock_boto3,
             patch("time.time", side_effect=[1000.123, 1000.456]),
+            # On Python <3.13, logging.LogRecord.__init__ calls time.time(),
+            # which would consume our mocked side_effect values when the
+            # idp_common logger is at INFO level (as it can be in the full
+            # suite). Patch out the info() call so only compress()'s own
+            # time.time() calls consume the mock, keeping this deterministic.
+            patch("logging.Logger.info"),
         ):
             mock_s3 = Mock()
             mock_boto3.return_value = mock_s3
