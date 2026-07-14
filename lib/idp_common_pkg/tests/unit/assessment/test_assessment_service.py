@@ -11,13 +11,22 @@ Unit tests for the AssessmentService class.
 import pytest
 
 # Import standard library modules first
+import json
 import sys
 from textwrap import dedent
 from unittest.mock import MagicMock, patch
 
-# Mock PIL before importing any modules that might depend on it
-sys.modules["PIL"] = MagicMock()
-sys.modules["PIL.Image"] = MagicMock()
+# Ensure PIL is importable before importing modules that depend on it. Only fall
+# back to a MagicMock when PIL is genuinely not installed — injecting one
+# unconditionally leaks globally via sys.modules and replaces the real PIL for
+# every later test file, breaking tests that manipulate real images (e.g.
+# discovery/test_embedding_service.py, discovery/test_discovery_agent.py).
+for _name in ("PIL", "PIL.Image"):
+    if _name not in sys.modules:
+        try:
+            __import__(_name)
+        except ImportError:
+            sys.modules[_name] = MagicMock()
 
 # Now import third-party modules
 
@@ -190,8 +199,12 @@ class TestAssessmentService:
 
         assert service.region == "us-west-2"
         # Config is converted to IDPConfig model, verify it has the expected structure
-        assert hasattr(service.config, "assessment")
-        assert service.config.assessment.model == mock_config["assessment"]["model"]
+        # (v0.6: confidence assessment config lives under extraction.confidence)
+        assert hasattr(service.config.extraction, "confidence")
+        assert (
+            service.config.extraction.confidence.model
+            == mock_config["assessment"]["model"]
+        )
 
     def test_get_class_schema(self, service):
         """Test getting schema for a document class."""
@@ -210,6 +223,149 @@ class TestAssessmentService:
         # Test case insensitivity
         invoice_schema_upper = service._get_class_schema("INVOICE")
         assert invoice_schema_upper.get("x-aws-idp-document-type") == "invoice"
+
+    @patch("idp_common.assessment.service.bedrock.extract_text_from_response")
+    @patch("idp_common.assessment.service.bedrock.invoke_model")
+    @patch("idp_common.image.prepare_image")
+    def test_assess_results_flags_truncation(
+        self, mock_prepare_image, mock_invoke_model, mock_extract_text, service
+    ):
+        """A Converse stopReason of 'max_tokens' marks the core result truncated
+        (so the batcher knows to retry over a smaller slice) and does NOT let the
+        default 0.5 fallback masquerade as a real score."""
+        mock_prepare_image.return_value = b"img"
+        # Truncated response: stopReason=max_tokens + an incomplete JSON body.
+        mock_invoke_model.return_value = {
+            "response": {
+                "stopReason": "max_tokens",
+                "output": {"message": {"content": [{"text": "```json\n{"}]}},
+            },
+            "metering": {"Assessment/bedrock/m": {"outputTokens": 10000}},
+        }
+        mock_extract_text.return_value = "```json\n{"
+
+        core = service.assess_results(
+            class_label="invoice",
+            extraction_results={"invoice_number": "INV-1"},
+            document_text="text",
+            page_images=[b"img"],
+        )
+
+        assert core.truncated is True
+        assert core.parsing_succeeded is False
+
+    @patch("idp_common.assessment.service.bedrock.extract_text_from_response")
+    @patch("idp_common.assessment.service.bedrock.invoke_model")
+    def test_assess_results_salvages_truncated_prefix(
+        self, mock_invoke_model, mock_extract_text, service
+    ):
+        """B4: a truncated response whose VALID PREFIX parses is salvaged — the
+        rows that came back keep their real scores instead of the whole call being
+        thrown away as all-default. Still flagged truncated so the caller retries
+        only the missing remainder."""
+        # Truncated mid-way through the third transaction row, but rows 1-2 are
+        # complete and well-formed → repair_truncated_json recovers them.
+        partial = (
+            '{"transactions": ['
+            '{"date": {"confidence": 0.97}, "amount": {"confidence": 0.95}}, '
+            '{"date": {"confidence": 0.92}, "amount": {"confidence": 0.9}}, '
+            '{"date": {"confidence": 0.8'  # cut off here
+        )
+        mock_invoke_model.return_value = {
+            "response": {
+                "stopReason": "max_tokens",
+                "output": {"message": {"content": [{"text": partial}]}},
+            },
+            "metering": {"Assessment/bedrock/m": {"outputTokens": 10000}},
+        }
+        mock_extract_text.return_value = partial
+
+        core = service.assess_results(
+            class_label="bank_statement",
+            extraction_results={
+                "transactions": [
+                    {"date": "1/1", "amount": "10"},
+                    {"date": "1/2", "amount": "20"},
+                    {"date": "1/3", "amount": "30"},
+                ]
+            },
+            document_text="text",
+            page_images=[],
+        )
+
+        assert core.truncated is True  # caller still retries the remainder
+        # Salvaged the 2 complete rows (real scores, NOT the 0.5 default).
+        tx = core.enhanced_assessment.get("transactions")
+        assert isinstance(tx, list) and len(tx) >= 2
+        assert tx[0]["date"]["confidence"] == 0.97
+        assert tx[1]["amount"]["confidence"] == 0.9
+
+    @patch("idp_common.assessment.service.bedrock.extract_text_from_response")
+    @patch("idp_common.assessment.service.bedrock.invoke_model")
+    @patch("idp_common.image.prepare_image")
+    def test_assess_results_not_truncated_on_normal_stop(
+        self, mock_prepare_image, mock_invoke_model, mock_extract_text, service
+    ):
+        """A normal (end_turn) response with valid JSON is not flagged truncated."""
+        mock_prepare_image.return_value = b"img"
+        mock_invoke_model.return_value = {
+            "response": {
+                "stopReason": "end_turn",
+                "output": {"message": {"content": [{"text": "{}"}]}},
+            },
+            "metering": {"Assessment/bedrock/m": {"outputTokens": 50}},
+        }
+        mock_extract_text.return_value = '{"invoice_number": {"confidence": 0.9}}'
+
+        core = service.assess_results(
+            class_label="invoice",
+            extraction_results={"invoice_number": "INV-1"},
+            document_text="text",
+            page_images=[b"img"],
+        )
+
+        assert core.truncated is False
+        assert core.parsing_succeeded is True
+
+    @patch("idp_common.assessment.service.bedrock.extract_text_from_response")
+    @patch("idp_common.assessment.service.bedrock.invoke_model")
+    def test_images_dropped_in_ocr_only_mode(
+        self, mock_invoke_model, mock_extract_text, mock_config
+    ):
+        """B1: in ocr_only/off geometry modes the confidence call is text-only —
+        page images are omitted (they add ~1.7K input tok each and don't help a
+        no-bbox confidence judgement). In llm/llm_grounded modes images are kept."""
+        mock_invoke_model.return_value = {
+            "response": {
+                "stopReason": "end_turn",
+                "output": {"message": {"content": [{"text": "{}"}]}},
+            },
+            "metering": {},
+        }
+        mock_extract_text.return_value = '{"invoice_number": {"confidence": 0.9}}'
+
+        def _run(mode: str):
+            cfg = json.loads(json.dumps(mock_config))  # deep copy
+            cfg.setdefault("extraction", {}).setdefault("geometry", {})["mode"] = mode
+            svc = AssessmentService(region="us-west-2", config=cfg)
+            with patch.object(
+                svc,
+                "_build_content_with_or_without_image_placeholder",
+                return_value=[{"text": "prompt"}],
+            ) as builder:
+                svc.assess_results(
+                    class_label="invoice",
+                    extraction_results={"invoice_number": "INV-1"},
+                    document_text="text",
+                    page_images=[b"img1", b"img2", b"img3"],
+                )
+            # 7th positional arg is page_images passed into the content builder.
+            return builder.call_args.args[6]
+
+        assert _run("ocr_only") == []  # images dropped
+        assert _run("off") == []  # images dropped
+        assert _run("llm_grounded") == [b"img1", b"img2", b"img3"]  # kept
+        assert _run("llm") == [b"img1", b"img2", b"img3"]  # kept
 
     def test_format_property_descriptions(self, service):
         """Test formatting property descriptions from JSON Schema."""
@@ -490,8 +646,8 @@ class TestAssessmentService:
 
         assert service.region == "us-east-1"
         assert isinstance(service.config, IDPConfig)
-        # Verify default config has assessment settings
-        assert hasattr(service.config, "assessment")
+        # Verify default config has confidence settings (v0.6: extraction.confidence)
+        assert hasattr(service.config.extraction, "confidence")
 
     def test_init_with_dict_config(self, mock_config):
         """Test initialization with dict config converts to IDPConfig."""
@@ -500,7 +656,10 @@ class TestAssessmentService:
         assert service.region == "us-east-1"
         assert isinstance(service.config, IDPConfig)
         # Verify config was properly converted
-        assert service.config.assessment.model == mock_config["assessment"]["model"]
+        assert (
+            service.config.extraction.confidence.model
+            == mock_config["assessment"]["model"]
+        )
 
     def test_init_with_idpconfig_instance(self, mock_config):
         """Test initialization with IDPConfig instance (the previously failing case)."""
@@ -515,7 +674,10 @@ class TestAssessmentService:
         # Should use the same instance
         assert service.config is config_instance
         # Verify config properties are accessible
-        assert service.config.assessment.model == mock_config["assessment"]["model"]
+        assert (
+            service.config.extraction.confidence.model
+            == mock_config["assessment"]["model"]
+        )
 
     def test_init_with_invalid_config_type(self):
         """Test initialization with invalid config type raises ValueError."""

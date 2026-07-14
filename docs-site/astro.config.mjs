@@ -36,9 +36,11 @@ export default defineConfig({
           label: "Core",
           items: [
             { label: "Architecture", slug: "architecture" },
+            { label: "Quick Start", slug: "quick-start" },
             { label: "Deployment", slug: "deployment" },
+            { label: "AI-Guided Deployment Walkthrough", slug: "idp-deployment-ai-guide" },
             { label: "Headless Deployment", slug: "headless-deployment" },
-            { label: "ALB Hosting", slug: "alb-hosting" },
+            { label: "API Gateway Hosting", slug: "apigateway-hosting" },
             { label: "Private Network Deployment", slug: "deployment-private-network" },
             { label: "VPC-Secured Mode", slug: "vpc-secured-mode" },
             { label: "Configuration", slug: "configuration" },
@@ -55,6 +57,10 @@ export default defineConfig({
               slug: "json-schema-migration",
             },
             { label: "Web UI", slug: "web-ui" },
+            {
+              label: "UI ⇄ Backend Transport (AppSync → REST)",
+              slug: "migration-appsync-to-rest",
+            },
             { label: "IDP CLI", slug: "idp-cli" },
             { label: "IDP SDK", slug: "idp-sdk" },
             { label: "idp_common API Reference", slug: "idpcommon-api-reference" },
@@ -76,16 +82,23 @@ export default defineConfig({
           label: "Document Processing Features",
           items: [
             { label: "Classification", slug: "classification" },
-            { label: "Extraction", slug: "extraction" },
-            { label: "Assessment", slug: "assessment" },
             {
-              label: "Assessment Bounding Boxes",
+              label: "Extraction & Confidence",
+              slug: "extraction-and-confidence",
+            },
+            // Legacy guides consolidated into Extraction & Confidence (kept as
+            // redirect stubs so old deep links still resolve).
+            { label: "Extraction (moved)", slug: "extraction" },
+            { label: "Assessment (moved)", slug: "assessment" },
+            {
+              label: "Assessment Bounding Boxes (moved)",
               slug: "assessment-bounding-boxes",
             },
             { label: "Few-Shot Examples", slug: "few-shot-examples" },
             { label: "Human-in-the-Loop Review", slug: "human-review" },
             { label: "Rule Validation", slug: "rule-validation" },
             { label: "Criteria Validation", slug: "criteria-validation" },
+            { label: "Missing Page Handling", slug: "missing-page-handling" },
             {
               label: "OCR Image Sizing Guide",
               slug: "ocr-image-sizing-guide",
@@ -104,6 +117,19 @@ export default defineConfig({
             { label: "Test Studio", slug: "test-studio" },
             { label: "Creating Custom Test Sets", slug: "creating-custom-test-sets" },
             { label: "MLflow Experiment Tracking", slug: "mlflow-integration" },
+          ],
+        },
+        {
+          label: "Benchmarks & Performance",
+          items: [
+            { label: "Benchmarking Guide", slug: "benchmarking" },
+            { label: "Configuration Guidance", slug: "benchmarking/config-guidance" },
+            {
+              label: "Release Audit Trail",
+              // README.md is the index; per-release vX.Y.Z.md entries auto-list.
+              items: [{ autogenerate: { directory: "benchmarking/releases" } }],
+            },
+            { label: "Extraction Scaling Guide", slug: "extraction-scaling-guide" },
           ],
         },
         {
@@ -130,6 +156,10 @@ export default defineConfig({
               label: "Extensions",
               items: [
                 {
+                  label: "Auto Optimizer",
+                  slug: "extensions/auto-optimizer",
+                },
+                {
                   label: "Sample: Document Status (feature add-on)",
                   slug: "extensions/sample-document-status",
                 },
@@ -137,7 +167,15 @@ export default defineConfig({
                   label: "Sample: Health Insurance Review",
                   slug: "extensions/sample-health-insurance-review",
                 },
+                {
+                  label: "Migration: External Feature for AppSync Removal",
+                  slug: "extensions/migration-prompt-appsync-removal",
+                },
               ],
+            },
+            {
+              label: "Document Versions",
+              slug: "document-versions",
             },
             {
               label: "Post-Processing Lambda Hook",
@@ -161,6 +199,7 @@ export default defineConfig({
             { label: "Cost Calculator", slug: "cost-calculator" },
             { label: "Circuit Breaker", slug: "circuit-breaker" },
             { label: "Cross-Account Bedrock", slug: "cross-account-bedrock" },
+            { label: "Version Update Indicator", slug: "version-update-indicator" },
           ],
         },
         {
@@ -193,6 +232,7 @@ export default defineConfig({
               label: "EU Region Model Support",
               slug: "eu-region-model-support",
             },
+            { label: "OpenAI GPT-5.x Models", slug: "openai-models" },
           ],
         },
         {
@@ -201,31 +241,25 @@ export default defineConfig({
             { label: "Setup: Linux", slug: "setup-development-env-linux" },
             { label: "Setup: macOS", slug: "setup-development-env-macos" },
             { label: "Setup: WSL", slug: "setup-development-env-wsl" },
+            { label: "Setup: Windows", slug: "setup-development-env-windows" },
             {
               label: "Using Notebooks",
               slug: "using-notebooks-with-idp-common",
             },
+            { label: "Dependency Mirroring", slug: "dependency-mirroring" },
           ],
         },
         {
           label: "Migration",
           items: [
+            { label: "v0.5 → v0.6 Migration", slug: "migration-v05-to-v06" },
             { label: "v0.4 → v0.5 Migration", slug: "migration-v04-to-v05" },
+            {
+              label: "Granular Assessment Retirement",
+              slug: "migration-granular-retirement",
+            },
           ],
         },
-        // AUTO-SIDEBAR-START
-        {
-          label: "New & Uncategorized",
-          items: [
-            { label: "Dependency Mirroring", slug: "dependency-mirroring" },
-            { label: "Idp Deployment Ai Guide", slug: "idp-deployment-ai-guide" },
-            { label: "Missing Page Handling", slug: "missing-page-handling" },
-            { label: "Openai Models", slug: "openai-models" },
-            { label: "Setup Development Env Windows", slug: "setup-development-env-windows" },
-            { label: "Version Update Indicator", slug: "version-update-indicator" },
-          ],
-        },
-        // AUTO-SIDEBAR-END
       ],
     }),
   ],

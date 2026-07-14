@@ -141,11 +141,40 @@ documentation, testing, code-review).
 - IAM policies scoped — no `Resource: "*"` or wildcard S3 ARNs without
   written justification
 - `PermissionsBoundary` conditional present on new IAM roles
+- New IAM role or AWS service introduced? → `docs/aws-services-and-roles.md` updated to match
 - New Lambdas have a dedicated `AWS::Logs::LogGroup` with KMS encryption
 - Input validation on new API surfaces; DOMPurify on HTML render paths
 - New Python/npm dependencies are pinned and from trusted sources
 - `cfn-nag` / `checkov` suppressions include `reason:` metadata
 - No new public S3 buckets, public SNS topics, or open security groups
+
+#### SRT security scan (`make srt-scan`)
+
+CI runs the `srt_security_review` job on every MR targeting `develop`. Check
+the pipeline first: if the job already ran, read its result and the
+`srt-issues.json` artifact instead of re-running the scan.
+
+Run the scan locally when the CI job hasn't run yet (draft MR, non-`develop`
+target, pipeline still pending) **and** the PR changes code, templates, or
+dependencies — skip it for docs-only PRs. SRT scans the **checkout**, not the
+diff, so run it on the PR head in a throwaway worktree (this also keeps the
+review read-only for your own working copy):
+
+```bash
+git fetch origin <headRef> && git worktree add /tmp/pr-<NN> FETCH_HEAD
+cd /tmp/pr-<NN> && make srt-setup && make srt-scan   # ~5–10 min
+# … read results, then clean up:
+cd - && git worktree remove --force /tmp/pr-<NN>
+```
+
+Interpreting results:
+- Outside CI the scan **exits 0 even with findings** and prints an
+  `OPEN HIGH PRIORITY SECURITY ISSUES` table — read the output (or
+  `.srt/issues.json`), don't rely on the exit code.
+- Attribute a finding to the PR only if it's in a file the PR touches; HIGH
+  `Open` findings in changed files are 🔴 blocking.
+- New or modified suppressions in `scripts/srt/issues.json` must carry a
+  specific justification — flag unexplained bulk suppressions as 🔴.
 
 ### 5. Well documented?
 - User-facing changes update `CHANGELOG.md`
@@ -236,3 +265,4 @@ Flag these immediately when seen in any diff:
   files under `src/ui/src/graphql/generated/`
 - `Document` model field removed or renamed without a migration path
 - Wildcards in S3 bucket/object ARNs without `reason:` metadata
+- New/edited SRT suppressions in `scripts/srt/issues.json` without justification

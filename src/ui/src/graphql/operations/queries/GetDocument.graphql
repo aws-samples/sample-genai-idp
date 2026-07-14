@@ -21,6 +21,13 @@ query GetDocument($objectKey: ID!) {
         confidence
         confidenceThreshold
       }
+      ProcessingIssues {
+        stage
+        severity
+        code
+        message
+        rootCause
+      }
     }
     Pages {
       Id
@@ -49,6 +56,7 @@ query GetDocument($objectKey: ID!) {
     HITLReviewHistory
     ConfigVersion
     HITLCompleted
+    ProcessingIssueCount
     TraceId
   }
 }

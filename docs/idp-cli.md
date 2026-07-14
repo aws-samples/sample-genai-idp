@@ -31,10 +31,12 @@ https://github.com/user-attachments/assets/3d448a74-ba5b-4a4a-96ad-ec03ac0b4d7d
   - [deploy](#deploy)
   - [publish](#publish)
   - [delete](#delete)
+  - [bootstrap](#bootstrap)
   - [process](#process--run-inference)
   - [reprocess](#reprocess--rerun-inference)
   - [status](#status)
   - [download-results](#download-results)
+  - [use-as-baseline](#use-as-baseline)
   - [delete-documents](#delete-documents)
   - [generate-manifest](#generate-manifest)
   - [validate-manifest](#validate-manifest)
@@ -106,6 +108,7 @@ make publish REGION=us-gov-west-1 HEADLESS=1
 make deploy STACK_NAME=my-idp ADMIN_EMAIL=me@example.com
 make deploy STACK_NAME=my-idp-dev ADMIN_EMAIL=me@example.com FROM_CODE=1
 make deploy STACK_NAME=my-idp CUSTOM_CONFIG=./my-config.yaml
+make deploy STACK_NAME=my-idp TAGS="Owner=docs-team,Environment=prod"
 
 # Delete a stack
 make delete-stack STACK_NAME=test-stack FORCE=1 FORCE_DELETE_ALL=1
@@ -124,6 +127,7 @@ make delete-stack STACK_NAME=test-stack FORCE=1 FORCE_DELETE_ALL=1
 | `BUCKET_BASENAME` | publish | `--bucket-basename` |
 | `PREFIX` | publish | `--prefix` |
 | `CUSTOM_CONFIG` | deploy | `--custom-config` |
+| `TAGS` | deploy | `--tags` |
 | `TEMPLATE_URL` | deploy | `--template-url` |
 | `TEMPLATE_FILE` | deploy | `--template-file` |
 | `NO_WAIT=1` | deploy, delete-stack | omits `--wait` |
@@ -221,6 +225,7 @@ idp-cli deploy [OPTIONS]
 - `--log-level`: Logging level (`DEBUG`, `INFO`, `WARN`, `ERROR`) (default: INFO)
 - `--enable-hitl`: Enable Human-in-the-Loop (`true` or `false`)
 - `--parameters`: Additional parameters as `key=value,key2=value2`
+- `--tags`: Stack tags as `key=value,key2=value2`. CloudFormation applies these to the stack and propagates them to all taggable resources and nested stacks — useful for governance/ownership (e.g. `Owner`, `Team`, `Environment`). See [Resource tagging](#resource-tagging) below.
 - `--wait`: Wait for stack operation to complete
 - `--no-rollback`: Disable rollback on stack creation failure
 - `--region`: AWS region (optional, auto-detected)
@@ -287,6 +292,13 @@ idp-cli deploy \
     --log-level DEBUG \
     --wait
 
+# Deploy with governance/ownership tags (propagated to all resources)
+idp-cli deploy \
+    --stack-name my-idp \
+    --admin-email user@example.com \
+    --tags "Owner=docs-team,Team=idp,Environment=prod" \
+    --wait
+
 # Deploy with custom template URL (for regions not auto-supported)
 idp-cli deploy \
     --stack-name my-idp \
@@ -340,7 +352,16 @@ idp-cli deploy \
     --headless \
     --wait
 
-# Deploy to GovCloud (headless + from-code are both required)
+# Deploy to GovCloud WITH the full Web UI (--govcloud; --from-code is required)
+idp-cli deploy \
+    --stack-name my-idp-govcloud \
+    --region us-gov-west-1 \
+    --from-code . \
+    --govcloud \
+    --admin-email user@example.com \
+    --wait
+
+# Deploy to GovCloud headless (no UI; --from-code is required)
 idp-cli deploy \
     --stack-name my-idp-govcloud \
     --region us-gov-west-1 \
@@ -350,6 +371,25 @@ idp-cli deploy \
 ```
 
 > **Headless?** See the [Headless Deployment Guide](./headless-deployment.md) for when to use it (not just GovCloud — also API-only / pipeline integrations in Commercial regions) and the [GovCloud Deployment Guide](./govcloud-deployment.md) for GovCloud-specific considerations.
+
+#### Resource tagging
+
+`--tags "key=value,key2=value2"` applies **CloudFormation stack-level tags**. CloudFormation adds them to the stack and automatically propagates them to all taggable resources it creates — including the nested stacks (pattern, API resolvers, KB, discovery, feature platform) and their resources — so you tag the whole deployment in one place.
+
+Notes and caveats:
+
+- **Format:** comma-separated `key=value` pairs. Tag keys may contain spaces and the characters `. : / + - _` (a value may itself contain `=`; only the first `=` splits key from value). Commas inside a tag value are not supported.
+- **Update behavior:** re-running `deploy` with `--tags` **replaces** the stack's entire tag set with what you pass. Omitting `--tags` on an update **preserves** the existing tags (unlike a bare AWS API call, which would clear them).
+- **Not every resource type accepts propagated tags.** CloudFormation propagation is best-effort — a small number of resource types (e.g. some Cognito, CloudFront, and custom resources) do not receive stack tags. This is an AWS platform limitation, not a configuration option.
+- **Cost allocation:** to use these tags in AWS Cost Explorer / cost allocation reports you must additionally activate them as *cost allocation tags* in the Billing console (a one-time, account-level step); this CLI option does not do that for you.
+
+```bash
+idp-cli deploy \
+    --stack-name my-idp \
+    --admin-email user@example.com \
+    --tags "Owner=docs-team,Team=idp,Environment=prod" \
+    --wait
+```
 
 ---
 
@@ -645,6 +685,55 @@ Proceeding with stack deletion...
 ```
 
 **Note:** CREATE operations cannot be cancelled directly - they must complete or roll back naturally. UPDATE operations can be cancelled immediately.
+
+---
+
+### `bootstrap`
+
+Bootstrap a configuration (and optional synthetic test set) from a plain-language
+description — the scriptable equivalent of the web UI [Quick Start](./quick-start.md)
+widget. Authors a document-class schema from your prompt (reusing a catalog match
+when one fits), creates a config version, and — when the document generator is
+available — generates a small labeled synthetic test set attached to it.
+
+**Usage:**
+```bash
+idp-cli bootstrap --prompt "<description>" [--stack-name <stack>] [OPTIONS]
+```
+
+**Example:**
+```bash
+idp-cli bootstrap \
+    --prompt "Invoices with vendor name, invoice number, date, and total amount" \
+    --stack-name my-idp-stack
+```
+
+**Local mode** — omit `--stack-name` to author and print the schema as JSON without
+saving anything to a stack:
+```bash
+idp-cli bootstrap --prompt "Bank statements with account holder and transactions"
+```
+
+**Options:**
+- `--prompt`, `-p`: **(required)** Natural-language description of the document type.
+- `--stack-name`: Target CloudFormation stack. **Omit for local mode** (print schema, no save).
+- `--class-name`: Document class name to use as the schema `$id` / document type.
+- `--field-hint`: A field the schema must include. Repeatable: `--field-hint X --field-hint Y`.
+- `--config-version`: Existing config version to source catalog classes from / merge the new class into.
+- `--target-version`: Name of the config version to create (default: `bootstrap-<class>`).
+- `--count`, `-c`: Number of synthetic documents to generate (default: `3`).
+- `--threshold`: Generation quality threshold, 1–10 (default: `7`).
+- `--augment`: Apply scan/fax-style image augmentation to generated documents.
+- `--model-id`: Bedrock model id override for schema authoring / generation.
+- `--region`: AWS region (optional).
+
+**Note:** The created version is **not** activated automatically (unlike the web UI
+Quick Start). Activate it from **Configuration › View/Edit Configuration** in the UI
+when you're ready to process documents with it. Synthetic generation is optional and
+requires the IDP Data Generator extension (deployed stack) or
+`pip install "idp_common[synthesis]"` (local); without it, the config is still
+created and you can upload your own documents to build a test set. See the
+[Quick Start guide](./quick-start.md) for the full workflow.
 
 ---
 
@@ -1041,7 +1130,9 @@ idp-cli download-results [OPTIONS]
 
 **Options:**
 - `--stack-name` (required): CloudFormation stack name
-- `--batch-id` (required): Batch identifier
+- `--batch-id`: Batch identifier (mutually exclusive with `--document-id`/`--run-id`)
+- `--document-id`: Document object key — required with `--run-id` to download a specific [document version](document-versions.md)
+- `--run-id`: Version run id (from `idp-cli list-versions`). Downloads the exact pinned S3 bytes of that processing run. Requires `--document-id`.
 - `--output-dir` (required): Local directory to download to
 - `--file-types`: File types to download (default: `all`)
   - Options: `pages`, `sections`, `summary`, `evaluation`, or `all`
@@ -1069,6 +1160,13 @@ idp-cli download-results \
     --batch-id eval-batch-20251015 \
     --output-dir ./eval-results/ \
     --file-types evaluation
+
+# Download a specific document VERSION (exact bytes of one processing run)
+idp-cli download-results \
+    --stack-name my-stack \
+    --document-id loan-12345/package.pdf \
+    --run-id 20250707T141530Z-exec-abc \
+    --output-dir ./results/
 ```
 
 **Output Structure:**
@@ -1093,6 +1191,67 @@ idp-cli download-results \
             ├── report.json              # Detailed metrics
             └── report.md                # Human-readable report
 ```
+
+---
+
+### `use-as-baseline`
+
+Promote a processed document's output to the evaluation baseline — the
+scriptable equivalent of the web UI's **Use as Evaluation Baseline** button.
+Copies every output object for the document into the evaluation baseline bucket
+and sets the document's `EvaluationStatus` to `BASELINE_AVAILABLE`. Runs
+synchronously (returns once the copy is complete).
+
+Use this to capture a manually validated result as the "ground truth" that
+future re-runs of the same document are evaluated against.
+
+**Usage:**
+```bash
+idp-cli use-as-baseline [OPTIONS]
+```
+
+**Options:**
+- `--stack-name` (required): CloudFormation stack name
+- `--document-id` (required): Document object key (S3 key) of a processed document, e.g. `loan-12345/package.pdf`
+- `--region`: AWS region (optional)
+
+**Example:**
+
+```bash
+idp-cli use-as-baseline \
+    --stack-name my-stack \
+    --document-id loan-12345/package.pdf
+```
+
+The document must have finished processing (its output prefix must exist); the
+caller's IAM credentials need read on the output bucket and write on the
+evaluation baseline bucket and tracking table.
+
+---
+
+### `list-versions`
+
+List the retained processing-run [versions](document-versions.md) of a document, newest first. Each successful run of a document is retained as a version whose output bytes are pinned by S3 object version; use a version's `Run ID` with `download-results --run-id` to fetch that exact version.
+
+**Usage:**
+```bash
+idp-cli list-versions [OPTIONS]
+```
+
+**Options:**
+- `--stack-name` (required): CloudFormation stack name
+- `--document-id` (required): Document object key (its tracking id)
+- `--region`: AWS region (optional)
+
+**Example:**
+
+```bash
+idp-cli list-versions \
+    --stack-name my-stack \
+    --document-id loan-12345/package.pdf
+```
+
+Output is a table of `Run ID`, `Completed`, `Config Version`, `Pages`, and `Files`. See the [Document Versions guide](document-versions.md) for how versioning works and the Web UI / API surfaces.
 
 ---
 

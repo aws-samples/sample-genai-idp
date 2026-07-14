@@ -4,8 +4,8 @@
 """Pipeline-hooks dispatcher Lambda.
 
 Invoked by the host's Step Functions workflow at each pipeline extension
-point (postOcr, postClassification, postExtraction, postAssessment,
-postRuleValidation, postSummarization). Reads the active configuration
+point (postOcr, postClassification, postExtraction, postRuleValidation,
+postSummarization). Reads the active configuration
 version from the host's ConfigurationTable and dispatches to the hook
 Lambdas listed under that step's `postHook` field.
 
@@ -59,7 +59,8 @@ _HOOK_TO_STEP = {
     "postOcr": "ocr",
     "postClassification": "classification",
     "postExtraction": "extraction",
-    "postAssessment": "assessment",
+    # postAssessment removed in v0.6 — confidence assessment is folded into
+    # extraction, so its post-step hook point no longer exists.
     "postRuleValidation": "rule_validation",
     "postSummarization": "summarization",
 }

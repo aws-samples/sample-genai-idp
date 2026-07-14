@@ -71,6 +71,18 @@ Configuration is stored in DynamoDB with two record types:
 - **Default** — built-in pattern configurations (from `config_library/` at deploy time).
 - **Custom** — user-provided overrides, merged over the defaults.
 
+The same Default/Custom pattern is used for auxiliary records:
+- **`DefaultPricing` / `CustomPricing`** (`PricingConfig`) — service pricing for
+  cost estimation; Custom is deep-merged over Default (`get_merged_pricing`).
+- **`DefaultModelConfigLimits` / `CustomModelConfigLimits`**
+  (`ModelConfigLimitsConfig`) — the ordered, first-match-wins list of per-model
+  token limits, seeded from `config_library/model_config_limits.yaml`. Because
+  entry **order is semantic**, Custom stores a **full replacement list** rather
+  than a delta: `get_merged_model_config_limits()` returns Custom if present,
+  else Default. Consumed at runtime by
+  `bedrock.model_utils.get_model_max_output_tokens()` (60s cache; falls back to
+  the on-disk `config_library/` YAML when no table is configured).
+
 ## Adding or changing a model
 
 Model defaults and inference fields live in `models.py`, and model/feature

@@ -107,3 +107,56 @@ class TestBuildShardPayloads:
         # Each shard's text uses 1-based PAGE markers for its own pages.
         first = _shard_text(payloads[0])
         assert "--- PAGE 1 ---" in first
+
+
+class TestTableHeaderContext:
+    """Header context prepended to later shards must include the table column
+    header but DROP page-1 data rows (else the parser re-emits them -> dup)."""
+
+    def test_truncates_at_markdown_separator(self):
+        txt = (
+            "# Statement\n\nAccount: X\n\n"
+            "| RowID | Symbol |\n|-------|--------|\n"
+            "| 1 | A |\n| 2 | B |\n| 3 | C |"
+        )
+        out = ExtractionService._table_header_context(txt)
+        assert "| RowID | Symbol |" in out  # column header kept
+        assert "|-------|--------|" in out  # separator kept
+        assert "| 1 | A |" not in out  # data rows dropped
+        assert "| 2 | B |" not in out
+
+    def test_non_table_falls_back_to_line_cap(self):
+        txt = "\n".join(f"line{i}" for i in range(50))
+        out = ExtractionService._table_header_context(txt, max_lines=10)
+        assert out.count("\n") == 9  # 10 lines
+        assert "line0" in out and "line49" not in out
+
+    def test_empty(self):
+        assert ExtractionService._table_header_context("") == ""
+
+
+class TestAnalyzeSchemaMinItems:
+    """minItems can arrive as a string after a config round-trip; the schema
+    analysis must coerce it instead of raising TypeError on `min_items > 50`."""
+
+    def test_string_min_items_does_not_raise(self):
+        svc = _service()
+        schema = {
+            "properties": {
+                "rows": {"type": "array", "minItems": "100", "description": "t"}
+            }
+        }
+        result = svc._analyze_schema_for_table_requirements(schema)
+        assert result["tool_usage_recommended"] is True
+
+    def test_string_min_items_below_threshold(self):
+        svc = _service()
+        schema = {"properties": {"rows": {"type": "array", "minItems": "5"}}}
+        result = svc._analyze_schema_for_table_requirements(schema)
+        assert result["tool_usage_recommended"] is False
+
+    def test_invalid_min_items_treated_as_zero(self):
+        svc = _service()
+        schema = {"properties": {"rows": {"type": "array", "minItems": "abc"}}}
+        result = svc._analyze_schema_for_table_requirements(schema)
+        assert result["tool_usage_recommended"] is False

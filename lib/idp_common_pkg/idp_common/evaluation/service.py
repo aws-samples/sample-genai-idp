@@ -53,9 +53,93 @@ def _normalize_comparator_name(comparator: str) -> str:
         "NumericComparator": "NumericExact",
         "LevenshteinComparator": "Levenshtein",
         "SemanticComparator": "Semantic",
+        "DateComparator": "Date",
         "LLMComparator": "LLM",
     }
     return mapping.get(comparator, comparator)
+
+
+# Comparison methods whose display string includes a similarity threshold.
+# NumericExact uses tolerance (not threshold) and LLM returns a binary match,
+# so neither shows a threshold suffix.
+_THRESHOLD_BASED_METHODS = {
+    "Fuzzy": 0.7,
+    "Semantic": 0.7,
+    "Levenshtein": 0.7,
+}
+
+
+def _format_evaluation_method(
+    comparator_method: Optional[str],
+    expected_value: Any,
+    actual_value: Any,
+    field_specific_threshold: Optional[float],
+    match_threshold: float,
+    list_match_threshold: Optional[float] = None,
+) -> str:
+    """
+    Build the human-readable evaluation-method string shown in reports.
+
+    This is the single source of truth for the "Method" column in both the
+    top-level attributes table and the Nested Field Comparison table, so the two
+    stay consistent (e.g. "Fuzzy (threshold: 0.70)", "Hungarian (threshold: 0.80)",
+    "NumericExact", "AggregateObject").
+
+    Args:
+        comparator_method: Explicit Stickler comparator name for the field, if any.
+        expected_value: Expected value (used for type inference when no comparator).
+        actual_value: Actual value (used for type inference when no comparator).
+        field_specific_threshold: Field-level similarity threshold, if configured.
+        match_threshold: Document-level Hungarian match threshold fallback.
+        list_match_threshold: Field-level Hungarian match threshold, if configured.
+
+    Returns:
+        Formatted method string for display.
+    """
+    if comparator_method:
+        # Normalize comparator name to UI-friendly format
+        method = _normalize_comparator_name(comparator_method)
+
+        # Show threshold ONLY for methods that use similarity thresholds
+        if method in _THRESHOLD_BASED_METHODS:
+            display_threshold = (
+                field_specific_threshold
+                if field_specific_threshold is not None
+                else _THRESHOLD_BASED_METHODS[method]
+            )
+            method = f"{method} (threshold: {display_threshold:.2f})"
+        # Exact, NumericExact, LLM, Date don't show thresholds
+        return method
+
+    if isinstance(expected_value, list) or isinstance(actual_value, list):
+        # Arrays use Hungarian matching - show field-specific or document-level threshold
+        display_threshold = list_match_threshold or match_threshold
+        return f"Hungarian (threshold: {display_threshold:.2f})"
+
+    if isinstance(expected_value, dict) or isinstance(actual_value, dict):
+        # Nested objects - no threshold
+        return "AggregateObject"
+
+    # Infer method based on data types when no explicit comparator
+    if isinstance(expected_value, bool) or isinstance(actual_value, bool):
+        # Booleans use exact matching - no threshold
+        return "Exact"
+    if isinstance(expected_value, (int, float)) or isinstance(
+        actual_value, (int, float)
+    ):
+        # Numbers use tolerance-based comparison - no threshold display
+        return "NumericExact"
+    if isinstance(expected_value, str) or isinstance(actual_value, str):
+        # Strings use fuzzy matching - show threshold
+        display_threshold = (
+            field_specific_threshold
+            if field_specific_threshold is not None
+            else _THRESHOLD_BASED_METHODS["Fuzzy"]
+        )
+        return f"Fuzzy (threshold: {display_threshold:.2f})"
+
+    # Safe default for any other types
+    return "Exact"
 
 
 def _convert_numpy_types(obj: Any) -> Any:
@@ -1245,69 +1329,29 @@ class EvaluationService:
 
             # Build formatted evaluation method string that matches markdown display
             comparator_method = field_config.get("comparator")
-
-            # Only these methods use similarity thresholds
-            # Note: NumericExact uses tolerance (not threshold), LLM returns binary match
-            THRESHOLD_BASED_METHODS = {
-                "Fuzzy": 0.7,
-                "Semantic": 0.7,
-                "Levenshtein": 0.7,
-            }
-
-            if comparator_method:
-                # Normalize comparator name to UI-friendly format
-                evaluation_method_value = _normalize_comparator_name(comparator_method)
-
-                # Show threshold ONLY for methods that use similarity thresholds
-                if evaluation_method_value in THRESHOLD_BASED_METHODS:
-                    # Use field-specific threshold if set, else use method default
-                    display_threshold = (
-                        field_specific_threshold
-                        if field_specific_threshold is not None
-                        else THRESHOLD_BASED_METHODS[evaluation_method_value]
-                    )
-                    evaluation_method_value = f"{evaluation_method_value} (threshold: {display_threshold:.2f})"
-                # Exact, NumericExact, LLM, AggregateObject don't show thresholds
-
-            elif isinstance(expected_value, list) or isinstance(actual_value, list):
-                # Arrays use Hungarian matching - show field-specific or document-level match_threshold
-                display_threshold = (
-                    field_config.get("match_threshold") or match_threshold
-                )
-                evaluation_method_value = (
-                    f"Hungarian (threshold: {display_threshold:.2f})"
-                )
-
-            elif isinstance(expected_value, dict) or isinstance(actual_value, dict):
-                # Nested objects - no threshold
-                evaluation_method_value = "AggregateObject"
-
-            else:
-                # Infer method based on data types when no explicit comparator
-                if isinstance(expected_value, bool) or isinstance(actual_value, bool):
-                    # Booleans use exact matching - no threshold
-                    evaluation_method_value = "Exact"
-                elif isinstance(expected_value, (int, float)) or isinstance(
-                    actual_value, (int, float)
-                ):
-                    # Numbers use tolerance-based comparison - no threshold display
-                    evaluation_method_value = "NumericExact"
-                elif isinstance(expected_value, str) or isinstance(actual_value, str):
-                    # Strings use fuzzy matching - show threshold
-                    display_threshold = (
-                        field_specific_threshold
-                        if field_specific_threshold is not None
-                        else THRESHOLD_BASED_METHODS["Fuzzy"]
-                    )
-                    evaluation_method_value = (
-                        f"Fuzzy (threshold: {display_threshold:.2f})"
-                    )
-                else:
-                    # Safe default for any other types
-                    evaluation_method_value = "Exact"
+            evaluation_method_value = _format_evaluation_method(
+                comparator_method=comparator_method,
+                expected_value=expected_value,
+                actual_value=actual_value,
+                field_specific_threshold=field_specific_threshold,
+                match_threshold=match_threshold,
+                list_match_threshold=field_config.get("match_threshold"),
+            )
 
             # Get detailed field comparisons for this attribute (sticker-eval v0.1.4+)
             detailed_comparisons = field_comparison_map.get(field_name, None)
+
+            # Annotate each nested comparison with its per-field method and weight
+            # so the Nested Field Comparison table can display them consistently
+            # with the top-level table. Stickler drops the comparator/weight from
+            # its field_comparisons dicts, but we can re-derive them from the
+            # translated item schema (keyed by the nested field name).
+            if detailed_comparisons:
+                self._annotate_nested_comparison_methods(
+                    detailed_comparisons,
+                    field_schema=properties.get(field_name, {}),
+                    match_threshold=match_threshold,
+                )
 
             # Create AttributeEvaluationResult with field comparison details
             attribute_result = AttributeEvaluationResult(
@@ -1351,6 +1395,99 @@ class EvaluationService:
             metrics=metrics,
             stickler_comparison_result=stickler_result,  # Store raw result for bulk aggregation
         )
+
+    def _annotate_nested_comparison_methods(
+        self,
+        field_comparisons: List[Dict[str, Any]],
+        field_schema: Dict[str, Any],
+        match_threshold: float,
+    ) -> None:
+        """
+        Add per-field ``evaluation_method`` and ``weight`` to nested comparisons.
+
+        Stickler's ``field_comparisons`` dicts carry only expected/actual keys,
+        values, match, score and reason - the comparator and weight used for each
+        nested field are computed internally and dropped. We re-derive them by
+        walking the translated schema to the leaf field (following array ``items``
+        and object ``properties``) so the Nested Field Comparison table (and the
+        Visual Editor overlay) can show the same Method/Weight columns as the
+        top-level attributes table.
+
+        The dicts are mutated in place (new keys ``evaluation_method`` / ``weight``).
+
+        Args:
+            field_comparisons: Stickler nested comparison dicts for one attribute.
+            field_schema: Translated schema for the (array or object) attribute.
+            match_threshold: Document-level Hungarian match threshold fallback.
+        """
+        for fc in field_comparisons:
+            # The expected_key is the canonical path, e.g. "LineItems[0].Amount"
+            # or "checks[0].bankInfo.bank". Strip the leading root-field segment
+            # (the attribute this schema describes) and walk what remains.
+            key = str(fc.get("expected_key") or fc.get("actual_key") or "")
+            leaf_schema = self._resolve_leaf_schema(field_schema, key)
+
+            if isinstance(leaf_schema, dict):
+                comparator = leaf_schema.get("x-aws-stickler-comparator")
+                threshold = leaf_schema.get("x-aws-stickler-threshold")
+                weight = leaf_schema.get("x-aws-stickler-weight")
+                # A nested field that is itself a list uses Hungarian matching;
+                # surface its field-level match threshold like the top-level table.
+                list_match_threshold = leaf_schema.get("x-aws-stickler-match-threshold")
+            else:
+                comparator = threshold = weight = list_match_threshold = None
+
+            fc["evaluation_method"] = _format_evaluation_method(
+                comparator_method=comparator,
+                expected_value=fc.get("expected_value"),
+                actual_value=fc.get("actual_value"),
+                field_specific_threshold=threshold,
+                match_threshold=match_threshold,
+                list_match_threshold=list_match_threshold,
+            )
+            # Default to 1.00 (Stickler's default weight) when not configured,
+            # matching the top-level table's weight fallback.
+            fc["weight"] = weight if weight is not None else 1.0
+
+    @staticmethod
+    def _resolve_leaf_schema(
+        field_schema: Dict[str, Any], expected_key: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Resolve the schema for a nested comparison's leaf field from its key.
+
+        Given the attribute's schema and a canonical key like
+        ``"LineItems[0].Amount"`` or ``"checks[0].bankInfo.bank"``, walk the
+        schema (descending through array ``items`` and object ``properties``,
+        ignoring ``[index]`` segments) to the leaf field's schema so its
+        ``x-aws-stickler-*`` config can be read.
+
+        Args:
+            field_schema: Schema for the root attribute (array or object).
+            expected_key: Canonical dotted/indexed key for the nested field.
+
+        Returns:
+            The leaf field's schema dict, or None if it can't be resolved.
+        """
+        # Split "root[0].child[1].leaf" into ["root", "child", "leaf"],
+        # dropping the "[index]" array subscripts.
+        segments = [
+            seg.split("[", 1)[0]
+            for seg in expected_key.split(".")
+            if seg.split("[", 1)[0]
+        ]
+        # The first segment is the root attribute itself (described by
+        # field_schema); everything after it is the path into the schema.
+        current = field_schema
+        for seg in segments[1:]:
+            if not isinstance(current, dict):
+                return None
+            # Descend into array item schemas transparently.
+            while isinstance(current, dict) and current.get("type") == "array":
+                current = current.get("items", {})
+            props = current.get("properties", {}) if isinstance(current, dict) else {}
+            current = props.get(seg)
+        return current if isinstance(current, dict) else None
 
     def _clean_null_descriptions(self, schema: dict[str, Any]) -> dict[str, Any]:
         """

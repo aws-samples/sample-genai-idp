@@ -996,25 +996,25 @@ top_k: 3      # Fewer candidates
 
 ### Max Tokens Sizing
 
-**Classification:**
+`max_tokens` is an **optional cap** on model output. Leave it empty (the
+default everywhere) and the service uses the selected model's maximum output
+limit — resolved at request time from the model limits list (editable in the
+web UI under **View / Edit Model Limits**). This avoids silent truncation when
+you switch to a larger-context model. Set a positive value only when you
+deliberately want to cap output *below* the model maximum (e.g. to bound cost
+or latency on a task with short responses).
+
 ```yaml
-max_tokens: 4096  # Sufficient for classification responses
+# Recommended: leave empty to use the model's full output budget
+max_tokens: ""
+
+# Or set an explicit cap (must not exceed the model's limit)
+max_tokens: 4096
 ```
 
-**Extraction:**
-```yaml
-max_tokens: 10000  # Larger for complex structured data
-```
-
-**Assessment:**
-```yaml
-max_tokens: 10000  # Detailed confidence explanations
-```
-
-**Summarization:**
-```yaml
-max_tokens: 4096   # Comprehensive summaries
-```
+Extraction and the confidence pass have no `max_tokens` knob at all — they
+always request the model's maximum output so long lists and large documents are
+never truncated.
 
 ## Token Efficiency and Cost Optimization
 
@@ -1277,97 +1277,89 @@ For documents with multiple pages, the system provides comprehensive image suppo
 4. **Monitor Processing Time**: Balance processing accuracy with processing speed based on your requirements
 5. **Strategic Image Placement**: Position images where they provide maximum context for the specific task
 
-## Assessment and Quality Assurance
+## Confidence (Assessment) and Quality Assurance
 
 ### Overview
 
-The Assessment feature provides automated confidence evaluation of document extraction results using Large Language Models (LLMs). This feature analyzes extraction outputs against source documents to provide confidence scores and explanations for each extracted attribute.
+As of **config v0.6**, per-field **confidence** and **geometry** are **outputs of
+extraction**, configured under `extraction.confidence.*` and
+`extraction.geometry.*` (there is no top-level `assessment.{model, geometry_mode,
+...}` block anymore). Confidence assessment analyzes extraction outputs against
+source documents to provide confidence scores and explanations for each extracted
+attribute. See [Extraction & Confidence](./extraction-and-confidence.md) for the
+full reference.
 
 ### Key Configuration Features
 
 - **Multimodal Analysis**: Combines text analysis with document images for comprehensive confidence assessment
 - **Per-Attribute Scoring**: Provides individual confidence scores and explanations for each extracted attribute
 - **Token-Optimized Processing**: Uses condensed text confidence data for 80-90% token reduction compared to full OCR results
-- **UI Integration**: Seamlessly displays assessment results in the web interface with explainability information
+- **UI Integration**: Seamlessly displays confidence results in the web interface with explainability information
 - **Confidence Threshold Support**: Configurable global and per-attribute confidence thresholds with color-coded visual indicators
-- **Optional Deployment**: Controlled by `IsAssessmentEnabled` parameter (defaults to false for cost optimization)
-- **Granular Assessment**: Advanced scalable approach for complex documents with many attributes or list items
+- **Runtime Control**: Enabled/disabled via configuration (`extraction.confidence.enabled` / `mode`), no stack redeployment required
+- **Large-list batching**: Long list fields (hundreds of rows) are scored in sequential batches so every row is covered
 
-### Standard vs Granular Assessment Configuration
+### Confidence modes
 
-#### Standard Assessment Configuration
-For documents with moderate complexity:
-```yaml
-assessment:
-  model: "anthropic.claude-3-5-sonnet-20241022-v2:0"
-  temperature: 0
-  # Standard assessment uses single-threaded processing
-```
+`extraction.confidence.mode` controls *where* per-field confidence is produced:
 
-#### Granular Assessment Configuration
-For complex documents with many attributes or large lists:
-```yaml
-assessment:
-  model: "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
-  temperature: 0
-  
-  # Granular assessment configuration
-  granular:
-    max_workers: 6              # Parallel processing threads
-    simple_batch_size: 3        # Attributes per batch
-    list_batch_size: 1          # List items per batch
-```
-
-### When to Use Granular Assessment
-
-Consider granular assessment configuration for:
-- **Bank statements** with hundreds of transactions
-- **Documents with 10+ attributes** requiring individual attention
-- **Complex nested structures** (group and list attributes)
-- **Performance-critical scenarios** where parallel processing helps
-- **Cost optimization** when prompt caching is available
-
-### Assessment Deployment Configuration
-
-Assessment is controlled by the `IsAssessmentEnabled` deployment parameter:
+- **`separate`** *(default)* — on the Simple (non-agentic) path, confidence runs
+  as the standalone Assessment step; on the Advanced (agentic) path, it runs
+  inside each extraction shard and the standalone step auto-skips.
+- **`integrated`** — a single extraction inference returns values **and** inline
+  confidence together (works on **both** the simple and agentic paths); the
+  service splits the envelope, enriches with thresholds, and emits
+  `explainability_info`, so the standalone Assessment step auto-skips.
+- **`off`** — no confidence scoring (equivalent to `enabled: false`); zero LLM cost.
 
 ```yaml
-Parameters:
-  IsAssessmentEnabled:
-    Type: String
-    Default: "false"
-    AllowedValues: ["true", "false"]
-    Description: Enable assessment functionality for extraction confidence evaluation
+extraction:
+  confidence:
+    enabled: true             # false disables confidence entirely (zero LLM cost)
+    mode: separate            # off | separate (default) | integrated
+    model: "us.amazon.nova-lite-v1:0"
+    temperature: 0
+    list_batch_size: 25       # rows per assessment batch for large lists
+    image:
+      target_width: ""        # Empty string = no resizing (recommended)
+      target_height: ""       # Empty string = no resizing (recommended)
 ```
 
-### Assessment Image Processing Configuration
+### Large lists (`list_batch_size`)
 
-The assessment service supports configurable image dimensions:
+For complex documents with large lists (bank statements with hundreds of
+transactions, line-item tables, brokerage holdings), the standalone Assessment
+step **batches large lists automatically**: it slices the largest list field into
+`extraction.confidence.list_batch_size` chunks (default **25**), assesses each
+chunk sequentially with the shared scalars/context, then reconciles the results
+so **every** list cell gets its own confidence and bounding box. A bounded
+missing-row retry re-scores any rows the model dropped, so coverage reaches 100%.
+Lower `list_batch_size` if a model still struggles to enumerate a full chunk;
+raise it to reduce the number of inference calls.
 
-```yaml
-assessment:
-  model: "us.amazon.nova-lite-v1:0"
-  # Image processing settings - preserves original resolution
-  image:
-    target_width: ""     # Empty string = no resizing (recommended)
-    target_height: ""    # Empty string = no resizing (recommended)
-```
+> **Granular assessment is retired.** The former "granular assessment" service
+> (parallel thread-pool fan-out with DynamoDB caching, formerly configured under
+> `assessment.granular` / `extraction.confidence.granular`) has been **retired and
+> deleted**. Large-list batching is its full replacement, and `list_batch_size` is
+> the one knob. Any leftover `granular.*` keys still validate but are ignored — no
+> config edit required. See
+> [Granular Assessment Retirement](./migration-granular-retirement.md).
 
 ### UI Integration Configuration
 
-Assessment results automatically appear in the web interface with color-coded displays:
+Confidence results automatically appear in the web interface with color-coded displays:
 
 - 🟢 **Green**: Confidence meets or exceeds threshold (high confidence)
 - 🔴 **Red**: Confidence falls below threshold (requires review)
 - ⚫ **Black**: Confidence available but no threshold for comparison
 
-### Best Practices for Assessment Configuration
+### Best Practices for Confidence Configuration
 
-1. **Enable Selectively**: Only enable assessment for critical document types to control costs
-2. **Use Granular for Complex Documents**: Leverage granular assessment for documents with many attributes
-3. **Configure Appropriate Image Dimensions**: Use original resolution for maximum accuracy
-4. **Set Deployment Parameters**: Control assessment deployment through CloudFormation parameters
-5. **Monitor Resource Usage**: Track processing time and costs when using assessment features
+1. **Enable Selectively**: Disable confidence (`enabled: false` or `mode: off`) for non-critical document types to control costs
+2. **Use Advanced (agentic) for Complex Documents**: For very large documents and big tables, prefer agentic extraction — it shards both extraction and confidence assessment and yields the best-calibrated confidence
+3. **Tune `list_batch_size` for Large Lists**: Lower it if a chunk under-enumerates; raise it to cut inference count
+4. **Configure Appropriate Image Dimensions**: Use original resolution for maximum accuracy
+5. **Monitor Resource Usage**: Track processing time and costs when using confidence features
 
 ## Evaluation and Analytics
 
@@ -1593,7 +1585,7 @@ Configuration management features:
 
 3. **Incorporate Advanced Features**
    - Add few-shot examples
-   - Configure granular assessment
+   - Tune confidence (`list_batch_size` for large lists; consider Advanced agentic extraction)
    - Test multi-modal understanding
 
 4. **Optimize for Performance**

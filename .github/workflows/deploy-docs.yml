@@ -40,21 +40,11 @@ jobs:
 
       - name: Setup symlinks
         working-directory: docs-site
-        run: |
-          # Create symlinks for doc content (same as setup.sh but with correct paths)
-          mkdir -p src/content/docs
-          for md_file in ../docs/*.md; do
-            filename=$(basename "$md_file")
-            [ "$filename" = "README.md" ] && continue
-            ln -sf "../../../../docs/$filename" "src/content/docs/$filename"
-          done
-
-          # Symlink images for relative path resolution
-          ln -sf ../../../images src/content/images
-
-          # Symlink images for public serving
-          mkdir -p public
-          ln -sf ../../images public/images
+        # Use setup.sh as the single source of truth so the symlink set (top-level
+        # docs, docs/extensions/, docs/benchmarking/, and images) can't drift from
+        # local builds. An inline copy previously missed the extensions/benchmarking
+        # subfolders and broke the build when sidebar entries referenced them.
+        run: bash setup.sh
 
       - name: Build documentation site
         working-directory: docs-site

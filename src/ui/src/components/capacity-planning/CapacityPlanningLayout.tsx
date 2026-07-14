@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /* eslint-disable react/no-array-index-key */
 import React, { useState, useMemo, useEffect } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { calculateCapacity as calculateCapacityOp } from '../../graphql/generated';
 import {
   Container,
@@ -35,7 +35,11 @@ import { parseMetering } from '../../graphql/awsjson-parsers';
 interface Configuration {
   ocr?: { backend?: string; model_id?: string; model?: string };
   classification?: { model?: string };
-  extraction?: { model?: string };
+  extraction?: {
+    model?: string;
+    // v0.6: confidence assessment (model + granular) lives under extraction
+    confidence?: { enabled?: boolean; model?: string; granular?: { enabled?: boolean } };
+  };
   assessment?: { enabled?: boolean; model?: string; granular?: { enabled?: boolean } };
   summarization?: { model?: string };
   classes?: Array<{
@@ -314,13 +318,16 @@ const CapacityPlanningLayout = () => {
   };
 
   // Check if granular assessment is enabled in configuration
+  // v0.6: confidence enable + granular live under extraction.confidence
+  // (fall back to legacy assessment.* for pre-migration configs).
   const isGranularAssessmentEnabled = () => {
-    // Check if assessment is enabled at all
-    if (configuration?.assessment?.enabled === false) {
+    const confidence = configuration?.extraction?.confidence;
+    // Check if confidence assessment is enabled at all
+    if ((confidence?.enabled ?? configuration?.assessment?.enabled) === false) {
       return false;
     }
     // Check if granular assessment specifically is enabled
-    if (configuration?.assessment?.granular?.enabled === false) {
+    if ((confidence?.granular?.enabled ?? configuration?.assessment?.granular?.enabled) === false) {
       return false;
     }
     // Default to true if not explicitly disabled
@@ -1363,7 +1370,7 @@ const CapacityPlanningLayout = () => {
       const modelConfig = {
         extraction_model: configuration?.extraction?.model,
         classification_model: configuration?.classification?.model,
-        assessment_model: configuration?.assessment?.model,
+        assessment_model: configuration?.extraction?.confidence?.model ?? configuration?.assessment?.model,
         summarization_model: configuration?.summarization?.model,
         ocr_model: configuration?.ocr?.backend === 'bedrock' ? configuration?.ocr?.model_id : null,
       };
@@ -1683,7 +1690,7 @@ const CapacityPlanningLayout = () => {
       [
         { id: configuration?.classification?.model, step: 'Classification' },
         { id: configuration?.extraction?.model, step: 'Extraction' },
-        { id: configuration?.assessment?.model, step: 'Assessment' },
+        { id: configuration?.extraction?.confidence?.model ?? configuration?.assessment?.model, step: 'Assessment' },
         { id: configuration?.summarization?.model, step: 'Summarization' },
       ].forEach((model) => {
         if (model.id) models.push(model);
@@ -1933,7 +1940,7 @@ const CapacityPlanningLayout = () => {
     }
     csvContent += `Classification,"${configuration?.classification?.model || 'Not configured'}"\n`;
     csvContent += `Extraction,"${configuration?.extraction?.model || 'Not configured'}"\n`;
-    csvContent += `Assessment,"${configuration?.assessment?.model || 'Not configured'}"\n`;
+    csvContent += `Assessment,"${(configuration?.extraction?.confidence?.model ?? configuration?.assessment?.model) || 'Not configured'}"\n`;
     csvContent += `Summarization,"${configuration?.summarization?.model || 'Not configured'}"\n`;
     csvContent += '\n';
 
@@ -2252,7 +2259,7 @@ const CapacityPlanningLayout = () => {
                     <div>
                       <div>Assessment</div>
                       <div style={{ fontSize: '0.8em', color: '#2f3b4a', fontWeight: 'normal' }}>
-                        Model: {configuration?.assessment?.model || 'Not configured'}
+                        Model: {(configuration?.extraction?.confidence?.model ?? configuration?.assessment?.model) || 'Not configured'}
                       </div>
                     </div>
                   ),

@@ -20,7 +20,7 @@ import {
   DatePicker,
   TimeInput,
 } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import {
   addTestSet,
   addTestSetFromUpload,
@@ -90,6 +90,7 @@ const TestSets = (): React.JSX.Element => {
   const [fileCount, setFileCount] = useState(0);
   const [showFilesModal, setShowFilesModal] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [showBucketHelp, setShowBucketHelp] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
@@ -133,6 +134,8 @@ const TestSets = (): React.JSX.Element => {
     } catch (err) {
       console.error('TestSets: Failed to load test sets:', err);
       setError(`Failed to load test sets: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setInitialLoading(false);
     }
   };
 
@@ -920,6 +923,8 @@ const TestSets = (): React.JSX.Element => {
         selectedItems={selectedItems}
         onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
         selectionType="multi"
+        loading={initialLoading}
+        loadingText="Loading test sets..."
         isItemDisabled={(item) => item.status !== 'COMPLETED' && item.status !== 'FAILED'}
         empty={
           <Box textAlign="center" color="inherit">

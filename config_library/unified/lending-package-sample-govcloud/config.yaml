@@ -14,6 +14,11 @@ classification:
 extraction:
   model: amazon.nova-pro-v1:0
   max_tokens: "10000"
+  # v0.6: confidence scoring settings (was the top-level `assessment` block —
+  # GovCloud pins a GovCloud-available assessment model).
+  confidence:
+    model: amazon.nova-lite-v1:0
+    max_tokens: "10000"
 summarization:
   model: anthropic.claude-3-7-sonnet-20250219-v1:0
 chat:
@@ -21,9 +26,6 @@ chat:
   # available in GovCloud — fall back to Claude 3.7 Sonnet (which also
   # has a large context window suitable for full-document chat).
   model: anthropic.claude-3-7-sonnet-20250219-v1:0
-assessment:
-  model: amazon.nova-lite-v1:0
-  max_tokens: "10000"
 evaluation:
   model: anthropic.claude-3-7-sonnet-20250219-v1:0
 discovery:
@@ -129,7 +131,7 @@ classes:
           indicating when the earning  period started for the compensation
           shown.
         type: string
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       FederalTaxes:
         description: >-
           List of federal tax withholdings showing different types of federal
@@ -172,14 +174,14 @@ classes:
           The ending date of the pay period covered by this payslip, indicating
           when the earning  period ended for the compensation shown.
         type: string
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       PayDate:
         format: date
         description: >-
           The actual date when the employee was paid, representing when the
           compensation was issued  or deposited.
         type: string
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       currency:
         type: string
         description: >-
@@ -428,7 +430,7 @@ classes:
           The date when the driver's license expires and requires renewal,
           typically in  YYYY-MM-DD format indicating when the license becomes
           invalid.
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       ENDORSEMENTS:
         description: >-
           List of special driving endorsements or certifications held by the
@@ -478,14 +480,14 @@ classes:
         description: >-
           The birth date of the license holder in YYYY-MM-DD format, used for
           age verification  and identification purposes.
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       DATE_OF_ISSUE:
         type: string
         description: >-
           The date when the driver's license was originally issued by the state
           authority,  typically in YYYY-MM-DD format showing the license
           creation date.
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       COUNTY:
         type: string
         description: >-
@@ -508,7 +510,7 @@ classes:
           The date when the check was written, typically handwritten or printed
           in the  date field of the check.
         type: string
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       dollar_amount:
         type: number
         description: >-
@@ -621,7 +623,7 @@ classes:
           date:
             type: string
             description: The date when the transaction occurred.
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           description:
             type: string
             description: Description of the transaction or merchant information.
@@ -679,14 +681,14 @@ classes:
           The ending date of the statement period in MM/DD/YYYY format,
           indicating when  the reporting period concluded.
         type: string
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       statement_start_date:
         format: date
         description: >-
           The beginning date of the statement period in MM/DD/YYYY format,
           indicating  when the reporting period began.
         type: string
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       account_holder_name:
         type: string
         description: >-
@@ -1032,7 +1034,7 @@ classes:
           Date of Birth:
             type: string
             description: The birth date of the co-applicant.
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           Gender:
             type: string
             description: The gender of the co-applicant.
@@ -1111,7 +1113,7 @@ classes:
           Date of Birth:
             type: string
             description: The birth date of the primary applicant.
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           Years with Prior Property Company:
             type: string
             description: >-
@@ -1131,7 +1133,7 @@ classes:
         description: >-
           The date when the insurance policy expires and requires renewal,
           indicating when  coverage will terminate if not renewed.
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       Purchase Date and Time:
         type: string
         description: >-
@@ -1193,7 +1195,7 @@ classes:
         description: >-
           The date when the insurance coverage begins and becomes active,
           marking the  start of the policy period.
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       Primary Email:
         type: string
         description: >-

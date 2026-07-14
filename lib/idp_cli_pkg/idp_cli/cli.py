@@ -12,7 +12,7 @@ import logging
 import os
 import sys
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Dict, Optional
 
 _SETUP_HELP = """\
 Error: Required packages not found.
@@ -65,6 +65,7 @@ def _build_from_local_code(
     stack_name: str,
     *,
     headless: bool = False,
+    govcloud: bool = False,
     bucket_basename: Optional[str] = None,
     prefix: Optional[str] = None,
     public: bool = False,
@@ -117,6 +118,7 @@ def _build_from_local_code(
             prefix=prefix,
             region=region,
             headless=headless,
+            govcloud=govcloud,
             public=public,
             max_workers=max_workers,
             clean_build=clean_build,
@@ -130,6 +132,13 @@ def _build_from_local_code(
             sys.exit(1)
 
         console.print()
+
+        # Return govcloud template if govcloud mode
+        if govcloud and result.govcloud_template_path:
+            console.print(
+                f"[green]✓ Build complete (GovCloud). Template: {result.govcloud_template_path}[/green]"
+            )
+            return result.govcloud_template_path, result.govcloud_template_url
 
         # Return headless template if headless mode
         if headless and result.headless_template_path:
@@ -236,8 +245,41 @@ TEMPLATE_URLS = {
 }
 
 
+def _parse_tags(tags: Optional[str]) -> Dict[str, str]:
+    """Parse a --tags string (key=value,key2=value2) into a dict.
+
+    Unlike --parameters, tag keys may contain spaces and characters like
+    . : / + - _, so we split on commas then on the first '=' rather than
+    using a key-name regex. Commas are not supported inside tag values.
+
+    Raises click.BadParameter on malformed input (missing '=' or empty key).
+    """
+    result: Dict[str, str] = {}
+    if not tags:
+        return result
+    for pair in tags.split(","):
+        pair = pair.strip()
+        if not pair:
+            continue
+        if "=" not in pair:
+            raise click.BadParameter(
+                f"Invalid tag '{pair}'. Expected key=value,key2=value2.",
+                param_hint="--tags",
+            )
+        key, value = pair.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            raise click.BadParameter(
+                f"Invalid tag '{pair}': empty key.",
+                param_hint="--tags",
+            )
+        result[key] = value
+    return result
+
+
 @click.group()
-@click.version_option(version="0.5.16")
+@click.version_option(version="0.6.0")
 def cli():
     """
     IDP CLI - Batch document processing for IDP Accelerator
@@ -299,6 +341,14 @@ def cli():
     help="Path to local config file or S3 URI (e.g., ./config.yaml or s3://bucket/config.yaml)",
 )
 @click.option("--parameters", help="Additional parameters as key=value,key2=value2")
+@click.option(
+    "--tags",
+    help=(
+        "Stack tags as key=value,key2=value2. Propagated by CloudFormation "
+        "to all taggable resources and nested stacks. On update, providing "
+        "tags replaces the stack's tag set; omitting them preserves existing tags."
+    ),
+)
 @click.option("--wait", is_flag=True, help="Wait for stack operation to complete")
 @click.option(
     "--no-rollback", is_flag=True, help="Disable rollback on stack creation failure"
@@ -309,6 +359,15 @@ def cli():
     "--headless",
     is_flag=True,
     help="Deploy headless (no UI/AppSync/Cognito/WAF) — for API-only or GovCloud deployments",
+)
+@click.option(
+    "--govcloud",
+    is_flag=True,
+    help=(
+        "Deploy the GovCloud template variant: removes all AWS::CloudFront::* "
+        "resources (unavailable in GovCloud) and forces API Gateway Web UI "
+        "hosting, keeping the full UI. Mutually exclusive with --headless."
+    ),
 )
 @click.option(
     "--bucket-basename",
@@ -352,11 +411,13 @@ def deploy(
     enable_hitl: str,
     custom_config: Optional[str],
     parameters: Optional[str],
+    tags: Optional[str],
     wait: bool,
     no_rollback: bool,
     region: Optional[str],
     role_arn: Optional[str],
     headless: bool,
+    govcloud: bool,
     bucket_basename: Optional[str],
     prefix: Optional[str],
     public: bool,
@@ -406,6 +467,14 @@ def deploy(
             )
             sys.exit(1)
 
+        if headless and govcloud:
+            console.print(
+                "[red]✗ Error: --headless and --govcloud are mutually exclusive. "
+                "--headless removes the UI entirely; --govcloud keeps the UI but "
+                "removes CloudFront and uses API Gateway hosting.[/red]"
+            )
+            sys.exit(1)
+
         # Auto-detect region if not provided
         if not region:
             import boto3
@@ -425,6 +494,7 @@ def deploy(
                 region,
                 stack_name,
                 headless=headless,
+                govcloud=govcloud,
                 bucket_basename=bucket_basename,
                 prefix=prefix,
                 public=public,
@@ -437,6 +507,73 @@ def deploy(
         elif template_file:
             template_path = os.path.abspath(template_file)
             console.print(f"[bold]Using local template: {template_path}[/bold]")
+
+        # Handle govcloud mode for pre-built templates (no --from-code).
+        # Download the default template, strip CloudFront + force API Gateway
+        # hosting, upload the transformed template, and deploy that.
+        elif govcloud and not template_url:
+            console.print("[bold cyan]Generating GovCloud template...[/bold cyan]")
+            if region in TEMPLATE_URLS:
+                source_url = TEMPLATE_URLS[region]
+            else:
+                supported_regions = ", ".join(TEMPLATE_URLS.keys())
+                raise ValueError(
+                    f"Region '{region}' is not supported for --govcloud without "
+                    f"--from-code/--template-url. Supported regions: {supported_regions}. "
+                    f"Use --from-code or --template-url explicitly."
+                )
+
+            import tempfile
+
+            import boto3 as _boto3
+            import requests
+            from idp_sdk.operations.publish import DEFAULT_GOVCLOUD_LINT_REGION
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                local_template = os.path.join(tmpdir, "idp-main.yaml")
+                console.print(f"[dim]Downloading template from {source_url}...[/dim]")
+                resp = requests.get(source_url, timeout=60)
+                resp.raise_for_status()
+                with open(local_template, "wb") as f:
+                    f.write(resp.content)
+
+                govcloud_template = os.path.join(tmpdir, "idp-govcloud.yaml")
+                client_tmp = IDPClient(region=region)
+                # Lint against the actual deploy region when it is GovCloud;
+                # otherwise fall back to the default GovCloud lint region.
+                gc_lint_region = (
+                    region
+                    if region and region.startswith("us-gov-")
+                    else DEFAULT_GOVCLOUD_LINT_REGION
+                )
+                transform_result = client_tmp.publish.transform_template_govcloud(
+                    source_template=local_template,
+                    output_path=govcloud_template,
+                    lint_region=gc_lint_region,
+                )
+                if not transform_result.success:
+                    console.print(
+                        f"[red]✗ GovCloud transformation failed: {transform_result.error}[/red]"
+                    )
+                    sys.exit(1)
+
+                sts = _boto3.client("sts", region_name=region)
+                account_id = sts.get_caller_identity()["Account"]
+                bucket_name = f"idp-accelerator-artifacts-{account_id}-{region}"
+                s3 = _boto3.client("s3", region_name=region)
+                s3_key = "idp-cli/idp-govcloud.yaml"
+                s3.upload_file(
+                    govcloud_template,
+                    bucket_name,
+                    s3_key,
+                    ExtraArgs={"ContentType": "text/yaml"},
+                )
+                template_url = (
+                    f"https://s3.{region}.amazonaws.com/{bucket_name}/{s3_key}"
+                )
+                console.print(
+                    f"[green]✓ GovCloud template uploaded: {template_url}[/green]"
+                )
 
         # Handle headless mode for pre-built templates (no --from-code)
         elif headless and not template_url:
@@ -627,6 +764,10 @@ def deploy(
                 value = match.group(2).strip().rstrip(",")
                 additional_params[key] = value
 
+        # Parse stack tags (key=value,key2=value2), propagated by CloudFormation
+        # to all taggable resources and nested stacks.
+        tags_dict = _parse_tags(tags)
+
         # Note: --headless (the CLI flag) controls TEMPLATE TRANSFORMATION
         # — strip UI / AppSync / Cognito / WAF / Agents / HITL / KB from the
         # template. The CFN parameter `EnableHeadless=true` is a separate
@@ -651,6 +792,7 @@ def deploy(
                 enable_hitl=enable_hitl == "true" if enable_hitl != "false" else None,
                 custom_config=custom_config,
                 parameters=additional_params,
+                tags=tags_dict or None,
                 wait=wait,
                 no_rollback=no_rollback,
                 role_arn=role_arn,
@@ -2289,7 +2431,19 @@ def list_batches(stack_name: str, limit: int, region: Optional[str]):
 
 @cli.command()
 @click.option("--stack-name", required=True, help="CloudFormation stack name")
-@click.option("--batch-id", required=True, help="Batch identifier")
+@click.option(
+    "--batch-id",
+    help="Batch identifier (mutually exclusive with --document-id/--run-id)",
+)
+@click.option(
+    "--document-id",
+    help="Document object key — required with --run-id to download a specific version",
+)
+@click.option(
+    "--run-id",
+    help="Version run id (from `idp-cli list-versions`). Downloads the exact "
+    "pinned bytes of that processing run. Requires --document-id.",
+)
 @click.option(
     "--output-dir",
     required=True,
@@ -2304,7 +2458,9 @@ def list_batches(stack_name: str, limit: int, region: Optional[str]):
 @click.option("--region", help="AWS region (optional)")
 def download_results(
     stack_name: str,
-    batch_id: str,
+    batch_id: Optional[str],
+    document_id: Optional[str],
+    run_id: Optional[str],
     output_dir: str,
     file_types: str,
     region: Optional[str],
@@ -2314,23 +2470,48 @@ def download_results(
 
     Examples:
 
-      # Download all results
+      # Download all results for a batch
       idp-cli download-results --stack-name my-stack --batch-id cli-batch-20251015-143000 --output-dir ./results/
 
       # Download only extraction results (sections)
       idp-cli download-results --stack-name my-stack --batch-id <id> --output-dir ./results/ --file-types sections
 
-      # Download evaluations only
-      idp-cli download-results --stack-name my-stack --batch-id <id> --output-dir ./results/ --file-types evaluation
+      # Download a specific document VERSION (exact bytes of one processing run)
+      idp-cli download-results --stack-name my-stack --document-id loan-123/package.pdf \\
+          --run-id 20250707T141530Z-exec-abc --output-dir ./results/
     """
     try:
         from idp_sdk import IDPClient
 
+        client = IDPClient(stack_name=stack_name, region=region)
+
+        # Version download path: pinned S3 object versions from a run manifest.
+        if run_id:
+            if not document_id:
+                console.print("[red]✗ --run-id requires --document-id[/red]")
+                sys.exit(1)
+            console.print(
+                f"[bold blue]Downloading version {run_id} of {document_id}[/bold blue]"
+            )
+            result = client.batch.download_version(
+                document_id=document_id, run_id=run_id, output_dir=output_dir
+            )
+            console.print(
+                f"\n[green]✓ Downloaded {result.files_downloaded} files to "
+                f"{result.output_dir}[/green]"
+            )
+            console.print()
+            return
+
+        if not batch_id:
+            console.print(
+                "[red]✗ Provide either --batch-id or --document-id/--run-id[/red]"
+            )
+            sys.exit(1)
+
         console.print(
             f"[bold blue]Downloading results for batch: {batch_id}[/bold blue]"
         )
-
-        client = IDPClient(stack_name=stack_name, region=region)
 
         # Parse file types
         if file_types == "all":
@@ -2352,6 +2533,108 @@ def download_results(
 
     except Exception as e:
         logger.error(f"Error downloading results: {e}", exc_info=True)
+        console.print(f"[red]✗ Error: {e}[/red]")
+        sys.exit(1)
+
+
+@cli.command(name="use-as-baseline")
+@click.option("--stack-name", required=True, help="CloudFormation stack name")
+@click.option(
+    "--document-id",
+    required=True,
+    help="Document object key (S3 key) of a processed document, e.g. "
+    "'loan-123/package.pdf'",
+)
+@click.option("--region", help="AWS region (optional)")
+def use_as_baseline(
+    stack_name: str,
+    document_id: str,
+    region: Optional[str],
+):
+    """
+    Promote a processed document's output to the evaluation baseline.
+
+    Programmatic equivalent of the UI "Use as Evaluation Baseline" button:
+    copies the document's output into the evaluation baseline bucket and sets
+    its EvaluationStatus to BASELINE_AVAILABLE. Runs synchronously.
+
+    Examples:
+
+      idp-cli use-as-baseline --stack-name my-stack --document-id loan-123/package.pdf
+    """
+    try:
+        from idp_sdk import IDPClient
+
+        client = IDPClient(stack_name=stack_name, region=region)
+
+        console.print(
+            f"[bold blue]Copying '{document_id}' to evaluation baseline...[/bold blue]"
+        )
+
+        result = client.evaluation.use_as_baseline(document_id=document_id)
+
+        console.print(f"\n[green]✓ Baseline created for {result.document_id}[/green]")
+        console.print(f"  Files copied: {result.files_copied}")
+        console.print(f"  Evaluation status: {result.evaluation_status}")
+        console.print()
+
+    except Exception as e:
+        logger.error(f"Error using document as baseline: {e}", exc_info=True)
+        console.print(f"[red]✗ Error: {e}[/red]")
+        sys.exit(1)
+
+
+@cli.command()
+@click.option("--stack-name", required=True, help="CloudFormation stack name")
+@click.option(
+    "--document-id", required=True, help="Document object key (its tracking id)"
+)
+@click.option("--region", help="AWS region (optional)")
+def list_versions(stack_name: str, document_id: str, region: Optional[str]):
+    """
+    List retained processing-run versions for a document, newest first.
+
+    Each successful processing run of a document is retained as a version whose
+    output bytes are pinned by S3 object VersionId. Use the RunId with
+    `download-results --run-id` to fetch that exact version.
+
+    Example:
+
+      idp-cli list-versions --stack-name my-stack --document-id loan-123/package.pdf
+    """
+    try:
+        from idp_sdk import IDPClient
+        from rich.table import Table
+
+        client = IDPClient(stack_name=stack_name, region=region)
+        versions = client.batch.list_versions(document_id=document_id)
+
+        if not versions:
+            console.print(f"[yellow]No versions found for {document_id}[/yellow]")
+            return
+
+        table = Table(title=f"Versions for {document_id}")
+        table.add_column("Run ID")
+        table.add_column("Completed")
+        table.add_column("Config Version")
+        table.add_column("Pages", justify="right")
+        table.add_column("Files", justify="right")
+
+        for v in versions:
+            table.add_row(
+                str(v.get("RunId", "")),
+                str(v.get("CompletionTime", ""))[:19],
+                str(v.get("ConfigVersion", "N/A")),
+                str(v.get("PageCount", "-")),
+                str(v.get("FileCount", "-")),
+            )
+
+        console.print()
+        console.print(table)
+        console.print()
+
+    except Exception as e:
+        logger.error(f"Error listing versions: {e}", exc_info=True)
         console.print(f"[red]✗ Error: {e}[/red]")
         sys.exit(1)
 
@@ -3071,11 +3354,16 @@ def _invoke_test_set_resolver(
     for page in paginator.paginate():
         all_functions.extend(page["Functions"])
 
+    # Match by the stack-name prefix + the unique function fragment. We do NOT
+    # match the full "-APIRESOLVERSTACK-" nested-stack segment because
+    # CloudFormation truncates long logical ids in physical names (e.g.
+    # "<stack>-APIRESOLVE-TestSetResolverFunction-xxxx"), which a fixed prefix
+    # would miss.
     test_set_resolver_function = next(
         (
             f["FunctionName"]
             for f in all_functions
-            if f["FunctionName"].startswith(f"{stack_name}-APPSYNCSTACK-")
+            if f["FunctionName"].startswith(f"{stack_name}-APIRESOLVE")
             and "TestSetResolverFunction" in f["FunctionName"]
         ),
         None,
@@ -3133,7 +3421,7 @@ def _invoke_test_runner(
     import json
 
     # Find test runner function by name pattern
-    # Match: <stack_name>-APPSYNCSTACK-*-TestRunnerFunction-*
+    # Match: <stack_name>-APIRESOLVE*-TestRunnerFunction-* (logical id is truncated)
     lambda_client = boto3.client("lambda", region_name=region)
 
     # Handle pagination to get all functions
@@ -3142,11 +3430,13 @@ def _invoke_test_runner(
     for page in paginator.paginate():
         all_functions.extend(page["Functions"])
 
+    # Stack prefix + function fragment (not the full "-APIRESOLVERSTACK-" segment,
+    # which CloudFormation truncates in physical names).
     test_runner_function = next(
         (
             f["FunctionName"]
             for f in all_functions
-            if f["FunctionName"].startswith(f"{stack_name}-APPSYNCSTACK-")
+            if f["FunctionName"].startswith(f"{stack_name}-APIRESOLVE")
             and "TestRunnerFunction" in f["FunctionName"]
         ),
         None,
@@ -3849,10 +4139,20 @@ def config_create(
     is_flag=True,
     help="Fail validation if config contains unknown or deprecated fields",
 )
+@click.option(
+    "--emit-migrated",
+    type=click.Path(),
+    default=None,
+    help=(
+        "Write the config migrated to the current format (e.g. v0.5 -> v0.6) to this "
+        "path. Useful for pre-migrating a saved older config file before import."
+    ),
+)
 def config_validate(
     config_file: str,
     show_merged: bool,
     strict: bool,
+    emit_migrated: Optional[str],
 ):
     """
     Validate a configuration file against system defaults
@@ -3893,6 +4193,30 @@ def config_validate(
         except Exception as e:
             console.print(f"[red]✗ Failed to load file: {e}[/red]")
             sys.exit(1)
+
+        # Emit the migrated (current-format) config if requested. Done up front so it
+        # works even when the file is an older format that would otherwise warn about
+        # deprecated fields — the whole point is to hand the user a pre-migrated file.
+        if emit_migrated:
+            from idp_common.config.migrations.v05_to_v06 import migrate_v05_to_v06
+
+            migrated = migrate_v05_to_v06(user_config)
+            migrated_yaml = yaml.dump(
+                migrated,
+                default_flow_style=False,
+                sort_keys=False,
+                allow_unicode=True,
+                width=120,
+            )
+            with open(emit_migrated, "w", encoding="utf-8") as f:
+                f.write(
+                    f"# Migrated to config_format_version {migrated.get('config_format_version', '?')} "
+                    f"from: {config_file}\n\n"
+                )
+                f.write(migrated_yaml)
+            console.print(
+                f"[green]✓ Migrated config written to: {emit_migrated}[/green]"
+            )
 
         # Check for extra/deprecated fields before Pydantic validation
         from idp_common.config.models import IDP_CONFIG_DEPRECATED_FIELDS, IDPConfig
@@ -5317,6 +5641,15 @@ def multi_discover(
 @click.option(
     "--headless", is_flag=True, help="Also generate a headless (no-UI) template variant"
 )
+@click.option(
+    "--govcloud",
+    is_flag=True,
+    help=(
+        "Also generate a GovCloud template variant: removes all AWS::CloudFront::* "
+        "resources (unavailable in GovCloud) and forces API Gateway Web UI hosting. "
+        "Keeps the full UI."
+    ),
+)
 @click.option("--public", is_flag=True, help="Make S3 artifacts publicly readable")
 @click.option(
     "--max-workers",
@@ -5344,6 +5677,7 @@ def publish(
     prefix: Optional[str],
     region: str,
     headless: bool,
+    govcloud: bool,
     public: bool,
     max_workers: Optional[int],
     clean_build: bool,
@@ -5386,6 +5720,7 @@ def publish(
             prefix=prefix,
             region=region,
             headless=headless,
+            govcloud=govcloud,
             public=public,
             max_workers=max_workers,
             clean_build=clean_build,
@@ -5404,6 +5739,7 @@ def publish(
             template_url=result.template_url or "",
             region=region,
             headless_template_url=result.headless_template_url,
+            govcloud_template_url=result.govcloud_template_url,
         )
         console.print()
         console.print("[bold green]✅ Publish complete![/bold green]")
@@ -5904,6 +6240,161 @@ def abort_test_run(
 
     except Exception as e:
         logger.error(f"Error aborting test runs: {e}", exc_info=True)
+        console.print(f"[red]✗ Error: {e}[/red]")
+        sys.exit(1)
+
+
+@cli.command(name="bootstrap")
+@click.option(
+    "--prompt",
+    "-p",
+    required=True,
+    help="Natural-language description of the document type to bootstrap",
+)
+@click.option(
+    "--stack-name",
+    help="CloudFormation stack name (omit for local mode: print schema, no save)",
+)
+@click.option("--class-name", help="Document class name to use as $id / document type")
+@click.option(
+    "--field-hint",
+    multiple=True,
+    help="A field the schema must include. Repeatable: --field-hint X --field-hint Y",
+)
+@click.option(
+    "--config-version",
+    help="Existing config version to source catalog classes from / merge into",
+)
+@click.option(
+    "--target-version",
+    help="Name of the config version to create (default: bootstrap-<class>)",
+)
+@click.option(
+    "--count", "-c", default=3, show_default=True, help="Documents to generate"
+)
+@click.option(
+    "--threshold",
+    default=7,
+    show_default=True,
+    help="Generation quality threshold (1-10)",
+)
+@click.option(
+    "--augment", is_flag=True, help="Apply image augmentation to generated docs"
+)
+@click.option("--model-id", help="Bedrock model id override for authoring/generation")
+@click.option("--region", help="AWS region (optional)")
+def bootstrap(
+    prompt,
+    stack_name,
+    class_name,
+    field_hint,
+    config_version,
+    target_version,
+    count,
+    threshold,
+    augment,
+    model_id,
+    region,
+):
+    """Bootstrap a config (and test set) from a prompt
+
+    Authors a document-class schema from your description (reusing a catalog
+    match when one fits), creates a config version, and — when the document
+    generator is available — generates a labeled synthetic test set.
+
+    Local mode (no --stack-name) authors and prints the schema without saving.
+    """
+    import os as _os
+
+    from idp_common.synthesis import bootstrap as bootstrap_mod
+    from idp_common.synthesis import engine as synthesis_engine
+
+    console.print("[bold blue]IDP Config Bootstrap[/bold blue]")
+    console.print(f"Prompt: {prompt}")
+    if stack_name:
+        console.print(f"Stack: {stack_name}")
+    else:
+        console.print("[yellow]Local mode — schema will not be saved[/yellow]")
+
+    available, reason = synthesis_engine.generator_available()
+    if not available:
+        console.print(
+            f"[yellow]Note: document generator unavailable ({reason}).[/yellow]"
+        )
+        console.print(f"[yellow]{synthesis_engine.INSTALL_HINT}[/yellow]")
+
+    request = bootstrap_mod.BootstrapRequest(
+        prompt=prompt,
+        class_name=class_name,
+        field_hints=list(field_hint),
+        config_version=config_version,
+        target_version=target_version,
+        doc_count=count,
+        quality_threshold=threshold,
+        augment=augment,
+        model_id=model_id,
+    )
+
+    def _status(pct, msg):
+        console.print(f"  [{pct:3.0f}%] {msg}")
+
+    try:
+        if not stack_name:
+            schema, tier, matched = bootstrap_mod.resolve_schema(
+                request, status_cb=_status
+            )
+            if schema is None:
+                console.print("[red]✗ Failed to author a schema[/red]")
+                sys.exit(1)
+            import json as _json
+
+            console.print(f"[green]✓ Schema authored (tier: {tier})[/green]")
+            if matched:
+                console.print(f"  Catalog match: {matched}")
+            console.print(_json.dumps(schema, indent=2))
+            return
+
+        from idp_sdk import IDPClient
+
+        client = IDPClient(stack_name=stack_name, region=region)
+        config_table = client.discovery._get_config_table(stack_name)
+        _os.environ["CONFIGURATION_TABLE_NAME"] = config_table
+
+        from idp_common.config.configuration_manager import ConfigurationManager
+
+        config_manager = ConfigurationManager()
+        test_set_bucket = _os.environ.get("TEST_SET_BUCKET")
+
+        result = bootstrap_mod.run_bootstrap(
+            request,
+            config_manager=config_manager,
+            test_set_bucket=test_set_bucket,
+            status_cb=_status,
+        )
+
+        if not result.success:
+            console.print(f"[red]✗ Bootstrap failed: {result.error}[/red]")
+            sys.exit(1)
+
+        console.print(f"[green]✓ Config version: {result.config_version}[/green]")
+        console.print(f"  Resolution tier: {result.resolution_tier}")
+        if result.catalog_match:
+            console.print(f"  Catalog match: {result.catalog_match}")
+        if result.test_set_id:
+            console.print(
+                f"[green]✓ Test set: {result.test_set_id} "
+                f"({result.docs_generated} doc(s))[/green]"
+            )
+        elif not result.generator_available:
+            console.print(
+                "[yellow]Test set skipped (generator unavailable). "
+                "Config is ready; upload your own docs to build a test set.[/yellow]"
+            )
+        if result.error:
+            console.print(f"[yellow]Note: {result.error}[/yellow]")
+
+    except Exception as e:
+        logger.error(f"Error in bootstrap: {e}", exc_info=True)
         console.print(f"[red]✗ Error: {e}[/red]")
         sys.exit(1)
 

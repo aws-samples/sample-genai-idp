@@ -246,7 +246,7 @@ class PackPublisher:
         feature_publisher = FeaturePublisher(
             self.project_dir, console=self.console, s3_client=s3
         )
-        # validate → build (ui.buildCommand) → upload, identical to `publish`.
+        # validate → build (ui.build steps) → upload, identical to `publish`.
         feat_result = feature_publisher.publish(
             feature_bucket=artifacts_bucket,
             region=region,

@@ -1,0 +1,122 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# =============================================================================
+# BASE CONFIDENCE - per-field confidence assessment defaults (v0.6)
+# =============================================================================
+# Confidence is an optional OUTPUT of extraction, so it lives under
+# `extraction.confidence` (v0.6 — replaces the former top-level `assessment`
+# block and `extraction.assessment_integration`). HITL lives in top-level
+# `hitl`; geometry in `extraction.geometry` (base-geometry.yaml).
+#
+# PROMPT TEMPLATES are separate editable extraction.* fields (see
+# base-extraction.yaml): task_prompt (extraction only),
+# task_prompt_extraction_with_confidence (integrated), task_prompt_confidence
+# (confidence-only), task_prompt_bbox (bbox block for llm/llm_grounded geometry).
+# =============================================================================
+
+extraction:
+  confidence:
+    mode: separate               # off | separate | integrated (enabled derived: mode != off)
+    # Nova Lite is the default confidence model because the assessment pass is
+    # far cheaper on it. Live A/B on the OCR benchmark (identical prompt, only the
+    # confidence model swapped): ~$0.0011/doc on Nova Lite vs ~$0.145/doc on
+    # Sonnet 5 (~130x) — driven by Sonnet's higher per-token rate AND ~2x more
+    # (verbose) output tokens, which dominate assessment cost. Both models use the
+    # two <<CACHEPOINT>> boundaries below for prompt-prefix caching (static
+    # instructions cached across documents; the per-doc image+OCR block cached
+    # across the initial call, the missing-row retry, and every list batch), so
+    # caching is NOT the differentiator here — the model choice is. Note: Anthropic
+    # models decline to cache a prefix under ~2048 tokens, so on a short/text-only
+    # confidence prompt they may not cache at all; Nova caches at a lower floor.
+    model: us.amazon.nova-lite-v1:0
+    top_p: "0.0"
+    top_k: "5"
+    temperature: "0.0"
+    # max_tokens is not configurable: the confidence pass always requests the
+    # model's maximum output (config_library/model_config_limits.yaml) so long
+    # list assessments are never truncated.
+    # UPPER bound on rows per assessment batch. The self-healing ladder derives a
+    # smaller token-aware first-pass size when the confidence model's output cap
+    # would truncate this many rows (e.g. Nova Lite + llm_grounded geometry).
+    list_batch_size: "25"
+    # Self-healing ladder (make advanced mode complete first-time). When rows come
+    # back unscored after token-aware batch shrinking + same-model retries, the
+    # still-missing rows are re-assessed on a stronger confidence model (bigger
+    # output cap). ON by default. Sonnet 5 (1M-context beta, :1m) is the default
+    # escalation target: its 128K output cap fixes the small-cap truncation that
+    # Nova Lite (10K) hits, and it matches the extraction escalation model. Empty
+    # = skip the model step (per-class override: x-aws-idp-confidence-escalation-model).
+    escalation_enabled: true
+    escalation_model: "us.anthropic.claude-sonnet-5:1m"
+    max_escalation_rounds: "2"
+    image:
+      target_height: ""
+      target_width: ""
+    system_prompt: >-
+      You are a document analysis assessment expert. Your role is to evaluate the confidence and accuracy of data extraction results by analyzing them against source documents.
+      Provide accurate confidence scores for each assessment.
+      When bounding boxes are requested, provide precise coordinate locations where information appears in the document.
+    task_prompt: >-
+      <background>
+      You are an expert document analysis assessment system. Your task is to evaluate the confidence of extraction results for a document of class {DOCUMENT_CLASS}.
+      </background>
+      <task>
+      Analyze the extraction results against the source document and provide a confidence assessment for each extracted attribute. Consider factors such as:
+      1. Text clarity and OCR quality in the source regions
+      2. Alignment between extracted values and document content
+      3. Presence of clear evidence supporting the extraction
+      4. Potential ambiguity or uncertainty in the source material
+      5. Completeness and accuracy of the extracted information
+      </task>
+      <assessment-guidelines>
+      For each attribute, provide:
+      - A confidence score between 0.0 and 1.0 (1.0 = clear, unambiguous evidence;
+        lower = weaker/ambiguous evidence)
+      - A confidence_reason ONLY when the confidence is below 0.9 (see the output
+        rule below). Reasons exist to explain low/uncertain scores for human review;
+        a high-confidence value does not need one.
+      Base assessments on actual document content and OCR quality; account for OCR
+      confidence scores when provided; be objective and specific.
+      </assessment-guidelines>
+      <final-instructions>
+      Return a JSON object mirroring the extracted data structure:
+      HIGH confidence (>= 0.9):  {"attr": {"confidence": 0.97}}
+      LOWER confidence (< 0.9):  {"attr": {"confidence": 0.72, "confidence_reason": "..."}}
+      GROUP:   {"grp": {"sub1": {"confidence": 0.95}}}
+      LIST:    {"items": [ {"c1": {"confidence": 0.72, "confidence_reason": "..."}}, ... ]}
+      OUTPUT RULE (keep responses compact — omit reasons for confident values):
+      - Emit "confidence_reason" for a leaf ONLY when its confidence is below 0.9.
+        For confidence >= 0.9, emit just {"confidence": <score>} with NO
+        confidence_reason key.
+      - When you do include a confidence_reason, keep it to at most 12 words and do
+        not restate the extracted value.
+      IMPORTANT:
+      - For LIST attributes, assess EACH row separately (one object per row, in order),
+        and within each row give EACH column its own confidence leaf ({"confidence"},
+        plus "confidence_reason" only when below 0.9) — mirror the row's column keys;
+        do NOT emit a single confidence per row. Nested lists follow the same rule
+        recursively.
+      - Include a confidence assessment for ALL attributes present in the extraction results
+      - Match the exact structure of the extracted data
+      </final-instructions>
+      <<CACHEPOINT>>
+      <document-image>
+      {DOCUMENT_IMAGE}
+      </document-image>
+      <ocr-text-confidence-results>
+      {OCR_TEXT_CONFIDENCE}
+      </ocr-text-confidence-results>
+      <<CACHEPOINT>>
+      <attributes-definitions>
+      {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+      </attributes-definitions>
+      <extraction-results>
+      {EXTRACTION_RESULTS}
+      </extraction-results>
+
+
+# Human-in-the-Loop review (v0.6, top-level)
+hitl:
+  enabled: false
+  confidence_threshold: "0.8"

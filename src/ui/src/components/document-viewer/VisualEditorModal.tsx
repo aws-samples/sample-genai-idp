@@ -20,13 +20,15 @@ import {
   Alert,
   Tabs,
 } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import generateS3PresignedUrl from '../common/generate-s3-presigned-url';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
+import { useDocumentVersion } from '../../contexts/document-version';
+import useUserRole from '../../hooks/use-user-role';
 import { getFieldConfidenceInfo } from '../common/confidence-alerts-utils';
-import { getFileContents, uploadDocument } from '../../graphql/generated';
+import { getFileContents, uploadDocument, completeSectionReview } from '../../graphql/generated';
 import JSONEditorTab from './JSONEditorTab';
 import type { BoxProps } from '@cloudscape-design/components';
 import EditHistoryTab from './EditHistoryTab';
@@ -190,6 +192,55 @@ const BoundingBox = memo(({ box, page, currentPage, imageRef, zoomLevel = 1, pan
 });
 
 BoundingBox.displayName = 'BoundingBox';
+
+// Build the canonical Stickler comparison key for a field from its render path.
+// e.g. path=["LineItems", 0, "Description"] -> "LineItems[0].Description".
+// NOTE: `path` already INCLUDES the current field key (children are rendered
+// with path={[...path, key]} and array items with path={[...path, index]}), so
+// the field key must NOT be appended again here. The "Document Data" synthetic
+// root and undefined segments are ignored, and numeric segments become
+// "[index]" subscripts on the preceding field name.
+const buildComparisonKey = (path: (string | number)[]): string => {
+  const segments = path.filter((p) => p !== undefined && p !== 'Document Data');
+  let key = '';
+  for (const seg of segments) {
+    if (typeof seg === 'number') {
+      key += `[${seg}]`;
+    } else {
+      key += key ? `.${seg}` : String(seg);
+    }
+  }
+  return key;
+};
+
+// Find the nested field_comparison_details entry whose canonical key matches
+// this field's render path. Returns the matching detail (with the per-field
+// evaluation_method/weight the backend annotates) or null.
+const findNestedComparisonDetail = (
+  evaluationResults: Record<string, unknown> | null,
+  sectionId: unknown,
+  comparisonKey: string,
+): Record<string, unknown> | null => {
+  const sectionResults = evaluationResults?.section_results as Record<string, unknown>[] | undefined;
+  if (!sectionResults || !comparisonKey) return null;
+  let sectionResult = sectionResults.find((sr) => String(sr.section_id) === String(sectionId));
+  if (!sectionResult && sectionResults.length === 1) {
+    [sectionResult] = sectionResults;
+  }
+  const attributes = sectionResult?.attributes as Record<string, unknown>[] | undefined;
+  if (!attributes?.length) return null;
+  for (const attr of attributes) {
+    const details = attr.field_comparison_details as Record<string, unknown>[] | undefined;
+    if (Array.isArray(details)) {
+      for (const detail of details) {
+        if (String(detail.expected_key || '') === comparisonKey) {
+          return detail;
+        }
+      }
+    }
+  }
+  return null;
+};
 
 // Memoized component to render a form field based on its type
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -399,39 +450,63 @@ const FormFieldRenderer = memo<Record<string, any>>(
       }
 
       if (sectionResult?.attributes?.length > 0) {
-        // Build the path string from current path and fieldKey
-        // path is like [index, "bankInfo"] and fieldKey is like "bank"
-        // We need to match against field_comparison_details paths like "checks[0].bankInfo.bank"
-        const _fullPath = [...path, fieldKey].filter((p) => p !== undefined && p !== 'Document Data');
+        // First, try an exact match on the canonical comparison key
+        // (e.g. "LineItems[0].Description" or "checks[0].bankInfo.bank"). This
+        // is how per-list-item leaf fields arrive - as flat entries carrying the
+        // backend-annotated per-field evaluation_method and weight. Restrict this
+        // to scalar (non-object, non-array) leaves; object/array nodes have their
+        // own group/array eval handling and must not be driven by an aggregate
+        // detail that happens to share their path.
+        const isScalarLeaf = value === null || typeof value !== 'object';
+        const comparisonKey = isScalarLeaf ? buildComparisonKey(path) : '';
+        const keyedDetail = comparisonKey
+          ? findNestedComparisonDetail(evaluationResults, sectionId, comparisonKey)
+          : null;
+        if (keyedDetail) {
+          evalResult = {
+            matched: keyedDetail.match,
+            score: keyedDetail.score,
+            threshold: keyedDetail.threshold,
+            reason: keyedDetail.reason,
+            expected: keyedDetail.expected_value,
+            actual: keyedDetail.actual_value,
+            parentPath: keyedDetail.expected_key || '',
+            evaluationMethod: keyedDetail.evaluation_method,
+            weight: keyedDetail.weight,
+          };
+        }
 
-        // Look through all attributes' field_comparison_details to find a match
-        for (const attr of sectionResult.attributes) {
-          if (attr.field_comparison_details && Array.isArray(attr.field_comparison_details)) {
-            // Search field_comparison_details for paths that end with our field/path
-            for (const detail of attr.field_comparison_details) {
-              const expectedKey = detail.expected_key || '';
-              // Check if this detail matches our path
-              // For nested paths like "checks[0].bankInfo" when looking at "bank" field
-              // We check if the actual/expected values contain our field
+        // Fall back to the legacy object-valued match: some details carry the
+        // whole object as actual_value with our field as a property.
+        if (!evalResult) {
+          for (const attr of sectionResult.attributes) {
+            if (attr.field_comparison_details && Array.isArray(attr.field_comparison_details)) {
+              // Search field_comparison_details for paths that end with our field/path
+              for (const detail of attr.field_comparison_details) {
+                const expectedKey = detail.expected_key || '';
+                // Check if this detail matches our path
+                // For nested paths like "checks[0].bankInfo" when looking at "bank" field
+                // We check if the actual/expected values contain our field
 
-              // Also extract leaf-level field values from actual_value/expected_value
-              if (detail.actual_value && typeof detail.actual_value === 'object') {
-                // Check if our fieldKey is a property in actual_value
-                if (fieldKey in detail.actual_value) {
-                  evalResult = {
-                    matched: detail.match,
-                    score: detail.score,
-                    threshold: attr.evaluation_threshold, // Get threshold from parent attribute
-                    reason: detail.reason,
-                    expected: detail.expected_value?.[fieldKey],
-                    actual: detail.actual_value?.[fieldKey],
-                    parentPath: expectedKey,
-                  };
-                  break;
+                // Also extract leaf-level field values from actual_value/expected_value
+                if (detail.actual_value && typeof detail.actual_value === 'object') {
+                  // Check if our fieldKey is a property in actual_value
+                  if (fieldKey in detail.actual_value) {
+                    evalResult = {
+                      matched: detail.match,
+                      score: detail.score,
+                      threshold: attr.evaluation_threshold, // Get threshold from parent attribute
+                      reason: detail.reason,
+                      expected: detail.expected_value?.[fieldKey],
+                      actual: detail.actual_value?.[fieldKey],
+                      parentPath: expectedKey,
+                    };
+                    break;
+                  }
                 }
               }
+              if (evalResult) break;
             }
-            if (evalResult) break;
           }
         }
       }
@@ -449,6 +524,10 @@ const FormFieldRenderer = memo<Record<string, any>>(
     const evalScore = evalResult?.score;
     const _evalThreshold = evalResult?.threshold;
     const evalReason = evalResult?.reason;
+    // Per-field comparison method and weight (backend-annotated); only present
+    // on path-keyed leaf matches, mirroring the top-level attributes table.
+    const evalMethod = evalResult?.evaluationMethod ? String(evalResult.evaluationMethod) : undefined;
+    const evalWeight = typeof evalResult?.weight === 'number' ? evalResult.weight : undefined;
 
     // Determine field type
     let fieldType: string = typeof value;
@@ -659,6 +738,13 @@ const FormFieldRenderer = memo<Record<string, any>>(
                       {evalReason && ` - ${evalReason}`}
                     </ExtBox>
                   )}
+                  {showComparison && (evalMethod || evalWeight !== undefined) && (
+                    <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color="text-body-secondary">
+                      {evalMethod && `Method: ${evalMethod}`}
+                      {evalMethod && evalWeight !== undefined && ' · '}
+                      {evalWeight !== undefined && `Weight: ${evalWeight.toFixed(2)}`}
+                    </ExtBox>
+                  )}
                 </ExtBox>
               }
             >
@@ -853,6 +939,13 @@ const FormFieldRenderer = memo<Record<string, any>>(
                     <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={hasMismatch ? 'text-status-warning' : 'text-status-success'}>
                       {`Eval Score: ${(evalScore * 100).toFixed(1)}%`}
                       {evalReason && ` - ${evalReason}`}
+                    </ExtBox>
+                  )}
+                  {showComparison && (evalMethod || evalWeight !== undefined) && (
+                    <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color="text-body-secondary">
+                      {evalMethod && `Method: ${evalMethod}`}
+                      {evalMethod && evalWeight !== undefined && ' · '}
+                      {evalWeight !== undefined && `Weight: ${evalWeight.toFixed(2)}`}
                     </ExtBox>
                   )}
                 </ExtBox>
@@ -1059,6 +1152,13 @@ const FormFieldRenderer = memo<Record<string, any>>(
                     <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={hasMismatch ? 'text-status-warning' : 'text-status-success'}>
                       {`Eval Score: ${(evalScore * 100).toFixed(1)}%`}
                       {evalReason && ` - ${evalReason}`}
+                    </ExtBox>
+                  )}
+                  {showComparison && (evalMethod || evalWeight !== undefined) && (
+                    <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color="text-body-secondary">
+                      {evalMethod && `Method: ${evalMethod}`}
+                      {evalMethod && evalWeight !== undefined && ' · '}
+                      {evalWeight !== undefined && `Weight: ${evalWeight.toFixed(2)}`}
                     </ExtBox>
                   )}
                 </ExtBox>
@@ -1450,6 +1550,13 @@ const FormFieldRenderer = memo<Record<string, any>>(
                     <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color={hasMismatch ? 'text-status-warning' : 'text-status-success'}>
                       {`Eval Score: ${(evalScore * 100).toFixed(1)}%`}
                       {evalReason && ` - ${evalReason}`}
+                    </ExtBox>
+                  )}
+                  {showComparison && (evalMethod || evalWeight !== undefined) && (
+                    <ExtBox fontSize="body-s" padding={{ top: 'xxxs' }} color="text-body-secondary">
+                      {evalMethod && `Method: ${evalMethod}`}
+                      {evalMethod && evalWeight !== undefined && ' · '}
+                      {evalWeight !== undefined && `Weight: ${evalWeight.toFixed(2)}`}
                     </ExtBox>
                   )}
                 </ExtBox>
@@ -1861,6 +1968,12 @@ const VisualEditorModal = ({
 }: VisualEditorModalProps) => {
   const { currentCredentials, user } = useAppContext();
   const { settings } = useSettingsContext();
+  // Role flags from the Cognito token (reliable regardless of how the modal was
+  // opened). Reviewers (Admin/Reviewer) cannot call uploadDocument (Admin/Author
+  // only), so their edits must be saved via completeSectionReview — see handleSaveChanges.
+  const { canWrite, canReview } = useUserRole();
+  // Pin page-image previews to the selected run when viewing a past version.
+  const { versionIdForUri, runId: viewingRunId } = useDocumentVersion();
   const [pageImages, setPageImages] = useState<Record<string, string>>({});
   const [loadingImages, setLoadingImages] = useState(true);
   const [currentPage, setCurrentPage] = useState<string | number | null>(null);
@@ -2180,6 +2293,14 @@ const VisualEditorModal = ({
       const [, outputBucketFromUri, outputFileKey] = outputUriMatch;
       logger.info('💾 Parsed output URI:', { bucket: outputBucketFromUri, key: outputFileKey });
 
+      // Reviewers are NOT authorized to call the `uploadDocument` mutation
+      // (restricted to Admin/Author by RBAC). They persist HITL edits through
+      // the reviewer-permitted `completeSectionReview` mutation instead.
+      // Derive this from the Cognito token (canReview && !canWrite = reviewer,
+      // not Admin/Author) rather than relying solely on the `isReviewerOnly`
+      // prop, which some SectionsPanel FileViewer entry points hardcode to false.
+      const isReviewerOnly = (canReview && !canWrite) || Boolean(sectionData?.isReviewerOnly);
+
       const results: {
         predictions: { success: boolean; changedFields: string[] } | null;
         baseline: { success: boolean; changedFields: string[] } | null;
@@ -2233,69 +2354,119 @@ const VisualEditorModal = ({
         editHistory.push(editEntry);
         dataToSave._editHistory = editHistory;
 
-        // Use the exact same path from the original output URI
-        logger.info('💾 Prediction file path:', outputFileKey);
+        // Reviewers are NOT authorized to call the `uploadDocument` mutation
+        // (restricted to Admin/Author by RBAC). They persist their HITL edits
+        // through the reviewer-permitted `completeSectionReview` mutation, which
+        // writes the full JSON to the section's output URI server-side (no
+        // presigned URL needed) and records the section as reviewed. The
+        // Admin/Author presigned-upload path is preserved below.
+        if (isReviewerOnly) {
+          const reviewObjectKey = (sectionDocItem?.ObjectKey ||
+            sectionDocItem?.objectKey ||
+            sectionDocItem?.key ||
+            sectionDocItem?.Key ||
+            sectionDocItem?.id ||
+            sectionDocItem?.Id) as string | undefined;
+          const reviewSectionId = (sectionData?.Id ?? sectionData?.SectionId) as string | number | undefined;
 
-        // Extract prefix (directory) and filename for uploadDocument
-        const predictionPrefix = outputFileKey.substring(0, outputFileKey.lastIndexOf('/'));
-        const predictionFilename = outputFileKey.split('/').pop() ?? outputFileKey;
-
-        const predictionUploadResponse = await client.graphql({
-          query: uploadDocument,
-          variables: {
-            fileName: predictionFilename,
-            prefix: predictionPrefix,
-            contentType: 'application/json',
-            bucket: outputBucketFromUri,
-          },
-        });
-
-        const predUploadData = predictionUploadResponse.data.uploadDocument;
-        const predictionPresignedUrl = predUploadData.presignedUrl;
-        const predictionUsePost = predUploadData.usePostMethod?.toLowerCase() === 'true';
-
-        // Upload the JSON data
-        const predictionContent = JSON.stringify(dataToSave, null, 2);
-
-        if (predictionUsePost) {
-          // POST method using presigned POST data (contains url + fields)
-          const presignedPostData = JSON.parse(predictionPresignedUrl);
-          const formData = new FormData();
-
-          // Add all required fields from presigned POST data
-          Object.entries(presignedPostData.fields).forEach(([key, fieldValue]) => {
-            formData.append(key, fieldValue as string);
-          });
-
-          // Append the file content as last field (required for S3 presigned POST)
-          const blob = new Blob([predictionContent], { type: 'application/json' });
-          formData.append('file', blob, predictionFilename);
-
-          logger.info('📤 Uploading predictions via presigned POST to:', presignedPostData.url);
-          const uploadResponse = await fetch(presignedPostData.url, {
-            method: 'POST',
-            body: formData,
-          });
-
-          if (!uploadResponse.ok) {
-            const errorText = await uploadResponse.text().catch(() => 'Could not read error response');
-            throw new Error(`Prediction upload failed: ${errorText}`);
+          if (!reviewObjectKey) {
+            throw new Error('Cannot determine document object key for saving reviewer changes');
           }
-        } else {
-          // PUT method (standard presigned URL)
-          await fetch(predictionPresignedUrl, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: predictionContent,
+          if (reviewSectionId === undefined || reviewSectionId === null) {
+            throw new Error('Cannot determine section id for saving reviewer changes');
+          }
+
+          logger.info('💾 Saving prediction changes via completeSectionReview (reviewer path):', {
+            objectKey: reviewObjectKey,
+            sectionId: reviewSectionId,
           });
+
+          const reviewResponse = await client.graphql({
+            query: completeSectionReview,
+            variables: {
+              objectKey: reviewObjectKey,
+              sectionId: String(reviewSectionId),
+              // editedData is AWSJSON — send the full JSON structure as a string.
+              // The resolver saves it verbatim to the section's output URI.
+              editedData: JSON.stringify(dataToSave),
+            },
+          });
+
+          if (!reviewResponse?.data?.completeSectionReview) {
+            throw new Error('completeSectionReview returned no data');
+          }
+          logger.info('✅ Predictions saved via completeSectionReview');
+        } else {
+          // Admin/Author path: request a presigned upload URL and write to S3 directly.
+          // Use the exact same path from the original output URI
+          logger.info('💾 Prediction file path:', outputFileKey);
+
+          // Extract prefix (directory) and filename for uploadDocument
+          const predictionPrefix = outputFileKey.substring(0, outputFileKey.lastIndexOf('/'));
+          const predictionFilename = outputFileKey.split('/').pop() ?? outputFileKey;
+
+          const predictionUploadResponse = await client.graphql({
+            query: uploadDocument,
+            variables: {
+              fileName: predictionFilename,
+              prefix: predictionPrefix,
+              contentType: 'application/json',
+              bucket: outputBucketFromUri,
+            },
+          });
+
+          const predUploadData = predictionUploadResponse.data.uploadDocument;
+          const predictionPresignedUrl = predUploadData.presignedUrl;
+          const predictionUsePost = predUploadData.usePostMethod?.toLowerCase() === 'true';
+
+          // Upload the JSON data
+          const predictionContent = JSON.stringify(dataToSave, null, 2);
+
+          if (predictionUsePost) {
+            // POST method using presigned POST data (contains url + fields)
+            const presignedPostData = JSON.parse(predictionPresignedUrl);
+            const formData = new FormData();
+
+            // Add all required fields from presigned POST data
+            Object.entries(presignedPostData.fields).forEach(([key, fieldValue]) => {
+              formData.append(key, fieldValue as string);
+            });
+
+            // Append the file content as last field (required for S3 presigned POST)
+            const blob = new Blob([predictionContent], { type: 'application/json' });
+            formData.append('file', blob, predictionFilename);
+
+            logger.info('📤 Uploading predictions via presigned POST to:', presignedPostData.url);
+            const uploadResponse = await fetch(presignedPostData.url, {
+              method: 'POST',
+              body: formData,
+            });
+
+            if (!uploadResponse.ok) {
+              const errorText = await uploadResponse.text().catch(() => 'Could not read error response');
+              throw new Error(`Prediction upload failed: ${errorText}`);
+            }
+          } else {
+            // PUT method (standard presigned URL)
+            await fetch(predictionPresignedUrl, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: predictionContent,
+            });
+          }
+
+          logger.info('✅ Predictions saved successfully');
         }
 
         results.predictions = { success: true, changedFields: [...predictionChanges.keys()] };
-        logger.info('✅ Predictions saved successfully');
       }
 
-      // Save baseline if changed
-      if (baselineChangeCount > 0 && localBaselineData) {
+      // Save baseline if changed.
+      // Baseline edits are an evaluation/Author feature and require the
+      // `uploadDocument` mutation (Admin/Author only). Reviewers cannot write to
+      // the EvaluationBaselineBucket, so skip the baseline save for reviewers to
+      // avoid an Unauthorized error (they should not be editing baselines).
+      if (baselineChangeCount > 0 && localBaselineData && !isReviewerOnly) {
         logger.info('💾 Saving baseline changes...', { count: baselineChangeCount });
 
         // Add edit history metadata with combined changes (same as predictions)
@@ -2372,20 +2543,32 @@ const VisualEditorModal = ({
         logger.info('✅ Baseline saved successfully');
       }
 
-      // Success! Reset change tracking and update originals
+      // Success! Reset change tracking and update originals for what was saved.
       setOriginalPredictionData(JSON.parse(JSON.stringify(localJsonData)));
-      if (localBaselineData) {
-        setOriginalBaselineData(JSON.parse(JSON.stringify(localBaselineData)));
-      }
       setPredictionChanges(new Map());
-      setBaselineChanges(new Map());
 
-      // Show success message
+      // Baseline edits are only persisted on the Admin/Author path. For reviewers
+      // the baseline save is skipped, so keep their baseline changes (and the
+      // "unsaved" indicator) rather than silently discarding them and falsely
+      // reporting success.
+      const baselineSkippedForReviewer = isReviewerOnly && baselineChangeCount > 0;
+      if (!baselineSkippedForReviewer) {
+        if (localBaselineData) {
+          setOriginalBaselineData(JSON.parse(JSON.stringify(localBaselineData)));
+        }
+        setBaselineChanges(new Map());
+      }
+
+      // Show an accurate message about what was (and wasn't) saved.
       const savedItems = [];
       if (results.predictions) savedItems.push(`${results.predictions.changedFields.length} prediction field(s)`);
       if (results.baseline) savedItems.push(`${results.baseline.changedFields.length} baseline field(s)`);
 
-      alert(`✅ Successfully saved:\n${savedItems.join('\n')}`);
+      let saveMessage = savedItems.length > 0 ? `✅ Successfully saved:\n${savedItems.join('\n')}` : 'ℹ️ No changes were saved.';
+      if (baselineSkippedForReviewer) {
+        saveMessage += `\n\n⚠️ ${baselineChangeCount} baseline edit(s) were NOT saved — editing evaluation baselines requires an Author or Admin role.`;
+      }
+      alert(saveMessage);
     } catch (error) {
       logger.error('❌ Error saving changes:', error);
       setSaveError((error as Error).message || 'Failed to save changes');
@@ -2478,7 +2661,9 @@ const VisualEditorModal = ({
             if (page?.ImageUri) {
               try {
                 logger.debug(`VisualEditorModal - generating presigned URL for page ${pageId}`);
-                const url = await generateS3PresignedUrl(page.ImageUri as string, currentCredentials as Record<string, unknown>);
+                const url = await generateS3PresignedUrl(page.ImageUri as string, currentCredentials as Record<string, unknown>, {
+                  versionId: versionIdForUri(page.ImageUri as string),
+                });
                 images[String(pageId)] = url;
               } catch (err) {
                 logger.error(`Error generating presigned URL for page ${pageId}:`, err);
@@ -2504,7 +2689,7 @@ const VisualEditorModal = ({
 
     loadImages();
     // Only reload images when modal opens or when pageIds/sectionData changes, not when switching pages
-  }, [visible, pageIds, sectionDocItem?.pages, currentCredentials]);
+  }, [visible, pageIds, sectionDocItem?.pages, currentCredentials, viewingRunId]);
 
   // Zoom controls
   const handleZoomIn = () => {
@@ -3530,6 +3715,16 @@ const VisualEditorModal = ({
               <ProcessingReportTab
                 metadata={localJsonData?.metadata as Record<string, unknown> | undefined}
                 processingReport={localJsonData?.processing_report as string | undefined}
+                inferenceResult={
+                  (localJsonData?.inference_result || localJsonData?.inferenceResult) as
+                    | Record<string, unknown>
+                    | undefined
+                }
+                processingIssues={
+                  (localJsonData?.metadata as Record<string, unknown> | undefined)?.processing_issues as
+                    | { stage?: string; severity?: string; code?: string; message?: string; rootCause?: string }[]
+                    | undefined
+                }
               />
             ),
           },

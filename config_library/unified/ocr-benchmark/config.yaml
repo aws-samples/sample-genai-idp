@@ -32,7 +32,7 @@ classes:
             properties:
               date:
                 type: string
-                x-aws-idp-evaluation-method: LEVENSHTEIN
+                x-aws-idp-evaluation-method: DATE
                 x-aws-idp-evaluation-threshold: '0.7'
                 x-aws-idp-confidence-threshold: '0.8'
                 data_type: string
@@ -124,7 +124,7 @@ classes:
   properties:
     date:
       type: string
-      x-aws-idp-evaluation-method: LEVENSHTEIN
+      x-aws-idp-evaluation-method: DATE
       x-aws-idp-evaluation-threshold: '0.7'
       x-aws-idp-confidence-threshold: '0.8'
       description: The agreement date in YYYY-MM-DD format.
@@ -157,14 +157,14 @@ classes:
           data_type: number
         endDate:
           type: string
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
           description: Lease end date in YYYY-MM-DD format.
           data_type: string
         startDate:
           type: string
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
           description: Lease start date in YYYY-MM-DD format.
@@ -259,7 +259,7 @@ classes:
         properties:
           date:
             type: string
-            x-aws-idp-evaluation-method: LEVENSHTEIN
+            x-aws-idp-evaluation-method: DATE
             x-aws-idp-evaluation-threshold: '0.7'
             x-aws-idp-confidence-threshold: '0.8'
             description: Transaction date in MM/DD format as shown on the statement (not YYYY-MM-DD for this field).
@@ -428,7 +428,7 @@ classes:
               data_type: string
         date:
           type: string
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
           data_type: string
@@ -540,7 +540,7 @@ classes:
           x-aws-idp-confidence-threshold: '0.8'
         inspectionDate:
           type: string
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
           description: inspectionDate in YYYY-MM-DD format.
@@ -556,7 +556,7 @@ classes:
           description: Whether the equipment passed overall inspection. Extract the explicit pass/fail determination stated in the document. Do NOT infer this from individual checkpoint statuses — use only the explicitly stated overall result.
         nextInspectionDue:
           type: string
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
           description: nextInspectionDue in YYYY-MM-DD format.
@@ -628,7 +628,7 @@ classes:
           data_type: string
         electionDate:
           type: string
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
           data_type: string
@@ -637,7 +637,7 @@ classes:
       properties:
         date:
           type: string
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           x-aws-idp-confidence-threshold: '0.8'
           data_type: string
@@ -681,7 +681,7 @@ classes:
         properties:
           date:
             type: string
-            x-aws-idp-evaluation-method: LEVENSHTEIN
+            x-aws-idp-evaluation-method: DATE
             x-aws-idp-evaluation-threshold: '0.7'
             x-aws-idp-confidence-threshold: '0.8'
             data_type: string
@@ -816,7 +816,7 @@ classes:
             data_type: string
     weekStartDate:
       type: string
-      x-aws-idp-evaluation-method: LEVENSHTEIN
+      x-aws-idp-evaluation-method: DATE
       x-aws-idp-evaluation-threshold: '0.7'
       x-aws-idp-confidence-threshold: '0.8'
       data_type: string
@@ -862,27 +862,10 @@ extraction:
   top_k: '5'
   system_prompt: You are a document assistant. Respond only with JSON. Never make up data, only provide data found in the document being provided.
   task_prompt: "<background> You are an expert in document analysis and information extraction.  You can understand and extract key information from documents classified as type: \n{DOCUMENT_CLASS}. </background>\n<task> Your task is to take the unstructured text provided and convert it into a well-organized table format using JSON. Identify the main entities, attributes, or categories mentioned in the attributes list below and use them as keys in the JSON object.  Then, extract the relevant information from the text and populate the corresponding values in the JSON object. </task>\n<extraction-guidelines> Guidelines:\n    1. Ensure that the data is accurately represented and properly formatted within\n    the JSON structure\n    2. Include double quotes around all keys and values\n    3. Do not make up data - only extract information explicitly found in the\n    document\n    4. Do not use /n for new lines, use a space instead\n    5. If a field is not found or if unsure, return null\n    6. All dates should be in YYYY-MM-DD format (e.g., 2025-01-15)\n    7. Do not perform calculations or summations unless totals are explicitly given\n    8. If an alias is not found in the document, return null\n    9. Guidelines for checkboxes:\n     9.A. CAREFULLY examine each checkbox, radio button, and selection field:\n        - Look for marks like ✓, ✗, x, filled circles (●), darkened areas, or handwritten checks indicating selection\n        - For checkboxes and multi-select fields, ONLY INCLUDE options that show clear visual evidence of selection\n        - DO NOT list options that have no visible selection mark\n     9.B. For ambiguous or overlapping tick marks:\n        - If a mark overlaps between two or more checkboxes, determine which option contains the majority of the mark\n        - Consider a checkbox selected if the mark is primarily inside the check box or over the option text\n        - When a mark touches multiple options, analyze which option was most likely intended based on position and density. For handwritten checks, the mark typically flows from the selected checkbox outward.\n        - Carefully analyze visual cues and contextual hints. Think from a human perspective, anticipate natural tendencies, and apply thoughtful reasoning to make the best possible judgment.\n    10. Think step by step first and then answer.\n</extraction-guidelines>\nIf the attributes section below contains a list of attribute names and descriptions, then output only those attributes, using the provided descriptions as guidance for finding the correct values. \n<attributes> {ATTRIBUTE_NAMES_AND_DESCRIPTIONS} </attributes>\n<<CACHEPOINT>>\n<document-text> {DOCUMENT_TEXT} </document-text>\n<document_image> {DOCUMENT_IMAGE} </document_image>\n<final-instructions> Extract key information from the document and return a JSON object with the following key steps: 1. Carefully analyze the document text to identify the requested attributes 2. Extract only information explicitly found in the document - never make up data 3. Format all dates as YYYY-MM-DD and replace newlines with spaces 4. For checkboxes, only include options with clear visual selection marks 5. Use null for any fields not found in the document 6. Ensure the output is properly formatted JSON with quoted keys and values 7. Think step by step before finalizing your answer </final-instructions>"
-assessment:
-  enabled: false
-  validation_enabled: false
-  hitl_enabled: false
-  default_confidence_threshold: '0.8'
-  image:
-    target_height: ''
-    target_width: ''
-  granular:
-    enabled: true
-    max_workers: '20'
-    simple_batch_size: '3'
-    list_batch_size: '1'
-  model: us.amazon.nova-lite-v1:0
-  top_p: '0.0'
-  max_tokens: '10000'
-  top_k: '5'
-  temperature: '0.0'
-  system_prompt: You are a document analysis assessment expert. Your role is to evaluate the confidence and accuracy of data extraction results by analyzing them against source documents. Provide accurate confidence scores for each assessment. When bounding boxes are requested, provide precise coordinate locations where information appears in the document.
-  task_prompt: "<background> You are an expert document analysis assessment system. Your task is to evaluate the confidence of extraction results for a document of class {DOCUMENT_CLASS} and provide precise spatial localization for each field. </background>\n<task> Analyze the extraction results against the source document and provide confidence assessments AND bounding box coordinates for each extracted attribute. Consider factors such as: 1. Text clarity and OCR quality in the source regions  2. Alignment between extracted values and document content  3. Presence of clear evidence supporting the extraction  4. Potential ambiguity or uncertainty in the source material  5. Completeness and accuracy of the extracted information 6. Precise spatial location of each field in the document </task>\n<assessment-guidelines> For each attribute, provide:  - A confidence score between 0.0 and 1.0 where:\n   - 1.0 = Very high confidence, clear and unambiguous evidence\n   - 0.8-0.9 = High confidence, strong evidence with minor uncertainty\n   - 0.6-0.7 = Medium confidence, reasonable evidence but some ambiguity\n   - 0.4-0.5 = Low confidence, weak or unclear evidence\n   - 0.0-0.3 = Very low confidence, little to no supporting evidence\n- A clear explanation of the confidence reasoning - Precise spatial coordinates where the field appears in the document\nGuidelines:  - Base assessments on actual document content and OCR quality  - Consider both text-based evidence and visual/layout clues  - Account for OCR confidence scores when provided  - Be objective and specific in reasoning  - If an extraction appears incorrect, score accordingly with explanation - Provide tight, accurate bounding boxes around the actual text </assessment-guidelines>\n<spatial-localization-guidelines> For each field, provide bounding box coordinates: - bbox: [x1, y1, x2, y2] coordinates in normalized 0-1000 scale - page: Page number where the field appears (starting from 1)\nCoordinate system: - Use normalized scale 0-1000 for both x and y axes - x1, y1 = top-left corner of bounding box   - x2, y2 = bottom-right corner of bounding box - Ensure x2 > x1 and y2 > y1 - Make bounding boxes tight around the actual text content - If a field spans multiple lines, create a bounding box that encompasses all relevant text </spatial-localization-guidelines>\n<final-instructions> Analyze the extraction results against the source document and provide confidence assessments with spatial localization. Return a JSON object with the following structure based on the attribute type:\nFor SIMPLE attributes:  {\n  \"simple_attribute_name\": {\n    \"confidence\": 0.85,\n    \"bbox\": [100, 200, 300, 250],\n    \"page\": 1\n  }\n}\nFor GROUP attributes (nested object structure):  {\n  \"group_attribute_name\": {\n    \"sub_attribute_1\": {\n      \"confidence\": 0.90,\n      \"bbox\": [150, 300, 250, 320],\n      \"page\": 1\n    },\n    \"sub_attribute_2\": {\n      \"confidence\": 0.75,\n      \"bbox\": [150, 325, 280, 345],\n      \"page\": 1\n    }\n  }\n}\nFor LIST attributes (array of assessed items):  {\n  \"list_attribute_name\": [\n    {\n      \"item_attribute_1\": {\n        \"confidence\": 0.95,\n        \"bbox\": [100, 400, 200, 420],\n        \"page\": 1\n      },\n      \"item_attribute_2\": {\n        \"confidence\": 0.88,\n        \"bbox\": [250, 400, 350, 420],\n        \"page\": 1\n      }\n    },\n    {\n      \"item_attribute_1\": {\n        \"confidence\": 0.92,\n        \"bbox\": [100, 425, 200, 445],\n        \"page\": 1\n      },\n      \"item_attribute_2\": {\n        \"confidence\": 0.70,\n        \"bbox\": [250, 425, 350, 445],\n        \"page\": 1\n      }\n    }\n  ]\n}\nIMPORTANT:   - For LIST attributes like \"Transactions\", assess EACH individual item in the list separately with individual bounding boxes - Each transaction should be assessed as a separate object in the array with its own spatial coordinates - Do NOT provide aggregate assessments for list items - assess each one individually with precise locations - Include assessments AND bounding boxes
-    for ALL attributes present in the extraction results - Match the exact structure of the extracted data - Provide page numbers for all bounding boxes (starting from 1) </final-instructions>\n<<CACHEPOINT>>\n<document-image> {DOCUMENT_IMAGE} </document-image>\n<ocr-text-confidence-results> {OCR_TEXT_CONFIDENCE} </ocr-text-confidence-results>\n<<CACHEPOINT>>\n<attributes-definitions> {ATTRIBUTE_NAMES_AND_DESCRIPTIONS} </attributes-definitions>\n<extraction-results> {EXTRACTION_RESULTS} </extraction-results>"
+  # v0.6: confidence scoring disabled (was the top-level `assessment` block,
+  # which had assessment.enabled: false).
+  confidence:
+    mode: 'off'
 summarization:
   enabled: false
   model: us.amazon.nova-pro-v1:0

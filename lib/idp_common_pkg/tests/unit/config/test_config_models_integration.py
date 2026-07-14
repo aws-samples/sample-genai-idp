@@ -156,7 +156,8 @@ class TestConfigModelsIntegration:
         assert isinstance(config.extraction.temperature, float)
         assert isinstance(config.extraction.top_p, float)
         assert isinstance(config.extraction.top_k, float)
-        assert isinstance(config.extraction.max_tokens, int)
+        # max_tokens is no longer an extraction field (output = model maximum)
+        assert not hasattr(config.extraction, "max_tokens")
 
         # Validate ranges
         assert 0.0 <= config.extraction.temperature <= 1.0
@@ -194,16 +195,14 @@ class TestConfigModelsIntegration:
 
         config = IDPConfig.model_validate(config_dict)
 
-        # Validate that assessment config works
-        assert config.assessment is not None
-        assert isinstance(config.assessment.enabled, bool)
+        # Validate that confidence config works (v0.6: confidence is under extraction)
+        assert config.extraction.confidence is not None
+        assert isinstance(config.extraction.confidence.enabled, bool)
 
-        # Validate granular assessment settings
-        if hasattr(config.assessment, "granular"):
-            assert isinstance(config.assessment.granular.enabled, bool)
-            if config.assessment.granular.enabled:
-                assert config.assessment.granular.list_batch_size > 0
-                assert config.assessment.granular.simple_batch_size > 0
+        # Validate list batching setting (v0.6: extraction.confidence.list_batch_size;
+        # granular assessment has been retired).
+        assert config.extraction.confidence.list_batch_size > 0
+        assert not hasattr(config.extraction.confidence, "granular")
 
     def test_config_with_all_optional_fields(self, config_root):
         """Test that configs work even if optional fields are missing"""
@@ -220,9 +219,10 @@ class TestConfigModelsIntegration:
 
         # Check defaults are applied
         assert config.extraction.temperature == 0.0
-        assert config.extraction.max_tokens == 10000
+        assert not hasattr(config.extraction, "max_tokens")
         assert config.extraction.agentic.enabled is False
-        assert config.assessment.enabled is True
+        # v0.6: assessment.enabled migrated to extraction.confidence.enabled
+        assert config.extraction.confidence.enabled is True
 
     def test_config_type_coercion(self):
         """Test that type coercion works for all numeric fields"""
@@ -244,12 +244,7 @@ class TestConfigModelsIntegration:
             },
             "assessment": {
                 "model": "test",
-                "granular": {
-                    "enabled": True,
-                    "list_batch_size": "5",  # String
-                    "simple_batch_size": 10,  # Int
-                    "max_workers": "20",  # String
-                },
+                "inshard_list_batch_size": "5",  # String (v0.5 key)
             },
             "classes": [],
         }
@@ -265,8 +260,10 @@ class TestConfigModelsIntegration:
         assert config.extraction.top_p == 0.2
         assert isinstance(config.extraction.top_p, float)
 
-        assert config.assessment.granular.list_batch_size == 5
-        assert isinstance(config.assessment.granular.list_batch_size, int)
+        # v0.6: assessment.inshard_list_batch_size migrates to
+        # extraction.confidence.list_batch_size
+        assert config.extraction.confidence.list_batch_size == 5
+        assert isinstance(config.extraction.confidence.list_batch_size, int)
 
     def test_boolean_variations(self):
         """Test various boolean representations"""

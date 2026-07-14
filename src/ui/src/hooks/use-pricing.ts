@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT-0
 
 import { useState, useEffect } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { getPricing, updatePricing as updatePricingOp, restoreDefaultPricing as restoreDefaultPricingOp } from '../graphql/generated';
 import { parsePricingData } from '../graphql/awsjson-parsers';

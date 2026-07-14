@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import type { SelectProps, IconProps } from '@cloudscape-design/components';
 import { Container, Header, SpaceBetween, Button, FormField, Select, Alert, Textarea, Input } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { startTestRun, getTestSets } from '../../graphql/generated';
 import handlePrint from './PrintUtils';
@@ -42,6 +42,7 @@ const TestRunner = ({
   activeTestRuns: _activeTestRuns,
 }: TestRunnerProps): React.JSX.Element => {
   const [testSets, setTestSets] = useState<TestSetData[]>([]);
+  const [testSetsLoading, setTestSetsLoading] = useState(true);
   const [selectedTestSet, setSelectedTestSet] = useState<SelectProps.Option | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<SelectProps.Option | null>(null);
   const [numberOfFiles, setNumberOfFiles] = useState('');
@@ -94,6 +95,8 @@ const TestRunner = ({
     } catch (err) {
       console.error('TestRunner: Failed to load test sets:', err);
       setError(`Failed to load test sets: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setTestSetsLoading(false);
     }
   };
 
@@ -235,6 +238,8 @@ const TestRunner = ({
             }}
             options={testSetOptions}
             placeholder="Choose a test set..."
+            statusType={testSetsLoading ? 'loading' : 'finished'}
+            loadingText="Loading test sets..."
             empty="No test sets available"
           />
         </FormField>

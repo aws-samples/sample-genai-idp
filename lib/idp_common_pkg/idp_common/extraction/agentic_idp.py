@@ -12,7 +12,6 @@ import io
 import json
 import logging
 import os
-import re
 import threading
 from pathlib import Path
 from typing import (
@@ -38,9 +37,16 @@ from strands.types.media import (
     ImageSource,
 )
 
-from idp_common.bedrock.client import CACHEPOINT_SUPPORTED_MODELS, is_claude_4_7_model
+from idp_common.bedrock.client import (
+    CACHEPOINT_SUPPORTED_MODELS,
+    CLAUDE_EFFORT_LEVELS,
+    is_claude_4_7_model,
+    is_claude_effort_model,
+)
+from idp_common.bedrock.model_utils import get_model_max_output_tokens
 from idp_common.bedrock.openai_responses import is_openai_responses_model
 from idp_common.config.models import IDPConfig
+from idp_common.extraction.topk_resolver import resolve_candidates
 from idp_common.utils.bedrock_utils import (
     async_exponential_backoff_retry,
 )
@@ -103,6 +109,51 @@ def supports_tool_caching(model_id: str) -> bool:
         True if the model supports tool caching, False otherwise
     """
     return "anthropic.claude" in model_id or "us.anthropic.claude" in model_id
+
+
+def _summarization_params(
+    model_id: str | None, _context_buffer: float
+) -> tuple[int, float]:
+    """Derive (preserve_recent_messages, summary_ratio) from the model window.
+
+    Larger context window → preserve more recent turns verbatim before the
+    conversation manager summarizes, so the agent is far less likely to lose the
+    parsed-table / finalize-instruction context mid-run (the re-parse/no-commit
+    loop root cause). Buckets keep it simple and safe:
+
+    - >= 1M input tokens  -> preserve 40 (summarize very rarely)
+    - >= 400K             -> preserve 20
+    - >= 200K             -> preserve 10
+    - otherwise / unknown -> preserve 5  (the conservative legacy value)
+
+    ``summary_ratio`` stays high (0.9) so that WHEN summarization does trigger it
+    compresses aggressively — we want few, large-preserve windows, not frequent
+    small summaries. ``context_buffer`` is accepted for future tuning but not
+    currently needed (the buckets already bake in headroom).
+    """
+    try:
+        from idp_common.bedrock.model_utils import get_model_max_input_tokens
+
+        window = get_model_max_input_tokens(model_id) if model_id else 0
+    except Exception:  # noqa: BLE001 - unknown model → conservative default
+        window = 0
+
+    if window >= 1_000_000:
+        preserve = 40
+    elif window >= 400_000:
+        preserve = 20
+    elif window >= 200_000:
+        preserve = 10
+    else:
+        preserve = 5
+    logger.info(
+        "Conversation summarization sizing: model=%s input_window=%d -> "
+        "preserve_recent_messages=%d summary_ratio=0.9",
+        model_id,
+        window,
+        preserve,
+    )
+    return preserve, 0.9
 
 
 def supports_prompt_caching(model_id: str) -> bool:
@@ -354,15 +405,14 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
         A tool-decorated function that validates against the model
     """
 
-    @tool
-    def extraction_tool(
-        extraction: model_class,  # pyright: ignore[reportInvalidTypeForm]
-        agent: Agent,  # pyright: ignore[reportInvalidTypeForm]
-    ) -> str:  # pyright: ignore[reportInvalidTypeForm]
-        """Use this tool to return the requested data extraction.
-        When you call this tool it overwrites the previous extraction, if you want to expand the extraction use jsonpatch.
-        This tool needs to be Successfully invoked before the patch tool can be used."""
+    def _record_extraction(extraction: Any, agent: Agent) -> str | None:
+        """Validate + store an extraction payload in agent state.
 
+        Shared by ``extraction_tool`` and ``extraction_with_confidence_tool`` so both
+        the plain and the single-shot integrated paths validate/normalize/persist the
+        extraction identically. Returns an error string to hand back to the model on a
+        malformed payload, or ``None`` on success (extraction stored in state).
+        """
         # Note: The @tool decorator passes data as a dict, not as a model instance
         # We need to validate it manually using the Pydantic model
 
@@ -397,9 +447,7 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
 
         extraction_model = model_class.model_validate(extraction_data)  # pyright: ignore[reportAssignmentType]
         extraction_dict = extraction_model.model_dump(mode="json")
-        logger.info(
-            "extraction_tool called", extra={"models_extraction": extraction_dict}
-        )
+        logger.info("extraction recorded", extra={"models_extraction": extraction_dict})
         agent.state.set(key="current_extraction", value=extraction_dict)
         logger.debug(
             "Successfully stored extraction in state",
@@ -407,7 +455,90 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
         )
         # Save checkpoint after successful extraction
         _invoke_checkpoint_callback(agent)
+        return None
+
+    @tool
+    def extraction_tool(
+        extraction: model_class,  # pyright: ignore[reportInvalidTypeForm]
+        agent: Agent,  # pyright: ignore[reportInvalidTypeForm]
+    ) -> str:  # pyright: ignore[reportInvalidTypeForm]
+        """Use this tool to return the requested data extraction.
+        When you call this tool it overwrites the previous extraction, if you want to expand the extraction use jsonpatch.
+        This tool needs to be Successfully invoked before the patch tool can be used."""
+        error = _record_extraction(extraction, agent)
+        if error is not None:
+            return error
         return "Extraction succeeded, the data format is correct"
+
+    @tool
+    def extraction_with_confidence_tool(
+        extraction: model_class,  # pyright: ignore[reportInvalidTypeForm]
+        field_assessment: dict[str, Any],
+        agent: Agent,  # pyright: ignore[reportInvalidTypeForm]
+    ) -> str:  # pyright: ignore[reportInvalidTypeForm]
+        """Return the extracted data AND your per-field confidence in ONE call.
+
+        Use this INSTEAD of calling an extraction tool and an assessment tool
+        separately (single-shot integrated confidence). Provide:
+        - extraction: the extracted values, matching the schema.
+        - field_assessment: your confidence, MIRRORING the extraction structure —
+          for each scalar/group field: {"confidence": 0.0-1.0, "confidence_reason": "..."};
+          for each list field: a LIST with ONE object per extracted row, in the SAME
+          ORDER as the rows (one entry for EVERY row — do not summarize or skip).
+        confidence is your calibrated certainty the value matches the source document.
+        This overwrites any previous extraction and assessment.
+        """
+        error = _record_extraction(extraction, agent)
+        if error is not None:
+            return error
+        agent.state.set("field_assessment", field_assessment)
+        logger.info(
+            "extraction_with_confidence_tool called (single-shot integrated)",
+            extra={
+                "field_count": len(field_assessment)
+                if isinstance(field_assessment, dict)
+                else 0
+            },
+        )
+        return "Extraction and confidence recorded; the data format is correct"
+
+    @tool
+    def extraction_with_topk_tool(
+        candidates: dict[str, Any],
+        agent: Agent,  # pyright: ignore[reportInvalidTypeForm]
+    ) -> str:
+        """Return your top-K guesses with probabilities for EVERY field in ONE call.
+
+        Use this INSTEAD of a plain extraction tool + assessment tool (1S-TopK
+        integrated confidence). For each field, provide a nested object with your
+        ranked guesses and their probabilities — the top guess (G1) becomes the
+        extracted value and its probability (P1) becomes the confidence:
+          - Scalar/group field ->
+            {"G1": "<best guess>", "P1": 0.0-1.0, "G2": "...", "P2": ..., ...}
+          - List field -> a LIST with ONE object per extracted row, IN THE SAME
+            ORDER, where each sub-attribute is itself a {G1, P1, ...} object.
+        Provide as many guesses (K) as are meaningful; G1/P1 alone is valid.
+        Ranking alternatives yields better-calibrated confidence than a single
+        value + single score. This overwrites any previous extraction/assessment.
+        """
+        # Resolve G1 -> value and P1 -> confidence using the shared resolver.
+        schema = model_class.model_json_schema()
+        inference_result, assessment_data, _candidates_meta = resolve_candidates(
+            candidates, schema
+        )
+        error = _record_extraction(inference_result, agent)
+        if error is not None:
+            return error
+        agent.state.set("field_assessment", assessment_data)
+        logger.info(
+            "extraction_with_topk_tool called (1S-TopK integrated)",
+            extra={
+                "field_count": len(assessment_data)
+                if isinstance(assessment_data, dict)
+                else 0
+            },
+        )
+        return "TopK extraction and confidence recorded; the data format is correct"
 
     @tool
     def apply_json_patches(
@@ -532,10 +663,34 @@ def create_dynamic_extraction_tool_and_patch_tool(model_class: type[TargetModel]
 
     return (
         extraction_tool,
+        extraction_with_confidence_tool,
+        extraction_with_topk_tool,
         apply_json_patches,
         make_buffer_data_final_extraction,
         finalize_table_extraction,
     )
+
+
+@tool
+def provide_field_assessment(assessment: dict[str, Any], agent: Agent) -> str:
+    """Record a per-field confidence + bounding-box assessment for the extraction.
+
+    Use this AFTER the extraction is complete and correct (integrated-assessment
+    mode only). Provide one entry per extracted field mirroring the extraction
+    structure:
+      - Scalar/group field -> {"confidence": 0.0-1.0, "confidence_reason": "...",
+        "bbox": [x1,y1,x2,y2], "page": N}   (bbox/page optional)
+      - List field        -> a LIST with one assessment object per extracted row,
+        IN THE SAME ORDER as the extracted rows.
+    confidence is your calibrated certainty the value is correct given the source.
+    This overwrites any previous assessment.
+    """
+    agent.state.set("field_assessment", assessment)
+    logger.info(
+        "provide_field_assessment called",
+        extra={"field_count": len(assessment) if isinstance(assessment, dict) else 0},
+    )
+    return "Assessment recorded."
 
 
 @tool
@@ -747,7 +902,21 @@ After successfully using the extraction tool, you MUST:
 4. Look for any missing fields, incorrect values, or formatting issues
 5. If any discrepancies are found, use the apply_json_patches tool to fix them
 6. Only finish when you are confident all data is accurate and complete
+
+TABLE TOOL NOTE (for the processing report):
+If the document contained a large table AND you did NOT use the parse_table /
+map_table_to_schema tools to extract it, end your final response with ONE short
+sentence, on its own line, beginning exactly with "TABLE_TOOL_NOTE:" that states
+briefly why you extracted the table directly instead (e.g. the table was small,
+the OCR pipe-table was malformed, columns didn't map cleanly). If you DID use the
+table tools, or there was no large table, do not add this note.
 """
+
+
+# Prompt templates are editable config fields (extraction.task_prompt*), selected
+# per settings by idp_common.extraction.prompt_assembly (select_extraction_task_prompt
+# / select_confidence_task_prompt). The integrated confidence instructions live in
+# extraction.task_prompt_extraction_with_confidence — not hardcoded here.
 
 
 TABLE_PARSING_PROMPT_ADDENDUM = """
@@ -891,6 +1060,7 @@ def _build_model_config(
     max_retries: int,
     connect_timeout: float,
     read_timeout: float,
+    reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
     """
     Build model configuration with token limits and caching settings.
@@ -942,43 +1112,45 @@ def _build_model_config(
         model_id = model_id[:-3]
         additional_request_fields = {"anthropic_beta": ["context-1m-2025-08-07"]}
 
-    # Determine model-specific maximum token limits
-    model_max = 4_096  # Default fallback
-    model_id_lower = model_id.lower()
+    # Reasoning effort (output_config.effort) for effort-capable Claude models.
+    # Maps to ConverseStream additionalModelRequestFields, controlling thinking
+    # depth / output-token spend. Verified live: effort measurably changes output
+    # tokens on Sonnet 5. Skipped for models that reject it (Sonnet 4.5 / Haiku).
+    if reasoning_effort and is_claude_effort_model(model_id):
+        effort = str(reasoning_effort).lower().strip()
+        if effort in CLAUDE_EFFORT_LEVELS:
+            if additional_request_fields is None:
+                additional_request_fields = {}
+            additional_request_fields["output_config"] = {"effort": effort}
+            logger.info("Agentic extraction using reasoning effort '%s'", effort)
 
-    # Check Claude Opus 4.7+ first (extended 128K output, more specific than
-    # the generic claude-4 pattern below).
-    if re.search(r"claude-opus-4-(7|8)", model_id_lower):
-        model_max = 128_000
-    # Check Claude 4 patterns (64K output)
-    elif re.search(r"claude-(opus|sonnet|haiku)-4", model_id_lower):
+    # Resolve the model's true max output tokens from the single source of truth
+    # (config_library/model_config_limits.yaml via get_model_max_output_tokens).
+    # Agentic extraction always requests the model maximum — its multi-step tool
+    # loop needs full output headroom, and Bedrock's default-when-omitted is a
+    # small truncating value (measured 4096 for Claude, 2000 for Nova). A stale
+    # per-model regex ladder here previously left new models (e.g. Sonnet 5) at a
+    # 4096 fallback, causing MaxTokensReachedException on ordinary documents.
+    try:
+        model_max = get_model_max_output_tokens(model_id)
+    except (ValueError, FileNotFoundError):
+        # Model not in model_config_limits.yaml, or the file is unavailable in
+        # this runtime. Don't truncate or crash extraction; use a conservative
+        # Claude-class headroom and log loudly. Bedrock will reject an over-limit
+        # request with a ValidationException naming the real cap if too high.
         model_max = 64_000
-    # Check Nova models
-    elif any(
-        nova in model_id_lower
-        for nova in ["nova-premier", "nova-pro", "nova-lite", "nova-micro"]
-    ):
-        model_max = 10_000
-    # Check Claude 3 models
-    elif "claude-3" in model_id_lower:
-        model_max = 8_192
+        logger.error(
+            "Could not resolve max output tokens for %s (missing entry or "
+            "model_config_limits.yaml unavailable); falling back to %d.",
+            model_id,
+            model_max,
+        )
 
-    # Use config value if provided, but cap at model's maximum
-    if max_tokens is not None:
-        if max_tokens > model_max:
-            logger.warning(
-                "Config max_tokens exceeds model limit, capping at model maximum",
-                extra={
-                    "config_max_tokens": max_tokens,
-                    "model_max_tokens": model_max,
-                    "model_id": model_id,
-                },
-            )
-            max_output_tokens = model_max
-        else:
-            max_output_tokens = max_tokens
+    # A config max_tokens (if still provided by a caller) is only ever an upper
+    # bound below the model max; never exceed the model's true limit.
+    if max_tokens is not None and max_tokens < model_max:
+        max_output_tokens = max_tokens
     else:
-        # No config value - use model maximum for agentic extraction
         max_output_tokens = model_max
 
     # Build base model config
@@ -1347,6 +1519,7 @@ async def _run_shard_agent(
     max_tokens: int | None,
     checkpoint_callback: Any | None,
     base_custom_instruction: str | None = None,
+    emit_field_assessment: bool = False,
 ) -> tuple[TargetModel, BedrockInvokeModelResponse]:
     """Run one extraction agent over a single shard.
 
@@ -1379,116 +1552,66 @@ async def _run_shard_agent(
         max_tokens=max_tokens,
         custom_instruction=combined_instruction,
         checkpoint_callback=checkpoint_callback,
+        emit_field_assessment=emit_field_assessment,
     )
 
 
-def _accumulate_metering(
-    merged_metering: dict[str, Any], metering: dict[str, Any]
-) -> None:
-    """Accumulate per-model token-metering counts into ``merged_metering``.
-
-    Token values from Bedrock responses may be ``None`` (e.g. when a model does
-    not report a particular counter). Both the accumulated value and the
-    incoming value are coerced to ``0`` so the addition never raises a
-    TypeError on a ``None`` operand (see issue #337).
-    """
-    for mk, mv in metering.items():
-        if mk not in merged_metering:
-            merged_metering[mk] = dict(mv)
-        else:
-            for tk, tv in mv.items():
-                merged_metering[mk][tk] = (merged_metering[mk].get(tk) or 0) + (tv or 0)
-
-
-def _list_valued_fields(data_format: type[BaseModel]) -> set[str]:
-    """Return the names of ``data_format`` fields that are list-typed.
-
-    Used so the shard merge treats a field consistently as a list even when an
-    individual shard returns it as ``None`` (an optional ``list | None`` left
-    empty by, e.g., a cover-page shard). Falls back to an empty set if the model
-    has no introspectable fields.
-    """
-    fields = getattr(data_format, "model_fields", None)
-    if not fields:
-        return set()
-    list_fields: set[str] = set()
-    for name, info in fields.items():
-        annotation = getattr(info, "annotation", None)
-        if _annotation_is_list(annotation):
-            list_fields.add(name)
-    return list_fields
-
-
-def _annotation_is_list(annotation: Any) -> bool:
-    """True if a type annotation is ``list`` / ``list[...]`` / ``Optional[list]``."""
-    import typing
-
-    if annotation is list:
-        return True
-    origin = typing.get_origin(annotation)
-    if origin in (list, __import__("builtins").list):
-        return True
-    # Unwrap Optional/Union and check members.
-    if origin is not None:
-        return any(_annotation_is_list(arg) for arg in typing.get_args(annotation))
-    return False
-
-
-def _merge_shard_results(
-    results: list[tuple[Any, dict[str, Any]]],
+async def default_shard_runner(
+    *,
+    shard_index: int,
+    total_shards: int,
+    payload: dict[str, Any],
+    model_id: str,
     data_format: type[TargetModel],
-) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
-    """Merge per-shard extraction dicts into one.
+    config: IDPConfig,
+    context: str,
+    max_retries: int,
+    connect_timeout: float,
+    read_timeout: float,
+    max_tokens: int | None,
+    checkpoint_callback: Any | None,
+    custom_instruction: str | None,
+) -> tuple[TargetModel, "BedrockInvokeModelResponse"]:
+    """Strands-backed shard runner used by the runtime backends.
 
-    - **List fields** (by the schema's field types) are concatenated in shard
-      order; a shard that returns the field as ``None`` contributes nothing.
-      Rows live on single pages, so page-aligned shards keep them intact/ordered.
-    - **Scalar fields** take the FIRST non-null value across shards; if a later
-      shard provides a *different* non-null value, that is recorded as a conflict
-      (the first value wins, the conflict is surfaced in metadata for audit).
-
-    List membership is decided by ``data_format`` field types (not the runtime
-    value) so an optional ``list | None`` field returned as ``None`` by one shard
-    and a list by another merges correctly rather than crashing.
-
-    Returns ``(merged_dict, merged_metering, conflicts)``.
+    Adapts the runtime's ``(shard_index, payload, ...)`` calling convention to
+    ``_run_shard_agent``. Defined here (not in ``runtime.py``) so ``runtime`` has
+    no dependency on the strands stack — the runtime stays import-light and the
+    import graph has no cycle.
     """
-    list_fields = _list_valued_fields(data_format)
-    merged_dict: dict[str, Any] = {}
-    merged_metering: dict[str, Any] = {}
-    conflicts: list[dict[str, Any]] = []
+    return await _run_shard_agent(
+        shard_index=shard_index,
+        total_shards=total_shards,
+        page_start=payload["page_start"],
+        page_end=payload["page_end"],
+        total_pages=payload["total_pages"],
+        model_id=model_id,
+        data_format=data_format,
+        shard_prompt={"role": "user", "content": payload["content"]},
+        config=config,
+        context=context,
+        max_retries=max_retries,
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+        max_tokens=max_tokens,
+        checkpoint_callback=checkpoint_callback,
+        base_custom_instruction=custom_instruction,
+        # Integrated-assessment mode flows through the payload (set by the
+        # service when extraction.confidence.mode == "integrated").
+        emit_field_assessment=bool(payload.get("emit_field_assessment")),
+    )
 
-    for result_data, result_response in results:
-        result_dict = result_data.model_dump(mode="json")
-        for key, value in result_dict.items():
-            # Treat as a list field if the schema says so, or (defensively) if
-            # any shard actually produced a list for it.
-            is_list_field = key in list_fields or isinstance(value, list)
-            if is_list_field:
-                existing = merged_dict.get(key)
-                if not isinstance(existing, list):
-                    # Replaces a prior None/absent with a fresh list before extend.
-                    merged_dict[key] = []
-                if isinstance(value, list):
-                    merged_dict[key].extend(value)
-            elif value is not None:
-                if key not in merged_dict or merged_dict[key] is None:
-                    merged_dict[key] = value
-                elif merged_dict[key] != value:
-                    # Two shards disagree on a scalar. Keep the first; record it.
-                    conflicts.append(
-                        {
-                            "field": key,
-                            "kept": merged_dict[key],
-                            "discarded": value,
-                        }
-                    )
-            else:
-                # Preserve the key as null if no shard has filled it yet.
-                merged_dict.setdefault(key, None)
-        _accumulate_metering(merged_metering, result_response.get("metering", {}))
 
-    return merged_dict, merged_metering, conflicts
+# Merge primitives live in idp_common.extraction.runtime (strands-free, the
+# single source of truth). Re-exported here for backward compatibility with
+# existing imports (`from idp_common.extraction.agentic_idp import
+# _merge_shard_results`, `_accumulate_metering`, ...).
+from idp_common.extraction.runtime import (  # noqa: E402,F401
+    _accumulate_metering,  # noqa: F401  (re-export for backward compat)
+    _annotation_is_list,  # noqa: F401
+    _list_valued_fields,  # noqa: F401
+    _merge_shard_results,  # noqa: F401
+)
 
 
 async def concurrent_structured_output_async(
@@ -1504,21 +1627,37 @@ async def concurrent_structured_output_async(
     max_tokens: int | None = None,
     checkpoint_callback: Any | None = None,
     custom_instruction: str | None = None,
+    section_id: str = "section",
+    persistence: Any | None = None,
+    runtime: Any | None = None,
+    assess_runner: Any | None = None,
 ) -> tuple[TargetModel, BedrockInvokeModelResponse]:
     """
     Run one extraction agent per input shard, concurrently, and merge results.
 
-    Unlike the previous implementation, each shard's prompt contains ONLY that
-    shard's page text/images (the service slices the input before calling), so
-    no agent loads the whole document — this is what bounds the context window
-    and prevents overflow on long documents. At most ``max_parallelism`` shards
-    run at once (Bedrock RPM control).
+    Each shard's prompt contains ONLY that shard's page text/images (the service
+    slices the input before calling), so no agent loads the whole document — this
+    bounds the context window and prevents overflow on long documents. At most
+    ``max_parallelism`` shards run at once (Bedrock RPM control).
+
+    This is now a thin shim over the runtime-agnostic primitives in
+    :mod:`idp_common.extraction.runtime`: it delegates to an
+    :class:`~idp_common.extraction.runtime.ExtractionRuntime` (default
+    :class:`~idp_common.extraction.runtime.InProcessRuntime`), which schedules
+    :func:`~idp_common.extraction.runtime.extract_one_shard` per shard and merges
+    via :func:`~idp_common.extraction.runtime.merge_shard_results`. Observable
+    behaviour is unchanged; existing callers keep working.
 
     Args:
         shard_payloads: List of dicts with keys ``content`` (pre-rendered prompt
             content blocks for the shard), ``page_start``, ``page_end``,
             ``total_pages``.
         max_parallelism: Max number of shards to run concurrently.
+        section_id: Section identifier used to derive deterministic per-shard
+            persistence keys (when ``persistence`` is supplied).
+        persistence: Optional per-shard persistence backend (idempotent
+            skip-if-complete). ``None`` => in-memory only (today's behaviour).
+        runtime: Optional explicit ExtractionRuntime; defaults to InProcessRuntime.
         Other args: Same as structured_output_async.
 
     Returns:
@@ -1526,63 +1665,33 @@ async def concurrent_structured_output_async(
         includes a ``_shard_scalar_conflicts`` marker when shards disagreed on a
         scalar field, so the service can record it in metadata.
     """
-    total_shards = len(shard_payloads)
-    logger.info(
-        "Starting sharded concurrent extraction",
-        extra={
-            "num_shards": total_shards,
-            "max_parallelism": max_parallelism,
-            "ranges": [(p["page_start"], p["page_end"]) for p in shard_payloads],
-        },
+    from idp_common.extraction.runtime import InProcessRuntime
+
+    rt = runtime or InProcessRuntime(max_parallelism)
+    merged_result, response = await rt.run(
+        shard_payloads=shard_payloads,
+        model_id=model_id,
+        data_format=data_format,
+        config=config,
+        section_id=section_id,
+        context=context,
+        max_retries=max_retries,
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+        max_tokens=max_tokens,
+        checkpoint_callback=checkpoint_callback,
+        custom_instruction=custom_instruction,
+        persistence=persistence,
+        shard_runner=default_shard_runner,
+        assess_runner=assess_runner,
     )
+    # Normalise the runtime's plain-dict response into the typed envelope that
+    # existing callers expect. The runtime returns a BaseModel; it is an instance
+    # of ``data_format`` (TargetModel) by construction.
+    import typing as _typing
 
-    semaphore = asyncio.Semaphore(max(1, max_parallelism))
-
-    async def _run_one(i: int, payload: dict[str, Any]):
-        async with semaphore:
-            return await _run_shard_agent(
-                shard_index=i,
-                total_shards=total_shards,
-                page_start=payload["page_start"],
-                page_end=payload["page_end"],
-                total_pages=payload["total_pages"],
-                model_id=model_id,
-                data_format=data_format,
-                shard_prompt={"role": "user", "content": payload["content"]},
-                config=config,
-                context=context,
-                max_retries=max_retries,
-                connect_timeout=connect_timeout,
-                read_timeout=read_timeout,
-                max_tokens=max_tokens,
-                checkpoint_callback=checkpoint_callback,
-                base_custom_instruction=custom_instruction,
-            )
-
-    tasks = [_run_one(i, p) for i, p in enumerate(shard_payloads)]
-    results = await asyncio.gather(*tasks)
-
-    merged_dict, merged_metering, conflicts = _merge_shard_results(results, data_format)
-    merged_result = data_format(**merged_dict)
-
-    total_items = sum(len(v) for v in merged_dict.values() if isinstance(v, list))
-    logger.info(
-        "Sharded concurrent extraction complete",
-        extra={
-            "total_items": total_items,
-            "shards_completed": len(results),
-            "scalar_conflicts": len(conflicts),
-        },
-    )
-    if conflicts:
-        logger.warning(
-            "Scalar field conflicts across shards (kept first value)",
-            extra={"conflicts": conflicts[:20]},
-        )
-        # Surface via metering dict so the service can record it in metadata.
-        merged_metering["_shard_scalar_conflicts"] = conflicts
-
-    return merged_result, BedrockInvokeModelResponse(
+    typed_result = _typing.cast(TargetModel, merged_result)
+    return typed_result, BedrockInvokeModelResponse(
         response=BedrockResponse(
             output=BedrockOutput(
                 message=BedrockMessage(
@@ -1590,7 +1699,7 @@ async def concurrent_structured_output_async(
                 )
             )
         ),
-        metering=merged_metering,
+        metering=response.get("metering", {}),
     )
 
 
@@ -1611,6 +1720,7 @@ async def structured_output_async(
     checkpoint_callback: Any | None = None,
     checkpoint_buffer_data: dict[str, Any] | None = None,
     schema_validator: Callable[[dict[str, Any]], tuple[bool, str]] | None = None,
+    emit_field_assessment: bool = False,
 ) -> tuple[TargetModel, BedrockInvokeModelResponse]:
     """
     Extract structured data using Strands agents with tool-based validation.
@@ -1705,17 +1815,50 @@ async def structured_output_async(
         extra={"data_format": data_format.__name__, "model_id": model_id},
     )
 
-    # Create the dynamic extraction tool for this specific model
-    dynamic_extraction_tools = create_dynamic_extraction_tool_and_patch_tool(
-        data_format
-    )
+    # Create the dynamic extraction tools for this specific model.
+    (
+        extraction_tool,
+        extraction_with_confidence_tool,
+        extraction_with_topk_tool,
+        apply_json_patches,
+        make_buffer_data_final_extraction,
+        finalize_table_extraction,
+    ) = create_dynamic_extraction_tool_and_patch_tool(data_format)
+
+    # Integrated-assessment: select HOW the agent produces confidence.
+    #   two_step (default): extract via extraction_tool, then call
+    #     provide_field_assessment in a follow-up inference (a dedicated reflection
+    #     pass over the finalized values).
+    #   single_shot: extract + confidence in ONE combined tool call
+    #     (extraction_with_confidence_tool), saving the follow-up inference.
+    #   topk: extract + confidence in ONE combined tool call
+    #     (extraction_with_topk_tool) where the agent emits its top-K guesses with
+    #     probabilities per field; the shared topk_resolver takes G1 as the value
+    #     and P1 as the confidence. Better-calibrated than single_shot.
+    # All three write agent.state["field_assessment"], so the downstream collation
+    # / reconcile / grounding / explainability_info path is identical. The choice
+    # is a hidden experimental knob (extraction.agentic.integrated_confidence_strategy)
+    # so cost/latency vs. confidence-calibration can be A/B tested; it is NOT in the
+    # config UI schema. The instructions telling the agent which call to make live
+    # in the selected extraction TASK prompt.
+    strategy = config.extraction.agentic.integrated_confidence_strategy
+    if emit_field_assessment and strategy == "single_shot":
+        primary_extraction_tool = extraction_with_confidence_tool
+    elif emit_field_assessment and strategy == "topk":
+        primary_extraction_tool = extraction_with_topk_tool
+    else:
+        primary_extraction_tool = extraction_tool
+
     image_tools = []
     if page_images:
         image_tools.append(create_view_image_tool(page_images))
 
     # Prepare tools list
     tools = [
-        *dynamic_extraction_tools,
+        primary_extraction_tool,
+        apply_json_patches,
+        make_buffer_data_final_extraction,
+        finalize_table_extraction,
         *image_tools,
         view_existing_extraction,
         patch_buffer_data,
@@ -1728,6 +1871,14 @@ async def structured_output_async(
         update_todo,
         view_todo_list,
     ]
+
+    if emit_field_assessment:
+        # two_step: this is the assessment tool the agent calls AFTER extraction.
+        # single_shot: this stays available only as an OPTIONAL end-of-batch
+        #   fallback so a multi-step / patched extraction (rows added AFTER the
+        #   combined call) can still (re)assess all rows; the common single-call
+        #   case never needs it.
+        tools.append(provide_field_assessment)
 
     # Add table parsing tools if enabled
     if table_parsing_config.enabled:
@@ -1775,6 +1926,7 @@ async def structured_output_async(
         max_retries=max_retries,
         connect_timeout=connect_timeout,
         read_timeout=read_timeout,
+        reasoning_effort=config.extraction.reasoning_effort,
     )
 
     # Prepare prompt content
@@ -1799,6 +1951,18 @@ async def structured_output_async(
     # requires all values to be JSON-serializable.
     _active_checkpoint_callback_var.set(checkpoint_callback)
 
+    # Model-aware conversation summarization (item 1). The Strands
+    # SummarizingConversationManager only exposes count/ratio knobs (no token
+    # budget), so we DERIVE preserve_recent_messages from the model's context
+    # window: a roomy model keeps more recent turns verbatim before summarizing,
+    # so it is far less likely to summarize away the "you already parsed the
+    # table — now finalize with extraction_tool" context that caused the
+    # re-parse/no-commit loop. A small-window model keeps the conservative
+    # minimum. This complements sharding (which keeps each shard's conversation
+    # small in the first place).
+    preserve_recent, summary_ratio = _summarization_params(
+        model_id, config.extraction.context_buffer
+    )
     agent = Agent(
         model=BedrockModel(
             **model_config,
@@ -1815,7 +1979,7 @@ async def structured_output_async(
             "extraction_schema_json": schema_json,  # Store for schema reminder tool
         },
         conversation_manager=SummarizingConversationManager(
-            summary_ratio=0.95, preserve_recent_messages=5
+            summary_ratio=summary_ratio, preserve_recent_messages=preserve_recent
         ),
     )
     if existing_data:
@@ -1893,6 +2057,28 @@ async def structured_output_async(
                 extra={"tool_stats": tool_stats},
             )
 
+        # Integrated-assessment mode: surface the agent's inline per-field
+        # assessment (recorded via provide_field_assessment) so the caller can
+        # route it through the same collation/grounding/emit path separate-mode
+        # uses. Rides in metering to survive the typed response envelope.
+        if emit_field_assessment:
+            field_assessment = agent.state.get("field_assessment")
+            if field_assessment:
+                metering_dict["_integrated_field_assessment"] = field_assessment
+                logger.info(
+                    "Integrated field assessment recorded",
+                    extra={
+                        "field_count": len(field_assessment)
+                        if isinstance(field_assessment, dict)
+                        else 0
+                    },
+                )
+            else:
+                logger.warning(
+                    "Integrated assessment enabled but agent did not call "
+                    "provide_field_assessment; no confidence emitted for this shard."
+                )
+
         return result, BedrockInvokeModelResponse(
             response=BedrockResponse(
                 output=BedrockOutput(
@@ -1928,6 +2114,7 @@ def structured_output(
     checkpoint_callback: Any | None = None,
     checkpoint_buffer_data: dict[str, Any] | None = None,
     schema_validator: Callable[[dict[str, Any]], tuple[bool, str]] | None = None,
+    emit_field_assessment: bool = False,
 ) -> tuple[BaseModel, BedrockInvokeModelResponse]:
     """
     Synchronous version of structured_output_async.
@@ -2017,6 +2204,7 @@ def structured_output(
                         checkpoint_callback=checkpoint_callback,
                         checkpoint_buffer_data=checkpoint_buffer_data,
                         schema_validator=schema_validator,
+                        emit_field_assessment=emit_field_assessment,
                     )
                 )
             except Exception as e:
@@ -2052,6 +2240,7 @@ def structured_output(
                 checkpoint_callback=checkpoint_callback,
                 checkpoint_buffer_data=checkpoint_buffer_data,
                 schema_validator=schema_validator,
+                emit_field_assessment=emit_field_assessment,
             )
         )
 

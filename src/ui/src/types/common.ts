@@ -8,6 +8,8 @@ export interface Notification {
   dismissLabel?: string;
   id: string | number;
   onDismiss?: () => void;
+  buttonText?: string;
+  onButtonClick?: () => void;
 }
 
 export interface SchemaValidationError {

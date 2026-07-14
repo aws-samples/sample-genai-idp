@@ -37,7 +37,7 @@ classes:
         format: date
         description: >-
           The patient's date of birth in MM/DD/YYYY format from Section A.
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       member_id:
         type: string
         description: >-
@@ -59,19 +59,19 @@ classes:
         description: >-
           The date when services were rendered from Section C: Encounter Information. 
           Critical for same_day_service_rules and global period calculations.
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       admission_date:
         type: string
         format: date
         description: >-
           The date the patient was admitted from Section C.
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       discharge_date:
         type: string
         format: date
         description: >-
           The date the patient was discharged from Section C.
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       type_of_service:
         type: string
         description: >-
@@ -184,7 +184,7 @@ classes:
         format: date
         description: >-
           The encounter date for this medical history documentation.
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       chronic_conditions:
         type: array
         description: >-
@@ -346,7 +346,7 @@ classes:
         format: date
         description: >-
           The date the surgical procedure was performed.
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       surgeon_name:
         type: string
         description: >-
@@ -473,7 +473,7 @@ classes:
         format: date
         description: >-
           The date of the procedures.
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       surgery_start_time:
         type: string
         description: >-

@@ -51,7 +51,7 @@
         },
         "BDA_InvokeDataAutomation": {
             "Type": "Task",
-            "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+            "Resource": "arn:${Partition}:states:::lambda:invoke.waitForTaskToken",
             "Parameters": {
                 "FunctionName": "${InvokeBDALambdaArn}",
                 "Payload": {
@@ -181,7 +181,7 @@
         },
         "PostOcrHook": {
             "Type": "Task",
-            "Resource": "arn:aws:states:::lambda:invoke",
+            "Resource": "arn:${Partition}:states:::lambda:invoke",
             "Parameters": {
                 "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
                 "Payload": {
@@ -230,7 +230,7 @@
         },
         "PostClassificationHook": {
             "Type": "Task",
-            "Resource": "arn:aws:states:::lambda:invoke",
+            "Resource": "arn:${Partition}:states:::lambda:invoke",
             "Parameters": {
                 "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
                 "Payload": {
@@ -258,14 +258,150 @@
             },
             "MaxConcurrency": 10,
             "Iterator": {
-                "StartAt": "ExtractionStep",
+                "StartAt": "ExtractionPlanStep",
                 "States": {
+                    "ExtractionPlanStep": {
+                        "Type": "Task",
+                        "Resource": "${ShardRuntimeFunctionArn}",
+                        "Parameters": {
+                            "mode": "plan",
+                            "execution_arn.$": "$.execution_arn",
+                            "document.$": "$.document",
+                            "section_id.$": "$.section_id"
+                        },
+                        "ResultPath": "$.ShardPlan",
+                        "Retry": [
+                            {
+                                "ErrorEquals": [
+                                    "Sandbox.Timedout",
+                                    "Lambda.ServiceException",
+                                    "Lambda.AWSLambdaException",
+                                    "Lambda.SdkClientException",
+                                    "Lambda.TooManyRequestsException",
+                                    "ThrottlingException",
+                                    "ServiceUnavailableException",
+                                    "InternalServerException",
+                                    "InternalServerError"
+                                ],
+                                "IntervalSeconds": 5,
+                                "MaxAttempts": 6,
+                                "BackoffRate": 2.0
+                            }
+                        ],
+                        "Next": "ShardModeChoice"
+                    },
+                    "ShardModeChoice": {
+                        "Type": "Choice",
+                        "Choices": [
+                            {
+                                "Variable": "$.ShardPlan.shard_mode",
+                                "BooleanEquals": true,
+                                "Next": "ExtractionShardMap"
+                            }
+                        ],
+                        "Default": "ExtractionStep"
+                    },
+                    "ExtractionShardMap": {
+                        "Type": "Map",
+                        "ItemProcessor": {
+                            "ProcessorConfig": {
+                                "Mode": "DISTRIBUTED",
+                                "ExecutionType": "STANDARD"
+                            },
+                            "StartAt": "ShardExtractionStep",
+                            "States": {
+                                "ShardExtractionStep": {
+                                    "Type": "Task",
+                                    "Resource": "arn:${Partition}:states:::lambda:invoke",
+                                    "Parameters": {
+                                        "FunctionName": "${ShardRuntimeFunctionArn}",
+                                        "Payload": {
+                                            "mode": "shard",
+                                            "execution_arn.$": "$.execution_arn",
+                                            "document.$": "$.document",
+                                            "section_id.$": "$.section_id",
+                                            "shard_index.$": "$.shard_index"
+                                        }
+                                    },
+                                    "OutputPath": "$.Payload",
+                                    "Retry": [
+                                        {
+                                            "ErrorEquals": [
+                                                "States.Timeout",
+                                                "Lambda.Unknown",
+                                                "Sandbox.Timedout",
+                                                "Lambda.ServiceException",
+                                                "Lambda.AWSLambdaException",
+                                                "Lambda.SdkClientException",
+                                                "Lambda.TooManyRequestsException",
+                                                "ServiceQuotaExceededException",
+                                                "ThrottlingException",
+                                                "ProvisionedThroughputExceededException",
+                                                "RequestLimitExceeded",
+                                                "ServiceUnavailableException",
+                                                "InternalServerException",
+                                                "InternalServerError",
+                                                "States.TaskFailed"
+                                            ],
+                                            "IntervalSeconds": 10,
+                                            "MaxAttempts": 8,
+                                            "BackoffRate": 2.0
+                                        }
+                                    ],
+                                    "End": true
+                                }
+                            }
+                        },
+                        "ItemsPath": "$.ShardPlan.shards",
+                        "ItemSelector": {
+                            "execution_arn.$": "$.execution_arn",
+                            "document.$": "$.document",
+                            "section_id.$": "$.section_id",
+                            "shard_index.$": "$$.Map.Item.Value.shard_index"
+                        },
+                        "MaxConcurrency": 5,
+                        "ResultPath": "$.ShardResults",
+                        "Next": "ExtractionMergeStep"
+                    },
+                    "ExtractionMergeStep": {
+                        "Type": "Task",
+                        "Resource": "${ShardRuntimeFunctionArn}",
+                        "Parameters": {
+                            "mode": "merge",
+                            "execution_arn.$": "$.execution_arn",
+                            "document.$": "$.document",
+                            "section_id.$": "$.section_id"
+                        },
+                        "Retry": [
+                            {
+                                "ErrorEquals": [
+                                    "States.Timeout",
+                                    "Lambda.Unknown",
+                                    "Sandbox.Timedout",
+                                    "Lambda.ServiceException",
+                                    "Lambda.AWSLambdaException",
+                                    "Lambda.SdkClientException",
+                                    "Lambda.TooManyRequestsException",
+                                    "ThrottlingException",
+                                    "ServiceUnavailableException",
+                                    "InternalServerException",
+                                    "InternalServerError"
+                                ],
+                                "IntervalSeconds": 10,
+                                "MaxAttempts": 8,
+                                "BackoffRate": 2.5
+                            }
+                        ],
+                        "Next": "PostExtractionHook"
+                    },
                     "ExtractionStep": {
                         "Type": "Task",
                         "Resource": "${ExtractionFunctionArn}",
                         "Retry": [
                             {
                                 "ErrorEquals": [
+                                    "States.Timeout",
+                                    "Lambda.Unknown",
                                     "Sandbox.Timedout",
                                     "Lambda.ServiceException",
                                     "Lambda.AWSLambdaException",
@@ -288,7 +424,7 @@
                     },
                     "PostExtractionHook": {
                         "Type": "Task",
-                        "Resource": "arn:aws:states:::lambda:invoke",
+                        "Resource": "arn:${Partition}:states:::lambda:invoke",
                         "Parameters": {
                             "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
                             "Payload": {
@@ -319,6 +455,8 @@
                         "Retry": [
                             {
                                 "ErrorEquals": [
+                                    "States.Timeout",
+                                    "Lambda.Unknown",
                                     "Sandbox.Timedout",
                                     "Lambda.ServiceException",
                                     "Lambda.AWSLambdaException",
@@ -334,27 +472,6 @@
                                 "MaxAttempts": 8,
                                 "BackoffRate": 2.5
                             }
-                        ],
-                        "Next": "PostAssessmentHook"
-                    },
-                    "PostAssessmentHook": {
-                        "Type": "Task",
-                        "Resource": "arn:aws:states:::lambda:invoke",
-                        "Parameters": {
-                            "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
-                            "Payload": {
-                                "hookPoint": "postAssessment",
-                                "executionArn.$": "$$.Execution.Id",
-                                "document.$": "$.document",
-                                "section.$": "$"
-                            }
-                        },
-                        "ResultPath": "$.HookResults",
-                        "Retry": [
-                            { "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2 }
-                        ],
-                        "Catch": [
-                            { "ErrorEquals": ["States.ALL"], "ResultPath": "$.HookResults.error", "Next": "SectionComplete" }
                         ],
                         "Next": "SectionComplete"
                     },
@@ -531,7 +648,7 @@
         },
         "PostRuleValidationHook": {
             "Type": "Task",
-            "Resource": "arn:aws:states:::lambda:invoke",
+            "Resource": "arn:${Partition}:states:::lambda:invoke",
             "Parameters": {
                 "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
                 "Payload": {
@@ -597,7 +714,7 @@
         },
         "PostSummarizationHook": {
             "Type": "Task",
-            "Resource": "arn:aws:states:::lambda:invoke",
+            "Resource": "arn:${Partition}:states:::lambda:invoke",
             "Parameters": {
                 "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
                 "Payload": {

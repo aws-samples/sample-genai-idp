@@ -14,7 +14,7 @@ import {
   Modal,
   Alert,
 } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
@@ -22,6 +22,7 @@ import useUserRole from '../../hooks/use-user-role';
 import generateS3PresignedUrl from '../common/generate-s3-presigned-url';
 import PageTextEditorModal from './PageTextEditorModal';
 import { processChanges } from '../../graphql/generated';
+import { useDocumentVersion } from '../../contexts/document-version';
 
 const client = generateClient();
 const logger = new ConsoleLogger('PagesPanel');
@@ -203,6 +204,9 @@ const PagesPanel = ({ pages, documentItem }: PagesPanelProps): React.JSX.Element
   const { currentCredentials } = useAppContext();
   const { settings } = useSettingsContext();
   const { isReviewerOnly, canWrite, canReview } = useUserRole();
+  // When viewing a past version, pin page images to that run's object versions
+  // and disable editing (edits write to the current objects, not the snapshot).
+  const { versionIdForUri, runId: viewingRunId, isHistorical } = useDocumentVersion();
 
   // Edit Mode should be disabled for reviewers until they click Start Review (claim the document)
   const hasReviewOwner = !!(documentItem?.hitlReviewOwner || documentItem?.hitlReviewOwnerEmail);
@@ -222,29 +226,23 @@ const PagesPanel = ({ pages, documentItem }: PagesPanelProps): React.JSX.Element
   // - User has no write or review permissions (Viewer role), OR
   // - REVIEWER only: HITL triggered but not claimed, document processing, or HITL completed/skipped
   // Admins and Authors can always edit
+  // - Viewing a historical version (read-only snapshot)
   const isEditModeDisabled =
+    isHistorical ||
     (!canWrite && !canReview) ||
     (isReviewerOnly && ((hitlTriggered && !hasReviewOwner) || isDocumentProcessing || isHitlCompleted || isHitlSkipped));
 
-  // Log for debugging
-  console.log('PagesPanel Edit Mode Check:', {
-    isReviewerOnly,
-    hitlTriggered,
-    hasReviewOwner,
-    hitlStatus: documentItem?.hitlStatus,
-    isHitlCompleted,
-    isHitlSkipped,
-    isDocumentProcessing,
-    isEditModeDisabled,
-  });
-
-  // Auto-exit edit mode for reviewers when document starts processing or HITL is completed/skipped
+  // Auto-exit edit mode when switching to a historical version, or (for
+  // reviewers) when the document starts processing or HITL is completed/skipped.
   useEffect(() => {
+    if (isHistorical && isEditMode) {
+      setIsEditMode(false);
+      return;
+    }
     if (isReviewerOnly && isEditMode && (isDocumentProcessing || isHitlCompleted || isHitlSkipped)) {
-      console.log('PagesPanel: Auto-exiting edit mode');
       setIsEditMode(false);
     }
-  }, [isReviewerOnly, isDocumentProcessing, isHitlCompleted, isHitlSkipped, isEditMode]);
+  }, [isHistorical, isReviewerOnly, isDocumentProcessing, isHitlCompleted, isHitlSkipped, isEditMode]);
 
   const loadThumbnails = async () => {
     if (!pages) return;
@@ -254,7 +252,9 @@ const PagesPanel = ({ pages, documentItem }: PagesPanelProps): React.JSX.Element
       pages.map(async (page) => {
         if (page.ImageUri) {
           try {
-            const url = await generateS3PresignedUrl(page.ImageUri, currentCredentials as Record<string, unknown>);
+            const url = await generateS3PresignedUrl(page.ImageUri, currentCredentials as Record<string, unknown>, {
+              versionId: versionIdForUri(page.ImageUri),
+            });
             urls[page.Id] = url;
           } catch (err) {
             logger.error('Error generating presigned URL for thumbnail:', err);
@@ -283,7 +283,7 @@ const PagesPanel = ({ pages, documentItem }: PagesPanelProps): React.JSX.Element
 
   useEffect(() => {
     loadThumbnails();
-  }, [pages]);
+  }, [pages, viewingRunId]);
 
   // Check if current pattern is Pattern-1
   const isPattern1 = () => {

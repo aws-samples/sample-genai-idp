@@ -22,6 +22,7 @@ import logging
 from ..analytics.agent import create_analytics_agent
 from ..code_intelligence.agent import create_code_intelligence_agent
 from ..error_analyzer.agent import create_error_analyzer_agent
+from ..quick_start.agent import create_quick_start_agent
 
 # from ..sample_calculator.agent import create_sample_calculator_agent  # Commented out - kept as reference for developers
 from .agent_factory import IDPAgentFactory
@@ -92,6 +93,28 @@ agent_factory.register_agent(
         "What are the main components of the system?",
         "What AWS services does this solution use?",
         "How is the Lambda function structured?",
+    ],
+)
+
+# Register Quick Start Agent
+agent_factory.register_agent(
+    agent_id="Quick-Start-Agent",
+    agent_name="Quick Start Agent",
+    agent_description="""
+    Guides a new user from a plain-language description of their document type to
+    a runnable IDP configuration and an optional labeled synthetic test set.
+    Authors a document-class schema (reusing a catalog template when one fits),
+    creates a config version, and — on explicit user confirmation — enqueues
+    synthetic document generation to build an evaluation test set. Ideal for
+    onboarding and cold-start setup when the user has only a description or a few
+    example documents.
+    """,
+    creator_func=create_quick_start_agent,
+    sample_queries=[
+        "Help me set up IDP for processing auto insurance claims",
+        "I have invoices with vendor, amount, and due date — get me started",
+        "Bootstrap a config for employee paystubs and make some test documents",
+        "Create a document type for medical discharge summaries",
     ],
 )
 

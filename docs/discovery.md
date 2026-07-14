@@ -751,13 +751,29 @@ discovery:
 **Accessing Discovery:**
 1. Navigate to the main application dashboard
 2. Click on the "Discovery" tab or panel
-3. Select a **Configuration Version** to save discovered classes to
-4. Upload a document file (PDF, PNG, JPG, TIFF)
-5. For PDFs, choose a **Discovery Mode**:
+3. Select a **Configuration Version** to save discovered classes to, or click
+   **Create new version** to create one on the fly (the new version inherits its
+   settings and existing document classes from a chosen source version)
+4. Choose a **Save mode**:
+   - **Add to existing schema** (default) — keeps the version's existing document
+     classes and adds/updates the discovered ones (a discovered class with the
+     same name overwrites the existing one)
+   - **Replace existing schema** — removes all existing document classes in the
+     selected version first, then saves only the newly discovered ones. For
+     multi-section discovery, the schema is cleared once before the batch runs,
+     so all sections in the run are rebuilt into a clean schema. A confirmation
+     warning is shown while Replace is selected.
+5. Upload a document file (PDF, PNG, JPG, TIFF)
+6. For PDFs, choose a **Discovery Mode**:
    - **Single Section Document** — discovers one class from the whole document; optionally upload a ground truth JSON file
    - **Multi-Section Package** — define page ranges (manually or via ✨ Auto-detect) to discover multiple classes
-6. Click **"Start Discovery"** (or "Start Discovery (N sections)" for multi-section)
-7. Monitor progress in real-time in the Discovery Jobs table below
+7. Click **"Start Discovery"** (or "Start Discovery (N sections)" for multi-section)
+8. Monitor progress in real-time in the Discovery Jobs table below
+
+> **Note:** "Save mode" and "Create new version" apply to Single Document,
+> Multiple Documents (multi-doc clustering), and Policy Discovery alike. In
+> Replace mode, class discovery clears the version's `classes` list while Policy
+> Discovery clears its `policy_classes` list.
 
 **Monitoring Progress:**
 - Real-time progress messages via GraphQL subscriptions (e.g., "Analyzing document structure with AI...", "Saving to configuration...")

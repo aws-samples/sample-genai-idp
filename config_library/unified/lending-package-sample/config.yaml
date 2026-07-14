@@ -92,17 +92,17 @@ classes:
         format: date
         description: The actual date when the employee was paid.
         type: string
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       PayPeriodStartDate:
         format: date
         description: The beginning date of the pay period covered by this payslip.
         type: string
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       PayPeriodEndDate:
         format: date
         description: The ending date of the pay period covered by this payslip.
         type: string
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       CurrentGrossPay:
         type: number
         description: The total earnings before any deductions for the current pay period.
@@ -270,15 +270,15 @@ classes:
       DATE_OF_BIRTH:
         type: string
         description: The birth date of the license holder.
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       DATE_OF_ISSUE:
         type: string
         description: The date when the driver's license was issued.
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       EXPIRATION_DATE:
         type: string
         description: The date when the driver's license expires.
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       CLASS:
         type: string
         description: The type of driving privileges granted.
@@ -311,7 +311,7 @@ classes:
       date:
         format: date
         type: string
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       dollar_amount:
         type: number
         x-aws-idp-evaluation-method: NUMERIC_EXACT
@@ -380,7 +380,7 @@ classes:
         properties:
           date:
             type: string
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           description:
             type: string
             x-aws-idp-evaluation-method: EXACT
@@ -412,11 +412,11 @@ classes:
       statement_start_date:
         format: date
         type: string
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       statement_end_date:
         format: date
         type: string
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       account_summary:
         type: array
         items:
@@ -581,7 +581,7 @@ classes:
             x-aws-idp-evaluation-method: EXACT
           Date of Birth:
             type: string
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           Gender:
             type: string
             x-aws-idp-evaluation-method: EXACT
@@ -623,7 +623,7 @@ classes:
             x-aws-idp-evaluation-method: EXACT
           Date of Birth:
             type: string
-            x-aws-idp-evaluation-method: EXACT
+            x-aws-idp-evaluation-method: DATE
           Gender:
             type: string
             x-aws-idp-evaluation-method: EXACT
@@ -681,10 +681,10 @@ classes:
         x-aws-idp-evaluation-method: EXACT
       Effective Date:
         type: string
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       Expiration Date:
         type: string
-        x-aws-idp-evaluation-method: EXACT
+        x-aws-idp-evaluation-method: DATE
       Purchase Date and Time:
         type: string
         x-aws-idp-evaluation-method: EXACT

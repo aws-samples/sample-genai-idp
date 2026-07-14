@@ -94,6 +94,7 @@ def _row_to_feature(
         "stackId": row.get("stackId"),
         "uiBundlePath": row.get("uiBundlePath", ""),
         "featureApiEndpoint": row.get("featureApiEndpoint"),
+        "generationQueueArn": row.get("generationQueueArn"),
         "iconUrl": row.get("iconUrl"),
         "installedAt": row.get("installedAt", ""),
         "installedBy": row.get("installedBy"),

@@ -341,12 +341,13 @@ The codebase maintains GovCloud compatibility:
 - Use `${AWS::URLSuffix}` instead of hardcoded `amazonaws.com`
 - Validation enforced via `make check-arn-partitions`
 
-### Nested Template Generation
+### Nested Stacks
 
-AppSync resources are split into a nested template to work around CloudFormation resource limits:
-- Script: `scripts/generate_nested_template.py`
-- Generated template: `nested/appsync-nested-template.yaml`
-- Automatically extracted from main template during build
+The solution is split into nested stacks to stay under CloudFormation resource
+limits. Notably, `nested/api-resolvers/` holds the UI API resolver Lambdas plus
+the API Gateway REST API + dispatcher that the web UI calls (logical id
+`APIRESOLVERSTACK`). (This stack was historically named `nested/appsync` /
+`APPSYNCSTACK` when the UI used AWS AppSync, which has since been removed.)
 
 ### Lambda Layer Dependencies
 
@@ -456,9 +457,16 @@ that domain:
 | `.claude/skills/infrastructure.md` | CloudFormation / SAM templates, nested stacks, GovCloud |
 | `.claude/skills/extraction-pipeline.md` | Document processing pipeline, configuration, agentic extraction |
 | `.claude/skills/code-review.md` | Pre-commit self-review checklist for your own changes |
+| `.claude/skills/srt-security-scan.md` | Running the SRT security scan (`make srt-scan`), triaging HIGH findings, and mitigating (`# nosec`/code fix) or suppressing (`scripts/srt/issues.json`) them |
+| `.claude/skills/api-rbac-test.md` | Verifying API authorization (Cognito groups + config-version scope) via `make api-test` / `make api-test-static`; adding a new API operation |
 | `.claude/skills/pr-review.md` | Reviewing an external GitHub PR or GitLab MR at a URL (e.g. `review <url>`) |
+| `.claude/skills/create-hf-dataset-pr.md` | Contributing a data/label correction to an external HuggingFace dataset via a community PR (parquet key-order gotcha, verification, review artifacts) |
 | `.claude/skills/testing-qa.md` | Writing tests, pytest patterns, moto, conftest setup |
+| `.claude/skills/full-test-battery.md` | Running the FULL test battery (all suites + lint/typecheck) to validate a branch/merge; includes the known pre-existing-failure baseline so real regressions stand out |
+| `.claude/skills/live-eval-and-cost.md` | Live benchmark A/B, upgrade testing, reading accuracy/cost/confidence + prompt-cache/model cost facts |
+| `.claude/skills/run-benchmarks.md` | Running the empirical benchmark suite in `benchmarks/` (config × doc-size matrix with exact ground truth; success/completeness/accuracy/calibration/time/tokens/cost) to produce the guidance paper or gate a change vs baseline |
 | `.claude/skills/documentation.md` | Documentation standards, two doc tiers, CHANGELOG, docs-site, and the "adding a Bedrock model" checklist |
+| `.claude/skills/prepare-changelog.md` | Preparing the `[Unreleased]` CHANGELOG section for release — three-section shape (Added/Changed/Fixed), net-since-release entries (drop intra-cycle churn), compact entries with doc/PR links |
 
 > **Note:** `.claude/skills/` is canonical. The Cline assistant's
 > `.cline/skills/` files are **symlinks** to these (different filenames), so

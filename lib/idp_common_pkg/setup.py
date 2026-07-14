@@ -52,7 +52,7 @@ extras_require = {
     ],
     # Evaluation module dependencies
     "evaluation": [
-        "stickler-eval==0.4.0",
+        "stickler-eval==0.5.0",
         "genson==1.3.0",
         "munkres>=1.1.4",  # For Hungarian algorithm
         "numpy==1.26.4",  # For numeric operations
@@ -61,13 +61,8 @@ extras_require = {
     "reporting": [
         "pyarrow==23.0.1",  # For Parquet conversion
     ],
-    # Appsync module dependencies
-    "appsync": [
-        "requests==2.32.4",
-    ],
-    # Document service factory dependencies (includes both appsync and dynamodb support)
+    # Document service factory dependencies (DynamoDB-only)
     "docs_service": [
-        "requests==2.32.4",
         "aws-xray-sdk>=2.14.0",
     ],
     # Testing dependencies
@@ -93,10 +88,19 @@ extras_require = {
         "strands-agents-tools==0.2.22",  # Pin to exact working version
         "bedrock-agentcore>=0.1.1",  # Specifically for the code interpreter tool
         "regex>=2024.0.0,<2026.0.0",  # Pin regex version to avoid conflicts
+        "jsonschema>=4.0.0",  # Quick-Start agent synthesis tools (schema authoring)
+    ],
+    # Synthesis / cold-start bootstrap. The schema bridge, prompt->schema
+    # authoring, catalog match and orchestration use only core deps. The heavy
+    # SEED document generator is an optional add-on whose packaging mechanism
+    # (pip package vs git submodule) is owned by the SEED team; declare it here
+    # once that contract is finalized.
+    "synthesis": [
+        "jsonschema>=4.0.0",
     ],
     # Full package with all dependencies
     "all": [
-        "stickler-eval==0.4.0",
+        "stickler-eval==0.5.0",
         "genson==1.3.0",
         "Pillow==12.1.1",
         "pypdfium2>=5.5.0",
@@ -112,12 +116,13 @@ extras_require = {
         "strands-agents-tools==0.2.22",  # Pin to exact working version
         "bedrock-agentcore>=0.1.1",
         "regex>=2024.0.0,<2026.0.0",
+        "jsonschema>=4.0.0",
     ],
 }
 
 setup(
     name="idp_common",
-    version="0.5.16",
+    version="0.6.0",
     packages=find_packages(
         exclude=[
             "build",

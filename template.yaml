@@ -6,18 +6,6 @@ Transform: AWS::Serverless-2016-10-31
 Description: AWS GenAI IDP Accelerator (uksb-r8evguc4p9) (SO9027) (v<VERSION>)
 
 Mappings:
-  AppSyncLogLevelMap:
-    DEBUG:
-      FieldLogLevel: ALL
-    INFO:
-      FieldLogLevel: ALL
-    WARN:
-      FieldLogLevel: ERROR
-    ERROR:
-      FieldLogLevel: ERROR
-    CRITICAL:
-      FieldLogLevel: ERROR
-
   CrawlerScheduleMap:
     Manual:
       ScheduleExpression: ""
@@ -48,7 +36,37 @@ Mappings:
     lending-package-sample-govcloud:
       ConfigPath: "lending-package-sample-govcloud"
 
+  # AWS Management Console domain per partition. Output console-URLs must use the
+  # partition-correct domain: hardcoded "console.aws.amazon.com" links break in
+  # GovCloud (they must be "console.amazonaws-us-gov.com"). Consumed in Outputs
+  # via !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain].
+  ConsoleDomainMap:
+    aws:
+      Domain: "console.aws.amazon.com"
+    aws-us-gov:
+      Domain: "console.amazonaws-us-gov.com"
+    aws-cn:
+      Domain: "console.amazonaws.cn"
+
 Parameters:
+  # NOTE: the legacy ApiTransport parameter has been removed. The UI/backend
+  # now always use the API Gateway REST API + polling + Lambda response
+  # streaming (the former GraphQL API has been fully removed).
+
+  LambdaWebAdapterLayerArn:
+    Type: String
+    # Public AWS Lambda Web Adapter layer (x86_64). The account 753240598075 is
+    # the LWA publisher; the layer name/version are region-stable. Leave blank
+    # to default to the LWA layer in this stack's region/partition (constructed
+    # as arn:${AWS::Partition}:lambda:${AWS::Region}:753240598075:...). Override
+    # this parameter for GovCloud (GovCloud publishes LWA under a different
+    # account; see the LWA releases) or to pin a specific version.
+    Default: ""
+    Description: >-
+      ARN of the AWS Lambda Web Adapter layer used by the chat streaming Function
+      URL. Leave blank to use the region-default LWA x86_64 layer; override for
+      GovCloud or to pin a version.
+
   # Authorization params
   AdminEmail:
     Type: String
@@ -254,6 +272,12 @@ Parameters:
     AllowedValues: [ 'true', 'false' ]
     Description: Enable Model Context Protocol (MCP) integration for external application access via AWS Bedrock AgentCore Gateway
 
+  EnableQuickStartWidget:
+    Type: String
+    Default: 'true'
+    AllowedValues: [ 'true', 'false' ]
+    Description: Show the floating Quick Start chat widget in the web UI for prompt-based config bootstrap
+
   # Optional Knowledge Base Configuration
   DocumentKnowledgeBase:
     Default: "BEDROCK_KNOWLEDGE_BASE (Create)"
@@ -290,6 +314,7 @@ Parameters:
       - "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
       - "us.anthropic.claude-sonnet-4-20250514-v1:0"
       - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      - "us.anthropic.claude-sonnet-5"
       - "eu.amazon.nova-lite-v1:0"
       - "eu.amazon.nova-pro-v1:0"
       - "eu.amazon.nova-2-lite-v1:0"
@@ -304,6 +329,7 @@ Parameters:
       - "global.amazon.nova-2-lite-v1:0"
       - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      - "global.anthropic.claude-sonnet-5"
 
     Description: Model to use for optional Document Knowledge Base. Model access MUST be enabled in Amazon Bedrock. Note - Nova Premier may not be available in all EU regions.
 
@@ -461,55 +487,14 @@ Parameters:
     Default: CloudFront
     AllowedValues:
       - CloudFront
-      - ALB
+      - APIGateway
     Description: >-
-      Frontend hosting method. Use CloudFront for public/standard deployments.
-      Use ALB for GovCloud or private network deployments that require
-      VPC-based hosting.
-
-  ALBVpcId:
-    Type: String
-    Default: ""
-    Description: >-
-      (Required when WebUIHosting=ALB or AppSyncVisibility=PRIVATE) VPC ID.
-      When using ALB hosting, this is the VPC for the ALB and S3 VPC endpoint.
-      When using private AppSync (AppSyncVisibility=PRIVATE), this VPC ID is
-      also used for the Lambda security group - private AppSync requires all
-      Lambda functions to be in the same VPC as the AppSync VPC endpoint, so
-      ALB hosting and private AppSync always use the same VPC.
-
-  ALBSubnetIds:
-    Type: CommaDelimitedList
-    Default: ""
-    Description: >-
-      (Required when WebUIHosting=ALB) Comma-separated subnet IDs for the ALB
-      (minimum 2 subnets in different AZs).
-
-  ALBCertificateArn:
-    Type: String
-    Default: ""
-    Description: >-
-      (Required when WebUIHosting=ALB) ACM certificate ARN for the ALB HTTPS
-      listener. Can be ACM-issued or imported (including self-signed). Use
-      scripts/generate_self_signed_cert.sh for demo/testing.
-
-  ALBScheme:
-    Type: String
-    Default: internal
-    AllowedValues:
-      - internal
-      - internet-facing
-    Description: >-
-      (ALB hosting only) ALB scheme. Use 'internal' for private network access,
-      'internet-facing' for public access.
-
-  ALBAllowedCIDRs:
-    Type: String
-    Default: ""
-    Description: >-
-      (ALB hosting only) Comma-separated CIDR ranges allowed to access the ALB.
-      Leave empty to automatically use the VPC CIDR range (recommended for
-      internal ALBs). Specify explicit CIDRs to override.
+      Frontend hosting method. Use CloudFront (default) for public/standard
+      deployments. Use APIGateway for GovCloud or private-network deployments
+      that require VPC-based hosting: the Web UI is served as an S3 proxy on the
+      same REST API that already backs the UI, so it inherits the API's
+      visibility (set ApiGatewayVisibility=PRIVATE for VPC-only access) and its
+      optional WAFv2 IP allow-list (WAFAllowedIPv4Ranges).
 
   S3VpcEndpointIdOverride:
     Type: String
@@ -517,10 +502,10 @@ Parameters:
     Description: >
       Optional. Existing S3 Interface VPC Endpoint ID (vpce-...) from a central
       network account. When provided, presigned S3 URLs for browser uploads use
-      this endpoint instead of the one auto-provisioned in the ALB stack.
-      Leave empty in standard private-mode (ALB) deployments to use the
-      stack-provisioned endpoint. When this is set you MUST also set
-      S3VpcEndpointDnsNameOverride.
+      this endpoint. Leave empty for standard deployments (browser uploads then
+      use the global/regional S3 endpoint). When this is set you MUST also set
+      S3VpcEndpointDnsNameOverride, and S3PresignedUrlViaVpcEndpoint must be
+      "true" to take effect.
 
   S3VpcEndpointDnsNameOverride:
     Type: String
@@ -545,19 +530,19 @@ Parameters:
       Optional. Public-facing custom domain URL through which end users access
       the Web UI (e.g. https://idp.example.com). Required when the application
       is fronted by a customer-owned DNS alias, an Okta/SAML/OIDC SSO domain,
-      or any origin other than the auto-generated ALB or CloudFront URL. When
-      set, this origin is added to all S3 bucket CORS AllowedOrigins and to
+      or any origin other than the auto-generated API Gateway or CloudFront URL.
+      When set, this origin is added to all S3 bucket CORS AllowedOrigins and to
       Cognito App Client CallbackURLs / LogoutURLs so that browser uploads
       and OAuth redirects succeed from the custom domain. The Web UI also
       switches to using window.location.origin for OAuth redirects, which
-      keeps both the ALB URL and the custom domain working simultaneously.
-      Must include scheme (https://) and lowercase host only — no uppercase,
-      no trailing slash, no path. Lowercase is required because the Web UI's
-      Amplify config lowercases the redirect URL before sending it to
-      Cognito (browsers normalize the Origin header host to lowercase), and
+      keeps both the API Gateway URL and the custom domain working
+      simultaneously. Must include scheme (https://) and lowercase host only —
+      no uppercase, no trailing slash, no path. Lowercase is required because
+      the Web UI's Amplify config lowercases the redirect URL before sending it
+      to Cognito (browsers normalize the Origin header host to lowercase), and
       Cognito matches CallbackURLs case-sensitively after that. Leave empty
-      for standard deployments where the ALB or CloudFront URL is the only
-      browser entry point.
+      for standard deployments where the API Gateway or CloudFront URL is the
+      only browser entry point.
 
   S3PresignedUrlViaVpcEndpoint:
     Type: String
@@ -574,27 +559,27 @@ Parameters:
       browser uploads transit the VPCE. Requires the browser's network to
       resolve and route VPCE hostnames.
 
-  AppSyncVisibility:
+  ApiGatewayVisibility:
     Type: String
     Default: GLOBAL
     AllowedValues:
       - GLOBAL
       - PRIVATE
     Description: >-
-      Controls AppSync API accessibility. GLOBAL (default) is the standard
-      internet-facing mode. Set to PRIVATE for private network deployments
-      where the API must only be accessible from within the VPC via VPC
-      endpoints. Requires WebUIHosting=ALB and LambdaSubnetIds to be set.
-      All Lambda functions will be deployed in VPC when PRIVATE.
+      GLOBAL = regional internet-facing REST API; PRIVATE = private REST API
+      reachable only via the VPC interface endpoint (requires DeployInVPC=true,
+      VpcId, ApiGatewayVpcEndpointId, LambdaSubnetIds) and all Lambdas deployed
+      in-VPC. When WebUIHosting=APIGateway the Web UI is served on this same
+      REST API, so PRIVATE also makes the Web UI VPC-only.
 
   LambdaSubnetIds:
     Type: CommaDelimitedList
     Default: ""
     Description: >-
-      (Required when AppSyncVisibility=PRIVATE) Comma-separated private subnet
+      (Required when ApiGatewayVisibility=PRIVATE) Comma-separated private subnet
       IDs for Lambda functions. Should be private subnets with no direct
       internet route - Lambda traffic reaches AWS services via VPC endpoints.
-      Can be the same as ALBSubnetIds for simpler deployments, or different
+      Can be the same as PrivateSubnetIds for simpler deployments, or different
       private subnets for stricter network isolation. Minimum 2 subnets in
       different Availability Zones recommended.
 
@@ -786,7 +771,7 @@ Parameters:
   # These parameters control the optional "headless" deployment mode, where
   # the stack deploys a private Jobs REST API (API Gateway + Lambda) instead
   # of (or in addition to) the web UI. This mode is REQUIRED for GovCloud
-  # regions because the UI-layer services (AppSync, CloudFront, Cognito UI
+  # regions because some UI-layer services (e.g. CloudFront, Cognito UI
   # pool) aren't available there. In Commercial regions the mode is OPTIONAL
   # and useful for API-only / machine-to-machine integrations.
   #
@@ -932,7 +917,7 @@ Parameters:
     AllowedValues: ['true', 'false']
     Description: >-
       Set to 'true' (default) to enable the Feature Platform (catalog,
-      InstalledFeatures table, AppSync resolvers, install flow). When no
+      InstalledFeatures table, REST API resolvers, install flow). When no
       FeaturePlatformSimulatorEndpoint is configured, all features in the
       catalog are treated as automatically subscribed and the UI goes
       straight to the Install prompt. Set to 'false' to remove the platform
@@ -1025,6 +1010,25 @@ Rules:
       - Assert: !Not [ !Equals [ !Ref LambdaSecurityGroupId, "" ] ]
         AssertDescription: "LambdaSecurityGroupId is required when DeployInVPC=true"
 
+  # A PRIVATE REST API is reachable only from inside the VPC, and its resolver
+  # Lambdas (plus the Lambda security group) must live in that VPC. So
+  # ApiGatewayVisibility=PRIVATE requires the standard VPC-secured-mode params.
+  # (Formerly this coupling was implicit via WebUIHosting=ALB, which has been
+  # removed.)
+  PrivateApiRequiresVPC:
+    RuleCondition: !Equals [ !Ref ApiGatewayVisibility, "PRIVATE" ]
+    Assertions:
+      - Assert: !Equals [ !Ref DeployInVPC, "true" ]
+        AssertDescription: "ApiGatewayVisibility=PRIVATE requires DeployInVPC=true"
+      - Assert: !Not [ !Equals [ !Ref VpcId, "" ] ]
+        AssertDescription: "VpcId is required when ApiGatewayVisibility=PRIVATE"
+      - Assert: !Not [ !Equals [ !Ref ApiGatewayVpcEndpointId, "" ] ]
+        AssertDescription: "ApiGatewayVpcEndpointId (execute-api interface endpoint) is required when ApiGatewayVisibility=PRIVATE"
+      # NB: LambdaSubnetIds (a CommaDelimitedList) is validated operationally —
+      # Fn::Join is not permitted in the Rules block, and an empty-list assertion
+      # has no cheap Rules-safe form. PrivateSubnetIds/VpcId coverage above plus
+      # the DeployInVPCRequiresParams rule catch the common misconfiguration.
+
   # Bastion host is a developer-convenience layered on top of VPC-secured mode.
   # It shares the customer-supplied VPC, so DeployInVPC must be true as well.
   BastionRequiresVPC:
@@ -1056,15 +1060,17 @@ Rules:
   S3PresignedUrlViaVpcEndpointRequiresEndpoint:
     RuleCondition: !Equals [ !Ref S3PresignedUrlViaVpcEndpoint, "true" ]
     Assertions:
-      - Assert: !Or
-          - !Not [ !Equals [ !Ref S3VpcEndpointIdOverride, "" ] ]
-          - !Equals [ !Ref WebUIHosting, "ALB" ]
+      - Assert: !Not [ !Equals [ !Ref S3VpcEndpointIdOverride, "" ] ]
         AssertDescription: >-
           S3PresignedUrlViaVpcEndpoint=true requires an S3 VPC Interface Endpoint.
-          Either set S3VpcEndpointIdOverride (BYO endpoint) or use WebUIHosting=ALB
-          (which auto-provisions an endpoint).
+          Provide one via S3VpcEndpointIdOverride / S3VpcEndpointDnsNameOverride
+          (APIGateway hosting serves the UI through API Gateway's internal S3
+          integration and does not auto-provision an S3 VPC endpoint).
 
 Conditions:
+  # API transport: API Gateway REST API + polling + Lambda response streaming is
+  # now the only path (the former GraphQL API has been fully removed). No transport
+  # conditions are needed — the REST API resources deploy unconditionally.
   # Headless/VPC/Bastion feature conditions
   DeployInVPC: !Equals [!Ref DeployInVPC, 'true']
   DeployApiGateway: !Equals [!Ref EnableHeadless, 'true']
@@ -1093,7 +1099,10 @@ Conditions:
   ShouldCreateEvaluationBaselineBucket:
     !Equals [ !Ref EvaluationBaselineBucketName, "" ]
   ShouldCreateReportingBucket: !Equals [ !Ref ReportingBucketName, "" ]
-  IsWafEnabled: !Not [ !Equals [ !Ref WAFAllowedIPv4Ranges, "0.0.0.0/0" ] ]
+  # NOTE: the old WAF apparatus (IsWafEnabled / IsWafEnabledAndApi) and the
+  # private DNS condition (IsPrivateApiAndApi) existed solely to protect /
+  # expose the former GraphQL API and were removed along with it. The REST API
+  # WAF + private-endpoint wiring now lives in the nested/api-resolvers stack.
   ShouldCreateDocumentKnowledgeBase:
     !Equals [ !Ref DocumentKnowledgeBase, "BEDROCK_KNOWLEDGE_BASE (Create)" ]
   ShouldUseDocumentKnowledgeBase: !Condition ShouldCreateDocumentKnowledgeBase
@@ -1101,6 +1110,9 @@ Conditions:
     !Not [ !Equals [ !Ref DocumentSectionsCrawlerFrequency, "Manual" ] ]
   HasPermissionsBoundary: !Not [ !Equals [ !Ref PermissionsBoundaryArn, "" ] ]
   HasCustomConfigPath: !Not [ !Equals [ !Ref CustomConfigPath, "" ] ]
+  # When the LWA layer ARN is left blank, construct the region/partition default.
+  HasLambdaWebAdapterLayerArn:
+    !Not [ !Equals [ !Ref LambdaWebAdapterLayerArn, "" ] ]
   # The version-check resolver only needs IAM grants when an artifacts
   # bucket is actually configured. When `PublicArtifactsBucket` is empty
   # the resolver short-circuits before any S3 call, so we omit the policy
@@ -1126,7 +1138,10 @@ Conditions:
       - !Condition HasExternalIdP
       - !Condition HasExternalIdPGroupMapping
   UseCloudFrontHosting: !Equals [ !Ref WebUIHosting, "CloudFront" ]
-  UseALBHosting: !Equals [ !Ref WebUIHosting, "ALB" ]
+  # APIGateway hosting: the Web UI SPA is served as an S3 proxy on the existing
+  # api-resolvers REST API (same stage as the /op transport), so it inherits the
+  # API's GLOBAL/PRIVATE visibility and optional stage-level WAFv2.
+  UseApiGatewayHosting: !Equals [ !Ref WebUIHosting, "APIGateway" ]
   HasS3VpcEndpointOverride: !Not [!Equals [!Ref S3VpcEndpointIdOverride, ""]]
   # True when a customer-owned domain (DNS alias, Okta/SAML SSO domain, etc.)
   # fronts the application. Drives three template behaviours:
@@ -1137,16 +1152,17 @@ Conditions:
   #      land back on the custom domain.
   #   3. Sets VITE_CLOUDFRONT_DOMAIN to "" at Web UI build time, which makes
   #      Amplify use window.location.origin for redirectSignIn /
-  #      redirectSignOut. This keeps the ALB and the custom domain working
-  #      side-by-side instead of pinning OAuth to a single host.
+  #      redirectSignOut. This keeps the API Gateway URL and the custom domain
+  #      working side-by-side instead of pinning OAuth to a single host.
   HasCustomDomain: !Not [!Equals [!Ref CustomDomainUrl, ""]]
-  # True when an S3 VPC Interface Endpoint EXISTS (either auto-provisioned by
-  # ALB stack or customer-provided via override). Used for:
+  # True when an S3 VPC Interface Endpoint EXISTS (customer-provided via the
+  # override params). Used for:
   #   - Backend Lambda S3 access (HasS3VpcEndpointAndVpc)
-  #   - Infrastructure references (WebUI bucket policy, ALB target group)
-  # NOTE: This condition does NOT control presigner URL injection.
-  # For presigner control, see UseS3VpcEndpointForPresigner.
-  HasS3VpcEndpoint: !Or [!Condition UseALBHosting, !Condition HasS3VpcEndpointOverride]
+  #   - Presigner URL injection is controlled separately (see below).
+  # NOTE: APIGateway hosting does NOT provision an S3 VPC endpoint — API Gateway
+  # reaches the Web UI bucket over AWS-internal networking. This condition is
+  # therefore driven solely by the BYO override.
+  HasS3VpcEndpoint: !Condition HasS3VpcEndpointOverride
   # True when presigner Lambdas should generate S3 URLs targeting the VPC
   # Interface Endpoint (for browser uploads). Triggered by explicit opt-in
   # or by BYO endpoint override (which always implies presigner usage).
@@ -1161,7 +1177,7 @@ Conditions:
   # reach the VPCE hostname — setting endpoint_url would cause timeouts.
   HasS3VpcEndpointAndVpc: !And [!Condition HasS3VpcEndpoint, !Condition DeployInVPC]
   EnableXRayTracingCondition: !Equals [ !Ref EnableXRayTracing, "true" ]
-  UsePrivateAppSync: !Equals [ !Ref AppSyncVisibility, "PRIVATE" ]
+  UsePrivateApi: !Equals [ !Ref ApiGatewayVisibility, "PRIVATE" ]
   HasArtifactsBucketKmsKey: !Not [ !Equals [ !Ref ArtifactsBucketKmsKeyArn, "" ] ]
   CircuitBreakerEnabledCondition: !Equals [ !Ref CircuitBreakerEnabled, "true" ]
   HasCircuitBreakerErrorHandler: !Not [ !Equals [ !Ref CircuitBreakerErrorHandlerArn, "" ] ]
@@ -1282,21 +1298,16 @@ Metadata:
           - CloudFrontPriceClass
           - CloudFrontAllowedGeos
       - Label:
-          default: "ALB Hosting (when WebUIHosting=ALB)"
+          default: "API Gateway Hosting (when WebUIHosting=APIGateway)"
         Parameters:
-          - ALBVpcId
-          - ALBSubnetIds
-          - ALBCertificateArn
-          - ALBScheme
-          - ALBAllowedCIDRs
           - S3PresignedUrlViaVpcEndpoint
           - S3VpcEndpointIdOverride
           - S3VpcEndpointDnsNameOverride
           - CustomDomainUrl
       - Label:
-          default: "Private Network (AppSync=PRIVATE requires ALB hosting)"
+          default: "Private Network (ApiGatewayVisibility=PRIVATE — VPC-only REST API + Web UI)"
         Parameters:
-          - AppSyncVisibility
+          - ApiGatewayVisibility
           - LambdaSubnetIds
       - Label:
           default: "Headless API Deployment (required for GovCloud)"
@@ -1414,28 +1425,18 @@ Metadata:
         default: "MLflow Tracking Server ARN"
       WebUIHosting:
         default: "Web UI Hosting Method"
-      ALBVpcId:
-        default: "ALB - VPC ID"
-      ALBSubnetIds:
-        default: "ALB - Subnet IDs"
-      ALBCertificateArn:
-        default: "ALB - ACM Certificate ARN"
-      ALBScheme:
-        default: "ALB - Scheme (internal/internet-facing)"
-      ALBAllowedCIDRs:
-        default: "ALB - Allowed CIDR Ranges"
       S3PresignedUrlViaVpcEndpoint:
         default: "Route Browser S3 Uploads via VPC Endpoint"
-      AppSyncVisibility:
-        default: "AppSync API Visibility (GLOBAL or PRIVATE)"
+      ApiGatewayVisibility:
+        default: "REST API Visibility (GLOBAL or PRIVATE)"
       LambdaSubnetIds:
-        default: "Lambda Subnet IDs (required when AppSyncVisibility=PRIVATE)"
+        default: "Lambda Subnet IDs (required when ApiGatewayVisibility=PRIVATE)"
       S3VpcEndpointIdOverride:
-        default: "ALB - S3 Interface VPC Endpoint ID (BYO endpoint, optional)"
+        default: "S3 Interface VPC Endpoint ID (BYO endpoint, optional)"
       S3VpcEndpointDnsNameOverride:
-        default: "ALB - S3 Interface VPC Endpoint Regional DNS Name (BYO endpoint, optional)"
+        default: "S3 Interface VPC Endpoint Regional DNS Name (BYO endpoint, optional)"
       CustomDomainUrl:
-        default: "ALB - Custom Domain URL (https://host, no trailing slash, optional)"
+        default: "Custom Domain URL (https://host, no trailing slash, optional)"
       ArtifactsBucketKmsKeyArn:
         default: "Artifacts Bucket KMS Key ARN (optional, for pre-created KMS-encrypted bucket)"
       CircuitBreakerEnabled:
@@ -1672,10 +1673,11 @@ Resources:
             - UseS3VpcEndpointForPresigner
             - !Sub
               - "https://bucket.${VpceDnsName}"
-              - VpceDnsName: !If
-                  - HasS3VpcEndpointOverride
-                  - !Ref S3VpcEndpointDnsNameOverride
-                  - !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointDnsName
+              # Only the BYO override provides an S3 VPC endpoint now (APIGateway
+              # hosting uses API Gateway's internal S3 integration, no VPCE). The
+              # S3PresignedUrlViaVpcEndpointRequiresEndpoint rule guarantees the
+              # override is set whenever UseS3VpcEndpointForPresigner is true.
+              - VpceDnsName: !Ref S3VpcEndpointDnsNameOverride
             - !Ref AWS::NoValue
       LoggingConfig:
         LogGroup: !Ref ApiHandlerLogGroup
@@ -1996,10 +1998,11 @@ Resources:
             - HasS3VpcEndpointAndVpc
             - !Sub
               - "https://bucket.${VpceDnsName}"
-              - VpceDnsName: !If
-                  - HasS3VpcEndpointOverride
-                  - !Ref S3VpcEndpointDnsNameOverride
-                  - !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointDnsName
+              # Only the BYO override provides an S3 VPC endpoint now (APIGateway
+              # hosting uses API Gateway's internal S3 integration, no VPCE). The
+              # S3PresignedUrlViaVpcEndpointRequiresEndpoint rule guarantees the
+              # override is set whenever UseS3VpcEndpointForPresigner is true.
+              - VpceDnsName: !Ref S3VpcEndpointDnsNameOverride
             - !Ref AWS::NoValue
       LoggingConfig:
         LogGroup:
@@ -2046,6 +2049,22 @@ Resources:
       TargetPrefix: "config_library"
       ConfigLibraryHash: "<CONFIG_LIBRARY_HASH_TOKEN>"
       FileList: <CONFIG_FILES_LIST_TOKEN>
+
+  # Copies the curated sample-document binaries from the artifacts bucket into
+  # the stack's ConfigurationBucket under samples/. Reuses the generic
+  # ConfigurationCopyFunction. The target keys (samples/<file>) match the
+  # s3Key values in config_library/samples-manifest.json, so the UI can list
+  # and launch bundled samples without a local download.
+  CopySampleFiles:
+    Type: Custom::ConfigurationCopy
+    Properties:
+      ServiceToken: !GetAtt ConfigurationCopyFunction.Arn
+      SourceBucket: "<ARTIFACT_BUCKET_TOKEN>"
+      SourcePrefix: "<ARTIFACT_PREFIX_TOKEN>/samples"
+      TargetBucket: !Ref ConfigurationBucket
+      TargetPrefix: "samples"
+      ConfigLibraryHash: "<SAMPLES_HASH_TOKEN>"
+      FileList: <SAMPLE_FILES_LIST_TOKEN>
 
   ##########################################################################
   # Nested stack for selected options
@@ -2116,7 +2135,7 @@ Resources:
           LOOKUP_FUNCTION_NAME: !Ref LookupFunction
           STRANDS_LOG_LEVEL: !Ref LogLevel
           AGENT_TABLE: !Ref AgentTable
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: ""
           ATHENA_DATABASE: !Ref ReportingDatabase
           ATHENA_WORKGROUP: primary
           QUERY_RESULTS_BUCKET: !If
@@ -2152,12 +2171,10 @@ Resources:
             Effect: Allow
             Action: bedrock-agentcore:InvokeAgentRuntime
             Resource: "*"
-        - Statement:
-            Effect: Allow
-            Action: appsync:GraphQL
-            Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${GraphQLApi.ApiId}/*"
         - DynamoDBCrudPolicy:
             TableName: !Ref ChatMessagesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ChatSessionsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdHelperChatMemoryTable
         - DynamoDBReadPolicy:
@@ -2259,11 +2276,6 @@ Resources:
                 Action: sts:AssumeRole
                 Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -2551,8 +2563,9 @@ Resources:
         BedrockHubRoleSessionName: !Ref BedrockHubRoleSessionName
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         ConfigurationTable: !Ref ConfigurationTable
-        AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
-        AppSyncApiArn: !GetAtt GraphQLApi.Arn
+        # GraphQL API removed: every processing Lambda writes the TrackingTable
+        # directly (DOCUMENT_TRACKING_MODE=dynamodb). The old ApiUrl/ApiArn
+        # params are no longer passed (the pattern stack no longer declares them).
         ConfigurationDefaultS3Uri: !If
           - HasCustomConfigPath
           - !Ref CustomConfigPath
@@ -2587,17 +2600,17 @@ Resources:
         EnableECRImageScanning: !Ref EnableECRImageScanning
         PreviousIDPPattern: !GetAtt PreviousIDPPatternValue.IDPPattern
 
-        # Private AppSync VPC config (req #2) — puts processing Lambdas in VPC
-        UsePrivateAppSync: !If [UsePrivateAppSync, "true", "false"]
+        # Private REST API VPC config (req #2) — puts processing Lambdas in VPC
+        UsePrivateApi: !If [UsePrivateApi, "true", "false"]
         LambdaSubnetIds: !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - !Join [",", !Ref LambdaSubnetIds]
           - ""
         LambdaSecurityGroupId: !If
           - DeployInVPC
           - !Ref LambdaSecurityGroupId
           - !If
-            - UsePrivateAppSync
+            - UsePrivateApi
             - !Ref LambdaVpcSecurityGroup
             - ""
 
@@ -2615,21 +2628,20 @@ Resources:
 
 
   ##########################################################################
-  # Nested stack for AppSync resolvers
+  # Nested stack for REST API resolvers
   ##########################################################################
 
-  APPSYNCSTACK:
+  APIRESOLVERSTACK:
     DependsOn:
       - IsStacknameLengthOK
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: ./nested/appsync/.aws-sam/packaged.yaml
+      TemplateURL: ./nested/api-resolvers/.aws-sam/packaged.yaml
       Parameters:
-        # Core AppSync resources
-        GraphQLApiId: !GetAtt GraphQLApi.ApiId
-        GraphQLApiArn: !GetAtt GraphQLApi.Arn
-        GraphQLApiUrl: !GetAtt GraphQLApi.GraphQLUrl
-        
+        # GraphQL API removed: the nested stack now hosts only the REST API +
+        # dispatcher. The GraphQLApiId/GraphQLApiArn/GraphQLApiUrl params are no
+        # longer passed (the nested template no longer declares them).
+
         # Background worker ARNs
         AgentChatProcessorFunctionArn: !GetAtt AgentChatProcessorFunction.Arn
         ChatWithDocumentProcessorFunctionArn: !GetAtt ChatWithDocumentProcessorFunction.Arn
@@ -2644,7 +2656,7 @@ Resources:
         ChatSessionsTableName: !Ref ChatSessionsTable
         IdHelperChatMemoryTableName: !Ref IdHelperChatMemoryTable
         DiscoveryTrackingTableName: !Ref DiscoveryTrackingTable
-        
+
         # S3 Buckets
         InputBucketName: !Ref InputBucket
         OutputBucketName: !Ref OutputBucket
@@ -2716,20 +2728,23 @@ Resources:
           - UseS3VpcEndpointForPresigner
           - !Sub
             - "https://bucket.${VpceDnsName}"
-            - VpceDnsName: !If
-                - HasS3VpcEndpointOverride
-                - !Ref S3VpcEndpointDnsNameOverride
-                - !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointDnsName
+            - VpceDnsName: !Ref S3VpcEndpointDnsNameOverride
           - ""
 
-        # Private AppSync VPC config (req #2) — passed to nested/appsync resolver Lambdas
-        UsePrivateAppSync: !If [UsePrivateAppSync, "true", "false"]
+        # Private REST API config — private endpoint + WAF + in-VPC resolver
+        # Lambdas. ApiGatewayVpcEndpointId (reused from the headless Jobs API)
+        # is only relevant in PRIVATE mode. WAFAllowedIPv4Ranges is a plain
+        # comma-joined string (the parent param is Type: String); the nested
+        # template declares it as CommaDelimitedList, which accepts that string.
+        UsePrivateApi: !If [UsePrivateApi, "true", "false"]
+        ApiGatewayVpcEndpointId: !If [UsePrivateApi, !Ref ApiGatewayVpcEndpointId, ""]
+        WAFAllowedIPv4Ranges: !Ref WAFAllowedIPv4Ranges
         LambdaSubnetIds: !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - !Join [",", !Ref LambdaSubnetIds]
           - ""
         LambdaSecurityGroupId: !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - !Ref LambdaVpcSecurityGroup
           - ""
 
@@ -2741,10 +2756,66 @@ Resources:
           - ""
         CircuitBreakerEnabled: !Ref CircuitBreakerEnabled
 
+        # API Gateway HTTP API transport (the only transport now). The nested
+        # stack builds the HTTP API + JWT authorizer + dispatcher Lambda. The
+        # dispatcher needs the main-template resolver function ARNs (the rest are
+        # defined in the nested stack). ApiTransport is no longer passed.
+        # NB: UserPoolClientId is intentionally NOT passed. The nested stack only
+        # needs the pool id (authorizer ProviderARNs); the client id is unused
+        # there. Omitting it removes an APIRESOLVERSTACK -> UserPoolClient
+        # dependency edge, so UserPoolClient.CallbackURLs can safely reference
+        # this stack's HttpApiEndpoint output (WebUIHosting=APIGateway) without a
+        # circular dependency.
+        UserPoolId: !Ref UserPool
+
+        # Web UI hosting via API Gateway S3 proxy (WebUIHosting=APIGateway). When
+        # enabled, this REST API also serves the React SPA from the Web UI bucket
+        # on the same stage, so the UI inherits the API's PRIVATE/GLOBAL
+        # visibility and stage-level WAF.
+        ServeWebUI: !If [UseApiGatewayHosting, "true", "false"]
+        WebUIBucketName: !If [UseApiGatewayHosting, !Ref WebUIBucket, ""]
+        WebUIProxyRoleArn: !If [UseApiGatewayHosting, !GetAtt WebUIProxyRole.Arn, ""]
+
+        CompleteSectionReviewFunctionArn: !GetAtt CompleteSectionReviewFunction.Arn
+        UserManagementFunctionArn: !GetAtt UserManagementFunction.Arn
+        FinetuningJobsResolverFunctionArn: !GetAtt FinetuningJobsResolverFunction.Arn
+        CalculateCapacityResolverFunctionArn: !GetAtt CalculateCapacityResolverFunction.Arn
+        VersionCheckResolverFunctionArn: !GetAtt VersionCheckResolverFunction.Arn
+
+        # Feature-platform UI-field resolver ARNs. The 6 UI-facing feature
+        # fields route through this HTTP API dispatcher; their resolver Lambdas
+        # live in the FeaturePlatformStack nested stack, so the ARNs flow
+        # FeaturePlatformStack Outputs -> here -> dispatcher FIELD_FUNCTION_MAP.
+        # Empty when the feature platform is disabled (fields absent from map).
+        ListCatalogFeaturesFunctionArn: !If
+          - IsFeaturePlatformEnabled
+          - !GetAtt FeaturePlatformStack.Outputs.ListCatalogFeaturesFunctionArn
+          - ""
+        ListInstalledFeaturesFunctionArn: !If
+          - IsFeaturePlatformEnabled
+          - !GetAtt FeaturePlatformStack.Outputs.ListInstalledFeaturesFunctionArn
+          - ""
+        CheckFeatureEntitlementFunctionArn: !If
+          - IsFeaturePlatformEnabled
+          - !GetAtt FeaturePlatformStack.Outputs.CheckFeatureEntitlementFunctionArn
+          - ""
+        GetFeatureLaunchUrlFunctionArn: !If
+          - IsFeaturePlatformEnabled
+          - !GetAtt FeaturePlatformStack.Outputs.GetFeatureLaunchUrlFunctionArn
+          - ""
+        SubscribeFeatureFunctionArn: !If
+          - IsFeaturePlatformEnabled
+          - !GetAtt FeaturePlatformStack.Outputs.SubscribeFeatureFunctionArn
+          - ""
+        UnsubscribeFeatureFunctionArn: !If
+          - IsFeaturePlatformEnabled
+          - !GetAtt FeaturePlatformStack.Outputs.UnsubscribeFeatureFunctionArn
+          - ""
+
   ##########################################################################
   # === Feature Platform (optional) — BEGIN ===============================
   # Deployed only when EnableFeaturePlatform=true. Adds an InstalledFeatures
-  # DDB table + AppSync Lambdas for listing/registering/installing features
+  # DDB table + resolver Lambdas for listing/registering/installing features
   # and checking Marketplace entitlements. Feature stacks register themselves
   # with this host and have their UI bundles rendered inside the main IDP web
   # UI. With no FeaturePlatformSimulatorEndpoint set the platform runs in
@@ -2759,18 +2830,23 @@ Resources:
   # Stack URL directly from those. Marketplace features use a private seller
   # bucket declared in config_library/extensions-marketplace.yaml.
 
+  # Ordering note: APIRESOLVERSTACK now consumes FeaturePlatformStack's resolver
+  # function ARNs (the 6 UI fields) via !GetAtt FeaturePlatformStack.Outputs.*,
+  # which makes APIRESOLVERSTACK implicitly depend on FeaturePlatformStack. The old
+  # explicit "FeaturePlatformStack DependsOn APIRESOLVERSTACK" was for attaching
+  # GraphQL resolvers to the main schema; with the GraphQL API gone it is removed (and
+  # keeping it would create a dependency cycle). The implicit GetAtt dependency
+  # is conditional-safe: it only applies when IsFeaturePlatformEnabled is true.
   FeaturePlatformStack:
     Type: AWS::CloudFormation::Stack
     Condition: IsFeaturePlatformEnabled
-    DependsOn:
-      - APPSYNCSTACK  # Attach resolvers only after main schema is finalised
     Properties:
       TemplateURL: ./feature-platform/main-stack-extensions/.aws-sam/packaged.yaml
       Parameters:
         MainStackName: !Ref AWS::StackName
-        GraphQLApiId: !GetAtt GraphQLApi.ApiId
-        GraphQLApiArn: !GetAtt GraphQLApi.Arn
-        AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
+        # GraphQL API removed: the feature platform now uses the REST API only. The
+        # ApiTransport / GraphQLApiId / GraphQLApiArn / ApiUrl params are no
+        # longer passed (the feature-platform template no longer declares them).
         UserPoolId: !Ref UserPool
         # Feature stacks with HTTP APIs use these two as the JWT audience
         # (Cognito Client id) and as the document-state table name for
@@ -2995,6 +3071,8 @@ Resources:
             Status: Enabled
             Prefix: mcp-temp/
             ExpirationInDays: 7
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 7
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
 
@@ -3059,6 +3137,8 @@ Resources:
             Status: Enabled
             ExpirationInDays: 180
             Prefix: "" # Applies to all objects in the bucket
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 180
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 7
 
@@ -3094,32 +3174,6 @@ Resources:
             Condition:
               StringEquals:
                 "AWS:SourceAccount": !Ref "AWS::AccountId"
-          - !If
-            - UseALBHosting
-            - Sid: AllowALBAccessLogs
-              Effect: Allow
-              Principal:
-                Service: !Sub "logdelivery.elasticloadbalancing.${AWS::URLSuffix}"
-              Action:
-                - s3:PutObject
-              Resource: !Sub "${LoggingBucket.Arn}/alb-access-logs/*"
-              Condition:
-                StringEquals:
-                  "aws:SourceAccount": !Ref "AWS::AccountId"
-            - !Ref AWS::NoValue
-          - !If
-            - UseALBHosting
-            - Sid: AllowALBAccessLogsBucketACL
-              Effect: Allow
-              Principal:
-                Service: !Sub "logdelivery.elasticloadbalancing.${AWS::URLSuffix}"
-              Action:
-                - s3:GetBucketAcl
-              Resource: !Sub "${LoggingBucket.Arn}"
-              Condition:
-                StringEquals:
-                  "aws:SourceAccount": !Ref "AWS::AccountId"
-            - !Ref AWS::NoValue
           - Sid: EnforceSSLOnly
             Effect: Deny
             Principal: "*"
@@ -3154,7 +3208,11 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt GetLowercaseAlbUrl.Lowercase
+                # APIGateway hosting: the browser origin is the execute-api host
+                # (scheme+host only — the /api stage path is not part of the CORS
+                # Origin). A single-wildcard origin avoids a bucket->API-stack
+                # dependency cycle while matching the REST API's regional host.
+                - !Sub "https://*.execute-api.${AWS::Region}.${AWS::URLSuffix}"
               # For local development only
               - "http://localhost:3000"
               # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
@@ -3185,6 +3243,13 @@ Resources:
           - Id: DeleteAfterNDays
             Status: Enabled
             ExpirationInDays: !Ref DataRetentionInDays
+            # Buckets are versioned; without this, overwritten/deleted object
+            # versions accumulate forever (Expiration only adds delete markers).
+            # Noncurrent versions get the same retention as current data —
+            # they are also the byte-store for document version history
+            # (see docs/document-versions.md).
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref DataRetentionInDays
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
 
@@ -3235,7 +3300,11 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt GetLowercaseAlbUrl.Lowercase
+                # APIGateway hosting: the browser origin is the execute-api host
+                # (scheme+host only — the /api stage path is not part of the CORS
+                # Origin). A single-wildcard origin avoids a bucket->API-stack
+                # dependency cycle while matching the REST API's regional host.
+                - !Sub "https://*.execute-api.${AWS::Region}.${AWS::URLSuffix}"
               # For local development only
               - "http://localhost:3000"
               # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
@@ -3266,6 +3335,13 @@ Resources:
           - Id: DeleteAfterNDays
             Status: Enabled
             ExpirationInDays: !Ref DataRetentionInDays
+            # Buckets are versioned; without this, overwritten/deleted object
+            # versions accumulate forever (Expiration only adds delete markers).
+            # Noncurrent versions get the same retention as current data —
+            # they are also the byte-store for document version history
+            # (see docs/document-versions.md).
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref DataRetentionInDays
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
 
@@ -3316,6 +3392,13 @@ Resources:
           - Id: DeleteAfterNDays
             Status: Enabled
             ExpirationInDays: !Ref DataRetentionInDays
+            # Buckets are versioned; without this, overwritten/deleted object
+            # versions accumulate forever (Expiration only adds delete markers).
+            # Noncurrent versions get the same retention as current data —
+            # they are also the byte-store for document version history
+            # (see docs/document-versions.md).
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref DataRetentionInDays
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
 
@@ -3358,7 +3441,11 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt GetLowercaseAlbUrl.Lowercase
+                # APIGateway hosting: the browser origin is the execute-api host
+                # (scheme+host only — the /api stage path is not part of the CORS
+                # Origin). A single-wildcard origin avoids a bucket->API-stack
+                # dependency cycle while matching the REST API's regional host.
+                - !Sub "https://*.execute-api.${AWS::Region}.${AWS::URLSuffix}"
               # For local development only
               - "http://localhost:3000"
               # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
@@ -3389,6 +3476,13 @@ Resources:
           - Id: DeleteAfterNDays
             Status: Enabled
             ExpirationInDays: !Ref DataRetentionInDays
+            # Buckets are versioned; without this, overwritten/deleted object
+            # versions accumulate forever (Expiration only adds delete markers).
+            # Noncurrent versions get the same retention as current data —
+            # they are also the byte-store for document version history
+            # (see docs/document-versions.md).
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref DataRetentionInDays
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
 
@@ -3565,10 +3659,11 @@ Resources:
             - HasS3VpcEndpointAndVpc
             - !Sub
               - "https://bucket.${VpceDnsName}"
-              - VpceDnsName: !If
-                  - HasS3VpcEndpointOverride
-                  - !Ref S3VpcEndpointDnsNameOverride
-                  - !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointDnsName
+              # Only the BYO override provides an S3 VPC endpoint now (APIGateway
+              # hosting uses API Gateway's internal S3 integration, no VPCE). The
+              # S3PresignedUrlViaVpcEndpointRequiresEndpoint rule guarantees the
+              # override is set whenever UseS3VpcEndpointForPresigner is true.
+              - VpceDnsName: !Ref S3VpcEndpointDnsNameOverride
             - !Ref AWS::NoValue
       Policies:
         - S3CrudPolicy:
@@ -3848,7 +3943,11 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt GetLowercaseAlbUrl.Lowercase
+                # APIGateway hosting: the browser origin is the execute-api host
+                # (scheme+host only — the /api stage path is not part of the CORS
+                # Origin). A single-wildcard origin avoids a bucket->API-stack
+                # dependency cycle while matching the REST API's regional host.
+                - !Sub "https://*.execute-api.${AWS::Region}.${AWS::URLSuffix}"
               # For local development only
               - "http://localhost:3000"
               # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
@@ -3879,6 +3978,13 @@ Resources:
           - Id: DeleteAfterNDays
             Status: Enabled
             ExpirationInDays: !Ref DataRetentionInDays
+            # Buckets are versioned; without this, overwritten/deleted object
+            # versions accumulate forever (Expiration only adds delete markers).
+            # Noncurrent versions get the same retention as current data —
+            # they are also the byte-store for document version history
+            # (see docs/document-versions.md).
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref DataRetentionInDays
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
 
@@ -3926,6 +4032,10 @@ Resources:
             Status: Enabled
             # Since bucket is for intermediate storage only, use log retention rather than data retention period
             ExpirationInDays: !Ref LogRetentionDays
+            # Versioned bucket: expire noncurrent versions of intermediate
+            # state on the same short schedule as current objects.
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref LogRetentionDays
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
 
@@ -3973,7 +4083,11 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt GetLowercaseAlbUrl.Lowercase
+                # APIGateway hosting: the browser origin is the execute-api host
+                # (scheme+host only — the /api stage path is not part of the CORS
+                # Origin). A single-wildcard origin avoids a bucket->API-stack
+                # dependency cycle while matching the REST API's regional host.
+                - !Sub "https://*.execute-api.${AWS::Region}.${AWS::URLSuffix}"
               # For local development only
               - "http://localhost:3000"
               # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
@@ -4004,6 +4118,13 @@ Resources:
           - Id: DeleteAfterNDays
             Status: Enabled
             ExpirationInDays: !Ref DataRetentionInDays
+            # Buckets are versioned; without this, overwritten/deleted object
+            # versions accumulate forever (Expiration only adds delete markers).
+            # Noncurrent versions get the same retention as current data —
+            # they are also the byte-store for document version history
+            # (see docs/document-versions.md).
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref DataRetentionInDays
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
 
@@ -4046,7 +4167,11 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt GetLowercaseAlbUrl.Lowercase
+                # APIGateway hosting: the browser origin is the execute-api host
+                # (scheme+host only — the /api stage path is not part of the CORS
+                # Origin). A single-wildcard origin avoids a bucket->API-stack
+                # dependency cycle while matching the REST API's regional host.
+                - !Sub "https://*.execute-api.${AWS::Region}.${AWS::URLSuffix}"
               # For local development only
               - "http://localhost:3000"
               # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
@@ -4077,6 +4202,13 @@ Resources:
           - Id: DeleteAfterNDays
             Status: Enabled
             ExpirationInDays: !Ref DataRetentionInDays
+            # Buckets are versioned; without this, overwritten/deleted object
+            # versions accumulate forever (Expiration only adds delete markers).
+            # Noncurrent versions get the same retention as current data —
+            # they are also the byte-store for document version history
+            # (see docs/document-versions.md).
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref DataRetentionInDays
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
 
@@ -4104,13 +4236,6 @@ Resources:
     Properties:
       ServiceToken: !GetAtt GetDomainLambda.Arn
       InputString: !Ref AWS::StackName
-
-  GetLowercaseAlbUrl:
-    Type: Custom::GetLowercaseAlbUrl
-    Condition: UseALBHosting
-    Properties:
-      ServiceToken: !GetAtt GetDomainLambda.Arn
-      InputString: !GetAtt ALBHOSTINGSTACK.Outputs.WebUIURL
 
   ReportingDatabase:
     Type: AWS::Glue::Database
@@ -4525,7 +4650,11 @@ Resources:
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}"
-                - !GetAtt GetLowercaseAlbUrl.Lowercase
+                # APIGateway hosting: the browser origin is the execute-api host
+                # (scheme+host only — the /api stage path is not part of the CORS
+                # Origin). A single-wildcard origin avoids a bucket->API-stack
+                # dependency cycle while matching the REST API's regional host.
+                - !Sub "https://*.execute-api.${AWS::Region}.${AWS::URLSuffix}"
               # For local development only
               - "http://localhost:3000"
               # Custom domain (e.g. customer-owned DNS alias, Okta SSO domain).
@@ -4622,14 +4751,16 @@ Resources:
                   "AWS:SourceArn": !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
             - !Ref AWS::NoValue
           - !If
-            - UseALBHosting
+            # APIGateway hosting: allow the API Gateway S3-proxy role to read the
+            # SPA objects. Same-account access also works via the role's identity
+            # policy (WebUIProxyRole), but the explicit resource grant keeps the
+            # bucket's access model self-documenting and robust to future changes.
+            - UseApiGatewayHosting
             - Effect: Allow
-              Principal: "*"
+              Principal:
+                AWS: !GetAtt WebUIProxyRole.Arn
               Action: s3:GetObject
               Resource: !Sub "${WebUIBucket.Arn}/*"
-              Condition:
-                StringEquals:
-                  "aws:sourceVpce": !GetAtt ALBHOSTINGSTACK.Outputs.S3VPCEndpointId
             - !Ref AWS::NoValue
           - Effect: "Deny"
             Action:
@@ -4990,6 +5121,30 @@ Resources:
       MessageRetentionPeriod: 345600 # 4 days
       KmsMasterKeyId: !Ref CustomerManagedEncryptionKey
 
+  ##########################################################################
+  # Config Bootstrap (Quick Start) tracking + queue
+  ##########################################################################
+
+  BootstrapTrackingTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: jobId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: jobId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ExpiresAfter
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKey
+
   UpdateConfigurationFunction:
     Type: AWS::Serverless::Function
     Metadata:
@@ -5180,7 +5335,7 @@ Resources:
           - ShouldUseDocumentKnowledgeBase
           - True
           - False
-        # Runtime-resolved values for APPSYNCSTACK decoupling
+        # Runtime-resolved values for APIRESOLVERSTACK decoupling
         # CloudWatch log groups moved here to decouple Agent Lambda functions from Pattern stacks
         CloudWatchLogGroups: !Join
           - ","
@@ -5325,7 +5480,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaVpcSecurityGroup
@@ -5339,11 +5494,18 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           QUEUE_URL: !Ref DocumentQueue
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: ""
+          # dynamodb: write the TrackingTable directly (no GraphQL API). The
+          # factory uses this mode now that the GraphQL transport is removed.
+          DOCUMENT_TRACKING_MODE: "dynamodb"
+          TRACKING_TABLE: !Ref TrackingTable
           DATA_RETENTION_IN_DAYS: !Ref DataRetentionInDays
           OUTPUT_BUCKET: !Ref OutputBucket
           CONFIG_TABLE: !Ref ConfigurationTable
       Policies:
+        # httpapi: the doc service writes the TrackingTable directly.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
         - SQSSendMessagePolicy:
             QueueName: !GetAtt DocumentQueue.QueueName
         - DynamoDBReadPolicy:
@@ -5351,11 +5513,6 @@ Resources:
         - S3ReadPolicy:
             BucketName: !Ref InputBucket
         - Statement:
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -5418,7 +5575,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaVpcSecurityGroup
@@ -5429,7 +5586,11 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           STATE_MACHINE_ARN: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: ""
+          # dynamodb: write the TrackingTable directly (no GraphQL API). The
+          # factory uses this mode now that the GraphQL transport is removed.
+          DOCUMENT_TRACKING_MODE: "dynamodb"
+          TRACKING_TABLE: !Ref TrackingTable
           CONCURRENCY_TABLE: !Ref ConcurrencyTable
           MAX_CONCURRENT: !Ref MaxConcurrentWorkflows
           WORKING_BUCKET: !Ref WorkingBucket
@@ -5438,6 +5599,9 @@ Resources:
           DOCUMENT_QUEUE_URL: !Ref DocumentQueue
           RECOVERY_TIMEOUT_SECONDS: !Ref CircuitBreakerRecoveryTimeoutSeconds
       Policies:
+        # httpapi: the doc service writes the TrackingTable directly.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
         - SQSPollerPolicy:
             QueueName: !GetAtt DocumentQueue.QueueName
         - StepFunctionsExecutionPolicy:
@@ -5451,12 +5615,6 @@ Resources:
         - S3CrudPolicy:
             BucketName: !Ref WorkingBucket
         - Statement:
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Query/*"
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -5548,7 +5706,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaVpcSecurityGroup
@@ -5563,7 +5721,11 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           CONCURRENCY_TABLE: !Ref ConcurrencyTable
           METRIC_NAMESPACE: !Ref AWS::StackName
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: ""
+          # dynamodb: write the TrackingTable directly (no GraphQL API). The
+          # factory uses this mode now that the GraphQL transport is removed.
+          DOCUMENT_TRACKING_MODE: "dynamodb"
+          TRACKING_TABLE: !Ref TrackingTable
           OUTPUT_BUCKET: !Ref OutputBucket
           REPORTING_BUCKET:
             !If [
@@ -5573,16 +5735,35 @@ Resources:
             ]
           SAVE_REPORTING_FUNCTION_NAME: !Ref SaveReportingDataFunctionV2
           WORKING_BUCKET: !Ref WorkingBucket
+          DATA_RETENTION_IN_DAYS: !Ref DataRetentionInDays
+          # Document version history: snapshot output S3 object versions into a
+          # per-run manifest and write a run record on successful completion.
+          DOCUMENT_VERSIONING_ENABLED: "true"
           CIRCUIT_BREAKER_ENABLED: !If [CircuitBreakerEnabledCondition, "true", "false"]
           CIRCUIT_BREAKER_MANAGER_ARN: !If [CircuitBreakerEnabledCondition, !GetAtt CircuitBreakerManagerFunction.Arn, ""]
           ALERTS_TOPIC_ARN: !If [CircuitBreakerEnabledCondition, !Ref AlertsTopic, ""]
       Policies:
+        # httpapi: the doc service writes the TrackingTable directly.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
         - DynamoDBCrudPolicy:
             TableName: !Ref TrackingTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ConcurrencyTable
         - S3CrudPolicy:
             BucketName: !Ref WorkingBucket
+        # Document version manifests: enumerate output object versions and
+        # write runs/<run_id>/manifest.json to the output bucket.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:ListBucketVersions
+              Resource: !GetAtt OutputBucket.Arn
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+              Resource: !Sub "${OutputBucket.Arn}/*"
         - Statement:
             - Effect: Allow
               Action:
@@ -5592,11 +5773,6 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !GetAtt SaveReportingDataFunctionV2.Arn
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -5904,7 +6080,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaVpcSecurityGroup
@@ -6025,11 +6201,11 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "VPC attachment is conditional: required when AppSyncVisibility=PRIVATE (SigV4 mutation to the private AppSync endpoint only resolves inside the VPC) or DeployInVPC=true (DynamoDB reached via gateway endpoint). On the default/public path the function only talks to DynamoDB, SNS, CloudWatch, and AppSync over AWS-managed networking and VPC access is not required."
+            reason: "VPC attachment is conditional: required when ApiGatewayVisibility=PRIVATE (the private REST API and its callers only resolve inside the VPC) or DeployInVPC=true (DynamoDB reached via gateway endpoint). On the default/public path the function only talks to DynamoDB, SNS, and CloudWatch over AWS-managed networking and VPC access is not required."
           - id: W92
             reason: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_116: "DLQ not required - alarm-driven, idempotent state changes"
-    # checkov:skip=CKV_AWS_117: "VPC attachment is conditional on AppSyncVisibility=PRIVATE or DeployInVPC=true (see VpcConfig below); default path does not require VPC access"
+    # checkov:skip=CKV_AWS_117: "VPC attachment is conditional on ApiGatewayVisibility=PRIVATE or DeployInVPC=true (see VpcConfig below); default path does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
     Properties:
@@ -6040,12 +6216,12 @@ Resources:
       CodeUri: src/lambda/circuit_breaker_manager/
       Timeout: 30
       MemorySize: 256
-      # When AppSync is PRIVATE, the SigV4 mutation to the private GraphQL
-      # endpoint only resolves from inside the AppSync VPC. When the user opted
-      # into VPC-only Lambdas (DeployInVPC=true) but AppSync is still public,
+      # When the REST API is PRIVATE, the function must run inside the VPC so it
+      # can reach the private API and AWS service endpoints. When the user opted
+      # into VPC-only Lambdas (DeployInVPC=true) but the API is still public,
       # we honour that too so DynamoDB traffic can use a gateway endpoint.
       VpcConfig: !If
-        - UsePrivateAppSync
+        - UsePrivateApi
         - SecurityGroupIds:
             - !Ref LambdaVpcSecurityGroup
           SubnetIds: !Ref LambdaSubnetIds
@@ -6063,7 +6239,10 @@ Resources:
           RECOVERY_TIMEOUT_SECONDS: !Ref CircuitBreakerRecoveryTimeoutSeconds
           ERROR_HANDLER_ARN: !Ref CircuitBreakerErrorHandlerArn
           METRIC_NAMESPACE: !Ref AWS::StackName
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          # Empty under httpapi transport: circuit-breaker state is the source
+          # of truth in ConcurrencyTable (DynamoDB); publish_to_appsync() no-ops
+          # when APPSYNC_API_URL is empty, and the UI polls getCircuitBreakerStatus.
+          APPSYNC_API_URL: ""
       LoggingConfig:
         LogGroup: !Ref CircuitBreakerManagerFunctionLogGroup
       Policies:
@@ -6073,11 +6252,6 @@ Resources:
             TopicName: !GetAtt AlertsTopic.TopicName
         - CloudWatchPutMetricPolicy: {}
         - Statement:
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/fields/publishCircuitBreakerStatus"
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -6753,8 +6927,8 @@ Resources:
 
   # ChatWithDocumentProcessor — long-running Lambda invoked async by the
   # send_chat_document_message_resolver. Does the heavy lifting (load doc,
-  # call Bedrock, publish streaming status via AppSync) outside AppSync's
-  # 30-second synchronous budget. Mirrors AgentChatProcessorFunction.
+  # call Bedrock, publish streaming status) outside the REST API's
+  # synchronous request budget. Mirrors AgentChatProcessorFunction.
   ChatWithDocumentProcessorLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -6793,7 +6967,13 @@ Resources:
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           TRACKING_TABLE_NAME: !Ref TrackingTable
           USERS_TABLE_NAME: !Ref UsersTable
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: ""
+          # Non-streaming (GovCloud poll) path: persist the final chat message to
+          # the ChatMessages table so the UI can poll getChatMessages for it when
+          # no Lambda Function URL is available. Harmless in streaming/commercial
+          # mode (the persist runs but the UI streams and ignores it).
+          CHAT_MESSAGES_TABLE: !Ref ChatMessagesTable
+          DATA_RETENTION_DAYS: !Ref DataRetentionInDays
           GUARDRAIL_ID_AND_VERSION:
             !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
           BEDROCK_ASSUME_ROLE_ARN:
@@ -6813,11 +6993,10 @@ Resources:
             TableName: !Ref ConfigurationTable
         - DynamoDBReadPolicy:
             TableName: !Ref TrackingTable
+        # Write final chat messages for the non-streaming (GovCloud poll) path.
+        - DynamoDBWritePolicy:
+            TableName: !Ref ChatMessagesTable
         - Statement:
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${GraphQLApi.ApiId}/types/Mutation/*"
             # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint
             # (OpenAI Responses API) and use a separate IAM action namespace.
             - Effect: Allow
@@ -6919,7 +7098,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaVpcSecurityGroup
@@ -6933,13 +7112,14 @@ Resources:
           STRANDS_LOG_LEVEL: !Ref LogLevel
           BEDROCK_REGION: !Ref AWS::Region
           CHAT_MESSAGES_TABLE: !Ref ChatMessagesTable
+          CHAT_SESSIONS_TABLE: !Ref ChatSessionsTable
           ID_HELPER_CHAT_MEMORY_TABLE: !Ref IdHelperChatMemoryTable
           MEMORY_METHOD: dynamodb
           STREAMING_ENABLED: true
           MAX_CONVERSATION_TURNS: 20
           MAX_MESSAGE_SIZE_KB: 8.5
           DATA_RETENTION_DAYS: !Ref DataRetentionInDays
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: ""
           ATHENA_DATABASE: !Ref ReportingDatabase
           ATHENA_OUTPUT_LOCATION: !Sub
             - "s3://${Bucket}/athena-results/"
@@ -6956,6 +7136,7 @@ Resources:
             ]
           CLOUDWATCH_LOG_GROUP_PREFIX: !Sub "/aws/lambda/${AWS::StackName}"
           SETTINGS_PARAMETER_NAME: !Ref SettingsParameter
+          CONFIGURATION_BUCKET: !Ref ConfigurationBucket
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
           BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
@@ -6970,15 +7151,31 @@ Resources:
             Action: bedrock-agentcore:InvokeAgentRuntime
             Resource: "*"
         - Statement:
-            Effect: Allow
-            Action: appsync:GraphQL
-            Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${GraphQLApi.ApiId}/*"
+            - Effect: Allow
+              Action: sqs:SendMessage
+              Resource: !Sub "arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:*"
+              Condition:
+                StringLike:
+                  "aws:ResourceTag/idp:feature-id": "*"
+            - Effect: Allow
+              Action:
+                - kms:GenerateDataKey
+                - kms:Decrypt
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
         - DynamoDBCrudPolicy:
             TableName: !Ref ChatMessagesTable
         - DynamoDBCrudPolicy:
+            TableName: !Ref ChatSessionsTable
+        - DynamoDBCrudPolicy:
             TableName: !Ref IdHelperChatMemoryTable
-        - DynamoDBReadPolicy:
+        - DynamoDBCrudPolicy:
             TableName: !Ref ConfigurationTable
+        # Read the samples manifest (config_library/samples-manifest.json) the
+        # list_sample_documents tool surfaces to the Quick Start agent.
+        - Statement:
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${ConfigurationBucket}/config_library/*"
         - S3CrudPolicy:
             BucketName: !If
               - ShouldCreateReportingBucket
@@ -7043,11 +7240,6 @@ Resources:
                 Action: sts:AssumeRole
                 Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -7132,6 +7324,305 @@ Resources:
     Properties:
       KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
       RetentionInDays: !Ref LogRetentionDays
+
+  ##########################################################################
+  # Chat streaming endpoint
+  #
+  # Replaces the former GraphQL mutation->subscription fan-out for chat token deltas
+  # with Lambda response streaming via a direct Function URL
+  # (InvokeMode=RESPONSE_STREAM, AuthType=AWS_IAM). The browser SigV4-signs the
+  # request with the authenticated Cognito Identity Pool role and reads the SSE
+  # body incrementally. Works identically under CloudFront or API Gateway
+  # hosting because the Function URL is addressed directly by the browser.
+  #
+  # The function runs a tiny FastAPI app under the AWS Lambda Web Adapter (LWA)
+  # and drives the SAME chat_with_document_processor / agent_chat_processor logic
+  # used by the async-invoke path, with the delta sink redirected to the HTTP
+  # response stream. The REST API is now the only transport (GraphQL API removed),
+  # so these resources deploy unconditionally.
+  ##########################################################################
+  ChatStreamProcessorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  ChatStreamProcessorFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+          - id: W11
+            reason: "Role requires * for Bedrock marketplace and CloudWatch Metrics"
+    # checkov:skip=CKV_AWS_116: "DLQ not required — synchronous Function URL stream; errors are streamed to the UI as assistant_error"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain only non-sensitive configuration"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      CodeUri: src/lambda/chat_stream_processor/
+      # LWA boots run.sh (uvicorn) via the /opt/bootstrap exec wrapper.
+      Handler: run.sh
+      Runtime: python3.12
+      MemorySize: 4096
+      Timeout: 900
+      Layers:
+        # Base (bedrock/appsync/config) + agents (strands) — the streaming app
+        # imports both processor modules so it needs both layers. LWA layer last.
+        - !Ref IDPCommonBaseLayer
+        - !Ref IDPCommonAgentsLayer
+        - !If
+          - HasLambdaWebAdapterLayerArn
+          - !Ref LambdaWebAdapterLayerArn
+          - !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:753240598075:layer:LambdaAdapterLayerX86:25
+      Environment:
+        Variables:
+          # LWA: run the app in response-streaming mode and wrap exec with LWA.
+          AWS_LAMBDA_EXEC_WRAPPER: /opt/bootstrap
+          AWS_LWA_INVOKE_MODE: response_stream
+          PORT: "8080"
+          LOG_LEVEL: !Ref LogLevel
+          # --- Shared / doc-chat processor env (mirrors ChatWithDocumentProcessorFunction) ---
+          OUTPUT_BUCKET: !Ref OutputBucket
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          CONFIGURATION_BUCKET: !Ref ConfigurationBucket
+          TRACKING_TABLE_NAME: !Ref TrackingTable
+          USERS_TABLE_NAME: !Ref UsersTable
+          GUARDRAIL_ID_AND_VERSION:
+            !If [HasGuardrailConfig, !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}", ""]
+          # --- Agent-chat processor env (mirrors AgentChatProcessorFunction) ---
+          LOOKUP_FUNCTION_NAME: !Ref LookupFunction
+          STRANDS_LOG_LEVEL: !Ref LogLevel
+          BEDROCK_REGION: !Ref AWS::Region
+          CHAT_MESSAGES_TABLE: !Ref ChatMessagesTable
+          CHAT_SESSIONS_TABLE: !Ref ChatSessionsTable
+          ID_HELPER_CHAT_MEMORY_TABLE: !Ref IdHelperChatMemoryTable
+          MEMORY_METHOD: dynamodb
+          STREAMING_ENABLED: true
+          MAX_CONVERSATION_TURNS: 20
+          MAX_MESSAGE_SIZE_KB: 8.5
+          DATA_RETENTION_DAYS: !Ref DataRetentionInDays
+          ATHENA_DATABASE: !Ref ReportingDatabase
+          ATHENA_OUTPUT_LOCATION: !Sub
+            - "s3://${Bucket}/athena-results/"
+            - Bucket: !If
+                - ShouldCreateReportingBucket
+                - !Ref ReportingBucket
+                - !Ref ReportingBucketName
+          AWS_STACK_NAME: !Ref AWS::StackName
+          CLOUDWATCH_LOG_GROUP_PREFIX: !Sub "/aws/lambda/${AWS::StackName}"
+          SETTINGS_PARAMETER_NAME: !Ref SettingsParameter
+          # No GraphQL API URL — the sink writes to the HTTP stream instead of
+          # a GraphQL endpoint, so neither processor constructs that client here.
+          BEDROCK_ASSUME_ROLE_ARN:
+            !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
+            !If [HasBedrockHubRoleExternalId, !Ref BedrockHubRoleExternalId, !Ref AWS::NoValue]
+          BEDROCK_ASSUME_ROLE_SESSION_NAME:
+            !If [HasBedrockHubRoleSessionName, !Ref BedrockHubRoleSessionName, !Ref AWS::NoValue]
+      LoggingConfig:
+        LogGroup: !Ref ChatStreamProcessorLogGroup
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref OutputBucket
+        - S3WritePolicy:
+            BucketName: !Ref OutputBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConfigurationTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref TrackingTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ChatMessagesTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ChatSessionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref IdHelperChatMemoryTable
+        - Statement:
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub "arn:${AWS::Partition}:s3:::${ConfigurationBucket}/config_library/*"
+        - S3CrudPolicy:
+            BucketName: !If
+              - ShouldCreateReportingBucket
+              - !Ref ReportingBucket
+              - !Ref ReportingBucketName
+        - Statement:
+            # OpenAI GPT-5.x models are served via the bedrock-mantle endpoint.
+            - Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference
+                - bedrock-mantle:GetProject
+                - bedrock-mantle:ListProjects
+                - bedrock-mantle:ListTagsForResources
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+                - bedrock:GetInferenceProfile
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+            - Effect: Allow
+              Action:
+                - bedrock-agentcore:InvokeAgentRuntime
+                - bedrock-agentcore:StartCodeInterpreterSession
+                - bedrock-agentcore:StopCodeInterpreterSession
+                - bedrock-agentcore:InvokeCodeInterpreter
+                - bedrock-agentcore:GetCodeInterpreterSession
+                - bedrock-agentcore:ListCodeInterpreterSessions
+              Resource:
+                - "*"
+            - Effect: Allow
+              Action:
+                - aws-marketplace:Subscribe
+                - aws-marketplace:Unsubscribe
+                - aws-marketplace:ViewSubscriptions
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - cloudwatch:PutMetricData
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - athena:StartQueryExecution
+                - athena:GetQueryExecution
+                - athena:GetQueryResults
+              Resource:
+                - !Sub "arn:${AWS::Partition}:athena:${AWS::Region}:${AWS::AccountId}:workgroup/primary"
+                - !Sub "arn:${AWS::Partition}:athena:${AWS::Region}:${AWS::AccountId}:datacatalog/*"
+            - Effect: Allow
+              Action:
+                - glue:GetTable
+                - glue:GetTables
+                - glue:GetDatabase
+                - glue:GetDatabases
+                - glue:GetPartitions
+              Resource:
+                - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:catalog"
+                - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:database/${ReportingDatabase}"
+                - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:table/${ReportingDatabase}/*"
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource:
+                - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}*"
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - !Ref ExternalMCPAgentsSecret
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${SettingsParameter}"
+            - Effect: Allow
+              Action:
+                - logs:DescribeLogGroups
+                - logs:DescribeLogStreams
+                - logs:FilterLogEvents
+                - logs:GetLogEvents
+              Resource:
+                - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}*"
+                - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/vendedlogs/states/${AWS::StackName}*"
+                - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${AWS::StackName}*"
+            - Effect: Allow
+              Action:
+                - cloudformation:DescribeStackResources
+                - cloudformation:DescribeStacks
+              Resource:
+                - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${AWS::StackName}/*"
+            - Effect: Allow
+              Action:
+                - states:DescribeExecution
+                - states:GetExecutionHistory
+              Resource:
+                - !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${AWS::StackName}*"
+            - Effect: Allow
+              Action:
+                - xray:GetTraceSummaries
+                - xray:BatchGetTraces
+                - xray:GetServiceGraph
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - sqs:SendMessage
+              Resource: !Sub "arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:*"
+              Condition:
+                StringLike:
+                  "aws:ResourceTag/idp:feature-id": "*"
+            # RBAC scope enforcement — query UsersTable.SubIndex.
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+              Resource:
+                - !GetAtt UsersTable.Arn
+                - !Sub "${UsersTable.Arn}/index/*"
+            - !If
+              - HasGuardrailConfig
+              - Effect: Allow
+                Action: bedrock:ApplyGuardrail
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+            - !If
+              - HasBedrockHubRole
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Ref BedrockHubRoleArn
+              - !Ref AWS::NoValue
+
+  # Direct Function URL (IAM-authed, response streaming). The browser POSTs
+  # SigV4-signed requests here; CORS allows the SPA origin.
+  ChatStreamProcessorUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !Ref ChatStreamProcessorFunction
+      AuthType: AWS_IAM
+      InvokeMode: RESPONSE_STREAM
+      Cors:
+        AllowCredentials: false
+        AllowMethods:
+          - POST
+        AllowHeaders:
+          - content-type
+          - authorization
+          - x-amz-date
+          - x-amz-content-sha256
+          - x-amz-security-token
+        AllowOrigins:
+          - "*"
+        MaxAge: 600
+
+  # Allow the authenticated Cognito Identity Pool role to invoke the Function
+  # URL (FunctionUrlAuthType=AWS_IAM requires both the resource permission here
+  # and the lambda:InvokeFunctionUrl grant on the caller's role).
+  ChatStreamProcessorUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ChatStreamProcessorFunction
+      Action: lambda:InvokeFunctionUrl
+      # Principal is the account: for AuthType=AWS_IAM the actual gate is the
+      # caller's IAM identity policy (CognitoAuthorizedRole's ChatStreamInvoke
+      # grant above). A role-ARN principal is not accepted here.
+      Principal: !Ref AWS::AccountId
+      FunctionUrlAuthType: AWS_IAM
 
   ##########################################################################
   # DynamoDB Table for Agent Chat Session Metadata
@@ -7273,8 +7764,8 @@ Resources:
           # Token calculation
           MIN_TOKENS_PER_REQUEST: "500"
           # Bedrock model quota codes (TPM and RPM)
-          BEDROCK_MODEL_QUOTA_CODES: '{"us.amazon.nova-lite-v1:0":"L-7C42E72A","us.amazon.nova-pro-v1:0":"L-C0326783","us.amazon.nova-premier-v1:0":"L-AA7FE948","us.amazon.nova-2-lite-v1:0":"L-C6F5908D","global.amazon.nova-2-lite-v1:0":"L-C6F5908D","us.anthropic.claude-3-haiku-20240307-v1:0":"L-DCADBC78","us.anthropic.claude-haiku-4-5-20251001-v1:0":"L-58BE175A","us.anthropic.claude-3-5-sonnet-20241022-v2:0":"L-FF8B4E28","us.anthropic.claude-3-7-sonnet-20250219-v1:0":"L-6E888CC2","us.anthropic.claude-sonnet-4-20250514-v1:0":"L-59759B4A","us.anthropic.claude-sonnet-4-5-20250929-v1:0":"L-F4DDD3EB","us.anthropic.claude-opus-4-20250514-v1:0":"L-29C2B0A3","us.anthropic.claude-opus-4-1-20250805-v1:0":"L-BD85BFCD","us.anthropic.claude-opus-4-5-20251101-v1:0":"L-7007E9C9","global.anthropic.claude-haiku-4-5-20251001-v1:0":"L-58BE175A","global.anthropic.claude-sonnet-4-5-20250929-v1:0":"L-F4DDD3EB","global.anthropic.claude-opus-4-5-20251101-v1:0":"L-7007E9C9"}'
-          BEDROCK_MODEL_RPM_QUOTA_CODES: '{"us.amazon.nova-lite-v1:0":"L-89F8391A","us.amazon.nova-pro-v1:0":"L-ED46B8C5","us.amazon.nova-premier-v1:0":"L-9AD981E7","us.amazon.nova-2-lite-v1:0":"L-F06F1187","global.amazon.nova-2-lite-v1:0":"L-F06F1187","us.anthropic.claude-3-haiku-20240307-v1:0":"L-616A3F5B","us.anthropic.claude-haiku-4-5-20251001-v1:0":"L-CCA5DF70","us.anthropic.claude-3-5-sonnet-20241022-v2:0":"L-1D3E59A3","us.anthropic.claude-3-7-sonnet-20250219-v1:0":"L-3D8CC480","us.anthropic.claude-sonnet-4-20250514-v1:0":"L-559DCC33","us.anthropic.claude-sonnet-4-5-20250929-v1:0":"L-4A6BFAB1","us.anthropic.claude-opus-4-20250514-v1:0":"L-C99C7EF6","us.anthropic.claude-opus-4-1-20250805-v1:0":"L-7EC72A47","us.anthropic.claude-opus-4-5-20251101-v1:0":"L-27989F42","global.anthropic.claude-haiku-4-5-20251001-v1:0":"L-CCA5DF70","global.anthropic.claude-sonnet-4-5-20250929-v1:0":"L-4A6BFAB1","global.anthropic.claude-opus-4-5-20251101-v1:0":"L-27989F42"}'
+          BEDROCK_MODEL_QUOTA_CODES: '{"us.anthropic.claude-sonnet-5":"L-D4FBCF4E","global.anthropic.claude-sonnet-5":"L-DD84E5CA","us.amazon.nova-lite-v1:0":"L-7C42E72A","us.amazon.nova-pro-v1:0":"L-C0326783","us.amazon.nova-premier-v1:0":"L-AA7FE948","us.amazon.nova-2-lite-v1:0":"L-C6F5908D","global.amazon.nova-2-lite-v1:0":"L-C6F5908D","us.anthropic.claude-3-haiku-20240307-v1:0":"L-DCADBC78","us.anthropic.claude-haiku-4-5-20251001-v1:0":"L-58BE175A","us.anthropic.claude-3-5-sonnet-20241022-v2:0":"L-FF8B4E28","us.anthropic.claude-3-7-sonnet-20250219-v1:0":"L-6E888CC2","us.anthropic.claude-sonnet-4-20250514-v1:0":"L-59759B4A","us.anthropic.claude-sonnet-4-5-20250929-v1:0":"L-F4DDD3EB","us.anthropic.claude-opus-4-20250514-v1:0":"L-29C2B0A3","us.anthropic.claude-opus-4-1-20250805-v1:0":"L-BD85BFCD","us.anthropic.claude-opus-4-5-20251101-v1:0":"L-7007E9C9","global.anthropic.claude-haiku-4-5-20251001-v1:0":"L-58BE175A","global.anthropic.claude-sonnet-4-5-20250929-v1:0":"L-F4DDD3EB","global.anthropic.claude-opus-4-5-20251101-v1:0":"L-7007E9C9"}'
+          BEDROCK_MODEL_RPM_QUOTA_CODES: '{"us.anthropic.claude-sonnet-5":"L-D4FBCF4E","global.anthropic.claude-sonnet-5":"L-DD84E5CA","us.amazon.nova-lite-v1:0":"L-89F8391A","us.amazon.nova-pro-v1:0":"L-ED46B8C5","us.amazon.nova-premier-v1:0":"L-9AD981E7","us.amazon.nova-2-lite-v1:0":"L-F06F1187","global.amazon.nova-2-lite-v1:0":"L-F06F1187","us.anthropic.claude-3-haiku-20240307-v1:0":"L-616A3F5B","us.anthropic.claude-haiku-4-5-20251001-v1:0":"L-CCA5DF70","us.anthropic.claude-3-5-sonnet-20241022-v2:0":"L-1D3E59A3","us.anthropic.claude-3-7-sonnet-20250219-v1:0":"L-3D8CC480","us.anthropic.claude-sonnet-4-20250514-v1:0":"L-559DCC33","us.anthropic.claude-sonnet-4-5-20250929-v1:0":"L-4A6BFAB1","us.anthropic.claude-opus-4-20250514-v1:0":"L-C99C7EF6","us.anthropic.claude-opus-4-1-20250805-v1:0":"L-7EC72A47","us.anthropic.claude-opus-4-5-20251101-v1:0":"L-27989F42","global.anthropic.claude-haiku-4-5-20251001-v1:0":"L-CCA5DF70","global.anthropic.claude-sonnet-4-5-20250929-v1:0":"L-4A6BFAB1","global.anthropic.claude-opus-4-5-20251101-v1:0":"L-27989F42"}'
       Policies:
         - Statement:
             - Effect: Allow
@@ -7344,44 +7835,7 @@ Resources:
       KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
       RetentionInDays: !Ref LogRetentionDays
 
-  CalculateCapacityDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      Name: CalculateCapacityDataSource
-      Description: Lambda function for calculating capacity requirements
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt HITLAppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt CalculateCapacityResolverFunction.Arn
 
-  CalculateCapacityResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt CalculateCapacityDataSource.Name
-      TypeName: Query
-      FieldName: calculateCapacity
-
-  ##########################################################################
-  # Public Template Version-Check Resolver
-  #
-  # Powers the "Update available" indicator in the Web UI's Deployment Info
-  # nav section. Lists the public artifacts S3 prefix for versioned templates
-  # of the form <prefix>/idp-main_<version>.yaml and returns the highest
-  # semver. The check is disabled by default (PublicArtifactsBucket=""); the
-  # public release sets it to the regional aws-ml-blog bucket.
-  #
-  # The resolver tries unsigned/anonymous S3 reads first (botocore UNSIGNED)
-  # so it works against truly public buckets without any IAM grant. If the
-  # unsigned call fails (e.g. the bucket has BlockPublicAcls / requires
-  # SigV4), it falls back to signed requests using this Lambda's execution
-  # role — that's why we attach `s3:ListBucket` and `s3:GetObject` on the
-  # configured PublicArtifactsBucket (conditional on
-  # HasPublicArtifactsBucket so headless / empty-bucket builds don't get a
-  # dangling policy).
-  ##########################################################################
 
 
   VersionCheckResolverFunctionLogGroup:
@@ -7402,7 +7856,7 @@ Resources:
             reason: "Function does not require VPC access — only reads from public S3 bucket via unsigned requests"
           - id: W92
             reason: "Function does not require reserved concurrency"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous AppSync resolver"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous REST API resolver"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values (bucket name, prefix, log level)"
@@ -7449,26 +7903,7 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:s3:::${PublicArtifactsBucket}/${PublicArtifactsPrefix}/*"
           - !Ref AWS::NoValue
 
-  VersionCheckResolverDataSource:
 
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      Name: VersionCheckResolverDataSource
-      Description: Lambda function for the public template version-check
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt HITLAppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt VersionCheckResolverFunction.Arn
-
-  GetLatestPublishedVersionResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt VersionCheckResolverDataSource.Name
-      TypeName: Query
-      FieldName: getLatestPublishedVersion
 
   AgentProcessorLogGroup:
     Type: AWS::Logs::LogGroup
@@ -7518,7 +7953,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaVpcSecurityGroup
@@ -7531,7 +7966,7 @@ Resources:
           LOOKUP_FUNCTION_NAME: !Ref LookupFunction
           STRANDS_LOG_LEVEL: !Ref LogLevel
           AGENT_TABLE: !Ref AgentTable
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: ""
           ATHENA_DATABASE: !Ref ReportingDatabase
           ATHENA_OUTPUT_LOCATION: !Sub
             - "s3://${Bucket}/athena-results/"
@@ -7625,11 +8060,6 @@ Resources:
                 Action: sts:AssumeRole
                 Resource: !Ref BedrockHubRoleArn
               - !Ref AWS::NoValue
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -7734,7 +8164,7 @@ Resources:
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}/"
-          - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
+          - !Sub "${APIRESOLVERSTACK.Outputs.HttpApiEndpoint}/"
         # Custom domain entries — both with and without trailing slash because
         # browsers and OAuth libraries vary in normalisation. Cognito matches
         # callback URLs case-sensitively after exact-string compare, so we add
@@ -7751,7 +8181,7 @@ Resources:
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}/"
-          - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
+          - !Sub "${APIRESOLVERSTACK.Outputs.HttpApiEndpoint}/"
         - !If [HasCustomDomain, !Ref CustomDomainUrl, !Ref "AWS::NoValue"]
         - !If [HasCustomDomain, !Sub "${CustomDomainUrl}/", !Ref "AWS::NoValue"]
         - !Sub "https://${AWS::Region}.quicksight.aws.amazon.com/sn/oauthcallback"
@@ -7788,7 +8218,7 @@ Resources:
         - COGNITO
 
   ##########################################################################
-  # Cognoito user authentication for AppSync API and WebUI
+  # Cognito user authentication for REST API and WebUI
   ##########################################################################
 
   UserPool:
@@ -7818,10 +8248,20 @@ Resources:
               <p>AWS GenAIIDP Team</p>
               <p>
               <p><em>Stack: ${AWS::StackName}, v<VERSION>, <BUILD_DATE_TIME></em>
+            # WebUIURL for the invite email. In CloudFront mode this is the
+            # distribution URL. In APIGateway mode the UI URL is an output of
+            # APIRESOLVERSTACK, which is created AFTER the UserPool — referencing
+            # it here would create a circular dependency — so we use the custom
+            # domain when set, otherwise direct the user to the stack's
+            # ApplicationWebURL output. (The email is only used for the initial
+            # temporary-password login; the URL is always in the stack Outputs.)
             - WebUIURL: !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}/"
-                - !GetAtt GetLowercaseAlbUrl.Lowercase
+                - !If
+                  - HasCustomDomain
+                  - !Sub "${CustomDomainUrl}/"
+                  - "The ApplicationWebURL is shown in the CloudFormation stack Outputs"
       AutoVerifiedAttributes:
         - email
       EmailConfiguration:
@@ -7872,6 +8312,14 @@ Resources:
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     DependsOn: ExternalIdentityProviderReady
+    # MAINTENANCE NOTE: In APIGateway hosting mode the WebUIClientOAuthUrls custom
+    # resource does a read-modify-write of this client (to add the execute-api
+    # CallbackURLs/LogoutURLs post-deploy — see that resource). Its Lambda
+    # preserves a fixed list of this client's writable properties when calling
+    # UpdateUserPoolClient. If you add a new writable property here (e.g.
+    # AuthSessionValidity, AnalyticsConfiguration), also add it to that Lambda's
+    # preserve list (WebUIClientOAuthUrlsFunction InlineCode), or the custom
+    # resource will silently reset it on update.
     Properties:
       ClientName: !Sub "${AWS::StackName}-Client"
       AllowedOAuthFlows:
@@ -7882,29 +8330,43 @@ Resources:
         - email
         - phone
         - profile
+      # NOTE: APIGateway hosting URLs are NOT listed here. The Web UI's URL in
+      # that mode is an output of APIRESOLVERSTACK, which (transitively, via
+      # FeaturePlatformStack's UserPoolClient dependency) is created AFTER this
+      # client — referencing it here would be a circular dependency. Instead the
+      # WebUIClientOAuthUrls custom resource appends the API Gateway callback /
+      # logout URLs to this client after both stacks exist. CloudFront hosting
+      # has no such ordering constraint, so its URLs are declared inline.
       CallbackURLs:
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}"
-          - !GetAtt GetLowercaseAlbUrl.Lowercase
+          - !Ref "AWS::NoValue"
         - !If
           - UseCloudFrontHosting
           - !Sub "https://${CloudFrontDistribution.DomainName}/"
-          - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
+          - !Ref "AWS::NoValue"
         # Custom domain — both forms (no trailing slash and trailing slash)
         # so OAuth redirects match regardless of how the browser normalises.
         - !If [HasCustomDomain, !Ref CustomDomainUrl, !Ref "AWS::NoValue"]
         - !If [HasCustomDomain, !Sub "${CustomDomainUrl}/", !Ref "AWS::NoValue"]
+        # Placeholder so the list is never empty in APIGateway mode without a
+        # custom domain (Cognito requires >=1 callback URL when OAuth flows are
+        # enabled); the real URL is added by WebUIClientOAuthUrls post-deploy.
+        - !If
+          - UseApiGatewayHosting
+          - !If [HasCustomDomain, !Ref "AWS::NoValue", "https://localhost/apigw-placeholder"]
+          - !Ref "AWS::NoValue"
       LogoutURLs: !If
         - HasExternalIdP
         - - !If
             - UseCloudFrontHosting
             - !Sub "https://${CloudFrontDistribution.DomainName}"
-            - !GetAtt GetLowercaseAlbUrl.Lowercase
+            - !Ref "AWS::NoValue"
           - !If
             - UseCloudFrontHosting
             - !Sub "https://${CloudFrontDistribution.DomainName}/"
-            - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
+            - !Ref "AWS::NoValue"
           - !If [HasCustomDomain, !Ref CustomDomainUrl, !Ref "AWS::NoValue"]
           - !If [HasCustomDomain, !Sub "${CustomDomainUrl}/", !Ref "AWS::NoValue"]
         - !Ref AWS::NoValue
@@ -7933,6 +8395,161 @@ Resources:
           - !Ref ExternalIdPName
         - - COGNITO
       UserPoolId: !Ref UserPool
+
+  ##########################################################################
+  # Web UI OAuth callback registration for APIGateway hosting.
+  #
+  # When WebUIHosting=APIGateway the Web UI URL is an output of
+  # APIRESOLVERSTACK, which is created AFTER UserPoolClient (via the
+  # FeaturePlatformStack -> UserPoolClient dependency chain). Declaring the API
+  # Gateway callback/logout URLs directly on UserPoolClient would therefore be a
+  # circular dependency. Instead this custom resource runs AFTER both stacks
+  # exist and merges the API Gateway URLs into the existing client via a
+  # read-modify-write (describe -> add URLs -> update). Nothing depends on this
+  # resource, so it introduces no cycle. It also removes the creation-time
+  # localhost placeholder. Only created for APIGateway hosting.
+  ##########################################################################
+  WebUIClientOAuthUrlsRole:
+    Type: AWS::IAM::Role
+    Condition: UseApiGatewayHosting
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: ManageUserPoolClientCallbacks
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cognito-idp:DescribeUserPoolClient
+                  - cognito-idp:UpdateUserPoolClient
+                Resource: !GetAtt UserPool.Arn
+
+  WebUIClientOAuthUrlsFunction:
+    Type: AWS::Serverless::Function
+    Condition: UseApiGatewayHosting
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function only calls Cognito control-plane APIs; no VPC access required"
+          - id: W92
+            reason: "Custom resource scales on demand; no reserved concurrency needed"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function only calls AWS APIs; no VPC access required"
+    # checkov:skip=CKV_AWS_115: "Reserved concurrency not required for a one-shot custom resource"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Description: !Sub "Registers API Gateway Web UI OAuth callback/logout URLs on the Cognito client for ${AWS::StackName}"
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 60
+      MemorySize: 128
+      Role: !GetAtt WebUIClientOAuthUrlsRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref WebUIClientOAuthUrlsLogGroup
+      InlineCode: |
+        import boto3
+        import cfnresponse
+
+        PLACEHOLDER = "https://localhost/apigw-placeholder"
+        cognito = boto3.client("cognito-idp")
+
+        def _apply(pool_id, client_id, base_url, remove=False):
+            # base_url ends with '/api'; register both with and without trailing
+            # slash to tolerate browser/OAuth-lib normalisation differences.
+            urls = {base_url, base_url + "/"}
+            resp = cognito.describe_user_pool_client(
+                UserPoolId=pool_id, ClientId=client_id
+            )
+            client = resp["UserPoolClient"]
+            cb = set(client.get("CallbackURLs") or [])
+            lo = set(client.get("LogoutURLs") or [])
+            cb.discard(PLACEHOLDER)
+            lo.discard(PLACEHOLDER)
+            if remove:
+                cb -= urls
+                lo -= urls
+            else:
+                cb |= urls
+                lo |= urls
+            # Preserve every writable field cognito requires on update.
+            update = {
+                "UserPoolId": pool_id,
+                "ClientId": client_id,
+                "CallbackURLs": sorted(cb),
+                "LogoutURLs": sorted(lo),
+            }
+            for k in (
+                "ClientName", "RefreshTokenValidity", "AccessTokenValidity",
+                "IdTokenValidity", "TokenValidityUnits", "ReadAttributes",
+                "WriteAttributes", "ExplicitAuthFlows", "SupportedIdentityProviders",
+                "AllowedOAuthFlows", "AllowedOAuthScopes",
+                "AllowedOAuthFlowsUserPoolClient", "PreventUserExistenceErrors",
+                "EnableTokenRevocation",
+            ):
+                if k in client:
+                    update[k] = client[k]
+            cognito.update_user_pool_client(**update)
+
+        def handler(event, context):
+            props = event.get("ResourceProperties", {})
+            pool_id = props.get("UserPoolId")
+            client_id = props.get("UserPoolClientId")
+            base_url = (props.get("WebUIBaseUrl") or "").rstrip("/")
+            try:
+                if event["RequestType"] == "Delete":
+                    if base_url:
+                        _apply(pool_id, client_id, base_url, remove=True)
+                else:
+                    if base_url:
+                        _apply(pool_id, client_id, base_url, remove=False)
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+            except Exception as e:  # noqa: BLE001
+                # Never block stack delete on a best-effort URL cleanup.
+                if event["RequestType"] == "Delete":
+                    cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                else:
+                    print(f"Error: {e}")
+                    cfnresponse.send(event, context, cfnresponse.FAILED, {"Error": str(e)})
+
+  WebUIClientOAuthUrlsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: UseApiGatewayHosting
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  WebUIClientOAuthUrls:
+    Type: Custom::WebUIClientOAuthUrls
+    Condition: UseApiGatewayHosting
+    Properties:
+      ServiceToken: !GetAtt WebUIClientOAuthUrlsFunction.Arn
+      UserPoolId: !Ref UserPool
+      UserPoolClientId: !Ref UserPoolClient
+      # HttpApiEndpoint is ".../api"; the SPA is served at that path.
+      WebUIBaseUrl: !GetAtt APIRESOLVERSTACK.Outputs.HttpApiEndpoint
+      # Drift guard: UserPoolClient declaratively owns CallbackURLs/LogoutURLs
+      # (which in APIGateway mode contain only the localhost placeholder), while
+      # this custom resource merges in the execute-api URLs. If UserPoolClient is
+      # re-materialized on a later stack update, CloudFormation would reset its
+      # URL lists back to the placeholder. Changing this property on every
+      # publish (BUILD_DATE_TIME is substituted at build time) forces the custom
+      # resource to re-run on each deploy, so it re-applies the execute-api URLs
+      # (its read-modify-write is idempotent and always removes the placeholder).
+      Rerun: "<BUILD_DATE_TIME>"
 
   ##########################################################################
   # External Identity Provider (SAML/OIDC Federation)
@@ -8330,6 +8947,25 @@ Resources:
           !Ref AWS::NoValue,
         ]
       Policies:
+        # Allow the authenticated Cognito Identity Pool role to invoke the chat
+        # streaming Function URL (AuthType=AWS_IAM) under the httpapi transport.
+        # This is the identity-side grant the SigV4-signed browser request needs.
+        #
+        # NB: a Function URL invocation requires lambda:InvokeFunction — NOT
+        # lambda:InvokeFunctionUrl. The latter gates the FunctionUrlConfig, not
+        # the invoke; granting only InvokeFunctionUrl yields a 403
+        # AccessDeniedException at invoke time (verified against the live
+        # us-west-2 Function URL: InvokeFunctionUrl alone -> 403,
+        # InvokeFunction -> 200). InvokeFunctionUrl is kept for completeness.
+        - PolicyName: ChatStreamInvoke
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                  - lambda:InvokeFunctionUrl
+                Resource: !GetAtt ChatStreamProcessorFunction.Arn
         - PolicyName: S3
           PolicyDocument:
             Version: 2012-10-17
@@ -8337,6 +8973,12 @@ Resources:
               - Effect: Allow
                 Action:
                   - "s3:GetObject"
+                  # s3:GetObjectVersion is required for the browser to fetch a
+                  # specific object version via a client-presigned URL
+                  # (?versionId=...) — used to view a past document version's
+                  # page images. Without it, versioned image loads get
+                  # AccessDenied and render blank.
+                  - "s3:GetObjectVersion"
                   - "s3:ListBucket"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:s3:::${OutputBucket}"
@@ -8362,16 +9004,6 @@ Resources:
                   - "ssm:GetParameter"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${SettingsParameter}"
-        - PolicyName: GraphQL
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource:
-                  - !Sub "${GraphQLApi.Arn}/types/Query/*"
-                  - !Sub "${GraphQLApi.Arn}/types/Subscription/*"
 
   AdminUser:
     Type: AWS::Cognito::UserPoolUser
@@ -8506,23 +9138,19 @@ Resources:
       SourceArn: !GetAtt UserPool.Arn
 
   ##########################################################################
-  # AppSync GraphQL API
-  ##########################################################################
-
-  ##########################################################################
-  # Lambda Security Group (conditional on UsePrivateAppSync)
-  # Used by Lambda functions in VPC to reach AppSync + AWS service endpoints
+  # Lambda Security Group (conditional on UsePrivateApi)
+  # Used by Lambda functions in VPC to reach the private REST API + AWS service endpoints
   ##########################################################################
 
   LambdaVpcSecurityGroup:
     Type: AWS::EC2::SecurityGroup
-    Condition: UsePrivateAppSync
+    Condition: UsePrivateApi
     Properties:
-      GroupDescription: !Sub "Security group for ${AWS::StackName} Lambda functions in VPC (private AppSync mode)"
-      # ALBVpcId is used here because AppSyncVisibility=PRIVATE always requires
-      # WebUIHosting=ALB — a private AppSync API is only accessible from inside
-      # the VPC, so the browser must also be inside the VPC via the internal ALB.
-      VpcId: !Ref ALBVpcId
+      GroupDescription: !Sub "Security group for ${AWS::StackName} Lambda functions in VPC (private REST API mode)"
+      # ApiGatewayVisibility=PRIVATE always requires DeployInVPC=true (the
+      # private REST API is reachable only from inside the VPC), so the standard
+      # VpcId supplied for VPC-secured mode is the VPC the Lambdas attach to.
+      VpcId: !Ref VpcId
       SecurityGroupEgress:
         - IpProtocol: tcp
           FromPort: 443
@@ -8533,181 +9161,14 @@ Resources:
         - Key: Name
           Value: !Sub "${AWS::StackName}-lambda-sg"
 
-  GraphQLApi:
-    Type: AWS::AppSync::GraphQLApi
-    # checkov:skip=CKV_AWS_194: AppSync has Field-Level logging is determined by LogLevel parameter
-    Properties:
-      Name: !Sub ${AWS::StackName}-api
-      Visibility: !If [UsePrivateAppSync, PRIVATE, GLOBAL]
-      AuthenticationType: AMAZON_COGNITO_USER_POOLS
-      UserPoolConfig:
-        UserPoolId: !Ref UserPool
-        AwsRegion: !Ref AWS::Region
-        DefaultAction: ALLOW
-      AdditionalAuthenticationProviders:
-        - AuthenticationType: AWS_IAM
-      LogConfig:
-        CloudWatchLogsRoleArn: !GetAtt AppSyncCwlRole.Arn
-        ExcludeVerboseContent: false
-        FieldLogLevel:
-          !FindInMap [ AppSyncLogLevelMap, !Ref LogLevel, FieldLogLevel ]
-      # Disable introspection for security purposes
-      IntrospectionConfig: DISABLED
 
-  GraphQLApiLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
-      LogGroupName: !Sub "/aws/appsync/apis/${GraphQLApi.ApiId}"
-      RetentionInDays: !Ref LogRetentionDays
 
-  AppSyncCwlRole:
-    DependsOn:
-      - IsStacknameLengthOK
-    Type: AWS::IAM::Role
-    Properties:
-      ManagedPolicyArns:
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs"
-      PermissionsBoundary:
-        !If [
-          HasPermissionsBoundary,
-          !Ref PermissionsBoundaryArn,
-          !Ref AWS::NoValue,
-        ]
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action:
-              - sts:AssumeRole
-            Principal:
-              Service:
-                - !Sub "appsync.${AWS::URLSuffix}"
 
-  # Optionally Secure API with WAF
 
-  WAFIPV4Set:
-    Type: AWS::WAFv2::IPSet
-    Condition: IsWafEnabled
-    Properties:
-      Name: !Sub ${AWS::StackName}-allowed-ips
-      Description: IP ranges allowed to access the AppSync API
-      Scope: REGIONAL
-      IPAddressVersion: IPV4
-      Addresses: !Split [ ", ", !Ref WAFAllowedIPv4Ranges ]
 
-  WAFLambdaServiceIPSet:
-    Type: AWS::WAFv2::IPSet
-    Condition: IsWafEnabled
-    Properties:
-      Name: !Sub ${AWS::StackName}-lambda-service-ips
-      Description: IP ranges used by AWS Lambda service
-      Scope: REGIONAL
-      IPAddressVersion: IPV4
-      Addresses: [ "0.0.0.0/32" ] # Placeholder - will be updated by IPSetUpdaterFunction
 
-  IPSetUpdaterFunction:
-    Type: AWS::Serverless::Function
-    Condition: IsWafEnabled
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
-          - id: W92
-            reason: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
-    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data
-    Properties:
-      PermissionsBoundary:
-        !If [
-          HasPermissionsBoundary,
-          !Ref PermissionsBoundaryArn,
-          !Ref AWS::NoValue,
-        ]
-      CodeUri: ./src/lambda/ipset_updater
-      Handler: index.lambda_handler
-      Runtime: python3.12
-      Timeout: 300
-      MemorySize: 256
-      Environment:
-        Variables:
-          LOG_LEVEL: !Ref LogLevel
-          IPSET_NAME: !Sub ${AWS::StackName}-lambda-service-ips
-      Policies:
-        - Version: "2012-10-17"
-          Statement:
-            - Effect: Allow
-              Action:
-                - wafv2:GetIPSet
-                - wafv2:UpdateIPSet
-              Resource: !GetAtt WAFLambdaServiceIPSet.Arn
-            - Effect: Allow
-              Action:
-                - wafv2:ListIPSets
-              Resource: !Sub "arn:${AWS::Partition}:wafv2:${AWS::Region}:${AWS::AccountId}:regional/ipset/*"
-      Events:
-        Schedule:
-          Type: Schedule
-          Properties:
-            Schedule: rate(1 day)
-            Description: Update Lambda IP ranges daily
-            Enabled: true
 
-  IPSetUpdaterCustomResource:
-    Type: Custom::IPSetUpdater
-    Condition: IsWafEnabled
-    Properties:
-      ServiceToken: !GetAtt IPSetUpdaterFunction.Arn
-      UpdateTime: <BUILD_DATE_TIME> # To force an update when stack is updated
 
-  WAFWebACL:
-    Type: AWS::WAFv2::WebACL
-    Condition: IsWafEnabled
-    Properties:
-      Name: !Sub ${AWS::StackName}-appsync-acl
-      Description: Web ACL for AppSync API
-      Scope: REGIONAL
-      DefaultAction:
-        Block: { }
-      Rules:
-        - Name: AllowLambdaServiceIPs
-          Priority: 1
-          Statement:
-            IPSetReferenceStatement:
-              Arn: !GetAtt WAFLambdaServiceIPSet.Arn
-          Action:
-            Allow: { }
-          VisibilityConfig:
-            SampledRequestsEnabled: true
-            CloudWatchMetricsEnabled: true
-            MetricName: AllowLambdaServiceIPsRule
-        - Name: AllowListedIPs
-          Priority: 2
-          Statement:
-            IPSetReferenceStatement:
-              Arn: !GetAtt WAFIPV4Set.Arn
-          Action:
-            Allow: { }
-          VisibilityConfig:
-            SampledRequestsEnabled: true
-            CloudWatchMetricsEnabled: true
-            MetricName: AllowListedIPsRule
-      VisibilityConfig:
-        SampledRequestsEnabled: true
-        CloudWatchMetricsEnabled: true
-        MetricName: APIAccessControl
-
-  WAFWebACLAssociation:
-    Type: AWS::WAFv2::WebACLAssociation
-    Condition: IsWafEnabled
-    Properties:
-      ResourceArn: !GetAtt GraphQLApi.Arn
-      WebACLArn: !GetAtt WAFWebACL.Arn
-
-  # Api Schema, datasource, resolvers
 
   TestFileCopyQueueDLQ:
     Type: AWS::SQS::Queue
@@ -8907,7 +9368,7 @@ Resources:
           - id: W92
             reason: "Lambda function does not need reserved concurrency"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous AppSync resolver"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for synchronous REST API resolver"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values"
     Properties:
@@ -9219,7 +9680,7 @@ Resources:
           SecurityGroupIds:
             - !Ref LambdaSecurityGroupId
         - !If
-          - UsePrivateAppSync
+          - UsePrivateApi
           - SubnetIds: !Ref LambdaSubnetIds
             SecurityGroupIds:
               - !Ref LambdaVpcSecurityGroup
@@ -9230,7 +9691,7 @@ Resources:
           DISCOVERY_BUCKET: !Ref DiscoveryBucket
           DISCOVERY_TRACKING_TABLE: !Ref DiscoveryTrackingTable
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: ""
           BLUEPRINT_OPTIMIZATION_FUNCTION_NAME: !Ref BlueprintOptimizationFunction
       LoggingConfig:
         LogGroup: !Ref DiscoveryProcessorFunctionLogGroup
@@ -9256,11 +9717,6 @@ Resources:
               Resource: "*"
             - Effect: Allow
               Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
-            - Effect: Allow
-              Action:
                 - kms:Encrypt
                 - kms:Decrypt
                 - kms:ReEncrypt*
@@ -9279,6 +9735,7 @@ Resources:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
                 - bedrock:GetInferenceProfile
               Resource:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
@@ -9335,7 +9792,7 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           DISCOVERY_BUCKET: !Ref DiscoveryBucket
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: ""
       LoggingConfig:
         LogGroup: !Ref MultiDocDiscoveryPrepareFunctionLogGroup
       Policies:
@@ -9349,10 +9806,6 @@ Resources:
             - Effect: Allow
               Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
               Resource: !GetAtt CustomerManagedEncryptionKey.Arn
-            - Effect: Allow
-              Action: [appsync:GraphQL]
-              Resource: !Sub "${GraphQLApi.Arn}/*"
-
   MultiDocDiscoveryPrepareFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -9386,8 +9839,11 @@ Resources:
         ArtifactBucket: "<ARTIFACT_BUCKET_TOKEN>"
         ArtifactsBucketKmsKeyArn: !Ref ArtifactsBucketKmsKeyArn
         SourceZipfile: "<ARTIFACT_PREFIX_TOKEN>/multi-doc-discovery-source.zip"
-        AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
-        AppSyncApiArn: !GetAtt GraphQLApi.Arn
+        # GraphQL API removed: discovery status updates write straight to the
+        # DiscoveryTrackingTable; the UI polls listDiscoveryJobs. The old
+        # ApiUrl/ApiArn params are no longer passed (the nested
+        # template no longer declares them).
+        DiscoveryTrackingTableName: !Ref DiscoveryTrackingTable
         BedrockHubRoleArn: !Ref BedrockHubRoleArn
         BedrockHubRoleExternalId: !Ref BedrockHubRoleExternalId
         BedrockHubRoleSessionName: !Ref BedrockHubRoleSessionName
@@ -9487,7 +9943,7 @@ Resources:
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
-          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          APPSYNC_API_URL: ""
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           STACK_NAME: !Ref AWS::StackName
           DISCOVERY_TRACKING_TABLE: !Ref DiscoveryTrackingTable
@@ -9505,11 +9961,6 @@ Resources:
               Action:
                 - cloudwatch:PutMetricData
               Resource: "*"
-            - Effect: Allow
-              Action:
-                - appsync:GraphQL
-              Resource:
-                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
             - Effect: Allow
               Action:
                 - kms:Encrypt
@@ -9586,7 +10037,15 @@ Resources:
             #     (tracked as Talos finding #12 phase 2).
             #   - img-src: retains `https:` to allow user-supplied
             #     document thumbnails from any S3 / CloudFront origin.
-            ContentSecurityPolicy: "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com https://cognito-idp.*.amazonaws.com https://cognito-identity.*.amazonaws.com https://*.appsync-api.*.amazonaws.com https://*.execute-api.*.amazonaws.com https://*.s3.*.amazonaws.com https://*.s3-accelerate.amazonaws.com wss://*.amazonaws.com wss://*.appsync-realtime-api.*.amazonaws.com wss://*.execute-api.*.amazonaws.com ws://localhost:*;"
+            #   - connect-src: includes https://*.on.aws for the chat streaming
+            #     Lambda Function URL (RESPONSE_STREAM), whose host is
+            #     <id>.lambda-url.<region>.on.aws. CSP host-source only permits a
+            #     wildcard as the LEFTMOST label (a middle wildcard like
+            #     *.lambda-url.*.on.aws is invalid and the whole source is
+            #     discarded), so we use the region-agnostic *.on.aws — the *.
+            #     prefix matches any subdomain depth. Without this the browser
+            #     blocks the streamed fetch ("Failed to fetch").
+            ContentSecurityPolicy: "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.amazoncognito.com https://cognito-idp.*.amazonaws.com https://cognito-identity.*.amazonaws.com https://*.appsync-api.*.amazonaws.com https://*.execute-api.*.amazonaws.com https://*.on.aws https://*.s3.*.amazonaws.com https://*.s3-accelerate.amazonaws.com wss://*.amazonaws.com wss://*.appsync-realtime-api.*.amazonaws.com wss://*.execute-api.*.amazonaws.com ws://localhost:*;"
 
           StrictTransportSecurity:
             Override: true
@@ -9668,31 +10127,42 @@ Resources:
               RestrictionType: none
 
   ##########################################################################
-  # ALB Hosting (alternative to CloudFront for GovCloud / private networks)
+  # API Gateway Web UI Hosting (alternative to CloudFront for GovCloud /
+  # private networks). The SPA is served as an S3 proxy on the existing
+  # api-resolvers REST API (see nested/api-resolvers ServeWebUI). This IAM role
+  # is what API Gateway assumes to read the Web UI bucket for that integration.
   ##########################################################################
 
-  ALBHOSTINGSTACK:
-    Type: AWS::CloudFormation::Stack
-    Condition: UseALBHosting
+  WebUIProxyRole:
+    Type: AWS::IAM::Role
+    Condition: UseApiGatewayHosting
     Properties:
-      TemplateURL: ./nested/alb-hosting/.aws-sam/packaged.yaml
-      Parameters:
-        VpcId: !Ref ALBVpcId
-        SubnetIds: !Join [",", !Ref ALBSubnetIds]
-        CertificateArn: !Ref ALBCertificateArn
-        ALBScheme: !Ref ALBScheme
-        ALBAllowedCIDRs: !Ref ALBAllowedCIDRs
-        WebUIBucketName: !Ref WebUIBucket
-        StackName: !Ref AWS::StackName
-        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
-        LoggingBucketName: !Ref LoggingBucket
-        # In private mode the same S3 VPCE is used by app Lambdas; pass the
-        # Lambda SG so the ALB stack opens 443 from it on the endpoint SG.
-        # Empty when DeployInVPC=false — the nested stack treats empty as no-op.
-        LambdaSecurityGroupId: !If
-          - DeployInVPC
-          - !Ref LambdaSecurityGroupId
-          - ""
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "apigateway.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+            # NOTE: do NOT add an aws:SourceAccount / aws:SourceArn confused-deputy
+            # condition here. When API Gateway assumes an *integration credentials*
+            # role for an AWS-service (S3) proxy integration it does NOT populate
+            # aws:SourceAccount in the STS request context, so the condition never
+            # matches and every Web UI request fails with a 500 ("API Gateway does
+            # not have permission to assume the provided role"). The confused-deputy
+            # risk is already negligible: this role can only s3:GetObject from the
+            # single private Web UI bucket (see the WebUIBucketRead policy below).
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: WebUIBucketRead
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "${WebUIBucket.Arn}/*"
 
   UICodeBuildServiceRole:
     Type: AWS::IAM::Role
@@ -9839,7 +10309,7 @@ Resources:
                     echo "Invalidating CloudFront Distribution"
                     aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --paths '/*'
                   else
-                    echo "ALB hosting mode - skipping CloudFront invalidation"
+                    echo "APIGateway hosting mode - skipping CloudFront invalidation"
                   fi
           artifacts:
             files:
@@ -9876,10 +10346,19 @@ Resources:
             Value: !Ref UserPoolClient
           - Name: VITE_IDENTITY_POOL_ID
             Value: !Ref IdentityPool
-          - Name: VITE_APPSYNC_GRAPHQL_URL
-            Value: !GetAtt GraphQLApi.GraphQLUrl
+          # REST API endpoint. VITE_API_BASE_URL is the REST API base; the thin
+          # REST client posts to ${VITE_API_BASE_URL}/op/<field>. (GraphQL API
+          # removed, so the old GraphQL URL / API_TRANSPORT vars are no longer emitted.)
+          - Name: VITE_API_BASE_URL
+            Value: !GetAtt APIRESOLVERSTACK.Outputs.HttpApiEndpoint
+          # Chat streaming Function URL (IAM-authed, response streaming). The
+          # signed stream client (src/api/stream-client.ts) reads this.
+          - Name: VITE_STREAM_URL
+            Value: !GetAtt ChatStreamProcessorUrl.FunctionUrl
           - Name: VITE_AWS_REGION
             Value: !Ref AWS::Region
+          - Name: VITE_ENABLE_QUICK_START_WIDGET
+            Value: !Ref EnableQuickStartWidget
           - Name: VITE_SHOULD_HIDE_SIGN_UP
             Value: !If
               - ShouldAllowSignUpEmailDomain
@@ -9901,19 +10380,29 @@ Resources:
               - !Ref ExternalIdPAutoLogin
               - "false"
           - Name: VITE_CLOUDFRONT_DOMAIN
-            # When a custom domain is configured, leave this empty so
-            # aws-exports.js falls back to window.location.origin for
-            # OAuth redirectSignIn / redirectSignOut. That fallback makes
-            # the same build work whether the user lands on the ALB URL,
-            # the CloudFront URL, or the custom domain — the Amplify OAuth
-            # flow always starts and returns on the same origin.
+            # OAuth redirect origin baked into aws-exports.js. When a custom
+            # domain is configured, leave this empty so aws-exports.js falls back
+            # to window.location.origin for OAuth redirectSignIn / redirectSignOut
+            # — the same build then works from the CloudFront URL, the API
+            # Gateway URL, or the custom domain (the Amplify OAuth flow always
+            # starts and returns on the same origin). For APIGateway hosting the
+            # UI is served under the /api stage path, so the redirect URL is the
+            # HttpApiEndpoint (which already ends in /api) plus a trailing slash.
             Value: !If
               - HasCustomDomain
               - ""
               - !If
                 - UseCloudFrontHosting
                 - !Sub "https://${CloudFrontDistribution.DomainName}/"
-                - !Sub "${GetLowercaseAlbUrl.Lowercase}/"
+                - !Sub "${APIRESOLVERSTACK.Outputs.HttpApiEndpoint}/"
+          # Vite base path. APIGateway hosting serves the SPA under the REST API
+          # stage prefix (/api), so assets must be emitted with base=/api/ and
+          # the SPA public path set accordingly. CloudFront serves at root (/).
+          - Name: VITE_UI_BASE_PATH
+            Value: !If
+              - UseCloudFrontHosting
+              - "/"
+              - "/api/"
           - Name: VITE_TEST_SET_BUCKET_NAME
             Value: !Ref TestSetBucket
           - Name: VITE_INPUT_BUCKET_NAME
@@ -10057,7 +10546,7 @@ Resources:
             reason: "Function does not require VPC access"
           - id: W92
             reason: "Function does not require reserved concurrency"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for REST API resolver"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values (Cognito pool and group IDs)"
@@ -10169,7 +10658,7 @@ Resources:
             reason: "Function does not require VPC access"
           - id: W92
             reason: "Function does not require reserved concurrency"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for REST API resolver"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values (DynamoDB table name)"
@@ -10209,116 +10698,10 @@ Resources:
                 - kms:GenerateDataKey
               Resource: !GetAtt CustomerManagedEncryptionKey.Arn
 
-  HITLAppSyncServiceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: !Sub "appsync.${AWS::URLSuffix}"
-            Action: sts:AssumeRole
-      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
-      Policies:
-        - PolicyName: HITLLambdaInvoke
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action: lambda:InvokeFunction
-                Resource:
-                  - !GetAtt UserManagementFunction.Arn
-                  - !GetAtt CompleteSectionReviewFunction.Arn
-                  - !GetAtt CalculateCapacityResolverFunction.Arn
-                  - !GetAtt FinetuningJobsResolverFunction.Arn
-                  # Public-template version-check resolver. Same shape as
-                  # CalculateCapacityResolverFunction above — the role is
-                  # shared with the AppSync data sources defined in the main
-                  # template (next to GraphQLApi), so we have to grant invoke
-                  # here. Without this, the AppSync data source returns
-                  # `Lambda:IllegalArgument` 403.
-                  - !GetAtt VersionCheckResolverFunction.Arn
 
-  UserManagementDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      Name: UserManagementDataSource
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt HITLAppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt UserManagementFunction.Arn
 
-  CreateUserResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt UserManagementDataSource.Name
-      TypeName: Mutation
-      FieldName: createUser
 
-  DeleteUserResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt UserManagementDataSource.Name
-      TypeName: Mutation
-      FieldName: deleteUser
 
-  ListUsersResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt UserManagementDataSource.Name
-      TypeName: Query
-      FieldName: listUsers
-
-  UpdateUserResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt UserManagementDataSource.Name
-      TypeName: Mutation
-      FieldName: updateUser
-
-  GetMyProfileResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt UserManagementDataSource.Name
-      TypeName: Query
-      FieldName: getMyProfile
-
-  CompleteSectionReviewDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      Name: CompleteSectionReviewDataSource
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt HITLAppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt CompleteSectionReviewFunction.Arn
-
-  CompleteSectionReviewResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt CompleteSectionReviewDataSource.Name
-      TypeName: Mutation
-      FieldName: completeSectionReview
-
-  ##########################################################################
-  # Custom Model Fine-Tuning Resources
-  ##########################################################################
-
-  # S3 Bucket for Fine-Tuning Training Data
   FinetuningDataBucket:
     Type: AWS::S3::Bucket
     UpdateReplacePolicy: Retain
@@ -10344,6 +10727,13 @@ Resources:
           - Id: DeleteAfterNDays
             Status: Enabled
             ExpirationInDays: !Ref DataRetentionInDays
+            # Buckets are versioned; without this, overwritten/deleted object
+            # versions accumulate forever (Expiration only adds delete markers).
+            # Noncurrent versions get the same retention as current data —
+            # they are also the byte-store for document version history
+            # (see docs/document-versions.md).
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref DataRetentionInDays
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
 
@@ -10880,7 +11270,7 @@ Resources:
             reason: "Function does not require VPC access"
           - id: W92
             reason: "Function does not require reserved concurrency"
-    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for REST API resolver"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration"
@@ -10890,7 +11280,7 @@ Resources:
       FunctionName: !Sub "${AWS::StackName}-FinetuningJobsResolver"
       Handler: index.lambda_handler
       Runtime: python3.12
-      CodeUri: nested/appsync/src/lambda/finetuning_jobs_resolver/
+      CodeUri: nested/api-resolvers/src/lambda/finetuning_jobs_resolver/
       Timeout: 60
       MemorySize: 512
       Layers:
@@ -10932,111 +11322,15 @@ Resources:
                 - kms:DescribeKey
               Resource: !GetAtt CustomerManagedEncryptionKey.Arn
 
-  # Fine-Tuning Jobs AppSync Data Source
-  FinetuningJobsDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      Name: FinetuningJobsDataSource
-      Description: Lambda function for fine-tuning job operations
-      Type: AWS_LAMBDA
-      ServiceRoleArn: !GetAtt HITLAppSyncServiceRole.Arn
-      LambdaConfig:
-        LambdaFunctionArn: !GetAtt FinetuningJobsResolverFunction.Arn
 
-  # Update HITLAppSyncServiceRole to include fine-tuning resolver
-  # (This is handled by adding the function ARN to the existing role's policy)
 
-  # Fine-Tuning AppSync Resolvers
-  CreateFinetuningJobResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
-      TypeName: Mutation
-      FieldName: createFinetuningJob
 
-  DeleteFinetuningJobResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
-      TypeName: Mutation
-      FieldName: deleteFinetuningJob
 
-  UpdateFinetuningJobStatusResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
-      TypeName: Mutation
-      FieldName: updateFinetuningJobStatus
 
-  GetFinetuningJobResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
-      TypeName: Query
-      FieldName: getFinetuningJob
 
-  ListFinetuningJobsResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
-      TypeName: Query
-      FieldName: listFinetuningJobs
 
-  ValidateTestSetForFinetuningResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
-      TypeName: Query
-      FieldName: validateTestSetForFinetuning
 
-  ListAvailableModelsResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
-      TypeName: Query
-      FieldName: listAvailableModels
 
-  SkipAllSectionsReviewResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt CompleteSectionReviewDataSource.Name
-      TypeName: Mutation
-      FieldName: skipAllSectionsReview
-
-  ClaimReviewResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt CompleteSectionReviewDataSource.Name
-      TypeName: Mutation
-      FieldName: claimReview
-
-  ReleaseReviewResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: APPSYNCSTACK
-    Properties:
-      ApiId: !GetAtt GraphQLApi.ApiId
-      DataSourceName: !GetAtt CompleteSectionReviewDataSource.Name
-      TypeName: Mutation
-      FieldName: releaseReview
 
 Outputs:
   CustomerManagedEncryptionKeyArn:
@@ -11047,7 +11341,9 @@ Outputs:
     Value: !If
       - UseCloudFrontHosting
       - !Sub "https://${CloudFrontDistribution.DomainName}/"
-      - !GetAtt GetLowercaseAlbUrl.Lowercase
+      # APIGateway hosting: the SPA is served on the REST API stage; the
+      # HttpApiEndpoint already ends in /api, so append a trailing slash.
+      - !Sub "${APIRESOLVERSTACK.Outputs.HttpApiEndpoint}/"
   S3InstallBucket:
     Description: Install S3 bucket name
     Value: !Ref InputBucket
@@ -11065,16 +11361,22 @@ Outputs:
     Value: !Ref DiscoveryBucket
   S3InputBucketConsoleURL:
     Description: Input S3 bucket console URL
-    Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${InputBucket}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/s3/buckets/${InputBucket}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   S3DiscoveryBucketConsoleURL:
     Description: Discovery S3 bucket console URL
-    Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${DiscoveryBucket}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/s3/buckets/${DiscoveryBucket}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   S3OutputBucketName:
     Description: Output S3 bucket name
     Value: !Ref OutputBucket
   S3OutputBucketConsoleURL:
     Description: Output S3 bucket console URL
-    Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${OutputBucket}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/s3/buckets/${OutputBucket}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   S3ReportingBucketName:
     Description: Reporting S3 bucket name
     Value: !If
@@ -11084,8 +11386,9 @@ Outputs:
   S3ReportingBucketConsoleURL:
     Description: Reporting S3 bucket console URL
     Value: !Sub
-      - https://s3.console.aws.amazon.com/s3/buckets/${Bucket}
-      - Bucket: !If
+      - https://${AWS::Region}.${ConsoleDomain}/s3/buckets/${Bucket}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
+        Bucket: !If
           - ShouldCreateReportingBucket
           - !Ref ReportingBucket
           - !Ref ReportingBucketName
@@ -11101,8 +11404,9 @@ Outputs:
   S3EvaluationBaselineBucketConsoleURL:
     Description: Evaluation Baseline S3 bucket console URL
     Value: !Sub
-      - https://s3.console.aws.amazon.com/s3/buckets/${Bucket}
-      - Bucket: !If
+      - https://${AWS::Region}.${ConsoleDomain}/s3/buckets/${Bucket}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
+        Bucket: !If
           - ShouldCreateEvaluationBaselineBucket
           - !Ref EvaluationBaselineBucket
           - !Ref EvaluationBaselineBucketName
@@ -11111,61 +11415,82 @@ Outputs:
     Value: !Ref ConfigurationBucket
   S3ConfigurationBucketConsoleURL:
     Description: Configuration S3 bucket console URL
-    Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${ConfigurationBucket}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/s3/buckets/${ConfigurationBucket}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   S3TestSetBucketName:
     Description: Test Set S3 bucket name
     Value: !Ref TestSetBucket
   S3TestSetBucketConsoleURL:
     Description: Test Set S3 bucket console URL
-    Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${TestSetBucket}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/s3/buckets/${TestSetBucket}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   StateMachineArn:
     Description: Step Functions State machine ARN
     Value: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
   StateMachineConsoleURL:
     Description: Step Functions State machine console URL
     Value: !Sub
-      - https://${AWS::Region}.console.aws.amazon.com/states/home?region=${AWS::Region}#/statemachines/view/${StateMachineArn}
-      - StateMachineArn: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
+      - https://${AWS::Region}.${ConsoleDomain}/states/home?region=${AWS::Region}#/statemachines/view/${StateMachineArn}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
+        StateMachineArn: !GetAtt PATTERNSTACK.Outputs.StateMachineArn
 
   CWDashboardConsoleName:
     Description: Name of the merged CloudWatch dashboard
     Value: !GetAtt MergedDashboard.DashboardName
   CWDashboardConsoleURL:
     Description: URL of the merged CloudWatch dashboard
-    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${MergedDashboard.DashboardName}"
+    Value: !Sub
+      - "https://${AWS::Region}.${ConsoleDomain}/cloudwatch/home?region=${AWS::Region}#dashboards:name=${MergedDashboard.DashboardName}"
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   SNSAlertsTopicARN:
     Description: SNS Topic ARN for alerts
     Value: !Ref AlertsTopic
   SNSAlertsTopicConsoleURL:
     Description: SNS Topic console URL
-    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/sns/v3/home?region=${AWS::Region}#/topic/${AlertsTopic}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/sns/v3/home?region=${AWS::Region}#/topic/${AlertsTopic}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   DynamoDBTrackingTableConsoleURL:
     Description: DynamoDB table console URL
-    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${TrackingTable}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${TrackingTable}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   DynamoDBConcurrencyTableConsoleURL:
     Description: DynamoDB table console URL
-    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${ConcurrencyTable}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${ConcurrencyTable}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   DynamoDBConfigurationTableConsoleURL:
     Description: DynamoDB table console URL
-    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${ConfigurationTable}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${ConfigurationTable}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   DynamoDBAgentTableName:
     Description: Name of the DynamoDB table for agent job tracking
     Value: !Ref AgentTable
   DynamoDBAgentTableConsoleURL:
     Description: DynamoDB table console URL for agent job tracking
-    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${AgentTable}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/dynamodbv2/home?region=${AWS::Region}#item-explorer?maximize=true&operation=QUERY&table=${AgentTable}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   LambdaLookupFunctionName:
     Description: Name of the Lookup function
     Value: !Ref LookupFunction
   LambdaLookupFunctionConsoleURL:
     Description: Lambda function console URL
-    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/lambda/home?region=${AWS::Region}#/functions/${LookupFunction}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/lambda/home?region=${AWS::Region}#/functions/${LookupFunction}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   SQSDocumentQueueUrl:
     Description: SQS Queue URL
     Value: !Ref DocumentQueue
   SQSDocumentQueueConsoleURL:
     Description: SQS Queue console URL
-    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/sqs/v2/home?region=${AWS::Region}#/queues/${DocumentQueue}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/sqs/v2/home?region=${AWS::Region}#/queues/${DocumentQueue}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   # NOTE: Federation VITE_ vars below will be empty when ExternalIdPName is not set.
   # This is expected — !Sub blocks cannot conditionally omit lines. Empty values are
   # harmless in .env files. The CodeBuild section uses !If for build-time optimization.
@@ -11176,8 +11501,10 @@ Outputs:
       - - !Sub "VITE_USER_POOL_ID=${UserPool}"
         - !Sub "VITE_USER_POOL_CLIENT_ID=${UserPoolClient}"
         - !Sub "VITE_IDENTITY_POOL_ID=${IdentityPool}"
-        - !Sub "VITE_APPSYNC_GRAPHQL_URL=${GraphQLApi.GraphQLUrl}"
+        - !Sub "VITE_API_BASE_URL=${APIRESOLVERSTACK.Outputs.HttpApiEndpoint}"
+        - !Sub "VITE_STREAM_URL=${ChatStreamProcessorUrl.FunctionUrl}"
         - !Sub "VITE_AWS_REGION=${AWS::Region}"
+        - !Sub "VITE_ENABLE_QUICK_START_WIDGET=${EnableQuickStartWidget}"
         - !Sub "VITE_SETTINGS_PARAMETER=${SettingsParameter}"
         - !If
           - HasExternalIdP
@@ -11200,7 +11527,9 @@ Outputs:
         - "VITE_BDA_TOKENS_PER_PAGE=2000"
   ExternalMCPAgentsSecretConsoleURL:
     Description: External MCP Agents secret console URL - configure MCP server credentials here (JSON array format)
-    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/secretsmanager/secret?name=${AWS::StackName}/external-mcp-agents/credentials&region=${AWS::Region}"
+    Value: !Sub
+      - "https://${AWS::Region}.${ConsoleDomain}/secretsmanager/secret?name=${AWS::StackName}/external-mcp-agents/credentials&region=${AWS::Region}"
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   IDPCommonBaseLayerArn:
     Description: ARN of IDP Common Base Layer
     Value: !Ref IDPCommonBaseLayer
@@ -11255,46 +11584,17 @@ Outputs:
     Value: !GetAtt MCPConnectorClient.ClientSecret
   MCPContentBucketConsoleURL:
     Description: MCP server content bucket console URL
-    Value: !Sub https://s3.console.aws.amazon.com/s3/buckets/${MCPContentBucket}
+    Value: !Sub
+      - https://${AWS::Region}.${ConsoleDomain}/s3/buckets/${MCPContentBucket}
+      - ConsoleDomain: !FindInMap [ConsoleDomainMap, !Ref "AWS::Partition", Domain]
   LambdaVpcSecurityGroupId:
-    Condition: UsePrivateAppSync
+    Condition: UsePrivateApi
     Description: >-
-      Security Group ID for Lambda functions in private AppSync mode.
+      Security Group ID for Lambda functions in private REST API mode.
       The networking team must allow inbound HTTPS (port 443) from this
       security group on all VPC Interface Endpoints they create for this stack.
       See scripts/vpc-endpoints.yaml for the endpoint template.
     Value: !GetAtt LambdaVpcSecurityGroup.GroupId
-  AppSyncEndpointForDNS:
-    Condition: UsePrivateAppSync
-    Description: >-
-      Fully-qualified AppSync GraphQL hostname, provided for private-network
-      DNS setup when AppSyncVisibility=PRIVATE. For cross-VPC, cross-account,
-      or hybrid (on-premises) access, create TWO API-ID-scoped Route 53 Private
-      Hosted Zones — one named for this exact hostname and one for its realtime
-      counterpart (this hostname with 'appsync-api' replaced by
-      'appsync-realtime-api') — and add an apex A-record alias in each,
-      targeting the AppSync VPC Interface Endpoint (EvaluateTargetHealth=false).
-      Scope the zones to these exact hostnames, NOT the broader regional
-      'appsync-api.<region>' service domain, so DNS for every other
-      AppSync API in the region is unaffected. Both zones must be associated
-      with each VPC that resolves the API. See docs/deployment-private-network.md,
-      "AppSync DNS resolution in cross-VPC and hybrid networks".
-    Value: !Select
-      - 2
-      - !Split ["/", !GetAtt GraphQLApi.GraphQLUrl]
-
-  # ── Feature Platform cross-stack export ───────────────────────────────────
-  # `${AWS::StackName}-TrackingTableName` lets installed feature stacks
-  # Fn::ImportValue the main stack's document tracking table (e.g. the
-  # docs-by-status sample scans it for per-status counts).
-  #
-  # This export is *conditionally suppressed* when EnableFeaturePlatform=true,
-  # because the FeaturePlatformStack nested stack
-  # (feature-platform/main-stack-extensions/template.yaml) re-exports the same
-  # name for feature-stack consumption. CloudFormation rejects two stacks
-  # declaring the same export name, so when the Feature Platform is enabled it
-  # owns the export, and when it is disabled the main stack owns it. Either way
-  # a feature stack that Fn::ImportValue's this name sees the same value.
   TrackingTableName:
     Condition: IsFeaturePlatformDisabled
     Description: Name of the DynamoDB document tracking table (feature-stack cross-stack ref)

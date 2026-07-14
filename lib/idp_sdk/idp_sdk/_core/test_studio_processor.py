@@ -33,6 +33,27 @@ class TestStudioProcessor:
         self.lambda_client = boto3.client("lambda", region_name=self.stack_info.region)
         self._resolver_arn = None
 
+    def _get_api_resolver_stack_output(self, output_key: str) -> Optional[str]:
+        """Get an output from the nested API resolver stack.
+
+        The stack's logical id is APIRESOLVERSTACK on current templates and
+        was APPSYNCSTACK before the AppSync removal — try both so the SDK
+        keeps working against stacks deployed from older templates.
+
+        Raises:
+            ValueError: If neither nested stack (or the output) is found.
+        """
+        try:
+            return self.stack_info.get_nested_stack_output(
+                nested_stack_pattern="apiresolver",
+                output_key=output_key,
+            )
+        except ValueError:
+            return self.stack_info.get_nested_stack_output(
+                nested_stack_pattern="appsync",
+                output_key=output_key,
+            )
+
     def _get_resolver_function_arn(self) -> str:
         """Get TestResultsResolverFunction ARN from nested AppSync stack outputs.
 
@@ -46,15 +67,15 @@ class TestStudioProcessor:
             return self._resolver_arn
 
         try:
-            # TestResultsResolverFunctionArn is in the nested AppSync stack, not main stack
-            resolver_arn = self.stack_info.get_nested_stack_output(
-                nested_stack_pattern="appsync",
-                output_key="TestResultsResolverFunctionArn",
+            # TestResultsResolverFunctionArn is in the nested API resolver
+            # stack (APIRESOLVERSTACK), not the main stack
+            resolver_arn = self._get_api_resolver_stack_output(
+                "TestResultsResolverFunctionArn"
             )
 
             if not resolver_arn:
                 raise IDPResourceNotFoundError(
-                    "TestResultsResolverFunctionArn not found in nested AppSync stack. "
+                    "TestResultsResolverFunctionArn not found in nested API resolver stack. "
                     "Ensure Test Studio is enabled in your stack."
                 )
 
@@ -271,17 +292,19 @@ class TestStudioProcessor:
         Raises:
             IDPProcessingError: If abort operation fails
         """
-        # Get AbortTestRunsResolverFunction ARN from nested AppSync stack
+        # Get AbortTestRunsResolverFunction ARN from nested API resolver stack.
+        # get_nested_stack_output raises ValueError when the stack or output
+        # is missing (the previous `except IDPResourceNotFoundError` never
+        # matched, so the friendly message below was dead code).
         try:
-            abort_function_arn = self.stack_info.get_nested_stack_output(
-                nested_stack_pattern="appsync",
-                output_key="AbortTestRunsResolverFunctionArn",
+            abort_function_arn = self._get_api_resolver_stack_output(
+                "AbortTestRunsResolverFunctionArn"
             )
-        except IDPResourceNotFoundError:
+        except ValueError as e:
             raise IDPResourceNotFoundError(
                 "AbortTestRunsResolverFunction not found. "
                 "Ensure you are using a stack version that supports test run abort."
-            )
+            ) from e
 
         try:
             # Invoke the abort resolver

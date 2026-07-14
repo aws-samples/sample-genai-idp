@@ -1,0 +1,27 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# =============================================================================
+# BASE GEOMETRY - field bounding-box (geometry) defaults (v0.6)
+# =============================================================================
+# Geometry is advisory enrichment on per-field confidence. It lives under
+# `extraction.geometry` (v0.6 — replaces `assessment.geometry_mode`).
+#   ocr_only     (default) : derive boxes purely by matching values to OCR lines
+#   llm_grounded           : model emits boxes, OCR grounding refines them
+#   llm                    : model boxes as-is, no grounding
+#   off                    : no geometry produced
+# =============================================================================
+
+extraction:
+  geometry:
+    mode: ocr_only
+    task_prompt_bbox: >-
+      <spatial-localization-guidelines>
+      Additionally, for each field provide bounding box coordinates alongside its
+      confidence:
+      - bbox: [x1, y1, x2, y2] in a normalized 0-1000 scale
+      - page: page number where the field appears (starting from 1)
+      Use x1,y1 = top-left and x2,y2 = bottom-right (ensure x2 > x1, y2 > y1). Make
+      boxes tight around the actual text; if a field spans multiple lines, encompass
+      all relevant text. Include bbox/page in the JSON alongside each field's confidence.
+      </spatial-localization-guidelines>

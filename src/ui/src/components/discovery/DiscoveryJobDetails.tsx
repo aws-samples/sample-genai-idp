@@ -29,7 +29,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useParams, useNavigate } from 'react-router-dom';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 
 import { listDiscoveryJobs, onDiscoveryJobStatusChange } from '../../graphql/generated';
 import { DISCOVERY_PATH, CONFIGURATION_PATH } from '../../routes/constants';

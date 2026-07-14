@@ -743,3 +743,125 @@ class TestSummarizationService:
         # Verify error was added and status set to FAILED
         assert "Document has no pages to summarize" in result.errors
         assert result.status == Status.FAILED
+
+
+@pytest.mark.unit
+class TestExtractionArrayElision:
+    """Tests for Fix A: compact/elide extraction JSON before injection."""
+
+    def test_elide_large_array_replaces_with_head_tail_and_marker(self):
+        from idp_common.summarization.service import _elide_large_arrays
+
+        data = {"transactions": [{"i": i} for i in range(6400)], "total": 6400}
+        out = _elide_large_arrays(data, 50)
+
+        # head (3) + marker (1) + tail (2) == 6 entries
+        assert len(out["transactions"]) == 6
+        assert out["transactions"][0] == {"i": 0}
+        assert out["transactions"][-1] == {"i": 6399}
+        assert "6400 items total" in out["transactions"][3]
+        # Scalars/counts preserved
+        assert out["total"] == 6400
+
+    def test_small_array_not_elided(self):
+        from idp_common.summarization.service import _elide_large_arrays
+
+        data = {"items": [1, 2, 3]}
+        assert _elide_large_arrays(data, 50) == {"items": [1, 2, 3]}
+
+    def test_cap_zero_disables_elision(self):
+        from idp_common.summarization.service import _elide_large_arrays
+
+        data = {"items": list(range(1000))}
+        assert _elide_large_arrays(data, 0) == data
+
+    def test_nested_arrays_elided(self):
+        from idp_common.summarization.service import _elide_large_arrays
+
+        data = {"outer": {"inner": list(range(500))}}
+        out = _elide_large_arrays(data, 10)
+        assert len(out["outer"]["inner"]) == 6
+
+    @patch("idp_common.bedrock.invoke_model")
+    def test_process_text_injects_compact_elided_extraction(self, mock_invoke_model):
+        """The prompt sent to Bedrock must NOT contain the full 6400-row list."""
+        mock_invoke_model.return_value = {
+            "response": {
+                "output": {"message": {"content": [{"text": '{"summary": "ok"}'}]}}
+            },
+            "metering": {"input_tokens": 10, "output_tokens": 5},
+        }
+        config = {
+            "summarization": {
+                "enabled": True,
+                "model": "us.amazon.nova-pro-v1:0",
+                "system_prompt": "sys",
+                "task_prompt": "Doc: {DOCUMENT_TEXT}\nAttrs: {EXTRACTION_RESULTS}",
+                "max_extraction_array_items": 50,
+            }
+        }
+        service = SummarizationService(region="us-west-2", config=config)
+        extraction = {"transactions": [{"i": i} for i in range(6400)]}
+        service.process_text("short document text", extraction)
+
+        sent_prompt = mock_invoke_model.call_args.kwargs["content"][0]["text"]
+        # Elided: marker present, not every row.
+        assert "6400 items total" in sent_prompt
+        # Compact (no indent) — pretty-printed 2-space indent should be absent.
+        assert '\n  "transactions"' not in sent_prompt
+
+
+@pytest.mark.unit
+class TestFitOrSkipGuard:
+    """Tests for Fix B: fit-or-truncate guard + graceful overflow degradation."""
+
+    def _make_service(self, model="us.amazon.nova-pro-v1:0"):
+        config = {
+            "summarization": {
+                "enabled": True,
+                "model": model,
+                "system_prompt": "sys",
+                "task_prompt": "Doc: {DOCUMENT_TEXT}\nAttrs: {EXTRACTION_RESULTS}",
+            }
+        }
+        return SummarizationService(region="us-west-2", config=config)
+
+    def test_build_placeholders_truncates_oversized_text(self):
+        service = self._make_service()
+        config = service._get_summarization_config()
+        # ~2M chars ≈ 500K tokens, far over Nova Pro's 300K window.
+        huge_text = "word " * 400_000
+        placeholders, truncated = service._build_placeholders(huge_text, {}, config)
+        assert truncated is True
+        assert len(placeholders["DOCUMENT_TEXT"]) < len(huge_text)
+        assert "truncated" in placeholders["DOCUMENT_TEXT"].lower()
+
+    def test_build_placeholders_no_truncation_when_small(self):
+        service = self._make_service()
+        config = service._get_summarization_config()
+        placeholders, truncated = service._build_placeholders(
+            "small text", {"a": 1}, config
+        )
+        assert truncated is False
+        assert placeholders["DOCUMENT_TEXT"] == "small text"
+
+    @patch("idp_common.bedrock.invoke_model")
+    def test_process_text_overflow_returns_stub_not_raise(self, mock_invoke_model):
+        """An input-token overflow from Bedrock must degrade to a stub, not raise."""
+        mock_invoke_model.side_effect = Exception(
+            "ValidationException: Input Tokens Exceeded"
+        )
+        service = self._make_service()
+        result = service.process_text("some document text", {"a": 1})
+
+        assert result.metadata.get("summarization_skipped") is True
+        assert result.metadata.get("skip_reason") == "input_token_overflow"
+        assert "Summary Unavailable" in result.content["summary"]
+
+    @patch("idp_common.bedrock.invoke_model")
+    def test_process_text_non_overflow_error_still_raises(self, mock_invoke_model):
+        """Non-overflow errors must still propagate (not silently swallowed)."""
+        mock_invoke_model.side_effect = Exception("AccessDeniedException")
+        service = self._make_service()
+        with pytest.raises(Exception, match="AccessDeniedException"):
+            service.process_text("some document text", {"a": 1})

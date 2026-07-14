@@ -5,8 +5,10 @@
  * PromptPreview component for the Configuration page.
  *
  * Renders a preview of the actual prompts sent to the LLM for each processing step
- * (Classification, Extraction, Assessment, Summarization) with config-derived placeholders
- * filled in and document-specific placeholders shown as highlighted markers.
+ * (Classification, Extraction, Confidence Assessment, Summarization) with config-derived
+ * placeholders filled in and document-specific placeholders shown as highlighted markers.
+ * The Extraction and Confidence previews COMPOSE the template that will actually run given
+ * confidence.mode + geometry.mode (mirroring idp_common.extraction.prompt_assembly).
  *
  * This helps users understand what the LLM actually sees, enabling better optimization
  * of document class schemas and prompt templates.
@@ -64,11 +66,30 @@ interface PromptPreviewProps {
 const STEPS = [
   { value: 'classification', label: 'Classification' },
   { value: 'extraction', label: 'Extraction' },
-  { value: 'assessment', label: 'Assessment' },
+  { value: 'confidence', label: 'Confidence Assessment' },
   { value: 'summarization', label: 'Summarization' },
 ] as const;
 
 type StepName = (typeof STEPS)[number]['value'];
+
+// Geometry modes in which the model is asked to emit bounding boxes (mirrors
+// idp_common.extraction.prompt_assembly.geometry_requires_llm_boxes).
+const LLM_BOX_GEOMETRY_MODES = ['llm', 'llm_grounded'];
+
+// Splice the bbox block before the first document/cache-point marker so runtime
+// document sections stay after it (mirrors the Python _append_bbox_block).
+const BBOX_SPLICE_MARKERS = ['<<CACHEPOINT>>', '<document-image>', '{DOCUMENT_IMAGE}'];
+
+function appendBboxBlock(core: string, bboxBlock: string): string {
+  if (!core || !bboxBlock) return core;
+  if (core.includes('spatial-localization')) return core;
+  const block = bboxBlock.replace(/^\n+|\n+$/g, '');
+  for (const marker of BBOX_SPLICE_MARKERS) {
+    const idx = core.indexOf(marker);
+    if (idx !== -1) return `${core.slice(0, idx)}${block}\n\n${core.slice(idx)}`;
+  }
+  return `${core.replace(/\s+$/, '')}\n\n${block}\n`;
+}
 
 /** Map of placeholder → human-readable description shown in preview */
 const DOCUMENT_PLACEHOLDER_LABELS: Record<string, string> = {
@@ -467,15 +488,51 @@ const PromptPreview = ({ formValues }: PromptPreviewProps): React.JSX.Element =>
     }
   }, [classes, selectedClassId]);
 
-  // Get the step config (system_prompt, task_prompt, model)
+  // Get the step config (system_prompt, task_prompt, model). For the v0.6
+  // 'extraction' and 'confidence' views this composes the actual template that
+  // will run given confidence.mode + geometry.mode (mirrors the Python
+  // prompt_assembly selectors), so the preview reflects real behavior.
   const stepConfig = useMemo((): StepConfig => {
+    const extraction = (formValues?.extraction as Record<string, unknown>) || {};
+    const confidence = (extraction.confidence as Record<string, unknown>) || {};
+    const geometry = (extraction.geometry as Record<string, unknown>) || {};
+    const mode = String(confidence.mode ?? 'separate');
+    const geomMode = String(geometry.mode ?? 'ocr_only');
+    const needsBbox = LLM_BOX_GEOMETRY_MODES.includes(geomMode);
+    // v0.6: bbox block lives under geometry; confidence prompt under confidence.
+    const bboxBlock = String(geometry.task_prompt_bbox ?? '');
+
+    if (selectedStep === 'extraction') {
+      const integrated = mode === 'integrated';
+      let task = String(extraction.task_prompt ?? '');
+      if (integrated) {
+        task = String(extraction.task_prompt_extraction_with_confidence ?? '') || String(extraction.task_prompt ?? '');
+        if (needsBbox) task = appendBboxBlock(task, bboxBlock);
+      }
+      return {
+        system_prompt: String(extraction.system_prompt ?? ''),
+        task_prompt: task,
+        model: String(extraction.model ?? ''),
+      };
+    }
+
+    if (selectedStep === 'confidence') {
+      let task = String(confidence.task_prompt ?? '');
+      if (needsBbox) task = appendBboxBlock(task, bboxBlock);
+      return {
+        system_prompt: String(confidence.system_prompt ?? ''),
+        task_prompt: task,
+        model: String(confidence.model ?? ''),
+      };
+    }
+
     const cfg = formValues?.[selectedStep];
     if (!cfg || typeof cfg !== 'object') return {};
     return cfg as StepConfig;
   }, [formValues, selectedStep]);
 
   // Whether this step needs a class selection
-  const needsClassSelection = selectedStep === 'extraction' || selectedStep === 'assessment';
+  const needsClassSelection = selectedStep === 'extraction' || selectedStep === 'confidence';
 
   // Get selected class schema
   const selectedClass = useMemo((): ClassSchema | null => {
@@ -506,7 +563,7 @@ const PromptPreview = ({ formValues }: PromptPreviewProps): React.JSX.Element =>
         }
         break;
 
-      case 'assessment':
+      case 'confidence':
         if (selectedClass) {
           subs.DOCUMENT_CLASS = getClassId(selectedClass);
           subs.ATTRIBUTE_NAMES_AND_DESCRIPTIONS = formatSchemaForPrompt(selectedClass);
@@ -566,6 +623,35 @@ const PromptPreview = ({ formValues }: PromptPreviewProps): React.JSX.Element =>
           )}
         </ColumnLayout>
       </Container>
+
+      {/* Settings-aware note: which composed prompt is shown for this step */}
+      {(selectedStep === 'extraction' || selectedStep === 'confidence') &&
+        (() => {
+          const extraction = (formValues?.extraction as Record<string, unknown>) || {};
+          const confidence = (extraction.confidence as Record<string, unknown>) || {};
+          const geometry = (extraction.geometry as Record<string, unknown>) || {};
+          const mode = String(confidence.mode ?? 'separate'); // off | separate | integrated
+          const enabled = mode !== 'off';
+          const geomMode = String(geometry.mode ?? 'ocr_only');
+          const bbox = LLM_BOX_GEOMETRY_MODES.includes(geomMode)
+            ? ` The bounding-box instruction block is appended (Geometry mode: ${geomMode}).`
+            : ` No bounding-box block (Geometry mode: ${geomMode}).`;
+          let msg: string;
+          if (selectedStep === 'extraction') {
+            msg =
+              mode === 'integrated'
+                ? `Integrated confidence mode: showing the extraction + confidence template (one inference emits value and confidence).${bbox}`
+                : 'Showing the extraction-only template (confidence scoring is off or runs separately).';
+          } else if (!enabled) {
+            msg = 'Confidence scoring mode is Off — this prompt is not used.';
+          } else if (mode === 'integrated') {
+            msg =
+              'Integrated confidence mode: confidence is produced inside the Extraction inference — this confidence-only prompt is NOT used. See the Extraction step.';
+          } else {
+            msg = `Separate confidence mode: this prompt runs as a second inference (Advanced in-shard) or the standalone Assessment step.${bbox}`;
+          }
+          return <Alert type={selectedStep === 'confidence' && !enabled ? 'warning' : 'info'}>{msg}</Alert>;
+        })()}
 
       {/* Info about what's shown */}
       <Alert type="info" header="About Prompt Preview">

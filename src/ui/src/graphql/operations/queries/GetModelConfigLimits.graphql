@@ -1,0 +1,11 @@
+query GetModelConfigLimits {
+  getModelConfigLimits {
+    success
+    modelConfigLimits
+    defaultModelConfigLimits
+    error {
+      type
+      message
+    }
+  }
+}

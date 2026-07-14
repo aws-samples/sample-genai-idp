@@ -20,6 +20,8 @@ The GenAI IDP Accelerator can be deployed using either the AWS CloudFormation co
 - **For Administrators**: Use the deployment options below with your existing administrator privileges
 - **For Delegated Access**: See [iam-roles/cloudformation-management/README.md](../iam-roles/cloudformation-management/README.md) for instructions on provisioning a CloudFormation service role that allows non-administrator users to deploy and maintain IDP stacks without requiring administrator permissions
 
+For the full breakdown of AWS services and the IAM permission scopes required for deployment and runtime, see [AWS Services and IAM Role Requirements](./aws-services-and-roles.md).
+
 ### Option 1: One-Click CloudFormation Console Deployment (Recommended for First-Time Users)
 
 1. Choose your region and click the Launch Stack button:
@@ -192,7 +194,8 @@ idp-cli publish --source-dir . --region <region> [--bucket-basename <bucket>] [-
 - `--verbose` or `-v`: (Optional) Enable detailed error output for debugging build failures
 - `--clean-build`: (Optional) Force a clean rebuild of all artifacts
 - `--max-workers N`: (Optional) Number of parallel build workers
-- `--headless`: (Optional) Also generate a **headless (no-UI) template variant**. Useful for API-only / pipeline integrations in Commercial regions and **required** for GovCloud deployments. See [Headless Deployment](./headless-deployment.md).
+- `--headless`: (Optional) Also generate a **headless (no-UI) template variant**. Useful for API-only / pipeline integrations. See [Headless Deployment](./headless-deployment.md).
+- `--govcloud`: (Optional) Also generate a **GovCloud template variant** that keeps the full Web UI: removes all `AWS::CloudFront::*` resources and Lambda Function URLs (unavailable in GovCloud) and forces API Gateway UI hosting. Mutually exclusive with `--headless`. See [GovCloud Deployment](./govcloud-deployment.md).
 
 **Example:**
 

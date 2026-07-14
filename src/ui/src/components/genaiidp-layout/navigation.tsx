@@ -3,13 +3,19 @@
 import React, { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import type { SideNavigationProps } from '@cloudscape-design/components';
-import { Badge, Box, Link, Popover, SideNavigation, SpaceBetween } from '@cloudscape-design/components';
+import { Badge, Box, Button, Hotspot, Link, Popover, SideNavigation, SpaceBetween } from '@cloudscape-design/components';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
 import useInstalledFeatures from '../../hooks/use-installed-features';
 import useCatalogFeatures from '../../hooks/use-catalog-features';
-import { buildFeaturesNavSection } from './feature-platform-nav-items';
+import { buildFeaturesNavSection, COMING_SOON_HREF } from './feature-platform-nav-items';
 import useLatestVersion from '../../hooks/use-latest-version';
+import './navigation.css';
+
+const isQuickStartWidgetEnabled = (): boolean => {
+  const flag = import.meta.env.VITE_ENABLE_QUICK_START_WIDGET;
+  return flag === undefined || flag === 'true' || flag === true;
+};
 
 import {
   DOCUMENTS_PATH,
@@ -19,6 +25,7 @@ import {
   UPLOAD_DOCUMENT_PATH,
   CONFIGURATION_PATH,
   PRICING_PATH,
+  MODEL_CONFIG_LIMITS_PATH,
   DISCOVERY_PATH,
   USER_MANAGEMENT_PATH,
   AGENT_CHAT_PATH,
@@ -28,6 +35,48 @@ import {
 } from '../../routes/constants';
 
 export const documentsNavHeader = { text: 'Tools', href: `#${DEFAULT_PATH}` };
+
+const NAV_HOTSPOTS: Record<string, string> = {
+  [`#${DOCUMENTS_PATH}`]: 'nav-documents',
+  [`#${UPLOAD_DOCUMENT_PATH}`]: 'nav-upload',
+  [`#${DOCUMENTS_KB_QUERY_PATH}`]: 'nav-document-kb',
+  [`#${AGENT_CHAT_PATH}`]: 'nav-agent-chat',
+  [`#${CONFIGURATION_PATH}`]: 'nav-configuration',
+  [`#${DISCOVERY_PATH}`]: 'nav-discovery',
+  [`#${CUSTOM_MODELS_PATH}`]: 'nav-custom-models',
+  [`#${CAPACITY_PLANNING_PATH}`]: 'nav-capacity-planning',
+  [`#${USER_MANAGEMENT_PATH}`]: 'nav-user-management',
+  [`#${PRICING_PATH}`]: 'nav-pricing',
+  [`#${TEST_STUDIO_PATH}?tab=sets`]: 'nav-test-sets',
+  [`#${TEST_STUDIO_PATH}?tab=executions`]: 'nav-test-executions',
+};
+
+const withInfoHotspot = (link: SideNavigationProps.Link, hotspotId: string): SideNavigationProps.Link => {
+  const hotspot = React.createElement(Hotspot, { hotspotId, side: 'right' });
+  const info = link.info ? React.createElement(SpaceBetween, { direction: 'horizontal', size: 'xxs' }, link.info, hotspot) : hotspot;
+  return { ...link, info };
+};
+
+const withNavHotspots = (items: readonly SideNavigationProps.Item[]): SideNavigationProps.Item[] =>
+  items.map((item) => {
+    if (item.type === 'section' && Array.isArray((item as SideNavigationProps.Section).items)) {
+      const section = item as SideNavigationProps.Section;
+      if (section.text === 'Extensions (Preview)' && section.items.length > 0) {
+        const [first, ...rest] = section.items;
+        const firstWithHotspot = first.type === 'link' ? withInfoHotspot(first as SideNavigationProps.Link, 'nav-extensions') : first;
+        return { ...section, items: [firstWithHotspot, ...rest] };
+      }
+      return { ...section, items: withNavHotspots(section.items) };
+    }
+    if (item.type === 'link') {
+      const link = item as SideNavigationProps.Link;
+      const hotspotId = NAV_HOTSPOTS[link.href];
+      if (hotspotId) {
+        return withInfoHotspot(link, hotspotId);
+      }
+    }
+    return item;
+  });
 
 // Full navigation items for Admin users (all features)
 export const adminNavItems = [
@@ -45,6 +94,7 @@ export const adminNavItems = [
       { type: 'link', text: 'Capacity Planning', href: `#${CAPACITY_PLANNING_PATH}` },
       { type: 'link', text: 'User Management', href: `#${USER_MANAGEMENT_PATH}` },
       { type: 'link', text: 'View / Edit Pricing', href: `#${PRICING_PATH}` },
+      { type: 'link', text: 'View / Edit Model Limits', href: `#${MODEL_CONFIG_LIMITS_PATH}` },
     ],
   },
   {
@@ -81,6 +131,12 @@ export const adminNavItems = [
         type: 'link',
         text: 'Source Code',
         href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws',
+        external: true,
+      },
+      {
+        type: 'link',
+        text: 'Report an issue',
+        href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues',
         external: true,
       },
     ],
@@ -100,6 +156,7 @@ export const authorNavItems = [
       { type: 'link', text: 'Custom Models', href: `#${CUSTOM_MODELS_PATH}` },
       { type: 'link', text: 'Capacity Planning', href: `#${CAPACITY_PLANNING_PATH}` },
       { type: 'link', text: 'View Pricing', href: `#${PRICING_PATH}` },
+      { type: 'link', text: 'View Model Limits', href: `#${MODEL_CONFIG_LIMITS_PATH}` },
     ],
   },
   {
@@ -138,6 +195,12 @@ export const authorNavItems = [
         href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws',
         external: true,
       },
+      {
+        type: 'link',
+        text: 'Report an issue',
+        href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues',
+        external: true,
+      },
     ],
   },
 ];
@@ -152,6 +215,7 @@ export const viewerNavItems = [
       { type: 'link', text: 'View Configuration', href: `#${CONFIGURATION_PATH}` },
       { type: 'link', text: 'Capacity Planning', href: `#${CAPACITY_PLANNING_PATH}` },
       { type: 'link', text: 'View Pricing', href: `#${PRICING_PATH}` },
+      { type: 'link', text: 'View Model Limits', href: `#${MODEL_CONFIG_LIMITS_PATH}` },
     ],
   },
   {
@@ -180,6 +244,12 @@ export const viewerNavItems = [
         type: 'link',
         text: 'Source Code',
         href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws',
+        external: true,
+      },
+      {
+        type: 'link',
+        text: 'Report an issue',
+        href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues',
         external: true,
       },
     ],
@@ -203,6 +273,7 @@ const defaultOnFollowHandler = (ev: CustomEvent<SideNavigationProps.FollowDetail
     '#idppattern',
     '#region',
     '#update-available',
+    COMING_SOON_HREF,
   ];
   if (nonNavigableHrefs.includes(ev.detail.href)) {
     ev.preventDefault();
@@ -349,6 +420,8 @@ const Navigation = ({
   // Determine active link based on current path
   if (path.includes(PRICING_PATH)) {
     activeHref = `#${PRICING_PATH}`;
+  } else if (path.includes(MODEL_CONFIG_LIMITS_PATH)) {
+    activeHref = `#${MODEL_CONFIG_LIMITS_PATH}`;
   } else if (path.includes(CONFIGURATION_PATH)) {
     activeHref = `#${CONFIGURATION_PATH}`;
   } else if (path.includes(DOCUMENTS_KB_QUERY_PATH)) {
@@ -467,7 +540,23 @@ const Navigation = ({
   }
 
   return (
-    <SideNavigation items={navigationItems} header={header || documentsNavHeader} activeHref={activeHref} onFollow={onFollowHandler} />
+    <>
+      {isQuickStartWidgetEnabled() && (
+        <div className="nav-quick-start">
+          <Hotspot hotspotId="nav-quick-start" side="right">
+            <Button variant="primary" iconName="gen-ai" onClick={() => window.dispatchEvent(new CustomEvent('openQuickStart'))}>
+              Quick Start
+            </Button>
+          </Hotspot>
+        </div>
+      )}
+      <SideNavigation
+        items={withNavHotspots(navigationItems)}
+        header={header || documentsNavHeader}
+        activeHref={activeHref}
+        onFollow={onFollowHandler}
+      />
+    </>
   );
 };
 

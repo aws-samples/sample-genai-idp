@@ -153,8 +153,13 @@ class TestDocumentVisualTool:
         assert result["status"] == "error"
 
     def test_compress_small_image(self):
-        """Test that small images pass through compression."""
-        small_data = b"small" * 10
+        """A small, in-dimension image passes through compression unchanged."""
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.new("RGB", (50, 50), color="blue").save(buf, format="JPEG")
+        small_data = buf.getvalue()
+
         tool = DocumentVisualTool(images={})
         result = tool._compress_image(small_data, max_size=1024 * 1024)
         assert result == small_data

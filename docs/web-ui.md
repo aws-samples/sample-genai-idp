@@ -24,12 +24,33 @@ _The GenAIIDP Web Interface showing the document tracking dashboard with status 
 - Accuracy evaluation reports when baseline data is provided
 - View and edit pattern configuration, including document classes, prompt engineering, and model settings
 - Manage multiple configuration versions — create, compare, activate, and delete versions (see [configuration-versions.md](configuration-versions.md))
+- Retain, view, compare, and delete **document versions** — every processing run of a document is kept and viewable read-only (see [document-versions.md](document-versions.md))
 - **Confidence threshold configuration** for HITL (Human-in-the-Loop) triggering through the Assessment & HITL Configuration section
-- Document upload from local computer
+- Document upload from your local computer, or from the **bundled sample documents** shipped with the deployment (no local download needed)
 - Knowledge base querying for document collections
 - "Chat with document" from the detailed view of the document
 - **Document Process Flow visualization** for detailed workflow execution monitoring and troubleshooting
 - **Document Analytics** for querying and visualizing processed document data
+- **Feedback & issue reporting** — report bugs or request features on GitHub directly from the UI, with your deployment details pre-filled
+
+## Upload Documents
+
+The **Upload Documents** panel accepts documents from two sources, selected with the **Document source** toggle:
+
+- **From my computer** — pick one or more files with the file picker (or drag-and-drop). Files are uploaded directly to the InputBucket via a presigned POST and processed automatically.
+- **Sample documents** — choose from the sample documents bundled with the deployment (e.g. a multi-page bank statement, a lending package, a batch of W-2 forms). Selecting a sample copies it server-side into the InputBucket — no local download required. This is the easiest way to try the accelerator or evaluate a configuration preset end-to-end.
+
+In both modes you can set an optional **folder prefix** and pick the **Configuration Version** used to process the document(s).
+
+### One-click config for samples
+
+Many bundled samples are tuned for a specific configuration preset in the [Configuration Library](configuration-versions.md) (for example, the bank-statement sample pairs with the `bank-statement-sample` config). When you select such a sample:
+
+- If the associated configuration is **not yet imported**, a pre-checked **"Also import and use its configuration"** checkbox appears. Leaving it checked imports the preset from the library as a new (non-active) configuration version and processes the sample with it. Uncheck it to process the sample under the currently selected version instead.
+- If the associated configuration is **already imported**, that version is preselected automatically.
+- Samples with no associated configuration are simply uploaded under the selected version.
+
+The bundled sample documents and their config associations are published to the deployment's ConfigurationBucket at deploy time (under `samples/`, described by `config_library/samples-manifest.json`).
 
 ## Edit Sections
 
@@ -186,6 +207,27 @@ Pattern-1 uses **Bedrock Data Automation (BDA)** with automatic page management.
 - **Alternative Workflows**: Available options like "View Page Text", Configuration updates, and document reprocessing
 - **Future Considerations**: Guidance on using Pattern-2/Pattern-3 for fine-grained page control
 
+## Document Schema Builder
+
+The **Document Schema** tab on the Configuration page provides a visual **Schema Builder** for defining the document types (classes) and fields (attributes) that extraction produces — a JSON Schema Draft 2020-12 editor that requires no hand-editing of JSON. (The same builder powers the **Policy Schema** tab for rule validation.)
+
+### Layout
+
+A three-pane master-detail: the **class list** (left, split into **Document Types** and reusable **Shared Classes**), the **attribute list** for the selected class (middle), and a **property inspector** for the selected class or attribute (right). Document types become top-level schemas; shared classes are referenced from attributes via `$ref` (single object) or `items.$ref` (array/list of that class).
+
+### Key Capabilities
+
+- **Add Class**: create a **Custom Class**, or import a **Standard Class** from 35+ pre-built document types derived from AWS BDA blueprints (fully editable after import).
+- **Add Attribute**: add fields to the selected class. The dialog includes an **Add another** button that saves the current field and immediately starts a new one, so multiple attributes can be added without reopening the dialog. A newly-created class with no fields shows an **Add first attribute** button.
+- **Show Preview**: opens preview tabs for the schema:
+  - **Diagram** — a graphical entity-relationship view. Each class is a node listing its attributes; relationships are drawn as labelled edges (**solid** arrow = a single referenced object, **dashed** arrow = an array/list of that class). Document types are colored and laid out on the left, referenced shared classes to the right by reference depth. Click a node to open that class in the editor.
+  - **JSON Schema** — the exported JSON Schema (one per document type, each carrying only the `$defs` it references).
+  - **Statistics** — attribute counts and type distribution for the selected class.
+- **Export**: download the schema as JSON — **Export all** (every document type) or **Export "&lt;class&gt;"** (the currently-selected document type plus only the shared classes it references).
+- **Reorder / edit / remove**: drag attributes to reorder; click any class or attribute to edit its properties, constraints, few-shot examples, and per-class overrides in the inspector.
+
+For the schema format itself and how to author it by hand, see the [JSON Schema Migration Guide](json-schema-migration.md).
+
 ## Prompt Preview
 
 The **Prompt Preview** tab in the Configuration page allows you to see exactly what prompts are sent to the LLM for each processing step, with configuration-derived placeholders filled in using your actual class definitions and schemas.
@@ -316,6 +358,18 @@ A self-describing `manifest.json` is written at the ZIP root capturing the expor
 
 Every file in the archive is fetched directly from S3 using a short-lived presigned URL generated client-side with your browser's Cognito credentials, preserving binary content byte-for-byte. A progress modal reports status during the download and offers a **Cancel** button for large documents. The per-section **Download Data** / **Download Baseline** buttons in the Sections panel remain available for single-file downloads.
 
+## Document Versions
+
+The Document Details page includes a **Version History** panel listing every retained processing run of the document, newest first (with the current run badged). Re-uploading a document under the same key — or reprocessing it — no longer discards the prior results; each successful run is kept as an immutable version whose exact output bytes are pinned by S3 object version.
+
+From the panel you can:
+
+- **View** any past version's outputs read-only — its sections, page text/images, extraction results, and summary/evaluation reports are fetched from that run's pinned S3 versions, so you see exactly what that run produced even after later runs overwrote the outputs. Editing is disabled while viewing history; a banner offers **Return to current version**.
+- **Compare** any two versions — a section-by-section, field-level diff of their extraction results.
+- **Delete** a version (Admin only) — permanently removes that run's pinned object versions; the current version cannot be deleted, and versions still referenced by another retained run are preserved.
+
+See the [Document Versions guide](document-versions.md) for how versioning works, retention, the CLI/API surfaces, and caveats.
+
 ## Chat with Document
 
 The "Chat with Document" feature is available at the bottom of the Document Detail view. It provides an interactive Q&A interface grounded in the text of the single document you are viewing — no other documents are considered. The feature is only available after the document's status is **COMPLETE**.
@@ -354,6 +408,54 @@ https://github.com/user-attachments/assets/50607084-96d6-4833-85a6-3dc0e72b28ac
 1. Navigate to a document's detail page and scroll to the bottom
 2. In the text area, type in your question and you'll see an answer pop up after the document is analyzed with the Nova Pro model
 
+## Feedback & Issue Reporting
+
+The UI makes it easy to report bugs or request enhancements on the project's public
+GitHub repository, with your deployment details pre-filled so you don't have to
+hand-type them. There are three entry points:
+
+- **Feedback menu (top navigation).** A **Feedback** menu is available in the top
+  navigation bar to every user, with **Report a bug**, **Request a feature**, and
+  **View existing issues**. Bug/feature links open a pre-filled GitHub issue form in
+  a new tab.
+- **Report this issue on GitHub (Troubleshoot modal).** After running the
+  [Error Analyzer](error-analyzer.md) on a failed document, the Troubleshoot modal
+  footer offers **Report this issue on GitHub** — it pre-fills the bug form with the
+  document context (object key, status, config version, execution ARN, and the
+  agent's findings) in addition to the environment details. A **Copy full details**
+  button copies the complete environment + findings text to your clipboard for
+  pasting anything the URL can't carry (long transcripts are length-capped in the
+  link). The modal only closes via its **Close** button (clicking outside or pressing
+  Esc no longer dismisses it, so a running analysis isn't interrupted), and a
+  **Minimize** button collapses it to a small restore chip while the analysis
+  continues in the background.
+- **Create GitHub issue (Agent Companion Chat).** The [Agent Companion Chat](agent-companion-chat.md)
+  — which can also run the Error Analyzer — shows a **Create GitHub issue** button
+  under the latest agent answer, offering *Report a bug* (with the answer attached as
+  findings) or *Request a feature*.
+- **Resources & help panel.** The side navigation **Resources** section includes a
+  **Report an issue** link, and the right-side info (Help) panel on the Document List
+  includes a **Feedback & support** section with the same links.
+
+**What gets pre-filled.** Every link opens the GitHub new-issue page with the
+**issue body** pre-populated — an environment summary (**Version**, **Build**,
+**Stack name**, **Region**, **Processing Mode**) sourced from the deployment's
+settings, plus context: the Troubleshoot path adds the document context and agent
+findings, and the Agent Companion Chat path adds the agent's answer. The report/copy
+affordances appear once the agent job completes.
+
+> **Privacy note:** issues on the public repository are visible to everyone. Nothing
+> is submitted automatically — GitHub always shows you the pre-filled form to review
+> first. **Please review every field and redact any sensitive document data**
+> (names, account numbers, PII) before submitting.
+
+The in-app links pre-fill the issue **body** directly (via `?title=&body=&labels=`),
+so the content is embedded immediately. This intentionally bypasses the `.yml` issue
+*forms* in `.github/ISSUE_TEMPLATE/` — GitHub ignores a pre-filled `body` when a form
+template is selected — so those forms apply only when a user clicks **New issue**
+directly on GitHub. Very long findings are length-capped in the URL; use **Copy full
+details** in the Troubleshoot modal to grab the complete text.
+
 ## Authentication Features
 
 The web UI uses Amazon Cognito for secure user authentication and authorization:
@@ -378,7 +480,7 @@ The web UI is automatically deployed as part of the CloudFormation stack. The de
 
 1. Creates required Cognito resources (User Pool, Identity Pool)
 2. Builds and deploys the React application to S3
-3. Sets up CloudFront distribution for content delivery (or ALB for VPC-based hosting — see [ALB Hosting](./alb-hosting.md))
+3. Sets up CloudFront distribution for content delivery (or API Gateway for VPC-based hosting — see [API Gateway Hosting](./apigateway-hosting.md))
 4. Configures necessary IAM roles and permissions
 
 ## Accessing the Web UI
@@ -425,7 +527,7 @@ The web UI implementation includes several security features:
 - All communication is encrypted using HTTPS
 - Authentication tokens are automatically rotated
 - Session timeouts are enforced
-- CloudFront distribution uses secure configuration (or ALB with TLS 1.3 for VPC-based hosting)
+- CloudFront distribution uses secure configuration (or API Gateway with AWS-managed TLS for VPC-based hosting)
 - S3 buckets are configured with appropriate security policies
 - API access is controlled through IAM and Cognito
 - Web Application Firewall (WAF) protection for AppSync API
@@ -454,7 +556,7 @@ The web UI includes built-in monitoring:
 
 - CloudWatch metrics for API and authentication activity
 - Access logs in CloudWatch Logs
-- CloudFront distribution logs (or ALB access logs for VPC-based hosting)
+- CloudFront distribution logs (or API Gateway access logs for VPC-based hosting)
 - Error tracking and reporting
 - Performance monitoring
 
@@ -462,6 +564,6 @@ To troubleshoot issues:
 
 1. Check CloudWatch Logs for application errors
 2. Verify Cognito user status in the AWS Console
-3. Check CloudFront distribution status (or ALB target group health for VPC-based hosting)
+3. Check CloudFront distribution status (or API Gateway stage / execute-api endpoint health for VPC-based hosting)
 4. Verify API endpoints are accessible
 5. Review browser console for client-side errors

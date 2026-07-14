@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import concurrent.futures
 import io
+import json
 import logging
 import os
+import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -226,9 +228,9 @@ class OcrService:
             )
 
         # Validate backend
-        if self.backend not in ["textract", "bedrock", "none"]:
+        if self.backend not in ["textract", "bedrock", "bda", "none"]:
             raise ValueError(
-                f"Invalid backend: {backend}. Must be 'textract', 'bedrock', or 'none'"
+                f"Invalid backend: {backend}. Must be 'textract', 'bedrock', 'bda', or 'none'"
             )
 
         # Initialize clients based on backend
@@ -286,6 +288,40 @@ class OcrService:
 
             logger.info(
                 f"OCR Service initialized with Bedrock backend, config: {self.bedrock_config}"
+            )
+        elif self.backend == "bda":
+            # Bedrock Data Automation standard-output OCR. Enhanced features are
+            # not applicable (BDA always returns tables + layout + word geometry).
+            self.enhanced_features = False
+
+            adaptive_config = Config(
+                retries={"max_attempts": 100, "mode": "adaptive"},
+                max_pool_connections=self.max_workers * 3,
+            )
+            self.bda_runtime_client = boto3.client(
+                "bedrock-data-automation-runtime",
+                region_name=self.region,
+                config=adaptive_config,
+            )
+
+            # Resolve project + profile ARNs. Project ARN may be supplied via
+            # config; otherwise a standard-output SYNC OCR project is
+            # auto-created and reused. Resolution is deferred to first use to
+            # keep __init__ side-effect-free when possible.
+            self.bda_project_arn = (
+                self.config.ocr.bda_project_arn if hasattr(self, "config") else None
+            )
+            self._bda_profile_arn: Optional[str] = None
+            # Guards lazy ARN resolution so parallel page workers resolve/create
+            # the project exactly once instead of racing.
+            self._bda_arn_lock = threading.Lock()
+            logger.info(
+                "OCR Service initialized with BDA backend"
+                + (
+                    f", project {self.bda_project_arn}"
+                    if self.bda_project_arn
+                    else " (project auto-managed)"
+                )
             )
         elif self.backend == "none":
             # No OCR processing - image-only mode
@@ -636,6 +672,14 @@ class OcrService:
             return self._process_single_page_bedrock(
                 page_index, pdf_document, output_bucket, prefix
             )
+        elif self.backend == "bda":
+            # BDA renders + OCRs per page from the page image, using the same
+            # image-based path as the parallel PDF workflow.
+            page = pdf_document[page_index]
+            img_bytes = self._extract_page_image(page, True, page_index + 1)
+            return self._process_page_with_image(
+                page_index, img_bytes, output_bucket, prefix
+            )
         else:
             # Textract backend (default)
             return self._process_single_page_textract(
@@ -877,7 +921,9 @@ class OcrService:
                 temperature=0.0,
                 top_p=0.1,
                 top_k=5,
-                max_tokens=4096,
+                # None => Bedrock client resolves the model's max output tokens
+                # (model_config_limits.yaml); Bedrock's default-when-omitted truncates.
+                max_tokens=None,
                 reasoning_effort=getattr(self.config.ocr, "reasoning_effort", None)
                 if hasattr(self, "config")
                 else None,
@@ -929,6 +975,53 @@ class OcrService:
             page_data_raw = raw_ocr_content
             page_data_text = extracted_text
             page_data_provider = "bedrock"
+
+        elif self.backend == "bda":
+            # BDA reads the image from S3 by s3Uri so extension-based modality
+            # routing (jpeg/png -> DOCUMENT) applies. BDA documents only accept
+            # PNG/JPG/TIFF and routing is only configured for jpeg/png, so any
+            # other stored format (gif, webp, bmp) is transcoded to JPEG and
+            # uploaded to a .jpg key for the BDA call. (BDA does its own image
+            # processing, so binarization preprocessing is not applied here.)
+            if img_ext in ("jpg", "png"):
+                bda_image_key = image_key
+            else:
+                from PIL import Image as _PILImage
+
+                _buf = io.BytesIO()
+                _pil = _PILImage.open(io.BytesIO(img_data))
+                if _pil.mode not in ("RGB", "L"):
+                    _pil = _pil.convert("RGB")
+                _pil.save(_buf, format="JPEG", quality=95)
+                bda_image_key = f"{prefix}/pages/{page_id}/image_bda.jpg"
+                s3.write_content(
+                    _buf.getvalue(),
+                    output_bucket,
+                    bda_image_key,
+                    content_type="image/jpeg",
+                )
+
+            # Dimensions of the stored page image (image.jpg) the UI overlays on;
+            # forwarded so BDA rectification corners map into its coordinate space.
+            _bda_img_size = self._image_size_from_bytes(img_data)
+
+            (
+                raw_ocr_content,
+                extracted_text,
+                raw_text_key,
+                text_confidence_key,
+                parsed_text_key,
+                metering,
+            ) = self._write_bda_page_artifacts(
+                f"s3://{output_bucket}/{bda_image_key}",
+                output_bucket,
+                prefix,
+                page_id,
+                original_image_size=_bda_img_size,
+            )
+            page_data_raw = raw_ocr_content
+            page_data_text = extracted_text
+            page_data_provider = "bda"
 
         else:
             # Process with Textract (default)
@@ -1106,7 +1199,9 @@ class OcrService:
                 temperature=0.0,
                 top_p=0.1,
                 top_k=5,
-                max_tokens=4096,
+                # None => Bedrock client resolves the model's max output tokens
+                # (model_config_limits.yaml); Bedrock's default-when-omitted truncates.
+                max_tokens=None,
                 reasoning_effort=getattr(self.config.ocr, "reasoning_effort", None)
                 if hasattr(self, "config")
                 else None,
@@ -1155,6 +1250,28 @@ class OcrService:
             page_data_raw = raw_ocr_content
             page_data_text = extracted_text
             page_data_provider = "bedrock"
+
+        elif self.backend == "bda":
+            # BDA reads the page image already uploaded to S3 (image_key) by
+            # s3Uri so extension-based modality routing applies. Pass the stored
+            # image's dimensions so BDA rectification corners map into its space.
+            (
+                raw_ocr_content,
+                extracted_text,
+                raw_text_key,
+                text_confidence_key,
+                parsed_text_key,
+                metering,
+            ) = self._write_bda_page_artifacts(
+                f"s3://{output_bucket}/{image_key}",
+                output_bucket,
+                prefix,
+                page_id,
+                original_image_size=self._image_size_from_bytes(img_bytes),
+            )
+            page_data_raw = raw_ocr_content
+            page_data_text = extracted_text
+            page_data_provider = "bda"
 
         else:
             # Process with Textract (default)
@@ -1578,7 +1695,9 @@ class OcrService:
             temperature=0.0,  # Use lowest temperature for OCR accuracy
             top_p=0.1,
             top_k=5,
-            max_tokens=4096,
+            # None => Bedrock client resolves the model's max output tokens
+            # (model_config_limits.yaml); Bedrock's default-when-omitted truncates.
+            max_tokens=None,
             reasoning_effort=getattr(self.config.ocr, "reasoning_effort", None)
             if hasattr(self, "config")
             else None,
@@ -1848,6 +1967,162 @@ class OcrService:
             "text": "| Text | Confidence |\n|:-----|:------------|\n| *No confidence data available from LLM OCR* | N/A |"
         }
         return response_payload, placeholder
+
+    def _ensure_bda_arns(self) -> None:
+        """Lazily resolve the BDA project + profile ARNs on first use.
+
+        Serialized with a lock so parallel page workers resolve/create the
+        auto-managed project exactly once rather than racing to create it.
+        """
+        if self.bda_project_arn and self._bda_profile_arn:
+            return
+        from idp_common.bda import bda_ocr
+
+        with self._bda_arn_lock:
+            if not self.bda_project_arn:
+                self.bda_project_arn = bda_ocr.resolve_ocr_project_arn(
+                    region=self.region
+                )
+            if not self._bda_profile_arn:
+                identity = boto3.client(
+                    "sts", region_name=self.region
+                ).get_caller_identity()
+                account_id = identity["Account"]
+                # Derive the partition from the caller ARN (arn:<partition>:...)
+                # so the profile ARN is correct in GovCloud / China partitions.
+                partition = identity["Arn"].split(":")[1]
+                self._bda_profile_arn = bda_ocr.build_profile_arn(
+                    self.region, account_id, partition
+                )
+
+    @staticmethod
+    def _image_size_from_bytes(
+        img_bytes: Optional[bytes],
+    ) -> Optional[Tuple[int, int]]:
+        """Return ``(width, height)`` of image bytes, or None if undecodable.
+
+        Used to give the BDA converter the original page-image dimensions so it
+        can rescale rectification corners into original-image space.
+        """
+        if not img_bytes:
+            return None
+        try:
+            from PIL import Image as _PILImage
+
+            with _PILImage.open(io.BytesIO(img_bytes)) as im:
+                return im.size
+        except Exception:
+            logger.warning("Could not determine page image size for BDA geometry")
+            return None
+
+    def _run_bda_ocr(
+        self,
+        image_s3_uri: str,
+        original_image_size: Optional[Tuple[int, int]] = None,
+    ) -> Tuple[Dict[str, Any], Dict[str, Any], str, Dict[str, Any]]:
+        """Run BDA standard-output OCR on a single page image.
+
+        Invokes the synchronous ``InvokeDataAutomation`` API on the page image
+        already uploaded to S3 (sync is capped at ~10 pages, so we always send a
+        single page), converts the standard output to Textract-format blocks,
+        and derives the confidence table.
+
+        The image is passed by ``s3Uri`` (not inline ``bytes``) deliberately: the
+        project's modality-routing override (``jpeg``/``png`` -> ``DOCUMENT``)
+        keys off the file extension, so an extension-bearing S3 URI guarantees
+        document text extraction. Inline bytes carry no extension and BDA falls
+        back to content-based classification, which under concurrent load
+        misclassifies some pages as IMAGE and yields empty OCR.
+
+        Args:
+            image_s3_uri: S3 URI of the page image to OCR.
+            original_image_size: ``(width, height)`` of that image, passed to the
+                converter so BDA's rectification corners (normalized against the
+                rectified crop) are rescaled into original-image space. Without
+                it, boxes are misplaced when BDA rectifies to a page sub-region.
+
+        Returns:
+            Tuple of (raw_ocr_blocks, text_confidence_data, parsed_text, metering).
+        """
+        from idp_common.bda import bda_ocr
+
+        self._ensure_bda_arns()
+
+        response = self.bda_runtime_client.invoke_data_automation(
+            inputConfiguration={"s3Uri": image_s3_uri},
+            dataAutomationConfiguration={
+                "dataAutomationProjectArn": self.bda_project_arn,
+                "stage": "LIVE",
+            },
+            dataAutomationProfileArn=self._bda_profile_arn,
+        )
+
+        segments = response.get("outputSegments", [])
+        standard_output = segments[0]["standardOutput"] if segments else {}
+        if isinstance(standard_output, str):
+            standard_output = json.loads(standard_output)
+
+        raw_ocr_blocks = bda_ocr.bda_standard_output_to_textract_blocks(
+            standard_output, original_image_size=original_image_size
+        )
+        parsed_text = bda_ocr.extract_markdown(standard_output)
+        text_confidence_data = self._generate_text_confidence_data(raw_ocr_blocks)
+        # Metering key maps to the pricing.yaml entry `bda/documents-standard`
+        # ($0.01/page) via reporting/save_reporting_data.py::_get_unit_cost.
+        metering = {"OCR/bda/documents-standard": {"pages": 1}}
+
+        return raw_ocr_blocks, text_confidence_data, parsed_text, metering
+
+    def _write_bda_page_artifacts(
+        self,
+        image_s3_uri: str,
+        output_bucket: str,
+        prefix: str,
+        page_id: int,
+        original_image_size: Optional[Tuple[int, int]] = None,
+    ) -> Tuple[Dict[str, Any], str, str, str, str, Dict[str, Any]]:
+        """Run BDA OCR for a page image (in S3) and persist artifacts.
+
+        ``original_image_size`` (``(width, height)`` of the page image) is
+        forwarded to the converter so BDA rectification corners are rescaled into
+        original-image space (see ``_run_bda_ocr``).
+
+        Returns (page_data_raw, page_data_text, raw_text_key, text_confidence_key,
+        parsed_text_key, metering) so callers can build page_data + result dict.
+        """
+        raw_ocr_blocks, text_confidence_data, parsed_text, metering = self._run_bda_ocr(
+            image_s3_uri, original_image_size=original_image_size
+        )
+
+        raw_text_key = f"{prefix}/pages/{page_id}/rawText.json"
+        s3.write_content(
+            raw_ocr_blocks, output_bucket, raw_text_key, content_type="application/json"
+        )
+
+        text_confidence_key = f"{prefix}/pages/{page_id}/textConfidence.json"
+        s3.write_content(
+            text_confidence_data,
+            output_bucket,
+            text_confidence_key,
+            content_type="application/json",
+        )
+
+        parsed_text_key = f"{prefix}/pages/{page_id}/result.json"
+        s3.write_content(
+            {"text": parsed_text},
+            output_bucket,
+            parsed_text_key,
+            content_type="application/json",
+        )
+
+        return (
+            raw_ocr_blocks,
+            parsed_text,
+            raw_text_key,
+            text_confidence_key,
+            parsed_text_key,
+            metering,
+        )
 
     def _generate_text_confidence_data(
         self, raw_ocr_data: Dict[str, Any]
@@ -2265,7 +2540,9 @@ class OcrService:
                     temperature=0.0,
                     top_p=0.1,
                     top_k=5,
-                    max_tokens=4096,
+                    # None => Bedrock client resolves the model's max output tokens
+                    # (model_config_limits.yaml); Bedrock's default-when-omitted truncates.
+                    max_tokens=None,
                     reasoning_effort=getattr(self.config.ocr, "reasoning_effort", None)
                     if hasattr(self, "config")
                     else None,

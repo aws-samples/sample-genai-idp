@@ -52,8 +52,8 @@ For comprehensive documentation, see [configuration-versions.md](configuration-v
 
 ### Configuration Management Features
 
-- **Save Changes**: Save your current configuration changes. The button is **enabled only when you have unsaved changes** (comparing your edits against the last saved configuration). After a successful save, a confirmation banner is displayed.
-- **Unsaved Changes Indicator**: Individual fields with unsaved edits display an orange dot next to the field label, and an info banner with a "Discard changes" button appears when the configuration form has unsaved edits.
+- **Save Changes**: Save your current configuration changes. The button is **enabled only when you have unsaved changes** (comparing your edits against the last saved configuration); when it's disabled on a stack-managed version, hovering it explains why. After a successful save, a confirmation banner **and** a brief success toast (top-right notification area) are shown. Less-frequent actions (Export, Save as default, Restore default (All), Save as Version, and BDA sync) are grouped under an **Actions** menu next to Save changes.
+- **Unsaved Changes Indicator**: Individual fields with unsaved edits display an orange dot next to the field label, and an info banner with a "Discard changes" button appears when the configuration form has unsaved edits (shown on all versions, including the stack-managed `default`).
 - **Browser Navigation Guard**: The browser warns before leaving the page when unsaved configuration changes exist (both on browser close/refresh and SPA navigation).
 - **Save as Default**: Save your current version's configuration as the new default baseline. This replaces the existing default configuration. **Warning**: Default configurations may be overwritten during solution upgrades - export your configuration first for backup.
 - **Restore Default (All)**: Reset the current version's configuration back to the default values, replacing all customizations.
@@ -159,10 +159,10 @@ notes: "Configuration with custom classification method"
 classification:
   classificationMethod: textbasedHolisticClassification
 
-# Override assessment to enable granular mode
-assessment:
-  granular:
-    enabled: true
+# Override confidence to use integrated mode
+extraction:
+  confidence:
+    mode: integrated
 
 classes:
   # ... your document classes
@@ -213,28 +213,38 @@ summarization:
 
 **Note:** Prior to v0.4.0, this feature was controlled by the `IsSummarizationEnabled` CloudFormation parameter. The configuration-based approach provides runtime control without requiring stack redeployment.
 
-## Assessment Configuration
+## Confidence (Assessment) Configuration
 
-### Enable/Disable Assessment
+As of **config v0.6**, per-field **confidence** and **geometry** are **outputs of
+extraction**, configured under `extraction.confidence.*` and
+`extraction.geometry.*` — there is no top-level `assessment.{model, geometry_mode,
+...}` block anymore. Human-in-the-loop review is configured under the top-level
+`hitl.*` block. See [Extraction & Confidence](./extraction-and-confidence.md) for
+the full reference.
 
-Similar to summarization, assessment can now be controlled via the configuration file rather than CloudFormation stack parameters. This provides more flexibility and eliminates the need for stack redeployment when changing assessment behavior.
+### Enable/Disable Confidence
+
+Confidence is controlled via the configuration file rather than CloudFormation
+stack parameters. This provides runtime control without stack redeployment.
 
 **Configuration-based Control (Recommended):**
 ```yaml
-assessment:
-  enabled: true  # Set to false to disable assessment
-  model: us.amazon.nova-lite-v1:0
-  temperature: 0.0
-  # ... other assessment settings
+extraction:
+  confidence:
+    enabled: true             # false disables confidence entirely (zero LLM cost)
+    mode: separate            # off | separate (default) | integrated
+    model: us.amazon.nova-lite-v1:0
+    temperature: 0.0
+    list_batch_size: 25       # rows per assessment batch for large lists
+    # ... other confidence settings
 ```
 
-**Key Benefits:**
-- **Runtime Control**: Enable/disable without stack redeployment
-- **Cost Optimization**: Zero LLM costs when disabled (`enabled: false`)
-- **Simplified Architecture**: No conditional logic in state machines
-- **Backward Compatible**: Defaults to `enabled: true` when property is missing
+**Confidence modes** (`extraction.confidence.mode`):
+- **`separate`** *(default)* — on the Simple path, confidence runs as the standalone Assessment step; on the Advanced (agentic) path it runs inside each extraction shard and the standalone step auto-skips.
+- **`integrated`** — a single extraction inference returns values **and** inline confidence together (works on **both** the simple and agentic paths); the standalone Assessment step auto-skips.
+- **`off`** — no confidence scoring (equivalent to `enabled: false`); zero LLM cost.
 
-**Behavior When Disabled:**
+**Behavior When Disabled** (`enabled: false` or `mode: off`):
 - Assessment lambda is still called (minimal overhead)
 - Service immediately returns with logging: "Assessment is disabled via configuration"
 - No LLM API calls or S3 operations are performed
@@ -242,33 +252,45 @@ assessment:
 
 **Note:** Prior to v0.4.0, this feature was controlled by the `IsAssessmentEnabled` CloudFormation parameter. The configuration-based approach provides runtime control without requiring stack redeployment.
 
-### Advanced Assessment Configuration
+### Large lists (`list_batch_size`)
 
-For complex documents with many attributes, enable granular assessment for improved accuracy and performance:
+For complex documents with large lists (bank statements with hundreds of
+transactions, line-item tables), the standalone Assessment step **batches large
+lists automatically**: it slices the largest list field into
+`extraction.confidence.list_batch_size` chunks (default **25**), scores each chunk
+sequentially, then reconciles so every list cell gets its own confidence and
+bounding box. A bounded missing-row retry re-scores any dropped rows so coverage
+reaches 100%. Lower `list_batch_size` if a chunk under-enumerates; raise it to cut
+inference count.
 
 ```yaml
-assessment:
-  enabled: true
-  model: us.amazon.nova-lite-v1:0
-  granular_mode: true  # Enable granular assessment
-  simple_batch_size: 5  # Group simple attributes (3-5 recommended)
-  list_batch_size: 1    # Process list items individually for accuracy
-  max_workers: 10       # Parallel processing threads
+extraction:
+  confidence:
+    enabled: true
+    mode: separate
+    list_batch_size: 25       # rows per assessment batch for large lists
 ```
 
-**Benefits:**
-- Better accuracy through focused prompts
-- Cost optimization via prompt caching
-- Reduced latency through parallel processing
-- Scalability for documents with 100+ attributes
+> **Granular assessment is retired.** The former "granular assessment" service
+> (parallel thread-pool fan-out with DynamoDB caching, formerly `assessment.granular`
+> / `extraction.confidence.granular` with `max_workers` / `simple_batch_size` / etc.)
+> has been **retired and deleted**. Large-list batching is its full replacement and
+> `list_batch_size` is the one knob. Any leftover `granular.*` keys still validate
+> but are ignored — no config edit required.
 
-**Ideal For:**
-- Bank statements with hundreds of transactions
-- Documents with 10+ attributes
-- Complex nested structures
-- Performance-critical scenarios
+**For large documents**, prefer **Advanced (agentic) extraction** — it shards both
+extraction and confidence assessment and yields the best-calibrated confidence.
 
-For detailed information, see [assessment.md](assessment.md).
+### v0.5 → v0.6 config migration
+
+- **Confidence and geometry moved under `extraction.*`** in v0.6: the former top-level `assessment.*` confidence settings are now `extraction.confidence.*`, and `assessment.geometry_mode` / `assessment.ground_geometry_in_ocr` are now `extraction.geometry.mode`. HITL moved to the top-level `hitl.*` block.
+- **Migrate-on-read handles old configs automatically** — pre-v0.6 configurations are migrated transparently when loaded; **no manual edit is required**.
+- **Granular assessment is retired** and its config keys are a **no-op** (they validate but are ignored).
+- **`list_batch_size`** is the knob for large lists; for large documents, Advanced (agentic) extraction is recommended.
+
+See [Granular Assessment Retirement](./migration-granular-retirement.md) for details.
+
+For detailed information, see [Extraction & Confidence](extraction-and-confidence.md).
 
 ## Stack Parameters
 
@@ -281,11 +303,11 @@ Key parameters that can be configured during CloudFormation deployment:
 - `DataRetentionInDays`: Set retention period for documents and tracking records (default: 365 days)
 - `ErrorThreshold`: Number of workflow errors that trigger alerts (default: 1)
 - `ExecutionTimeThresholdMs`: Maximum acceptable execution time before alerting (default: 30000 ms)
-- `LogLevel`: Set logging level (DEBUG, INFO, WARN, ERROR)
+- `LogLevel`: Set logging level (DEBUG, INFO, WARN, ERROR). At `INFO` or `DEBUG`, access logging is also enabled on the web UI's REST API stage (request metadata only — no request/response bodies), capturing requests that fail before reaching a Lambda (e.g. authorizer 401/403s, WAF blocks)
 - `WAFAllowedIPv4Ranges`: IP restrictions for web UI access (default: allow all)
 - `CloudFrontPriceClass`: Set CloudFront price class for UI distribution (CloudFront hosting only)
 - `CloudFrontAllowedGeos`: Optional geographic restrictions for UI access (CloudFront hosting only)
-- `WebUIHosting`: Select hosting mode — `CloudFront` (default) or `ALB` for VPC-based hosting (see [ALB Hosting](./alb-hosting.md))
+- `WebUIHosting`: Select hosting mode — `CloudFront` (default) or `APIGateway` for VPC-based hosting (see [API Gateway Hosting](./apigateway-hosting.md))
 - `CustomConfigPath`: Optional S3 URI to a custom configuration file that overrides pattern presets. Leave blank to use selected pattern configuration. Example: s3://my-bucket/custom-config/config.yaml
 
 ### Integration and Tracing Parameters
@@ -469,7 +491,8 @@ Document class schemas support evaluation-specific extensions for fine-grained c
 
 ### Available Extensions
 
-- `x-aws-idp-evaluation-method`: Comparison method (EXACT, FUZZY, NUMERIC_EXACT, SEMANTIC, LLM, HUNGARIAN)
+- `x-aws-idp-evaluation-method`: Comparison method (EXACT, FUZZY, LEVENSHTEIN, NUMERIC_EXACT, SEMANTIC, DATE, LLM, HUNGARIAN)
+- `x-aws-idp-evaluation-method-config`: Optional comparator config (used by DATE: `dayfirst`, `tolerance`, `range_mode`)
 - `x-aws-idp-evaluation-threshold`: Minimum score to consider a match (0.0-1.0)
 - `x-aws-idp-evaluation-weight`: Field importance for weighted scoring (default: 1.0, higher values = more important)
 
@@ -656,7 +679,8 @@ Patterns 2 and 3 support multiple OCR backend engines for flexible document proc
 
 ### Available Backends
 
-- **Textract** (default): AWS Textract with advanced feature support (TABLES, FORMS, SIGNATURES, LAYOUT)
+- **Textract** (default): AWS Textract with advanced feature support (TABLES, FORMS, SIGNATURES, LAYOUT). Cheapest for raw text (~$1.50/1K pages); TABLES +$15/1K, FORMS +$50/1K.
+- **BDA**: Amazon Bedrock Data Automation "standard output" used as a pure OCR engine — reading-order markdown with **tables and layout** plus word-level confidence/bounding boxes in one call, flat **$10/1K pages**. Auto-enables the agentic extraction table tool. Best for table-heavy documents and predictable pricing without composing Textract features. (Distinct from the whole-pipeline BDA mode `use_bda`, which also does classification/extraction.)
 - **Bedrock**: LLM-based OCR using Claude/Nova models with customizable prompts for better handling of complex documents
 - **None**: Image-only processing without OCR (useful for pure visual analysis)
 
@@ -664,13 +688,58 @@ Patterns 2 and 3 support multiple OCR backend engines for flexible document proc
 
 ```yaml
 ocr:
-  backend: textract  # or "bedrock", "none"
-  
+  backend: textract  # or "bda", "bedrock", "none"
+
+  # Textract features. DEFAULT: TABLES + LAYOUT (see trade-off below).
+  features:
+    - name: TABLES
+    - name: LAYOUT
+
+  # For BDA backend (optional): reuse a specific standard-output SYNC project
+  # instead of the auto-managed GENAIIDP-OCR-StandardOutput project.
+  bda_project_arn: null
+
   # For Bedrock backend:
   bedrock_model: us.anthropic.claude-3-5-sonnet-20241022-v2:0
   system_prompt: "You are an OCR expert..."
   task_prompt: "Extract all text from this document..."
 ```
+
+### When to choose BDA vs Textract for OCR
+
+- **BDA** — you want table-aware OCR (bank/brokerage statements, invoices) with a
+  single flat per-page price and no feature tuning. One call returns markdown
+  tables, layout, word confidence, and bounding boxes; per-page processing scales
+  past BDA's ~10-page synchronous limit automatically.
+- **Textract** — you need only raw text (cheapest), or you already tune specific
+  Textract features. For table-heavy docs, `TABLES`+`LAYOUT` on Textract (~$0.065/page)
+  is often comparable in total cost to BDA ($0.01/page) once you weigh the extra
+  Textract feature cost against BDA's flat rate; benchmark on your corpus.
+
+### Textract features & the TABLES cost/accuracy trade-off
+
+`ocr.features` selects which Amazon Textract analysis features run. The default is
+**`TABLES` + `LAYOUT`**.
+
+- **`TABLES` is on by default because tables are common and the accuracy gain is
+  large.** It makes Textract emit structured Table/Cell blocks (with per-cell text,
+  confidence, and geometry) that linearize into clean Markdown pipe-tables for the
+  agentic table parser — yielding more complete extraction *and* more accurate
+  confidence/geometry on table-heavy documents. In validation on a 24-page
+  brokerage statement, `TABLES` extracted **all 1,440 rows (every page)** while
+  `LAYOUT`-only silently dropped ~5 pages (~300 rows) where the plain-text
+  linearization mis-segmented the table.
+- **Cost trade-off** (`TABLES`+`LAYOUT` ≈ **$0.065/page** vs `LAYOUT`-only ≈
+  **$0.004/page**, ~16× on the Textract line item):
+  - **Documents *with* tables:** the extra OCR cost is typically *more*
+    cost-effective and scalable end-to-end — cleaner cell structure means fewer LLM
+    extraction retries, fewer confidence truncations/re-batches, and less downstream
+    correction than fighting a mis-linearized plain-text table.
+  - **Documents *without* tables:** `TABLES` adds cost with no benefit. If your
+    corpus is table-free (forms, prose, single-value docs), **remove the `TABLES`
+    entry** to fall back to cheaper `LAYOUT`-only OCR.
+
+Set `ocr.features` per configuration to match the documents each stack processes.
 
 ### Bedrock OCR Benefits
 
@@ -723,29 +792,28 @@ See `notebooks/examples/demo-lambda/` for:
 - SAM deployment template for example Lambda
 - Complete documentation and examples
 
-For more details, see [extraction.md](extraction.md).
+For more details, see [Extraction & Confidence](extraction-and-confidence.md).
 
-### Review Agent Model (Agentic Extraction)
+### Tiered Models for Agentic Extraction (Validation + Escalation)
 
-For agentic extraction workflows, you can specify a separate model for reviewing extraction work:
+Agentic extraction supports a **cost-tiered** strategy: extract with a fast/cheap model, then automatically re-extract only the fields that fail schema validation with a stronger model. This is configured under `extraction.agentic.validation`:
 
 ```yaml
 extraction:
-  model: us.amazon.nova-pro-v1:0
-  review_agent_model: us.anthropic.claude-3-7-sonnet-20250219-v1:0  # Optional
+  model: us.amazon.nova-pro-v1:0          # fast/cheap primary extractor
+  agentic:
+    enabled: true
+    validation:
+      enabled: true
+      fail_action: escalate
+      escalation_model: us.anthropic.claude-opus-4-8   # stronger tier, used only on failure
 ```
 
-If not specified, defaults to the main extraction model. This allows using a more powerful model for validation while using a cost-effective model for initial extraction.
+When validation fails, only the failing top-level fields are re-extracted with `escalation_model` (a per-class `x-aws-idp-extraction-escalation-model` override takes precedence) and merged back — typically a small fraction of documents, so the stronger model's cost is incurred only where it's needed. See [Schema validation and model escalation](extraction-and-confidence.md#schema-validation-and-model-escalation) for the full feature, including the deterministic table-parsing tool, the completeness heuristic, and sharding for large documents.
 
-**Benefits:**
-- Cost optimization by using different models for different tasks
-- Enhanced accuracy with specialized review model
-- Flexibility in model selection for extraction vs. validation
+> The agentic options (validation, table parsing, sharding, escalation) are editable in the Web UI under **Configuration → Extraction → Agentic Extraction**, where sub-options are progressively revealed as you enable each feature.
 
-**Use Cases:**
-- Use Nova Pro for extraction, Claude Sonnet for review
-- Balance between cost and accuracy requirements
-- Experimentation with different model combinations
+> **Deprecated:** the older `extraction.agentic.review_agent` / `review_agent_model` fields are no-ops retained only for backward compatibility — use `validation` + `escalation_model` above instead.
 
 ## Cost Tracking and Optimization
 

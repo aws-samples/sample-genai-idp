@@ -296,7 +296,12 @@ def save_configuration_bypass_manager(config_type: str, config_data: Any, versio
     Used when ConfigurationManager is unreliable (e.g., after migration from legacy format).
     """
     import boto3
-    from idp_common.config.models import IDPConfig, PricingConfig, SchemaConfig
+    from idp_common.config.models import (
+        IDPConfig,
+        ModelConfigLimitsConfig,
+        PricingConfig,
+        SchemaConfig,
+    )
     
     # Get table name from environment
     table_name = os.environ.get('CONFIGURATION_TABLE_NAME')
@@ -325,6 +330,8 @@ def save_configuration_bypass_manager(config_type: str, config_data: Any, versio
             config_data = SchemaConfig(**config_data)
         elif config_type in ("DefaultPricing", "CustomPricing"):
             config_data = PricingConfig(**config_data)
+        elif config_type in ("DefaultModelConfigLimits", "CustomModelConfigLimits"):
+            config_data = ModelConfigLimitsConfig(**config_data)
         else:
             config_data = IDPConfig(**config_data)
     
@@ -580,13 +587,22 @@ def handler(event: Dict[str, Any], context: Any) -> None:
                 configurations["DefaultPricing"] = resolved_pricing
                 logger.info("Loaded DefaultPricing configuration")
 
+            # Process DefaultModelConfigLimits configuration if provided
+            if "DefaultModelConfigLimits" in properties:
+                resolved_limits = resolve_content(
+                    properties["DefaultModelConfigLimits"]
+                )
+                configurations["DefaultModelConfigLimits"] = resolved_limits
+                logger.info("Loaded DefaultModelConfigLimits configuration")
+
             # Process ALL other properties as configuration versions dynamically
             excluded_properties = {
                 "ServiceToken", 
                 "Schema", 
                 "Default",
                 "Custom", 
-                "DefaultPricing", 
+                "DefaultPricing",
+                "DefaultModelConfigLimits",
                 "ConfigLibraryHash",
                 "CustomClassificationModelARN",
                 "CustomExtractionModelARN",

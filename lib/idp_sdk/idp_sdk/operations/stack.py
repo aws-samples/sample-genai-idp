@@ -42,6 +42,7 @@ class StackOperation:
         wait: bool = True,
         no_rollback: bool = False,
         role_arn: Optional[str] = None,
+        tags: Optional[Dict[str, str]] = None,
         **kwargs,
     ) -> StackDeploymentResult:
         """
@@ -61,6 +62,9 @@ class StackOperation:
             wait: Wait for operation to complete (default: True)
             no_rollback: Disable rollback on failure
             role_arn: CloudFormation service role ARN
+            tags: Stack-level tags (dict) propagated to all taggable resources
+                and nested stacks. On update, omitting tags preserves existing
+                tags; providing them replaces the stack's tag set.
             **kwargs: Additional parameters
 
         Returns:
@@ -137,6 +141,7 @@ class StackOperation:
                     wait=wait,
                     no_rollback=no_rollback,
                     role_arn=role_arn,
+                    tags=tags,
                 )
             else:
                 result = deployer.deploy_stack(
@@ -146,6 +151,7 @@ class StackOperation:
                     wait=wait,
                     no_rollback=no_rollback,
                     role_arn=role_arn,
+                    tags=tags,
                 )
 
             return StackDeploymentResult(

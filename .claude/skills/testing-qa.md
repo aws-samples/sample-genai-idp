@@ -131,7 +131,9 @@ Interactive testing via the web UI — upload documents, compare results across 
 
 ## Commands Reference
 ```bash
-make test                    # All tests
+make test                    # Every non-integration suite, auto-discovered
+make test-integration-all    # Every integration-marked suite (needs AWS)
+make test-list               # Show discovered roots (run vs quarantined)
 make test-cli                # CLI tests only
 make test-config-library     # Config validation only
 make test-capacity           # Capacity planning tests
@@ -145,3 +147,24 @@ pytest -m "unit" -k "test_extraction"   # Filter by name
 pytest -v --tb=short         # Verbose with short tracebacks
 pytest --cov=idp_common --cov-report=html   # Coverage report
 ```
+
+## How `make test` finds every suite (scripts/run_all_tests.py)
+The repo's Python tests live in ~30 separate roots (packages + per-Lambda dirs).
+A single `pytest` from the repo root FAILS: the many `tests/conftest.py` files
+all import as the module `tests.conftest` and collide
+(`ImportPathMismatchError`; `--import-mode=importlib` hits a duplicate-plugin
+error too). So `make test` runs `scripts/run_all_tests.py`, which runs each root
+as its own isolated pytest invocation.
+
+The script DISCOVERS every directory containing `test_*.py` and checks it against
+two registries in the file: `RUN_ROOTS` (run in the gate) and `QUARANTINE`
+(excluded, each with a reason). **A discovered dir in neither list is a hard
+error** — so when you add tests in a NEW location, `make test`/CI fails until you
+add that dir to `RUN_ROOTS` (if green headless) or `QUARANTINE` (with a reason).
+This is deliberate: it's the guard that stops new tests from being silently
+skipped, which is exactly how ~200 Lambda tests went unrun under the old
+hand-maintained `make test`. Currently quarantined roots (need fixing before
+they join the gate): `ocr_benchmark_deployer` + `s3_vectors_manager`
+(uninstalled runtime deps — huggingface_hub / cfnresponse), `scripts` (the RBAC
+harness, not a suite), the `chandra-ocr-hook` manual script, and the
+`idp_sdk/_core` source tree. Run `make test-list` to see the current split.

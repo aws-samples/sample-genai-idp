@@ -9,7 +9,9 @@ evaluation:
   enabled: true
   llm_method:
     top_p: "0.0"
-    max_tokens: "4096"
+    # Empty => use the selected model's maximum output limit (model_config_limits.yaml).
+    # Set a positive value only to cap output below the model max.
+    max_tokens: ""
     top_k: "5"
     system_prompt: >-
       You are an evaluator that helps determine if the predicted and expected values match for document attribute extraction. You will consider the context and meaning rather than just exact string matching.

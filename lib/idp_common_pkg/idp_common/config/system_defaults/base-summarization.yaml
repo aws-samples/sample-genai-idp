@@ -7,9 +7,16 @@
 
 summarization:
   enabled: true
-  model: us.amazon.nova-pro-v1:0
+  # Default uses the 1M-context (:1m) Sonnet 5 variant so very large documents
+  # (100+ pages / thousands of extracted rows) don't overflow the summarization
+  # input window. Combined with extraction-JSON elision + a fit-or-truncate
+  # guard (see summarization/service.py), this keeps large docs from failing at
+  # the summarization step. Note the higher per-token cost of the :1m variant.
+  model: us.anthropic.claude-sonnet-5:1m
   top_p: "0.0"
-  max_tokens: "4096"
+  # Empty => use the selected model's maximum output limit (model_config_limits.yaml).
+  # Set a positive value only to cap output below the model max.
+  max_tokens: ""
   top_k: "5"
   temperature: "0.0"
   system_prompt: >-

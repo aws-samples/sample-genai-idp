@@ -6,7 +6,7 @@ import ReactMarkdown from 'react-markdown';
 import { Box, Button, Spinner, Header, Grid, Container, SpaceBetween, Input, Link } from '@cloudscape-design/components';
 import SafeMarkdown from '../common/SafeMarkdown';
 
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
 import { queryKnowledgeBase } from '../../graphql/generated';

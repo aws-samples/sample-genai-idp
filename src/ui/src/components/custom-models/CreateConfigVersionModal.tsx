@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState, useEffect, useCallback } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { Modal, Box, SpaceBetween, Button, FormField, Input, Select, Checkbox, Alert } from '@cloudscape-design/components';
 
 interface SelectOption {
@@ -260,11 +260,13 @@ const CreateConfigVersionModal = ({
     }
   };
 
-  const versionOptions: SelectOption[] = configVersions.map((v) => ({
-    label: v.isActive ? `${v.versionName} (Active)` : v.versionName,
-    value: v.versionName,
-    description: v.description || undefined,
-  }));
+  const versionOptions: SelectOption[] = [...configVersions]
+    .sort((a, b) => a.versionName.localeCompare(b.versionName, undefined, { numeric: true, sensitivity: 'base' }))
+    .map((v) => ({
+      label: v.isActive ? `${v.versionName} (Active)` : v.versionName,
+      value: v.versionName,
+      description: v.description || undefined,
+    }));
 
   const atLeastOneChecked = useForExtraction || useForClassification;
 

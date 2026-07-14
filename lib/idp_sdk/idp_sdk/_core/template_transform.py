@@ -5,8 +5,8 @@
 Headless template transformation for IDP CloudFormation templates.
 
 Transforms a standard IDP CloudFormation template into a headless version
-by removing UI, AppSync, Cognito, WAF, Agent, HITL, and Knowledge Base
-resources. The resulting template is suitable for API-only deployments
+by removing UI, the UI REST API, Cognito, WAF, Agent, HITL, and Knowledge
+Base resources. The resulting template is suitable for API-only deployments
 (e.g., GovCloud regions or headless use cases).
 """
 
@@ -24,7 +24,7 @@ class HeadlessTemplateTransformer:
     """Transform IDP CloudFormation templates for headless (no-UI) deployment.
 
     This class extracts and removes AWS services that are not needed for
-    headless/API-only deployments: CloudFront, AppSync, Cognito, WAF,
+    headless/API-only deployments: CloudFront, the UI REST API, Cognito, WAF,
     Agent/MCP, HITL/A2I, and Knowledge Base resources.
 
     Usage:
@@ -62,36 +62,33 @@ class HeadlessTemplateTransformer:
             "CodeBuildRun",
         }
 
+        # UI-API resources to strip for headless. AWS AppSync has been removed;
+        # the interactive UI API is now an API Gateway REST API hosted in the
+        # APIRESOLVERSTACK nested stack (its dispatcher invokes these resolver
+        # Lambdas). Headless = no UI API, so strip the nested stack and the
+        # UI-only resolver Lambdas it fronts. (The former AppSync
+        # DataSource/Resolver/GraphQLApi resources no longer exist in the base
+        # template, so they are not listed here anymore.)
         self.appsync_resources: Set[str] = {
-            "APPSYNCSTACK",
-            "GraphQLApi",
-            "GraphQLApiLogGroup",
-            "AppSyncCwlRole",
-            "CalculateCapacityDataSource",
-            "CalculateCapacityResolver",
+            # Nested stack hosting the REST API dispatcher + UI resolver Lambdas.
+            "APIRESOLVERSTACK",
+            # UI-only resolver Lambdas defined in the main template (capacity
+            # planning, version check, fine-tuning) — only reachable via the
+            # (stripped) UI API, so remove them in headless mode.
             "CalculateCapacityResolverFunction",
             "CalculateCapacityResolverFunctionLogGroup",
-            # Public-template version-check resolver — UI-only feature, must
-            # be stripped because its DataSource references the AppSync
-            # GraphQLApi (removed below) and HITLAppSyncServiceRole (removed
-            # in self.hitl_resources). Same shape/rationale as the
-            # CalculateCapacityResolver entries above — these resources live
-            # in the main template (next to GraphQLApi) rather than in the
-            # nested/appsync stack to avoid the cross-stack circular
-            # dependency on `!GetAtt GraphQLApi.ApiId`.
             "VersionCheckResolverFunction",
             "VersionCheckResolverFunctionLogGroup",
-            "VersionCheckResolverDataSource",
-            "GetLatestPublishedVersionResolver",
-            # Fine-tuning AppSync resources — depend on GraphQLApi
-            "FinetuningJobsDataSource",
-            "CreateFinetuningJobResolver",
-            "DeleteFinetuningJobResolver",
-            "UpdateFinetuningJobStatusResolver",
-            "GetFinetuningJobResolver",
-            "ListFinetuningJobsResolver",
-            "ValidateTestSetForFinetuningResolver",
-            "ListAvailableModelsResolver",
+            # API-Gateway Web UI hosting (WebUIHosting=APIGateway). These only
+            # exist to serve the Web UI as an S3 proxy on the UI REST API and to
+            # register its Cognito OAuth callback URLs — meaningless in headless
+            # mode, and they reference removed resources (APIRESOLVERSTACK,
+            # UserPool, UserPoolClient, WebUIBucket), so strip them.
+            "WebUIProxyRole",
+            "WebUIClientOAuthUrls",
+            "WebUIClientOAuthUrlsFunction",
+            "WebUIClientOAuthUrlsRole",
+            "WebUIClientOAuthUrlsLogGroup",
         }
 
         self.auth_resources: Set[str] = {
@@ -172,7 +169,6 @@ class HeadlessTemplateTransformer:
             "UserSyncFunction",
             "CompleteSectionReviewFunctionLogGroup",
             "CompleteSectionReviewFunction",
-            "HITLAppSyncServiceRole",
             "UserManagementDataSource",
             "CreateUserResolver",
             "DeleteUserResolver",
@@ -191,14 +187,13 @@ class HeadlessTemplateTransformer:
         }
 
         # Feature Platform nested stack — gated on EnableFeaturePlatform=true.
-        # Its parameters wire in GraphQLApi (ApiId/Arn/GraphQLUrl), UserPool,
+        # Its parameters wire in the UI REST API (in APIRESOLVERSTACK), UserPool,
         # UserPoolClient, WebUIBucket, and DiscoveryBucket — all removed in
-        # headless mode — and it DependsOn the (removed) APPSYNCSTACK. Left in
-        # place, its dangling `!GetAtt GraphQLApi.*` refs cause
-        # "Template error: instance of Fn::GetAtt references undefined resource
-        # GraphQLApi" at deploy time. EnableFeaturePlatform is forced to
-        # 'false' in _remove_parameters so the IsFeaturePlatformDisabled-gated
-        # TrackingTableName export stays active.
+        # headless mode — and it DependsOn the (removed) APIRESOLVERSTACK. Left in
+        # place, its references to those removed resources would fail at deploy
+        # time ("Fn::GetAtt references undefined resource"). EnableFeaturePlatform
+        # is forced to 'false' in _remove_parameters so the
+        # IsFeaturePlatformDisabled-gated TrackingTableName export stays active.
         self.feature_platform_resources: Set[str] = {
             "FeaturePlatformStack",
         }
@@ -225,12 +220,22 @@ class HeadlessTemplateTransformer:
             "StepFunctionSubscriptionPublisherLogGroup",
             "StepFunctionSubscriptionRule",
             "StepFunctionSubscriptionPublisherPermission",
-            # Invoked async only by an AppSync resolver in the (removed)
-            # APPSYNCSTACK; with no resolver caller, the function and its
-            # log group are dead weight in headless mode and their dangling
-            # refs to UsersTable/GraphQLApi block stack updates.
+            # Invoked async only by the UI REST API dispatcher in the (removed)
+            # APIRESOLVERSTACK; with no caller, the function and its log group are
+            # dead weight in headless mode and their dangling refs to removed
+            # UI resources (e.g. UsersTable) would block stack updates.
             "ChatWithDocumentProcessorFunction",
             "ChatWithDocumentProcessorLogGroup",
+            # Chat streaming endpoint (Function URL + LWA). UI-only: reached
+            # directly by the browser via VITE_STREAM_URL (emitted only by the
+            # removed UI CodeBuild/WebUITestEnvFile), invoked by the removed
+            # CognitoAuthorizedRole, and it references the removed UsersTable
+            # (RBAC scope) — so a dangling "Fn::GetAtt UsersTable" would block
+            # headless deploys. Strip the whole family.
+            "ChatStreamProcessorFunction",
+            "ChatStreamProcessorLogGroup",
+            "ChatStreamProcessorUrl",
+            "ChatStreamProcessorUrlPermission",
         }
 
         # ---- Parameters to remove ----
@@ -290,7 +295,11 @@ class HeadlessTemplateTransformer:
             "MCPConnectorClientSecret",
             "S3DiscoveryBucketName",
             "S3DiscoveryBucketConsoleURL",
-            # References !GetAtt GraphQLApi.GraphQLUrl (AppSync removed headless)
+            # UI-API DNS helper output (named for the former AppSync endpoint).
+            # AppSync is gone — the UI API is now an API Gateway REST API in the
+            # (stripped) APIRESOLVERSTACK — so this UI-only output has no place in a
+            # headless deployment. Kept here as a defensive strip in case the
+            # base template still emits it.
             "AppSyncEndpointForDNS",
         }
 
@@ -617,10 +626,10 @@ class HeadlessTemplateTransformer:
     ) -> Dict[str, Any]:
         """Clean template for headless deployment.
 
-        - Remove Cognito auth from any remaining GraphQLApi
         - Remove CloudFront policy statements
         - Remove CORS from S3 buckets
-        - Convert Lambda functions from AppSync to DynamoDB tracking mode
+        - Strip dangling references to removed resources from kept Lambda
+          functions (e.g. ExternalMCPAgentsSecret policy statements)
         - Clean nested stack parameters
         - Fix Knowledge Base condition references
         - Clean UpdateSettingsValues custom resource
@@ -628,37 +637,6 @@ class HeadlessTemplateTransformer:
         """
         logger.info("Cleaning template for headless deployment")
         resources = template.get("Resources", {})
-
-        # Fix GraphQLApi — remove Cognito auth since UserPool is removed
-        if "GraphQLApi" in resources:
-            graphql_api = resources["GraphQLApi"]
-            if "Properties" in graphql_api:
-                if "UserPoolConfig" in graphql_api["Properties"]:
-                    del graphql_api["Properties"]["UserPoolConfig"]
-                    logger.debug("Removed UserPoolConfig from GraphQLApi")
-                if "AuthenticationType" in graphql_api["Properties"]:
-                    graphql_api["Properties"]["AuthenticationType"] = "AWS_IAM"
-                    logger.debug("Changed GraphQLApi AuthenticationType to AWS_IAM")
-                if "AdditionalAuthenticationProviders" in graphql_api["Properties"]:
-                    auth_providers = graphql_api["Properties"][
-                        "AdditionalAuthenticationProviders"
-                    ]
-                    iam_providers = [
-                        p
-                        for p in auth_providers
-                        if p.get("AuthenticationType") == "AWS_IAM"
-                    ]
-                    if iam_providers:
-                        graphql_api["Properties"][
-                            "AdditionalAuthenticationProviders"
-                        ] = iam_providers
-                    else:
-                        del graphql_api["Properties"][
-                            "AdditionalAuthenticationProviders"
-                        ]
-                    logger.debug(
-                        "Cleaned AdditionalAuthenticationProviders in GraphQLApi"
-                    )
 
         # Remove CloudFront policy statements
         template = self._clean_cloudfront_policy_statements(template)
@@ -674,8 +652,14 @@ class HeadlessTemplateTransformer:
                     del properties["CorsConfiguration"]
                     logger.debug(f"Removed CORS configuration from {resource_name}")
 
-        # Convert backend functions from AppSync to DynamoDB tracking mode
-        functions_to_convert = [
+        # Tidy backend functions that survive in headless mode. The base
+        # template already tracks via DynamoDB (DOCUMENT_TRACKING_MODE=dynamodb,
+        # APPSYNC_API_URL=""), so there is no AppSync→DynamoDB conversion to do.
+        # What still matters: drop the now-empty APPSYNC_API_URL env var and
+        # strip any policy statements that reference resources we removed (e.g.
+        # the ExternalMCPAgentsSecret on the agent-chat function, or a stray
+        # appsync:GraphQL action) so no dangling refs remain.
+        functions_to_clean = [
             "QueueSender",
             "QueueProcessor",
             "WorkflowTracker",
@@ -683,26 +667,14 @@ class HeadlessTemplateTransformer:
             "AgentChatProcessorFunction",
             "AgentProcessorFunction",
             "DiscoveryProcessorFunction",
-            # Publishes circuit-breaker status to AppSync mutations for the
-            # UI; the function still has work to do (state management,
-            # alarm processing) in headless mode, so we keep it but strip
-            # the APPSYNC_API_URL env var and appsync:GraphQL policy.
+            # The circuit-breaker manager still does real work in headless mode
+            # (state management, alarm processing); we keep it but drop the
+            # empty APPSYNC_API_URL env var and any appsync:GraphQL policy.
             "CircuitBreakerManagerFunction",
         ]
-        for func_name in functions_to_convert:
+        for func_name in functions_to_clean:
             if func_name in resources:
-                self._convert_function_to_dynamodb_tracking(resources, func_name)
-
-        # Clean ALB hosting nested stack parameters
-        if "ALBHOSTINGSTACK" in resources:
-            alb_stack_params = (
-                resources["ALBHOSTINGSTACK"].get("Properties", {}).get("Parameters", {})
-            )
-            if "WebUIBucketName" in alb_stack_params:
-                alb_stack_params["WebUIBucketName"] = ""
-                logger.debug(
-                    "Replaced WebUIBucketName with empty string in ALBHOSTINGSTACK"
-                )
+                self._clean_tracking_function(resources, func_name)
 
         # Clean nested stack parameters (PATTERNSTACK)
         for stack_name in ["PATTERNSTACK"]:
@@ -723,22 +695,31 @@ class HeadlessTemplateTransformer:
 
         return template
 
-    def _convert_function_to_dynamodb_tracking(
+    def _clean_tracking_function(
         self, resources: Dict[str, Any], func_name: str
     ) -> None:
-        """Convert a Lambda function from AppSync to DynamoDB tracking mode."""
+        """Tidy a kept Lambda function for headless deployment.
+
+        The base template already tracks documents via DynamoDB directly
+        (DOCUMENT_TRACKING_MODE=dynamodb, TRACKING_TABLE set, APPSYNC_API_URL=""),
+        so this is no longer an AppSync→DynamoDB conversion. It just drops the
+        now-empty APPSYNC_API_URL env var, ensures a DynamoDB CRUD policy is
+        present, and strips any policy statements that reference removed
+        resources (ExternalMCPAgentsSecret) or stale appsync:GraphQL actions.
+        """
         func_def = resources[func_name]
         env_vars = (
             func_def.get("Properties", {}).get("Environment", {}).get("Variables", {})
         )
 
+        # Drop the leftover (empty) APPSYNC_API_URL env var. The base template
+        # already sets DOCUMENT_TRACKING_MODE=dynamodb and TRACKING_TABLE, so we
+        # only backfill them defensively if they are somehow missing.
         if "APPSYNC_API_URL" in env_vars:
             del env_vars["APPSYNC_API_URL"]
-            env_vars["DOCUMENT_TRACKING_MODE"] = "dynamodb"
-            env_vars["TRACKING_TABLE"] = {"Ref": "TrackingTable"}
-            logger.debug(
-                f"Converted {func_name} from AppSync to DynamoDB tracking mode"
-            )
+            env_vars.setdefault("DOCUMENT_TRACKING_MODE", "dynamodb")
+            env_vars.setdefault("TRACKING_TABLE", {"Ref": "TrackingTable"})
+            logger.debug(f"Removed empty APPSYNC_API_URL env var from {func_name}")
 
         # Add DynamoDB CRUD policy if not present
         policies = func_def.get("Properties", {}).get("Policies", [])
@@ -1124,3 +1105,491 @@ class HeadlessTemplateTransformer:
             template["Description"] = current_description + " (Headless)"
             logger.debug("Updated template description for headless deployment")
         return template
+
+
+class GovCloudTemplateTransformer:
+    """Transform an IDP CloudFormation template for GovCloud (CloudFront-free).
+
+    Unlike :class:`HeadlessTemplateTransformer` (which removes the entire UI),
+    this transform KEEPS the full Web UI but makes it hostable in GovCloud,
+    where the ``AWS::CloudFront::*`` resource types do not exist. cfn-lint /
+    CloudFormation reject a template that merely *declares* those types even
+    behind a false ``Condition`` (e.g. ``E3006 Resource type
+    'AWS::CloudFront::Distribution' does not exist in 'us-gov-west-1'``), so the
+    resources must be physically removed and the sole hosting option forced to
+    API Gateway (see the ``WebUIHosting=APIGateway`` S3-proxy hosting mode).
+
+    The transform:
+      1. Collapses every ``Fn::If`` whose condition is ``UseCloudFrontHosting``
+         to its else-branch (the API-Gateway path). This rewrites all CloudFront
+         *references* — ``${CloudFrontDistribution.DomainName}``, the OAC/CSP
+         refs, the ``CLOUDFRONT_DISTRIBUTION_ID`` env var, ``VITE_UI_BASE_PATH``,
+         etc. — to their non-CloudFront values in one pass.
+      2. Deletes the three CloudFront resources (``CloudFrontDistribution``,
+         ``CloudFrontOriginAccessControl``, ``SecurityHeadersPolicy``) and the
+         now-unused ``UseCloudFrontHosting`` condition and CloudFront-only
+         parameters (``CloudFrontPriceClass``, ``CloudFrontAllowedGeos``).
+      3. Forces ``WebUIHosting`` to ``APIGateway`` (removes ``CloudFront`` from
+         AllowedValues and sets it as the Default) so the API-Gateway S3-proxy
+         hosting is the only option.
+      4. Fixes hard-coded ARN partitions (``arn:aws`` -> ``arn:${AWS::Partition}``)
+         and updates the template description.
+
+    Usage::
+
+        transformer = GovCloudTemplateTransformer()
+        transformer.transform(input_path, output_path)
+    """
+
+    # The AWS::CloudFront::* logical resources to remove.
+    CLOUDFRONT_RESOURCES = {
+        "CloudFrontDistribution",
+        "CloudFrontOriginAccessControl",
+        "SecurityHeadersPolicy",
+    }
+    # CloudFront-only parameters that become dead once CloudFront is removed.
+    CLOUDFRONT_PARAMETERS = {
+        "CloudFrontPriceClass",
+        "CloudFrontAllowedGeos",
+    }
+    # Conditions that reference CloudFront and are removed after collapsing.
+    CLOUDFRONT_CONDITIONS = {
+        "UseCloudFrontHosting",
+        "ShouldEnableGeoRestriction",
+    }
+    # The condition whose Fn::If blocks are collapsed to the else-branch.
+    HOSTING_CONDITION = "UseCloudFrontHosting"
+
+    def __init__(self, verbose: bool = False):
+        self.verbose = verbose
+
+    # ---- Entry points ----
+
+    def transform(self, input_path: str, output_path: str) -> bool:
+        """Transform a template file for GovCloud and write it to output_path.
+
+        Returns True on success.
+        """
+        try:
+            logger.info("🔧 Starting GovCloud (CloudFront-free) transformation")
+            template = self.load_template(input_path)
+            template = self.apply_transforms(template)
+            self.save_template(template, output_path)
+            if not self.validate_no_cloudfront(template):
+                return False
+            logger.info("🎉 GovCloud template transformation completed successfully!")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Failed to generate GovCloud template: {e}")
+            if self.verbose:
+                import traceback
+
+                logger.debug(traceback.format_exc())
+            return False
+
+    def apply_transforms(self, template: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply all GovCloud transformations to an in-memory template dict."""
+        # 1. Collapse Fn::If[UseCloudFrontHosting] -> else-branch everywhere.
+        n_collapsed = [0]
+        template = self._collapse_hosting_ifs(template, n_collapsed)
+        logger.info(
+            f"Collapsed {n_collapsed[0]} Fn::If[{self.HOSTING_CONDITION}] to the "
+            "API-Gateway (else) branch"
+        )
+        # 2. Remove CloudFront resources / condition / params / outputs.
+        template = self._remove_cloudfront_resources(template)
+        template = self._remove_cloudfront_parameters(template)
+        template = self._remove_cloudfront_conditions(template)
+        template = self._remove_cloudfront_outputs(template)
+        template = self._remove_cloudfront_policy_statements(template)
+        template = self._clean_parameter_groups(template)
+        # 3. Remove AWS::Lambda::Url resources — Lambda Function URLs are NOT
+        #    available in GovCloud (per the AWS GovCloud Lambda docs), so they
+        #    also raise E3006. The only one is the chat-streaming endpoint; the
+        #    UI degrades gracefully (chat streaming disabled) when its
+        #    VITE_STREAM_URL is empty.
+        template = self._remove_lambda_function_urls(template)
+        # 4. Force WebUIHosting=APIGateway.
+        template = self._force_apigateway_hosting(template)
+        # 5. Partition + description.
+        template = self._update_arn_partitions(template)
+        template = self._update_description(template)
+        return template
+
+    # ---- I/O (packaged templates use long-form Fn:: intrinsics) ----
+
+    def load_template(self, input_file: str) -> Dict[str, Any]:
+        logger.info(f"Loading template from {input_file}")
+        if not os.path.exists(input_file):
+            raise FileNotFoundError(f"Input template file not found: {input_file}")
+        with open(input_file, "r", encoding="utf-8") as f:
+            template = yaml.safe_load(f)
+        logger.debug(
+            f"Loaded template with {len(template.get('Resources', {}))} resources"
+        )
+        return template
+
+    def save_template(self, template: Dict[str, Any], output_file: str) -> None:
+        logger.info(f"Saving GovCloud template to {output_file}")
+        os.makedirs(
+            os.path.dirname(output_file) if os.path.dirname(output_file) else ".",
+            exist_ok=True,
+        )
+        with open(output_file, "w", encoding="utf-8") as f:
+            yaml.dump(template, f, default_flow_style=False, width=120, indent=2)
+        logger.info("✅ GovCloud template saved successfully")
+
+    # ---- Fn::If collapsing ----
+
+    def _collapse_hosting_ifs(self, node: Any, counter: List[int]) -> Any:
+        """Recursively collapse Fn::If[UseCloudFrontHosting] to its else-branch.
+
+        A CloudFormation ``Fn::If`` is ``{"Fn::If": [condition, then, else]}``.
+        For the hosting condition we always take the else-branch (index 2), which
+        is the API-Gateway path in this template. All other Fn::If nodes are left
+        intact (their subtrees are still recursed into).
+        """
+        if isinstance(node, dict):
+            if (
+                "Fn::If" in node
+                and isinstance(node["Fn::If"], list)
+                and len(node["Fn::If"]) == 3
+                and node["Fn::If"][0] == self.HOSTING_CONDITION
+            ):
+                counter[0] += 1
+                # Recurse into the chosen (else) branch in case of nesting.
+                return self._collapse_hosting_ifs(node["Fn::If"][2], counter)
+            return {k: self._collapse_hosting_ifs(v, counter) for k, v in node.items()}
+        if isinstance(node, list):
+            return [self._collapse_hosting_ifs(v, counter) for v in node]
+        return node
+
+    # ---- Removal helpers ----
+
+    def _remove_cloudfront_resources(self, template: Dict[str, Any]) -> Dict[str, Any]:
+        resources = template.get("Resources", {})
+        for name in self.CLOUDFRONT_RESOURCES:
+            if name in resources:
+                del resources[name]
+                logger.debug(f"Removed CloudFront resource: {name}")
+        # Defensive: drop any remaining AWS::CloudFront::* resource by type.
+        for name in list(resources.keys()):
+            rtype = (
+                resources[name].get("Type", "")
+                if isinstance(resources[name], dict)
+                else ""
+            )
+            if isinstance(rtype, str) and rtype.startswith("AWS::CloudFront::"):
+                del resources[name]
+                logger.debug(f"Removed CloudFront-typed resource: {name} ({rtype})")
+        return template
+
+    def _remove_cloudfront_parameters(self, template: Dict[str, Any]) -> Dict[str, Any]:
+        params = template.get("Parameters", {})
+        for name in self.CLOUDFRONT_PARAMETERS:
+            if name in params:
+                del params[name]
+                logger.debug(f"Removed CloudFront parameter: {name}")
+        return template
+
+    def _remove_cloudfront_conditions(self, template: Dict[str, Any]) -> Dict[str, Any]:
+        conditions = template.get("Conditions", {})
+        for name in self.CLOUDFRONT_CONDITIONS:
+            if name in conditions:
+                del conditions[name]
+                logger.debug(f"Removed CloudFront condition: {name}")
+        return template
+
+    def _remove_cloudfront_outputs(self, template: Dict[str, Any]) -> Dict[str, Any]:
+        """Remove Outputs whose Condition was a removed CloudFront condition."""
+        outputs = template.get("Outputs", {})
+        for name in list(outputs.keys()):
+            out = outputs[name]
+            if (
+                isinstance(out, dict)
+                and out.get("Condition") in self.CLOUDFRONT_CONDITIONS
+            ):
+                del outputs[name]
+                logger.debug(f"Removed CloudFront-conditioned output: {name}")
+        return template
+
+    def _remove_lambda_function_urls(self, template: Dict[str, Any]) -> Dict[str, Any]:
+        """Remove AWS::Lambda::Url resources (unavailable in GovCloud).
+
+        Also removes the associated AWS::Lambda::Permission statements that grant
+        lambda:InvokeFunctionUrl for those URLs, drops any Outputs that GetAtt the
+        removed URL's FunctionUrl, and blanks CodeBuild env / test-env references
+        (e.g. VITE_STREAM_URL) so the UI build still succeeds. The Web UI degrades
+        gracefully — the only Function URL here is the chat-streaming endpoint,
+        which is simply disabled when its stream URL is empty.
+        """
+        resources = template.get("Resources", {})
+        url_resources = {
+            name
+            for name, res in resources.items()
+            if isinstance(res, dict) and res.get("Type") == "AWS::Lambda::Url"
+        }
+        if not url_resources:
+            return template
+
+        # Remove the URL resources themselves.
+        for name in url_resources:
+            del resources[name]
+            logger.debug(f"Removed AWS::Lambda::Url resource: {name}")
+
+        # Remove Lambda permissions that grant InvokeFunctionUrl (they only exist
+        # to authorize the now-removed Function URLs).
+        for name in list(resources.keys()):
+            res = resources[name]
+            if (
+                not isinstance(res, dict)
+                or res.get("Type") != "AWS::Lambda::Permission"
+            ):
+                continue
+            action = res.get("Properties", {}).get("Action", "")
+            if action == "lambda:InvokeFunctionUrl":
+                del resources[name]
+                logger.debug(f"Removed InvokeFunctionUrl permission: {name}")
+
+        # Remove Outputs that reference a removed URL's .FunctionUrl.
+        outputs = template.get("Outputs", {})
+        for name in list(outputs.keys()):
+            if self._references_function_url(outputs[name], url_resources):
+                del outputs[name]
+                logger.debug(
+                    f"Removed output referencing a removed Function URL: {name}"
+                )
+
+        # Blank remaining .FunctionUrl references (e.g. VITE_STREAM_URL in the UI
+        # CodeBuild env, or Fn::Sub'd values) so nothing dangles. The UI treats an
+        # empty VITE_STREAM_URL as "chat streaming disabled".
+        removed = self._blank_function_url_refs(resources, url_resources)
+        removed += self._blank_function_url_refs(outputs, url_resources)
+        if removed:
+            logger.info(
+                f"Blanked {removed} reference(s) to removed Lambda Function URL(s)"
+            )
+        logger.info(
+            f"Removed {len(url_resources)} AWS::Lambda::Url resource(s) "
+            "(not available in GovCloud)"
+        )
+        return template
+
+    @staticmethod
+    def _references_function_url(node: Any, url_names: Set[str]) -> bool:
+        """True if node contains a GetAtt/Sub referencing <url>.FunctionUrl."""
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == "Fn::GetAtt":
+                    parts = v if isinstance(v, list) else str(v).split(".")
+                    if (
+                        len(parts) >= 2
+                        and parts[0] in url_names
+                        and parts[1] == "FunctionUrl"
+                    ):
+                        return True
+                if k == "Fn::Sub":
+                    s = v[0] if isinstance(v, list) else v
+                    if isinstance(s, str):
+                        for u in url_names:
+                            if f"{u}.FunctionUrl" in s:
+                                return True
+                if GovCloudTemplateTransformer._references_function_url(v, url_names):
+                    return True
+        elif isinstance(node, list):
+            return any(
+                GovCloudTemplateTransformer._references_function_url(x, url_names)
+                for x in node
+            )
+        return False
+
+    def _blank_function_url_refs(self, node: Any, url_names: Set[str]) -> int:
+        """Replace {Fn::GetAtt: [url, FunctionUrl]} / Fn::Sub with "" in-place.
+
+        Returns the number of references blanked.
+        """
+        count = 0
+        if isinstance(node, dict):
+            for k, v in list(node.items()):
+                if isinstance(v, dict) and "Fn::GetAtt" in v:
+                    ga = v["Fn::GetAtt"]
+                    parts = ga if isinstance(ga, list) else str(ga).split(".")
+                    if (
+                        len(parts) >= 2
+                        and parts[0] in url_names
+                        and parts[1] == "FunctionUrl"
+                    ):
+                        node[k] = ""
+                        count += 1
+                        continue
+                if isinstance(v, dict) and "Fn::Sub" in v:
+                    s = v["Fn::Sub"]
+                    sub_str = s[0] if isinstance(s, list) else s
+                    if isinstance(sub_str, str) and any(
+                        f"{u}.FunctionUrl" in sub_str for u in url_names
+                    ):
+                        # Replace the ${url.FunctionUrl} token with empty string.
+                        for u in url_names:
+                            sub_str = sub_str.replace(f"${{{u}.FunctionUrl}}", "")
+                        node[k] = sub_str
+                        count += 1
+                        continue
+                count += self._blank_function_url_refs(v, url_names)
+        elif isinstance(node, list):
+            for x in node:
+                count += self._blank_function_url_refs(x, url_names)
+        return count
+
+    def _remove_cloudfront_policy_statements(
+        self, template: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Drop IAM/bucket policy statements scoped to the CloudFront service.
+
+        The LoggingBucket grants ``cloudfront.<urlsuffix>`` log-delivery write
+        access (Sid ``AllowCloudFrontLogs``). With CloudFront removed this is
+        dead, and the CloudFront service principal does not exist in GovCloud —
+        some IAM validators reject an Allow to a nonexistent service principal —
+        so strip any statement whose Principal.Service resolves to the
+        CloudFront service.
+        """
+        resources = template.get("Resources", {})
+        removed = 0
+        for res in resources.values():
+            if not isinstance(res, dict):
+                continue
+            props = res.get("Properties", {})
+            policy = props.get("PolicyDocument", {})
+            statements = policy.get("Statement") if isinstance(policy, dict) else None
+            if not isinstance(statements, list):
+                continue
+            kept = []
+            for stmt in statements:
+                if isinstance(stmt, dict) and self._is_cloudfront_service_statement(
+                    stmt
+                ):
+                    removed += 1
+                    continue
+                kept.append(stmt)
+            policy["Statement"] = kept
+        if removed:
+            logger.info(f"Removed {removed} CloudFront-service policy statement(s)")
+        return template
+
+    @staticmethod
+    def _is_cloudfront_service_statement(stmt: Dict[str, Any]) -> bool:
+        principal = stmt.get("Principal")
+        if not isinstance(principal, dict):
+            return False
+        service = principal.get("Service")
+        candidates = service if isinstance(service, list) else [service]
+        for svc in candidates:
+            # Service may be a plain string or an Fn::Sub dict.
+            text = ""
+            if isinstance(svc, str):
+                text = svc
+            elif isinstance(svc, dict):
+                text = str(svc.get("Fn::Sub", svc))
+            if "cloudfront." in text:
+                return True
+        return False
+
+    def _force_apigateway_hosting(self, template: Dict[str, Any]) -> Dict[str, Any]:
+        """Force WebUIHosting to APIGateway (the only GovCloud-viable option)."""
+        params = template.get("Parameters", {})
+        webui = params.get("WebUIHosting")
+        if isinstance(webui, dict):
+            webui["AllowedValues"] = ["APIGateway"]
+            webui["Default"] = "APIGateway"
+            webui["Description"] = (
+                "Frontend hosting method. Fixed to APIGateway for GovCloud "
+                "(CloudFront is not available in GovCloud regions). The Web UI is "
+                "served as an S3 proxy on the REST API; set "
+                "ApiGatewayVisibility=PRIVATE for VPC-only access."
+            )
+            logger.info("Forced WebUIHosting=APIGateway (CloudFront removed)")
+        return template
+
+    # ---- Parameter-group tidy (drop dangling CloudFront param labels) ----
+
+    def _clean_parameter_groups(self, template: Dict[str, Any]) -> Dict[str, Any]:
+        metadata = template.get("Metadata", {})
+        interface = metadata.get("AWS::CloudFormation::Interface", {})
+        groups = interface.get("ParameterGroups", [])
+        removed = self.CLOUDFRONT_PARAMETERS
+        for group in groups:
+            plist = group.get("Parameters", [])
+            group["Parameters"] = [p for p in plist if p not in removed]
+        labels = interface.get("ParameterLabels", {})
+        for p in list(labels.keys()):
+            if p in removed:
+                del labels[p]
+        return template
+
+    # ---- ARN partition + description (mirror the headless helpers) ----
+
+    def _update_arn_partitions(self, template: Dict[str, Any]) -> Dict[str, Any]:
+        template_str = yaml.dump(template, default_flow_style=False)
+        remaining = len(re.findall(r"arn:aws:(?!\$\{AWS::Partition\})", template_str))
+        if remaining > 0:
+            logger.warning(f"Found {remaining} hard-coded ARN references — fixing")
+            template_str = re.sub(
+                r"arn:aws:(?!\$\{AWS::Partition\})",
+                "arn:${AWS::Partition}:",
+                template_str,
+            )
+            template = yaml.safe_load(template_str)
+        return template
+
+    def _update_description(self, template: Dict[str, Any]) -> Dict[str, Any]:
+        current = template.get("Description", "")
+        if "GovCloud" not in current:
+            template["Description"] = current + " (GovCloud - CloudFront removed)"
+        return template
+
+    # ---- Validation ----
+
+    # Resource types that do not exist in GovCloud regions and would raise
+    # cfn-lint E3006 (and fail deployment) if left in the template.
+    GOVCLOUD_UNSUPPORTED_TYPE_PREFIXES = ("AWS::CloudFront::",)
+    GOVCLOUD_UNSUPPORTED_TYPES = frozenset({"AWS::Lambda::Url"})
+
+    def validate_no_cloudfront(self, template: Dict[str, Any]) -> bool:
+        """Assert no GovCloud-unsupported resource types or dangling refs remain.
+
+        Checks for AWS::CloudFront::* and AWS::Lambda::Url (both raise E3006 in
+        GovCloud), plus dangling references to the removed CloudFront resources /
+        condition. (Name kept for backwards compatibility.)
+        """
+        issues: List[str] = []
+        resources = template.get("Resources", {})
+        for name, res in resources.items():
+            rtype = res.get("Type", "") if isinstance(res, dict) else ""
+            if isinstance(rtype, str) and (
+                rtype.startswith(self.GOVCLOUD_UNSUPPORTED_TYPE_PREFIXES)
+                or rtype in self.GOVCLOUD_UNSUPPORTED_TYPES
+            ):
+                issues.append(
+                    f"GovCloud-unsupported resource type still present: {name} ({rtype})"
+                )
+
+        # No reference to a removed CloudFront logical id should survive.
+        template_str = yaml.dump(template, default_flow_style=False)
+        for ref in self.CLOUDFRONT_RESOURCES:
+            if ref in template_str:
+                issues.append(
+                    f"Dangling reference to removed CloudFront resource: {ref}"
+                )
+        if self.HOSTING_CONDITION in template_str:
+            issues.append(
+                f"Dangling reference to removed condition: {self.HOSTING_CONDITION}"
+            )
+
+        if issues:
+            for issue in issues:
+                logger.error(f"GovCloud validation issue: {issue}")
+            return False
+        logger.info(
+            "✅ GovCloud template contains no CloudFront / Lambda-URL resources or "
+            "dangling refs"
+        )
+        return True

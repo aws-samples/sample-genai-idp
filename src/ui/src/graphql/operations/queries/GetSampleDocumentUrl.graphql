@@ -1,0 +1,6 @@
+query GetSampleDocumentUrl($s3Key: String!) {
+  getSampleDocumentUrl(s3Key: $s3Key) {
+    url
+    s3Key
+  }
+}

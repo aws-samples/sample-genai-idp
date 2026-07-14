@@ -14,7 +14,7 @@ SPDX-License-Identifier: MIT-0
 > The assistant will ask you one question at a time, pre-fill every command with your actual
 > values, check for errors after each step, and guide you all the way through to a working
 > deployment — whether you choose the default **public CloudFront** setup or the fully
-> **private ALB / VPC** setup.
+> **private API Gateway / VPC** setup.
 >
 > The **[Knowledge Base](#knowledge-base)** section that follows the system prompt is the
 > reference material the assistant draws from.  You do not need to read it in advance.
@@ -57,8 +57,8 @@ pre-filled shell commands that they can copy-paste directly.
    line-continuation inside the `--parameters` value — backslashes are passed literally
    to CloudFormation and corrupt values (e.g. `subnet-abc\` instead of `subnet-abc`).
 7. When the deployment is complete, run through the Smoke Test Checklist with the user
-   to confirm everything works — including verifying that the VpcCidr fix is active
-   (required for browser AppSync access in private deployments).
+   to confirm everything works — including verifying that the UI is reachable through
+   the execute-api VPC interface endpoint in private deployments.
 
 ## Conversation flow
 
@@ -175,11 +175,11 @@ Example:
 | Stack name | IDP-PRIVATE |
 | Region | us-east-1 |
 | VPC ID | vpc-0e0d... |
-| ALB Subnets | subnet-aaa,subnet-bbb |
+| Private Subnets | subnet-aaa,subnet-bbb |
 | ... | ... |
 
 **Parameters string:**
-`WebUIHosting=ALB,ALBVpcId=vpc-0e0d...,ALBSubnetIds=subnet-aaa,subnet-bbb,...`
+`WebUIHosting=APIGateway,ApiGatewayVisibility=PRIVATE,DeployInVPC=true,VpcId=vpc-0e0d...,PrivateSubnetIds=subnet-aaa,subnet-bbb,LambdaSubnetIds=subnet-aaa,subnet-bbb,LambdaSecurityGroupId=sg-...,ApiGatewayVpcEndpointId=vpce-...`
 
 Does everything look correct? Reply **yes** to proceed or tell me what to change."
 
@@ -304,7 +304,7 @@ idp-cli deploy \
 
 ---
 
-### PRIVATE PATH — ALB hosting, AppSync PRIVATE (VPC-only access)
+### PRIVATE PATH — API Gateway hosting, ApiGatewayVisibility PRIVATE (VPC-only access)
 
 **Collect from user (ask one at a time, in this order):**
 
@@ -314,10 +314,15 @@ idp-cli deploy \
 | `STACK_NAME` | "What name do you want to give the IDP stack? (default: IDP-PRIVATE)" |
 | `VPC_ID` | "Do you have an existing VPC, or should we create a test VPC? If existing, paste the VPC ID (vpc-xxxxx)." |
 | `SUBNET_IDS` | Collected from VPC outputs or entered by user |
+| `LAMBDA_SG_ID` | Security group attached to the in-VPC Lambdas (allow outbound HTTPS) — from VPC outputs or entered by user |
+| `APIGW_VPCE_ID` | The **execute-api** interface VPC endpoint id (`vpce-xxxxx`, `PrivateDnsEnabled: true`) — from VPC outputs or entered by user |
 | `BUCKET_BASENAME` | Ask after VPC is resolved — see Step P0 note below |
 | `ADMIN_EMAIL` | "What admin email address should receive the temporary login password?" |
-| `CERT_ARN` | "Do you have an existing ACM certificate ARN, or do you need a self-signed cert for testing?" |
 | `S3_UPLOAD_MODE` | See S3 upload mode question below |
+
+> **No TLS certificate is required.** API Gateway hosting serves the UI over the
+> `execute-api` endpoint, which uses AWS-managed TLS — there is no load balancer and
+> no ACM certificate to provision or reimport.
 
 **S3 upload mode question (ask after VPC/subnets are resolved):**
 
@@ -337,11 +342,10 @@ If the user replies **vpce**, set `S3PresignedUrlViaVpcEndpoint=true` in the
 `--parameters` string. If **global** (or the user is unsure), omit it (defaults
 to `false`).
 
-> **Ask about S3 bucket AFTER resolving the VPC**, not before. The `alb-test-vpc.yaml`
-> test VPC template outputs a `ArtifactBucketKeyArn` — a KMS key that is already
-> configured to allow CodeBuild roles to `kms:Decrypt`. If the user just created the
-> test VPC, you can offer that key for a new S3 artifacts bucket, saving them the
-> manual key policy step.
+> **Ask about the S3 artifacts bucket AFTER resolving the VPC**, not before. If the
+> user provides their own KMS-encrypted bucket, its key policy must allow CodeBuild
+> roles to `kms:Decrypt` (see Q1c in the System Prompt). The test VPC below only
+> provisions networking, so use Q1c's normal auto/custom bucket flow.
 
 ---
 
@@ -350,7 +354,7 @@ to `false`).
 ```bash
 aws cloudformation deploy \
   --stack-name IDP-TestVPC \
-  --template-file scripts/alb-test-vpc.yaml \
+  --template-file scripts/sdlc/apigw-hosting-test-vpc.yaml \
   --capabilities CAPABILITY_IAM \
   --region <REGION>
 
@@ -361,50 +365,20 @@ aws cloudformation describe-stacks \
   --output table --region <REGION>
 ```
 
-Collect `VpcId`, `SubnetIds` (use for both ALB and Lambda), `RouteTableIds`, and
-**`ArtifactBucketKeyArn`** from the outputs.
+This self-contained test VPC provides NAT egress plus a single `execute-api`
+interface endpoint — exactly what API Gateway PRIVATE hosting needs. Collect from the
+outputs:
 
-**After the test VPC is created, ask:**
-"The test VPC includes a KMS key (`ArtifactBucketKeyArn`) that is already configured
-to allow IDP CodeBuild roles to `kms:Decrypt` — no extra key policy steps needed.
+- `VpcId` → `VPC_ID`
+- `PrivateSubnetIds` (use for both `PrivateSubnetIds` and `LambdaSubnetIds`) → `SUBNET_IDS`
+- `LambdaSecurityGroupId` → `LAMBDA_SG_ID`
+- `ApiGatewayVpcEndpointId` (the execute-api endpoint) → `APIGW_VPCE_ID`
 
-Would you like to create a new S3 artifacts bucket encrypted with this key?
-- Reply **yes** — I'll create the bucket for you using this key.
-- Reply **no** — I'll let the CLI auto-create an unencrypted bucket, or you can
-  provide your own bucket name."
-
-If the user replies **yes**:
-```bash
-# Create an S3 bucket encrypted with the TestVPC KMS key
-BUCKET_NAME="idp-artifacts-<ACCOUNT_ID>-<REGION>"
-aws s3api create-bucket --bucket $BUCKET_NAME --region <REGION>
-aws s3api put-bucket-encryption --bucket $BUCKET_NAME \
-  --server-side-encryption-configuration "{\"Rules\":[{\"ApplyServerSideEncryptionByDefault\":{\"SSEAlgorithm\":\"aws:kms\",\"KMSMasterKeyID\":\"<ARTIFACT_BUCKET_KEY_ARN>\"}}]}"
-echo "Bucket $BUCKET_NAME created and encrypted with TestVPC KMS key"
-```
-Save `BUCKET_NAME` as `BUCKET_BASENAME` and `ArtifactBucketKeyArn` as `KMS_KEY_ARN`.
-The KMS key policy is already correct — **skip the key policy prerequisite warning**.
-
-If the user replies **no**, fall back to Q1c: ask auto vs custom bucket as usual.
+Then follow Q1c to determine the artifact bucket and (if applicable) KMS key.
 
 > **If the user has an existing VPC** (not using the test VPC), ask Q1c as normal to
-> determine the artifact bucket and KMS key.
-
----
-
-#### Step P1 — Generate a placeholder TLS certificate (self-signed only)
-
-A certificate is required before the stack can be created because the ALB needs an
-HTTPS listener.  The certificate will be reimported with the real ALB hostname in Step P4.
-
-```bash
-CERT_ARN=$(./scripts/generate_self_signed_cert.sh \
-  --region <REGION> \
-  --domain idp-alb.internal)
-echo "Certificate ARN: $CERT_ARN"
-```
-
-Save the printed `CERT_ARN`.
+> determine the artifact bucket and KMS key, and collect an existing `execute-api`
+> interface endpoint id (`PrivateDnsEnabled: true`) for `ApiGatewayVpcEndpointId`.
 
 ---
 
@@ -419,56 +393,40 @@ idp-cli deploy \
   --admin-email <ADMIN_EMAIL> \
   --region <REGION> \
   --wait \
-  --parameters "WebUIHosting=ALB,ALBVpcId=<VPC_ID>,ALBSubnetIds=<SUBNET_IDS>,ALBCertificateArn=<CERT_ARN>,ALBScheme=internal,AppSyncVisibility=PRIVATE,LambdaSubnetIds=<SUBNET_IDS>,EnableMCP=false,DocumentKnowledgeBase=DISABLED"
+  --parameters "WebUIHosting=APIGateway,ApiGatewayVisibility=PRIVATE,DeployInVPC=true,VpcId=<VPC_ID>,PrivateSubnetIds=<SUBNET_IDS>,LambdaSubnetIds=<SUBNET_IDS>,LambdaSecurityGroupId=<LAMBDA_SG_ID>,ApiGatewayVpcEndpointId=<APIGW_VPCE_ID>,EnableMCP=false,DocumentKnowledgeBase=DISABLED"
 ```
 
 If the artifact bucket is **KMS-encrypted**, append `,ArtifactsBucketKmsKeyArn=<KMS_KEY_ARN>`
 to the end of the `--parameters` string (before the closing `"`), keeping it all on one line.
 
-If the user chose **vpce** for S3 uploads, also append `,S3PresignedUrlViaVpcEndpoint=true`.
+If the user chose **vpce** for S3 uploads, also append `,S3PresignedUrlViaVpcEndpoint=true`
+along with the BYO S3 endpoint parameters (`S3VpcEndpointIdOverride`,
+`S3VpcEndpointDnsNameOverride`).
 
 **Success indicator:** `Stack <STACK_NAME> is CREATE_COMPLETE`
 
-**Get the ALB URL (needed for Step P3):**
+**Get the application URL:**
 ```bash
-ALB_URL=$(aws cloudformation describe-stacks --stack-name <STACK_NAME> \
+APP_URL=$(aws cloudformation describe-stacks --stack-name <STACK_NAME> \
   --query 'Stacks[0].Outputs[?OutputKey==`ApplicationWebURL`].OutputValue' \
   --output text --region <REGION>)
-echo "ALB URL: $ALB_URL"
+echo "Application URL: $APP_URL"   # execute-api URL ending in /api/
 ```
 
----
-
-#### Step P3 — Reimport TLS certificate with the real ALB hostname (self-signed only)
-
-> **Why:** Browsers block background JavaScript requests (AppSync GraphQL, Cognito
-> token exchange) to hosts with a mismatched TLS cert — even if the user clicked
-> through the initial page-level cert warning.
-
-> **Note on long ALB DNS names:** AWS-generated ALB DNS names often exceed 64 characters
-> (e.g. `internal-STACKNAME-webui-alb-1234567890.us-east-1.elb.amazonaws.com`). The X.509
-> CN field is limited to 64 characters, so `generate_self_signed_cert.sh` automatically
-> truncates the CN while placing the full hostname in the Subject Alternative Name (SAN).
-> Browsers validate the SAN, so this is fully compatible — no manual workaround needed.
-
-```bash
-ALB_DNS=$(echo "$ALB_URL" | sed 's|https://||')
-
-./scripts/generate_self_signed_cert.sh \
-  --region <REGION> \
-  --domain "$ALB_DNS" \
-  --cert-arn <CERT_ARN>
-# The ALB serves the updated cert within ~30 seconds.
-```
+> **No TLS certificate step.** API Gateway hosting serves the UI over the
+> `execute-api` endpoint with AWS-managed TLS — there is no certificate to provision
+> or reimport.
 
 ---
 
 #### Step P4 — Deploy VPC Interface Endpoints
 
-This step creates the 17 required VPC Interface Endpoints (15 app + 2 SSM testing) and
-— **critically** — adds the VPC CIDR to the endpoint security group so that browsers
-inside the VPC (WorkSpaces, VPN clients, bastions) can reach the private AppSync
-endpoint directly.
+If you are deploying into a fully air-gapped VPC (no NAT egress), this step creates the
+required VPC Interface Endpoints and — **critically** — adds the VPC CIDR to the endpoint
+security group so that browsers inside the VPC (WorkSpaces, VPN clients, bastions) can
+reach the private `execute-api` endpoint directly. (If your VPC already has NAT egress
+plus the `execute-api` endpoint — as the test VPC in Step P0 provides — you can skip this
+step.)
 
 > **Note:** Cognito endpoints (`cognito-idp`, `cognito-identity`) are intentionally
 > excluded. AWS blocks PrivateLink when the User Pool has a domain configured (Hosted UI
@@ -494,8 +452,8 @@ python scripts/deploy-vpc-endpoints.py \
 
 > **VpcCidr fix note:** The script automatically discovers the VPC CIDR and passes it as
 > `VpcCidr` to the CloudFormation template. This adds a second ingress rule to the
-> `VpcEndpointSecurityGroup` allowing TCP 443 from the VPC CIDR block — fixing the bug
-> where browser AppSync traffic was blocked when `AppSyncVisibility=PRIVATE`.
+> `VpcEndpointSecurityGroup` allowing TCP 443 from the VPC CIDR block — so in-VPC
+> browsers can reach the private interface endpoints when `ApiGatewayVisibility=PRIVATE`.
 
 **Verify the fix is active:**
 ```bash
@@ -523,26 +481,28 @@ Reply **workspaces**, **vpn**, or **ssm**."
 
 ##### WorkSpaces
 - Connect to your Amazon WorkSpaces desktop.
-- Open the browser and navigate to `<ALB_URL>`.
-- Accept the self-signed cert warning (if applicable).
+- Open the browser and navigate to `<APP_URL>` (the execute-api `/api/` URL).
 
 ##### VPN / Direct Connect
 - Ensure your VPN/DX connection is active.
-- Navigate to `<ALB_URL>` — DNS resolves automatically inside the VPC.
+- Navigate to `<APP_URL>` — the execute-api hostname resolves automatically inside
+  the VPC via the interface endpoint's private DNS.
 
 ##### SSM port forwarding (testing / no WorkSpaces)
 ```bash
-# Terminal 1 — forward the ALB
+APP_HOST=$(echo "$APP_URL" | sed -E 's|https://([^/]+)/.*|\1|')
+
+# Terminal 1 — forward the execute-api endpoint
 aws ssm start-session \
   --target <EC2_INSTANCE_ID> \
   --document-name AWS-StartPortForwardingSessionToRemoteHost \
-  --parameters "{\"host\":[\"$ALB_DNS\"],\"portNumber\":[\"443\"],\"localPortNumber\":[\"8443\"]}"
+  --parameters "{\"host\":[\"$APP_HOST\"],\"portNumber\":[\"443\"],\"localPortNumber\":[\"8443\"]}"
 ```
-Open `https://<ALB_DNS>:8443/` in your browser (requires `/etc/hosts` or DNS override
-to point the ALB hostname to `127.0.0.1`).
+Open `https://$APP_HOST:8443/api/` in your browser (requires `/etc/hosts` or DNS
+override to point the execute-api hostname to `127.0.0.1`).
 
 See `docs/deployment-private-network.md` §Step 4 for the full SSM port-forward
-instructions including AppSync tunnel setup.
+instructions.
 
 ---
 
@@ -553,7 +513,7 @@ verify that the `VpcCidr` ingress fix is working correctly.
 
 | # | Test | Expected result |
 |---|------|----------------|
-| 1 | Navigate to the ALB/CloudFront URL and log in | Login succeeds; app loads |
+| 1 | Navigate to the application URL (execute-api `/api/` or CloudFront) and log in | Login succeeds; app loads |
 | 2 | Open **Configuration** page | Loads within a few seconds — NOT "Loading configuration..." forever |
 | 3 | Open **Upload Documents** page | Shows the input bucket name — NOT "Input bucket not configured" |
 | 4 | Upload `samples/lending_package.pdf` | Document appears in the Document List with status `QUEUED` |
@@ -578,11 +538,11 @@ parameters.
 | `AccessDenied: kms:Decrypt` in CodeBuild (cause 2) | KMS key policy does not allow CodeBuild roles to decrypt | Add a `*CodeBuild*` principal condition to the KMS key policy **before** deploying (see Q1c in System Prompt for the JSON) |
 | **Config page stuck "Loading configuration..."** | VpcCidr not in endpoint SG (old deployment) | Re-run `deploy-vpc-endpoints.py` — will add VPC CIDR ingress rule |
 | **"Input bucket not configured"** | Same root cause as above | Same fix |
-| App spins after login (stuck loading) | TLS cert domain mismatch | Reimport cert with real ALB DNS: `generate_self_signed_cert.sh --cert-arn ... --domain ...` |
+| UI unreachable in PRIVATE mode | execute-api endpoint private DNS disabled, or client SG blocked | Confirm the execute-api VPC endpoint has `PrivateDnsEnabled: true` and its SG allows 443 from your client |
 | `Login hangs on cognito-idp.amazonaws.com` | No NAT Gateway for Cognito internet access | Add NAT GW in a public subnet; private subnets route `0.0.0.0/0 → NAT GW` |
 | `"PrivateLink access is disabled for the user pool that has ManagedLogin configured"` | A `cognito-idp` VPC endpoint exists but the User Pool has a domain (Hosted UI / Managed Login) | Delete the `cognito-idp` VPC endpoint — Cognito must route through NAT. `deploy-vpc-endpoints.py` no longer creates Cognito endpoints by default |
-| `Target Group Unhealthy` | VPC endpoint ENIs stale or SG misconfigured | Check endpoint SG allows HTTPS 443 from ALB; run `deploy-vpc-endpoints.py` |
-| `Output 'LambdaVpcSecurityGroupId' not found` | Stack was not deployed with `AppSyncVisibility=PRIVATE` | Redeploy stack with `AppSyncVisibility=PRIVATE` |
+| UI assets return 404 | UI not built with `VITE_UI_BASE_PATH=/api/` | CodeBuild sets this automatically when `WebUIHosting=APIGateway`; asset URLs in `index.html` must start with `/api/` |
+| `Output 'LambdaVpcSecurityGroupId' not found` | Stack was not deployed in VPC/private mode | Redeploy stack with `WebUIHosting=APIGateway,ApiGatewayVisibility=PRIVATE,DeployInVPC=true` |
 | **S3 upload timeout (`NS_Net_Timeout POST` to `*.vpce.amazonaws.com`)** | Browser can't reach S3 VPCE (corporate network lacks DNS/routing) | Set `S3PresignedUrlViaVpcEndpoint=false` (default) so uploads use global S3 via NAT instead of VPCE |
 | **Parameter value ends with `\` (e.g. `subnet-abc\`)** | Backslash line-continuation used inside `--parameters` string | Reformat `--parameters` value as a **single unbroken line** — no `\` inside the quotes |
 
@@ -592,19 +552,20 @@ parameters.
 
 | Parameter | Public path | Private path |
 |-----------|-------------|--------------|
-| `WebUIHosting` | `CloudFront` (default) | `ALB` |
-| `ALBScheme` | — | `internal` |
-| `AppSyncVisibility` | `GLOBAL` (default) | `PRIVATE` |
+| `WebUIHosting` | `CloudFront` (default) | `APIGateway` |
+| `ApiGatewayVisibility` | `GLOBAL` (default) | `PRIVATE` |
+| `DeployInVPC` | `false` | `true` |
+| `VpcId` | — | VPC ID |
+| `PrivateSubnetIds` | — | comma-separated private subnet IDs (≥2 AZs) |
 | `LambdaSubnetIds` | — | comma-separated private subnet IDs |
-| `ALBVpcId` | — | VPC ID |
-| `ALBSubnetIds` | — | comma-separated subnet IDs (≥2 AZs) |
-| `ALBCertificateArn` | — | ACM cert ARN |
-| `S3PresignedUrlViaVpcEndpoint` | — | `false` (default, uploads via NAT) or `true` (uploads via S3 VPCE) |
+| `LambdaSecurityGroupId` | — | Lambda security group id |
+| `ApiGatewayVpcEndpointId` | — | execute-api interface endpoint id |
+| `S3PresignedUrlViaVpcEndpoint` | — | `false` (default, uploads via NAT) or `true` (uploads via BYO S3 VPCE) |
 | `EnableMCP` | `true` (default) | `false` (requires public endpoint) |
 | `DocumentKnowledgeBase` | `OPENSEARCH_SERVERLESS` or `S3_VECTORS` | `DISABLED` |
 | `ArtifactsBucketKmsKeyArn` | optional | optional (required if bucket is KMS-encrypted) |
 
-> **`AppSyncVisibility` is immutable** — it cannot be changed after stack creation.
+> **`ApiGatewayVisibility` is immutable** — it cannot be changed after stack creation.
 > To switch between `GLOBAL` and `PRIVATE`, delete and recreate the stack.
 
 ---
@@ -614,7 +575,7 @@ parameters.
 | Topic | Document |
 |-------|----------|
 | Full private network runbook | `docs/deployment-private-network.md` |
-| ALB hosting architecture & security | `docs/alb-hosting.md` |
+| API Gateway hosting architecture & security | `docs/apigateway-hosting.md` |
 | Standard deployment guide | `docs/deployment.md` |
 | VPC secured mode (GovCloud / headless) | `docs/vpc-secured-mode.md` |
 | GovCloud deployment | `docs/govcloud-deployment.md` |

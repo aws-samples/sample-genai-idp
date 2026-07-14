@@ -3,11 +3,43 @@ SPDX-License-Identifier: MIT-0
 
 # Assessment Service for IDP Accelerator
 
-This module provides assessment capabilities for evaluating document extraction confidence using LLMs within the IDP Accelerator project.
+This module provides the **standalone confidence assessment step** for the IDP
+Accelerator. As of config **v0.6**, confidence is an **output of extraction**:
+its settings live under `extraction.confidence.*` (and geometry under
+`extraction.geometry.*`), not a top-level `assessment.*` block. This service
+implements the standalone step that runs on the Simple (non-agentic) path when
+`extraction.confidence.mode: separate` (the default). On the agentic path, and
+for `integrated` mode, confidence is produced inside extraction and this
+standalone step auto-skips.
+
+> **Granular assessment is retired.** The former `GranularAssessmentService` /
+> `granular_service.py` and the `extraction.confidence.granular` config field
+> have been **deleted**. Large lists are handled by the standalone large-list
+> batching described below (plus a bounded missing-row retry). Any leftover
+> `granular.*` keys still validate but are ignored. See
+> `docs/migration-granular-retirement.md`.
+
+> **Compact reasons (default prompts).** The shipped confidence prompts ask the
+> model to emit `confidence_reason` **only for leaves below 0.9 confidence**;
+> confident leaves emit just `{"confidence": <score>}`. Because output tokens
+> dominate assessment cost, this materially cuts cost with no effect on the
+> scores or threshold/alert logic (`_enhance_dict_assessment` spreads whatever
+> leaf keys are present). The many `confidence_reason`-on-every-field examples
+> below predate this and are illustrative of the *structure*, not the
+> reason-frequency. Widen the 0.9 threshold in the confidence `task_prompt` to
+> get a reason on every field.
+
+> **Integrated (simple-path) response shapes.** In `integrated` mode the single
+> extraction inference returns values **and** confidence. The service prefers a
+> `{"extraction": {...}, "confidence": {...}}` envelope, but also lifts a
+> `field_assessment` (or `confidence`) **sibling** key emitted next to the
+> extracted fields — stripping it from `inference_result` and promoting it to
+> `explainability_info` so the standalone step auto-skips (avoids a redundant
+> second Bedrock pass). See `ExtractionService._split_inline_confidence`.
 
 ## Overview
 
-The Assessment service is designed to assess the confidence and accuracy of extraction results by analyzing them against source documents using LLMs. It supports both text and image content analysis and provides detailed confidence scores and explanations for each extracted attribute.
+The Assessment service is designed to assess the confidence and accuracy of extraction results by analyzing them against source documents using LLMs. It supports both text and image content analysis and provides detailed confidence scores and explanations for each extracted attribute, applying configured confidence thresholds (threshold enrichment) to each field.
 
 ## Features
 
@@ -22,7 +54,7 @@ The Assessment service is designed to assess the confidence and accuracy of extr
 - **Fallback mechanisms** for robust error handling
 - **Metering integration** for usage tracking
 - **Direct Document model integration**
-- **Both regular and granular assessment support** with identical bounding box capabilities
+- **Automatic large-list batching** for long tables (see *Large-list batching* below)
 
 ## Usage Example
 
@@ -62,33 +94,40 @@ assessment_info = extraction_data.get("explainability_info", {})
 
 ## Configuration
 
-The assessment service uses configuration-driven prompts and model parameters:
+The assessment service uses configuration-driven prompts and model parameters,
+under `extraction.confidence` in v0.6:
 
 ```yaml
-assessment:
-  enabled: true                         # Enable/disable assessment processing
-  model: "us.amazon.nova-pro-v1:0"
-  temperature: 0
-  top_k: 5
-  top_p: 0.1
-  max_tokens: 4096
-  system_prompt: "You are an expert document analyst..."
-  task_prompt: |
-    Assess the confidence of extraction results for this {DOCUMENT_CLASS} document.
-    
-    Text Confidence Data:
-    {OCR_TEXT_CONFIDENCE}
-    
-    Extraction Results:
-    {EXTRACTION_RESULTS}
-    
-    Attributes Definition:
-    {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-    
-    Document Images:
-    {DOCUMENT_IMAGE}
-    
-    Respond with confidence assessments in JSON format.
+extraction:
+  confidence:
+    enabled: true                       # Enable/disable confidence processing
+    mode: separate                      # off | separate (default) | integrated
+    model: "us.amazon.nova-pro-v1:0"
+    temperature: 0
+    top_k: 5
+    top_p: 0.1
+    reasoning_effort: low               # only if a reasoning-capable model is selected
+    list_batch_size: 25                 # rows per assessment batch for large lists
+    # NOTE: no max_tokens knob — the confidence pass always requests the model's
+    # maximum output (resolved from config_library/model_config_limits.yaml) so
+    # long list assessments are never truncated.
+    system_prompt: "You are an expert document analyst..."
+    task_prompt: |
+      Assess the confidence of extraction results for this {DOCUMENT_CLASS} document.
+
+      Text Confidence Data:
+      {OCR_TEXT_CONFIDENCE}
+
+      Extraction Results:
+      {EXTRACTION_RESULTS}
+
+      Attributes Definition:
+      {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
+
+      Document Images:
+      {DOCUMENT_IMAGE}
+
+      Respond with confidence assessments in JSON format.
 ```
 
 ### `enabled` Configuration Property
@@ -102,11 +141,12 @@ The assessment service supports runtime enable/disable control via the `enabled`
 
 **Example - Disabling Assessment:**
 ```yaml
-assessment:
-  enabled: false  # Disables all assessment processing
-  # Other properties can remain but will be ignored
-  model: us.amazon.nova-lite-v1:0
-  temperature: 0.0
+extraction:
+  confidence:
+    enabled: false  # Disables all confidence processing (equivalent to mode: off)
+    # Other properties can remain but will be ignored
+    model: us.amazon.nova-lite-v1:0
+    temperature: 0.0
 ```
 
 **Behavior When Disabled:**
@@ -114,6 +154,149 @@ assessment:
 - No LLM API calls or S3 operations are performed
 - Document processing continues to completion
 - Minimal performance impact (early return)
+
+## Large-list batching (`assessment/batching.py`)
+
+A single confidence inference over a large list field (e.g. a 120-row transaction
+table) is unreliable: the model under-enumerates or omits the list, leaving most
+rows unassessed. The standalone Assessment step handles this itself — it does **not**
+depend on granular assessment for large lists.
+
+`process_document_section` runs the assessment through the shared
+`idp_common.assessment.batching.assess_results_batched`, which:
+
+1. Finds the single largest list field whose length exceeds
+   `extraction.confidence.list_batch_size` (default 25).
+2. Slices that list into `list_batch_size` chunks and assesses each chunk
+   **sequentially**, passing the SAME scalars/context every time so scalar
+   assessments and the document context are preserved (scalars come from the first
+   batch). Sequential, not a thread pool, is intentional: the historical granular
+   path's 20-way fan-out caused a Bedrock prompt-cacheWrite storm — batching
+   sequentially avoids it and is why retiring granular is a net cost win.
+3. Concatenates the per-row assessments in order and calls
+   `reconcile_assessment_to_data` to force the assessment to index-align with the
+   extracted data — truncating over-long lists, padding short/omitted ones with
+   per-sub-field placeholders (so every un-assessed row is still groundable), and
+   fanning any per-row scalar confidence out to per-column leaves.
+4. Runs a **bounded missing-row retry**: any rows the model dropped within a
+   batch are re-scored in a follow-up pass (missing rows only), so large-list
+   coverage reaches 100% without re-scoring rows that already have confidence.
+
+Both `assess_results_batched` and `reconcile_assessment_to_data` are shared with
+the agentic in-shard assessment path (`ExtractionService`), so there is exactly one
+implementation of large-list assessment. When no list exceeds the batch size the
+helper makes a single (still reconciled) call — identical to the previous behavior.
+
+### Truncation-aware adaptive batch splitting
+
+A configured `list_batch_size` is a *row* count, but the model's real limit is
+its **max output tokens**. When per-row output is large — most notably with
+`extraction.geometry.mode: llm`, which asks the model to emit a bounding box for
+every cell — even a modest batch can exceed a small-cap model's ceiling (e.g.
+Amazon Nova Lite caps at 10,000 output tokens). A truncated response
+(`stopReason == "max_tokens"`) is unparseable JSON, and previously the service
+silently fell back to a default `0.5` for every field / null-confidence
+placeholders for every row — with no signal that anything went wrong.
+
+The core now detects truncation (`AssessmentCoreResult.truncated`) and the
+batcher recovers automatically: any slice the model truncates is **recursively
+halved and re-assessed** until it parses or bottoms out at a single row —
+instead of accepting the placeholder. The recursive splitter
+(`_assess_slice_adaptive`) runs in the initial batch loop and in **every**
+missing-row retry, so it protects all four confidence code paths uniformly:
+the standalone Assessment step (`separate`), the agentic single-agent and
+sharded in-shard passes, and the simple/agentic `integrated` path's inline-row
+retry (`ExtractionService._retry_missing_integrated_rows`). Simple `separate`
+extraction — the granular-assessment replacement — goes through the standalone
+step and is fully covered.
+
+The activity is surfaced for visibility (only when a run actually had to shrink):
+
+- **`metadata.assessment_batch_split_stats`** on the section result — a dict with
+  `truncated_calls`, `splits`, `min_batch_size_used`, `rows_recovered_by_retry`,
+  `unrecoverable_rows`, `derived_batch_size`, `configured_batch_size`,
+  `escalation_model`, `escalation_rounds`, and `rows_recovered_by_escalation`.
+- An **`⚠ Assessment Batch Splitting`** block in the agentic extraction
+  **processing report**.
+
+### Self-healing: token-aware sizing + model escalation
+
+Adaptive splitting recovers a truncated batch by *shrinking* it against the
+**same** model. When the model's output cap is the real bottleneck, shrinking
+alone can bottom out at a single row and still recover nothing (the failure that
+left 34/68 transaction rows with `confidence: null`). Two additions make advanced
+mode complete correctly on the first try:
+
+1. **Token-aware first-pass sizing** (`compute_token_aware_batch_size`). Before
+   the first call, the effective batch size is derived from the confidence
+   model's output cap (`bedrock.model_utils.get_model_max_output_tokens`) and an
+   estimate of per-row output tokens (`extraction.sharding.estimate_tokens` ×
+   a confidence-envelope multiplier × a larger bbox multiplier for
+   `geometry.mode` `llm`/`llm_grounded`). The result **only ever shrinks**
+   `list_batch_size` (never grows it past your ceiling), so a small-cap model
+   (Nova Lite, 10K) starts at ~6–9 rows instead of truncating at 25. Unknown
+   models fall back to the configured size. Recorded as `derived_batch_size`.
+
+2. **Model-escalation ladder** (`extraction.confidence.escalation_*`). When rows
+   are *still* unscored after token-aware shrink + same-model retries, the
+   still-missing rows (only those) are re-assessed on a **stronger confidence
+   model** with a bigger output cap — the rung that actually fixes small-cap
+   truncation. Cheapest-first and bounded by `max_escalation_rounds`; a round
+   that recovers nothing stops early. Configure with:
+
+   ```yaml
+   extraction:
+     confidence:
+       escalation_enabled: true          # ON by default
+       escalation_model: "us.anthropic.claude-sonnet-4-20250514-v1:0"
+       max_escalation_rounds: 2
+   ```
+
+   Per-class override: `x-aws-idp-confidence-escalation-model` (mirrors
+   `x-aws-idp-extraction-escalation-model`). `escalation_model: null` skips the
+   model rung (ladder stays at shrink + retry). Escalation applies uniformly to
+   the standalone `separate` step and the `integrated` in-shard/inline retry.
+
+If rows remain unscored even after escalation, `unrecoverable_rows` is non-zero —
+reduce per-row output, e.g. switch `extraction.geometry.mode` from `llm` to
+`ocr_only` (the default), which derives boxes from OCR value-matching instead of
+the model.
+
+### Structured processing issues + completeness gate
+
+The ladder's `split_stats` are translated into user-surfacing
+`ProcessingIssue`s (`idp_common.models.ProcessingIssue`) by
+`build_assessment_issues`, so a run that healed (or couldn't heal) is visible
+without reading raw metadata. Severity ladder:
+
+| Condition | code | severity |
+|-----------|------|----------|
+| Rows still unscored after the full ladder | `assessment_incomplete` | **error** |
+| Wall-clock guard cut escalation short | `assessment_deadline_reached` | **warning** |
+| Healed, but needed shrinking/escalation | `assessment_recovered_with_retries` | **info** |
+
+A **completeness gate** (`audit_explainability`) runs after the ladder on both
+the standalone and in-shard paths: it confirms every extracted value has a real
+(non-null), in-range confidence and — when `geometry.mode != "off"` — a bounding
+box, emitting `assessment_confidence_out_of_range` / `assessment_geometry_incomplete`
+for anything structurally wrong. Issues are attached to each `Section`
+(`section.processing_issues`), rolled up to `Document.processing_issue_count`,
+and rendered in the extraction processing report.
+
+### Lambda wall-clock budget & resume safety
+
+The escalation ladder adds sequential model calls inside the 900s
+Extraction/Assessment Lambdas. To avoid a hard timeout, both handlers thread the
+Lambda's `context.get_remaining_time_in_millis()` down as an absolute
+`deadline_epoch`; before starting a **new escalation round** the ladder checks
+the estimated round cost fits in the remaining time minus a 90s safety reserve.
+If not, it stops, keeps what was recovered, and flags `deadline_reached` (→
+`assessment_deadline_reached` warning) — converting a would-be timeout into a
+soft, flagged, complete document. As defense in depth, the Step Functions
+`ExtractionStep`/`AssessmentStep`/`ShardExtractionStep` retry sets include
+`States.Timeout` / `Lambda.Unknown`, so a genuine timeout is retried and resumes
+via the per-shard S3 persistence and the Assessment step's "skip if
+`explainability_info` already present" short-circuit.
 
 ## Prompt Template Placeholders
 
@@ -249,30 +432,33 @@ The assessment service now includes **automatic spatial localization** capabilit
 To enable spatial localization, include these instructions in your `task_prompt`:
 
 ```yaml
-assessment:
-  task_prompt: |
-    <spatial-localization-guidelines>
-    For each field, provide bounding box coordinates:
-    - bbox: [x1, y1, x2, y2] coordinates in normalized 0-1000 scale
-    - page: Page number where the field appears (starting from 1)
-    
-    Coordinate system:
-    - Use normalized scale 0-1000 for both x and y axes
-    - x1, y1 = top-left corner of bounding box
-    - x2, y2 = bottom-right corner of bounding box
-    - Ensure x2 > x1 and y2 > y1
-    - Make bounding boxes tight around the actual text content
-    </spatial-localization-guidelines>
-    
-    For each attribute, provide:
-    {
-      "attribute_name": {
-        "confidence": 0.95,
-        "confidence_reason": "Clear explanation",
-        "bbox": [100, 200, 300, 250],
-        "page": 1
+extraction:
+  geometry:
+    mode: llm_grounded
+  confidence:
+    task_prompt: |
+      <spatial-localization-guidelines>
+      For each field, provide bounding box coordinates:
+      - bbox: [x1, y1, x2, y2] coordinates in normalized 0-1000 scale
+      - page: Page number where the field appears (starting from 1)
+
+      Coordinate system:
+      - Use normalized scale 0-1000 for both x and y axes
+      - x1, y1 = top-left corner of bounding box
+      - x2, y2 = bottom-right corner of bounding box
+      - Ensure x2 > x1 and y2 > y1
+      - Make bounding boxes tight around the actual text content
+      </spatial-localization-guidelines>
+
+      For each attribute, provide:
+      {
+        "attribute_name": {
+          "confidence": 0.95,
+          "confidence_reason": "Clear explanation",
+          "bbox": [100, 200, 300, 250],
+          "page": 1
+        }
       }
-    }
 ```
 
 ### Benefits
@@ -280,7 +466,7 @@ assessment:
 - **No Configuration Required**: Works automatically when LLM provides bbox data
 - **Backward Compatible**: Existing assessments without bbox continue working
 - **UI Ready**: Geometry format works immediately with existing visualizations
-- **All Services Supported**: Both regular and granular assessment include this capability
+- **Consistent**: applies uniformly across the standalone step and the agentic in-shard path
 
 ## Grounding Geometry in Real OCR Data
 
@@ -288,7 +474,7 @@ The bounding boxes produced above are **LLM-estimated**. When the OCR backend su
 geometry (Textract or the Mistral OCR LambdaHook), a post-LLM enrichment pass grounds each
 field's box in the actual OCR coordinates from the consolidated per-page `pageData.json`
 artifact (see `idp_common/ocr/README.md`). Implemented in `idp_common.assessment.ocr_grounding`
-and shared by both the standard (`service.py`) and granular (`granular_service.py`) paths.
+and used by the standalone assessment step (`service.py`) and the agentic in-shard path alike.
 
 ```python
 from idp_common.assessment.ocr_grounding import (
@@ -317,12 +503,58 @@ Key behaviors:
 - **Additive output**: a matched field gets `geometry_source` (`"ocr"`/`"ocr-paragraph"`/
   `"llm"`) and, when available, `ocr_confidence` (0–1). The LLM `confidence`/`confidence_reason`
   are never modified, so HITL and confidence alerts are unaffected.
-- **Config gate**: `assessment.ground_geometry_in_ocr` (default `True`).
+- **Config gate**: `extraction.geometry.mode` (`ocr_only` default | `llm_grounded` | `llm` | `off`). The legacy `assessment.ground_geometry_in_ocr: false` maps to `llm`; old configs are migrated on read.
 - **Safe fallback**: absent `pageData.json`, `geometryAvailable: false`, or no value match →
   keep the LLM-estimated box (identical to prior behavior). `pageData.json` is read from S3, so
   the `{OCR_TEXT_CONFIDENCE}` prompt and token budget are unchanged.
 
-See `docs/assessment-bounding-boxes.md` for the user-facing description.
+### Per-shard grounding (sharded agentic path)
+
+In the sharded agentic path each shard **grounds its own rows against only its own
+pages** immediately after its in-shard confidence assessment (in
+`ExtractionService._build_assess_runner` → `_ground_shard_assessment`), rather than
+deferring one full-section grounding sweep to the merge step. This matters because
+grounding is `O(rows × pages)` fuzzy line-matching: a large multi-page table
+(e.g. 1,440 rows over 24 pages) grounded once at merge time is single-threaded, has
+no wall-clock guard, and could exceed the merge Lambda's 900s ceiling. Grounding
+per-shard makes it scale exactly like the confidence assessment does — each shard's
+work is bounded to its own ~N rows × ~5 pages and runs concurrently across shards.
+Scoping to the shard's pages also improves correctness: a row's value can only appear
+on its own pages, so cross-page false matches are avoided.
+
+The merge step then re-runs `ground_assessment_geometry(..., skip_grounded=True)`,
+which is a near-instant no-op over leaves that already carry a `geometry_source`
+(everything the shards grounded) and only grounds any **residual** leaves — e.g.
+reconcile-padded placeholder rows the assessment LLM omitted. The non-sharded
+single-agent path still grounds once at the end (`skip_grounded=True` is a no-op
+there because no leaf is pre-grounded), so behavior is identical.
+
+### Indexed value→line matching (performance)
+
+`match_value_to_geometry` builds, once per page and caches on the `pageData` dict,
+a normalized-line list plus an **exact-text → lines index**, then does an
+index-first pass across all pages before any linear scan. Because EXACT is the most
+precise tier, a value that equals an OCR line verbatim (the overwhelmingly common
+case for table cells) resolves as an O(1) dict hit and skips the substring / span /
+token-overlap / Levenshtein passes entirely; a tier-aware early-out likewise skips
+the fuzzy ladder whenever a hit that it cannot beat already exists. This took a
+1,440-row section from ~64s to ~2s with byte-identical output. When nothing matches
+exactly (reformatting, OCR noise) the full fuzzy ladder still runs, so match quality
+is unchanged. `_ground_shard_assessment` logs the row count + duration so a
+regression can never again be a silent multi-minute hang.
+
+### Images omitted in OCR-geometry modes
+
+In `geometry.mode: ocr_only` (default) and `off`, `assess_results` **drops the page
+images from the confidence prompt** — the model is never asked for boxes (geometry
+comes from OCR value-matching), so the images only bloat the request (~1.7K input
+tokens each; a 5-page shard ≈ 8.7K) and, on a small multimodal model like Nova Lite,
+materially raise latency and the odds of a max-output-token truncation on large
+tables. In `llm`/`llm_grounded` the images are kept (the model needs them to estimate
+boxes).
+
+See the *Geometry / Bounding Boxes* section of `docs/extraction-and-confidence.md`
+for the user-facing description.
 
 ## Multimodal Assessment
 
@@ -707,7 +939,8 @@ def lambda_handler(event, context):
 
 ### Configuration
 - Set appropriate temperature (0 for deterministic assessment)
-- Configure max_tokens based on expected response length
+- Output tokens are not configurable — the confidence pass always requests the
+  model maximum (so long list assessments aren't truncated)
 - Use system prompts to establish assessment criteria
 
 ### Performance

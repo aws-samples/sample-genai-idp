@@ -2,13 +2,17 @@
 // SPDX-License-Identifier: MIT-0
 
 import React, { useState, useEffect } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { Modal, Box, SpaceBetween, Button, Spinner, Alert, Header } from '@cloudscape-design/components';
 
-import { submitAgentQuery, getAgentJobStatus, onAgentJobComplete, listAvailableAgents } from '../../graphql/generated';
+import { submitAgentQuery, getAgentJobStatus, listAvailableAgents } from '../../graphql/generated';
 import AgentResultDisplay from '../document-agents-layout/AgentResultDisplay';
 import AgentMessagesDisplay from '../document-agents-layout/AgentMessagesDisplay';
+import './TroubleshootModal.css';
+import useDeploymentContext from '../../hooks/use-deployment-context';
+import { buildBugReportUrl, buildFullDetailsText, type DocumentContext } from '../../utils/github-feedback';
+import { extractFindingsText } from './troubleshootFindings';
 
 interface DocumentItem {
   objectKey: string;
@@ -71,59 +75,62 @@ const TroubleshootModal = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [_availableAgents, setAvailableAgents] = useState<AgentInfo[]>([]);
+  const [copied, setCopied] = useState(false);
+  // When minimized the modal collapses to a small restore chip so the
+  // analysis keeps running (and polling continues) instead of being torn down.
+  const [minimized, setMinimized] = useState(false);
+
+  const deploymentContext = useDeploymentContext();
 
   const query = `Troubleshoot ${documentItem?.objectKey} for failures or performance issues.`;
 
-  const subscribeToJobCompletion = (id: string): Subscription | null => {
+  // A terminal (COMPLETED/FAILED) job with either findings or an error is worth
+  // reporting. Build the document context once so the "Report this issue"
+  // button and "Copy full details" share the same data.
+  const isTerminal = jobStatus === 'COMPLETED' || jobStatus === 'FAILED';
+  const findings = extractFindingsText(jobResult);
+  const canReport = isTerminal && (Boolean(findings) || Boolean(error));
+
+  const docContext: DocumentContext = {
+    objectKey: documentItem?.objectKey,
+    objectStatus: documentItem?.objectStatus,
+    configVersion: documentItem?.configVersion as string | undefined,
+    executionArn: documentItem?.executionArn as string | undefined,
+    jobError: error ?? undefined,
+    findings: findings || undefined,
+  };
+
+  const reportIssueUrl = buildBugReportUrl(deploymentContext, docContext);
+
+  const handleCopyFullDetails = async (): Promise<void> => {
+    const text = buildFullDetailsText(deploymentContext, docContext);
     try {
-      logger.debug('Subscribing to job completion for job ID:', id);
-      const sub = client
-        .graphql({
-          query: onAgentJobComplete,
-          variables: { jobId: id },
-        })
-        .subscribe({
-          next: async (message) => {
-            const jobCompleted = message.data?.onAgentJobComplete;
-            logger.debug('Job completion notification:', jobCompleted);
-
-            if (jobCompleted) {
-              try {
-                const jobResponse = await client.graphql({
-                  query: getAgentJobStatus,
-                  variables: { jobId: id },
-                });
-
-                const job = jobResponse.data?.getAgentJobStatus;
-                if (job) {
-                  setJobStatus(job.status);
-                  setAgentMessages(job.agent_messages);
-
-                  if (job.status === 'COMPLETED') {
-                    setJobResult(job.result ?? null);
-                  } else if (job.status === 'FAILED') {
-                    setError(job.error ?? 'Job processing failed');
-                  }
-                }
-              } catch (fetchError) {
-                logger.error('Error fetching job details:', fetchError);
-                setError(`Failed to fetch job details: ${(fetchError as Error).message}`);
-              }
-            }
-          },
-          error: (err: Error) => {
-            logger.error('Subscription error:', err);
-            setError(`Subscription error: ${err.message}`);
-          },
-        });
-
-      setSubscription(sub);
-      return sub;
-    } catch (err) {
-      logger.error('Error setting up subscription:', err);
-      setError(`Failed to set up job status subscription: ${(err as Error).message}`);
-      return null;
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Fallback for older browsers / insecure contexts.
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+      } catch (err) {
+        logger.error('Failed to copy troubleshoot details:', err);
+      }
+      document.body.removeChild(textarea);
     }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  // AppSync subscriptions were removed; agent job completion is detected by the
+  // interval polling effect below (polls getAgentJobStatus until terminal). This
+  // is a no-op retained so existing call sites stay unchanged.
+  const subscribeToJobCompletion = (id: string): Subscription | null => {
+    logger.debug('Job completion tracked via polling for job ID:', id);
+    return null;
   };
 
   const checkAvailableAgents = async (): Promise<AgentInfo[]> => {
@@ -195,6 +202,7 @@ const TroubleshootModal = ({
   // Auto-submit when modal opens or resume existing job
   useEffect(() => {
     if (visible) {
+      setMinimized(false); // always reopen expanded
       if (existingJob && ['PENDING', 'PROCESSING'].includes(existingJob.status)) {
         // Resume existing active job
         logger.info('Resuming existing troubleshoot job:', existingJob.jobId);
@@ -288,17 +296,63 @@ const TroubleshootModal = ({
     }
   }, [visible]);
 
+  // Live status for the minimized chip.
+  const isRunning = jobStatus === 'PENDING' || jobStatus === 'PROCESSING' || isSubmitting;
+
+  // When minimized, collapse to a restore chip. The polling/subscription
+  // effects keep running because `visible` stays true, so the analysis
+  // continues in the background and its result is ready on restore.
+  if (visible && minimized) {
+    return (
+      <div className="troubleshoot-restore-chip">
+        <Button
+          iconName={isRunning ? undefined : 'status-positive'}
+          onClick={() => setMinimized(false)}
+          ariaLabel="Restore Troubleshoot window"
+        >
+          {isRunning ? (
+            <>
+              <Spinner /> Troubleshooting…
+            </>
+          ) : (
+            'Troubleshoot results ready'
+          )}
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <Modal
-      onDismiss={onDismiss}
+      // Only the Close button dismisses. Ignore overlay-click / Esc so an
+      // in-progress analysis (which can take ~30s) is never torn down by an
+      // accidental click outside the window.
+      onDismiss={({ detail }) => {
+        if (detail.reason === 'closeButton') onDismiss();
+      }}
       visible={visible}
       size="large"
       header={<Header variant="h1">Troubleshoot Document</Header>}
       footer={
         <Box float="right">
-          <Button variant="primary" onClick={onDismiss}>
-            Close
-          </Button>
+          <SpaceBetween direction="horizontal" size="xs">
+            {canReport && (
+              <Button iconName="copy" onClick={handleCopyFullDetails}>
+                {copied ? 'Copied' : 'Copy full details'}
+              </Button>
+            )}
+            {canReport && (
+              <Button iconName="bug" href={reportIssueUrl} target="_blank" rel="noopener noreferrer">
+                Report this issue on GitHub
+              </Button>
+            )}
+            <Button iconName="treeview-collapse" onClick={() => setMinimized(true)}>
+              Minimize
+            </Button>
+            <Button variant="primary" onClick={onDismiss}>
+              Close
+            </Button>
+          </SpaceBetween>
         </Box>
       }
     >

@@ -14,6 +14,34 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 s3 = boto3.client('s3')
 dynamodb = boto3.resource('dynamodb')
 
+# Document formats supported as test set inputs. Used as a fallback when a
+# baseline directory name does not match any known input filename, so that
+# genuinely orphaned baselines still surface as "extra baselines" rather than
+# being silently dropped.
+SUPPORTED_EXTENSIONS = ('.pdf', '.png', '.jpg', '.jpeg', '.tiff', '.tif')
+
+
+def _match_baseline_name(path_parts, input_names):
+    """Find the baseline directory name for a baseline file's path segments.
+
+    The baseline directory is named after the input filename (e.g.
+    ``baseline/category/document1.png/sections/1/result.json``). Match it
+    extension-agnostically against the set of known input filenames; fall back
+    to a supported-extension check only when no segment matches an input name.
+    """
+    # Prefer an exact match against a known input filename (extension-agnostic).
+    for part in path_parts:
+        if part in input_names:
+            return part
+
+    # Fallback: a segment that looks like a supported document filename. This
+    # lets orphaned baselines still be reported as extras instead of vanishing.
+    for part in path_parts:
+        if part.lower().endswith(SUPPORTED_EXTENSIONS):
+            return part
+
+    return None
+
 def handler(event, context):
     """Process S3 events for uploaded ZIP files"""
     logger.info(f"Zip extractor invoked with {len(event['Records'])} S3 events")
@@ -70,10 +98,13 @@ def _extract_uploaded_zip(bucket, test_set_id, zip_key):
             input_names = set()
             baseline_names = set()
             
+            # First pass: partition input vs baseline files and collect input
+            # filenames. ZIP entry order is not guaranteed, so baseline names
+            # are resolved in a second pass once all input names are known.
             for file_info in zip_ref.infolist():
                 if not file_info.is_dir():
                     file_path = file_info.filename
-                    
+
                     # Check if file is in input/ or baseline/ folder
                     if '/input/' in file_path:
                         input_files.append(file_info)
@@ -82,20 +113,23 @@ def _extract_uploaded_zip(bucket, test_set_id, zip_key):
                         input_names.add(filename)
                     elif '/baseline/' in file_path:
                         baseline_files.append(file_info)
-                        # Extract folder name after /baseline/ for matching
-                        parts = file_path.split('/baseline/', 1)
-                        if len(parts) == 2 and '/' in parts[1]:
-                            # Handle nested structure: baseline/category/filename.pdf/sections/...
-                            path_parts = parts[1].split('/')
-                            if len(path_parts) >= 2:
-                                # Look for the .pdf file (second level folder)
-                                for part in path_parts:
-                                    if part.endswith('.pdf'):
-                                        baseline_names.add(part)
-                                        break
                     else:
                         logger.warning(f"Skipping file not in input/ or baseline/ folder: {file_path}")
-            
+
+            # Second pass: resolve baseline directory names. The baseline dir is
+            # named after the input filename and may use any supported document
+            # extension (.pdf, .png, .jpg, .jpeg, .tiff, .tif), not just .pdf.
+            for file_info in baseline_files:
+                # Extract folder name after /baseline/ for matching
+                parts = file_info.filename.split('/baseline/', 1)
+                if len(parts) == 2 and '/' in parts[1]:
+                    # Handle nested structure: baseline/category/filename.png/sections/...
+                    path_parts = parts[1].split('/')
+                    if len(path_parts) >= 2:
+                        baseline_name = _match_baseline_name(path_parts, input_names)
+                        if baseline_name:
+                            baseline_names.add(baseline_name)
+
             if not input_files:
                 raise ValueError(f"No files found in input/ folder within zip file")
             

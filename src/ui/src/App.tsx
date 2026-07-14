@@ -9,6 +9,7 @@ import '@aws-amplify/ui-react/styles.css';
 import { AppContext, type AppActiveTestRun } from './contexts/app';
 import { AnalyticsProvider } from './contexts/analytics';
 import { AgentChatProvider } from './contexts/agentChat';
+import { GuidedTourProvider } from './contexts/guidedTour';
 import useAwsConfig from './hooks/use-aws-config';
 import useCurrentSessionCreds from './hooks/use-current-session-creds';
 
@@ -23,6 +24,7 @@ const AppContent = (): React.JSX.Element => {
   const { authStatus: authState, user } = useAuthenticator((context) => [context.authStatus, context.user]);
   const { currentSession, currentCredentials } = useCurrentSessionCreds({});
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
+  const [successMessage, setSuccessMessage] = useState<string | undefined>();
   const [navigationOpen, setNavigationOpen] = useState<boolean>(true);
   const [activeTestRuns, setActiveTestRuns] = useState<AppActiveTestRun[]>([]);
 
@@ -38,9 +40,11 @@ const AppContent = (): React.JSX.Element => {
     authState,
     awsConfig,
     errorMessage,
+    successMessage,
     currentCredentials,
     currentSession,
     setErrorMessage,
+    setSuccessMessage,
     user,
     navigationOpen,
     setNavigationOpen,
@@ -56,7 +60,9 @@ const AppContent = (): React.JSX.Element => {
         <AnalyticsProvider>
           <AgentChatProvider>
             <HashRouter>
-              <Routes />
+              <GuidedTourProvider>
+                <Routes />
+              </GuidedTourProvider>
             </HashRouter>
           </AgentChatProvider>
         </AnalyticsProvider>

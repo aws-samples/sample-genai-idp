@@ -403,6 +403,7 @@ def merge_config_with_defaults(
     user_config: Dict[str, Any],
     pattern: str = "pattern-2",
     validate: bool = False,
+    migrate: bool = True,
 ) -> Dict[str, Any]:
     """
     Merge a user's config with system defaults.
@@ -414,6 +415,8 @@ def merge_config_with_defaults(
         user_config: User's configuration dictionary (may be partial)
         pattern: Pattern to use for defaults (pattern-1, pattern-2)
         validate: If True, validate the merged config with Pydantic
+        migrate: If True (default), migrate ``user_config`` to the current config
+            format (e.g. v0.5 -> v0.6) BEFORE merging onto the defaults.
 
     Returns:
         Complete configuration dictionary with defaults applied
@@ -425,7 +428,25 @@ def merge_config_with_defaults(
         }
         result = merge_config_with_defaults(user_config, "pattern-2")
         # Result has all fields populated from defaults, with user's model override
+
+    IMPORTANT -- migrate BEFORE merge:
+        The system defaults are already in the current (v0.6) shape. If a v0.5-shaped
+        ``user_config`` (e.g. a top-level ``assessment`` block, or
+        ``extraction.assessment_integration``) is merged onto the v0.6 defaults FIRST,
+        the merged dict carries BOTH the v0.6 default keys and the legacy keys. A later
+        migration then applies its "explicit v0.6 keys win over migrated legacy values"
+        rule and the v0.6 DEFAULTS silently beat the user's migrated legacy
+        customizations (a pinned assessment model / list_batch_size / geometry_mode
+        reverts to default). Migrating ``user_config`` first keeps the merge a clean
+        v0.6-over-v0.6 deep_update where user values win. The migration is idempotent,
+        so this is a no-op for already-v0.6 input.
     """
+    # Migrate the user config to the current format BEFORE merging (see docstring).
+    if migrate:
+        from idp_common.config.migrations.v05_to_v06 import migrate_v05_to_v06
+
+        user_config = migrate_v05_to_v06(deepcopy(user_config))
+
     # Load system defaults
     defaults = load_system_defaults(pattern)
 
@@ -601,12 +622,6 @@ def validate_config(
     if not config.get("classes"):
         result["warnings"].append(
             "No document classes defined - you must add at least one class"
-        )
-
-    assessment = merged.get("assessment", {})
-    if assessment.get("granular", {}).get("enabled") and not assessment.get("enabled"):
-        result["warnings"].append(
-            "assessment.granular.enabled=true but assessment.enabled=false - granular assessment won't run"
         )
 
     # Enhanced validation checks
@@ -1119,11 +1134,12 @@ def _validate_max_tokens(merged_config: Dict[str, Any], result: Dict[str, Any]) 
     This prevents runtime failures when the Bedrock API rejects requests
     with max_tokens values that exceed model limits.
     """
-    # Services that have both model and max_tokens configurations
+    # Services that still expose a max_tokens knob. extraction + confidence
+    # (assessment) no longer do — their output is always requested at the model
+    # maximum and clamped at request time — so they cannot be over-limit and are
+    # excluded here.
     sections_with_tokens = {
         "classification": {"model_field": "model", "max_tokens_field": "max_tokens"},
-        "extraction": {"model_field": "model", "max_tokens_field": "max_tokens"},
-        "assessment": {"model_field": "model", "max_tokens_field": "max_tokens"},
         "summarization": {"model_field": "model", "max_tokens_field": "max_tokens"},
     }
 
@@ -1136,10 +1152,21 @@ def _validate_max_tokens(merged_config: Dict[str, Any], result: Dict[str, Any]) 
                 continue
 
         model_id = section.get(config["model_field"])
-        max_tokens = section.get(config["max_tokens_field"])
+        max_tokens_raw = section.get(config["max_tokens_field"])
 
-        # Skip if either value is missing
-        if not model_id or not max_tokens:
+        # Skip if the model is missing. max_tokens is an OPTIONAL cap: empty
+        # string / None / a value that coerces to <= 0 all mean "unset" (use the
+        # model's max output), so there is nothing to validate.
+        if not model_id or max_tokens_raw in (None, ""):
+            continue
+
+        # Config stores numbers as strings (DynamoDB); coerce before comparing
+        # against the int model limit. A non-numeric value is treated as unset.
+        try:
+            max_tokens = int(max_tokens_raw)
+        except (TypeError, ValueError):
+            continue
+        if max_tokens <= 0:
             continue
 
         # Get model's max output tokens limit

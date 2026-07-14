@@ -14,11 +14,11 @@ A **headless** deployment of the GenAI IDP Accelerator deploys the full document
 Headless is **not specific to GovCloud**. It is available in **any supported region**, both **Commercial** and **GovCloud**, whenever the web UI is not needed or not permitted:
 
 - **API-only / pipeline integrations** — you drive IDP from `idp-cli`, the `idp-sdk`, another application, or direct S3 uploads and don't need the Web UI.
-- **Policy / compliance constraints** — your environment restricts services the UI depends on (Cognito, CloudFront, AppSync, or WAF WebACL for CloudFront).
+- **Policy / compliance constraints** — your environment restricts services the UI depends on (Cognito, CloudFront, or WAF WebACL for CloudFront).
 - **Cost optimization** — remove UI-adjacent resources when they won't be used.
-- **GovCloud** — headless is **required** in AWS GovCloud regions (`us-gov-*`) because the UI-layer services (CloudFront, AppSync, Cognito, WAF for CloudFront) are not available there. See also [GovCloud Deployment](./govcloud-deployment.md) for GovCloud-specific considerations.
+- **GovCloud, API-only** — headless is one of two GovCloud deployment paths. It is **no longer required** there: `idp-cli deploy --govcloud` keeps the full Web UI (served by API Gateway instead of CloudFront). Choose headless in GovCloud only when you don't want the UI. See [GovCloud Deployment](./govcloud-deployment.md).
 
-> **If you want the Web UI but cannot use CloudFront** (for example, private-network / VPC-only requirements in a Commercial region), use [ALB Hosting](./alb-hosting.md) instead — ALB hosting keeps the full UI while serving it from within a VPC.
+> **If you want the Web UI but cannot use CloudFront** (for example, private-network / VPC-only requirements in a Commercial region), use [API Gateway Hosting](./apigateway-hosting.md) instead — API Gateway hosting keeps the full UI while serving it from the existing REST API, within a VPC when combined with `ApiGatewayVisibility=PRIVATE`.
 
 ## What Gets Removed in Headless Mode
 
@@ -31,14 +31,15 @@ The headless transformation strips the following resource groups from the templa
 - CodeBuild project for UI deployment
 - Security headers policy
 
-### API Layer
+### UI API Layer
 
-- AppSync GraphQL API and schema
-- All GraphQL resolvers and data sources
-- Lambda resolver functions
-- Test Studio resources (Lambda functions, resolvers, data sources, SQS queues)
-- Chat infrastructure (ChatMessagesTable, ChatSessionsTable)
-- Agent chat processors and resolvers
+- The API Gateway REST API nested stack (`APIRESOLVERSTACK`) hosting the UI
+  dispatcher and all UI resolver Lambdas — including Test Studio, evaluation,
+  configuration, and document-query resolvers. (This stack replaced the former
+  AWS AppSync GraphQL API, which has been removed from the solution entirely.)
+- UI-only resolver Lambdas in the main template (capacity planning, version
+  check, fine-tuning)
+- Chat processors and the chat streaming endpoint (Lambda Function URL)
 
 ### Authentication
 
@@ -73,7 +74,10 @@ The headless transformation strips the following resource groups from the templa
 
 ### Discovery (Web-UI-dependent)
 
-- BlueprintOptimization, MultiDocDiscovery, and DiscoveryProcessor resources that depend on AppSync / GraphQL
+- Discovery bucket, queues, tracking table, DiscoveryProcessor,
+  BlueprintOptimization, and the MultiDocDiscovery state machine — all only
+  reachable through the (removed) web UI
+- The Feature Platform nested stack (`EnableFeaturePlatform` is forced off)
 
 ## What Is Retained
 
@@ -81,7 +85,7 @@ All core document-processing functionality is retained:
 
 ### Document Processing
 
-- ✅ All processing patterns (BDA, Textract+Bedrock, Textract+SageMaker+Bedrock)
+- ✅ Both processing modes of the unified workflow: BDA mode (`use_bda: true`) and Pipeline mode (Textract/Bedrock OCR + Bedrock classification/extraction)
 - ✅ Complete pipeline (OCR, Classification, Extraction, Assessment, Summarization, Evaluation)
 - ✅ Step Functions workflows and Lambda processing
 - ✅ Custom prompt Lambda integration
@@ -115,9 +119,9 @@ All core document-processing functionality is retained:
 graph TB
     A[Users] --> B[CloudFront Distribution]
     B --> C[React Web UI]
-    C --> D[AppSync GraphQL API]
+    C --> D[API Gateway REST API<br/>UI resolvers]
     D --> E[Cognito Authentication]
-    E --> F[Core Processing Engine]
+    D --> F[Core Processing Engine]
     F --> G[Document Workflows]
     G --> H[S3 Storage]
 ```
@@ -285,10 +289,10 @@ Use the CLI `status` command, the SDK `document.get_status()` / `batch.get_statu
 
 ## Features Not Available in Headless Mode
 
-The following features depend on the UI/AppSync/Cognito stack and are therefore **not available** in a headless deployment:
+The following features depend on the UI / UI REST API / Cognito stack and are therefore **not available** in a headless deployment:
 
 - Web-based user interface (document upload, viewer, dashboards)
-- Real-time document status updates via WebSockets
+- Live document status updates in the UI
 - Interactive configuration management via the UI
 - Cognito-backed user authentication and RBAC
 - CloudFront content delivery
@@ -310,15 +314,16 @@ The following features depend on the UI/AppSync/Cognito stack and are therefore 
 | Evaluation / metrics | Athena queries on the reporting database, `idp-cli test-result` / `test-compare`, reporting S3 outputs |
 | Authentication / RBAC | Implement at the application / network layer (IAM, API Gateway authorizers, VPC, SSO) |
 
-## When to Choose Headless vs. Standard vs. ALB Hosting
+## When to Choose Headless vs. Standard vs. API Gateway Hosting
 
 | Requirement | Recommended mode |
 |---|---|
 | You want the full Web UI, deployed with defaults | **Standard** (CloudFront + CloudFormation) |
-| You want the full Web UI but cannot use CloudFront (private network / VPC-only) | **[ALB Hosting](./alb-hosting.md)** |
+| You want the full Web UI but cannot use CloudFront (private network / VPC-only) | **[API Gateway Hosting](./apigateway-hosting.md)** |
 | You only need the backend (API / pipeline), no UI | **Headless** (this guide) |
-| Deploying to AWS **GovCloud** | **Headless** (required) + see [GovCloud Deployment](./govcloud-deployment.md) |
-| Organization prohibits CloudFront / Cognito / AppSync / WAF | **Headless** |
+| Deploying to AWS **GovCloud** with the Web UI | **`--govcloud`** — see [GovCloud Deployment](./govcloud-deployment.md) |
+| Deploying to AWS **GovCloud**, API-only | **Headless** + see [GovCloud Deployment](./govcloud-deployment.md) |
+| Organization prohibits CloudFront / Cognito / WAF | **Headless** |
 
 ## Best Practices
 
@@ -347,6 +352,6 @@ The following features depend on the UI/AppSync/Cognito stack and are therefore 
 - [IDP CLI](./idp-cli.md) — `deploy --headless`, `publish --headless`
 - [IDP SDK](./idp-sdk.md) — `publish.build()`, `publish.transform_template_headless()`
 - [GovCloud Deployment](./govcloud-deployment.md) — GovCloud-specific requirements and defaults
-- [ALB Hosting](./alb-hosting.md) — Deploying the Web UI inside a VPC (alternative to headless when you still want the UI)
+- [API Gateway Hosting](./apigateway-hosting.md) — Deploying the Web UI inside a VPC (alternative to headless when you still want the UI)
 - [Deployment in Private Network](./deployment-private-network.md) — Private-network deployment guidance
 - [Deployment Guide](./deployment.md) — General build / publish / deploy reference

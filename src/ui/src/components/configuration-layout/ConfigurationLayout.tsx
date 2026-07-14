@@ -8,6 +8,7 @@ import {
   SpaceBetween,
   Box,
   Button,
+  ButtonDropdown,
   Alert,
   Spinner,
   Form,
@@ -25,13 +26,14 @@ import Editor, { type OnMount } from '@monaco-editor/react';
 import yaml from 'js-yaml';
 import ReactMarkdown from 'react-markdown';
 import { useLocation } from 'react-router-dom';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import useConfiguration from '../../hooks/use-configuration';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import useConfigurationLibrary from '../../hooks/use-configuration-library';
 import useUserRole from '../../hooks/use-user-role';
 import useSettingsContext from '../../contexts/settings';
+import useAppContext from '../../contexts/app';
 import ConfigBuilder from './ConfigBuilder';
 import ConfigurationVersionsTable from './ConfigurationVersionsTable';
 import ConfigurationComparison from './ConfigurationComparison';
@@ -41,6 +43,17 @@ import { parseConfigurationData } from '../../graphql/awsjson-parsers';
 
 const client = generateClient();
 const logger = new ConsoleLogger('ConfigurationLayout');
+
+// Shown as the disabled-reason tooltip on actions that cannot run against the
+// stack-managed `default` version (the user must first create an editable copy).
+const STACK_MANAGED_DISABLED_REASON = 'This is the stack-managed default version — use Save as Version to create an editable copy.';
+
+// One-line explanations shown on hover for the version Type/state badges.
+const BADGE_TOOLTIPS = {
+  managed: 'Stack-managed: shipped with the solution and overwritten on stack updates; not directly editable.',
+  custom: 'Custom: a user-created version you can freely edit, save, and delete.',
+  active: 'Active: the version used to process newly uploaded documents.',
+};
 
 // Utility function to normalize boolean values from strings (same as use-configuration.js)
 interface SchemaProperty {
@@ -153,7 +166,9 @@ const ConfigurationLayout = (): React.JSX.Element => {
   const [selectedVersionsForCompare, setSelectedVersionsForCompare] = useState<string[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<string | null>(getInitialVersionFromUrl);
   const location = useLocation();
-  const [versionsTableExpanded, setVersionsTableExpanded] = useState(false);
+  // Expanded by default so the version list — central to the config mental model —
+  // is visible on arrival (users pick / create / compare versions from here).
+  const [versionsTableExpanded, setVersionsTableExpanded] = useState(true);
 
   // Import as new version state
   const [importedConfigForNewVersion, setImportedConfigForNewVersion] = useState<Record<string, unknown> | null>(null);
@@ -182,6 +197,10 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
   // Get user role for scope and permissions
   const { isAdmin, canWrite } = useUserRole();
+
+  // App-wide success toast (sticky Flashbar region) so save confirmation is
+  // visible even when the user is scrolled deep into a long config form (C1).
+  const { setSuccessMessage } = useAppContext();
 
   // Get active version name — prefer first scoped version over system active
   const activeVersionName = useMemo(() => {
@@ -594,13 +613,15 @@ const ConfigurationLayout = (): React.JSX.Element => {
         e.returnValue = '';
       }
     };
-    const handleHashChange = (): void => {
+    const handleHashChange = (e: HashChangeEvent): void => {
       // For SPA hash-based routing, intercept navigation when there are unsaved changes
       if (hasUnsavedChanges) {
         const confirmed = window.confirm('You have unsaved configuration changes. Are you sure you want to leave?');
         if (!confirmed) {
-          // Restore the hash to the config page
-          window.history.pushState(null, '', `${window.location.pathname}#/documents/config`);
+          // Restore the exact URL the user was on (e.oldURL preserves ?version= / ?tab=
+          // deep-link params) rather than bouncing them to the base config route.
+          // pushState does not re-fire hashchange, so this won't loop.
+          window.history.pushState(null, '', e.oldURL);
         }
       }
     };
@@ -655,6 +676,14 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
   // Rule Schema/Validation is available in all modes (Unified, Pattern2, etc.) - only excluded for Pattern1-only
   const showRuleSchema = !isPattern1;
+
+  // BDA sync actions are only relevant when this is a BDA/Pattern-1 configuration.
+  const isBdaConfigActive = Boolean(isPattern1 || mergedConfig?.use_bda || formValues?.use_bda);
+
+  // Explains, on hover, why the primary Save changes button is disabled for
+  // stack-managed / default versions (mirrors the button's disabled condition).
+  const saveChangesDisabledReason =
+    currentVersionName === 'default' || currentVersion?.managed === true ? STACK_MANAGED_DISABLED_REASON : undefined;
 
   // Initialize form values from merged config
   useEffect(() => {
@@ -1347,8 +1376,12 @@ const ConfigurationLayout = (): React.JSX.Element => {
         console.log('DEBUG: About to compare formValues with mergedConfig:', {
           formValues,
           mergedConfig,
-          granularInFormValues: (formValues?.assessment as Record<string, unknown> | undefined)?.granular,
-          granularInMergedConfig: (mergedConfig?.assessment as Record<string, unknown> | undefined)?.granular,
+          granularInFormValues: (
+            (formValues?.extraction as Record<string, unknown> | undefined)?.confidence as Record<string, unknown> | undefined
+          )?.granular,
+          granularInMergedConfig: (
+            (mergedConfig?.extraction as Record<string, unknown> | undefined)?.confidence as Record<string, unknown> | undefined
+          )?.granular,
         });
         const differences = compareWithDefault(formValues, mergedConfig ?? {});
         console.log('DEBUG: Differences found by compareWithDefault:', differences);
@@ -1485,6 +1518,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
       if (success) {
         setSaveSuccess(true);
+        setSuccessMessage(saveAsDefault ? 'Configuration saved as new default.' : 'Configuration saved successfully.');
         if (saveAsDefault) {
           setShowSaveAsDefaultModal(false);
         }
@@ -1523,6 +1557,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
       if (result.success) {
         setSaveSuccess(true);
+        setSuccessMessage(`Saved as new version "${saveAsVersionName}".`);
         setShowSaveAsVersionModal(false);
         setSaveAsVersionName('');
         setSaveAsVersionDescription('');
@@ -1592,6 +1627,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
       if (success) {
         setSaveSuccess(true);
+        setSuccessMessage('Configuration reset to default.');
         setShowResetModal(false);
         // Refresh to show the restored default configuration
         await fetchConfiguration(currentVersionName);
@@ -2288,83 +2324,112 @@ const ConfigurationLayout = (): React.JSX.Element => {
                     Format YAML
                   </Button>
                 )}
-                <Button variant="normal" onClick={() => setShowExportModal(true)}>
-                  Export
-                </Button>
                 <input id="import-file" type="file" accept=".json,.yaml,.yml" style={{ display: 'none' }} onChange={handleImport} />
                 <Button variant="normal" onClick={() => fetchConfiguration(currentVersionName)} loading={refreshing} iconName="refresh">
                   Refresh
                 </Button>
-                {Boolean(isPattern1 || mergedConfig?.use_bda || formValues?.use_bda) && (
-                  <>
-                    <span title={hasUnsavedChanges ? 'Save your changes first' : undefined}>
-                      <Button
-                        variant="normal"
-                        onClick={() => {
-                          setSyncFromBdaArnInput('');
-                          setSyncFromBdaMode('replace');
-                          setShowSyncFromBdaModal(true);
-                        }}
-                        loading={syncingDirection === 'bda_to_idp'}
-                        disabled={hasUnsavedChanges}
-                      >
-                        Sync from BDA
-                      </Button>
-                    </span>
-                    <span title={hasUnsavedChanges ? 'Save your changes first' : undefined}>
-                      <Button
-                        variant="normal"
-                        onClick={() => {
-                          setBdaSyncMode(currentVersion?.bdaProjectArn ? 'linked' : 'create');
-                          setShowSyncToBdaConfirmModal(true);
-                        }}
-                        loading={syncingDirection === 'idp_to_bda'}
-                        disabled={hasUnsavedChanges}
-                      >
-                        Sync to BDA
-                      </Button>
-                    </span>
-                  </>
-                )}
-                {canWrite && (
-                  <Button variant="normal" onClick={() => setShowResetModal(true)} disabled={currentVersionName === 'default'}>
-                    Restore default (All)
-                  </Button>
-                )}
-                {/* Save as default - Admin only */}
-                {isAdmin && (
-                  <Button variant="normal" onClick={() => setShowSaveAsDefaultModal(true)} disabled={currentVersionName === 'default'}>
-                    Save as default
-                  </Button>
-                )}
-                {isAdmin && (
-                  <Button
-                    variant="normal"
-                    onClick={() => {
-                      setSaveAsVersionName(`${currentVersionName}-copy`);
-                      setSaveAsVersionDescription(currentVersion?.description ? `${currentVersion.description} - copy` : '');
-                      setShowSaveAsVersionModal(true);
-                    }}
-                    disabled={validationErrors.length > 0}
-                  >
-                    Save as Version
-                  </Button>
-                )}
-                {/* Save changes - hidden for read-only users, disabled on default or managed versions */}
-                {canWrite && (
-                  <Button
-                    variant="primary"
-                    onClick={() => handleSave(false)}
-                    loading={isSaving}
-                    disabled={
-                      !hasUnsavedChanges ||
-                      validationErrors.length > 0 ||
-                      currentVersionName === 'default' ||
-                      currentVersion?.managed === true
+                {/* Secondary / less-frequent actions grouped into a single menu to keep the
+                    action bar scannable. Disabled items carry a disabledReason tooltip. */}
+                <ButtonDropdown
+                  items={[
+                    { id: 'export', text: 'Export…' },
+                    ...(isBdaConfigActive
+                      ? [
+                          {
+                            id: 'sync-from-bda',
+                            text: 'Sync from BDA…',
+                            disabled: hasUnsavedChanges,
+                            disabledReason: 'Save your changes first',
+                          },
+                          {
+                            id: 'sync-to-bda',
+                            text: 'Sync to BDA…',
+                            disabled: hasUnsavedChanges,
+                            disabledReason: 'Save your changes first',
+                          },
+                        ]
+                      : []),
+                    ...(isAdmin
+                      ? [
+                          {
+                            id: 'save-as-version',
+                            text: 'Save as Version…',
+                            disabled: validationErrors.length > 0,
+                            disabledReason: 'Resolve validation errors first',
+                          },
+                        ]
+                      : []),
+                    ...(canWrite
+                      ? [
+                          {
+                            id: 'restore-default-all',
+                            text: 'Restore default (All)',
+                            disabled: currentVersionName === 'default',
+                            disabledReason: STACK_MANAGED_DISABLED_REASON,
+                          },
+                        ]
+                      : []),
+                    ...(isAdmin
+                      ? [
+                          {
+                            id: 'save-as-default',
+                            text: 'Save as default…',
+                            disabled: currentVersionName === 'default',
+                            disabledReason: STACK_MANAGED_DISABLED_REASON,
+                          },
+                        ]
+                      : []),
+                  ]}
+                  onItemClick={({ detail }) => {
+                    switch (detail.id) {
+                      case 'export':
+                        setShowExportModal(true);
+                        break;
+                      case 'sync-from-bda':
+                        setSyncFromBdaArnInput('');
+                        setSyncFromBdaMode('replace');
+                        setShowSyncFromBdaModal(true);
+                        break;
+                      case 'sync-to-bda':
+                        setBdaSyncMode(currentVersion?.bdaProjectArn ? 'linked' : 'create');
+                        setShowSyncToBdaConfirmModal(true);
+                        break;
+                      case 'save-as-version':
+                        setSaveAsVersionName(`${currentVersionName}-copy`);
+                        setSaveAsVersionDescription(currentVersion?.description ? `${currentVersion.description} - copy` : '');
+                        setShowSaveAsVersionModal(true);
+                        break;
+                      case 'restore-default-all':
+                        setShowResetModal(true);
+                        break;
+                      case 'save-as-default':
+                        setShowSaveAsDefaultModal(true);
+                        break;
+                      default:
+                        break;
                     }
-                  >
-                    Save changes
-                  </Button>
+                  }}
+                >
+                  Actions
+                </ButtonDropdown>
+                {/* Save changes - hidden for read-only users, disabled on default or managed versions.
+                    A title tooltip explains why it's disabled on stack-managed versions. */}
+                {canWrite && (
+                  <span title={saveChangesDisabledReason}>
+                    <Button
+                      variant="primary"
+                      onClick={() => handleSave(false)}
+                      loading={isSaving}
+                      disabled={
+                        !hasUnsavedChanges ||
+                        validationErrors.length > 0 ||
+                        currentVersionName === 'default' ||
+                        currentVersion?.managed === true
+                      }
+                    >
+                      Save changes
+                    </Button>
+                  </span>
                 )}
               </SpaceBetween>
             }
@@ -2375,11 +2440,19 @@ const ConfigurationLayout = (): React.JSX.Element => {
                 {currentVersion?.description ? ` - ${currentVersion.description}` : ''}
               </span>
               {currentVersion?.managed || currentVersionName === 'default' ? (
-                <Badge color="blue">Managed</Badge>
+                <span title={BADGE_TOOLTIPS.managed}>
+                  <Badge color="blue">Managed</Badge>
+                </span>
               ) : (
-                <Badge color="grey">Custom</Badge>
+                <span title={BADGE_TOOLTIPS.custom}>
+                  <Badge color="grey">Custom</Badge>
+                </span>
               )}
-              {currentVersion?.isActive && <Badge color="green">Active</Badge>}
+              {currentVersion?.isActive && (
+                <span title={BADGE_TOOLTIPS.active}>
+                  <Badge color="green">Active</Badge>
+                </span>
+              )}
             </SpaceBetween>
           </Header>
         }
@@ -2541,7 +2614,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
             </>
           )}
 
-          {hasUnsavedChanges && currentVersionName !== 'default' && (
+          {hasUnsavedChanges && (
             <Alert
               type="info"
               action={
@@ -2550,7 +2623,16 @@ const ConfigurationLayout = (): React.JSX.Element => {
                 </Button>
               }
             >
-              You have unsaved changes. Click <strong>Save changes</strong> to persist, or <strong>Discard changes</strong> to revert.
+              {currentVersionName === 'default' || currentVersion?.managed === true ? (
+                <>
+                  You have unsaved changes to this stack-managed version, which can&rsquo;t be saved directly. Use{' '}
+                  <strong>Save as Version</strong> to keep them as an editable copy, or <strong>Discard changes</strong> to revert.
+                </>
+              ) : (
+                <>
+                  You have unsaved changes. Click <strong>Save changes</strong> to persist, or <strong>Discard changes</strong> to revert.
+                </>
+              )}
             </Alert>
           )}
 

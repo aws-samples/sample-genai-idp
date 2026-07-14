@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState, useEffect, useRef } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { ButtonDropdown, Button } from '@cloudscape-design/components';
 
@@ -28,12 +28,14 @@ interface AgentChatHistoryDropdownProps {
   onSessionSelect: (session: ChatSession, messages: ChatMessage[]) => void;
   disabled?: boolean;
   onSessionDeleted?: (sessionId: string) => void;
+  surface?: string;
 }
 
 const AgentChatHistoryDropdown = ({
   onSessionSelect,
   disabled = false,
   onSessionDeleted = () => {},
+  surface,
 }: AgentChatHistoryDropdownProps): React.JSX.Element => {
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -61,7 +63,7 @@ const AgentChatHistoryDropdown = ({
       try {
         response = await client.graphql({
           query: listChatSessions,
-          variables: { limit: 20 }, // Limit to most recent 20 sessions
+          variables: { limit: 20, surface }, // Limit to most recent 20 sessions, scoped to this surface
         });
       } catch (amplifyError: unknown) {
         // Amplify throws an exception when there are GraphQL errors, but the response might still contain valid data
@@ -158,10 +160,10 @@ const AgentChatHistoryDropdown = ({
     }
   };
 
-  // Fetch chat sessions when component mounts
+  // Fetch chat sessions when component mounts or the surface scope changes
   useEffect(() => {
     fetchChatSessions(true);
-  }, []);
+  }, [surface]);
 
   const handleDropdownItemClick = async ({ detail }: { detail: { id: string } }) => {
     console.log('Previous chat session clicked, detail:', detail);

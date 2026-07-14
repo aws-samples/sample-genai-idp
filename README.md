@@ -62,6 +62,7 @@ Concierge support for customization, deployment, and integration of production u
 - **Comprehensive Monitoring**: Rich CloudWatch dashboard with detailed metrics and logs
 - **Web User Interface**: Modern UI for inspecting document workflow status and results
 - **Configuration Versioning**: Support for multiple configuration versions with version-specific processing and test comparison
+- **Document Versioning**: Every processing run of a document is retained as an immutable version — view, compare, download, and manage prior outputs (see [document-versions.md](./docs/document-versions.md))
 - **Human-in-the-Loop (HITL)**: Built-in review system for human validation workflows
 - **AI-Powered Evaluation**: Framework to assess accuracy against baseline data
 - **Extraction Confidence Assessment**: LLM-powered assessment of extraction confidence with multimodal document analysis
@@ -177,9 +178,11 @@ For detailed deployment and testing instructions, see the [Deployment Guide](./d
 - [Architecture](./docs/architecture.md) - Detailed component architecture and data flow
 - [Demo Videos](./docs/demo-videos.md) - Comprehensive collection of feature demonstration videos
 - [Deployment](./docs/deployment.md) - Build, publish, deploy, and test instructions
-- [Headless Deployment](./docs/headless-deployment.md) - Backend-only deployment (no UI/AppSync/Cognito/WAF) for API-only use cases; required for GovCloud
+- [Headless Deployment](./docs/headless-deployment.md) - Backend-only deployment (no UI/AppSync/Cognito/WAF) for API-only use cases
+- [GovCloud Deployment](./docs/govcloud-deployment.md) - Deploy to GovCloud with the full Web UI (`--govcloud`) or headless (`--headless`)
 - [IDP CLI](./docs/idp-cli.md) - Command line interface for batch processing, evaluation workflows, and interactive Agent Chat
 - [Web UI](./docs/web-ui.md) - Web interface features and usage
+- [Document Versions](./docs/document-versions.md) - Retain, view, compare, and manage every processing run of a document
 - [Agent Analysis](./docs/agent-analysis.md) - Natural language analytics and data visualization feature
 - [Custom MCP Agent](./docs/custom-MCP-agent.md) - Integrating external MCP servers for custom tools and capabilities
 - [Configuration](./docs/configuration.md) - Configuration and customization options

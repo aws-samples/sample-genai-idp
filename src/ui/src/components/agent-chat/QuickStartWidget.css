@@ -1,0 +1,130 @@
+.quick-start-widget {
+  z-index: 1000;
+}
+
+.quick-start-widget-launcher-wrap {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 1000;
+}
+
+.quick-start-widget-launcher {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  background: var(--color-background-button-primary-default, #0972d3);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 7, 22, 0.3);
+  touch-action: none;
+}
+
+.quick-start-widget-launcher:hover {
+  background: var(--color-background-button-primary-hover, #033160);
+}
+
+.quick-start-widget-panel {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 1000;
+  width: 550px;
+  max-width: calc(100vw - 16px);
+  height: 680px;
+  max-height: calc(100vh - 16px);
+  background: var(--color-background-container-content, #ffffff);
+  border: 1px solid var(--color-border-divider-default, #e9ebed);
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(0, 7, 22, 0.25);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.quick-start-widget-resize {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  z-index: 1001;
+  touch-action: none;
+}
+
+.quick-start-widget-resize-br {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+}
+
+.quick-start-widget-resize-bl {
+  left: 0;
+  bottom: 0;
+  cursor: nesw-resize;
+}
+
+.quick-start-widget-resize-tr {
+  right: 0;
+  top: 0;
+  cursor: nesw-resize;
+}
+
+.quick-start-widget-resize-tl {
+  left: 0;
+  top: 0;
+  cursor: nwse-resize;
+}
+
+.quick-start-widget-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--color-border-divider-default, #e9ebed);
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+
+.quick-start-widget-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: default;
+}
+
+.quick-start-widget-title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.quick-start-widget-chat {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The shared AgentChatLayout pins .chat-container to 80vh, which overflows the
+   popover. Inside the widget, make it fill the available panel height instead. */
+.quick-start-widget-chat .chat-container {
+  height: 100%;
+}
+
+/* The full-page welcome screen vertically centers a large heading; in the short
+   popover that clips the top. Top-align and shrink it so it fits and scrolls. */
+.quick-start-widget-chat .welcome-text {
+  height: auto;
+  justify-content: flex-start;
+  padding-top: 4px;
+}
+
+.quick-start-widget-chat .welcome-text h2 {
+  font-size: 1.3rem;
+  margin: 0 0 4px;
+}

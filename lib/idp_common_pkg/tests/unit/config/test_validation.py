@@ -491,9 +491,13 @@ class TestValidateMaxTokens:
         assert len(result["errors"]) == 0
 
     def test_exceeds_nova_limit(self):
-        """Test that max_tokens exceeding Nova limit fails."""
+        """Test that max_tokens exceeding Nova limit fails.
+
+        (Uses classification — extraction/confidence no longer carry a max_tokens
+        knob; their output is always requested at the model maximum.)
+        """
         config = {
-            "extraction": {
+            "classification": {
                 "model": "us.amazon.nova-lite-v1:0",
                 "max_tokens": 16000,  # Exceeds limit (10,000)
             }
@@ -504,7 +508,7 @@ class TestValidateMaxTokens:
 
         assert result["valid"] is False
         assert len(result["errors"]) == 1
-        assert "extraction.max_tokens" in result["errors"][0]
+        assert "classification.max_tokens" in result["errors"][0]
         assert "16000" in result["errors"][0]
         assert "10,000" in result["errors"][0]
 
@@ -542,9 +546,12 @@ class TestValidateMaxTokens:
         assert len(result["errors"]) == 0
 
     def test_claude4_exceeds_limit(self):
-        """Test that exceeding Claude 4 limit fails."""
+        """Test that exceeding Claude 4 limit fails.
+
+        (Uses classification — extraction no longer carries a max_tokens knob.)
+        """
         config = {
-            "extraction": {
+            "classification": {
                 "model": "us.anthropic.claude-sonnet-4-20250514-v1:0",
                 "max_tokens": 70000,  # Exceeds limit (64,000)
             }
@@ -555,12 +562,17 @@ class TestValidateMaxTokens:
 
         assert result["valid"] is False
         assert len(result["errors"]) == 1
-        assert "extraction.max_tokens" in result["errors"][0]
+        assert "classification.max_tokens" in result["errors"][0]
         assert "70000" in result["errors"][0]
         assert "64,000" in result["errors"][0]
 
     def test_validates_all_sections(self):
-        """Test validates max_tokens in all sections."""
+        """Test validates max_tokens in all sections that still expose the knob.
+
+        extraction + assessment (confidence) no longer carry a max_tokens knob —
+        their output is always requested at the model maximum — so only
+        classification and summarization are validated here.
+        """
         config = {
             "classification": {
                 "model": "us.amazon.nova-lite-v1:0",
@@ -568,12 +580,12 @@ class TestValidateMaxTokens:
             },
             "extraction": {
                 "model": "us.amazon.nova-lite-v1:0",
-                "max_tokens": 12000,  # Exceeds 10,000
+                "max_tokens": 12000,  # Ignored — extraction has no max_tokens knob
             },
             "assessment": {
                 "enabled": True,
                 "model": "us.amazon.nova-lite-v1:0",
-                "max_tokens": 13000,  # Exceeds 10,000
+                "max_tokens": 13000,  # Ignored — confidence has no max_tokens knob
             },
             "summarization": {
                 "enabled": True,
@@ -586,7 +598,8 @@ class TestValidateMaxTokens:
         _validate_max_tokens(config, result)
 
         assert result["valid"] is False
-        assert len(result["errors"]) == 4
+        # Only classification + summarization are checked now.
+        assert len(result["errors"]) == 2
 
     def test_skips_disabled_sections(self):
         """Test skips validation for disabled sections."""
@@ -629,10 +642,63 @@ class TestValidateMaxTokens:
         assert result["valid"] is True
         assert len(result["errors"]) == 0
 
-    def test_nova2_models_have_10k_limit(self):
-        """Test that Nova 2 models have 10,000 token limit."""
+    def test_string_valued_max_tokens_within_limit(self):
+        """Config stores numbers as strings (DynamoDB); a stringified numeric
+        max_tokens within the model limit must validate cleanly (regression:
+        previously raised 'str > int' and silently skipped the guard)."""
         config = {
-            "extraction": {
+            "classification": {
+                "model": "us.amazon.nova-lite-v1:0",
+                "max_tokens": "5000",  # string, within 10,000
+            }
+        }
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_max_tokens(config, result)
+        assert result["valid"] is True
+        assert len(result["errors"]) == 0
+
+    def test_string_valued_max_tokens_over_limit_is_caught(self):
+        """A stringified numeric max_tokens over the limit must be flagged
+        (regression: the str>int TypeError used to be swallowed as a warning,
+        letting an over-limit cap slip through)."""
+        config = {
+            "classification": {
+                "model": "us.amazon.nova-lite-v1:0",
+                "max_tokens": "99999",  # string, exceeds 10,000
+            }
+        }
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_max_tokens(config, result)
+        assert result["valid"] is False
+        assert len(result["errors"]) == 1
+        assert "exceeds model limit" in result["errors"][0]
+
+    def test_empty_string_max_tokens_is_skipped(self):
+        """An empty-string max_tokens means 'unset' (use the model max), so it
+        must be skipped, not treated as 0 or errored."""
+        config = {
+            "classification": {
+                "model": "us.amazon.nova-lite-v1:0",
+                "max_tokens": "",  # unset => model max
+            },
+            "summarization": {
+                "enabled": True,
+                "model": "us.amazon.nova-lite-v1:0",
+                "max_tokens": None,  # unset => model max
+            },
+        }
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_max_tokens(config, result)
+        assert result["valid"] is True
+        assert len(result["errors"]) == 0
+
+    def test_nova2_models_have_10k_limit(self):
+        """Test that Nova 2 models have 10,000 token limit.
+
+        (Uses classification — extraction no longer carries a max_tokens knob.)
+        """
+        config = {
+            "classification": {
                 "model": "us.amazon.nova-2-lite-v1:0",
                 "max_tokens": 11000,  # Exceeds limit (10,000)
             }

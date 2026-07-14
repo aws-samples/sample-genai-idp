@@ -214,6 +214,31 @@ Example:
 </details>
 ```
 
+#### Reporting an Issue from the Modal
+
+When the analysis job reaches a terminal state (`COMPLETED` or `FAILED`), the
+Troubleshoot modal footer offers two additional actions:
+
+- **Report this issue on GitHub** — opens a pre-filled GitHub bug-report form in a
+  new tab, populated with the deployment environment (Region, Processing Mode,
+  Version/Build/Stack), the document context (object key, status, config version,
+  execution ARN, and any job error), and the agent's Markdown findings.
+- **Copy full details** — copies the complete environment + findings text to your
+  clipboard, for pasting content that the pre-filled URL can't carry (the issue link
+  length-caps the findings; the full transcript is not embedded in the URL).
+
+> **Privacy note:** GitHub issues on the public repository are visible to everyone,
+> and the findings can quote OCR'd document content. Nothing is submitted
+> automatically — review the pre-filled form and **redact any sensitive data**
+> before submitting. See [Feedback & Issue Reporting](web-ui.md#feedback--issue-reporting).
+
+The modal stays open until you press **Close** (an outside click or Esc no longer
+dismisses it, so a running analysis — which can take ~30 seconds — is not
+interrupted). Use **Minimize** to collapse it to a restore chip while the analysis
+finishes in the background. When the Error Analyzer is run from the
+[Agent Companion Chat](agent-companion-chat.md) instead, a **Create GitHub issue**
+button appears under the answer with the same bug/feature options.
+
 ### Query Patterns
 
 #### Document-Specific Queries
@@ -425,7 +450,7 @@ For configuration issues, the agent directs users to the UI:
 Recommendations:
 • Navigate to Configuration panel in the Web UI
 • Update 'extraction.model' to use a higher-capacity model
-• Adjust 'assessment.granular.max_workers' from 4 to 2 to reduce memory pressure
+• Lower 'extraction.confidence.list_batch_size' from 25 to 10 to reduce per-inference load
 ```
 
 #### Operational Recommendations
@@ -1200,10 +1225,11 @@ The Error Analyzer supports:
 ### Can I export analysis results?
 
 **Export Options**:
-1. **Copy from UI**: Select and copy formatted text
-2. **API Access**: Use `getAgentJobStatus` query
-3. **CloudWatch Logs**: Agent logs contain full results
-4. **Future Enhancement**: Export to PDF/JSON (roadmap)
+1. **Copy full details**: The Troubleshoot modal footer has a **Copy full details** button that copies the environment + findings as formatted text
+2. **Report this issue on GitHub**: Opens a pre-filled bug-report form with the findings and document context (see [Reporting an Issue from the Modal](#reporting-an-issue-from-the-modal))
+3. **Copy from UI**: Select and copy formatted text
+4. **API Access**: Use `getAgentJobStatus` query
+5. **CloudWatch Logs**: Agent logs contain full results
 
 ### How long are analysis results retained?
 

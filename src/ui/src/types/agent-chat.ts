@@ -39,6 +39,8 @@ export interface ChatMessage {
   awaitingStructuredData?: boolean;
 }
 
+export type ChatMode = 'chat' | 'quick_start';
+
 export interface AgentChatState {
   messages: ChatMessage[];
   sessionId: string;
@@ -49,6 +51,7 @@ export interface AgentChatState {
   lastMessageCount: number;
   enableCodeIntelligence: boolean;
   inputValue: string;
+  mode: ChatMode;
 }
 
 export interface AgentChatContextValue {

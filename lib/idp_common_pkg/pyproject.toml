@@ -21,7 +21,7 @@ exclude = [
 
 [project]
 name = "idp_common"
-version = "0.5.16"
+version = "0.6.0"
 description = "Common utilities for GenAI IDP Accelerator patterns"
 authors = [{ name = "AWS", email = "noreply@amazon.com" }]
 requires-python = ">=3.12,<3.14"
@@ -86,7 +86,7 @@ assessment = [
 
 # Evaluation module dependencies
 evaluation = [
-  "stickler-eval==0.4.0",
+  "stickler-eval==0.5.0",
   "genson==1.3.0",  # For automatic JSON Schema generation from data
   "munkres>=1.1.4", # For Hungarian algorithm (legacy, may be removed)
   "numpy==1.26.4",  # For numeric operations
@@ -112,6 +112,7 @@ agents = [
   "strands-agents==1.14.0; python_version>='3.10'",
   "strands-agents-tools==0.2.22; python_version>='3.10'",
   "bedrock-agentcore>=0.1.1; python_version>='3.10'",    # Specifically for the code interpreter tool
+  "jsonschema>=4.0.0",
 ]
 
 # Multi-document discovery dependencies (clustering + agent analysis)
@@ -123,6 +124,11 @@ multi_document_discovery = [
   "pypdfium2>=5.5.0",          # PDF page rendering
   "jinja2>=3.1.0",             # Prompt template rendering
   "strands-agents==1.14.0; python_version>='3.10'",  # Agentic schema generation
+]
+
+# Synthesis / cold-start bootstrap dependencies
+synthesis = [
+  "jsonschema>=4.0.0",
 ]
 
 # Code intelligence module dependencies
@@ -166,7 +172,7 @@ test = [
   "datamodel-code-generator>=0.25.0",   # Required for schema/pydantic generator tests
   "mypy-boto3-bedrock-runtime>=1.39.0", # Required for bedrock_utils tests
   # Evaluation module dependencies (from evaluation group)
-  "stickler-eval==0.4.0",
+  "stickler-eval==0.5.0",
   "genson==1.3.0",
   "munkres>=1.1.4",
   "numpy==1.26.4",
@@ -175,7 +181,7 @@ test = [
 
 # Full package with all dependencies
 all = [
-  "stickler-eval==0.4.0",
+  "stickler-eval==0.5.0",
   "genson==1.3.0",
   "Pillow==12.1.1",
   "pypdfium2>=5.5.0",
@@ -190,6 +196,7 @@ all = [
   "strands-agents==1.14.0; python_version>='3.10'",
   "strands-agents-tools==0.2.22; python_version>='3.10'",
   "bedrock-agentcore>=0.1.1; python_version>='3.10'",
+  "jsonschema>=4.0.0",
   # "s3fs==2023.12.2" - - disabled till we fix package dependencies
 ]
 agentic-extraction = [

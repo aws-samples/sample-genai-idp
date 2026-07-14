@@ -35,6 +35,29 @@ High-level service for document operations:
 - `list_documents_date_shard()` - List by date/shard
 - `calculate_ttl()` - Generate TTL timestamps
 
+#### Document run (version) records
+
+Each successful processing run of a document is recorded as an immutable "run"
+item so prior results can be retained and compared (see the user-facing
+[Document Versions](../../../../docs/document-versions.md) guide and the
+companion `idp_common.document_versions` module, which pins each run's output
+S3 object versions into a manifest):
+
+- `create_document_run(document, run_id, manifest_uri, file_count, expires_after)`
+  - Writes `PK = doc#<key>`, `SK = run#<run_id>` and increments a
+    `VersionCount` counter on the doc item.
+- `list_document_runs(object_key)` - All runs for a document, newest first.
+- `get_document_run(object_key, run_id)` - A single run record.
+- `delete_document_run(object_key, run_id)` - Remove a run record and decrement
+  `VersionCount` (S3 artifact cleanup is the caller's responsibility via
+  `document_versions.delete_run_artifacts`).
+
+> **GSI safety.** Run items deliberately omit the `ItemType` and
+> `InitialEventTime` attributes so they never enter the `TypeDateIndex` GSI
+> (which keys on both), and `VersionCount` is **not** in that GSI's INCLUDE
+> projection. Document versioning therefore required **no GSI schema change** —
+> GSIs cannot be modified without replacing/rehydrating the index.
+
 ### JobDynamoDBService
 
 Service for managing batch job records (used by the `/jobs` REST API):

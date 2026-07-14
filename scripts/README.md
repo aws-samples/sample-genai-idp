@@ -40,6 +40,7 @@ See [sdlc/cfn/README.md](sdlc/cfn/README.md) for CloudFormation templates.
 | Script | Purpose | Usage |
 |--------|---------|-------|
 | `discover_model_limits.py` | Empirically test Bedrock model max_tokens limits | `python scripts/discover_model_limits.py` |
+| `test_api_rbac.py` | Live RBAC/auth/arg-mapping test of the REST API across all Cognito roles | `python scripts/test_api_rbac.py --stack-name <stack> --region <region>` |
 | `generate_govcloud_template.py` | Generate GovCloud-compatible template (**deprecated** — use `idp-cli publish --headless`) | `idp-cli publish --source-dir . --region <region> --headless` |
 
 ### Model Limit Discovery (`discover_model_limits.py`)
@@ -75,6 +76,59 @@ python scripts/discover_model_limits.py --verbose
 **Requirements:** AWS credentials with Bedrock `InvokeModel` permissions
 
 **See also:** [Config Validation](../docs/config-validation.md)
+
+### API RBAC / Auth Test (`test_api_rbac.py`)
+
+Drives the deployed REST API (the `/op/<field>` dispatcher that replaced
+AppSync) as each Cognito group — **Admin, Author, Viewer, Reviewer** — plus
+unauthenticated, and asserts the authorization outcome of every UI operation
+against the AppSync schema baseline.
+
+**Why:** Under AppSync, `@aws_cognito_user_pools(cognito_groups:[...])` schema
+directives gated operations *before* the resolver ran. The REST API Gateway
+transport uses a Cognito authorizer that only *authenticates*, so each resolver
+(and the dispatcher's `ddb_direct` module) must re-enforce the group check
+itself. A `curl`/`idp-cli` smoke test with an admin identity does **not**
+exercise per-role RBAC, so group regressions (a Viewer reaching an Admin-only
+op, a resolver soft-denying with HTTP 200, a broken argument mapping) slip
+through. This script catches them.
+
+Per operation it verifies:
+- unauthenticated → `401`
+- a **disallowed** role → `403` (`errorType: "Unauthorized"`)
+- an **allowed** role → not denied (read ops use valid args, so a `BadRequest`
+  flags an arg-mapping regression; mutation ops use nonexistent ids, so a
+  benign validation error is expected and only proves auth passed)
+- backend/IAM-only ops (e.g. `updateAgentJobStatus`) → `403` for every Cognito role
+
+**Basic usage:**
+```bash
+# Full run: create test users, test all ops x 4 roles, tear down. Exit 0 = pass.
+AWS_PROFILE=default python3 scripts/test_api_rbac.py --stack-name IDP1 --region us-west-2
+
+# Iterate faster (keep users between runs):
+python3 scripts/test_api_rbac.py --stack-name IDP1 --region us-west-2 --setup-only
+python3 scripts/test_api_rbac.py --stack-name IDP1 --region us-west-2 --no-teardown
+python3 scripts/test_api_rbac.py --stack-name IDP1 --region us-west-2 --teardown-only
+```
+
+**When to use:**
+- After any change to a UI-facing resolver, the dispatcher, `ddb_direct`, or the
+  REST client's argument mapping.
+- Before merging changes to `nested/api-resolvers/` — to confirm RBAC parity with
+  the AppSync schema is preserved.
+- When adding a new operation: add it to `READ_OPS`/`MUTATION_OPS` with its
+  required groups (mirroring the directive in `schema.graphql`).
+
+**Safety:** Test users are `test-rbac-<role>@example.invalid` (created and
+deleted by the script); mutation ops use nonexistent ids so allowed callers hit
+benign validation, not real data. The script temporarily enables
+`ALLOW_ADMIN_USER_PASSWORD_AUTH` on the UI app client and **always** reverts it
+(even on failure). Nothing is destructive to stack data.
+
+**Requirements:** AWS CLI v2 on `PATH`; credentials with Cognito admin +
+CloudFormation read (the same credentials used for `idp-cli deploy`). Resolves
+the UI user pool, app client, and API base URL from the stack — no hardcoding.
 
 ## Operational Commands (via idp-cli)
 

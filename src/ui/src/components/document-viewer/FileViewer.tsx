@@ -3,7 +3,7 @@
 
 import React, { useState } from 'react';
 import { Box } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import DOMPurify from 'dompurify';
 // Note: XLSX and mammoth imports removed since we're using download approach for Excel/Docx files
@@ -11,6 +11,7 @@ import useSettingsContext from '../../contexts/settings';
 import generateS3PresignedUrl from '../common/generate-s3-presigned-url';
 import useAppContext from '../../contexts/app';
 import { getFileContents } from '../../graphql/generated';
+import { useDocumentVersion } from '../../contexts/document-version';
 
 interface FileViewerProps {
   objectKey: string;
@@ -67,6 +68,8 @@ const detectFileType = (objectKey: string, contentType: string | null): string =
 };
 
 const FileViewer = ({ objectKey }: FileViewerProps): React.JSX.Element => {
+  // Fetch pinned bytes when viewing a past document version.
+  const { versionIdForUri } = useDocumentVersion();
   const [presignedUrl, setPresignedUrl] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [contentType, setContentType] = useState<string | null>(null);
@@ -84,7 +87,7 @@ const FileViewer = ({ objectKey }: FileViewerProps): React.JSX.Element => {
       logger.info('Fetching file contents via GraphQL for:', s3Url);
       const response = await client.graphql({
         query: getFileContents,
-        variables: { s3Uri: s3Url },
+        variables: { s3Uri: s3Url, versionId: versionIdForUri(s3Url) },
       });
 
       const result = (response as { data: { getFileContents: { contentType: string; isBinary: boolean; content: string } } }).data
@@ -167,7 +170,9 @@ const FileViewer = ({ objectKey }: FileViewerProps): React.JSX.Element => {
       // Generate presigned URL only if needed
       if (needsPresignedUrl) {
         logger.info('Generating presigned URL for:', s3Url);
-        const url = await generateS3PresignedUrl(s3Url, currentCredentials as Record<string, unknown>);
+        const url = await generateS3PresignedUrl(s3Url, currentCredentials as Record<string, unknown>, {
+          versionId: versionIdForUri(s3Url),
+        });
         setPresignedUrl(url);
       } else {
         logger.info('Using content-based viewing, no presigned URL needed');

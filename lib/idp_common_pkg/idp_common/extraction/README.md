@@ -553,6 +553,66 @@ The service supports both text and image inputs:
 
 The extraction service is designed to be thread-safe, supporting concurrent processing of multiple sections in parallel workloads.
 
+## 1S-TopK: single-stage extraction + confidence (Simple mode)
+
+When `extraction.mode: simple` and `extraction.confidence.mode: integrated`, the
+service produces the extracted values **and** their per-field confidence in a
+**single LLM call** — there is no separate Assessment pass, halving the number of
+LLM invocations for the extraction workflow.
+
+**How it works.** The selected task prompt
+(`extraction.task_prompt_extraction_with_confidence_topk`, chosen automatically by
+`prompt_assembly.select_extraction_task_prompt`) instructs the model to return,
+per field, its **top-K guesses with probabilities** rather than a single value:
+
+```json
+{
+  "Agency": { "G1": "ACME Media", "P1": 0.93, "G2": "ACME", "P2": 0.05, "G3": "...", "P3": 0.02 },
+  "LineItems": [
+    { "LineItemRate": { "G1": "800.15", "P1": 0.88 }, "LineItemDays": { "G1": "-TWTF--", "P1": 0.71 } }
+  ]
+}
+```
+
+`idp_common.extraction.topk_resolver.resolve_candidates` then splits this into:
+
+- **`inference_result`** — the top guess `G1` per field (numbers coerced per schema).
+- **raw confidence leaves** — `{"confidence": P1}` per field, stashed in
+  `metering["_integrated_field_assessment"]`. `_save_results` runs these through the
+  **shared** `enrich_assessment_with_thresholds` (attaches
+  `confidence_threshold` from each field's `x-aws-idp-confidence-threshold` or the
+  default, and builds threshold alerts) and grounds them into
+  `explainability_info` — the identical output contract to separate mode, so
+  evaluation, reporting, the UI, and HITL are all unchanged.
+- **`metadata.topk_candidates`** — the full candidate set (all K guesses) per field,
+  preserved for auditability, plus `metadata.assessment_method: "1s_topk"`.
+
+Because `explainability_info` is already present in the saved `result.json`, the
+downstream Assessment Lambda **auto-skips**.
+
+**Why top-K.** Asking the model to enumerate and rank alternatives (instead of a
+single value + a single confidence number) forces it to distribute probability
+mass, yielding **better-calibrated, less-overconfident** scores. See Tian et al.,
+*"Just Ask for Calibration"* (EMNLP 2023).
+
+**Contract.** Output keys follow `G<N>` (guess) / `P<N>` (probability). K is
+flexible — `G1`/`P1` alone is valid; the default prompt requests K=4. Only `G1`/`P1`
+are consumed; `G2..GK`/`P2..PK` are preserved verbatim in `topk_candidates`. If the
+model returns a flat response with no `G1`/`P1` candidates, the values pass through
+unchanged and the standalone Assessment step runs as the fallback (no regression).
+Under `geometry.mode: llm`/`llm_grounded` the bbox block is appended to the TopK
+prompt, so a candidate may also carry `bbox`/`page`; the resolver carries those onto
+the confidence leaf for the shared grounding path (under pure `llm` — no OCR
+grounding — this is the only box source).
+
+Advanced (agentic) integrated mode can opt into the same top-K elicitation via the
+hidden experimental knob `extraction.agentic.integrated_confidence_strategy: topk`
+(see below).
+
+Reference config:
+[`config_library/unified/realkie-fcc-verified/config-1s-topk-with-ocr-image.yaml`](../../../../config_library/unified/realkie-fcc-verified/config-1s-topk-with-ocr-image.yaml);
+end-to-end demo: [`notebooks/misc/e2e-example-with-1s-topk.ipynb`](../../../../notebooks/misc/e2e-example-with-1s-topk.ipynb).
+
 ## Agentic Extraction with Table Parsing Tool
 
 The extraction service supports an optional **agentic extraction mode** powered by the Strands agent framework with tool-based structured output. When enabled, the extraction agent gains intelligent tools including a deterministic table parser for robust tabular data extraction.
@@ -685,17 +745,39 @@ contains **only that shard's OCR text and images** — not the whole document. T
 shards run concurrently (up to `max_concurrent_batches` at a time) and their
 results are merged. This serves two purposes:
 
+> **Why "shard" and not "chunk"?** A *shard* here is a **non-overlapping page
+> range fanned out to a concurrent extraction agent** — the term is chosen for
+> its distributed-systems connotation of *partition-for-parallelism/scale*,
+> which is exactly this feature's purpose. We deliberately avoid "chunk" because
+> it already denotes several *other*, unrelated concepts elsewhere in the
+> codebase: RAG-style overlapping text windows (`max_chunk_size`,
+> `chunk_overlap_percentage`), sequential assessment list sub-batches
+> (`assessment/batching.py`), rule-validation `chunking_occurred`, and streaming
+> byte reads. Reusing "chunk" for agentic-extraction shards would collide with
+> all of those; "shard" keeps this concept unambiguous.
+
 1. **Bounds the context window.** Because each agent sees only its pages, a long
    or dense section that would overflow a single agent's context (the failure
    mode behind `ContextWindowOverflowException`) is split until each shard fits.
 2. **Reduces wall-clock time** via parallelism.
 
 Key behaviors:
-- **Size-bounded, not count-bounded.** Pages are grouped so each shard's
-  estimated input stays under `shard_token_budget` (default 40,000;
-  `≈ chars/4`). `max_concurrent_batches` is an **upper bound on parallelism and
-  shard count** — a very large section is split into as many shards as needed to
-  fit (capped at `max_concurrent_batches`), not exactly N equal pieces.
+- **Bounded by tokens AND pages.** Pages are grouped so each shard's estimated
+  input stays under `shard_token_budget` (default **8,000**; `≈ chars/4`) **and**
+  holds at most `max_pages_per_shard` pages (default **5**, `0` disables the page
+  ceiling). A shard closes when *either* bound is hit. The page ceiling
+  guarantees a large document shards even when its OCR text is unusually compact
+  and would otherwise fit one token budget — so sharding engages **by default**
+  with no per-config tuning. `max_concurrent_batches` is an **upper bound on
+  parallelism and shard count** — a very large section is split into as many
+  shards as needed to fit (capped at `max_concurrent_batches`), not exactly N
+  equal pieces.
+  > **Why the low default budget?** A high budget (the old 40,000 default) let
+  > even a ~25-page dense table fit one shard, so sharding silently did *not*
+  > engage and a single agent had to emit the whole giant table in one Bedrock
+  > call → read timeout. 8,000 + a 5-page ceiling reliably shard large docs so
+  > each agent's work stays bounded. Raise `shard_token_budget` for
+  > large-context (`:1m`) models if you want fewer, larger shards.
 - **Page-aligned splits keep table rows intact.** A table spans pages but each
   row lives on one page, so splits fall between rows; list fields are
   concatenated in page order on merge (no row loss/duplication).
@@ -717,10 +799,188 @@ extraction:
   agentic:
     enabled: true
     max_concurrent_batches: 4
-    shard_token_budget: 40000   # lower if shards still overflow; raise for 1M-context models
+    shard_token_budget: 8000    # default; lower if shards still overflow, raise for 1M-context models
+    max_pages_per_shard: 5      # default; page ceiling so large docs always shard (0 = disable)
     table_parsing:
       enabled: true
 ```
+
+**Document-size guidance.** The defaults above are tuned to work without
+hand-tuning on large documents (validated at scale on 100- and 200-page
+single- and multi-table PDFs). For very large documents (100+ pages) prefer the
+Step Functions Distributed Map runtime (`runtime: step_functions`) so each shard
+runs in its own Lambda and the section is not bound by the single-Lambda 15-min
+ceiling; the in-process runtime still shards correctly but a 200-page section may
+approach that ceiling.
+
+### ExtractionRuntime: pluggable orchestration over shared primitives
+
+Sharding is factored into runtime-agnostic primitives in
+`idp_common.extraction.runtime` so the **same** shard/merge logic runs whether
+you call the library from a notebook, a CLI, a single Lambda, or a production
+Step Functions Distributed Map — one implementation, no behaviour divergence.
+
+**Primitives (the single source of truth):**
+
+- `extract_one_shard(...)` — runs ONE shard's agent (via an injected
+  `shard_runner`; `agentic_idp.default_shard_runner` in production) and is
+  **idempotent**: if a `ShardPersistence` backend already holds a complete
+  result for the shard's page range, it is loaded and returned instead of
+  re-inferring. This is the asyncio task body AND the SFN Map iteration body.
+- `merge_shard_results(...)` / `merge_shard_dicts(...)` — concatenate list fields
+  in page order and take first-non-null scalars (recording conflicts).
+- `ShardPersistence` protocol + `S3ShardPersistence`, keyed at
+  `checkpoints/{execution_arn}/{section_id}/shards/shard_{start}_{end}.json`.
+
+**Two backends behind the `ExtractionRuntime` interface:**
+
+- **`InProcessRuntime`** (default) — plans shards, runs them via `asyncio.gather`
+  + a semaphore, then merges. This is what a notebook / CLI / single Lambda uses;
+  **sharding works fully here with no Step Functions dependency.**
+  `ExtractionService.process_document_section()` routes its concurrent path
+  through this runtime, so standalone usage is unchanged.
+- **`StepFunctionsRuntime`** (production) — a nested SFN **Distributed Map** where
+  each iteration is a thin shard Lambda calling `extract_one_shard` (one fresh
+  15-minute Lambda per shard) and a following merge state calls
+  `merge_shard_results`. Because each shard persists its result idempotently to
+  S3, SFN's **native per-iteration retry re-runs only the failed/incomplete
+  shards** — completed shards load from S3, with no custom near-timeout/reentry
+  code and no 15-minute ceiling for the section as a whole.
+
+Select the backend with `extraction.agentic.runtime` (`in_process` default, or
+`step_functions`); the `EXTRACTION_RUNTIME` env var and an explicit `override`
+argument also work. The in-process section Lambda additionally wires
+`S3ShardPersistence`, so even on the in-process path an SFN `ExtractionStep`
+retry of a timed-out section resumes only the incomplete shards.
+
+**Standalone usage (plain Python, no SFN):**
+
+```python
+from idp_common.extraction import ExtractionService
+service = ExtractionService(config=config)            # config.extraction.agentic.max_concurrent_batches > 1
+doc = service.process_document_section(document, section_id)   # shards + merges in-process
+```
+
+See `notebooks/misc/standalone_sharded_extraction_demo.py` for a runnable
+demonstration (offline with a fake agent; live with real Bedrock).
+
+### Confidence Assessment (in-shard confidence & bounding boxes)
+
+> **Config v0.6:** confidence scoring is an **output of extraction** — its settings
+> live under `extraction.confidence` (was the top-level `assessment` block) and
+> geometry under `extraction.geometry` (was `assessment.geometry_mode`). HITL moved
+> to the top-level `hitl` block. Old configs are migrated on read.
+
+Per-field confidence/bbox **assessment can run inside extraction** instead of as a
+separate downstream step, controlled by `extraction.confidence.mode`:
+
+```yaml
+extraction:
+  confidence:
+    enabled: true                     # master on/off — false disables confidence entirely
+    mode: separate                    # off | "separate" (default) | "integrated"
+    model: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    list_batch_size: 25               # rows scored per inference (agentic in-shard)
+  geometry:
+    mode: ocr_only                    # ocr_only (default) | llm_grounded | llm | off
+  agentic:
+    enabled: true
+    max_concurrent_batches: 4         # sharded; confidence scoring runs per-shard
+hitl:
+  enabled: false                      # route low-confidence fields to human review
+  confidence_threshold: 0.8
+```
+
+- **`separate`** (default, **no behavior change on upgrade**): extraction and
+  assessment are distinct inferences.
+  - *Agentic*: after each shard extracts, a **second assessment inference runs
+    inside that same shard** over the shard's pages/values — so assessment
+    inherits the same per-shard scaling as extraction (a 200-page section never
+    assesses in one oversized call). Per-shard assessments are collated on merge
+    (per-field, **page-ordered for list items**, first-shard-wins for scalars),
+    grounded once in real OCR geometry over the whole section, and emitted as
+    `explainability_info` — byte-for-byte the same output the standalone
+    Assessment step produces.
+  - *Non-agentic*: unchanged — the pipeline flows to the standalone Assessment
+    step exactly as before.
+- **`integrated`**: confidence is produced **within the extraction inference
+  itself** — the document is already in context, so there is no separate
+  assessment request and no re-sent document. The inline result rides the **same**
+  collation → post-merge reconcile → OCR grounding → `explainability_info` path as
+  `separate`, so the output contract is identical; only the source of the
+  confidence differs. The `extraction.confidence` model/prompt settings are unused,
+  and the standalone Assessment step is bypassed (auto-skips once
+  `explainability_info` is present).
+  - *Agentic*: the agent emits confidence via a tool call (see the strategy knob
+    below).
+  - *Non-agentic (simple)*: the single extraction inference is prompted to return
+    values **and** a parallel confidence structure as
+    `{"extraction": {...}, "confidence": {...}}`; the service splits that envelope
+    (values → `inference_result`, confidence → the same in-extraction marker),
+    enriches it with per-field `confidence_threshold` + alerts, reconciles, grounds,
+    and emits `explainability_info`. If the model returns a flat response with no
+    confidence envelope, the path **falls back to the standalone Assessment step**
+    (no data loss). Best for **smaller documents** where one inference comfortably
+    holds the whole doc; for large docs prefer agentic (sharded) or `separate`.
+  - **Missing-row robustness (both paths):** because integrated confidence rides on
+    the extraction call, a model can under-score a large table. After reconcile,
+    any list rows left unscored are **retried in focused, bounded re-assessment
+    calls** (only the missing rows) and spliced back — so large-list confidence
+    coverage reaches 100% rather than leaving null placeholders. Best for
+    cost/latency once you've confirmed your model produces well-calibrated inline
+    confidence; otherwise prefer `separate` (a dedicated assessment inference).
+
+  <a id="integrated-confidence-strategy"></a>
+  **Hidden setting — `extraction.agentic.integrated_confidence_strategy` (experimental).**
+  For the *agentic* path, integrated confidence can be produced two ways. This knob
+  is **not surfaced in the config UI** — it exists so operators can A/B the
+  cost/latency-vs-calibration trade-off before we pick a default. Set it via
+  `idp-cli config-upload` on a throwaway config version; both values produce
+  identical `explainability_info` downstream (only the inference mechanics differ):
+
+  | value | how confidence is produced | inferences per turn/shard (happy path) |
+  |---|---|---|
+  | `two_step` *(default)* | the agent extracts via the extraction tool, then calls `provide_field_assessment` in a **follow-up inference** within the same turn — a dedicated reflection pass over the finalized values | 3 (extract → assess → close) |
+  | `single_shot` | the agent emits values **and** per-field confidence in **one combined tool call** (`extraction_with_confidence_tool`), saving the follow-up inference | 2 (extract+confidence → close) |
+
+  Why it is not one inference either way: agentic extraction is delivered via a
+  *tool call*, and the tool-use protocol ends an inference at each tool call, so a
+  final "close the turn" inference is always required after the last tool result.
+  `single_shot` removes the *middle* (assessment) inference, not the close. It
+  reuses the same prompt cache as `two_step` (the document/system/tools prefix is
+  written once and read by the closing inference). Trade-off: `two_step` gives the
+  model a dedicated look at the finalized extraction before scoring (often
+  better-calibrated confidence); `single_shot` is cheaper/faster but scores inline
+  as it extracts. For large/multi-step (patched) extractions where rows are added
+  after the combined call, the agent may still call `provide_field_assessment` once
+  at the end to (re)assess every row (rows never assessed are padded with neutral
+  `confidence: null`, same as today). Non-agentic (simple) integrated is always a
+  true single inference and is unaffected by this knob.
+
+**Standalone Assessment step bypass.** When in-shard (or integrated) assessment
+has already written `explainability_info` to the section result, the downstream
+Assessment Lambda detects it and **skips its own inference** (a cheap
+pass-through) — so no duplicate assessment cost and no state-machine change. When
+`extraction.confidence.enabled: false`, confidence scoring is skipped everywhere. The document status
+remains `EXTRACTING` while in-shard assessment runs (it *is* part of the extraction
+step).
+
+**List alignment guarantee.** Downstream consumers index
+`explainability_info[0][field][i]` against `inference_result[field][i]`, but an
+assessment LLM often returns a *different* number of row assessments than the
+table has rows (e.g. 44 assessments for 120 extracted rows). In-shard assessment
+**reconciles each list field's assessment to exactly match the extracted row
+count** (truncating extras, padding shortfalls with a neutral `confidence: null`
+"not individually assessed" entry) *before* the per-shard merge — so confidence is
+never misattributed to the wrong row and the drift never compounds across shards.
+
+**Reuse, not duplication.** In-shard assessment calls the **same**
+`AssessmentService.assess_results(...)` core the standalone step uses (extracted
+into a pure, S3-free method) and the same `ocr_grounding.ground_assessment_geometry`
+— so confidence scoring, thresholds, alerts, and geometry grounding are identical;
+only the *where it runs* differs. The output contract (`explainability_info[0]` +
+`section.confidence_threshold_alerts`) is unchanged, so HITL, the UI confidence
+display, evaluation, and reporting all consume it as before.
 
 ### Configuration Options
 
@@ -939,6 +1199,13 @@ Extraction results include table parsing metadata when the tool is used:
   }
 }
 ```
+
+When a section is sharded across concurrent agents, each shard contributes its own
+`table_parsing_stats` and they are merged with quality-aware semantics (not summed):
+counts (`tables_parsed`, `rows_parsed`, `rows_mapped`, `invocation_count`) add up,
+while `parse_success_rate` and `avg_confidence` are combined as **row-weighted
+averages** so the reported values stay a real 0-1 rate / 0-100 confidence regardless
+of shard count.
 
 Use these metrics to:
 - Identify documents where table parsing is working well

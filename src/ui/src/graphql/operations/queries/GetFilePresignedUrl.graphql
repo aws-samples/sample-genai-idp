@@ -1,0 +1,7 @@
+query GetFilePresignedUrl($s3Uri: String!, $versionId: String) {
+  getFilePresignedUrl(s3Uri: $s3Uri, versionId: $versionId) {
+    presignedUrl
+    contentType
+    size
+  }
+}

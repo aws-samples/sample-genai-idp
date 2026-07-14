@@ -693,6 +693,80 @@ class TestSticklerEvaluationService:
         value = service._get_nested_value(dict_obj, "nonexistent")
         assert value is None
 
+    def test_resolve_leaf_schema(self, service):
+        """Leaf schema resolution follows array items and object properties."""
+        field_schema = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "Amount": {"x-aws-stickler-comparator": "NumericComparator"},
+                    "bankInfo": {
+                        "type": "object",
+                        "properties": {
+                            "bank": {"x-aws-stickler-comparator": "FuzzyComparator"},
+                        },
+                    },
+                },
+            },
+        }
+
+        # Flat list-item field
+        leaf = service._resolve_leaf_schema(field_schema, "LineItems[0].Amount")
+        assert leaf is not None
+        assert leaf["x-aws-stickler-comparator"] == "NumericComparator"
+
+        # Deeply nested object field within a list item
+        leaf = service._resolve_leaf_schema(field_schema, "LineItems[1].bankInfo.bank")
+        assert leaf is not None
+        assert leaf["x-aws-stickler-comparator"] == "FuzzyComparator"
+
+        # Unknown field resolves to None
+        assert (
+            service._resolve_leaf_schema(field_schema, "LineItems[0].Missing") is None
+        )
+
+    def test_annotate_nested_comparison_methods(self, service):
+        """Nested comparisons get per-field evaluation_method and weight."""
+        field_schema = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "Description": {
+                        "x-aws-stickler-comparator": "FuzzyComparator",
+                        "x-aws-stickler-threshold": 0.9,
+                        "x-aws-stickler-weight": 2.0,
+                    },
+                    "Rate": {
+                        "x-aws-stickler-comparator": "NumericComparator",
+                        # no weight configured -> defaults to 1.0
+                    },
+                },
+            },
+        }
+        comparisons = [
+            {
+                "expected_key": "LineItems[0].Description",
+                "expected_value": "Widget",
+                "actual_value": "Widgets",
+            },
+            {
+                "expected_key": "LineItems[0].Rate",
+                "expected_value": 10.0,
+                "actual_value": 10.0,
+            },
+        ]
+
+        service._annotate_nested_comparison_methods(
+            comparisons, field_schema=field_schema, match_threshold=0.8
+        )
+
+        assert comparisons[0]["evaluation_method"] == "Fuzzy (threshold: 0.90)"
+        assert comparisons[0]["weight"] == 2.0
+        assert comparisons[1]["evaluation_method"] == "NumericExact"
+        assert comparisons[1]["weight"] == 1.0  # default
+
     def test_generate_reason(self, service):
         """Test reason generation."""
         # Test exact match

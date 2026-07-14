@@ -7,8 +7,9 @@ use_bda: false
 
 notes: "RealKIE-FCC-Verified dataset settings for pipeline mode (Bedrock LLM). Set use_bda: true for BDA mode. Assessment and summarization disabled by default."
 
-assessment:
-  enabled: false
+extraction:
+  confidence:
+    mode: 'off'   # v0.6: confidence scoring disabled (was assessment.enabled: false)
 summarization:
   enabled: false
 
@@ -34,15 +35,15 @@ classes:
           x-aws-idp-evaluation-threshold: '0.7'
           type: string
         LineItemStartDate:
-          description: Start date for the line item. Output null if not shown.
+          description: Start date for the line item, formatted as MM/DD/YY (2-digit year, e.g. 10/22/16). Output null if not shown.
           x-aws-idp-confidence-threshold: '0.8'
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           type: string
         LineItemEndDate:
-          description: End date for the line item. Output null if not shown.
+          description: End date for the line item, formatted as MM/DD/YY (2-digit year, e.g. 10/22/16). Output null if not shown.
           x-aws-idp-confidence-threshold: '0.8'
-          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-method: DATE
           x-aws-idp-evaluation-threshold: '0.7'
           type: string
         LineItemDescription:

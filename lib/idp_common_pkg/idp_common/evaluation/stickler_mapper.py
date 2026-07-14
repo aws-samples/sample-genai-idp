@@ -16,6 +16,7 @@ import logging
 from typing import Any, Dict, List, Optional, Set
 
 from idp_common.config.schema_constants import (
+    EVALUATION_METHOD_DATE,
     EVALUATION_METHOD_EXACT,
     EVALUATION_METHOD_FUZZY,
     EVALUATION_METHOD_HUNGARIAN,
@@ -36,6 +37,7 @@ from idp_common.config.schema_constants import (
     X_AWS_IDP_DOCUMENT_TYPE,
     X_AWS_IDP_EVALUATION_MATCH_THRESHOLD,
     X_AWS_IDP_EVALUATION_METHOD,
+    X_AWS_IDP_EVALUATION_METHOD_CONFIG,
     X_AWS_IDP_EVALUATION_MODEL_NAME,
     X_AWS_IDP_EVALUATION_THRESHOLD,
     X_AWS_IDP_EVALUATION_WEIGHT,
@@ -62,6 +64,7 @@ class SticklerConfigMapper:
         EVALUATION_METHOD_FUZZY: "FuzzyComparator",
         EVALUATION_METHOD_LEVENSHTEIN: "LevenshteinComparator",
         EVALUATION_METHOD_SEMANTIC: "SemanticComparator",
+        EVALUATION_METHOD_DATE: "DateComparator",  # Stickler v0.5.0+
         EVALUATION_METHOD_LLM: "LLMComparator",  # Uses global config from llm_comparator.py
         EVALUATION_METHOD_HUNGARIAN: None,  # Built-in for arrays
     }
@@ -135,6 +138,16 @@ class SticklerConfigMapper:
                         stickler_config["comparator_config"] = {"tolerance": threshold}
                         logger.debug(
                             f"Field '{full_path}': Set numeric tolerance to {threshold}"
+                        )
+
+                # DateComparator accepts an optional config dict (dayfirst,
+                # tolerance, range_mode, etc.) passed through verbatim.
+                if eval_method == EVALUATION_METHOD_DATE:
+                    method_config = field_schema.get(X_AWS_IDP_EVALUATION_METHOD_CONFIG)
+                    if isinstance(method_config, dict) and method_config:
+                        stickler_config["comparator_config"] = dict(method_config)
+                        logger.debug(
+                            f"Field '{full_path}': Set date comparator config to {method_config}"
                         )
             elif eval_method == EVALUATION_METHOD_HUNGARIAN:
                 # Hungarian is handled automatically for arrays by Stickler
@@ -567,6 +580,7 @@ class SticklerConfigMapper:
             EVALUATION_METHOD_LEVENSHTEIN,
             EVALUATION_METHOD_SEMANTIC,
             EVALUATION_METHOD_NUMERIC_EXACT,
+            EVALUATION_METHOD_DATE,
         ]:
             if is_structured_array:
                 raise ValueError(
@@ -711,11 +725,17 @@ class SticklerConfigMapper:
         # Coerce types FIRST, before any other processing
         cls._coerce_json_schema_types(schema, field_path)
 
-        # If this is an object with properties but no required array, add empty one
-        # This makes all fields optional, allowing None values
+        # Force all fields optional for evaluation by clearing any 'required' array.
+        # For evaluation a field that is present in the baseline but correctly
+        # extracted as null (or vice versa) is a scored MISS, not a hard schema
+        # failure. If an explicit config marks a field required (e.g. RealKIE
+        # Invoice: required: [Agency, Advertiser, LineItems]) and a document
+        # genuinely has no value for it, Stickler/Pydantic would otherwise raise
+        # "Field required [type=missing]" after None-stripping and fail-score the
+        # WHOLE document. Overwriting (not just adding-when-missing) makes explicit
+        # configs behave like the genson auto-schema path (_strip_required).
         if schema.get(SCHEMA_TYPE) == TYPE_OBJECT and SCHEMA_PROPERTIES in schema:
-            if "required" not in schema:
-                schema["required"] = []
+            schema["required"] = []
 
         # Check if this is an array with structured items
         is_structured_array = False
@@ -745,6 +765,14 @@ class SticklerConfigMapper:
             comparator = cls.METHOD_TO_COMPARATOR.get(method)
             if comparator:
                 schema["x-aws-stickler-comparator"] = comparator
+
+                # Pass through optional comparator config (e.g. DateComparator's
+                # dayfirst / tolerance / range_mode). Stickler's
+                # JsonSchemaFieldConverter forwards x-aws-stickler-comparator-config
+                # verbatim to create_comparator().
+                method_config = schema.get(X_AWS_IDP_EVALUATION_METHOD_CONFIG)
+                if isinstance(method_config, dict) and method_config:
+                    schema["x-aws-stickler-comparator-config"] = dict(method_config)
 
         # Handle thresholds based on field type
         # For structured arrays (Hungarian): use match_threshold at field level

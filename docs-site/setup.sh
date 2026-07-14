@@ -56,6 +56,34 @@ if [ -d "$PROJECT_ROOT/docs/extensions" ]; then
     echo "   ✅ Linked $ext_count extension docs"
 fi
 
+# Step 1c: Symlink the docs/benchmarking/ folder (guide + config-guidance + the
+# per-release audit trail under releases/) into src/content/docs/benchmarking/.
+if [ -d "$PROJECT_ROOT/docs/benchmarking" ]; then
+    echo ""
+    echo "🔗 Creating symlinks for benchmarking docs..."
+    mkdir -p "$CONTENT_DOCS/benchmarking/releases"
+    bench_count=0
+    for md_file in "$PROJECT_ROOT"/docs/benchmarking/*.md; do
+        [ -e "$md_file" ] || continue
+        filename=$(basename "$md_file")
+        target="$CONTENT_DOCS/benchmarking/$filename"
+        # Path: docs-site/src/content/docs/benchmarking/ → 5 levels up to project root
+        [ -L "$target" ] && rm "$target"
+        ln -s "../../../../../docs/benchmarking/$filename" "$target"
+        bench_count=$((bench_count + 1))
+    done
+    for md_file in "$PROJECT_ROOT"/docs/benchmarking/releases/*.md; do
+        [ -e "$md_file" ] || continue
+        filename=$(basename "$md_file")
+        target="$CONTENT_DOCS/benchmarking/releases/$filename"
+        # Path: docs-site/src/content/docs/benchmarking/releases/ → 6 levels up
+        [ -L "$target" ] && rm "$target"
+        ln -s "../../../../../../docs/benchmarking/releases/$filename" "$target"
+        bench_count=$((bench_count + 1))
+    done
+    echo "   ✅ Linked $bench_count benchmarking docs"
+fi
+
 # Step 2: Symlink images/ into src/content/images/ (for ../images/ relative paths in docs)
 # Path: docs-site/src/content/ → 3 levels up to project root
 echo ""

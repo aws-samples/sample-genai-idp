@@ -39,7 +39,7 @@ import boto3
 from rich.console import Console
 
 from .bundle import BundleInfo, validate_bundle
-from .manifest import FeatureManifest, load_manifest
+from .manifest import CommandStep, FeatureManifest, load_manifest
 
 
 @dataclass
@@ -80,27 +80,16 @@ class FeaturePublisher:
         return manifest
 
     def build(self, manifest: Optional[FeatureManifest] = None) -> BundleInfo:
-        """Run the UI buildCommand (if any), then statically validate the bundle."""
+        """Run the UI build steps (if any), then statically validate the bundle."""
         manifest = manifest or self.validate()
 
-        if manifest.ui.buildCommand:
-            self.console.log(
-                f"[cyan]▸[/cyan] Building UI bundle: {manifest.ui.buildCommand}"
+        if manifest.ui.build:
+            self._run_steps(manifest.ui.build, step_name="ui.build")
+            self.console.log("[green]✓[/green] UI build finished")
+        elif manifest.ui.buildCommand:
+            self._run_legacy_shell_command(
+                manifest.ui.buildCommand, step_name="ui.buildCommand"
             )
-            result = subprocess.run(
-                manifest.ui.buildCommand,
-                shell=True,
-                cwd=self.project_dir,
-                check=False,
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode != 0:
-                self.console.print(result.stdout)
-                self.console.print(result.stderr)
-                raise RuntimeError(
-                    f"UI buildCommand failed with exit code {result.returncode}"
-                )
             self.console.log("[green]✓[/green] UI build finished")
 
         bundle_path = self.project_dir / manifest.ui.bundlePath
@@ -111,13 +100,40 @@ class FeaturePublisher:
         )
 
         if manifest.agentSource:
+            if manifest.agentSource.package:
+                self._run_steps(
+                    manifest.agentSource.package, step_name="agentSource.package"
+                )
+            elif manifest.agentSource.packageCommand:
+                self._run_legacy_shell_command(
+                    manifest.agentSource.packageCommand,
+                    step_name="agentSource.packageCommand",
+                )
+            artifact = self.project_dir / manifest.agentSource.artifactPath
+            if not artifact.exists():
+                raise RuntimeError(
+                    f"Agent source artifact not found at {artifact} after packaging"
+                )
             self.console.log(
-                f"[cyan]▸[/cyan] Packaging agent source: {manifest.agentSource.packageCommand}"
+                f"[green]✓[/green] Agent source packaged ({artifact.stat().st_size:,} bytes)"
+            )
+
+        return info
+
+    def _run_steps(self, steps: List[CommandStep], *, step_name: str) -> None:
+        """Run structured manifest steps with ``shell=False`` — argv is exec'd
+        directly, so there is no shell metacharacter surface (the B602 class of
+        issue the legacy string forms have)."""
+        for i, step in enumerate(steps):
+            cwd = self.project_dir / step.cwd if step.cwd else self.project_dir
+            self.console.log(
+                f"[cyan]▸[/cyan] {step_name}[{i}]: {' '.join(step.argv)}"
+                + (f"  (cwd={step.cwd})" if step.cwd else "")
             )
             result = subprocess.run(
-                manifest.agentSource.packageCommand,
-                shell=True,
-                cwd=self.project_dir,
+                step.argv,
+                shell=False,
+                cwd=cwd,
                 check=False,
                 capture_output=True,
                 text=True,
@@ -126,18 +142,33 @@ class FeaturePublisher:
                 self.console.print(result.stdout)
                 self.console.print(result.stderr)
                 raise RuntimeError(
-                    f"Agent source packageCommand failed with exit code {result.returncode}"
+                    f"{step_name}[{i}] ({step.argv[0]}) failed with exit code "
+                    f"{result.returncode}"
                 )
-            artifact = self.project_dir / manifest.agentSource.artifactPath
-            if not artifact.exists():
-                raise RuntimeError(
-                    f"Agent source artifact not found at {artifact} after packageCommand"
-                )
-            self.console.log(
-                f"[green]✓[/green] Agent source packaged ({artifact.stat().st_size:,} bytes)"
-            )
 
-        return info
+    def _run_legacy_shell_command(self, command: str, *, step_name: str) -> None:
+        """Run a legacy shell-string manifest command (deprecated).
+
+        Kept for backward compatibility with existing feature.yaml files; new
+        manifests should use the structured `ui.build` / `agentSource.package`
+        step lists, which run without a shell."""
+        self.console.log(
+            f"[yellow]![/yellow] {step_name} is deprecated (runs through a shell). "
+            f"Migrate to the structured step-list form — see the feature SDK README."
+        )
+        self.console.log(f"[cyan]▸[/cyan] {step_name}: {command}")
+        result = subprocess.run(
+            command,
+            shell=True,  # nosec B602 - legacy manifest form; command is the feature author's own build/package string run on their machine, not attacker-controlled input. Structured shell-free form is preferred.
+            cwd=self.project_dir,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            self.console.print(result.stdout)
+            self.console.print(result.stderr)
+            raise RuntimeError(f"{step_name} failed with exit code {result.returncode}")
 
     def publish(
         self,

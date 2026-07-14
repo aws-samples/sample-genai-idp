@@ -19,7 +19,7 @@ import {
   StatusIndicator,
   Badge,
 } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 
 import useUserRole from '../../hooks/use-user-role';
@@ -82,10 +82,12 @@ const UserManagementLayout = (): React.JSX.Element => {
   ];
 
   const configVersionOptions = useMemo(() => {
-    return versions.map((v) => ({
-      label: v.versionName + (v.isActive ? ' (active)' : ''),
-      value: v.versionName,
-    }));
+    return [...versions]
+      .sort((a, b) => a.versionName.localeCompare(b.versionName, undefined, { numeric: true, sensitivity: 'base' }))
+      .map((v) => ({
+        label: v.versionName + (v.isActive ? ' (active)' : ''),
+        value: v.versionName,
+      }));
   }, [versions]);
 
   const validateEmail = useCallback(

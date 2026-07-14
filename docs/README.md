@@ -12,8 +12,9 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 ## Core
 
 - [Architecture](./architecture.md) - Detailed component architecture and data flow
+- [Quick Start](./quick-start.md) - Cold-start configuration authoring for new deployments (chat widget + `idp-cli bootstrap`)
 - [Deployment](./deployment.md) - Build, publish, deploy, and test instructions
-- [Headless Deployment](./headless-deployment.md) - Backend-only deployment (no UI/AppSync/Cognito/WAF) — for API-only / pipeline integrations in Commercial regions and required for GovCloud
+- [Headless Deployment](./headless-deployment.md) - Backend-only deployment (no UI/AppSync/Cognito/WAF) — for API-only / pipeline integrations in Commercial regions or GovCloud
 - [Configuration](./configuration.md) - Configuration and customization options
 - [Configuration Versions](./configuration-versions.md) - Managing multiple configuration versions
 - [IDP Configuration Best Practices](./idp-configuration-best-practices.md) - Guidelines for effective configuration design
@@ -34,9 +35,8 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 ## Document Processing Features
 
 - [Classification](./classification.md) - Customizing document classification
-- [Extraction](./extraction.md) - Customizing information extraction
-- [Assessment](./assessment.md) - Extraction confidence evaluation using LLMs
-- [Assessment Bounding Boxes](./assessment-bounding-boxes.md) - Spatial localization of extracted fields
+- [Extraction & Confidence](./extraction-and-confidence.md) - Extraction configuration, per-field confidence scoring, and bounding-box geometry (consolidates the former Extraction, Assessment, and Assessment Bounding Boxes guides)
+- [Extraction Scaling Guide](./extraction-scaling-guide.md) - Simple vs advanced (agentic) mode limits by document/list size; where each hits limits and how to choose
 - [Few-Shot Examples](./few-shot-examples.md) - Implementing few-shot examples for improved accuracy
 - [Human-in-the-Loop Review](./human-review.md) - Human review workflows with built-in review system
 - [Rule Validation](./rule-validation.md) - Business rule validation and compliance checking
@@ -80,8 +80,8 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 
 - [Well-Architected Framework Assessment](./well-architected.md) - Analysis based on AWS Well-Architected Framework
 - [AWS Services & IAM Roles](./aws-services-and-roles.md) - AWS services used and IAM role requirements
-- [ALB Hosting](./alb-hosting.md) - ALB+S3 hosting to serve the full Web UI from within a VPC (alternative to CloudFront)
-- [GovCloud Deployment](./govcloud-deployment.md) - GovCloud-specific considerations on top of headless deployment
+- [API Gateway Hosting](./apigateway-hosting.md) - Serve the full Web UI from the existing API Gateway REST API (S3 proxy), within a VPC when combined with `ApiGatewayVisibility=PRIVATE` (alternative to CloudFront)
+- [GovCloud Deployment](./govcloud-deployment.md) - Deploy to GovCloud with the full Web UI (`--govcloud`) or headless (`--headless`)
 - [EU Region Model Support](./eu-region-model-support.md) - Model availability in EU regions
 
 ## Development Setup
@@ -97,7 +97,7 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 
 ### GovCloud
 
-- [GovCloud Deployment Guide](./govcloud-deployment.md) - Deployment packages, prerequisites, and deploy commands
+- [GovCloud Deployment Guide](./govcloud-deployment.md) - Deployment options (Web UI or headless), prerequisites, and deploy commands
 - [GovCloud Architecture](./govcloud-architecture.md) - Services removed vs. retained, limitations, and workarounds
 - [Batch Jobs REST API](./govcloud-batch-api.md) - API reference, authentication, and bastion tunnel setup
 - [GovCloud Operations](./govcloud-operations.md) - Monitoring, troubleshooting, and best practices

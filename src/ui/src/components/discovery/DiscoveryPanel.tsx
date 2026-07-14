@@ -26,13 +26,14 @@ import {
   Link,
   TextFilter,
   Tiles,
+  RadioGroup,
   Pagination,
   CollectionPreferences,
 } from '@cloudscape-design/components';
 import type { SelectProps } from '@cloudscape-design/components';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../../api/client-shim';
 
-import { uploadDiscoveryDocument, listDiscoveryJobs, onDiscoveryJobStatusChange, deleteDiscoveryJob, autoDetectSections } from '../../graphql/generated';
+import { uploadDiscoveryDocument, listDiscoveryJobs, deleteDiscoveryJob, autoDetectSections } from '../../graphql/generated';
 import useSettingsContext from '../../contexts/settings';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import { getJsonValidationError } from '../common/utilities';
@@ -43,6 +44,7 @@ import { DISCOVERY_JOB_PATH } from '../../routes/constants';
 import { SUPPORTED_DISCOVERY_EXTENSIONS } from '../common/constants';
 import PdfPageSelector from './PdfPageSelector';
 import type { PageRange } from './PdfPageSelector';
+import CreateDiscoveryVersionModal from './CreateDiscoveryVersionModal';
 
 const client = generateClient();
 
@@ -109,7 +111,7 @@ export const shouldShowClassesDiscoveryControls = (discoveryType: 'classes' | 'r
 const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {}): React.JSX.Element => {
   const navigate = useNavigate();
   const { settings } = useSettingsContext();
-  const { versions, loading: versionsLoading, getVersionOptions } = useConfigurationVersions();
+  const { versions, loading: versionsLoading, getVersionOptions, fetchVersions } = useConfigurationVersions();
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [groundTruthFile, setGroundTruthFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -120,6 +122,10 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
   const [isLoadingJobs, setIsLoadingJobs] = useState(false);
   const [isValidatingJson, setIsValidatingJson] = useState(false);
   const [selectedVersion, setSelectedVersion] = useState<SelectProps.Option | null>(null);
+  // Save mode: 'augment' (default) adds to the version's existing schema;
+  // 'replace' clears it first so discovery rebuilds the schema from scratch.
+  const [saveMode, setSaveMode] = useState<'augment' | 'replace'>('augment');
+  const [showCreateVersionModal, setShowCreateVersionModal] = useState(false);
   const [, setTick] = useState(0); // Force re-render for elapsed time
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [filterText, setFilterText] = useState('');
@@ -174,8 +180,10 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
     }, 50);
   }, []);
 
-  const loadDiscoveryJobs = async () => {
-    setIsLoadingJobs(true);
+  // `silent` skips the loading spinner so the 5s status poll doesn't flicker
+  // the table / refresh button on every tick.
+  const loadDiscoveryJobs = async (silent = false) => {
+    if (!silent) setIsLoadingJobs(true);
     try {
       const response = await client.graphql({ query: listDiscoveryJobs });
       type ListJobsResp = Record<string, Record<string, Record<string, DiscoveryJob[]>>>;
@@ -185,9 +193,9 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
       setDiscoveryJobs(singleDocJobs);
     } catch (err) {
       console.error('Error loading discovery jobs:', err);
-      setError(`Failed to load discovery jobs: ${(err as Error).message}`);
+      if (!silent) setError(`Failed to load discovery jobs: ${(err as Error).message}`);
     } finally {
-      setIsLoadingJobs(false);
+      if (!silent) setIsLoadingJobs(false);
     }
   };
 
@@ -233,12 +241,16 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
     loadDiscoveryJobs();
   }, []);
 
-  // Timer for elapsed time display on active jobs (subscriptions handle status updates)
+  // Poll for status updates + refresh the elapsed-time display while any job is
+  // active. Real-time GraphQL subscriptions were removed with AppSync (the REST
+  // transport has no push channel), so polling is the only way active jobs
+  // advance past PENDING here.
   useEffect(() => {
     const hasActiveJobs = discoveryJobs.some((j) => j.status === 'PENDING' || j.status === 'IN_PROGRESS' || j.status === 'OPTIMIZATION_IN_PROGRESS');
     if (hasActiveJobs && !tickRef.current) {
       tickRef.current = setInterval(() => {
         setTick((t) => t + 1);
+        loadDiscoveryJobs(true);
       }, 5000);
     } else if (!hasActiveJobs && tickRef.current) {
       clearInterval(tickRef.current);
@@ -252,91 +264,6 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
     };
   }, [discoveryJobs]);
 
-  // Update a specific job in the list — FIX: spread ALL fields from the update, not just status
-  const updateDiscoveryJob = useCallback((updatedJob: DiscoveryJob) => {
-    console.log('Updating discovery job status:', updatedJob);
-    setDiscoveryJobs((currentJobs) => {
-      const jobIndex = currentJobs.findIndex((job) => job.jobId === updatedJob.jobId);
-      if (jobIndex >= 0) {
-        const newJobs = [...currentJobs];
-        const oldJob = newJobs[jobIndex];
-        // Merge ALL updated fields from subscription (not just status)
-        // Set updatedAt to now when terminal status arrives via subscription
-        // (subscription doesn't include updatedAt, so we capture it client-side)
-        const merged = { ...oldJob, ...updatedJob };
-        if (updatedJob.status === 'COMPLETED' || updatedJob.status === 'FAILED' || updatedJob.status === 'OPTIMIZATION_COMPLETED' || updatedJob.status === 'OPTIMIZATION_FAILED') {
-          merged.updatedAt = new Date().toISOString();
-        }
-        newJobs[jobIndex] = merged;
-        console.log(`Updated job ${updatedJob.jobId}: ${oldJob.status} -> ${updatedJob.status}`);
-
-        return newJobs;
-      }
-      console.warn(`Job ${updatedJob.jobId} not found in current jobs list, adding it`);
-      return [...currentJobs, updatedJob];
-    });
-  }, []);
-
-  // Set up subscriptions for active discovery jobs
-  // Use a ref to track active subscriptions and avoid teardown/recreation on status changes
-  const subscriptionsRef = useRef(new Map<string, { unsubscribe: () => void }>());
-
-  useEffect(() => {
-    const terminalStatuses = new Set(['COMPLETED', 'FAILED', 'OPTIMIZATION_COMPLETED', 'OPTIMIZATION_FAILED']);
-    const activeJobIds = new Set<string>();
-
-    discoveryJobs.forEach((job) => {
-      if (!terminalStatuses.has(job.status)) {
-        activeJobIds.add(job.jobId);
-
-        // Only create a subscription if we don't already have one for this jobId
-        if (!subscriptionsRef.current.has(job.jobId)) {
-          type GqlSubscription = {
-            subscribe: (callbacks: Record<string, unknown>) => { unsubscribe: () => void };
-          };
-          const observable = client.graphql({
-            query: onDiscoveryJobStatusChange,
-            variables: { jobId: job.jobId },
-          }) as unknown as GqlSubscription;
-          const subscription = observable.subscribe({
-              next: (data: { data?: { onDiscoveryJobStatusChange?: DiscoveryJob } }) => {
-                console.log('Discovery job status changed:', data);
-                const changedJob = data?.data?.onDiscoveryJobStatusChange;
-                if (changedJob) {
-                  updateDiscoveryJob(changedJob);
-                  return;
-                }
-                console.warn('Received subscription update but no job data, falling back to refresh');
-                loadDiscoveryJobs();
-              },
-              error: (subscriptionError: unknown) => {
-                console.error('Discovery job subscription error:', subscriptionError);
-              },
-            });
-
-          subscriptionsRef.current.set(job.jobId, subscription);
-        }
-      }
-    });
-
-    // Clean up subscriptions for jobs that reached terminal state
-    subscriptionsRef.current.forEach((subscription, jobId) => {
-      if (!activeJobIds.has(jobId)) {
-        subscription.unsubscribe();
-        subscriptionsRef.current.delete(jobId);
-      }
-    });
-  }, [JSON.stringify(discoveryJobs.map((job) => ({ jobId: job.jobId, status: job.status }))), updateDiscoveryJob]);
-
-  // Clean up all subscriptions on unmount
-  useEffect(() => {
-    return () => {
-      subscriptionsRef.current.forEach((subscription) => {
-        subscription.unsubscribe();
-      });
-      subscriptionsRef.current.clear();
-    };
-  }, []);
 
   if (!settings.DiscoveryBucket) {
     return (
@@ -462,6 +389,10 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
       setError('Please select a document file to upload');
       return;
     }
+    if (selectedVersion?.value === 'default') {
+      setError('The "default" configuration version is read-only. Create a new version to save the discovered schema.');
+      return;
+    }
 
     setIsUploading(true);
     setUploadStatus([]);
@@ -502,6 +433,7 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
           pageRanges: pageRangeStrings,
           pageLabels: pageLabelStrings,
           discoveryType,
+          saveMode,
         },
       });
 
@@ -849,17 +781,60 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
 
           <FormField
             label="Configuration Version"
-            description="Select which configuration version to save the discovered document schema to"
+            description="Select which configuration version to save the discovered document schema to, or create a new one"
           >
-            <Select
-              selectedOption={selectedVersion}
-              onChange={({ detail }) => setSelectedVersion(detail.selectedOption)}
-              options={getVersionOptions()}
-              placeholder={versions.length === 0 ? 'Loading versions...' : 'Select configuration version'}
-              disabled={isUploading || versionsLoading || versions.length === 0}
-              loadingText="Loading versions..."
+            <SpaceBetween size="xs" direction="horizontal" alignItems="end">
+              <Select
+                selectedOption={selectedVersion}
+                onChange={({ detail }) => setSelectedVersion(detail.selectedOption)}
+                options={getVersionOptions()}
+                placeholder={versions.length === 0 ? 'Loading versions...' : 'Select configuration version'}
+                disabled={isUploading || versionsLoading || versions.length === 0}
+                loadingText="Loading versions..."
+              />
+              <Button iconName="add-plus" onClick={() => setShowCreateVersionModal(true)} disabled={isUploading}>
+                Create new version
+              </Button>
+            </SpaceBetween>
+          </FormField>
+
+          {selectedVersion?.value === 'default' && (
+            <Alert type="warning">
+              The <strong>default</strong> configuration version is read-only and cannot be overwritten by discovery. Click{' '}
+              <strong>Create new version</strong> to save the discovered schema to a new version (it will be seeded from{' '}
+              <strong>default</strong>).
+            </Alert>
+          )}
+
+          <FormField
+            label="Save mode"
+            description="Choose whether discovered classes are added to the version's existing schema or replace it"
+          >
+            <RadioGroup
+              value={saveMode}
+              onChange={({ detail }) => setSaveMode(detail.value as 'augment' | 'replace')}
+              items={[
+                {
+                  value: 'augment',
+                  label: 'Add to existing schema',
+                  description: 'Keep the existing document classes and add/update discovered ones (classes with the same name are overwritten).',
+                },
+                {
+                  value: 'replace',
+                  label: 'Replace existing schema',
+                  description: 'Remove all existing document classes in the selected version, then save only the newly discovered ones.',
+                },
+              ]}
             />
           </FormField>
+
+          {saveMode === 'replace' && selectedVersion && (
+            <Alert type="warning">
+              Replace mode removes all existing document classes in version <strong>{selectedVersion.value}</strong>{' '}
+              <strong>immediately, before discovery runs</strong>, then saves the newly discovered schema. If discovery fails, the version is
+              left with no classes. This cannot be undone — consider creating a new version instead.
+            </Alert>
+          )}
 
           <ColumnLayout columns={2}>
             <FormField label="Document File" description="Select the document to analyze">
@@ -1017,7 +992,9 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
               variant="primary"
               onClick={uploadFiles}
               loading={isUploading}
-              disabled={!documentFile || !selectedVersion || isUploading || isValidatingJson}
+              disabled={
+                !documentFile || !selectedVersion || selectedVersion.value === 'default' || isUploading || isValidatingJson
+              }
             >
               {pageRanges.length > 0
                 ? `Start Discovery (${pageRanges.length} section${pageRanges.length !== 1 ? 's' : ''})`
@@ -1106,7 +1083,7 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
                 <Button
                   iconName="refresh"
                   variant="icon"
-                  onClick={loadDiscoveryJobs}
+                  onClick={() => loadDiscoveryJobs()}
                   loading={isLoadingJobs}
                   ariaLabel="Refresh discovery jobs"
                 />
@@ -1158,6 +1135,17 @@ const DiscoveryPanel = ({ discoveryType = 'classes' }: DiscoveryPanelProps = {})
             }}
           />
         }
+      />
+
+      <CreateDiscoveryVersionModal
+        visible={showCreateVersionModal}
+        onDismiss={() => setShowCreateVersionModal(false)}
+        defaultSourceVersion={selectedVersion?.value ?? null}
+        onCreated={async (versionName) => {
+          setShowCreateVersionModal(false);
+          await fetchVersions();
+          setSelectedVersion({ label: versionName, value: versionName });
+        }}
       />
     </SpaceBetween>
   );

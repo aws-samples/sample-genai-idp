@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Box, Tabs, SpaceBetween, Alert, Container, Header } from '@cloudscape-design/components';
 import Editor from '@monaco-editor/react';
 import { X_AWS_IDP_DOCUMENT_TYPE } from '../../constants/schemaConstants';
+import SchemaDiagram from './SchemaDiagram';
 
 interface SchemaClass {
   id: string;
@@ -54,6 +55,7 @@ interface SchemaPreviewTabsProps {
   classes: SchemaClass[];
   selectedClassId?: string | null;
   exportedSchemas?: ExportedSchema | ExportedSchema[] | null;
+  onSelectClass?: ((classId: string) => void) | null;
 }
 
 const getSchemaStats = (schema: SchemaClass | undefined): SchemaStats => {
@@ -160,8 +162,13 @@ const SchemaStatsContent = ({ stats }: SchemaStatsContentProps): React.JSX.Eleme
   </Box>
 );
 
-const SchemaPreviewTabs = ({ classes, selectedClassId = null, exportedSchemas = null }: SchemaPreviewTabsProps): React.JSX.Element => {
-  const [activeTabId, setActiveTabId] = useState('schema-0');
+const SchemaPreviewTabs = ({
+  classes,
+  selectedClassId = null,
+  exportedSchemas = null,
+  onSelectClass = null,
+}: SchemaPreviewTabsProps): React.JSX.Element => {
+  const [activeTabId, setActiveTabId] = useState('diagram');
 
   // Memoize selected class with shallow comparison
   const selectedClass = useMemo(() => {
@@ -212,16 +219,17 @@ const SchemaPreviewTabs = ({ classes, selectedClassId = null, exportedSchemas = 
     }));
   }, [schemas]);
 
-  if (schemas.length === 0) {
-    return (
-      <Box textAlign="center" padding="xxl">
-        <Alert type="info">Configure document types and classes to preview schemas</Alert>
-      </Box>
-    );
-  }
+  // The diagram is always available (it renders from `classes`); the JSON Schema
+  // tabs only appear once there are exportable document-type schemas.
+  const diagramTab = {
+    id: 'diagram',
+    label: 'Diagram',
+    content: <SchemaDiagram classes={classes} selectedClassId={selectedClassId} onSelectClass={onSelectClass} />,
+  };
 
-  // Combine all tabs
+  // Combine all tabs: Diagram first, then per-document-type JSON Schema, then Statistics.
   const allTabs = [
+    diagramTab,
     ...schemaTabs,
     ...(selectedClass
       ? [

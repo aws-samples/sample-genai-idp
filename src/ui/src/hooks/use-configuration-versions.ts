@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT-0
 
 import { useState, useEffect } from 'react';
-import { generateClient } from 'aws-amplify/api';
+import { generateClient } from '../api/client-shim';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import {
   getConfigVersions,
@@ -214,19 +214,23 @@ const useConfigurationVersions = (): UseConfigurationVersionsReturn => {
     fetchVersions();
   }, []);
 
-  // Utility function to generate version options for Select components
+  // Utility function to generate version options for Select components.
+  // Sorted alphanumerically by version name (numeric-aware, so "v2" sorts
+  // before "v10") to give the picklists a stable, predictable order.
   const getVersionOptions = (): VersionOption[] => {
-    return versions.map((version) => {
-      const truncatedDescription =
-        version.description && version.description.length > 50 ? `${version.description.substring(0, 50)}...` : version.description;
+    return [...versions]
+      .sort((a, b) => a.versionName.localeCompare(b.versionName, undefined, { numeric: true, sensitivity: 'base' }))
+      .map((version) => {
+        const truncatedDescription =
+          version.description && version.description.length > 50 ? `${version.description.substring(0, 50)}...` : version.description;
 
-      return {
-        label: version.isActive
-          ? `${version.versionName} (Active)${truncatedDescription ? ` - ${truncatedDescription}` : ''}`
-          : `${version.versionName}${truncatedDescription ? ` - ${truncatedDescription}` : ''}`,
-        value: version.versionName,
-      };
-    });
+        return {
+          label: version.isActive
+            ? `${version.versionName} (Active)${truncatedDescription ? ` - ${truncatedDescription}` : ''}`
+            : `${version.versionName}${truncatedDescription ? ` - ${truncatedDescription}` : ''}`,
+          value: version.versionName,
+        };
+      });
   };
 
   return {

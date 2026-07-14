@@ -312,9 +312,23 @@ class TestAssessmentEnabledProperty(unittest.TestCase):
             mock_invoke_model.assert_not_called()
 
     def test_assessment_missing_config_section(self):
-        """Test assessment runs when assessment config section is missing."""
-        # Configure without assessment section
-        config = {"classes": self.base_config["classes"]}
+        """Assessment defaults to enabled when the assessment section is absent.
+
+        In config v0.6 the confidence prompt lives under
+        ``extraction.confidence.task_prompt`` (the legacy ``assessment.task_prompt``
+        is migrated there on read). With no ``assessment`` section at all — but a
+        confidence prompt present — the service must still run (enabled is the
+        default), which is what this asserts.
+        """
+        # No `assessment` section; confidence prompt supplied in its v0.6 home.
+        config = {
+            "classes": self.base_config["classes"],
+            "extraction": {
+                "confidence": {
+                    "task_prompt": self.base_config["assessment"]["task_prompt"],
+                },
+            },
+        }
 
         # Initialize assessment service
         idp_config = IDPConfig.model_validate(config)

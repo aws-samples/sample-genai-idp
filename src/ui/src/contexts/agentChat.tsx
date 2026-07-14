@@ -2,15 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import type { AgentChatState, AgentChatContextValue, ChatMessage } from '../types/agent-chat';
+import type { AgentChatState, AgentChatContextValue, ChatMessage, ChatMode } from '../types/agent-chat';
 
 const AgentChatContext = createContext<AgentChatContextValue | null>(null);
 
 interface AgentChatProviderProps {
   children: React.ReactNode;
+  initialMode?: ChatMode;
 }
 
-export const AgentChatProvider = ({ children }: AgentChatProviderProps): React.JSX.Element => {
+export const AgentChatProvider = ({ children, initialMode = 'chat' }: AgentChatProviderProps): React.JSX.Element => {
   // State for the agent chat
   const [agentChatState, setAgentChatState] = useState<AgentChatState>({
     messages: [], // Current chat messages
@@ -22,6 +23,7 @@ export const AgentChatProvider = ({ children }: AgentChatProviderProps): React.J
     lastMessageCount: 0,
     enableCodeIntelligence: true,
     inputValue: '',
+    mode: initialMode,
   });
 
   // Function to update agent chat state
@@ -34,7 +36,7 @@ export const AgentChatProvider = ({ children }: AgentChatProviderProps): React.J
 
   // Function to reset agent chat state (new session)
   const resetAgentChatState = useCallback(() => {
-    setAgentChatState({
+    setAgentChatState((prevState) => ({
       messages: [],
       sessionId: uuidv4(),
       isLoading: false,
@@ -44,7 +46,8 @@ export const AgentChatProvider = ({ children }: AgentChatProviderProps): React.J
       lastMessageCount: 0,
       enableCodeIntelligence: true,
       inputValue: '',
-    });
+      mode: prevState.mode,
+    }));
   }, []);
 
   // Function to load a specific session

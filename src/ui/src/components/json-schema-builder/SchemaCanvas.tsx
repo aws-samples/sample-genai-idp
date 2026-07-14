@@ -62,6 +62,7 @@ interface SchemaCanvasProps {
   onReorder: (oldIndex: number, newIndex: number) => void;
   onNavigateToClass?: ((classId: string) => void) | null;
   onNavigateToAttribute?: ((classId: string, attributeName: string | null) => void) | null;
+  onAddAttribute?: (() => void) | null;
   availableClasses?: AvailableClass[];
   isRuleSchema?: boolean;
 }
@@ -343,6 +344,7 @@ const SchemaCanvas = ({
   onReorder,
   onNavigateToClass = null,
   onNavigateToAttribute = null,
+  onAddAttribute = null,
   availableClasses = [],
   isRuleSchema = false,
 }: SchemaCanvasProps) => {
@@ -394,7 +396,14 @@ const SchemaCanvas = ({
       <SpaceBetween size="s">
         {attributes.length === 0 ? (
           <Box textAlign="center" padding="l" color="text-body-secondary">
-            No {attributeLabel}s defined. Click &quot;Add {isRuleSchema ? 'Rule' : 'Attribute'}&quot; to get started.
+            <SpaceBetween size="s" alignItems="center">
+              <span>No {attributeLabel}s defined yet.</span>
+              {onAddAttribute && (
+                <Button iconName="add-plus" onClick={onAddAttribute}>
+                  {isRuleSchema ? 'Add first rule' : 'Add first attribute'}
+                </Button>
+              )}
+            </SpaceBetween>
           </Box>
         ) : (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>

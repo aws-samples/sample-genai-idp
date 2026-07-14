@@ -39,6 +39,12 @@ logger = logging.getLogger(__name__)
 # Minimum Jaccard token-overlap for a fuzzy single-line match.
 _FUZZY_MATCH_THRESHOLD = 0.6
 
+# Minimum character-level Levenshtein similarity for the last-resort fuzzy tier
+# (matches the evaluation module's default FUZZY threshold). Catches OCR noise /
+# near-misses (e.g. "Acme Corp" vs "Acrne Corp"), NOT reformatting — that is
+# handled by format variants + type-aware equality below.
+_LEVENSHTEIN_MATCH_THRESHOLD = 0.8
+
 # Cap on how many adjacent lines a single value may span (multi-line union).
 # Keeps unions tight; multi-line addresses/cells are typically 2-4 lines.
 _MAX_SPAN_LINES = 6
@@ -71,25 +77,263 @@ def _jaccard(a: set, b: set) -> float:
     return inter / len(a | b)
 
 
+# --------------------------------------------------------------------------- #
+# Format-aware matching helpers
+#
+# Extraction often canonicalizes a value to a schema-prescribed format that does
+# NOT match how it is rendered in the document (and thus in OCR text): a date
+# extracted as "2022-04-04" appears as "04/04/2022"; an amount "1234.00" appears
+# as "$1,234.00"; a phone "+15551234567" appears as "(555) 123-4567". Plain text
+# matching then fails and the field gets no geometry. These helpers bridge that
+# gap two ways: (1) type-aware equality — parse both the value and an OCR line as
+# the same logical type (date/number) and compare the parsed forms; (2) value
+# variants — render the value in the common surface forms so the existing
+# exact/substring/span matcher can hit. Both are precision-preserving: a parse
+# must succeed on BOTH sides, so unrelated text never spuriously matches.
+# --------------------------------------------------------------------------- #
+
+# Hint values describing the logical type of a field, used to choose which
+# format bridges to attempt. Resolved from the JSON-Schema (type/format) when
+# available, else inferred from the value itself.
+HINT_DATE = "date"
+HINT_NUMBER = "number"
+HINT_PHONE = "phone"
+HINT_STRING = "string"
+
+
+def _parse_date(text: Any):
+    """Parse a string as a date, returning a ``date`` or None.
+
+    Uses dateutil when available (handles most human formats). Conservative:
+    requires the string to actually contain digits so plain words ("March")
+    or arbitrary tokens don't parse into today's date.
+    """
+    if text is None:
+        return None
+    s = str(text).strip()
+    if not s or not any(ch.isdigit() for ch in s):
+        return None
+    # A real date needs a separator or a month name — otherwise a bare number
+    # like "1234.00" or "100" would parse as a date (dateutil is permissive).
+    if not (re.search(r"[/\-.:]", s) or re.search(r"[A-Za-z]", s)):
+        return None
+    try:
+        from dateutil import parser as _dateparser
+
+        if len(re.sub(r"\D", "", s)) < 4:
+            return None
+        return _dateparser.parse(s, fuzzy=False).date()
+    except Exception:  # noqa: BLE001 - any parse failure -> not a date
+        return None
+
+
+def _parse_number(text: Any) -> Optional[float]:
+    """Parse a string as a number, stripping currency/commas/parens, or None."""
+    if text is None:
+        return None
+    s = str(text).strip()
+    if not s or not any(ch.isdigit() for ch in s):
+        return None
+    # Accounting negatives: (1,234.00) -> -1234.00
+    neg = s.startswith("(") and s.endswith(")")
+    cleaned = re.sub(r"[,$%\s()]", "", s)
+    # Reject things that aren't basically a number (e.g. "12 Main St" -> "12MainSt").
+    if not re.fullmatch(r"[-+]?\d*\.?\d+", cleaned):
+        return None
+    try:
+        val = float(cleaned)
+        return -val if neg else val
+    except (ValueError, TypeError):
+        return None
+
+
+def _digits(text: Any) -> str:
+    """All digits in a string (for phone-number comparison)."""
+    return re.sub(r"\D", "", str(text)) if text is not None else ""
+
+
+def _levenshtein_sim(a: str, b: str) -> float:
+    """Character-level Levenshtein similarity (0-1), reusing the evaluation module.
+
+    Returns 0.0 on import failure (the tier is then simply inert). Guarded so an
+    empty/degenerate string never claims a spurious match.
+    """
+    if not a or not b:
+        return 0.0
+    try:
+        from idp_common.evaluation.text_matching import fuzz_score
+
+        return fuzz_score(a, b)
+    except Exception:  # noqa: BLE001 - keep grounding resilient if eval is absent
+        return 0.0
+
+
+def _infer_hint(value: Any) -> str:
+    """Infer a field's logical type from the value itself (heuristic fallback).
+
+    Order matters:
+    - PHONE before NUMBER: a phone-shaped value ("+1 (555) 123-4567") would parse
+      as a number and then miss digit-suffix matching against "(555) 123-4567".
+      Requires 7-15 digits AND phone punctuation (+, (), -, space) and nothing
+      else, so a bare integer falls through to NUMBER.
+    - NUMBER before DATE: a genuine date ("04/04/2022") fails the strict numeric
+      regex, while a bare number ("1234.00") must NOT be mistaken for a date
+      (dateutil is permissive).
+    """
+    s = str(value).strip() if value is not None else ""
+    digits = _digits(value)
+    # PHONE: 7-15 digits with phone punctuation and nothing else, AND not a date
+    # ("2022-04-04" is digits+dashes but is a date) and not a plain decimal.
+    if (
+        7 <= len(digits) <= 15
+        and len(digits) == len(re.sub(r"[\s\-().+]", "", s))
+        and re.search(r"[()+]|\d[\s\-]\d", s)
+        and "." not in s
+        and _parse_date(value) is None
+    ):
+        return HINT_PHONE
+    if _parse_number(value) is not None:
+        return HINT_NUMBER
+    if _parse_date(value) is not None:
+        return HINT_DATE
+    return HINT_STRING
+
+
+# JSON-Schema 'format' values that imply a date.
+_SCHEMA_DATE_FORMATS = {"date", "date-time", "datetime"}
+_SCHEMA_NUMBER_TYPES = {"number", "integer"}
+
+
+def _resolve_hint(value: Any, schema_hint: Optional[Dict[str, Any]]) -> str:
+    """Resolve a field's logical type: JSON-Schema hint first, else value-based.
+
+    ``schema_hint`` is the field's JSON-Schema fragment (``{"type":..,"format":..}``).
+    When it names a date/number type we trust it; otherwise (or absent) we infer
+    from the value so any config benefits without declaring formats.
+    """
+    if isinstance(schema_hint, dict):
+        fmt = str(schema_hint.get("format", "")).lower()
+        typ = str(schema_hint.get("type", "")).lower()
+        if fmt in _SCHEMA_DATE_FORMATS:
+            return HINT_DATE
+        if typ in _SCHEMA_NUMBER_TYPES:
+            return HINT_NUMBER
+        # A string field whose value still looks like a date/number/phone is
+        # bridged via the value-based inference (the schema didn't forbid it).
+    return _infer_hint(value)
+
+
+def _value_variants(value: Any, hint: str) -> List[str]:
+    """Surface-form renderings of ``value`` to try against OCR text.
+
+    Always includes the value as-is. For dates/numbers, adds the common ways the
+    same logical value is written in documents so the exact/substring matcher can
+    hit despite reformatting. All variants are returned RAW (the caller normalizes).
+    """
+    variants: List[str] = [str(value)] if value is not None else []
+    if hint == HINT_DATE:
+        d = _parse_date(value)
+        if d is not None:
+            for fmt in (
+                "%m/%d/%Y",
+                "%-m/%-d/%Y",
+                "%d/%m/%Y",
+                "%m-%d-%Y",
+                "%d-%m-%Y",
+                "%Y/%m/%d",
+                "%Y-%m-%d",
+                "%B %d, %Y",
+                "%b %d, %Y",
+                "%d %B %Y",
+                "%d %b %Y",
+                "%m/%d/%y",
+                "%-m/%-d/%y",
+            ):
+                try:
+                    variants.append(d.strftime(fmt))
+                except ValueError:
+                    continue
+    elif hint == HINT_NUMBER:
+        n = _parse_number(value)
+        if n is not None:
+            # Integer-valued -> also a no-decimal form; always a thousands form.
+            as_int = int(n) if n == int(n) else None
+            cores = []
+            if as_int is not None:
+                cores += [f"{as_int}", f"{as_int:,}"]
+            cores += [f"{n:.2f}", f"{abs(n):,.2f}", f"{n}"]
+            for core in cores:
+                variants.append(core)
+                variants.append(f"${core}")
+    return variants
+
+
+def _type_equal(value: Any, line_text: Any, hint: str) -> bool:
+    """True when ``value`` and an OCR line are the SAME logical value by type.
+
+    This is the robust bridge for reformatting (e.g. 2022-04-04 == 04/04/2022),
+    where character/­token similarity is low but the parsed values are identical.
+    Requires a successful parse on BOTH sides, so it never matches unrelated text.
+    """
+    if hint == HINT_DATE:
+        dv = _parse_date(value)
+        return dv is not None and dv == _parse_date(line_text)
+    if hint == HINT_NUMBER:
+        nv = _parse_number(value)
+        nl = _parse_number(line_text)
+        return nv is not None and nl is not None and nv == nl
+    if hint == HINT_PHONE:
+        dv = _digits(value)
+        dl = _digits(line_text)
+        if len(dv) < 7 or len(dl) < 7:
+            return False
+        # Exact, or one is a suffix of the other (country-code prefix differs,
+        # e.g. "+1 555 123 4567" vs "(555) 123-4567"). Bounded to phone lengths.
+        return dv == dl or (
+            len(dl) <= 15 and len(dv) <= 15 and (dv.endswith(dl) or dl.endswith(dv))
+        )
+    return False
+
+
 def load_page_ocr_data(
-    pages: Dict[str, Any], page_ids: List[str]
+    pages: Dict[str, Any], page_ids: List[str], page_offset: int = 0
 ) -> Dict[int, Dict[str, Any]]:
     """
-    Load ``pageData.json`` for each page in ``page_ids`` keyed by 1-indexed page number.
+    Load ``pageData.json`` for each page in ``page_ids`` keyed by its **1-based
+    SECTION-RELATIVE page number** (NOT the document-absolute page id).
+
+    The returned key becomes ``geometry.page`` on every grounded field, and the UI
+    navigates with ``sectionPageIds[geometry.page - 1]`` — i.e. it expects page 1 to
+    be the FIRST page of the section. Keying by ``int(page_id)`` (document-absolute)
+    made a section that starts at doc page 2 emit ``page: 2`` for its first page, so
+    the viewer jumped to the wrong page (off by the section's start offset). Keying
+    by position within the section fixes this for every grounding path (ocr_only,
+    llm_grounded, standalone Assessment step, and the sharded agentic path).
+
+    ``page_ids`` MUST be in section reading order (callers pass ``sorted_page_ids``).
+    ``page_offset`` shifts the section-relative numbering for callers that pass only
+    a *slice* of the section's pages — the sharded path passes
+    ``sorted_page_ids[page_start:page_end]`` with ``page_offset=page_start`` so a
+    shard's pages still number relative to the WHOLE section (e.g. a shard over
+    section pages 6-10 yields keys 6-10, not 1-5).
 
     Pages without an ``ocr_page_data_uri`` (older documents) or whose artifact cannot
-    be read are simply omitted from the result, so callers degrade gracefully.
+    be read are simply omitted from the result, so callers degrade gracefully — the
+    section-relative numbering of the surviving pages is unaffected (it is derived
+    from the page's position in ``page_ids``, not from how many loaded).
 
     Args:
         pages: Document.pages mapping (page_id -> Page).
-        page_ids: Page IDs belonging to the section (1-indexed strings).
+        page_ids: Page IDs belonging to the section (or shard), in reading order.
+        page_offset: 0-based offset of ``page_ids[0]`` within the full section.
 
     Returns:
-        Mapping of ``int(page_id)`` -> parsed pageData dict, only for pages that have
-        usable data.
+        Mapping of ``section-relative 1-based page number`` -> parsed pageData dict,
+        only for pages that have usable data.
     """
     result: Dict[int, Dict[str, Any]] = {}
-    for page_id in page_ids:
+    for local_idx, page_id in enumerate(page_ids):
+        section_page = page_offset + local_idx + 1  # 1-based, section-relative
         page = pages.get(page_id)
         if page is None:
             continue
@@ -104,10 +348,7 @@ def load_page_ocr_data(
             )
             continue
         if isinstance(page_data, dict):
-            try:
-                result[int(page_id)] = page_data
-            except (TypeError, ValueError):
-                logger.warning(f"Non-numeric page_id '{page_id}' skipped for grounding")
+            result[section_page] = page_data
     return result
 
 
@@ -158,21 +399,100 @@ def _line_box(line: Dict[str, Any]) -> Optional[Dict[str, float]]:
 _TIER_EXACT = 1
 _TIER_SUBSTRING = 2
 _TIER_SPAN = 3
-_TIER_PARTIAL = 4
-_TIER_FUZZY = 5
+# Type-aware equality (date/number/phone parse to the same value) — high
+# precision (both sides must parse), ranks just below direct text coverage and
+# above partial/token/char fuzzy. This is what bridges format reformatting
+# (e.g. 2022-04-04 == 04/04/2022) that text similarity cannot.
+_TIER_TYPED = 4
+_TIER_PARTIAL = 5
+_TIER_FUZZY = 6
+# Character-level Levenshtein near-miss (OCR noise) — last resort.
+_TIER_LEVENSHTEIN = 7
+
+# geometry_source tags for the format-bridged tiers (distinct from "ocr" so they
+# are auditable). _TIER_TYPED / variant matches -> "ocr-normalized";
+# _TIER_LEVENSHTEIN -> "ocr-fuzzy".
+_SOURCE_NORMALIZED = "ocr-normalized"
+_SOURCE_FUZZY = "ocr-fuzzy"
+
+
+def _dedup_norm_variants(variants: Optional[List[str]], norm_value: str) -> List[str]:
+    """Normalize + dedupe a value's format variants, preserving order.
+
+    ``variants[0]`` (the primary value) stays first so callers can tag any
+    non-primary hit as a format-normalized match.
+    """
+    src = variants if variants else [norm_value]
+    seen: set = set()
+    out: List[str] = []
+    for v in src:
+        nv = _normalize(v)
+        if nv and nv not in seen:
+            seen.add(nv)
+            out.append(nv)
+    return out
+
+
+def _ensure_page_indexes(page_data: Dict[str, Any]) -> Dict[str, List[Dict[str, Any]]]:
+    """Build (once, cached on ``page_data``) the normalized-line list and the
+    EXACT-match index, returning the index.
+
+    Grounding calls into a page once per extracted value (a 300-row × 6-col table
+    → 1,800 values). Without caching, every call re-normalized all ~370 lines —
+    O(values × lines) work that pushed per-shard grounding of a large table to
+    ~60s and toward the shard Lambda's 900s wall. The normalized lines and an
+    ``exact-text -> [lines]`` index are computed once and reused; the EXACT index
+    turns the common table-cell case (value == one OCR line verbatim) into an O(1)
+    dict hit instead of a linear scan + fuzzy ladder. Cached under private keys the
+    caller never serializes.
+    """
+    idx = page_data.get("__exact_index_cache__")
+    if idx is not None:
+        return idx
+    lines = page_data.get("lines")
+    norm_lines: List[Tuple[str, Dict[str, Any]]] = (
+        [
+            (_normalize(line.get("text")), line)
+            for line in lines
+            if isinstance(line, dict)
+        ]
+        if isinstance(lines, list)
+        else []
+    )
+    page_data["__norm_lines_cache__"] = norm_lines
+    idx = {}
+    for nt, ln in norm_lines:
+        if nt:
+            idx.setdefault(nt, []).append(ln)
+    page_data["__exact_index_cache__"] = idx
+    return idx
 
 
 def _collect_candidates_in_page(
-    norm_value: str, value_tokens: set, page_data: Dict[str, Any], page_num: int
+    norm_value: str,
+    value_tokens: set,
+    page_data: Dict[str, Any],
+    page_num: int,
+    norm_variants: Optional[List[str]] = None,
+    raw_value: Any = None,
+    hint: str = HINT_STRING,
 ) -> List[Tuple[int, Dict[str, Any], str, Optional[float]]]:
     """
     Collect *all* matching OCR lines on one page, each tagged with a precision tier.
 
-    Returns a list of ``(tier, geometry, geometry_source, ocr_confidence)`` where
-    ``geometry`` is ``{"boundingBox": {...0-1...}, "page": page_num}``. The caller
-    picks the best tier globally and disambiguates ties spatially — critical for
-    repeated values (e.g. the same transaction amount on several rows), where
-    returning the first match would collapse every row onto one line.
+    Matching layers (best tier wins; the caller filters to the most precise):
+      1. EXACT/SUBSTRING/PARTIAL on the value AND its format variants (``norm_variants``)
+         — variants bridge reformatting (e.g. "04/04/2022" for value "2022-04-04").
+         A variant hit is tagged ``ocr-normalized``.
+      2. SPAN — value text reconstructed across consecutive lines.
+      3. TYPED — date/number/phone parse to the SAME logical value (``hint``); the
+         robust bridge for reformatting that text similarity misses. Tagged
+         ``ocr-normalized``.
+      4. FUZZY — token overlap (existing).
+      5. LEVENSHTEIN — character similarity >= threshold (OCR noise). Tagged
+         ``ocr-fuzzy``.
+
+    Returns ``(tier, geometry, geometry_source, ocr_confidence)`` tuples.
     """
     if not norm_value or not page_data.get("geometryAvailable"):
         return []
@@ -181,41 +501,85 @@ def _collect_candidates_in_page(
     if not isinstance(lines, list) or not lines:
         return []
 
-    # Pre-compute normalized line text once.
-    norm_lines: List[Tuple[str, Dict[str, Any]]] = []
-    for line in lines:
-        if isinstance(line, dict):
-            norm_lines.append((_normalize(line.get("text")), line))
+    # Variant forms to text-match against (normalized, deduped, non-empty). The
+    # primary value is variant[0]; any OTHER variant that hits is a normalized
+    # (format-bridged) match and is tagged accordingly.
+    norm_variant_list = _dedup_norm_variants(norm_variants, norm_value)
+
+    # Normalized lines + EXACT index are built (once) and cached on page_data.
+    _ensure_page_indexes(page_data)
+    norm_lines = page_data.get("__norm_lines_cache__") or []
 
     candidates: List[Tuple[int, Dict[str, Any], str, Optional[float]]] = []
 
     for norm_text, line in norm_lines:
         if not norm_text:
             continue
-        if norm_text == norm_value:
-            tier = _TIER_EXACT
-        elif norm_value in norm_text:
-            # Whole value covered by one line.
-            tier = _TIER_SUBSTRING
-        elif norm_text in norm_value:
-            # A single line is a fragment of a longer value (partial coverage).
-            tier = _TIER_PARTIAL
-        else:
+        best_tier = None
+        is_variant_only = True
+        for i, nv in enumerate(norm_variant_list):
+            if norm_text == nv:
+                tier = _TIER_EXACT
+            elif nv in norm_text:
+                tier = _TIER_SUBSTRING
+            elif norm_text in nv:
+                tier = _TIER_PARTIAL
+            else:
+                continue
+            if best_tier is None or tier < best_tier:
+                best_tier = tier
+                # primary value (i==0) keeps real "ocr" provenance; a non-primary
+                # variant hit is a format-normalized match.
+                is_variant_only = i != 0
+        if best_tier is not None:
+            src = _SOURCE_NORMALIZED if is_variant_only else None
+            match = _build_match(line, page_num, best_tier, src)
+            if match is not None:
+                candidates.append(match)
             continue
-        match = _build_match(line, page_num, tier)
-        if match is not None:
-            candidates.append(match)
 
-    # Multi-line spans (value == concatenation of consecutive lines).
-    candidates.extend(_collect_span_candidates(norm_value, norm_lines, page_num))
+        # TYPED equality: same logical date/number/phone despite formatting.
+        if hint in (HINT_DATE, HINT_NUMBER, HINT_PHONE) and _type_equal(
+            raw_value, line.get("text"), hint
+        ):
+            match = _build_match(line, page_num, _TIER_TYPED, _SOURCE_NORMALIZED)
+            if match is not None:
+                candidates.append(match)
 
-    # Token-overlap fuzzy: include every line at/above the threshold (only matters
-    # when no higher-precision tier matched, since the caller filters by best tier).
+    # Tier-aware early-out. The caller keeps only the MOST PRECISE tier that
+    # matched, so a pass that can only produce a WORSE tier than what we already
+    # have is pure waste. Tiers: EXACT=1 < SUBSTRING=2 < SPAN=3 < TYPED=4 <
+    # PARTIAL=5 < FUZZY=6 < LEVENSHTEIN=7.
+    #   • SPAN (3): skip only if we already have EXACT/SUBSTRING (≤ SPAN). A mere
+    #     PARTIAL/TYPED (>SPAN) must NOT skip it — a multi-line span can still win.
+    #   • FUZZY/LEVENSHTEIN (6/7): skip whenever ANY candidate exists — they can
+    #     never beat tiers 1-5. Skipping these O(lines) sweeps is the bulk of the
+    #     speed-up for real documents.
+    best_so_far = min((t for t, *_ in candidates), default=None)
+    if best_so_far is None or best_so_far > _TIER_SPAN:
+        # Multi-line spans (value == concatenation of consecutive lines).
+        candidates.extend(_collect_span_candidates(norm_value, norm_lines, page_num))
+        best_so_far = min((t for t, *_ in candidates), default=None)
+
+    if candidates:
+        # Have at least a PARTIAL/TYPED/SPAN hit → fuzzy/Levenshtein can't improve.
+        return candidates
+
+    # Token-overlap fuzzy.
     for norm_text, line in norm_lines:
         if not norm_text:
             continue
         if _jaccard(value_tokens, _tokens(norm_text)) >= _FUZZY_MATCH_THRESHOLD:
             match = _build_match(line, page_num, _TIER_FUZZY)
+            if match is not None:
+                candidates.append(match)
+
+    # Character-level Levenshtein near-miss (last resort; OCR noise).
+    for norm_text, line in norm_lines:
+        if not norm_text:
+            continue
+        if _levenshtein_sim(norm_value, norm_text) >= _LEVENSHTEIN_MATCH_THRESHOLD:
+            match = _build_match(line, page_num, _TIER_LEVENSHTEIN, _SOURCE_FUZZY)
             if match is not None:
                 candidates.append(match)
 
@@ -273,13 +637,23 @@ def _collect_span_candidates(
 
 
 def _build_match(
-    line: Dict[str, Any], page_num: int, tier: int
+    line: Dict[str, Any],
+    page_num: int,
+    tier: int,
+    source_override: Optional[str] = None,
 ) -> Optional[Tuple[int, Dict[str, Any], str, Optional[float]]]:
-    """Build a candidate tuple from a single OCR line, or None if it lacks geometry."""
+    """Build a candidate tuple from a single OCR line, or None if it lacks geometry.
+
+    ``source_override`` tags format-bridged matches ("ocr-normalized"/"ocr-fuzzy")
+    distinctly; otherwise provenance is "ocr"/"ocr-paragraph" from the line.
+    """
     box = _line_box(line)
     if box is None:
         return None
-    source = "ocr-paragraph" if line.get("geometrySource") == "paragraph" else "ocr"
+    if source_override is not None:
+        source = source_override
+    else:
+        source = "ocr-paragraph" if line.get("geometrySource") == "paragraph" else "ocr"
     conf = line.get("confidence")
     ocr_conf = conf / 100.0 if isinstance(conf, (int, float)) else None
     return (tier, {"boundingBox": box, "page": page_num}, source, ocr_conf)
@@ -313,32 +687,52 @@ def _ref_from_llm_geometry(
     return (page_val, center[0], center[1])
 
 
+def _reading_order_key(
+    candidate: Tuple[int, Dict[str, Any], str, Optional[float]],
+) -> Tuple[int, float, float]:
+    """Sort key placing candidates in document reading order: page, top, left."""
+    geometry = candidate[1]
+    page = geometry.get("page", 0)
+    bb = geometry.get("boundingBox") if isinstance(geometry, dict) else None
+    if isinstance(bb, dict):
+        return (page, bb.get("top", 0.0), bb.get("left", 0.0))
+    return (page, 0.0, 0.0)
+
+
 def match_value_to_geometry(
     value: Any,
     page_data_by_page: Dict[int, Dict[str, Any]],
     preferred_geometry: Optional[Dict[str, Any]] = None,
+    occurrence_index: Optional[int] = None,
+    schema_hint: Optional[Dict[str, Any]] = None,
 ) -> Optional[Tuple[Dict[str, Any], str, Optional[float]]]:
     """
     Match an extracted value to a real OCR line across the section's pages.
 
     Collects every candidate line across all pages, keeps only the best (most
-    precise) tier, and resolves ties **spatially** using the LLM-estimated box as a
-    reference: among equally-good text matches, the one whose center is nearest the
-    LLM box wins. This is what keeps repeated values (e.g. identical transaction
-    amounts on different rows) from all collapsing onto the first matching line — the
-    LLM placed each row's box at a roughly-correct, distinct position, so proximity
-    selects the right occurrence.
+    precise) tier, and resolves ties between equally-good text matches (e.g. the
+    same transaction amount on several rows). Two disambiguation strategies:
 
-    Safe fallback: if multiple candidates remain and there is **no** usable LLM
-    reference box to disambiguate (or the reference is on a different page than all
-    candidates), the match is treated as ambiguous and None is returned, so the
-    caller keeps the existing LLM-estimated box rather than risk the wrong one.
+    - **Row order** (``occurrence_index`` set — the ``ocr_only`` geometry mode):
+      candidates are sorted into document reading order (page, then top, then
+      left) and the one at ``occurrence_index`` is chosen. The i-th assessed list
+      item is the i-th extracted row, and OCR lines read top-to-bottom, so the
+      i-th occurrence of a repeated value is that row's. Needs no LLM box.
+    - **Spatial proximity** (``preferred_geometry`` set, ``occurrence_index`` None —
+      the ``llm_grounded`` mode): the candidate whose center is
+      nearest the LLM-estimated box wins.
+
+    Safe fallback: if multiple candidates remain and there is no usable
+    disambiguator (no ``occurrence_index`` and no usable LLM reference), the match
+    is treated as ambiguous and None is returned.
 
     Args:
         value: The extracted attribute value (scalar; coerced to string).
         page_data_by_page: Mapping of 1-indexed page number -> pageData dict.
-        preferred_geometry: The LLM-estimated ``{boundingBox, page}`` for this field,
-            used as the spatial/page reference.
+        preferred_geometry: The LLM-estimated ``{boundingBox, page}`` reference
+            (used only for spatial disambiguation; ignored when occurrence_index set).
+        occurrence_index: 0-based position of this value among repeated occurrences,
+            used for row-order disambiguation. Out-of-range clamps to the last.
 
     Returns:
         ``(geometry, geometry_source, ocr_confidence)`` where ``geometry`` is
@@ -353,16 +747,52 @@ def match_value_to_geometry(
         return None
     value_tokens = _tokens(norm_value)
 
+    # Resolve the logical type (schema hint first, else infer) and build the
+    # format variants to text-match against. Bridges reformatting like
+    # "2022-04-04" (value) vs "04/04/2022" (document).
+    hint = _resolve_hint(value, schema_hint)
+    variants = _value_variants(value, hint)
+
     ref = _ref_from_llm_geometry(preferred_geometry)
 
-    # Collect candidates across all pages.
+    norm_variant_list = _dedup_norm_variants(variants, norm_value)
+
+    # FAST PATH — EXACT index lookup across ALL pages first. EXACT (tier 1) is the
+    # best possible tier, so if any page's O(1) index has a verbatim hit for a
+    # variant we take those candidates and NEVER run the per-page O(lines) scan +
+    # fuzzy/Levenshtein sweeps. This is what keeps grounding a 300-row table fast:
+    # every cell value equals its OCR line verbatim, so it's a dict hit, not a scan
+    # over ~1,800 lines × the full fuzzy ladder. Falls through to the full scan only
+    # when nothing matched exactly (reformatting / OCR noise).
     candidates: List[Tuple[int, Dict[str, Any], str, Optional[float]]] = []
     for page_num in sorted(page_data_by_page):
-        candidates.extend(
-            _collect_candidates_in_page(
-                norm_value, value_tokens, page_data_by_page[page_num], page_num
+        page_data = page_data_by_page[page_num]
+        if not isinstance(page_data, dict) or not page_data.get("geometryAvailable"):
+            continue
+        idx = _ensure_page_indexes(page_data)
+        for i, nv in enumerate(norm_variant_list):
+            for ln in idx.get(nv, ()):
+                m = _build_match(
+                    ln, page_num, _TIER_EXACT, None if i == 0 else _SOURCE_NORMALIZED
+                )
+                if m is not None:
+                    candidates.append(m)
+    if candidates:
+        best_tier = _TIER_EXACT  # by construction
+    else:
+        # Full (slower) collection across all pages: substring/span/typed/fuzzy.
+        for page_num in sorted(page_data_by_page):
+            candidates.extend(
+                _collect_candidates_in_page(
+                    norm_value,
+                    value_tokens,
+                    page_data_by_page[page_num],
+                    page_num,
+                    norm_variants=variants,
+                    raw_value=value,
+                    hint=hint,
+                )
             )
-        )
 
     if not candidates:
         return None
@@ -377,9 +807,22 @@ def match_value_to_geometry(
         return (geometry, source, ocr_conf)
 
     # Ambiguous: multiple equally-good text matches (e.g. a value repeated across
-    # table rows). Disambiguate by proximity to the LLM-estimated box, which sits at
-    # a roughly-correct distinct position per occurrence. Prefer candidates on the
-    # LLM's page; among those, pick the nearest box center.
+    # table rows).
+    #
+    # Row-order disambiguation (ocr_only mode): pick the occurrence_index-th match
+    # in document reading order. This is deterministic and needs no LLM box — the
+    # i-th assessed row maps to the i-th occurrence top-to-bottom.
+    if occurrence_index is not None:
+        ordered = sorted(best, key=_reading_order_key)
+        idx = occurrence_index if occurrence_index < len(ordered) else len(ordered) - 1
+        if idx < 0:
+            idx = 0
+        _, geometry, source, ocr_conf = ordered[idx]
+        return (geometry, source, ocr_conf)
+
+    # Spatial disambiguation (llm_grounded mode): proximity to the
+    # LLM-estimated box, which sits at a roughly-correct distinct position per
+    # occurrence. Prefer candidates on the LLM's page; among those, nearest center.
     if ref is not None:
         ref_page, ref_cx, ref_cy = ref
         on_ref_page = [c for c in best if c[1].get("page") == ref_page]
@@ -396,13 +839,44 @@ def match_value_to_geometry(
             _, geometry, source, ocr_conf = nearest
             return (geometry, source, ocr_conf)
 
-    # No usable LLM reference to disambiguate -> ambiguous; keep the LLM box.
-    logger.debug(
-        "Ambiguous OCR grounding for value '%s' (%d candidates, no usable reference); "
-        "keeping LLM box",
-        norm_value,
-        len(best),
-    )
+    # A usable LLM reference was supplied (llm_grounded mode) but
+    # couldn't disambiguate -> stay ambiguous and KEEP the LLM box (return None),
+    # preserving prior behavior.
+    if ref is not None:
+        logger.debug(
+            "Ambiguous OCR grounding for '%s' (%d candidates, LLM ref didn't "
+            "resolve); keeping LLM box",
+            norm_value,
+            len(best),
+        )
+        return None
+
+    # No disambiguator at all (ocr_only scalar field whose value legitimately
+    # appears on several lines, e.g. a statement date printed in multiple places).
+    # A scalar's value is identical wherever it appears, so the FIRST occurrence in
+    # reading order is a sound, deterministic choice — better than no geometry.
+    # (List items never reach here: they always pass an occurrence_index.)
+    first = sorted(best, key=_reading_order_key)[0]
+    _, geometry, source, ocr_conf = first
+    return (geometry, source, ocr_conf)
+
+
+def _field_schema_for(schema_node: Any, key: str) -> Optional[Dict[str, Any]]:
+    """Return the JSON-Schema fragment for child ``key`` of ``schema_node``, if any."""
+    if not isinstance(schema_node, dict):
+        return None
+    props = schema_node.get("properties")
+    if isinstance(props, dict) and key in props and isinstance(props[key], dict):
+        return props[key]
+    return None
+
+
+def _item_schema_of(schema_node: Any) -> Optional[Dict[str, Any]]:
+    """Return the array ``items`` schema fragment of ``schema_node``, if any."""
+    if isinstance(schema_node, dict):
+        items = schema_node.get("items")
+        if isinstance(items, dict):
+            return items
     return None
 
 
@@ -410,17 +884,36 @@ def _ground_node(
     assessment_node: Any,
     extraction_node: Any,
     page_data_by_page: Dict[int, Dict[str, Any]],
+    geometry_mode: str = "llm_grounded",
+    occurrence_index: Optional[int] = None,
+    schema_node: Optional[Dict[str, Any]] = None,
+    skip_grounded: bool = False,
 ) -> None:
     """
     Recursively walk an assessment subtree, grounding leaf geometries in place.
 
     The recursion mirrors ``_extract_geometry_from_assessment``: a dict with a
     ``confidence`` key is a leaf assessment; otherwise it is a group; lists are
-    walked element-wise alongside the parallel extraction list.
+    walked element-wise alongside the parallel extraction list. ``occurrence_index``
+    is the position of the current item within its parent list (None at the top
+    level / for scalars), used for ocr_only row-order disambiguation of repeated
+    values. ``schema_node`` is the JSON-Schema fragment for the current node (its
+    ``format``/``type`` give the format-matching hint), descended in parallel.
+    ``skip_grounded`` leaves already-grounded leaves untouched (see
+    :func:`ground_assessment_geometry`).
     """
     if isinstance(assessment_node, dict):
         if "confidence" in assessment_node:
-            _ground_leaf(assessment_node, extraction_node, page_data_by_page)
+            if skip_grounded and assessment_node.get("geometry_source"):
+                return
+            _ground_leaf(
+                assessment_node,
+                extraction_node,
+                page_data_by_page,
+                geometry_mode,
+                occurrence_index,
+                schema_node,
+            )
             return
         # Group: descend into each child alongside the matching extraction value.
         #
@@ -446,26 +939,72 @@ def _ground_node(
                 child_extraction = key
             else:
                 child_extraction = None
-            _ground_node(child, child_extraction, page_data_by_page)
+            # Children of a group inherit this node's occurrence_index (a group
+            # field inside list row i still belongs to row i's occurrence) and
+            # descend into the matching schema property fragment.
+            _ground_node(
+                child,
+                child_extraction,
+                page_data_by_page,
+                geometry_mode,
+                occurrence_index,
+                _field_schema_for(schema_node, key),
+                skip_grounded,
+            )
     elif isinstance(assessment_node, list):
+        item_schema = _item_schema_of(schema_node)
         for idx, item in enumerate(assessment_node):
             item_extraction = (
                 extraction_node[idx]
                 if isinstance(extraction_node, list) and idx < len(extraction_node)
                 else None
             )
-            _ground_node(item, item_extraction, page_data_by_page)
+            # The list index IS the occurrence index for row-order disambiguation;
+            # list items share the array's ``items`` schema fragment.
+            _ground_node(
+                item,
+                item_extraction,
+                page_data_by_page,
+                geometry_mode,
+                idx,
+                item_schema,
+                skip_grounded,
+            )
 
 
 def _ground_leaf(
     leaf: Dict[str, Any],
     value: Any,
     page_data_by_page: Dict[int, Dict[str, Any]],
+    geometry_mode: str = "llm_grounded",
+    occurrence_index: Optional[int] = None,
+    schema_node: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Ground a single leaf assessment (has a ``confidence`` key) in place."""
-    # The existing (LLM-estimated) box doubles as the spatial reference used to
-    # disambiguate repeated values across table rows.
     existing_geometry = leaf.get("geometry")
+
+    if geometry_mode == "ocr_only":
+        # Derive geometry purely from OCR value-matching; the LLM box (if any) is
+        # NOT used as a reference — repeated values are disambiguated by row order
+        # via occurrence_index. Match found -> real OCR box; no match -> no box.
+        match = match_value_to_geometry(
+            value, page_data_by_page, None, occurrence_index, schema_node
+        )
+        if match is None:
+            # No OCR match: drop any stray LLM-provided box so we never emit
+            # hallucinated coordinates in ocr_only mode.
+            leaf.pop("geometry", None)
+            leaf.pop("geometry_source", None)
+            return
+        geometry, source, ocr_conf = match
+        leaf["geometry"] = [geometry]
+        leaf["geometry_source"] = source
+        if ocr_conf is not None:
+            leaf["ocr_confidence"] = round(ocr_conf, 4)
+        return
+
+    # llm_grounded: the existing (LLM-estimated) box doubles as
+    # the spatial reference used to disambiguate repeated values across table rows.
     preferred_geometry: Optional[Dict[str, Any]] = None
     if (
         isinstance(existing_geometry, list)
@@ -474,7 +1013,9 @@ def _ground_leaf(
     ):
         preferred_geometry = existing_geometry[0]
 
-    match = match_value_to_geometry(value, page_data_by_page, preferred_geometry)
+    match = match_value_to_geometry(
+        value, page_data_by_page, preferred_geometry, None, schema_node
+    )
     if match is None:
         # No OCR match -> keep the LLM box. Tag provenance only if a box exists.
         if existing_geometry:
@@ -492,13 +1033,21 @@ def ground_assessment_geometry(
     enhanced_assessment: Dict[str, Any],
     extraction_results: Dict[str, Any],
     page_data_by_page: Dict[int, Dict[str, Any]],
+    geometry_mode: str = "llm_grounded",
+    class_schema: Optional[Dict[str, Any]] = None,
+    skip_grounded: bool = False,
 ) -> Dict[str, Any]:
     """
-    Replace LLM-estimated field geometry with real OCR geometry where matchable.
+    Produce field geometry from OCR (and optionally the LLM box), in place.
 
-    Mutates and returns ``enhanced_assessment``. Safe to call unconditionally: when
-    ``page_data_by_page`` is empty (no OCR geometry anywhere), it is a near no-op
-    (only tags ``geometry_source: "llm"`` on fields that already had a box).
+    Mutates and returns ``enhanced_assessment``. ``geometry_mode``:
+    - ``"ocr_only"`` (default in AssessmentConfig): geometry is derived purely by
+      matching each extracted value to OCR lines; the LLM box is ignored and a
+      field with no OCR match is left with no geometry. Repeated values are
+      disambiguated by row order. When ``page_data_by_page`` is empty this leaves
+      fields without geometry (nothing to ground against).
+    - ``"llm_grounded"``: refine LLM-estimated boxes with OCR geometry,
+      falling back to the LLM box when unmatched (near no-op when no OCR data).
 
     Args:
         enhanced_assessment: The per-field assessment dict (the object that becomes
@@ -507,6 +1056,13 @@ def ground_assessment_geometry(
             each field's extracted value for matching.
         page_data_by_page: Mapping of 1-indexed page number -> pageData dict, from
             ``load_page_ocr_data``.
+        geometry_mode: ``"ocr_only"``, ``"llm_grounded"``, ``"llm"``, or ``"off"``.
+        skip_grounded: When True, a leaf that already carries a ``geometry_source``
+            is left untouched. This makes a post-merge grounding pass a near-instant
+            no-op when the rows were already grounded per-shard (each shard grounds
+            its own rows against its own pages), while still grounding any residual
+            leaves (e.g. reconcile-padded placeholder rows, or the non-sharded
+            single-agent path that grounds only once at the end).
 
     Returns:
         The same ``enhanced_assessment`` dict, grounded in place.
@@ -518,7 +1074,15 @@ def ground_assessment_geometry(
                 if isinstance(extraction_results, dict)
                 else None
             )
-            _ground_node(attr_assessment, extraction_value, page_data_by_page)
+            _ground_node(
+                attr_assessment,
+                extraction_value,
+                page_data_by_page,
+                geometry_mode,
+                None,
+                _field_schema_for(class_schema, attr_name),
+                skip_grounded,
+            )
     except Exception as e:
         # Grounding is best-effort enrichment; never fail assessment over it.
         logger.warning(f"OCR geometry grounding failed; keeping LLM boxes: {e}")

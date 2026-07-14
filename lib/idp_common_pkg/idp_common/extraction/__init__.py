@@ -13,7 +13,24 @@ from idp_common.extraction.page_type_resolver import (
     PageTypePresence,
     resolve_page_types,
 )
+from idp_common.extraction.runtime import (
+    ExtractionRuntime,
+    InProcessRuntime,
+    NoopShardPersistence,
+    S3ShardPersistence,
+    ShardPersistence,
+    StepFunctionsRuntime,
+    extract_one_shard,
+    merge_shard_dicts,
+    merge_shard_results,
+    select_runtime,
+    shard_result_key,
+)
 from idp_common.extraction.service import ExtractionService
+from idp_common.extraction.topk_resolver import (
+    is_topk_response,
+    resolve_candidates,
+)
 
 __all__ = [
     "ExtractionService",
@@ -22,4 +39,19 @@ __all__ = [
     "PageInfo",
     "PageTypePresence",
     "resolve_page_types",
+    # Runtime-agnostic sharding primitives
+    "ExtractionRuntime",
+    "InProcessRuntime",
+    "StepFunctionsRuntime",
+    "ShardPersistence",
+    "S3ShardPersistence",
+    "NoopShardPersistence",
+    "extract_one_shard",
+    "merge_shard_results",
+    "merge_shard_dicts",
+    "shard_result_key",
+    "select_runtime",
+    # 1S-TopK candidate resolution
+    "is_topk_response",
+    "resolve_candidates",
 ]

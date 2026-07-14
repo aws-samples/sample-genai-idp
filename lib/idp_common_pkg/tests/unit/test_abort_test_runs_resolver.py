@@ -51,7 +51,7 @@ def test_abort_single_test_run_success(mock_env, mock_dynamodb, mock_lambda_clie
         "index",
         os.path.join(
             os.path.dirname(__file__),
-            "../../../../nested/appsync/src/lambda/abort_test_runs/index.py",
+            "../../../../nested/api-resolvers/src/lambda/abort_test_runs/index.py",
         ),
     )
     index = importlib.util.module_from_spec(spec)
@@ -88,7 +88,7 @@ def test_abort_test_run_not_found(mock_env, mock_dynamodb):
         "index",
         os.path.join(
             os.path.dirname(__file__),
-            "../../../../nested/appsync/src/lambda/abort_test_runs/index.py",
+            "../../../../nested/api-resolvers/src/lambda/abort_test_runs/index.py",
         ),
     )
     index = importlib.util.module_from_spec(spec)
@@ -117,7 +117,7 @@ def test_abort_cannot_abort_completed(mock_env, mock_dynamodb):
         "index",
         os.path.join(
             os.path.dirname(__file__),
-            "../../../../nested/appsync/src/lambda/abort_test_runs/index.py",
+            "../../../../nested/api-resolvers/src/lambda/abort_test_runs/index.py",
         ),
     )
     index = importlib.util.module_from_spec(spec)
@@ -148,7 +148,7 @@ def test_abort_queued_test_run(mock_env, mock_dynamodb, mock_lambda_client):
         "index",
         os.path.join(
             os.path.dirname(__file__),
-            "../../../../nested/appsync/src/lambda/abort_test_runs/index.py",
+            "../../../../nested/api-resolvers/src/lambda/abort_test_runs/index.py",
         ),
     )
     index = importlib.util.module_from_spec(spec)
@@ -178,7 +178,7 @@ def test_wait_for_documents_all_complete():
         "index",
         os.path.join(
             os.path.dirname(__file__),
-            "../../../../nested/appsync/src/lambda/abort_test_runs/index.py",
+            "../../../../nested/api-resolvers/src/lambda/abort_test_runs/index.py",
         ),
     )
     index = importlib.util.module_from_spec(spec)
@@ -227,7 +227,7 @@ def test_wait_for_documents_mixed_statuses():
         "index",
         os.path.join(
             os.path.dirname(__file__),
-            "../../../../nested/appsync/src/lambda/abort_test_runs/index.py",
+            "../../../../nested/api-resolvers/src/lambda/abort_test_runs/index.py",
         ),
     )
     index = importlib.util.module_from_spec(spec)
@@ -274,7 +274,7 @@ def test_abort_updates_completed_at_timestamp(
         "index",
         os.path.join(
             os.path.dirname(__file__),
-            "../../../../nested/appsync/src/lambda/abort_test_runs/index.py",
+            "../../../../nested/api-resolvers/src/lambda/abort_test_runs/index.py",
         ),
     )
     index = importlib.util.module_from_spec(spec)
@@ -314,7 +314,7 @@ def test_abort_multiple_test_runs_mixed_results(
         "index",
         os.path.join(
             os.path.dirname(__file__),
-            "../../../../nested/appsync/src/lambda/abort_test_runs/index.py",
+            "../../../../nested/api-resolvers/src/lambda/abort_test_runs/index.py",
         ),
     )
     index = importlib.util.module_from_spec(spec)
@@ -355,7 +355,7 @@ def test_abort_rejects_viewer(mock_env, mock_dynamodb):
         "index",
         os.path.join(
             os.path.dirname(__file__),
-            "../../../../nested/appsync/src/lambda/abort_test_runs/index.py",
+            "../../../../nested/api-resolvers/src/lambda/abort_test_runs/index.py",
         ),
     )
     index = importlib.util.module_from_spec(spec)
@@ -366,7 +366,50 @@ def test_abort_rejects_viewer(mock_env, mock_dynamodb):
         "identity": {"claims": {"cognito:groups": ["Viewer"]}},
         "arguments": {"testRunIds": ["test-run-1"]},
     }
-    result = index.lambda_handler(event, None)
-    assert result["success"] is False
-    assert "Admin or Author" in result["message"]
+    # RBAC denials raise PermissionError (not a 200 dict) so the dispatcher maps
+    # them to 403/Unauthorized.
+    with pytest.raises(PermissionError, match="Admin or Author"):
+        index.lambda_handler(event, None)
     assert not mock_dynamodb.update_item.called
+
+
+@pytest.mark.unit
+def test_abort_allows_direct_lambda_invocation(mock_env, mock_dynamodb):
+    """Direct Lambda invocations (no 'identity') bypass Cognito RBAC.
+
+    Internal/automation callers (e.g. the IDP SDK / autotune agent) invoke this
+    resolver directly with a payload that has no 'identity' field. Those callers
+    are gated by IAM (lambda:InvokeFunction), not Cognito groups, so the RBAC
+    check must not reject them.
+    """
+    import importlib.util
+    import os
+    import sys
+
+    spec = importlib.util.spec_from_file_location(
+        "index",
+        os.path.join(
+            os.path.dirname(__file__),
+            "../../../../nested/api-resolvers/src/lambda/abort_test_runs/index.py",
+        ),
+    )
+    index = importlib.util.module_from_spec(spec)
+    sys.modules["index"] = index
+    spec.loader.exec_module(index)
+
+    # Test run in an abortable state so the handler proceeds past auth into abort.
+    mock_dynamodb.get_item.return_value = {
+        "Item": {"Status": "RUNNING", "Files": ["file1.pdf"], "FilesCount": 1}
+    }
+
+    # No 'identity' field -> direct invoke; must NOT raise PermissionError.
+    event = {
+        "info": {"fieldName": "abortTestRuns"},
+        "arguments": {"testRunIds": ["test-run-1"]},
+    }
+    with patch.object(index, "_wait_for_documents_terminal_state"):
+        result = index.lambda_handler(event, None)
+
+    assert result["success"] is True
+    assert result["abortedCount"] == 1
+    assert mock_dynamodb.update_item.called

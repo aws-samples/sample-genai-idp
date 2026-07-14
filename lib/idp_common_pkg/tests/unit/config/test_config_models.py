@@ -8,7 +8,6 @@ Tests for configuration Pydantic models.
 import pytest
 from idp_common.config.models import (
     AgenticConfig,
-    AssessmentConfig,
     ChatConfig,
     ExtractionConfig,
     IDPConfig,
@@ -37,6 +36,28 @@ class TestConfigModels:
         assert config.enabled is False
         assert config.review_agent is True
 
+    def test_extraction_mode_derives_agentic_enabled(self):
+        """extraction.mode is authoritative and derives agentic.enabled."""
+        from idp_common.config.models import ExtractionConfig
+
+        # mode=advanced -> agentic on
+        c = ExtractionConfig(mode="advanced")
+        assert c.agentic.enabled is True
+        # mode=simple -> agentic off (mode wins even over an explicit agentic.enabled)
+        c = ExtractionConfig(mode="simple", agentic={"enabled": True})
+        assert c.agentic.enabled is False
+        # legacy config with no mode -> inferred from agentic.enabled
+        c = ExtractionConfig(agentic={"enabled": True})
+        assert c.mode == "advanced"
+        c = ExtractionConfig(agentic={"enabled": False})
+        assert c.mode == "simple"
+
+    def test_extraction_mode_rejects_unknown(self):
+        from idp_common.config.models import ExtractionConfig
+
+        with pytest.raises(Exception):
+            ExtractionConfig(mode="turbo")
+
     def test_extraction_config_with_string_numbers(self):
         """Test ExtractionConfig with string numeric values"""
         config_dict = {
@@ -44,6 +65,8 @@ class TestConfigModels:
             "temperature": "0.5",
             "top_p": "0.1",
             "top_k": "5",
+            # max_tokens is no longer an ExtractionConfig field (extra="ignore"):
+            # output is always requested at the model maximum.
             "max_tokens": "10000",
             "agentic": {"enabled": False, "review_agent": False},
         }
@@ -53,13 +76,12 @@ class TestConfigModels:
         assert config.temperature == 0.5
         assert config.top_p == 0.1
         assert config.top_k == 5.0
-        assert config.max_tokens == 10000
+        assert not hasattr(config, "max_tokens")
 
         # Types should be correct
         assert isinstance(config.temperature, float)
         assert isinstance(config.top_p, float)
         assert isinstance(config.top_k, float)
-        assert isinstance(config.max_tokens, int)
 
     def test_extraction_config_with_native_numbers(self):
         """Test ExtractionConfig with native numeric values"""
@@ -68,7 +90,6 @@ class TestConfigModels:
             "temperature": 0.5,
             "top_p": 0.1,
             "top_k": 5.0,
-            "max_tokens": 10000,
             "agentic": {"enabled": False, "review_agent": False},
         }
         config = ExtractionConfig.model_validate(config_dict)
@@ -76,7 +97,7 @@ class TestConfigModels:
         assert config.temperature == 0.5
         assert config.top_p == 0.1
         assert config.top_k == 5.0
-        assert config.max_tokens == 10000
+        assert not hasattr(config, "max_tokens")
 
     def test_full_config_with_mixed_types(self):
         """Test full IDPConfig with mixed type representations"""
@@ -97,14 +118,12 @@ class TestConfigModels:
                 "temperature": 0.0,
                 "top_p": 0.1,
                 "top_k": 5,
-                "max_tokens": 10000,
                 "agentic": {"enabled": False, "review_agent": True},
             },
             "assessment": {
                 "model": "us.amazon.nova-lite-v1:0",
                 "enabled": True,
                 "temperature": "0.0",
-                "granular": {"enabled": False, "list_batch_size": "1"},
             },
             "classes": [],
         }
@@ -114,7 +133,8 @@ class TestConfigModels:
         # Booleans
         assert config.extraction.agentic.enabled is False
         assert config.extraction.agentic.review_agent is True
-        assert config.assessment.enabled is True
+        # v0.6: assessment.enabled migrated to extraction.confidence.enabled
+        assert config.extraction.confidence.enabled is True
 
         # Numbers from strings
         assert config.classification.temperature == 0.0
@@ -122,7 +142,7 @@ class TestConfigModels:
 
         # Numbers from natives
         assert config.extraction.top_p == 0.1
-        assert config.extraction.max_tokens == 10000
+        assert not hasattr(config.extraction, "max_tokens")
 
     def test_classification_valid_class_enforcement_defaults(self):
         """New class-enforcement fields default to enabled with sane values."""
@@ -168,23 +188,59 @@ class TestConfigModels:
         result = process_config(config)
         assert result is True
 
-    def test_assessment_granular_config(self):
-        """Test granular assessment configuration"""
+    def test_confidence_list_batch_size_config(self):
+        """Confidence list batching config (v0.6: extraction.confidence). Any
+        leftover retired ``granular.*`` keys are ignored, not errors."""
+        from idp_common.config import ConfidenceConfig
+
         config_dict = {
             "model": "us.amazon.nova-lite-v1:0",
-            "granular": {
-                "enabled": True,
-                "list_batch_size": "5",
-                "simple_batch_size": "10",
-                "max_workers": "20",
-            },
+            "list_batch_size": "5",
+            # Retired granular sub-config: tolerated (ignored) for back-compat.
+            "granular": {"enabled": True, "max_workers": "20"},
         }
-        config = AssessmentConfig.model_validate(config_dict)
+        config = ConfidenceConfig.model_validate(config_dict)
 
-        assert config.granular.enabled is True
-        assert config.granular.list_batch_size == 5
-        assert config.granular.simple_batch_size == 10
-        assert config.granular.max_workers == 20
+        assert config.list_batch_size == 5
+        assert not hasattr(config, "granular")
+
+    def test_required_int_none_falls_back_to_default(self):
+        """A stored config may carry an explicit ``null`` / empty string for a
+        required int field (e.g. ``list_batch_size``, ``max_empty_line_gap``).
+        These must fall back to the field default rather than crash with
+        ``int(None)`` when the config is re-validated (e.g. on upgrade)."""
+        from idp_common.config import ConfidenceConfig
+        from idp_common.config.models import TableParsingConfig
+
+        # Explicit None -> default (25)
+        assert (
+            ConfidenceConfig.model_validate({"list_batch_size": None}).list_batch_size
+            == 25
+        )
+        # Empty string -> default
+        assert (
+            ConfidenceConfig.model_validate({"list_batch_size": ""}).list_batch_size
+            == 25
+        )
+        # Valid values still coerce
+        assert (
+            ConfidenceConfig.model_validate({"list_batch_size": "8"}).list_batch_size
+            == 8
+        )
+
+        # Same guard on a different non-optional int field (default 3)
+        assert (
+            TableParsingConfig.model_validate(
+                {"max_empty_line_gap": None}
+            ).max_empty_line_gap
+            == 3
+        )
+        assert (
+            TableParsingConfig.model_validate(
+                {"max_empty_line_gap": 5}
+            ).max_empty_line_gap
+            == 5
+        )
 
     def test_config_validation_range_checks(self):
         """Test that validation enforces ranges"""
@@ -209,7 +265,7 @@ class TestConfigModels:
         assert config.agentic.enabled is False
         assert config.agentic.review_agent is False
         assert config.temperature == 0.0
-        assert config.max_tokens == 10000
+        assert not hasattr(config, "max_tokens")
 
 
 class TestChatConfig:
@@ -223,7 +279,10 @@ class TestChatConfig:
         # Default should be a large-context Opus model (see decision in CHANGELOG).
         assert cfg.model == "us.anthropic.claude-opus-4-8:1m"
         assert cfg.temperature == 0.0
-        assert cfg.max_tokens == 4096
+        # max_tokens defaults to None (unset) => Bedrock client resolves the
+        # model's maximum output limit. An empty string also maps to None.
+        assert cfg.max_tokens is None
+        assert ChatConfig.model_validate({"max_tokens": ""}).max_tokens is None
         assert cfg.system_prompt  # non-empty
 
     def test_chat_config_string_numeric_parsing(self):
@@ -282,11 +341,12 @@ class TestPipelineHookPreservation:
         "onError": "continue",
         "enabled": True,
     }
+    # v0.6: the standalone `assessment` step config was retired (confidence folded
+    # into extraction), so it no longer carries a postHook list.
     _STEPS = [
         "ocr",
         "classification",
         "extraction",
-        "assessment",
         "rule_validation",
         "summarization",
     ]

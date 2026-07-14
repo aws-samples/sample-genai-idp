@@ -5,6 +5,8 @@
 
 import pytest
 from idp_common.extraction.sharding import (
+    DEFAULT_MAX_PAGES_PER_SHARD,
+    DEFAULT_SHARD_TOKEN_BUDGET,
     Shard,
     estimate_tokens,
     plan_shards,
@@ -83,3 +85,68 @@ class TestPlanShards:
     def test_estimate_tokens(self):
         assert estimate_tokens("") == 0
         assert estimate_tokens("a" * 400) == 100
+
+
+class TestDefaults:
+    def test_default_budget_is_lowered(self):
+        # Regression guard: the 40K foot-gun default is gone; 8000 is proven to
+        # shard large dense tables so a single agent never emits a giant table.
+        assert DEFAULT_SHARD_TOKEN_BUDGET == 8_000
+
+    def test_default_page_ceiling(self):
+        assert DEFAULT_MAX_PAGES_PER_SHARD == 5
+
+
+class TestPageCeiling:
+    def test_compact_pages_still_shard_on_page_count(self):
+        # 20 tiny pages whose total text fits ONE token budget would historically
+        # NOT shard (the foot-gun). With the page ceiling they still shard.
+        pages = ["tiny"] * 20  # ~1 token each, well under any budget
+        shards = plan_shards(pages, token_budget=DEFAULT_SHARD_TOKEN_BUDGET)
+        assert _covers_all(shards, 20)
+        # default ceiling 5 -> 4 shards of 5 pages each
+        assert len(shards) == 4
+        assert all(s.page_count <= DEFAULT_MAX_PAGES_PER_SHARD for s in shards)
+
+    def test_explicit_page_cap_binds_before_budget(self):
+        pages = ["small"] * 12
+        shards = plan_shards(pages, token_budget=1_000_000, max_pages_per_shard=3)
+        assert _covers_all(shards, 12)
+        assert len(shards) == 4
+        assert all(s.page_count <= 3 for s in shards)
+
+    def test_page_cap_disabled_with_zero(self):
+        # Compact pages, page ceiling disabled -> a single shard (budget only).
+        pages = ["tiny"] * 30
+        shards = plan_shards(
+            pages, token_budget=DEFAULT_SHARD_TOKEN_BUDGET, max_pages_per_shard=0
+        )
+        assert len(shards) == 1
+        assert _covers_all(shards, 30)
+
+    def test_page_cap_disabled_with_none(self):
+        pages = ["tiny"] * 30
+        shards = plan_shards(
+            pages, token_budget=DEFAULT_SHARD_TOKEN_BUDGET, max_pages_per_shard=None
+        )
+        assert len(shards) == 1
+        assert _covers_all(shards, 30)
+
+    def test_token_budget_can_split_below_page_cap(self):
+        # Dense pages (~12k tokens) with a small budget split on tokens before
+        # reaching the page ceiling -> 1 page/shard even though ceiling is 5.
+        pages = ["x" * 48000] * 6
+        shards = plan_shards(
+            pages, token_budget=DEFAULT_SHARD_TOKEN_BUDGET, max_pages_per_shard=5
+        )
+        assert _covers_all(shards, 6)
+        assert all(s.page_count == 1 for s in shards)
+
+    def test_both_bounds_whichever_first(self):
+        # 100 compact pages, ceiling 5 -> exactly 20 shards (page-bound).
+        pages = ["row data"] * 100
+        shards = plan_shards(
+            pages, token_budget=DEFAULT_SHARD_TOKEN_BUDGET, max_pages_per_shard=5
+        )
+        assert _covers_all(shards, 100)
+        assert len(shards) == 20

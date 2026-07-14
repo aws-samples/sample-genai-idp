@@ -1,0 +1,8 @@
+.nav-quick-start {
+  padding: 12px 20px 4px;
+  width: fit-content;
+}
+
+.nav-quick-start [class*='awsui_hotspot'] {
+  display: inline-flex;
+}

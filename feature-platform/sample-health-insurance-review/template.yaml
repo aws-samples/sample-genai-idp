@@ -276,9 +276,8 @@ Resources:
       RetentionInDays: 30
 
   ###########################################################################
-  # UI deployer: copies the UMD bundle, registers the feature, registers the
-  # pipeline hook, and applies the bundled config preset via the host's
-  # IAM-auth AppSync mutations.
+  # UI deployer: copies the UMD bundle, registers the feature, and applies the
+  # bundled config preset by directly invoking the host's resolver Lambdas.
   ###########################################################################
   UiDeployerRole:
     Type: AWS::IAM::Role
@@ -321,31 +320,22 @@ Resources:
                 Resource: !Sub
                   - 'arn:${AWS::Partition}:s3:::${Bucket}/features/${FeatureId}/*'
                   - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-WebUIBucketName' }
-        - PolicyName: InvokeAppSync
+        - PolicyName: InvokeHostResolvers
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
+              # Direct Lambda invoke of the host's resolver functions (the
+              # AppSync transport was removed). The ui-deployer invokes each with
+              # the resolver event shape {info, arguments, identity}:
+              #   RegisterFeatureFunction        -> registerFeature / unregisterFeature
+              #   RegisterFeatureHooksFunction   -> unregisterFeatureHooks (delete-time cleanup)
+              #   ApplyFeatureConfigPresetFunction -> applyFeatureConfigPreset / removeFeatureConfigPreset
               - Effect: Allow
-                Action: appsync:GraphQL
+                Action: lambda:InvokeFunction
                 Resource:
-                  - !Sub
-                    - '${ApiArn}/types/Mutation/fields/registerFeature'
-                    - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
-                  - !Sub
-                    - '${ApiArn}/types/Mutation/fields/unregisterFeature'
-                    - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
-                  - !Sub
-                    - '${ApiArn}/types/Mutation/fields/registerFeatureHooks'
-                    - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
-                  - !Sub
-                    - '${ApiArn}/types/Mutation/fields/unregisterFeatureHooks'
-                    - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
-                  - !Sub
-                    - '${ApiArn}/types/Mutation/fields/applyFeatureConfigPreset'
-                    - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
-                  - !Sub
-                    - '${ApiArn}/types/Mutation/fields/removeFeatureConfigPreset'
-                    - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
+                  - { 'Fn::ImportValue': !Sub '${MainStackName}-RegisterFeatureFunctionArn' }
+                  - { 'Fn::ImportValue': !Sub '${MainStackName}-RegisterFeatureHooksFunctionArn' }
+                  - { 'Fn::ImportValue': !Sub '${MainStackName}-ApplyFeatureConfigPresetFunctionArn' }
 
   UiDeployerFunction:
     Type: AWS::Serverless::Function
@@ -365,7 +355,9 @@ Resources:
           FEATURE_BUCKET: !Ref FeatureBucket
           # Baked at publish time (see top-of-file note) — NOT a CFN param.
           FEATURE_ARTIFACT_PREFIX: '<FEATURE_ARTIFACT_PREFIX_TOKEN>'
-          APPSYNC_API_URL: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiUrl' }
+          REGISTER_FEATURE_FUNCTION_ARN: { 'Fn::ImportValue': !Sub '${MainStackName}-RegisterFeatureFunctionArn' }
+          REGISTER_FEATURE_HOOKS_FUNCTION_ARN: { 'Fn::ImportValue': !Sub '${MainStackName}-RegisterFeatureHooksFunctionArn' }
+          APPLY_FEATURE_CONFIG_PRESET_FUNCTION_ARN: { 'Fn::ImportValue': !Sub '${MainStackName}-ApplyFeatureConfigPresetFunctionArn' }
           FEATURE_API_ENDPOINT: !GetAtt FeatureApi.ApiEndpoint
           HOOK_FUNCTION_ARN: !GetAtt ClaimStatusHookFunction.Arn
           # Relative key of the preset under <FeatureArtifactPrefix>/<version>/;
