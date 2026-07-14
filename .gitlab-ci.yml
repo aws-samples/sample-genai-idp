@@ -55,6 +55,10 @@ developer_tests:
     - uv pip install typer rich boto3
     # Install test dependencies
     - cd lib/idp_common_pkg && uv pip install -e ".[test,evaluation]" && cd ../..
+    # Install the other package suites run by `make test-packages-cicd`
+    - cd lib/idp_sdk && uv pip install -e ".[test]" && cd ../..
+    - cd lib/idp_cli_pkg && uv pip install -e ".[test]" && cd ../..
+    - cd lib/idp_feature_sdk && uv pip install -e ".[test]" && cd ../..
 
   script:
     - make lint-cicd
@@ -68,6 +72,10 @@ developer_tests:
     # expectations drift and missing server-side group checks).
     - make api-test-static
     - make test-cicd -C lib/idp_common_pkg
+    # Package/Lambda suites not covered by idp_common_pkg (idp_cli, idp_sdk,
+    # idp_feature_sdk, feature-platform, capacity, circuit-breaker, chat,
+    # config_library) — all green headless, previously CI-untested.
+    - make test-packages-cicd
     # UI unit tests (Vitest + jsdom, no browser). Node 22 installed above.
     - cd src/ui && npm ci --prefer-offline --no-audit && npx vitest run && cd ../..
 
