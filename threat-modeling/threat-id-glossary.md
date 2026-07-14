@@ -7,7 +7,7 @@
 | **Document Version** | 2.0 |
 | **Last Updated** | 2025-03-19 |
 | **Classification** | Internal |
-| **Total Threat IDs** | 62 |
+| **Total Threat IDs** | 64 |
 
 ## 1. Threat ID Naming Convention
 
@@ -91,7 +91,7 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | KB.T03 | OpenSearch Serverless data exposure | ID | 2 (Low) |
 | KB.T04 | Excessive RAG retrieval | ID, DoS | 2 (Low) |
 
-### AUTH — Authentication & RBAC (6 threats)
+### AUTH — Authentication & RBAC (8 threats)
 
 | ID | Short Name | STRIDE | Risk |
 |----|-----------|--------|------|
@@ -101,6 +101,8 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | AUTH.T04 | Cognito user pool misconfiguration | Spoofing, ID | 3 (Medium) |
 | AUTH.T05 | Refresh token abuse | Spoofing | 3 (Medium) |
 | AUTH.T06 | Cross-tenant data access (multi-stack) | ID | 2 (Low) |
+| AUTH.T07 | Config-version scope bypass (fail-open scope lookup) | EoP, ID | 6 (High) |
+| AUTH.T08 | Silently-ignored schema authorization directives | EoP | 6 (High) |
 
 ### SDK — SDK/CLI (4 threats)
 
