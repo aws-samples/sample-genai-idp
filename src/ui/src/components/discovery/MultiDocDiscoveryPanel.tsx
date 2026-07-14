@@ -234,6 +234,10 @@ const MultiDocDiscoveryPanel = () => {
       setError('Please select a configuration version');
       return;
     }
+    if (selectedVersion.value === 'default') {
+      setError('The "default" configuration version is read-only. Create a new version to save the discovered schema.');
+      return;
+    }
 
     setStarting(true);
     setError(null);
@@ -771,6 +775,14 @@ const MultiDocDiscoveryPanel = () => {
             </SpaceBetween>
           </FormField>
 
+          {selectedVersion?.value === 'default' && (
+            <Alert type="warning">
+              The <strong>default</strong> configuration version is read-only and cannot be overwritten by discovery. Click{' '}
+              <strong>Create new version</strong> to save the discovered schema to a new version (it will be seeded from{' '}
+              <strong>default</strong>).
+            </Alert>
+          )}
+
           {/* Save Mode */}
           <FormField
             label="Save mode"
@@ -863,7 +875,12 @@ const MultiDocDiscoveryPanel = () => {
               variant="primary"
               onClick={handleStartDiscovery}
               loading={starting || uploading}
-              disabled={!selectedVersion || (inputMode === 'zip' && !zipFile) || (inputMode === 's3path' && !s3Prefix)}
+              disabled={
+                !selectedVersion ||
+                selectedVersion.value === 'default' ||
+                (inputMode === 'zip' && !zipFile) ||
+                (inputMode === 's3path' && !s3Prefix)
+              }
             >
               {uploading ? 'Uploading...' : starting ? 'Starting...' : '🔍 Start Discovery'}
             </Button>
