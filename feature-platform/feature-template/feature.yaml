@@ -19,7 +19,13 @@ template:
 
 ui:
   bundlePath: feature-ui/dist/ui-bundle.js   # Output of the UI build
-  buildCommand: "cd feature-ui && npm ci && npm run build"
+  # Structured build steps: each argv runs without a shell; cwd replaces
+  # the `cd X && ...` idiom of the legacy buildCommand string.
+  build:
+    - cwd: feature-ui
+      argv: ["npm", "ci"]
+    - cwd: feature-ui
+      argv: ["npm", "run", "build"]
 
 # docsUrl: extensions/my-feature   # OSS: docs-site slug (docs/extensions/<slug>.md);
                                     # or an absolute https URL. Shown as the UI

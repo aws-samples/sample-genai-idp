@@ -147,6 +147,12 @@ lint-cicd: ## CI/CD lint — checks only, no modifications
 		exit 1; \
 	fi
 
+	@echo "GovCloud ARN partition check"
+	@if ! make check-arn-partitions; then \
+		echo -e "$(RED)ERROR: Hardcoded ARN partitions/service principals found (breaks GovCloud)$(NC)"; \
+		exit 1; \
+	fi
+
 	@echo -e "$(GREEN)All code quality checks passed!$(NC)"
 
 validate-buildspec: ## Validate AWS CodeBuild buildspec files
@@ -239,6 +245,33 @@ test-integration-all: ## Run every integration-marked suite across all roots (re
 
 test-list: ## List the discovered test roots (run vs quarantined) without running them
 	$(PYTHON) scripts/run_all_tests.py --list
+
+test-packages-cicd: ## CI-safe: run the package/Lambda suites NOT covered by idp_common_pkg test-cicd (all green headless, no AWS)
+	@echo "Running idp_cli_pkg tests..."
+	cd lib/idp_cli_pkg && $(PYTHON) -m pytest -q -p no:cacheprovider
+	@echo "Running idp_sdk tests (not integration)..."
+	cd lib/idp_sdk && $(PYTHON) -m pytest -m "not integration" -q -p no:cacheprovider
+	@echo "Running idp_feature_sdk tests..."
+	cd lib/idp_feature_sdk && $(PYTHON) -m pytest -q -p no:cacheprovider
+	@echo "Running feature platform tests..."
+	cd feature-platform/main-stack-extensions && $(PYTHON) -m pytest -q -p no:cacheprovider
+	cd feature-platform/feature-template/feature-api && $(PYTHON) -m pytest -q -p no:cacheprovider
+	@echo "Running capacity planning Lambda tests..."
+	cd src/lambda/calculate_capacity && $(PYTHON) -m pytest -q -p no:cacheprovider
+	@echo "Running circuit breaker Lambda tests..."
+	$(PYTHON) -m pytest -q -p no:cacheprovider \
+	    src/lambda/circuit_breaker_manager \
+	    src/lambda/queue_processor/test_check_circuit_breaker.py \
+	    src/lambda/workflow_tracker/test_notify_circuit_breaker.py
+	@echo "Running Chat-with-Document Lambda tests..."
+	$(PYTHON) -m pytest -q -p no:cacheprovider \
+	    src/lambda/chat_with_document_processor/tests \
+	    nested/api-resolvers/src/lambda/send_chat_document_message_resolver/tests
+	@echo "Running Chat-stream processor tests (incl. vendored-in-sync guard)..."
+	cd src/lambda/chat_stream_processor && $(PYTHON) -m pytest tests -q -p no:cacheprovider
+	@echo "Validating config library files..."
+	$(PYTHON) -m pytest config_library/test_config_library.py -q -p no:cacheprovider
+	@echo -e "$(GREEN)✅ All package/Lambda CI suites passed!$(NC)"
 
 test-cli: ## Run only IDP CLI tests
 	@echo "Running IDP CLI tests..."

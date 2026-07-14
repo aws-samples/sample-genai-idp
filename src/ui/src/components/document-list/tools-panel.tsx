@@ -3,6 +3,8 @@
 import React from 'react';
 import { HelpPanel, Icon } from '@cloudscape-design/components';
 
+import FeedbackHelpSection from '../common/feedback-help-section';
+
 const DOCS_BASE_URL = 'https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws';
 
 const ToolsPanel = (): React.JSX.Element => (
@@ -50,6 +52,7 @@ const ToolsPanel = (): React.JSX.Element => (
         <li>Drill down into individual documents for detailed inspection</li>
         <li>Monitor the circuit breaker status and (admins only) pause, resume, or probe document processing</li>
       </ul>
+      <FeedbackHelpSection />
     </div>
   </HelpPanel>
 );

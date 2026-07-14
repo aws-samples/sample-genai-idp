@@ -45,10 +45,21 @@ Parameters:
     Description: '(Optional) Security group for CodeBuild VPC config'
     Default: ''
 
+  FailureNotificationEmail:
+    Type: String
+    Description: >-
+      (Optional) Email address subscribed to CI failure notifications. The
+      deployment script publishes the AI failure root-cause summary to an SNS
+      topic on every failed run; the subscription must be confirmed once via
+      the email AWS sends. Additional subscribers can be added to the topic
+      manually.
+    Default: ''
+
 Conditions:
   CreateKMSKey: !Equals [!Ref KMSKeyArn, '']
   CreateCodeBuildRole: !Equals [!Ref CodeBuildRoleArn, '']
   DeployInVPC: !Not [!Equals [!Ref VpcId, '']]
+  HasNotificationEmail: !Not [!Equals [!Ref FailureNotificationEmail, '']]
 
 Resources:
   PipelineKMSKey:
@@ -383,6 +394,66 @@ Resources:
               Bool:
                 "aws:SecureTransport": false
 
+  FailureNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${PipelineName}-failures'
+      DisplayName: 'IDP CI failure notifications'
+      KmsMasterKeyId: alias/aws/sns
+
+  FailureNotificationSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasNotificationEmail
+    Properties:
+      TopicArn: !Ref FailureNotificationTopic
+      Protocol: email
+      Endpoint: !Ref FailureNotificationEmail
+
+  CodeBuildSNSPolicy:
+    Type: 'AWS::IAM::Policy'
+    Properties:
+      PolicyName: CodeBuildSNSPublish
+      Roles:
+        - !Ref CodeBuildRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'sns:Publish'
+            Resource: !Ref FailureNotificationTopic
+
+  # Cognito admin access for the dynamic API RBAC test step (Step 12 in
+  # codebuild_deployment.py): creates/deletes temporary test users, sets
+  # passwords, manages group membership, and temporarily toggles the UI app
+  # client's ADMIN_USER_PASSWORD_AUTH flow (restored afterwards). User pools
+  # created by idp-* stacks don't carry a predictable ARN prefix, so this is
+  # scoped by action rather than resource.
+  CodeBuildCognitoPolicy:
+    Type: 'AWS::IAM::Policy'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W12
+            reason: "Cognito user pool ids are generated at stack deploy time; RBAC test needs admin ops on the just-deployed pool"
+    Properties:
+      PolicyName: CodeBuildCognitoRBACTest
+      Roles:
+        - !Ref CodeBuildRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'cognito-idp:AdminCreateUser'
+              - 'cognito-idp:AdminDeleteUser'
+              - 'cognito-idp:AdminSetUserPassword'
+              - 'cognito-idp:AdminAddUserToGroup'
+              - 'cognito-idp:AdminInitiateAuth'
+              - 'cognito-idp:DescribeUserPoolClient'
+              - 'cognito-idp:UpdateUserPoolClient'
+            Resource: !Sub 'arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*'
+
   IdkInstallCodeBuild:
     Type: 'AWS::CodeBuild::Project'
     Metadata:
@@ -415,6 +486,8 @@ Resources:
         EnvironmentVariables:
           - Name: SOURCE_BUCKET
             Value: !Sub '${BucketNamePrefix}-${AWS::AccountId}-${AWS::Region}'
+          - Name: IDP_FAILURE_SNS_TOPIC
+            Value: !Ref FailureNotificationTopic
       Source:
         Type: CODEPIPELINE
         BuildSpec: |

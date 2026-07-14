@@ -184,7 +184,14 @@ def handle_upload_discovery_document(event, context):
 
         if not file_name:
             raise ValueError("fileName is required")
-        
+
+        # The 'default' config version is read-only — discovery must target a
+        # user-created version so the built-in defaults are never overwritten.
+        if version == 'default':
+            raise ValueError(
+                "The 'default' configuration version is read-only. Create a new version to save the discovered schema."
+            )
+
         # Get bucket from arguments
         bucket_name = arguments.get('bucket')
 
@@ -391,6 +398,13 @@ def handle_start_multi_doc_discovery(event, context):
 
     if not config_version:
         raise ValueError("configVersion is required")
+
+    # The 'default' config version is read-only — discovery must target a
+    # user-created version so the built-in defaults are never overwritten.
+    if config_version == 'default':
+        raise ValueError(
+            "The 'default' configuration version is read-only. Create a new version to save the discovered schema."
+        )
 
     if not s3_bucket and not zip_file_name:
         raise ValueError("Either s3Bucket/s3Prefix or zipFileName is required")

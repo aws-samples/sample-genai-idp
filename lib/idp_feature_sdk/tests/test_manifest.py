@@ -122,3 +122,96 @@ def test_missing_bundle_with_build_cmd_is_allowed(demo_feature_project: Path) ->
     # Should load now (buildCommand present, bundle missing is OK).
     m = load_manifest(demo_feature_project)
     assert m.ui.buildCommand == "echo build"
+
+
+def test_structured_build_steps_are_parsed(demo_feature_project: Path) -> None:
+    """The shell-free `ui.build` step-list form parses into CommandStep objects
+    and, like buildCommand, allows a missing bundle at load time."""
+    (demo_feature_project / "feature-ui" / "dist" / "ui-bundle.js").unlink()
+    mf = demo_feature_project / "feature.yaml"
+    mf.write_text(
+        mf.read_text().replace(
+            "ui:\n  bundlePath: feature-ui/dist/ui-bundle.js",
+            "ui:\n"
+            "  bundlePath: feature-ui/dist/ui-bundle.js\n"
+            "  build:\n"
+            "    - cwd: feature-ui\n"
+            "      argv: ['npm', 'ci']\n"
+            "    - argv: ['npm', 'run', 'build']\n",
+        ),
+        encoding="utf-8",
+    )
+    m = load_manifest(demo_feature_project)
+    assert [s.argv for s in m.ui.build] == [["npm", "ci"], ["npm", "run", "build"]]
+    assert [s.cwd for s in m.ui.build] == ["feature-ui", None]
+    assert m.ui.has_build
+
+
+def test_build_and_build_command_are_mutually_exclusive(
+    demo_feature_project: Path,
+) -> None:
+    mf = demo_feature_project / "feature.yaml"
+    mf.write_text(
+        mf.read_text().replace(
+            "ui:\n  bundlePath: feature-ui/dist/ui-bundle.js",
+            "ui:\n"
+            "  bundlePath: feature-ui/dist/ui-bundle.js\n"
+            "  buildCommand: 'echo build'\n"
+            "  build:\n"
+            "    - argv: ['echo', 'build']\n",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ManifestError, match="is invalid"):
+        load_manifest(demo_feature_project)
+
+
+def test_build_step_missing_cwd_dir_is_rejected(demo_feature_project: Path) -> None:
+    """A typo'd step cwd should fail at load time, not mid-publish."""
+    mf = demo_feature_project / "feature.yaml"
+    mf.write_text(
+        mf.read_text().replace(
+            "ui:\n  bundlePath: feature-ui/dist/ui-bundle.js",
+            "ui:\n"
+            "  bundlePath: feature-ui/dist/ui-bundle.js\n"
+            "  build:\n"
+            "    - cwd: no-such-dir\n"
+            "      argv: ['npm', 'ci']\n",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ManifestError, match="cwd directory not found"):
+        load_manifest(demo_feature_project)
+
+
+def test_agent_source_structured_package_is_parsed(
+    demo_feature_project: Path,
+) -> None:
+    mf = demo_feature_project / "feature.yaml"
+    mf.write_text(
+        mf.read_text()
+        + (
+            "\nagentSource:\n"
+            "  artifactPath: dist/agent-source.zip\n"
+            "  package:\n"
+            "    - argv: ['python3', 'scripts/package_agent.py']\n"
+        ),
+        encoding="utf-8",
+    )
+    m = load_manifest(demo_feature_project)
+    assert m.agentSource is not None
+    assert m.agentSource.packageCommand is None
+    assert [s.argv for s in m.agentSource.package] == [
+        ["python3", "scripts/package_agent.py"]
+    ]
+
+
+def test_agent_source_requires_some_package_form(demo_feature_project: Path) -> None:
+    """agentSource must declare exactly one of packageCommand / package."""
+    mf = demo_feature_project / "feature.yaml"
+    mf.write_text(
+        mf.read_text() + "\nagentSource:\n  artifactPath: dist/agent-source.zip\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ManifestError, match="is invalid"):
+        load_manifest(demo_feature_project)

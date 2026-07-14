@@ -16,9 +16,17 @@ import sys
 from textwrap import dedent
 from unittest.mock import MagicMock, patch
 
-# Mock PIL before importing any modules that might depend on it
-sys.modules["PIL"] = MagicMock()
-sys.modules["PIL.Image"] = MagicMock()
+# Ensure PIL is importable before importing modules that depend on it. Only fall
+# back to a MagicMock when PIL is genuinely not installed — injecting one
+# unconditionally leaks globally via sys.modules and replaces the real PIL for
+# every later test file, breaking tests that manipulate real images (e.g.
+# discovery/test_embedding_service.py, discovery/test_discovery_agent.py).
+for _name in ("PIL", "PIL.Image"):
+    if _name not in sys.modules:
+        try:
+            __import__(_name)
+        except ImportError:
+            sys.modules[_name] = MagicMock()
 
 # Now import third-party modules
 

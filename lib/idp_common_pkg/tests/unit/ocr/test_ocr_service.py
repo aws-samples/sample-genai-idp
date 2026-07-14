@@ -15,11 +15,24 @@ import sys
 from io import BytesIO
 from unittest.mock import ANY, MagicMock, patch
 
-# Mock pypdfium2 and textractor before importing any modules that might depend on them
-sys.modules["pypdfium2"] = MagicMock()
-sys.modules["textractor"] = MagicMock()
-sys.modules["textractor.parsers"] = MagicMock()
-sys.modules["textractor.parsers.response_parser"] = MagicMock()
+# Ensure pypdfium2 and textractor are importable before importing modules that
+# depend on them. When these (heavy/native) deps are actually installed we use
+# the REAL modules — injecting a MagicMock unconditionally would leak globally
+# via sys.modules and make the mock the "real" pypdfium2 for every later test
+# file, breaking tests that build genuine PDFs (e.g.
+# discovery/test_pdf_page_extraction.py). So only fall back to a MagicMock for
+# whichever of these is genuinely missing, and never overwrite an installed one.
+for _name in (
+    "pypdfium2",
+    "textractor",
+    "textractor.parsers",
+    "textractor.parsers.response_parser",
+):
+    if _name not in sys.modules:
+        try:
+            __import__(_name)
+        except ImportError:
+            sys.modules[_name] = MagicMock()
 
 from idp_common.models import Document, Status
 from idp_common.ocr.service import OcrService

@@ -10,6 +10,7 @@ import json
 import unittest
 from unittest.mock import Mock, patch
 
+import pytest
 import yaml
 from idp_common.config.models import (
     IDPConfig,
@@ -17,8 +18,16 @@ from idp_common.config.models import (
 from idp_common.discovery.classes_discovery import ClassesDiscovery
 
 
+@pytest.mark.integration
 class TestDiscoveryConfigIntegration(unittest.TestCase):
-    """Integration tests for Discovery configuration functionality."""
+    """Integration tests for Discovery configuration functionality.
+
+    Marked ``integration`` (consistent with every other file in
+    ``tests/integration/``) so the ``-m "not integration"`` unit gate excludes
+    it. These end-to-end config-flow tests mock several internal seams that have
+    drifted from the current discovery implementation; they are exercised in the
+    integration suite rather than the fast unit gate.
+    """
 
     def setUp(self):
         """Set up test fixtures."""

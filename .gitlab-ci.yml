@@ -18,11 +18,14 @@ default:
 #   paths:
 #     - .cache/pip
 
+# security_review (SRT, ~5-10 min) runs BEFORE integration_tests (~2h stack
+# deploy + smoke suite) so a pipeline that is going to fail the security gate
+# fails fast instead of after the expensive deploy.
 stages:
   - developer_tests
   - deployment_validation
-  - integration_tests
   - security_review
+  - integration_tests
 
 developer_tests:
   stage: developer_tests
@@ -52,6 +55,10 @@ developer_tests:
     - uv pip install typer rich boto3
     # Install test dependencies
     - cd lib/idp_common_pkg && uv pip install -e ".[test,evaluation]" && cd ../..
+    # Install the other package suites run by `make test-packages-cicd`
+    - cd lib/idp_sdk && uv pip install -e ".[test]" && cd ../..
+    - cd lib/idp_cli_pkg && uv pip install -e ".[test]" && cd ../..
+    - cd lib/idp_feature_sdk && uv pip install -e ".[test]" && cd ../..
 
   script:
     - make lint-cicd
@@ -61,7 +68,14 @@ developer_tests:
     - echo "===================================="
     - echo ""
     - make typecheck-pr TARGET_BRANCH=$TARGET_BRANCH
+    # Static API RBAC/authorization scan (no AWS needed; catches op/schema/
+    # expectations drift and missing server-side group checks).
+    - make api-test-static
     - make test-cicd -C lib/idp_common_pkg
+    # Package/Lambda suites not covered by idp_common_pkg (idp_cli, idp_sdk,
+    # idp_feature_sdk, feature-platform, capacity, circuit-breaker, chat,
+    # config_library) — all green headless, previously CI-untested.
+    - make test-packages-cicd
     # UI unit tests (Vitest + jsdom, no browser). Node 22 installed above.
     - cd src/ui && npm ci --prefer-offline --no-audit && npx vitest run && cd ../..
 
@@ -148,10 +162,10 @@ integration_tests:
       if [ -f "pipeline_execution_id.txt" ]; then
         EXECUTION_ID=$(cat pipeline_execution_id.txt)
         echo "Pipeline Execution: $EXECUTION_ID"
-        
+
         # Get CodeBuild ID from the pipeline execution
         BUILD_ID=$(aws codepipeline list-action-executions --pipeline-name ${IDP_PIPELINE_NAME:-genaiic-sdlc-deploy-pipeline} --filter pipelineExecutionId=$EXECUTION_ID --query 'actionExecutionDetails[?actionName==`BuildAction`].output.executionResult.externalExecutionId' --output text 2>/dev/null || echo "")
-        
+
         if [ "$BUILD_ID" != "" ] && [ "$BUILD_ID" != "None" ]; then
           echo "CodeBuild ID: $BUILD_ID"
           # Extract just the build ID part (after the colon)
@@ -162,16 +176,39 @@ integration_tests:
           # Wait for CloudWatch Logs to flush all events
           echo "Waiting 30 seconds for logs to flush..."
           sleep 30
-          FULL_LOGS=$(aws logs get-log-events --log-group-name "/aws/codebuild/app-sdlc" --log-stream-name "$LOG_STREAM_NAME" --start-from-head --query 'events[].message' --output text 2>/dev/null || echo "Could not retrieve CodeBuild logs")
-          
-          # Save full logs to artifact
-          echo "$FULL_LOGS" > codebuild_logs.txt
-          echo -e "\033[1;36m📁 Full deployment logs saved to: \033[1;33mcodebuild_logs.txt\033[0m"
+          # Paginate get-log-events: a single call returns only ~1MB/10K
+          # events, which truncates 2h builds (the summary printed at the
+          # very end was regularly cut off).
+          : > codebuild_logs.txt
+          NEXT_TOKEN=""
+          PREV_TOKEN="none"
+          PAGES=0
+          while [ "$NEXT_TOKEN" != "$PREV_TOKEN" ] && [ $PAGES -lt 200 ]; do
+            PREV_TOKEN="$NEXT_TOKEN"
+            if [ -z "$NEXT_TOKEN" ]; then
+              PAGE=$(aws logs get-log-events --log-group-name "/aws/codebuild/app-sdlc" --log-stream-name "$LOG_STREAM_NAME" --start-from-head --output json 2>/dev/null || echo '{}')
+            else
+              PAGE=$(aws logs get-log-events --log-group-name "/aws/codebuild/app-sdlc" --log-stream-name "$LOG_STREAM_NAME" --start-from-head --next-token "$NEXT_TOKEN" --output json 2>/dev/null || echo '{}')
+            fi
+            echo "$PAGE" | python3 -c 'import json,sys; d=json.load(sys.stdin); print("\n".join(e["message"].rstrip("\n") for e in d.get("events",[])))' >> codebuild_logs.txt
+            NEXT_TOKEN=$(echo "$PAGE" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("nextForwardToken",""))')
+            PAGES=$((PAGES+1))
+          done
+          echo -e "\033[1;36m📁 Full deployment logs saved to: \033[1;33mcodebuild_logs.txt\033[0m (${PAGES} pages)"
           echo -e "\033[1;34m🔗 View logs: ${CI_JOB_URL}/artifacts/external_file/codebuild_logs.txt\033[0m"
-          # Extract and show deployment summary (AI or manual)
           echo ""
-          SUMMARY=$(echo "$FULL_LOGS" | sed -n '/🤖 Generating deployment summary with Bedrock.../,$p' | sed 's/^\t*//' | grep -v '\[Container\]' | grep -v 'Phase complete:' | grep -v 'Phase context status code:' | grep -v 'Entering phase' || true)
-          
+          # Preferred source: the summary file the build uploads to S3
+          # (deterministic key from the build id) — no log scraping needed.
+          SOURCE_BUCKET="genaiic-sdlc-sourcecode-${IDP_ACCOUNT_ID:-020432867916}-${AWS_DEFAULT_REGION:-us-east-1}"
+          SUMMARY=""
+          if aws s3 cp "s3://${SOURCE_BUCKET}/deploy/summaries/${LOG_STREAM_NAME}.txt" deployment_summary.txt 2>/dev/null; then
+            SUMMARY=$(cat deployment_summary.txt)
+          else
+            # Fallback: extract from the (now fully paginated) logs
+            SUMMARY=$(sed -n '/🤖 Generating deployment summary with Bedrock.../,$p' codebuild_logs.txt | sed 's/^\t*//' | grep -v '\[Container\]' | grep -v 'Phase complete:' | grep -v 'Phase context status code:' | grep -v 'Entering phase' || true)
+            echo "$SUMMARY" > deployment_summary.txt
+          fi
+
           if [ -n "$SUMMARY" ]; then
             echo "┌─────────────────────────────────────────────────────────────────────────┐"
             echo "│                        DEPLOYMENT SUMMARY                               │"
@@ -195,6 +232,7 @@ integration_tests:
     paths:
       - pipeline_execution_id.txt
       - codebuild_logs.txt
+      - deployment_summary.txt
     expire_in: 1 week
 
 srt_security_review:
@@ -206,11 +244,23 @@ srt_security_review:
   tags:
     - size:large
 
-  # Only run on merge requests targeting develop branch
+  # Run on merge requests targeting develop AND on the branch pipelines that
+  # trigger integration_tests (develop/feature/fix). Without the branch rules
+  # SRT and the integration tests never share a pipeline, so SRT could not
+  # act as a fail-fast gate for the 2h integration stage.
   rules:
     - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"
       when: on_success
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: on_success
+    - if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+      when: on_success
+    - if: $CI_COMMIT_BRANCH =~ /^fix\/.*/
+      when: on_success
     - when: never
+
+  # Start immediately — SRT needs no artifacts from earlier stages.
+  needs: []
 
   before_script:
     - python --version

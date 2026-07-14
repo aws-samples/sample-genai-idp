@@ -14,14 +14,12 @@ from datetime import datetime
 from io import StringIO  # Used for capturing stdout during agent execution
 
 import boto3
-import requests
-from aws_requests_auth.aws_auth import AWSRequestsAuth
 from botocore.exceptions import ClientError
 
 # Import the analytics agent and configuration utilities from idp_common
 from idp_common.agents.analytics import get_analytics_config, parse_agent_response
-from idp_common.agents.factory import agent_factory
 from idp_common.agents.common.config import configure_logging
+from idp_common.agents.factory import agent_factory
 
 # Configure logging for both application and Strands framework
 # This will respect both LOG_LEVEL and STRANDS_LOG_LEVEL environment variables
@@ -33,11 +31,9 @@ logger = logging.getLogger(__name__)
 # Initialize AWS clients
 dynamodb = boto3.resource("dynamodb")
 session = boto3.Session()
-credentials = session.get_credentials()
 
 # Get environment variables
 AGENT_TABLE = os.environ.get("AGENT_TABLE")
-APPSYNC_API_URL = os.environ.get("APPSYNC_API_URL")
 
 
 def validate_job_ownership(table, user_id, job_id):
@@ -183,116 +179,58 @@ def process_agent_query(query: str, agent_ids: list, job_id: str = None, user_id
         raise
 
 
-def update_job_status_in_appsync(job_id, status, user_id, result=None, error=None):
+_AGENT_TERMINAL_STATUSES = {"COMPLETED", "FAILED"}
+
+
+def update_job_status(job_id, status, user_id, result=None, error=None):
     """
-    Update the job status in AppSync via GraphQL mutation.
-    
-    NOTE: This function uses AppSync GraphQL mutations instead of direct DynamoDB updates
-    for a specific reason: to enable real-time subscriptions in the frontend. The original
-    plan was to have the frontend subscribe to job completion events so users wouldn't
-    need to wait for polling intervals to see results.
-    
-    However, implementing proper AppSync subscriptions proved more complex than anticipated.
-    The current implementation returns a Boolean from the mutation rather than the full
-    AnalyticsJob object, which means subscriptions receive a simple true/false notification
-    rather than the complete job data. This requires the frontend to make a separate query
-    to fetch the actual job details when notified.
-    
-    TODO: Implement proper AppSync subscriptions that return the full AnalyticsJob object
-    so the frontend can receive complete job data in real-time without additional queries.
-    This would require:
-    1. Changing the mutation return type from Boolean to AnalyticsJob
-    2. Updating the AppSync resolver to return the updated DynamoDB item
-    3. Ensuring the subscription properly receives and handles the job data
-    
-    For now, the frontend relies on polling every 30 seconds as a fallback mechanism,
-    with the subscription serving as a potential optimization that isn't fully utilized.
-    
+    Persist the job status/result to the Agent DynamoDB table.
+
+    This is the authoritative status write: the UI reads job status by polling
+    getAgentJobStatus, which reads this DynamoDB item. (AppSync — previously the
+    only status-persistence path — was removed as part of the AppSync->REST
+    migration.)
+
     Args:
-        job_id: The ID of the job to update
-        status: The new status of the job
-        user_id: The user ID who owns the job
-        result: The result data (optional)
+        job_id: The ID of the job to update.
+        status: The new status (PROCESSING / COMPLETED / FAILED).
+        user_id: The user who owns the job (part of the DynamoDB key).
+        result: The result payload (JSON string or serializable object), optional.
+        error: The error message, optional.
+
+    Returns:
+        True if the DynamoDB write succeeded, else False.
     """
     try:
-        # Prepare the simplified mutation
-        mutation = """
-        mutation UpdateAgentJobStatus($jobId: ID!, $status: String!, $userId: String!, $result: String, $error: String) {
-            updateAgentJobStatus(jobId: $jobId, status: $status, userId: $userId, result: $result, error: $error)
-        }
-        """
-        
-        logger.info(f"Updating AppSync for job {job_id}, user {user_id}, status {status}")
-        
-        # Prepare the variables
-        variables = {
-            "jobId": job_id,
-            "status": status,
-            "userId": user_id
-        }
-        
-        # Serialize result to JSON string if it's provided
-        if result:
-            if isinstance(result, str):
-                variables["result"] = result
-            else:
-                variables["result"] = json.dumps(result)
+        table = dynamodb.Table(AGENT_TABLE)
 
-        # Include error message if provided
-        if error:
-            variables["error"] = error if isinstance(error, str) else str(error)
-        
-        # Set up AWS authentication
-        region = session.region_name or os.environ.get('AWS_REGION', 'us-east-1')
-        auth = AWSRequestsAuth(
-            aws_access_key=credentials.access_key,
-            aws_secret_access_key=credentials.secret_key,
-            aws_token=credentials.token,
-            aws_host=APPSYNC_API_URL.replace('https://', '').replace('/graphql', ''),
-            aws_region=region,
-            aws_service='appsync'
+        names = {"#status": "status"}
+        values = {":status": status}
+        expr = "SET #status = :status"
+
+        if result is not None:
+            names["#result"] = "result"
+            values[":result"] = result if isinstance(result, str) else json.dumps(result)
+            expr += ", #result = :result"
+        if error is not None:
+            names["#error"] = "error"
+            values[":error"] = error if isinstance(error, str) else str(error)
+            expr += ", #error = :error"
+        if status in _AGENT_TERMINAL_STATUSES:
+            names["#completedAt"] = "completedAt"
+            values[":completedAt"] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            expr += ", #completedAt = :completedAt"
+
+        table.update_item(
+            Key={"PK": f"agent#{user_id}", "SK": job_id},
+            UpdateExpression=expr,
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
         )
-        
-        # Prepare the request
-        headers = {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        }
-        
-        payload = {
-            'query': mutation,
-            'variables': variables
-        }
-        
-        logger.info(f"Publishing analytics job update to AppSync for job: {job_id}")
-        logger.debug(f"Mutation payload: {json.dumps(payload)}")
-        
-        # Make the request
-        response = requests.post(
-            APPSYNC_API_URL,
-            json=payload,
-            headers=headers,
-            auth=auth,
-            timeout=30
-        )
-        
-        # Check for successful response
-        if response.status_code == 200:
-            response_json = response.json()
-            if "errors" not in response_json:
-                logger.info(f"Successfully published analytics job update for: {job_id}, user: {user_id}")
-                logger.debug(f"Response: {response.text}")
-                return True
-            else:
-                logger.error(f"GraphQL errors in response: {json.dumps(response_json.get('errors'))}")
-                logger.error(f"Full mutation payload: {json.dumps(payload)}")
-                return False
-        else:
-            logger.error(f"Failed to publish analytics job update. Status: {response.status_code}, Response: {response.text}")
-            return False
-        
+        logger.info(f"Persisted job status to DynamoDB: {job_id} -> {status}")
+        return True
     except Exception as e:
-        logger.error(f"Error updating job status in AppSync: {str(e)}")
+        logger.error(f"Failed to persist job status to DynamoDB for job {job_id}: {str(e)}")
         import traceback
         logger.error(f"Error traceback: {traceback.format_exc()}")
         return False
@@ -337,7 +275,7 @@ def handler(event, context):
             }
         
         # Update the job status to PROCESSING
-        update_job_status_in_appsync(job_id, "PROCESSING", user_id)
+        update_job_status(job_id, "PROCESSING", user_id)
         logger.info(f"Updated job status to PROCESSING: {job_id}")
         
         # Process the agent query using the agent with retry logic
@@ -409,19 +347,20 @@ def handler(event, context):
                 # Serialize the analytics_result to a JSON string
                 analytics_result_json = json.dumps(analytics_result)
                 
-                # Update the job status to COMPLETED with result via AppSync
-                # This will handle DynamoDB update, completedAt timestamp, and subscription notification
-                success = update_job_status_in_appsync(
-                    job_id=job_id, 
-                    status="COMPLETED", 
+                # Update the job status to COMPLETED with result. Writes to
+                # DynamoDB (authoritative, polled by the UI) with completedAt,
+                # and best-effort notifies AppSync if still configured.
+                success = update_job_status(
+                    job_id=job_id,
+                    status="COMPLETED",
                     user_id=user_id,
                     result=analytics_result_json
                 )
-                
+
                 if success:
                     logger.info(f"Successfully updated job status to COMPLETED with result: {job_id}")
                 else:
-                    logger.error(f"Failed to update job status via AppSync for job: {job_id}")
+                    logger.error(f"Failed to update job status for job: {job_id}")
                 
                 # Return the updated job record (without exposing userId)
                 return {
@@ -443,19 +382,20 @@ def handler(event, context):
             error_msg = f"Agent query processing failed: {str(processing_error)}"
             logger.error(error_msg)
             
-            # Update the job status to FAILED via AppSync
-            # This will handle DynamoDB update, completedAt timestamp, and subscription notification
-            success = update_job_status_in_appsync(
+            # Update the job status to FAILED. Writes to DynamoDB (authoritative,
+            # polled by the UI) with completedAt, and best-effort notifies AppSync
+            # if still configured.
+            success = update_job_status(
                 job_id=job_id,
                 status="FAILED",
                 user_id=user_id,
                 error=error_msg
             )
-            
+
             if success:
                 logger.info(f"Successfully updated job status to FAILED: {job_id}")
             else:
-                logger.error(f"Failed to update job status via AppSync for job: {job_id}")
+                logger.error(f"Failed to update job status for job: {job_id}")
             
             return {
                 "statusCode": 500,
