@@ -18,18 +18,22 @@ class TestConfigOperationsMocked:
     """Test config operations with mocked file I/O."""
 
     @patch("idp_common.config.merge_utils.generate_config_template")
-    def test_create_config(self, mock_generate):
+    def test_create_config(self, mock_generate, tmp_path):
         """Test creating config file."""
         # Setup mock
         mock_generate.return_value = "key: value"
 
+        # Write to a temp path — not the repo root — so the test leaves no
+        # stray config.yaml in the working tree.
+        output = tmp_path / "config.yaml"
+
         # Test
         client = IDPClient()
-        result = client.config.create(features="min", output="config.yaml")
+        result = client.config.create(features="min", output=str(output))
 
         assert isinstance(result, ConfigCreateResult)
         assert result.yaml_content
-        assert result.output_path == "config.yaml"
+        assert result.output_path == str(output)
 
     @patch("idp_common.config.merge_utils.validate_config")
     @patch("idp_common.config.merge_utils.load_yaml_file")
