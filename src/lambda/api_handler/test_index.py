@@ -283,7 +283,7 @@ class TestCreateJob:
                     "claims": {
                         "sub": "client-abc-123",
                         "client_id": "client-abc-123",
-                        "token_use": "access",
+                        "token_use": "access",  # nosec B105 - JWT claim type, not a secret
                         "scope": "idp-api/jobs.write idp-api/jobs.read",
                     }
                 }

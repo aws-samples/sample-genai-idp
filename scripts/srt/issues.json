@@ -123,7 +123,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-04-27T18:09:25.876Z",
     "assessmentCount": 22,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret."
+    "suppressionReason": "False positive: flagged string is demo output text '10-30% fewer tokens than JSON' stored under a dict key named 'token_efficiency' in a documentation notebook; Bandit matches the 'token' substring in the key. Not a credential."
   },
   {
     "source": "security-matrix",
@@ -198,7 +198,7 @@
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.913Z",
     "assessmentCount": 22,
-    "suppressionReason": "Accepted: bucket retention is a customer data-governance decision (evaluation baselines, working documents); imposing a lifecycle policy in the template risks deleting customer data."
+    "suppressionReason": "Accepted: SDLC pipeline scaffolding bucket in solution-builder dev accounts; retention of pipeline source/artifact objects is the pipeline owner's decision, and a lifecycle policy here is cost optimization rather than a security control."
   },
   {
     "source": "security-matrix",
@@ -258,7 +258,7 @@
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.914Z",
     "assessmentCount": 22,
-    "suppressionReason": "Accepted: bucket retention is a customer data-governance decision (evaluation baselines, working documents); imposing a lifecycle policy in the template risks deleting customer data."
+    "suppressionReason": "Accepted: SDLC pipeline scaffolding bucket in solution-builder dev accounts; retention of pipeline source/artifact objects is the pipeline owner's decision, and a lifecycle policy here is cost optimization rather than a security control."
   },
   {
     "source": "security-matrix",
@@ -333,7 +333,7 @@
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.915Z",
     "assessmentCount": 22,
-    "suppressionReason": "Accepted: bucket retention is a customer data-governance decision (evaluation baselines, working documents); imposing a lifecycle policy in the template risks deleting customer data."
+    "suppressionReason": "Accepted: WebUIBucket holds only the current built web-app bundle, redeployed in full by CodeBuild on each update; there is no object accumulation to manage, and an expiry lifecycle rule could delete live UI assets."
   },
   {
     "source": "security-matrix",
@@ -604,7 +604,7 @@
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-27T18:09:25.924Z",
     "assessmentCount": 22,
-    "suppressionReason": "Accepted: optional ALB-hosting mode for dev/enterprise-internal deployments; AZ topology follows the subnets the customer supplies."
+    "suppressionReason": "Accepted/false positive at scan time: optional ALB-hosting mode takes customer-supplied subnet parameters that cannot be evaluated statically; ALB creation itself requires at least two subnets in distinct AZs, so a single-AZ deployment is not possible. AZ topology is the deploying customer's choice."
   },
   {
     "source": "Bandit",
@@ -618,7 +618,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-04-30T20:15:11.167Z",
     "assessmentCount": 18,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret."
+    "suppressionReason": "False positive: deliberate dummy secret-shaped values ('j.w.t', 's1', 'should-hide', None) in fixtures that exercise the log sanitizer's redaction of password/token/secret keys; the test's purpose requires these literals. No real secret."
   },
   {
     "source": "Bandit",
@@ -632,7 +632,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-04-30T20:15:11.168Z",
     "assessmentCount": 36,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret."
+    "suppressionReason": "False positive: deliberate dummy secret-shaped values ('j.w.t', 's1', 'should-hide', None) in fixtures that exercise the log sanitizer's redaction of password/token/secret keys; the test's purpose requires these literals. No real secret."
   },
   {
     "source": "Bandit",
@@ -646,7 +646,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-04-30T20:15:11.169Z",
     "assessmentCount": 18,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret."
+    "suppressionReason": "False positive: deliberate dummy secret-shaped values ('j.w.t', 's1', 'should-hide', None) in fixtures that exercise the log sanitizer's redaction of password/token/secret keys; the test's purpose requires these literals. No real secret."
   },
   {
     "source": "Bandit",
@@ -660,7 +660,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-04-30T20:15:11.170Z",
     "assessmentCount": 18,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret."
+    "suppressionReason": "False positive: deliberate dummy secret-shaped values ('j.w.t', 's1', 'should-hide', None) in fixtures that exercise the log sanitizer's redaction of password/token/secret keys; the test's purpose requires these literals. No real secret."
   },
   {
     "source": "Bandit",
@@ -674,7 +674,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-04-30T20:15:11.170Z",
     "assessmentCount": 18,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret."
+    "suppressionReason": "False positive: deliberate dummy secret-shaped values ('j.w.t', 's1', 'should-hide', None) in fixtures that exercise the log sanitizer's redaction of password/token/secret keys; the test's purpose requires these literals. No real secret."
   },
   {
     "source": "Bandit",
@@ -688,7 +688,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-04-30T20:15:11.172Z",
     "assessmentCount": 18,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret."
+    "suppressionReason": "False positive: deliberate dummy secret-shaped values ('j.w.t', 's1', 'should-hide', None) in fixtures that exercise the log sanitizer's redaction of password/token/secret keys; the test's purpose requires these literals. No real secret."
   },
   {
     "source": "Bandit",
@@ -732,7 +732,7 @@
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-30T20:15:11.353Z",
     "assessmentCount": 18,
-    "suppressionReason": "Accepted: bastion role/instance is an optional, condition-gated debug convenience; scope reviewed and limited to SSM session access patterns."
+    "suppressionReason": "False positive: BastionRole (Condition ShouldDeployBastionHost, off by default) carries exactly the managed policy the finding's own fix recommends - AmazonSSMManagedInstanceCore - and nothing else; the instance profile attaches only that role. No excess privilege exists."
   },
   {
     "source": "security-matrix",
@@ -747,7 +747,7 @@
     "isCustomResource": false,
     "firstDetectedAt": "2026-04-30T20:15:11.353Z",
     "assessmentCount": 18,
-    "suppressionReason": "Accepted: bastion role/instance is an optional, condition-gated debug convenience; scope reviewed and limited to SSM session access patterns."
+    "suppressionReason": "False positive: BastionRole (Condition ShouldDeployBastionHost, off by default) carries exactly the managed policy the finding's own fix recommends - AmazonSSMManagedInstanceCore - and nothing else; the instance profile attaches only that role. No excess privilege exists."
   },
   {
     "source": "Bandit",
@@ -1055,7 +1055,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-07-07T01:25:57.569Z",
     "assessmentCount": 6,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret.",
+    "suppressionReason": "False positive: flagged values are numeric rule-validation counters in test fixtures (e.g. {'Pass': 4, 'Fail': 1}, passCount); Bandit B105 matches dict keys containing 'pass'. No credential involved.",
     "suppressedAt": "2026-07-07T02:15:42.487410Z"
   },
   {
@@ -1070,7 +1070,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-07-07T01:25:57.569Z",
     "assessmentCount": 6,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret.",
+    "suppressionReason": "False positive: flagged values are numeric rule-validation counters in test fixtures (e.g. {'Pass': 4, 'Fail': 1}, passCount); Bandit B105 matches dict keys containing 'pass'. No credential involved.",
     "suppressedAt": "2026-07-07T02:15:42.487410Z"
   },
   {
@@ -1085,7 +1085,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-07-07T01:25:57.569Z",
     "assessmentCount": 6,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret.",
+    "suppressionReason": "False positive: flagged values are numeric rule-validation counters in test fixtures (e.g. {'Pass': 4, 'Fail': 1}, passCount); Bandit B105 matches dict keys containing 'pass'. No credential involved.",
     "suppressedAt": "2026-07-07T02:15:42.487410Z"
   },
   {
@@ -1100,7 +1100,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-07-07T01:25:57.570Z",
     "assessmentCount": 6,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret.",
+    "suppressionReason": "False positive: flagged values are numeric rule-validation counters in test fixtures (e.g. {'Pass': 4, 'Fail': 1}, passCount); Bandit B105 matches dict keys containing 'pass'. No credential involved.",
     "suppressedAt": "2026-07-07T02:15:42.487410Z"
   },
   {
@@ -1115,7 +1115,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-07-07T01:25:57.570Z",
     "assessmentCount": 6,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret.",
+    "suppressionReason": "False positive: flagged values are numeric rule-validation counters in test fixtures (e.g. {'Pass': 4, 'Fail': 1}, passCount); Bandit B105 matches dict keys containing 'pass'. No credential involved.",
     "suppressedAt": "2026-07-07T02:15:42.487410Z"
   },
   {
@@ -1130,7 +1130,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-07-07T01:25:57.570Z",
     "assessmentCount": 6,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret.",
+    "suppressionReason": "False positive: flagged values are numeric rule-validation counters in test fixtures (e.g. {'Pass': 4, 'Fail': 1}, passCount); Bandit B105 matches dict keys containing 'pass'. No credential involved.",
     "suppressedAt": "2026-07-07T02:15:42.487410Z"
   },
   {
@@ -1145,7 +1145,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-07-07T01:25:57.570Z",
     "assessmentCount": 6,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret.",
+    "suppressionReason": "False positive: flagged values are numeric rule-validation counters in test fixtures (e.g. {'Pass': 4, 'Fail': 1}, passCount); Bandit B105 matches dict keys containing 'pass'. No credential involved.",
     "suppressedAt": "2026-07-07T02:15:42.487410Z"
   },
   {
@@ -1160,7 +1160,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-07-07T01:25:57.570Z",
     "assessmentCount": 6,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret.",
+    "suppressionReason": "False positive: flagged values are numeric rule-validation counters in test fixtures (e.g. {'Pass': 4, 'Fail': 1}, passCount); Bandit B105 matches dict keys containing 'pass'. No credential involved.",
     "suppressedAt": "2026-07-07T02:15:42.487410Z"
   },
   {
@@ -1175,7 +1175,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-07-07T01:25:57.570Z",
     "assessmentCount": 6,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret.",
+    "suppressionReason": "False positive: flagged values are numeric rule-validation counters in test fixtures (e.g. {'Pass': 4, 'Fail': 1}, passCount); Bandit B105 matches dict keys containing 'pass'. No credential involved.",
     "suppressedAt": "2026-07-07T02:15:42.487410Z"
   },
   {
@@ -1190,7 +1190,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-07-07T01:25:57.570Z",
     "assessmentCount": 6,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret.",
+    "suppressionReason": "False positive: flagged values are numeric rule-validation counters in test fixtures (e.g. {'Pass': 4, 'Fail': 1}, passCount); Bandit B105 matches dict keys containing 'pass'. No credential involved.",
     "suppressedAt": "2026-07-07T02:15:42.487410Z"
   },
   {
@@ -1205,7 +1205,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-07-07T01:25:57.570Z",
     "assessmentCount": 6,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret.",
+    "suppressionReason": "False positive: flagged values are numeric rule-validation counters in test fixtures (e.g. {'Pass': 4, 'Fail': 1}, passCount); Bandit B105 matches dict keys containing 'pass'. No credential involved.",
     "suppressedAt": "2026-07-07T02:15:42.487410Z"
   },
   {
@@ -1220,7 +1220,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-07-07T01:25:57.570Z",
     "assessmentCount": 6,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret.",
+    "suppressionReason": "False positive: flagged values are numeric rule-validation counters in test fixtures (e.g. {'Pass': 4, 'Fail': 1}, passCount); Bandit B105 matches dict keys containing 'pass'. No credential involved.",
     "suppressedAt": "2026-07-07T02:15:42.487410Z"
   },
   {
@@ -1235,7 +1235,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-07-07T01:25:57.570Z",
     "assessmentCount": 6,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret.",
+    "suppressionReason": "False positive: flagged values are numeric rule-validation counters in test fixtures (e.g. {'Pass': 4, 'Fail': 1}, passCount); Bandit B105 matches dict keys containing 'pass'. No credential involved.",
     "suppressedAt": "2026-07-07T02:15:42.487410Z"
   },
   {
@@ -1250,7 +1250,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-07-07T01:25:57.570Z",
     "assessmentCount": 6,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret.",
+    "suppressionReason": "False positive: flagged values are numeric rule-validation counters in test fixtures (e.g. {'Pass': 4, 'Fail': 1}, passCount); Bandit B105 matches dict keys containing 'pass'. No credential involved.",
     "suppressedAt": "2026-07-07T02:15:42.487410Z"
   },
   {
@@ -1265,7 +1265,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-07-07T01:25:57.570Z",
     "assessmentCount": 6,
-    "suppressionReason": "False positive: test fixture uses dummy placeholder credentials (e.g. 'testing') required by moto/boto3 test setup; no real secret.",
+    "suppressionReason": "False positive: flagged values are numeric rule-validation counters in test fixtures (e.g. {'Pass': 4, 'Fail': 1}, passCount); Bandit B105 matches dict keys containing 'pass'. No credential involved.",
     "suppressedAt": "2026-07-07T02:15:42.487410Z"
   },
   {
@@ -1361,7 +1361,7 @@
     "isCustomResource": false,
     "firstDetectedAt": "2026-07-07T03:02:04.772Z",
     "assessmentCount": 4,
-    "suppressionReason": "Accepted: HTTP API (v2) proxy routes validate requests in the Lambda resolvers; API GW request validators are a REST-API (v1) feature."
+    "suppressionReason": "Accepted: REST API in Lambda-proxy mode; the data-plane POST method is Cognito-authorized and the dispatcher Lambda validates each request body per-field, and the remaining method is the auth-less MOCK OPTIONS CORS preflight (static 200, no backend). API GW request validators add no value for opaque proxy payloads."
   },
   {
     "source": "security-matrix",
@@ -1405,7 +1405,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-07-08T23:11:40.438Z",
     "assessmentCount": 2,
-    "suppressionReason": "This is a false-positive"
+    "suppressionReason": "False positive: '9999' is a token-budget number asserted in a dict whose key 'shard_token_budget' contains 'token'; Bandit B105 keys on the substring. Not a credential."
   },
   {
     "source": "Checkov",
@@ -1574,7 +1574,7 @@
     "isCustomResource": false,
     "firstDetectedAt": "2026-07-08T23:11:40.717Z",
     "assessmentCount": 2,
-    "suppressionReason": "This is not required/permitted by the customer"
+    "suppressionReason": "Accepted: WebACL uses DefaultAction Block with an explicit IP allowlist (deny-by-default), so only allowlisted ranges reach the API; backend is Python (no Log4j2). Log4Shell managed rule adds no protection. Inline 'checkov:skip=CKV_AWS_192' comment present on the ApiWafWebACL resource in nested/api-resolvers/template.yaml."
   },
   {
     "source": "security-matrix",
@@ -1664,7 +1664,7 @@
     "isCustomResource": false,
     "firstDetectedAt": "2026-07-08T23:11:40.736Z",
     "assessmentCount": 2,
-    "suppressionReason": "This is not required/permitted by the customer"
+    "suppressionReason": "Accepted: duplicate finding from a SAM build artifact (.aws-sam/packaged.yaml) of feature-platform/sample-health-insurance-review/template.yaml ClaimsStatusTable. Same rationale as the source-template entry: CloudTrail DynamoDB data-plane logging is an account-level control (trail + log bucket) owned by the deploying customer. Build artifacts are excluded from scans by 'make srt-clean'."
   },
   {
     "source": "security-matrix",
@@ -1679,7 +1679,7 @@
     "isCustomResource": false,
     "firstDetectedAt": "2026-07-08T23:11:40.736Z",
     "assessmentCount": 2,
-    "suppressionReason": "This is not required/permitted by the customer"
+    "suppressionReason": "Accepted: duplicate finding from a SAM build artifact (.aws-sam/idp-main.yaml) of template.yaml BastionKey. Same rationale as the source-template entry: KMS key event monitoring (CloudTrail/EventBridge/alarms) is account-level infrastructure owned by the deploying customer. Build artifacts are excluded from scans by 'make srt-clean'."
   },
   {
     "source": "Bandit",
@@ -1693,7 +1693,7 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-07-10T01:37:31.041Z",
     "assessmentCount": 1,
-    "suppressionReason": "Test script only"
+    "suppressionReason": "Accepted: local benchmark harness (developer tooling in benchmarks/, never deployed); shell commands are composed from hard-coded constants and the operator's own CLI arguments, so no untrusted input crosses the shell boundary."
   },
   {
     "source": "Bandit",
@@ -1707,6 +1707,6 @@
     "status": "suppressed",
     "firstDetectedAt": "2026-07-10T01:37:31.041Z",
     "assessmentCount": 1,
-    "suppressionReason": "Test script only"
+    "suppressionReason": "Accepted: local benchmark harness (developer tooling in benchmarks/, never deployed); shell commands are composed from hard-coded constants and the operator's own CLI arguments, so no untrusted input crosses the shell boundary."
   }
 ]

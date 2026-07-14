@@ -34,9 +34,9 @@ logger = logging.getLogger(__name__)
 # Required environment variables and their CloudFormation output counterparts
 REQUIRED_ENV_VARS = {
     "IDP_MCP_ENDPOINT": "MCPServerEndpoint",
-    "IDP_MCP_TOKEN_URL": "MCPTokenURL",
+    "IDP_MCP_TOKEN_URL": "MCPTokenURL",  # nosec B105 - CFN output name, not a secret
     "IDP_MCP_CLIENT_ID": "MCPConnectorClientId",
-    "IDP_MCP_CLIENT_SECRET": "MCPConnectorClientSecret",
+    "IDP_MCP_CLIENT_SECRET": "MCPConnectorClientSecret",  # nosec B105 - CFN output name, not a secret
 }
 
 

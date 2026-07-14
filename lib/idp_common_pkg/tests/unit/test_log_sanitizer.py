@@ -64,14 +64,14 @@ class TestRedaction:
         event = {
             "idToken": "j.w.t",
             "AccessToken": "j.w.t",
-            "refresh_TOKEN": "j.w.t",
+            "refresh_TOKEN": "j.w.t",  # nosec B105 - dummy value exercising redaction
         }
         out = sanitize_event_for_logging(event)
         for k in ("idToken", "AccessToken", "refresh_TOKEN"):
             assert out[k] == "***REDACTED***"
 
     def test_preserves_none_for_denied_null_values(self):
-        event = {"password": None, "token": None}
+        event = {"password": None, "token": None}  # nosec B105 - dummy value exercising redaction
         out = sanitize_event_for_logging(event)
         assert out["password"] is None
         assert out["token"] is None
@@ -102,8 +102,8 @@ class TestStructure:
     def test_preserves_nested_structure(self):
         event = {
             "records": [
-                {"id": 1, "password": "s1"},
-                {"id": 2, "password": "s2"},
+                {"id": 1, "password": "s1"},  # nosec B105 - dummy value exercising redaction
+                {"id": 2, "password": "s2"},  # nosec B105 - dummy value exercising redaction
             ]
         }
         out = sanitize_event_for_logging(event)
@@ -112,7 +112,7 @@ class TestStructure:
         assert out["records"][0]["password"] == "***REDACTED***"
 
     def test_does_not_mutate_input(self):
-        event = {"secret": "s", "ok": 1}
+        event = {"secret": "s", "ok": 1}  # nosec B105 - dummy value exercising redaction
         _ = sanitize_event_for_logging(event)
         assert event["secret"] == "s"
 
@@ -134,7 +134,7 @@ class TestStructure:
 
 class TestExtraDenyKeys:
     def test_extra_deny_keys_augment_default_list(self):
-        event = {"custom_secret_field": "should-hide", "safe": "visible"}
+        event = {"custom_secret_field": "should-hide", "safe": "visible"}  # nosec B105 - dummy value exercising redaction
         out = sanitize_event_for_logging(event, extra_deny_keys=["custom_secret"])
         assert out["custom_secret_field"] == "***REDACTED***"
         assert out["safe"] == "visible"

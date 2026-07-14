@@ -37,7 +37,7 @@ RESULTS = os.path.join(BENCH, "results")
 
 
 def sh(cmd):
-    return subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    return subprocess.run(cmd, shell=True, capture_output=True, text=True)  # nosec B602 - operator-owned local harness
 
 
 def resolve_stack(stack):

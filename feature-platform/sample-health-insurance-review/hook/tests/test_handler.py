@@ -112,12 +112,12 @@ def _get_row():
 @pytest.mark.parametrize(
     "counts,expected",
     [
-        ({"Pass": 5}, "CLEAN_CLAIM"),
-        ({"Pass": 4, "Fail": 1}, "REVIEW_REQUIRED"),
+        ({"Pass": 5}, "CLEAN_CLAIM"),  # nosec B105 - rule counter fixture
+        ({"Pass": 4, "Fail": 1}, "REVIEW_REQUIRED"),  # nosec B105 - rule counter fixture
         ({"Fail": 2, "Information Not Found": 3}, "REVIEW_REQUIRED"),
-        ({"Pass": 1, "Information Not Found": 4}, "INSUFFICIENT_DOCUMENTATION"),
+        ({"Pass": 1, "Information Not Found": 4}, "INSUFFICIENT_DOCUMENTATION"),  # nosec B105 - rule counter fixture
         ({"Information Not Found": 5}, "INSUFFICIENT_DOCUMENTATION"),
-        ({"Pass": 3, "Unknown": 1}, "INSUFFICIENT_DOCUMENTATION"),
+        ({"Pass": 3, "Unknown": 1}, "INSUFFICIENT_DOCUMENTATION"),  # nosec B105 - rule counter fixture
         ({}, "INSUFFICIENT_DOCUMENTATION"),
     ],
 )
@@ -128,17 +128,17 @@ def test_derive_status_matrix(stack, counts, expected):
 
 def test_derive_status_ignores_zero_and_non_numeric_counts(stack):
     status, normalized = stack.derive_status(
-        {"Pass": 3, "Fail": 0, "Information Not Found": "oops"}
+        {"Pass": 3, "Fail": 0, "Information Not Found": "oops"}  # nosec B105 - rule counter fixture
     )
     assert status == "CLEAN_CLAIM"
-    assert normalized == {"Pass": 3}
+    assert normalized == {"Pass": 3}  # nosec B105 - rule counter fixture
 
 
 # ---------------------------------------------------------------------------
 # End-to-end handler behaviour
 # ---------------------------------------------------------------------------
 def test_clean_claim_written_to_table(stack):
-    _put_summary({"Pass": 7})
+    _put_summary({"Pass": 7})  # nosec B105 - rule counter fixture
     result = stack.lambda_handler(_event(_document()), None)
 
     assert result["status"] == "CLEAN_CLAIM"
@@ -153,7 +153,7 @@ def test_clean_claim_written_to_table(stack):
 
 
 def test_failed_rules_mark_review_required(stack):
-    _put_summary({"Pass": 4, "Fail": 2, "Information Not Found": 1})
+    _put_summary({"Pass": 4, "Fail": 2, "Information Not Found": 1})  # nosec B105 - rule counter fixture
     result = stack.lambda_handler(_event(_document()), None)
     assert result["status"] == "REVIEW_REQUIRED"
     assert _get_row()["notFoundCount"] == 1
@@ -161,7 +161,7 @@ def test_failed_rules_mark_review_required(stack):
 
 def test_compressed_document_reference_is_resolved(stack):
     """The dispatcher usually passes {"compressed": true, "s3_uri": ...}."""
-    _put_summary({"Pass": 2})
+    _put_summary({"Pass": 2})  # nosec B105 - rule counter fixture
     full_doc_key = f"compressed_documents/{_DOC_ID}/123_hook_state.json"
     boto3.client("s3", region_name="us-east-1").put_object(
         Bucket=_WORKING_BUCKET,
@@ -180,7 +180,7 @@ def test_compressed_document_reference_is_resolved(stack):
 
 def test_falls_back_to_conventional_path_without_result_block(stack):
     """Docs without rule_validation_result still resolve via output_bucket."""
-    _put_summary({"Pass": 1, "Fail": 1})
+    _put_summary({"Pass": 1, "Fail": 1})  # nosec B105 - rule counter fixture
     result = stack.lambda_handler(_event(_document(output_uri=None)), None)
     assert result["status"] == "REVIEW_REQUIRED"
 
@@ -197,12 +197,12 @@ def test_unresolvable_document_skips_without_raising(stack):
 
 
 def test_rerun_is_idempotent_overwrite(stack):
-    _put_summary({"Pass": 3})
+    _put_summary({"Pass": 3})  # nosec B105 - rule counter fixture
     stack.lambda_handler(_event(_document()), None)
     assert _get_row()["status"] == "CLEAN_CLAIM"
 
     # Rule validation re-ran and found a failure; the hook overwrites.
-    _put_summary({"Pass": 2, "Fail": 1})
+    _put_summary({"Pass": 2, "Fail": 1})  # nosec B105 - rule counter fixture
     stack.lambda_handler(_event(_document()), None)
     row = _get_row()
     assert row["status"] == "REVIEW_REQUIRED"
