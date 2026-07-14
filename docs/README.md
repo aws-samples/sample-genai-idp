@@ -12,6 +12,7 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 ## Core
 
 - [Architecture](./architecture.md) - Detailed component architecture and data flow
+- [Quick Start](./quick-start.md) - Cold-start configuration authoring for new deployments (chat widget + `idp-cli bootstrap`)
 - [Deployment](./deployment.md) - Build, publish, deploy, and test instructions
 - [Headless Deployment](./headless-deployment.md) - Backend-only deployment (no UI/AppSync/Cognito/WAF) — for API-only / pipeline integrations in Commercial regions or GovCloud
 - [Configuration](./configuration.md) - Configuration and customization options

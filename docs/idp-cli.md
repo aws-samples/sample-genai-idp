@@ -31,6 +31,7 @@ https://github.com/user-attachments/assets/3d448a74-ba5b-4a4a-96ad-ec03ac0b4d7d
   - [deploy](#deploy)
   - [publish](#publish)
   - [delete](#delete)
+  - [bootstrap](#bootstrap)
   - [process](#process--run-inference)
   - [reprocess](#reprocess--rerun-inference)
   - [status](#status)
@@ -684,6 +685,55 @@ Proceeding with stack deletion...
 ```
 
 **Note:** CREATE operations cannot be cancelled directly - they must complete or roll back naturally. UPDATE operations can be cancelled immediately.
+
+---
+
+### `bootstrap`
+
+Bootstrap a configuration (and optional synthetic test set) from a plain-language
+description — the scriptable equivalent of the web UI [Quick Start](./quick-start.md)
+widget. Authors a document-class schema from your prompt (reusing a catalog match
+when one fits), creates a config version, and — when the document generator is
+available — generates a small labeled synthetic test set attached to it.
+
+**Usage:**
+```bash
+idp-cli bootstrap --prompt "<description>" [--stack-name <stack>] [OPTIONS]
+```
+
+**Example:**
+```bash
+idp-cli bootstrap \
+    --prompt "Invoices with vendor name, invoice number, date, and total amount" \
+    --stack-name my-idp-stack
+```
+
+**Local mode** — omit `--stack-name` to author and print the schema as JSON without
+saving anything to a stack:
+```bash
+idp-cli bootstrap --prompt "Bank statements with account holder and transactions"
+```
+
+**Options:**
+- `--prompt`, `-p`: **(required)** Natural-language description of the document type.
+- `--stack-name`: Target CloudFormation stack. **Omit for local mode** (print schema, no save).
+- `--class-name`: Document class name to use as the schema `$id` / document type.
+- `--field-hint`: A field the schema must include. Repeatable: `--field-hint X --field-hint Y`.
+- `--config-version`: Existing config version to source catalog classes from / merge the new class into.
+- `--target-version`: Name of the config version to create (default: `bootstrap-<class>`).
+- `--count`, `-c`: Number of synthetic documents to generate (default: `3`).
+- `--threshold`: Generation quality threshold, 1–10 (default: `7`).
+- `--augment`: Apply scan/fax-style image augmentation to generated documents.
+- `--model-id`: Bedrock model id override for schema authoring / generation.
+- `--region`: AWS region (optional).
+
+**Note:** The created version is **not** activated automatically (unlike the web UI
+Quick Start). Activate it from **Configuration › View/Edit Configuration** in the UI
+when you're ready to process documents with it. Synthetic generation is optional and
+requires the IDP Data Generator extension (deployed stack) or
+`pip install "idp_common[synthesis]"` (local); without it, the config is still
+created and you can upload your own documents to build a test set. See the
+[Quick Start guide](./quick-start.md) for the full workflow.
 
 ---
 
