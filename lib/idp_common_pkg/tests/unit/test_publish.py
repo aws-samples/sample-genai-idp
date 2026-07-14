@@ -112,48 +112,19 @@ class TestIDPPublisherEnvironmentSetup:
     """Test environment setup functionality"""
 
     @patch("boto3.client")
-    @patch("platform.machine")
-    def test_setup_environment_x86_64(self, mock_machine, mock_boto_client):
-        """Test setup_environment for x86_64 platform"""
-        mock_machine.return_value = "x86_64"
+    def test_setup_environment_reads_version_and_derived_values(self, mock_boto_client):
+        """setup_environment reads VERSION and derives bucket / prefix values."""
         mock_boto_client.return_value = Mock()
 
         publisher = IDPPublisher()
         publisher.region = "us-east-1"
 
-        with (
-            patch("builtins.open", mock_open_version_file("1.0.0")),
-            patch.object(
-                publisher, "_generate_lambda_image_version", return_value="test-version"
-            ),
-        ):
+        with patch("builtins.open", mock_open_version_file("1.0.0")):
             publisher.setup_environment()
 
-            # Verify setup completed successfully
             assert publisher.version == "1.0.0"
-            assert publisher.lambda_image_version == "test-version"
-
-    @patch("boto3.client")
-    @patch("platform.machine")
-    def test_setup_environment_arm64(self, mock_machine, mock_boto_client):
-        """Test setup_environment for ARM64 platform (Mac)"""
-        mock_machine.return_value = "arm64"
-        mock_boto_client.return_value = Mock()
-
-        publisher = IDPPublisher()
-        publisher.region = "us-west-2"
-
-        with (
-            patch("builtins.open", mock_open_version_file("1.0.0")),
-            patch.object(
-                publisher, "_generate_lambda_image_version", return_value="test-version"
-            ),
-        ):
-            publisher.setup_environment()
-
-            # Verify setup completed successfully
-            assert publisher.version == "1.0.0"
-            assert publisher.lambda_image_version == "test-version"
+            assert publisher.prefix_and_version.endswith("/1.0.0")
+            assert publisher.bucket.endswith("-us-east-1")
 
     @patch("boto3.client")
     def test_setup_environment_us_east_1_udop_model(self, mock_boto_client):
@@ -163,12 +134,7 @@ class TestIDPPublisherEnvironmentSetup:
         publisher = IDPPublisher()
         publisher.region = "us-east-1"
 
-        with (
-            patch("builtins.open", mock_open_version_file("1.0.0")),
-            patch.object(
-                publisher, "_generate_lambda_image_version", return_value="test-version"
-            ),
-        ):
+        with patch("builtins.open", mock_open_version_file("1.0.0")):
             publisher.setup_environment()
 
             expected_model = "s3://aws-ml-blog-us-east-1/artifacts/genai-idp/udop-finetuning/rvl-cdip/model.tar.gz"
@@ -182,12 +148,7 @@ class TestIDPPublisherEnvironmentSetup:
         publisher = IDPPublisher()
         publisher.region = "eu-west-1"
 
-        with (
-            patch("builtins.open", mock_open_version_file("1.0.0")),
-            patch.object(
-                publisher, "_generate_lambda_image_version", return_value="test-version"
-            ),
-        ):
+        with patch("builtins.open", mock_open_version_file("1.0.0")):
             publisher.setup_environment()
 
             # Uses the actual region (no longer falls back to us-east-1)

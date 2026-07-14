@@ -5,8 +5,12 @@ PYTHON ?= $(shell command -v python3 2>/dev/null || pyenv which python 2>/dev/nu
 
 test: test-unit
 
+# Run everything that isn't an integration test (requires AWS resources).
+# NOT `-m "unit"`: hundreds of real unit tests were never marked, so the old
+# `unit`-only filter silently skipped ~800+ of them. `not integration` matches
+# pytest.ini's default and the rest of the repo's suites.
 test-unit:
-	$(PYTHON) -m pytest -m "unit" --ignore=idp_common/agents/testing
+	$(PYTHON) -m pytest -m "not integration" --ignore=idp_common/agents/testing
 
 test-integration:
 	$(PYTHON) -m pytest -m "integration" --ignore=idp_common/agents/testing
@@ -15,7 +19,7 @@ test-cicd: test-unit-cicd
 
 test-unit-cicd:
 	pip install -e ".[test]"
-	$(PYTHON) -m pytest -m "unit" --cov=idp_common --cov-report=xml:test-reports/coverage.xml --cov-report=term --junitxml=test-reports/test-results.xml tests/
+	$(PYTHON) -m pytest -m "not integration" --ignore=idp_common/agents/testing --cov=idp_common --cov-report=xml:test-reports/coverage.xml --cov-report=term --junitxml=test-reports/test-results.xml tests/
 
 clean:
 	rm -rf .pytest_cache

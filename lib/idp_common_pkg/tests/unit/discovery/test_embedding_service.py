@@ -68,7 +68,7 @@ class TestEmbeddingService:
     def test_init_defaults(self, mock_bedrock_client):
         """Test default initialization."""
         service = EmbeddingService(bedrock_client=mock_bedrock_client)
-        assert service.model_id == "cohere.embed-english-v3"
+        assert service.model_id == EmbeddingService.DEFAULT_MODEL_ID
         assert service.max_concurrent == 5
         assert service.input_type == "search_document"
 
@@ -141,10 +141,17 @@ class TestEmbeddingService:
         assert valid_indices == []
 
     def test_compress_image_bytes_small(self, embedding_service):
-        """Test compression of already small image."""
-        small_bytes = b"small image data"
-        # Set max_size larger than the data
-        result = embedding_service._compress_image_bytes(small_bytes, max_size=1000)
+        """An already-small, in-dimension image is returned unchanged."""
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.new("RGB", (100, 100), color="red").save(buf, format="JPEG")
+        small_bytes = buf.getvalue()
+
+        # max_size larger than the data and within MAX_IMAGE_DIMENSION → no re-encode
+        result = embedding_service._compress_image_bytes(
+            small_bytes, max_size=len(small_bytes) + 1000
+        )
         assert result == small_bytes
 
     def test_compress_pil_image(self, embedding_service):
