@@ -1,7 +1,4 @@
 
-
-https://github.com/user-attachments/assets/3446854d-8c82-42d2-b826-639e8772931f
-
 ---
 title: "Quick Start"
 ---
