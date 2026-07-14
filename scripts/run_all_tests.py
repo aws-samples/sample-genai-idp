@@ -65,6 +65,7 @@ RUN_ROOTS = [
     "feature-platform/sample-health-insurance-review/ui-deployer/tests",
     "nested/api-resolvers/src/lambda/get_file_contents_resolver",
     "nested/api-resolvers/src/lambda/get_sample_document_resolver",
+    "nested/api-resolvers/src/lambda/get_stepfunction_execution_resolver",
     "nested/api-resolvers/src/lambda/list_agent_chat_sessions_resolver/tests",
     "nested/api-resolvers/src/lambda/send_chat_document_message_resolver/tests",
     "nested/api-resolvers/src/lambda/upload_resolver",
@@ -80,6 +81,7 @@ RUN_ROOTS = [
     "src/lambda/external_idp_group_mapping",
     "src/lambda/job_tracker",
     "src/lambda/queue_processor",
+    "src/lambda/save_reporting_data",
     "src/lambda/version_check_resolver",
     "src/lambda/workflow_tracker",
     "config_library",
@@ -93,15 +95,6 @@ QUARANTINE = {
     "scripts": (
         "Not a test suite — scripts/test_api_rbac.py is the live RBAC harness "
         "(run via `make api-test`); pytest mis-collects its test_email() helper."
-    ),
-    "src/lambda/save_reporting_data": (
-        "Pre-existing failures; the suite reaches real AWS (DynamoDB Scan / "
-        "config manager) so it behaves like an integration test. Needs fixing "
-        "or an @pytest.mark.integration pass before joining the gate."
-    ),
-    "nested/api-resolvers/src/lambda/get_stepfunction_execution_resolver": (
-        "Pre-existing failures (stale RUNNING vs FAILED status assertions). "
-        "Fix in a dedicated change before adding to the gate."
     ),
     "src/lambda/ocr_benchmark_deployer": (
         "Requires huggingface_hub, which is not a test dependency."

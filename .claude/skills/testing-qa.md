@@ -164,8 +164,7 @@ add that dir to `RUN_ROOTS` (if green headless) or `QUARANTINE` (with a reason).
 This is deliberate: it's the guard that stops new tests from being silently
 skipped, which is exactly how ~200 Lambda tests went unrun under the old
 hand-maintained `make test`. Currently quarantined roots (need fixing before
-they join the gate): `save_reporting_data` and
-`get_stepfunction_execution_resolver` (pre-existing failures / real-AWS reach),
-`ocr_benchmark_deployer` + `s3_vectors_manager` (uninstalled runtime deps),
-`scripts` (harness, not a suite), and the `chandra-ocr-hook` manual script.
-Run `make test-list` to see the current split.
+they join the gate): `ocr_benchmark_deployer` + `s3_vectors_manager`
+(uninstalled runtime deps — huggingface_hub / cfnresponse), `scripts` (the RBAC
+harness, not a suite), the `chandra-ocr-hook` manual script, and the
+`idp_sdk/_core` source tree. Run `make test-list` to see the current split.
