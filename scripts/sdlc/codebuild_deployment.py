@@ -2163,18 +2163,133 @@ def create_apigw_test_vpc(vpc_stack_name):
     return outputs
 
 
-def delete_apigw_test_vpc(vpc_stack_name):
-    """Delete the test VPC stack (best effort)."""
-    print(f"[{vpc_stack_name}] Deleting test VPC...")
+def _force_delete_vpc_stack_enis(vpc_stack_name):
+    """Delete detached Lambda ENIs that block a test VPC stack's teardown.
+
+    IDP deploys VPC-attached Lambdas (e.g. DashboardMergerFunction). When the
+    IDP stack is deleted, its ENIs linger in 'available' state for a while;
+    CloudFormation then can't delete the subnets/security group, so the VPC
+    stack goes DELETE_FAILED and the VPC leaks — eventually exhausting the
+    account's VPC quota and rolling back every later apigw hosting test. This
+    reaps the orphaned (unattached) ENIs so the stack delete can proceed.
+
+    Returns the number of ENIs deleted. Best effort — never raises.
+    """
+    deleted = 0
     try:
         cf = boto3.client("cloudformation")
+        outputs = {
+            o["OutputKey"]: o["OutputValue"]
+            for o in cf.describe_stacks(StackName=vpc_stack_name)["Stacks"][0].get(
+                "Outputs", []
+            )
+        }
+        vpc_id = outputs.get("VpcId", "")
+        if not vpc_id:
+            return 0
+        ec2 = boto3.client("ec2")
+        enis = ec2.describe_network_interfaces(
+            Filters=[{"Name": "vpc-id", "Values": [vpc_id]}]
+        ).get("NetworkInterfaces", [])
+        for eni in enis:
+            # Only unattached ENIs are safe to delete directly; attached ones
+            # (VPC endpoint / NAT) are removed by CloudFormation with their
+            # owning resource.
+            if eni.get("Status") != "available" or eni.get("Attachment"):
+                continue
+            eni_id = eni["NetworkInterfaceId"]
+            try:
+                ec2.delete_network_interface(NetworkInterfaceId=eni_id)
+                deleted += 1
+                print(f"[{vpc_stack_name}]   force-deleted orphaned ENI {eni_id}")
+            except Exception as e:  # noqa: BLE001
+                print(f"[{vpc_stack_name}]   ⚠️ could not delete ENI {eni_id}: {e}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[{vpc_stack_name}]   ⚠️ ENI sweep failed: {e}")
+    return deleted
+
+
+def delete_apigw_test_vpc(vpc_stack_name):
+    """Delete the test VPC stack, recovering from ENI-blocked DELETE_FAILED.
+
+    First attempt is a plain stack delete. If it fails (almost always because
+    orphaned Lambda ENIs hold the subnets/SG), sweep the detached ENIs and
+    retry once — this stops the VPC leak that otherwise exhausts the account's
+    VPC quota. Best effort — never raises.
+    """
+    print(f"[{vpc_stack_name}] Deleting test VPC...")
+    cf = boto3.client("cloudformation")
+
+    def _attempt():
         cf.delete_stack(StackName=vpc_stack_name)
         cf.get_waiter("stack_delete_complete").wait(
             StackName=vpc_stack_name, WaiterConfig={"MaxAttempts": 60, "Delay": 15}
         )
+
+    try:
+        _attempt()
         print(f"[{vpc_stack_name}] ✅ Test VPC deleted")
+        return
     except Exception as e:  # noqa: BLE001
-        print(f"[{vpc_stack_name}] ⚠️ Test VPC delete failed: {e}")
+        print(f"[{vpc_stack_name}] ⚠️ First delete failed ({e}); sweeping ENIs and retrying")
+
+    # Retry path: orphaned Lambda ENIs are the usual culprit. Give them a
+    # moment to detach, sweep, then delete again.
+    time.sleep(30)
+    swept = _force_delete_vpc_stack_enis(vpc_stack_name)
+    print(f"[{vpc_stack_name}] swept {swept} orphaned ENI(s); retrying delete")
+    try:
+        _attempt()
+        print(f"[{vpc_stack_name}] ✅ Test VPC deleted (after ENI sweep)")
+    except Exception as e:  # noqa: BLE001
+        print(
+            f"[{vpc_stack_name}] ❌ Test VPC still failed to delete after ENI sweep: {e}. "
+            f"Startup reaper will retry on the next run."
+        )
+
+
+def cleanup_stale_apigw_test_vpcs():
+    """Reap leftover apigw test VPC stacks from prior runs before starting.
+
+    Defense in depth alongside delete_apigw_test_vpc: if a previous run's
+    teardown failed (or the job was killed mid-cleanup), its throwaway
+    `*-apigw-vpc` stack survives and holds a VPC. Left unchecked these
+    accumulate until the account hits its VPC quota and EVERY subsequent apigw
+    hosting test instant-rolls-back on VPC creation. Each run creates a fresh
+    timestamped stack, so any pre-existing `*-apigw-vpc` stack is by definition
+    stale and safe to delete here. Best effort — never raises.
+    """
+    print("🧹 Cleaning up stale apigw test VPC stacks...")
+    try:
+        cf = boto3.client("cloudformation")
+        stale = []
+        paginator = cf.get_paginator("list_stacks")
+        for page in paginator.paginate(
+            StackStatusFilter=[
+                "CREATE_COMPLETE",
+                "CREATE_FAILED",
+                "ROLLBACK_COMPLETE",
+                "ROLLBACK_FAILED",
+                "DELETE_FAILED",
+                "UPDATE_COMPLETE",
+                "UPDATE_ROLLBACK_COMPLETE",
+            ]
+        ):
+            for s in page.get("StackSummaries", []):
+                name = s.get("StackName", "")
+                if name.startswith("idp-") and name.endswith("-apigw-vpc"):
+                    stale.append(name)
+
+        if not stale:
+            print("✅ No stale apigw test VPC stacks found")
+            return
+
+        for name in stale:
+            print(f"[{name}] reaping stale test VPC stack...")
+            delete_apigw_test_vpc(name)
+        print(f"✅ Reaped {len(stale)} stale apigw test VPC stack(s)")
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠️ Stale apigw VPC cleanup failed: {e}")
 
 
 def validate_apigw_private_hosting(stack_name):
@@ -2373,8 +2488,11 @@ def main():
     # is actionable even if the AI summary generation itself breaks.
     failure_reason = ""
 
-    # Step 0: Clean up stale BDA blueprints from previous runs
+    # Step 0: Clean up stale resources leaked by prior runs (BDA blueprints and
+    # apigw test VPCs) — leaked VPCs otherwise exhaust the account VPC quota and
+    # roll back every apigw hosting test.
     cleanup_stale_bda_blueprints()
+    cleanup_stale_apigw_test_vpcs()
 
     # Step 1: Publish templates to S3
     try:
