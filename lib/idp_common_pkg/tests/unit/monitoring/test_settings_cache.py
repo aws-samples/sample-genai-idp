@@ -185,6 +185,7 @@ class TestSSMFailureResilience:
         # i.e. it should expire far sooner than the full TTL.
         import time
 
+        assert cache._cache_time is not None  # refresh-failure path sets it
         time_remaining = cache._ttl - (time.monotonic() - cache._cache_time)
         # With a 300s TTL, remaining window should be close to 30s, not 300s
         assert time_remaining < 60, (
@@ -223,11 +224,62 @@ class TestSSMFailureResilience:
         import time
 
         cache2.get("Key")  # fails but has stale data → should defer full TTL
+        assert cache2._cache_time is not None  # refresh-failure path sets it
         time_remaining = cache2._ttl - (time.monotonic() - cache2._cache_time)
         # Should be close to the full 300s TTL
         assert time_remaining > 250, (
             f"Expected full TTL retry window after stale-cache failure, got {time_remaining:.1f}s"
         )
+
+
+# ---------------------------------------------------------------------------
+# Cold-start monotonic-clock regression (GitHub #504 follow-up)
+# ---------------------------------------------------------------------------
+
+
+class TestColdStartMonotonic:
+    """
+    Regression tests for the cold-start bug where a never-loaded cache was
+    treated as fresh because ``time.monotonic()`` on a freshly-booted Lambda
+    microVM can be below the TTL, so ``monotonic() - 0.0 > ttl`` was False and
+    ``_refresh()`` never ran (surfaced as "CloudWatchLogGroups not found in SSM
+    Settings" on cold starts, blocking the Error Analyzer agent's log search).
+    """
+
+    def test_first_load_refreshes_when_monotonic_below_ttl(self, monkeypatch):
+        # Simulate a cold-start microVM: monotonic() well below the 300s TTL.
+        import idp_common.monitoring.settings_cache as sc_mod
+
+        monkeypatch.setattr(sc_mod.time, "monotonic", lambda: 12.0)
+        monkeypatch.setenv("SETTINGS_PARAMETER_NAME", "/my/param")
+        ssm = _make_mock_ssm({"CloudWatchLogGroups": "/aws/lambda/fn1"})
+        cache = SettingsCache(ttl_seconds=300, ssm_client=ssm)
+
+        # Before the fix this returned [] because _refresh() was skipped.
+        assert cache.get_cloudwatch_log_groups() == ["/aws/lambda/fn1"]
+        ssm.get_parameter.assert_called_once()
+
+    def test_never_loaded_cache_is_expired_regardless_of_clock(self, monkeypatch):
+        import idp_common.monitoring.settings_cache as sc_mod
+
+        monkeypatch.setattr(sc_mod.time, "monotonic", lambda: 5.0)
+        cache = SettingsCache(ttl_seconds=300)
+        assert cache._is_expired() is True
+
+    def test_invalidate_forces_refresh_on_low_monotonic(self, monkeypatch):
+        # invalidate() must force expiry even when monotonic() < TTL.
+        import idp_common.monitoring.settings_cache as sc_mod
+
+        monkeypatch.setattr(sc_mod.time, "monotonic", lambda: 20.0)
+        monkeypatch.setenv("SETTINGS_PARAMETER_NAME", "/my/param")
+        ssm = _make_mock_ssm({"Key": "v1"})
+        cache = SettingsCache(ttl_seconds=300, ssm_client=ssm)
+
+        cache.get("Key")  # first load
+        cache.invalidate()
+        cache.get("Key")  # must reload despite low, non-advancing monotonic
+
+        assert ssm.get_parameter.call_count == 2
 
 
 # ---------------------------------------------------------------------------
