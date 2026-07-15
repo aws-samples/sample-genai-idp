@@ -14,6 +14,7 @@ import sys
 import tempfile
 import threading
 import time
+from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from textwrap import dedent
@@ -2408,46 +2409,137 @@ def _capture_cf_events(result, *stack_names):
     ]
 
 
-def deploy_and_test_apigw_hosting(admin_email, template_url):
-    """Deploy + validate + tear down the APIGateway (GLOBAL, no-VPC) hosting variant.
+# ---------------------------------------------------------------------------
+# Deployment-variant probe framework
+#
+# A "probe" is a self-contained *deploy-a-config-variant + smoke-check-its-
+# distinguishing-feature* unit: it stands up its OWN throwaway IDP stack with a
+# set of extra CloudFormation parameters, runs a validator against the deployed
+# stack, and tears the stack down in a finally — all concurrently with the
+# primary functional suite (Steps 3-12, which run on ONE default-hosting stack).
+#
+# This generalizes what the single APIGW hosting test used to do by hand into a
+# table of Probe(name, stack_suffix, deploy_params, validate_fn) rows that a
+# concurrent launcher iterates. Adding a new deployment permutation becomes one
+# table row + a validator instead of a copy-pasted deploy/validate/cleanup
+# function.
+#
+# CONSTRAINTS (learned the hard way — see the VPC-quota incident in
+# scripts/sdlc/docs/CI_TEST_COVERAGE.md):
+#   * Probes are DEPLOY + FEATURE-SMOKE ONLY, not full functional coverage. A
+#     variant can deploy clean yet still have a doc-processing regression that
+#     only the primary suite would catch. Keep that expectation explicit.
+#   * Each concurrent probe consumes real account quota AT THE SAME TIME as the
+#     primary stack and any other concurrent pipeline (stacks, IAM roles/
+#     boundaries, and for VPC variants: VPCs, NAT, endpoints). Probe fan-out is
+#     therefore capped at DEFAULT_PROBE_MAX_CONCURRENCY (below) so N variants x
+#     parallel pipelines can't re-hit the quota wall.
+#   * A variant that stands up a VPC must reuse the age-safe cleanup + startup
+#     reaper discipline (delete_apigw_test_vpc / cleanup_stale_apigw_test_vpcs)
+#     so a leaked VPC can't exhaust the account's 5-VPC quota.
+# ---------------------------------------------------------------------------
 
-    Exercises the S3-proxy REST API Web UI hosting (WebUIHosting=APIGateway,
-    ApiGatewayVisibility=GLOBAL) on every run WITHOUT a VPC. The previous
-    PRIVATE/VPC variant stood up a throwaway VPC per run, which (a) leaked VPCs
-    when Lambda ENIs blocked teardown and (b) consumed 1 of only 5 VPC slots
-    per concurrent run — so N>=5 overlapping pipelines exhausted the quota and
-    rolled back every apigw test. The regional endpoint is internet-reachable,
-    so this variant also does a real HTTP fetch of the UI. The VPC/PRIVATE path
-    is validated out-of-band (manual/local), not in routine CI.
+# name:         human-readable label (summary + AI failure analysis).
+# stack_suffix: appended to the generated stack name (e.g. "apigw" ->
+#               "idp-MMDD-HHMMSS-apigw"); keep short and DNS/CFN-safe.
+# deploy_params: dict of EXTRA CFN parameter key->value merged into the deploy
+#               (PermissionsBoundaryArn is added automatically). No VPC params
+#               for GLOBAL/no-VPC variants.
+# validate_fn:  callable(stack_name) -> {"success": bool, ...}; asserts the
+#               variant's distinguishing feature (endpoint type, reachable URL,
+#               API responds, ...). Must not raise for an expected failure —
+#               return {"success": False, "error": ...} instead.
+Probe = namedtuple("Probe", ["name", "stack_suffix", "deploy_params", "validate_fn"])
 
-    Runs concurrently with the primary suite (to overlap the two ~30m stack
-    deploys), on its own thread and independent stack. It opts this thread out
-    of the fail-fast abort machinery so a primary-suite failure's kill sweep
-    cannot terminate this deploy mid-flight.
+# Conservative default fan-out. Each probe deploys a FULL IDP stack (and, for
+# VPC variants, a VPC) concurrently with the primary suite's stack AND with any
+# other in-flight pipeline (pipelines run in PARALLEL mode). The account allows
+# only 5 VPCs and a bounded number of concurrent stacks, so unbounded probe
+# concurrency is exactly what caused the VPC-quota incident. Default to ONE
+# in-flight probe at a time; override with IDP_PROBE_MAX_CONCURRENCY only after
+# confirming the account has headroom for the extra simultaneous stacks/VPCs.
+DEFAULT_PROBE_MAX_CONCURRENCY = 1
+
+# The probe table. The primary suite (Steps 3-12) still runs separately on ONE
+# default-hosting (CloudFront) stack; these are ADDITIONAL deploy+smoke probes
+# of alternative deployment permutations, each on its own throwaway stack.
+PROBE_VARIANTS = [
+    # The former standalone APIGW hosting test, migrated verbatim: no VPC,
+    # GLOBAL visibility = regional internet-facing REST API serving the SPA as
+    # an S3 proxy. validate_apigw_global_hosting asserts the endpoint is
+    # REGIONAL, the ApplicationWebURL is the execute-api /api URL, and a real
+    # HTTP GET returns 200.
+    Probe(
+        name="APIGateway hosting (GLOBAL, no VPC)",
+        stack_suffix="apigw",
+        deploy_params={
+            "WebUIHosting": "APIGateway",
+            "ApiGatewayVisibility": "GLOBAL",
+        },
+        validate_fn=validate_apigw_global_hosting,
+    ),
+    # --- How to add a future variant (one row + a validator) -----------------
+    # Uncomment and adapt. deploy_params are extra CFN params; validate_fn is a
+    # new callable(stack_name) -> {"success": bool, ...}. Remember these are
+    # DEPLOY + FEATURE-SMOKE probes, not full functional coverage.
+    #
+    # Probe(
+    #     name="Headless (Jobs API)",
+    #     stack_suffix="headless",
+    #     deploy_params={"EnableHeadless": "true"},  # + VPC params if required
+    #     validate_fn=validate_headless_jobs_api,     # assert the Jobs API 200s
+    # ),
+    #
+    # A variant that stands up a VPC (e.g. ApiGatewayVisibility=PRIVATE +
+    # DeployInVPC=true, or a headless VPC deploy) MUST additionally:
+    #   * create its VPC stack first — the self-contained template
+    #     scripts/sdlc/apigw-hosting-test-vpc.yaml and delete_apigw_test_vpc are
+    #     retained for exactly this;
+    #   * keep DEFAULT_PROBE_MAX_CONCURRENCY low (VPCs are capped at 5/account
+    #     and pipelines run in PARALLEL — N variants x M pipelines re-hit the
+    #     quota wall, which is the incident that removed the VPC variant from
+    #     routine CI in the first place);
+    #   * rely on the age-gated startup reaper (cleanup_stale_apigw_test_vpcs)
+    #     to sweep any VPC stack whose teardown leaked.
+]
+
+
+def deploy_and_test_probe(probe, admin_email, template_url):
+    """Deploy + validate + tear down ONE deployment-variant probe.
+
+    Generic form of the former deploy_and_test_apigw_hosting: stands up a
+    throwaway IDP stack with the probe's extra CFN params, runs its validator,
+    and ALWAYS tears the stack down (finally). Runs on its own pool thread and
+    opts that thread out of the primary suite's fail-fast abort machinery
+    (_thread_local.never_abort) so a primary failure's kill sweep cannot
+    terminate this independent-stack deploy mid-flight. CF failure events are
+    captured before teardown so the AI summary can name the root cause.
+
+    Returns a result dict shaped like the primary suite's:
+    {"stack_name", "success", "probe", ["error", "failure_type", ...]}.
     """
     _thread_local.never_abort = True
-    stack_name = f"{generate_stack_name()}-apigw"
-    result = {"stack_name": stack_name, "success": False}
+    stack_name = f"{generate_stack_name()}-{probe.stack_suffix}"
+    result = {"stack_name": stack_name, "success": False, "probe": probe.name}
     try:
         role_arn, boundary_arn = create_iam_resources(stack_name)
         if not role_arn or not boundary_arn:
-            raise Exception("Failed to create IAM resources for APIGateway test")
+            raise Exception(
+                f"Failed to create IAM resources for probe {probe.name!r}"
+            )
 
-        # No VPC parameters: GLOBAL visibility = regional internet-facing REST
-        # API. idp-cli --parameters takes ONE comma-separated key=value string.
-        params = ",".join(
-            [
-                f"PermissionsBoundaryArn={boundary_arn}",
-                "WebUIHosting=APIGateway",
-                "ApiGatewayVisibility=GLOBAL",
-            ]
-        )
+        # idp-cli --parameters takes ONE comma-separated key=value string.
+        # PermissionsBoundaryArn is always required; the probe's extra params
+        # follow (e.g. WebUIHosting=APIGateway,ApiGatewayVisibility=GLOBAL).
+        param_pairs = [f"PermissionsBoundaryArn={boundary_arn}"]
+        param_pairs += [f"{k}={v}" for k, v in probe.deploy_params.items()]
+        params = ",".join(param_pairs)
         cmd = (
             f"idp-cli deploy --stack-name {stack_name} --template-url {template_url} "
             f"--admin-email {admin_email} --wait --role-arn {role_arn} "
             f'--parameters "{params}"'
         )
-        print("APIGateway (GLOBAL, no-VPC) hosting: deploying stack...")
+        print(f"Probe [{probe.name}]: deploying stack {stack_name}...")
         run_command(cmd, timeout=3 * 3600)
 
         status = run_command(
@@ -2460,19 +2552,103 @@ def deploy_and_test_apigw_hosting(admin_email, template_url):
             _capture_cf_events(result, stack_name)
             return result
 
-        validation = validate_apigw_global_hosting(stack_name)
+        validation = probe.validate_fn(stack_name)
         result.update(validation)
         if not validation.get("success"):
             result["failure_type"] = "test"
         return result
     except Exception as e:  # noqa: BLE001
-        print(f"❌ APIGateway hosting test exception: {e}")
+        print(f"❌ Probe [{probe.name}] exception: {e}")
         result["error"] = str(e)
         result["failure_type"] = "deploy"
         _capture_cf_events(result, stack_name)
         return result
     finally:
         cleanup_stack({"stack_name": stack_name})
+
+
+def resolve_probe_concurrency(num_probes):
+    """Resolve the probe fan-out cap from IDP_PROBE_MAX_CONCURRENCY.
+
+    Clamped to [1, num_probes]: never spins up more workers than there are
+    probes, and a malformed/<=0 override falls back to the conservative
+    default rather than deploying an unbounded number of concurrent stacks.
+    """
+    raw = get_env_var(
+        "IDP_PROBE_MAX_CONCURRENCY", str(DEFAULT_PROBE_MAX_CONCURRENCY)
+    )
+    try:
+        cap = int(raw)
+    except (TypeError, ValueError):
+        print(
+            f"⚠️ Invalid IDP_PROBE_MAX_CONCURRENCY={raw!r}; "
+            f"using default {DEFAULT_PROBE_MAX_CONCURRENCY}"
+        )
+        cap = DEFAULT_PROBE_MAX_CONCURRENCY
+    if cap < 1:
+        cap = DEFAULT_PROBE_MAX_CONCURRENCY
+    return max(1, min(cap, num_probes))
+
+
+def run_variant_probes(admin_email, template_url, probes=None):
+    """Run the deployment-variant probes concurrently, capped at the quota budget.
+
+    Intended to run on its OWN supervisor thread so its probe deploys overlap
+    the primary suite's ~30m deploy (the caller in main() submits it to a
+    single-worker executor). Internally it fans out to at most
+    IDP_PROBE_MAX_CONCURRENCY probes at a time — the quota budget that stops N
+    variants x parallel pipelines from re-hitting the account's stack/VPC wall.
+
+    Each probe deploys/validates/tears-down its own throwaway stack and opts out
+    of fail-fast independently, so one probe failing (or the primary suite
+    failing) never affects the others. Returns a list of per-probe result dicts
+    (order not significant; each carries its own "probe" label).
+    """
+    probes = PROBE_VARIANTS if probes is None else probes
+    if not probes:
+        print("ℹ️ No deployment-variant probes configured")
+        return []
+
+    cap = resolve_probe_concurrency(len(probes))
+    print(
+        f"🚀 Launching {len(probes)} deployment-variant probe(s) "
+        f"(max {cap} concurrent) alongside the primary suite..."
+    )
+    for p in probes:
+        print(f"   • {p.name} (stack suffix -{p.stack_suffix})")
+
+    results = []
+    # No `with`: match the primary suite's pattern — shutdown(wait=True) in a
+    # finally, never an implicit join that could burn the job timeout.
+    executor = ThreadPoolExecutor(max_workers=cap)
+    try:
+        futures = {
+            executor.submit(
+                deploy_and_test_probe, probe, admin_email, template_url
+            ): probe
+            for probe in probes
+        }
+        for future in as_completed(futures):
+            probe = futures[future]
+            try:
+                results.append(future.result())
+            except Exception as e:  # noqa: BLE001
+                # deploy_and_test_probe already catches its own exceptions, so
+                # this is a last-resort guard (e.g. the thread died) — record a
+                # failure rather than losing the probe from the summary.
+                print(f"❌ Probe [{probe.name}] supervisor exception: {e}")
+                results.append(
+                    {
+                        "stack_name": f"<{probe.stack_suffix} probe>",
+                        "success": False,
+                        "error": str(e),
+                        "failure_type": "deploy",
+                        "probe": probe.name,
+                    }
+                )
+    finally:
+        executor.shutdown(wait=True)
+    return results
 
 
 def publish_summary_to_s3(summary_text):
@@ -2554,28 +2730,32 @@ def main():
         ai_summary = generate_publish_failure_summary(str(e))
 
     if publish_success:
-        # Step 2: Launch the APIGW hosting test (GLOBAL, no VPC) on its OWN
-        # thread FIRST so its ~30m stack deploy overlaps the primary suite's
-        # ~30m deploy instead of running after it (~30m wall-clock saved). It
-        # uses an independent throwaway stack and opts out of the fail-fast
-        # abort machinery, so the two are fully isolated. Gated by
-        # IDP_TEST_APIGW_HOSTING (default on).
-        apigw_enabled = (
+        # Step 2: Launch the deployment-variant probes on their OWN supervisor
+        # thread FIRST so their ~30m stack deploys overlap the primary suite's
+        # ~30m deploy instead of running after it (~30m wall-clock saved). Each
+        # probe uses an independent throwaway stack and opts out of the fail-
+        # fast abort machinery, so probes and the primary suite are fully
+        # isolated. The supervisor internally caps concurrent probes at the
+        # quota budget (IDP_PROBE_MAX_CONCURRENCY). Gated by
+        # IDP_TEST_APIGW_HOSTING (default on) — the historical env name is kept
+        # for backward compatibility since the GLOBAL APIGW probe is the only
+        # default row.
+        probes_enabled = (
             get_env_var("IDP_TEST_APIGW_HOSTING", "true").lower() == "true"
         )
-        apigw_future = None
-        apigw_executor = None
-        if apigw_enabled:
+        probes_future = None
+        probes_executor = None
+        if probes_enabled:
             print(
-                "\n🚀 Launching API Gateway hosting test (GLOBAL, no VPC) "
-                "concurrently with the primary suite...\n"
+                "\n🚀 Launching deployment-variant probes concurrently with "
+                "the primary suite...\n"
             )
-            apigw_executor = ThreadPoolExecutor(max_workers=1)
-            apigw_future = apigw_executor.submit(
-                deploy_and_test_apigw_hosting, admin_email, template_url
+            probes_executor = ThreadPoolExecutor(max_workers=1)
+            probes_future = probes_executor.submit(
+                run_variant_probes, admin_email, template_url
             )
         else:
-            print("ℹ️ Skipping API Gateway hosting test (disabled)")
+            print("ℹ️ Skipping deployment-variant probes (disabled)")
 
         # Step 2b: Deploy + test the primary shared stack (runs concurrently
         # with the APIGW thread above).
@@ -2607,47 +2787,56 @@ def main():
         # stack in its finally block).
         cleanup_stack(result)
 
-        # Step 4b: Join the concurrent APIGW hosting test and fold in its
-        # result. A failure here marks the overall run failed but does not
-        # affect the already-completed primary suite result.
-        if apigw_future is not None:
+        # Step 4b: Join the concurrent deployment-variant probes and fold in
+        # their results. A probe failure marks the overall run failed but does
+        # not affect the already-completed primary suite result.
+        if probes_future is not None:
             print(f"\n{'=' * 80}")
-            print("Waiting for API Gateway hosting test (GLOBAL, no VPC)...")
+            print("Waiting for deployment-variant probes...")
             print(f"{'=' * 80}\n")
             try:
-                apigw_result = apigw_future.result()
+                probe_results = probes_future.result()
             except Exception as e:  # noqa: BLE001
-                apigw_result = {
-                    "stack_name": f"{stack_name}-apigw",
-                    "success": False,
-                    "error": str(e),
-                    "failure_type": "deploy",
-                }
+                # run_variant_probes catches per-probe failures itself; this
+                # only fires if the supervisor thread itself died.
+                print(f"❌ Deployment-variant probe supervisor exception: {e}")
+                probe_results = [
+                    {
+                        "stack_name": "<probe supervisor>",
+                        "success": False,
+                        "error": str(e),
+                        "failure_type": "deploy",
+                        "probe": "probe supervisor",
+                    }
+                ]
             finally:
-                apigw_executor.shutdown(wait=True)
-            if apigw_result.get("success"):
-                print("✅ API Gateway hosting test passed")
-            else:
+                probes_executor.shutdown(wait=True)
+
+            for probe_result in probe_results:
+                probe_name = probe_result.get("probe", "deployment-variant probe")
+                if probe_result.get("success"):
+                    print(f"✅ Probe [{probe_name}] passed")
+                    continue
                 stack_success = False
-                apigw_error = apigw_result.get("error", "Unknown error")
-                print(f"❌ API Gateway hosting test failed: {apigw_error}")
+                probe_error = probe_result.get("error", "Unknown error")
+                print(f"❌ Probe [{probe_name}] failed: {probe_error}")
                 if not failure_reason:
-                    failure_reason = f"APIGW hosting test failed: {apigw_error}"
+                    failure_reason = f"Probe [{probe_name}] failed: {probe_error}"
                 # The primary summary was generated before this join and may say
-                # "All Tests Passed" — analyze this failure too (its CF events
-                # were captured before the throwaway stack teardown).
+                # "All Tests Passed" — analyze each probe failure too (its CF
+                # events were captured before the throwaway stack teardown).
                 try:
-                    apigw_summary = generate_deployment_summary(
-                        apigw_result,
-                        apigw_result.get("stack_name", f"{stack_name}-apigw"),
+                    probe_summary = generate_deployment_summary(
+                        probe_result,
+                        probe_result.get("stack_name", "<probe stack>"),
                         template_url,
                     )
                 except Exception as e:  # noqa: BLE001
-                    apigw_summary = f"⚠️ Failed to generate APIGW summary: {e}"
+                    probe_summary = f"⚠️ Failed to generate probe summary: {e}"
                 ai_summary = (
                     f"{ai_summary}\n\n"
-                    f"--- API Gateway hosting test (Step 4b) ---\n"
-                    f"{apigw_summary}"
+                    f"--- Deployment-variant probe: {probe_name} (Step 4b) ---\n"
+                    f"{probe_summary}"
                 )
 
     # Step 5: Print AI analysis results at the end
