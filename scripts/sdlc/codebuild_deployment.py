@@ -15,7 +15,7 @@ import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timezone
 from textwrap import dedent
 
 import boto3
@@ -2125,42 +2125,25 @@ def cleanup_stack(result):
 
 
 # ---------------------------------------------------------------------------
-# API Gateway Web UI hosting test (VPC / PRIVATE)
+# API Gateway Web UI hosting test
 #
 # Separate from the primary shared-stack test suite (Steps 3-11), which deploys
-# once with default hosting (CloudFront, no VPC). This phase deploys a SECOND,
-# throwaway IDP stack configured for the new API-Gateway Web UI hosting option
-# WITH VPC support: WebUIHosting=APIGateway + ApiGatewayVisibility=PRIVATE +
-# DeployInVPC=true. It stands up a self-contained test VPC (NAT egress + a
-# single execute-api interface endpoint), deploys, validates the private
-# REST API is serving the UI, and tears everything down.
+# once with default hosting (CloudFront). This phase deploys a SECOND throwaway
+# IDP stack configured for API-Gateway Web UI hosting in its GLOBAL (regional,
+# internet-facing, NO VPC) form: WebUIHosting=APIGateway +
+# ApiGatewayVisibility=GLOBAL. It exercises the S3-proxy REST API hosting code
+# on every run and fetches the UI over HTTP, without consuming VPC quota.
 #
-# Gated by IDP_TEST_APIGW_VPC_HOSTING (default "true"); set to "false" to skip.
+# The VPC/PRIVATE variant is NOT run in routine CI: it stood up a throwaway VPC
+# per run, which leaked VPCs (Lambda ENIs blocking teardown) and consumed 1 of
+# only 5 VPC slots per concurrent run, exhausting the quota under parallel
+# pipelines. Validate the PRIVATE/VPC path out-of-band (manual/local) instead.
+# The self-contained VPC template (scripts/sdlc/apigw-hosting-test-vpc.yaml) is
+# retained for that manual use. delete_apigw_test_vpc / the startup reaper below
+# remain to clean up any historical *-apigw-vpc stragglers.
+#
+# Gated by IDP_TEST_APIGW_HOSTING (default "true"); set to "false" to skip.
 # ---------------------------------------------------------------------------
-APIGW_HOSTING_VPC_TEMPLATE = "scripts/sdlc/apigw-hosting-test-vpc.yaml"
-
-
-def create_apigw_test_vpc(vpc_stack_name):
-    """Create the self-contained test VPC and return its outputs dict."""
-    print(f"[{vpc_stack_name}] Creating test VPC for API Gateway hosting...")
-    cf = boto3.client("cloudformation")
-    with open(APIGW_HOSTING_VPC_TEMPLATE, "r") as f:
-        template_body = f.read()
-    try:
-        cf.create_stack(StackName=vpc_stack_name, TemplateBody=template_body)
-        cf.get_waiter("stack_create_complete").wait(
-            StackName=vpc_stack_name, WaiterConfig={"MaxAttempts": 60, "Delay": 15}
-        )
-    except cf.exceptions.AlreadyExistsException:
-        print(f"[{vpc_stack_name}] ℹ️ VPC stack already exists")
-    outputs = {
-        o["OutputKey"]: o["OutputValue"]
-        for o in cf.describe_stacks(StackName=vpc_stack_name)["Stacks"][0].get(
-            "Outputs", []
-        )
-    }
-    print(f"[{vpc_stack_name}] ✅ Test VPC ready: {outputs}")
-    return outputs
 
 
 def _force_delete_vpc_stack_enis(vpc_stack_name):
@@ -2248,21 +2231,33 @@ def delete_apigw_test_vpc(vpc_stack_name):
         )
 
 
-def cleanup_stale_apigw_test_vpcs():
-    """Reap leftover apigw test VPC stacks from prior runs before starting.
+# Only reap *-apigw-vpc stacks older than this. A manual/local PRIVATE-VPC
+# test can legitimately be running concurrently with a CI job; a young stack
+# may be that in-flight test, so the age gate prevents this reaper from
+# deleting a VPC that is still in use. Historical leaks are always far older.
+APIGW_VPC_STALE_AGE_SECONDS = 2 * 3600
 
-    Defense in depth alongside delete_apigw_test_vpc: if a previous run's
-    teardown failed (or the job was killed mid-cleanup), its throwaway
-    `*-apigw-vpc` stack survives and holds a VPC. Left unchecked these
-    accumulate until the account hits its VPC quota and EVERY subsequent apigw
-    hosting test instant-rolls-back on VPC creation. Each run creates a fresh
-    timestamped stack, so any pre-existing `*-apigw-vpc` stack is by definition
-    stale and safe to delete here. Best effort — never raises.
+
+def cleanup_stale_apigw_test_vpcs():
+    """Reap OLD leftover apigw test VPC stacks (defense in depth).
+
+    Routine CI no longer creates test VPCs (the every-run apigw test is the
+    no-VPC GLOBAL variant), so this exists to clean up historical `*-apigw-vpc`
+    stragglers and any left by a manual PRIVATE-VPC test whose teardown failed.
+    Left unchecked these hold VPCs until the account hits its quota.
+
+    Age-gated (APIGW_VPC_STALE_AGE_SECONDS): a manual VPC test could be running
+    concurrently, so only stacks older than the threshold are deleted — never a
+    possibly-in-flight one. Best effort — never raises.
     """
     print("🧹 Cleaning up stale apigw test VPC stacks...")
     try:
         cf = boto3.client("cloudformation")
-        stale = []
+        # Compare CreationTime against server-side "now" (a stack's own
+        # DeletionTime is unavailable pre-delete, and Date.now-style local
+        # clocks can skew); use a timezone-aware now from the newest stack's tz.
+        now = datetime.now(tz=timezone.utc)
+        stale, skipped_young = [], 0
         paginator = cf.get_paginator("list_stacks")
         for page in paginator.paginate(
             StackStatusFilter=[
@@ -2277,11 +2272,24 @@ def cleanup_stale_apigw_test_vpcs():
         ):
             for s in page.get("StackSummaries", []):
                 name = s.get("StackName", "")
-                if name.startswith("idp-") and name.endswith("-apigw-vpc"):
+                if not (name.startswith("idp-") and name.endswith("-apigw-vpc")):
+                    continue
+                created = s.get("CreationTime")
+                age = (now - created).total_seconds() if created else None
+                if age is None or age >= APIGW_VPC_STALE_AGE_SECONDS:
                     stale.append(name)
+                else:
+                    skipped_young += 1
+                    print(
+                        f"[{name}] skipping — only {age / 60:.0f}m old "
+                        f"(may be an in-flight manual VPC test)"
+                    )
 
         if not stale:
-            print("✅ No stale apigw test VPC stacks found")
+            print(
+                f"✅ No stale apigw test VPC stacks to reap "
+                f"({skipped_young} young stack(s) skipped)"
+            )
             return
 
         for name in stale:
@@ -2292,28 +2300,31 @@ def cleanup_stale_apigw_test_vpcs():
         print(f"⚠️ Stale apigw VPC cleanup failed: {e}")
 
 
-def validate_apigw_private_hosting(stack_name):
-    """Assert the deployed stack serves the Web UI on a PRIVATE REST API.
+def validate_apigw_global_hosting(stack_name):
+    """Assert the deployed stack serves the Web UI on a GLOBAL (REGIONAL) REST API.
 
-    Cannot curl the endpoint (it's VPC-only, and CodeBuild is in a different
-    network), so validate structurally:
-      * the REST API "{stack}-api" has endpoint type PRIVATE, and
-      * the stack's ApplicationWebURL output is the execute-api /api URL.
+    This is the no-VPC APIGateway hosting path (WebUIHosting=APIGateway +
+    ApiGatewayVisibility=GLOBAL): the Web UI is served as an S3 proxy on a
+    regional, internet-facing REST API. Because it IS reachable, validate both
+    structurally and by actually fetching the UI:
+      * the REST API "{stack}-api" has endpoint type REGIONAL,
+      * the stack's ApplicationWebURL output is the execute-api /api URL, and
+      * an HTTP GET of that URL returns 200 with HTML (the S3-proxy served UI).
     """
     apig = boto3.client("apigateway")
     cf = boto3.client("cloudformation")
 
-    # 1. REST API is PRIVATE
+    # 1. REST API is REGIONAL (GLOBAL visibility maps to a REGIONAL endpoint)
     api_name = f"{stack_name}-api"
     apis = apig.get_rest_apis(limit=500).get("items", [])
     match = next((a for a in apis if a.get("name") == api_name), None)
     if not match:
         return {"success": False, "error": f"REST API {api_name} not found"}
     types = match.get("endpointConfiguration", {}).get("types", [])
-    if "PRIVATE" not in types:
+    if "REGIONAL" not in types:
         return {
             "success": False,
-            "error": f"REST API {api_name} endpoint types={types}, expected PRIVATE",
+            "error": f"REST API {api_name} endpoint types={types}, expected REGIONAL",
         }
 
     # 2. ApplicationWebURL output points at the execute-api /api URL
@@ -2330,7 +2341,20 @@ def validate_apigw_private_hosting(stack_name):
             "error": f"ApplicationWebURL={web_url!r} is not an execute-api /api URL",
         }
 
-    print(f"✅ PRIVATE REST API serving Web UI: {web_url} (types={types})")
+    # 3. The UI actually loads over HTTP (S3-proxy hosting served the app).
+    # Unlike the PRIVATE variant this endpoint is internet-reachable, so we can
+    # do a real end-to-end fetch instead of only checking structure.
+    fetch = run_command(
+        f"curl -s -o /dev/null -w '%{{http_code}}' -L {web_url}", check=False
+    )
+    http_code = fetch.stdout.strip()
+    if http_code != "200":
+        return {
+            "success": False,
+            "error": f"GET {web_url} returned HTTP {http_code!r}, expected 200",
+        }
+
+    print(f"✅ GLOBAL REST API serving Web UI: {web_url} (types={types}, HTTP 200)")
     return {"success": True, "web_url": web_url}
 
 
@@ -2362,31 +2386,32 @@ def _capture_cf_events(result, *stack_names):
     ]
 
 
-def deploy_and_test_apigw_vpc_hosting(admin_email, template_url):
-    """Deploy + validate + tear down the APIGateway/VPC/PRIVATE hosting variant."""
+def deploy_and_test_apigw_hosting(admin_email, template_url):
+    """Deploy + validate + tear down the APIGateway (GLOBAL, no-VPC) hosting variant.
+
+    Exercises the S3-proxy REST API Web UI hosting (WebUIHosting=APIGateway,
+    ApiGatewayVisibility=GLOBAL) on every run WITHOUT a VPC. The previous
+    PRIVATE/VPC variant stood up a throwaway VPC per run, which (a) leaked VPCs
+    when Lambda ENIs blocked teardown and (b) consumed 1 of only 5 VPC slots
+    per concurrent run — so N>=5 overlapping pipelines exhausted the quota and
+    rolled back every apigw test. The regional endpoint is internet-reachable,
+    so this variant also does a real HTTP fetch of the UI. The VPC/PRIVATE path
+    is validated out-of-band (manual/local), not in routine CI.
+    """
     stack_name = f"{generate_stack_name()}-apigw"
-    vpc_stack_name = f"{stack_name}-vpc"
     result = {"stack_name": stack_name, "success": False}
     try:
-        vpc = create_apigw_test_vpc(vpc_stack_name)
         role_arn, boundary_arn = create_iam_resources(stack_name)
         if not role_arn or not boundary_arn:
-            raise Exception("Failed to create IAM resources for APIGateway VPC test")
+            raise Exception("Failed to create IAM resources for APIGateway test")
 
-        # idp-cli --parameters takes ONE comma-separated key=value string; its
-        # parser splits on `key=` boundaries so comma-containing values (the
-        # subnet lists) are preserved without needing per-value quoting.
+        # No VPC parameters: GLOBAL visibility = regional internet-facing REST
+        # API. idp-cli --parameters takes ONE comma-separated key=value string.
         params = ",".join(
             [
                 f"PermissionsBoundaryArn={boundary_arn}",
                 "WebUIHosting=APIGateway",
-                "ApiGatewayVisibility=PRIVATE",
-                "DeployInVPC=true",
-                f"VpcId={vpc['VpcId']}",
-                f"PrivateSubnetIds={vpc['PrivateSubnetIds']}",
-                f"LambdaSubnetIds={vpc['PrivateSubnetIds']}",
-                f"LambdaSecurityGroupId={vpc['LambdaSecurityGroupId']}",
-                f"ApiGatewayVpcEndpointId={vpc['ApiGatewayVpcEndpointId']}",
+                "ApiGatewayVisibility=GLOBAL",
             ]
         )
         cmd = (
@@ -2394,7 +2419,7 @@ def deploy_and_test_apigw_vpc_hosting(admin_email, template_url):
             f"--admin-email {admin_email} --wait --role-arn {role_arn} "
             f'--parameters "{params}"'
         )
-        print("APIGateway/VPC hosting: deploying stack...")
+        print("APIGateway (GLOBAL, no-VPC) hosting: deploying stack...")
         run_command(cmd, timeout=3 * 3600)
 
         status = run_command(
@@ -2404,26 +2429,22 @@ def deploy_and_test_apigw_vpc_hosting(admin_email, template_url):
         if "COMPLETE" not in status.stdout:
             result["error"] = f"Deploy status: {status.stdout.strip()}"
             result["failure_type"] = "deploy"
-            _capture_cf_events(result, stack_name, vpc_stack_name)
+            _capture_cf_events(result, stack_name)
             return result
 
-        validation = validate_apigw_private_hosting(stack_name)
+        validation = validate_apigw_global_hosting(stack_name)
         result.update(validation)
         if not validation.get("success"):
             result["failure_type"] = "test"
         return result
     except Exception as e:  # noqa: BLE001
-        print(f"❌ APIGateway/VPC hosting test exception: {e}")
+        print(f"❌ APIGateway hosting test exception: {e}")
         result["error"] = str(e)
         result["failure_type"] = "deploy"
-        # The failure can originate in the VPC stack (created first) or the IDP
-        # stack; capture both since both are torn down in the finally block.
-        _capture_cf_events(result, stack_name, vpc_stack_name)
+        _capture_cf_events(result, stack_name)
         return result
     finally:
-        # Tear down IDP stack first (frees ENIs in the VPC), then the VPC.
         cleanup_stack({"stack_name": stack_name})
-        delete_apigw_test_vpc(vpc_stack_name)
 
 
 def publish_summary_to_s3(summary_text):
@@ -2533,17 +2554,17 @@ def main():
         # Step 4: clean up stack
         cleanup_stack(result)
 
-        # Step 4b: API Gateway Web UI hosting test (VPC / PRIVATE). Runs on its
-        # own throwaway stack + VPC, independent of the shared-stack suite.
-        # Gated by IDP_TEST_APIGW_VPC_HOSTING (default on). A failure here marks
-        # the overall run failed but does not affect the already-completed
-        # primary suite result.
-        if get_env_var("IDP_TEST_APIGW_VPC_HOSTING", "true").lower() == "true":
+        # Step 4b: API Gateway Web UI hosting test (GLOBAL, no VPC). Runs on its
+        # own throwaway stack, independent of the shared-stack suite. Gated by
+        # IDP_TEST_APIGW_HOSTING (default on). A failure here marks the overall
+        # run failed but does not affect the already-completed primary suite
+        # result. (The VPC/PRIVATE variant is validated out-of-band, not in CI.)
+        if get_env_var("IDP_TEST_APIGW_HOSTING", "true").lower() == "true":
             print(f"\n{'=' * 80}")
-            print("API Gateway Web UI hosting test (VPC / PRIVATE)...")
+            print("API Gateway Web UI hosting test (GLOBAL, no VPC)...")
             print(f"{'=' * 80}\n")
             try:
-                apigw_result = deploy_and_test_apigw_vpc_hosting(
+                apigw_result = deploy_and_test_apigw_hosting(
                     admin_email, template_url
                 )
             except Exception as e:  # noqa: BLE001
@@ -2554,13 +2575,13 @@ def main():
                     "failure_type": "deploy",
                 }
             if apigw_result.get("success"):
-                print("✅ API Gateway / VPC hosting test passed")
+                print("✅ API Gateway hosting test passed")
             else:
                 stack_success = False
                 apigw_error = apigw_result.get("error", "Unknown error")
-                print(f"❌ API Gateway / VPC hosting test failed: {apigw_error}")
+                print(f"❌ API Gateway hosting test failed: {apigw_error}")
                 if not failure_reason:
-                    failure_reason = f"APIGW/VPC hosting test failed: {apigw_error}"
+                    failure_reason = f"APIGW hosting test failed: {apigw_error}"
                 # The primary summary was generated before this phase ran and
                 # may say "All Tests Passed" — analyze this failure too (its
                 # CF events were captured before the throwaway stack teardown).
@@ -2574,11 +2595,11 @@ def main():
                     apigw_summary = f"⚠️ Failed to generate APIGW summary: {e}"
                 ai_summary = (
                     f"{ai_summary}\n\n"
-                    f"--- API Gateway / VPC hosting test (Step 4b) ---\n"
+                    f"--- API Gateway hosting test (Step 4b) ---\n"
                     f"{apigw_summary}"
                 )
         else:
-            print("ℹ️ Skipping API Gateway / VPC hosting test (disabled)")
+            print("ℹ️ Skipping API Gateway hosting test (disabled)")
 
     # Step 5: Print AI analysis results at the end
     print("\n🤖 Generating deployment summary with Bedrock...")

@@ -194,33 +194,53 @@ The CI/CD pipeline runs a comprehensive smoke test suite that validates all majo
 
 ---
 
-## Additional Deployment Test: API Gateway Web UI Hosting (VPC / PRIVATE)
+## Additional Deployment Test: API Gateway Web UI Hosting (GLOBAL, no VPC)
 
 Separate from the shared-stack suite above (Steps 3–11, which run against ONE
-stack deployed with default hosting — CloudFront, no VPC), this test validates
-the **API Gateway Web UI hosting** option end-to-end **with VPC support**. It
-deploys a SECOND, throwaway IDP stack and tears it down afterward.
+stack deployed with default hosting — CloudFront), this test validates the
+**API Gateway Web UI hosting** option end-to-end in its **GLOBAL (regional,
+internet-facing, no-VPC)** form. It deploys a SECOND, throwaway IDP stack and
+tears it down afterward.
 
 **What it tests**:
-- `WebUIHosting=APIGateway` + `ApiGatewayVisibility=PRIVATE` + `DeployInVPC=true`
-- A self-contained test VPC (`scripts/sdlc/apigw-hosting-test-vpc.yaml`): 2
-  private subnets, a NAT gateway for egress, a Lambda SG, and the single
-  `execute-api` interface endpoint the private REST API requires.
-- The SPA is served as an S3 proxy on the private REST API; in-VPC Lambdas.
-- **Verification** (`validate_apigw_private_hosting`):
-  - The REST API `{stack}-api` has endpoint type **PRIVATE**.
+- `WebUIHosting=APIGateway` + `ApiGatewayVisibility=GLOBAL` (no VPC parameters)
+- The SPA is served as an S3 proxy on a regional REST API.
+- **Verification** (`validate_apigw_global_hosting`):
+  - The REST API `{stack}-api` has endpoint type **REGIONAL**.
   - The stack's `ApplicationWebURL` output is the execute-api `/api` URL.
-  - (The endpoint itself is VPC-only, so it is validated structurally rather
-    than curled — CodeBuild is on a different network.)
+  - An HTTP `GET` of that URL returns **200** — because the endpoint is
+    internet-reachable, the UI load is verified end-to-end (unlike the
+    VPC/PRIVATE variant, which could only be checked structurally).
 
-**Lifecycle**: creates the test VPC → creates per-stack IAM/boundary → deploys →
-validates → **always** tears down the IDP stack then the VPC (in a `finally`).
+**Lifecycle**: creates per-stack IAM/boundary → deploys → validates →
+**always** tears down the IDP stack (in a `finally`).
 
-**Gating**: runs by default; set `IDP_TEST_APIGW_VPC_HOSTING=false` to skip.
-**Implementation**: `deploy_and_test_apigw_vpc_hosting()` in
+**Gating**: runs by default; set `IDP_TEST_APIGW_HOSTING=false` to skip.
+**Implementation**: `deploy_and_test_apigw_hosting()` in
 `scripts/sdlc/codebuild_deployment.py`, invoked from `main()` after the
 shared-stack suite.
 **Duration**: ~20–30 minutes (full nested-stack create + teardown).
+
+### Why not the VPC/PRIVATE variant in CI?
+
+The earlier every-run test used `ApiGatewayVisibility=PRIVATE` + `DeployInVPC=true`
+and stood up a self-contained test VPC per run
+(`scripts/sdlc/apigw-hosting-test-vpc.yaml`). That was removed from routine CI
+because:
+- **VPC quota**: the account allows only 5 VPCs; the pipeline runs in PARALLEL
+  mode, so ≥5 concurrent runs exhausted the quota and rolled back every apigw
+  test — with no per-run concurrency guard.
+- **VPC leaks**: VPC-attached Lambdas (e.g. `DashboardMergerFunction`) leave
+  orphaned ENIs that block subnet/SG deletion, so the throwaway VPC stack goes
+  `DELETE_FAILED` and the VPC leaks, compounding the quota problem.
+
+The GLOBAL variant exercises the same S3-proxy REST API hosting code (the part
+that regresses) on every run without any VPC. Validate the **PRIVATE/VPC** path
+**out-of-band** (manual/local) before releases; the VPC template and
+`delete_apigw_test_vpc` / `cleanup_stale_apigw_test_vpcs` helpers are retained
+for that. The startup reaper age-gates deletions
+(`APIGW_VPC_STALE_AGE_SECONDS`, 2h) so it can never delete an in-flight manual
+VPC test.
 
 ---
 
