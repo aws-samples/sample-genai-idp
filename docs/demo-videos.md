@@ -40,6 +40,15 @@ https://github.com/user-attachments/assets/fc2652b5-a9cc-42d7-9975-887c8320a2f5
 
 ---
 
+### Quick Start
+Go from a plain-language description of your document type to a working, active IDP configuration — entirely through conversation, with no manual schema editing. Solves the cold-start problem for fresh deployments.
+
+https://github.com/user-attachments/assets/7096c812-08be-4716-ad37-7ae4f3797fa7
+
+**Related Documentation**: [Quick Start Documentation](./quick-start.md)
+
+---
+
 ## External Presentations & Demos
 
 This section features comprehensive presentations and live demonstrations from AWS events, conferences, and technical sessions.
