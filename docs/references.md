@@ -31,6 +31,14 @@ its capabilities.
   Python in a secure AgentCore Code Interpreter sandbox, and returns
   visualizations. See also [Agent Analysis](./agent-analysis.md).
 
+- **[Automate schema generation for intelligent document processing](https://aws.amazon.com/blogs/machine-learning/automate-schema-generation-for-intelligent-document-processing/)**
+  *(May 2026)* — Introduces multi-document discovery, which generates extraction
+  schemas from collections of unlabeled documents — removing the requirement to
+  know your document classes up front. It clusters documents by type with visual
+  embeddings (Cohere Embed v4 on Amazon Bedrock), then uses Strands Agents to
+  analyze each cluster, generate JSON schemas, and reflect to catch overlaps.
+  See also [Discovery](./discovery.md).
+
 ## Customer Stories
 
 Reference deployments showing measurable accuracy, cost, and throughput results.

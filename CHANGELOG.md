@@ -7,7 +7,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
-- **Blogs, Customer Stories & Research references page.** A new [references doc](docs/references.md) collects and summarizes external publications about the accelerator: AWS ML blog feature deep-dives, customer reference stories (Myriad Genetics, Associa, Ricoh, Built Technologies) with real-world accuracy/cost/throughput results, and the peer-reviewed research papers (the IDP Accelerator arxiv paper and DocSplit, both ACL 2026). Linked from the docs index and the Starlight sidebar. (#507)
+- **Blogs, Customer Stories & Research references page.** A new [references doc](docs/references.md) collects and summarizes external publications about the accelerator: AWS ML blog feature deep-dives (including automated schema generation / multi-document discovery), customer reference stories (Myriad Genetics, Associa, Ricoh, Built Technologies) with real-world accuracy/cost/throughput results, and the peer-reviewed research papers (the IDP Accelerator arxiv paper and DocSplit, both ACL 2026). Linked from the docs index and the Starlight sidebar. (#507)
 
 ## [0.6.0]
 
