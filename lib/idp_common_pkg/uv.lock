@@ -994,7 +994,7 @@ wheels = [
 
 [[package]]
 name = "idp-common"
-version = "0.5.16"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
@@ -1018,6 +1018,7 @@ agentic-extraction = [
 ]
 agents = [
     { name = "bedrock-agentcore" },
+    { name = "jsonschema" },
     { name = "strands-agents" },
     { name = "strands-agents-tools" },
 ]
@@ -1025,6 +1026,7 @@ all = [
     { name = "amazon-textract-textractor", extra = ["pandas"] },
     { name = "bedrock-agentcore" },
     { name = "genson" },
+    { name = "jsonschema" },
     { name = "munkres" },
     { name = "numpy" },
     { name = "openpyxl" },
@@ -1101,6 +1103,9 @@ ocr = [
 reporting = [
     { name = "pyarrow" },
 ]
+synthesis = [
+    { name = "jsonschema" },
+]
 test = [
     { name = "aws-lambda-powertools" },
     { name = "build" },
@@ -1159,6 +1164,9 @@ requires-dist = [
     { name = "jinja2", marker = "extra == 'multi-document-discovery'", specifier = ">=3.1.0" },
     { name = "jsonpatch", marker = "extra == 'agentic-extraction'", specifier = "==1.33" },
     { name = "jsonschema", specifier = ">=4.25.1" },
+    { name = "jsonschema", marker = "extra == 'agents'", specifier = ">=4.0.0" },
+    { name = "jsonschema", marker = "extra == 'all'", specifier = ">=4.0.0" },
+    { name = "jsonschema", marker = "extra == 'synthesis'", specifier = ">=4.0.0" },
     { name = "jupyter", marker = "extra == 'dev'", specifier = ">=1.1.1,<2.0.0" },
     { name = "moto", marker = "extra == 'test'", specifier = ">=5.1.8" },
     { name = "moto", extras = ["s3", "cloudformation"], marker = "extra == 'test'", specifier = "==5.1.8" },
@@ -1217,9 +1225,9 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'test'", specifier = ">=0.14.0" },
     { name = "scikit-learn", marker = "extra == 'multi-document-discovery'", specifier = ">=1.5.0" },
     { name = "scipy", marker = "extra == 'multi-document-discovery'", specifier = ">=1.14.0" },
-    { name = "stickler-eval", marker = "extra == 'all'", specifier = "==0.4.0" },
-    { name = "stickler-eval", marker = "extra == 'evaluation'", specifier = "==0.4.0" },
-    { name = "stickler-eval", marker = "extra == 'test'", specifier = "==0.4.0" },
+    { name = "stickler-eval", marker = "extra == 'all'", specifier = "==0.5.0" },
+    { name = "stickler-eval", marker = "extra == 'evaluation'", specifier = "==0.5.0" },
+    { name = "stickler-eval", marker = "extra == 'test'", specifier = "==0.5.0" },
     { name = "strands-agents", marker = "python_full_version >= '3.10' and extra == 'agentic-extraction'", specifier = "==1.14.0" },
     { name = "strands-agents", marker = "python_full_version >= '3.10' and extra == 'agents'", specifier = "==1.14.0" },
     { name = "strands-agents", marker = "python_full_version >= '3.10' and extra == 'all'", specifier = "==1.14.0" },
@@ -1231,7 +1239,7 @@ requires-dist = [
     { name = "tabulate", marker = "extra == 'agentic-extraction'", specifier = ">=0.9.0" },
     { name = "typer", marker = "extra == 'test'", specifier = ">=0.19.2" },
 ]
-provides-extras = ["core", "dev", "image", "ocr", "classification", "extraction", "assessment", "evaluation", "rule-validation", "reporting", "appsync", "agents", "multi-document-discovery", "code-intel", "docs-service", "test", "all", "agentic-extraction"]
+provides-extras = ["core", "dev", "image", "ocr", "classification", "extraction", "assessment", "evaluation", "rule-validation", "reporting", "appsync", "agents", "multi-document-discovery", "synthesis", "code-intel", "docs-service", "test", "all", "agentic-extraction"]
 
 [[package]]
 name = "importlib-metadata"
@@ -2848,11 +2856,11 @@ wheels = [
 
 [[package]]
 name = "python-multipart"
-version = "0.0.27"
+version = "0.0.31"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/69/9b/f23807317a113dc36e74e75eb265a02dd1a4d9082abc3c1064acd22997c4/python_multipart-0.0.27.tar.gz", hash = "sha256:9870a6a8c5a20a5bf4f07c017bd1489006ff8836cff097b6933355ee2b49b602", size = 44043, upload-time = "2026-04-27T10:51:26.649Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/64/7e/9b35ad8f3d9ca680f7c87a88f19612fdd8da9796c4d3b46e560ac79dcc4a/python_multipart-0.0.31.tar.gz", hash = "sha256:fc631183bb13e56db3158a4909908dfb2e23565286744e798241e63750e5d680", size = 46689, upload-time = "2026-06-04T08:27:49.014Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/99/78/4126abcbdbd3c559d43e0db7f7b9173fc6befe45d39a2856cc0b8ec2a5a6/python_multipart-0.0.27-py3-none-any.whl", hash = "sha256:6fccfad17a27334bd0193681b369f476eda3409f17381a2d65aa7df3f7275645", size = 29254, upload-time = "2026-04-27T10:51:24.997Z" },
+    { url = "https://files.pythonhosted.org/packages/5e/1e/7f7f299527a5a8ad90acd5f2f78dfa6c8495c6301a3205106ea68a84de96/python_multipart-0.0.31-py3-none-any.whl", hash = "sha256:8408153d68a9773291fc1da39a8b85a50044bddbabd2dd72e9229776b7b15e28", size = 29996, upload-time = "2026-06-04T08:27:47.804Z" },
 ]
 
 [[package]]
@@ -3465,7 +3473,7 @@ wheels = [
 
 [[package]]
 name = "stickler-eval"
-version = "0.4.0"
+version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jinja2" },
@@ -3475,13 +3483,14 @@ dependencies = [
     { name = "pandas" },
     { name = "psutil" },
     { name = "pydantic" },
+    { name = "python-dateutil" },
     { name = "rapidfuzz" },
     { name = "scikit-learn" },
     { name = "scipy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/24/2b/917798f061900f32394af11a142b28ae2c22075d67f77760a1be7cb6f8b3/stickler_eval-0.4.0.tar.gz", hash = "sha256:2581e7879dd3e03416d8a523a8bddf38abeeaa8fb9b98ea6984819b79cde0e5b", size = 179813, upload-time = "2026-05-20T21:06:50.002Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/42/bb/0e78b24108f32d9569eaff3d789e205ee4ffa49b214c4b0b195c804f0124/stickler_eval-0.5.0.tar.gz", hash = "sha256:81957d7206b61a582cb96bb77f0872274759cc048f6579b09dfce4f1440f657f", size = 201904, upload-time = "2026-06-26T21:20:40.287Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cc/07/fec2b017a34659847386b55bbb73e3d3795e5b658d81dcb060b8b4f8af6e/stickler_eval-0.4.0-py3-none-any.whl", hash = "sha256:6a3caf0a74092e0e1fc670ef216bf31b828fabed863459ef734e712db3f31597", size = 214926, upload-time = "2026-05-20T21:06:48.221Z" },
+    { url = "https://files.pythonhosted.org/packages/b1/ad/b8b7e09a3dac62b92fcb4252040161781792719203fd35e809fe9294fe3f/stickler_eval-0.5.0-py3-none-any.whl", hash = "sha256:e186533978b63039099bef4e04755527912b5a20dee034824e1813bd0dbdc9bd", size = 237727, upload-time = "2026-06-26T21:20:37.336Z" },
 ]
 
 [[package]]
