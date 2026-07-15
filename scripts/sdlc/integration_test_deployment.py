@@ -258,17 +258,34 @@ def stream_new_milestones(logs_client, log_stream, next_token, console, max_page
     return next_token, saw_activity
 
 
-def monitor_pipeline_execution(pipeline_name, execution_id, max_wait=6000):
-    """Monitor specific pipeline execution until completion with live progress
+# The GitLab runner's AWS credentials are vended by assuming idp-sdlc-GitLab
+# FROM the already-assumed gitlab-runners-prod role. That is STS role chaining,
+# which AWS hard-caps at 1 hour regardless of the role's MaxSessionDuration —
+# so the job's creds expire ~60 min in, but the pipeline itself runs ~60-90 min
+# (publish ~28m + deploy ~29m + tests). The monitor therefore CANNOT reliably
+# watch a run to completion on one credential. Instead it watches within the
+# credential window and, if the pipeline is still running, hands off: prints
+# where the authoritative result will land (S3 summary + SNS) and exits
+# NEUTRALLY (not failed). Set below the ~60m token life minus before_script
+# (~5m) and after_script (~2m) headroom.
+MONITOR_HANDOFF_SECONDS = 2700  # 45 min
 
-    max_wait defaults to 6000s (100 min), deliberately BELOW the GitLab job's
-    2h ceiling: the script must own the deadline so it always returns and lets
-    after_script capture codebuild_logs.txt + the S3 summary. When max_wait
-    equalled the GitLab timeout (both 7200s), GitLab hard-killed the job before
-    the monitor could report or after_script could run — a fast pipeline
-    failure (e.g. ~64 min) still surfaced as an opaque "execution took longer
-    than 2h" with no logs. The pipeline itself failing fast is the norm; this
-    watcher just needs to notice and exit cleanly.
+
+def monitor_pipeline_execution(
+    pipeline_name, execution_id, max_wait=6000, handoff_after=MONITOR_HANDOFF_SECONDS
+):
+    """Monitor a pipeline execution with live progress; hand off if it outlives creds.
+
+    Returns:
+      True  — pipeline reached a terminal Succeeded state.
+      False — pipeline reached a terminal failure state, or polling failed hard.
+      None  — still running when the credential window (handoff_after) elapsed:
+              a graceful HANDOFF, not a failure. The caller exits neutrally and
+              the run's real result surfaces via the S3 summary + SNS.
+
+    max_wait (100 min) is a hard backstop below the GitLab job's 2h30m ceiling;
+    handoff_after (45 min) is the normal exit for a still-running pipeline,
+    chosen to stay within the 1h role-chained credential lifetime.
     """
     console = Console()
     console.print(f"[cyan]Monitoring pipeline execution:[/cyan] {execution_id}")
@@ -343,6 +360,27 @@ def monitor_pipeline_execution(pipeline_name, execution_id, max_wait=6000):
                     )
                     return False
                 elif status == "InProgress":
+                    # Graceful handoff: the pipeline is healthy but will outlive
+                    # our 1h role-chained credentials. Stop before they expire
+                    # (which would otherwise spew ExpiredToken errors and burn
+                    # the job slot) and point at the authoritative result.
+                    if wait_time >= handoff_after:
+                        progress.update(
+                            task, description="[cyan]↪ Handing off (still running)"
+                        )
+                        console.print(
+                            f"[cyan]↪ Pipeline still running after {elapsed_mins}m. "
+                            f"Handing off before the ~60m credential window closes "
+                            f"(role-chained creds cannot be extended).[/cyan]"
+                        )
+                        console.print(
+                            f"[cyan]  Execution: {execution_id}[/cyan]"
+                        )
+                        console.print(
+                            "[cyan]  Result will be published to the S3 deploy "
+                            "summary + SNS when the pipeline finishes.[/cyan]"
+                        )
+                        return None
                     # Heartbeat: show minutes since the last log activity so a
                     # genuine stall (build hung) is visually distinct from a
                     # healthy long-running step.
@@ -417,10 +455,21 @@ def main():
     create_deployment_package()
     version_id = upload_to_s3(bucket_name)
 
-    success = monitor_pipeline(pipeline_name, version_id)
+    result = monitor_pipeline(pipeline_name, version_id)
 
-    if success:
+    if result is True:
         print("🎉 Integration test deployment completed successfully!")
+        sys.exit(0)
+    elif result is None:
+        # Handoff: pipeline still running when the credential window closed.
+        # Not a failure — the real result lands in the S3 summary + SNS. Exit 0
+        # so a healthy long run doesn't show as a red job; monitoring it to
+        # completion is impossible on 1h role-chained creds.
+        print(
+            "↪ Integration test pipeline still running at handoff; "
+            "monitor exited cleanly. See the S3 deploy summary / SNS for the "
+            "final result."
+        )
         sys.exit(0)
     else:
         print("💥 Integration test deployment failed!")
