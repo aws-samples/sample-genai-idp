@@ -158,6 +158,106 @@ def find_pipeline_execution_by_version(pipeline_name, version_id, max_wait=300):
     return None
 
 
+# CodeBuild streams every codebuild_deployment.py print to this log group.
+CODEBUILD_LOG_GROUP = "/aws/codebuild/app-sdlc"
+
+# Substrings that mark a meaningful step boundary or result. Surfacing only
+# these keeps the monitor readable (the raw log is tens of thousands of lines
+# of boto3/idp_sdk chatter) while still showing what the pipeline is doing.
+MILESTONE_MARKERS = (
+    "Step ",
+    "Running tests",
+    "Deploying stack",
+    "Deployment completed",
+    "Publishing templates",
+    "Template published",
+    "API Gateway Web UI hosting",
+    "All tests passed",
+    "Test suite failed",
+    "✅",
+    "❌",
+    "🎉",
+    "💥",
+    "🧹",
+    "📦",
+)
+
+
+def resolve_codebuild_log_stream(pipeline_name, execution_id):
+    """Find the CodeBuild log stream backing this pipeline execution.
+
+    Mirrors the after_script: the BuildAction's externalExecutionId is
+    '<project>:<streamName>'. Returns the stream name, or None if the build
+    hasn't started/registered yet (caller retries on later polls).
+    """
+    try:
+        cp = boto3.client("codepipeline")
+        actions = cp.list_action_executions(
+            pipelineName=pipeline_name,
+            filter={"pipelineExecutionId": execution_id},
+        ).get("actionExecutionDetails", [])
+        for a in actions:
+            if a.get("actionName") != "BuildAction":
+                continue
+            ext = (
+                a.get("output", {})
+                .get("executionResult", {})
+                .get("externalExecutionId", "")
+            )
+            if ":" in ext:
+                return ext.split(":", 1)[1]
+    except Exception:
+        # Non-fatal: status polling continues without the log stream.
+        pass
+    return None
+
+
+def stream_new_milestones(logs_client, log_stream, next_token, console, max_pages=20):
+    """Print new milestone log lines since next_token; return updated token.
+
+    Returns (token, saw_activity): saw_activity is True when ANY new events
+    arrived (even non-milestone), so the caller can show a real "last activity"
+    heartbeat and distinguish a working build from a genuinely stalled one.
+
+    Drains up to max_pages of get_log_events per call: a single page caps at
+    ~1MB/10k events, and a busy build easily produces more between 30s polls,
+    so paging fully keeps the milestone stream from falling behind. The cap
+    bounds a single poll's work (a fresh monitor attaching to a long build).
+    """
+    saw_activity = False
+    try:
+        for _ in range(max_pages):
+            kwargs = {
+                "logGroupName": CODEBUILD_LOG_GROUP,
+                "logStreamName": log_stream,
+                "startFromHead": True,
+            }
+            if next_token:
+                kwargs["nextToken"] = next_token
+            resp = logs_client.get_log_events(**kwargs)
+            events = resp.get("events", [])
+            if events:
+                saw_activity = True
+            for e in events:
+                msg = e["message"].rstrip()
+                if any(marker in msg for marker in MILESTONE_MARKERS):
+                    # Trim to keep one line per milestone; the log prefix (bare
+                    # timestamps) adds no value here.
+                    console.print(f"  [dim]│[/dim] {msg[:160]}")
+            new_token = resp.get("nextForwardToken", next_token)
+            # get_log_events returns the SAME nextForwardToken at the stream
+            # head — that's the "no more pages" signal; stop draining.
+            if new_token == next_token:
+                next_token = new_token
+                break
+            next_token = new_token
+    except Exception:
+        # Log group/stream may not exist yet, or a transient error — the
+        # status poller remains the source of truth for completion.
+        pass
+    return next_token, saw_activity
+
+
 def monitor_pipeline_execution(pipeline_name, execution_id, max_wait=6000):
     """Monitor specific pipeline execution until completion with live progress
 
@@ -174,6 +274,7 @@ def monitor_pipeline_execution(pipeline_name, execution_id, max_wait=6000):
     console.print(f"[cyan]Monitoring pipeline execution:[/cyan] {execution_id}")
 
     codepipeline = boto3.client("codepipeline")
+    logs_client = boto3.client("logs")
     poll_interval = 30
     # A persistent get_pipeline_execution failure (throttling, expired creds,
     # wrong id) must NOT masquerade as a 2h hang: the old handler logged each
@@ -181,6 +282,14 @@ def monitor_pipeline_execution(pipeline_name, execution_id, max_wait=6000):
     # errors so the real problem is visible in minutes, not hours.
     max_consecutive_errors = 10
     consecutive_errors = 0
+
+    # Live milestone stream from the CodeBuild log so the monitor shows what
+    # the tests are actually doing (which step, pass/fail) instead of an opaque
+    # spinner. Resolving the stream may lag the execution start, so retry until
+    # it appears. Track "last activity" to expose a real stall heartbeat.
+    log_stream = None
+    log_token = None
+    wait_time_at_last_activity = 0
 
     with Progress(
         SpinnerColumn(),
@@ -204,6 +313,19 @@ def monitor_pipeline_execution(pipeline_name, execution_id, max_wait=6000):
                 status = response["pipelineExecution"]["status"]
                 elapsed_mins = wait_time // 60
 
+                # Surface new CodeBuild milestone lines (best effort). Resolve
+                # the log stream lazily once the BuildAction has started.
+                if log_stream is None:
+                    log_stream = resolve_codebuild_log_stream(
+                        pipeline_name, execution_id
+                    )
+                if log_stream is not None:
+                    log_token, saw_activity = stream_new_milestones(
+                        logs_client, log_stream, log_token, console
+                    )
+                    if saw_activity:
+                        wait_time_at_last_activity = wait_time
+
                 # Terminal states: return IMMEDIATELY and log explicitly so a
                 # detection miss can never be confused with a timeout.
                 if status == "Succeeded":
@@ -221,7 +343,21 @@ def monitor_pipeline_execution(pipeline_name, execution_id, max_wait=6000):
                     )
                     return False
                 elif status == "InProgress":
-                    progress.update(task, description=f"[yellow]⏳ Pipeline running ({elapsed_mins}m elapsed)...")
+                    # Heartbeat: show minutes since the last log activity so a
+                    # genuine stall (build hung) is visually distinct from a
+                    # healthy long-running step.
+                    idle_mins = (wait_time - wait_time_at_last_activity) // 60
+                    idle_note = (
+                        f", no log activity for {idle_mins}m" if idle_mins >= 3 else ""
+                    )
+                    stream_note = "" if log_stream else ", awaiting build logs"
+                    progress.update(
+                        task,
+                        description=(
+                            f"[yellow]⏳ Pipeline running "
+                            f"({elapsed_mins}m elapsed{idle_note}{stream_note})..."
+                        ),
+                    )
 
             except Exception as e:
                 consecutive_errors += 1
