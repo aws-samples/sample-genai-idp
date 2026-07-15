@@ -1517,6 +1517,91 @@ def get_codebuild_logs():
         return f"Failed to retrieve CodeBuild logs: {str(e)}"
 
 
+def get_workflow_failure_details(stack_name, max_executions=5):
+    """Capture the real cause of a document processing failure before teardown.
+
+    When a smoke test fails because a document didn't process, the tracking
+    table / batch monitor only surface a generic "Unknown error" — the actual
+    exception (a Lambda traceback, a Bedrock/BDA InvokeDataAutomationAsync
+    error, a validation failure) lives in the Step Functions execution history
+    and is destroyed when cleanup_stack deletes the stack. This snapshots the
+    failed executions' error/cause so the summary can name the true root cause
+    instead of echoing "Unknown error".
+
+    Returns a list of {execution_arn, name, error, cause, failed_state} dicts
+    (empty if none found or the stack has no reachable state machine).
+    """
+    try:
+        cf = boto3.client("cloudformation")
+        outputs = {
+            o["OutputKey"]: o["OutputValue"]
+            for o in cf.describe_stacks(StackName=stack_name)["Stacks"][0].get(
+                "Outputs", []
+            )
+        }
+        state_machine_arn = outputs.get("StateMachineArn", "")
+        if not state_machine_arn:
+            return []
+
+        sfn = boto3.client("stepfunctions")
+        failed = sfn.list_executions(
+            stateMachineArn=state_machine_arn,
+            statusFilter="FAILED",
+            maxResults=max_executions,
+        ).get("executions", [])
+
+        details = []
+        for execution in failed:
+            arn = execution["executionArn"]
+            # Walk the execution history for the terminal failure event, which
+            # carries the concrete error + cause (Lambda stack trace, service
+            # exception) that the tracking table flattens to "Unknown error".
+            error = cause = failed_state = ""
+            try:
+                events = sfn.get_execution_history(
+                    executionArn=arn, reverseOrder=True, maxResults=25
+                ).get("events", [])
+                for event in events:
+                    for key in (
+                        "executionFailedEventDetails",
+                        "taskFailedEventDetails",
+                        "lambdaFunctionFailedEventDetails",
+                    ):
+                        detail = event.get(key)
+                        if detail:
+                            error = error or detail.get("error", "")
+                            cause = cause or detail.get("cause", "")
+                    # reverseOrder=True → the first StateEntered we see is the
+                    # last state the execution reached, i.e. the one that
+                    # failed. (Don't break once error/cause are set: the
+                    # terminal ExecutionFailed event precedes this in reverse
+                    # order, so an early break would miss the state name.)
+                    if not failed_state and event.get("type", "").endswith(
+                        "StateEntered"
+                    ):
+                        failed_state = event.get("stateEnteredEventDetails", {}).get(
+                            "name", ""
+                        )
+            except Exception as e:  # noqa: BLE001
+                cause = f"(could not read execution history: {e})"
+
+            details.append(
+                {
+                    "execution_arn": arn,
+                    "name": execution.get("name", ""),
+                    "error": error or "(no error field)",
+                    # Causes can be huge (full traceback) — cap so the summary
+                    # prompt stays small while keeping the actionable head.
+                    "cause": (cause or "(no cause field)")[:2000],
+                    "failed_state": failed_state or "(unknown state)",
+                }
+            )
+        return details
+
+    except Exception as e:  # noqa: BLE001
+        return [{"error": f"Failed to retrieve workflow failure details: {str(e)}"}]
+
+
 def generate_publish_failure_summary(publish_error):
     """Generate summary for publish/build failures"""
     try:
@@ -1797,31 +1882,37 @@ def generate_deployment_summary(result, stack_name, template_url):
             Deployment error:
             {error_text}
 
-            CloudFormation error events:
+            CloudFormation error events (may span multiple stacks — e.g. a
+            throwaway VPC stack AND the IDP stack; the real failure can be in
+            either, so read the `stack_name` field on each event):
             {json.dumps(logs, indent=2)}
 
-            IMPORTANT: Log retrieval may have failed (check for "error" fields).
-            In that case, base the analysis on the deployment error message.
-
-            Find the FIRST CREATE_FAILED events (chronologically) that have a
-            concrete ResourceStatusReason — later "Resource creation cancelled"
-            events are cascades caused by the original failure. Quote the exact
-            error message (e.g. quota exceeded, access denied, validation error).
+            GROUNDING RULES — follow strictly:
+            • Base the root cause ONLY on a concrete ResourceStatusReason
+              actually present in the events above. Do NOT invent causes.
+            • If the events list is empty or every entry has only an "error"
+              field (retrieval failed / stack already deleted), you MUST say the
+              root cause was NOT captured and recommend re-running with
+              `idp-cli deploy --no-rollback` to preserve the failed resources.
+              Do NOT guess at IAM/quota/API-limit causes with no evidence.
+            • Find the FIRST CREATE_FAILED events (chronologically) with a
+              concrete reason — later "Resource creation cancelled" events are
+              cascades. Quote the exact reason string verbatim.
 
             Provide analysis in this format:
 
             🚀 DEPLOYMENT RESULT
 
-            📋 Status: {stack_name} FAILED - [one-line root cause]
+            📋 Status: {stack_name} FAILED - [one-line root cause, or "root cause not captured"]
 
             🔍 CloudFormation Root Cause:
             • Quote the exact ResourceStatusReason of the original failure
-            • Identify which specific resources failed to create
-            • Distinguish the root failure from cancellation cascades
+            • Name the stack + logical resource that failed (from the events)
+            • If nothing concrete was captured, say so explicitly
 
             💡 Fix Commands:
             • Provide specific AWS CLI commands based on actual failures found
-            • Focus on the resources that actually failed
+            • If root cause not captured, give the --no-rollback re-run command
 
             Keep each bullet point under 75 characters.
             Respond ONLY with the format above, no other text.
@@ -1836,19 +1927,50 @@ def generate_deployment_summary(result, stack_name, template_url):
         suite_reference = "\n".join(
             f"• {step}: {desc}" for _, step, _, desc in ALL_TEST_STEPS
         )
+
+        # When a document failed to process, the test's own error is a generic
+        # "Unknown error" (the tracking table flattens the real cause). Pull the
+        # Step Functions execution failure now — the stack still exists (summary
+        # runs before cleanup_stack) but will be gone by the time anyone reads
+        # this. Prefer pre-captured details if the caller already snapshotted.
+        workflow_failures = result.get("workflow_failures")
+        if workflow_failures is None:
+            print(f"🔍 Capturing Step Functions failures for: {stack_name}")
+            workflow_failures = get_workflow_failure_details(stack_name)
+        if workflow_failures:
+            print(f"✅ Captured {len(workflow_failures)} workflow failure(s)")
+
         test_prompt = dedent(f"""
         An IDP deployment succeeded but a post-deployment smoke test failed.
 
         Stack Name: {stack_name}
 
-        Test error:
+        Test error (this is often a GENERIC wrapper like "Unknown error" or
+        "BDA config test failed" — it is NOT necessarily the root cause):
         {error_text}
 
         Test suite reference:
         {suite_reference}
 
-        Last build log lines (for context on the failure):
+        Step Functions execution failures (the AUTHORITATIVE root cause when
+        present — the `cause` field holds the real Lambda traceback / service
+        exception behind a generic "Unknown error"):
+        {json.dumps(workflow_failures, indent=2)}
+
+        Last build log lines (context only — note that "exit code -9" / SIGKILL
+        lines are fail-fast collateral from OTHER parallel tests being killed
+        after the first failure, NOT independent failures; do not report them):
         {log_tail}
+
+        GROUNDING RULES — follow strictly:
+        • Base the root cause ONLY on evidence actually present above (the
+          Step Functions `cause`/`error`, a concrete log line, or the test
+          error). Do NOT invent likely causes.
+        • If the Step Functions failures list is empty or contains only an
+          "error" field (capture failed), and no concrete cause appears in the
+          logs, you MUST say the root cause was not captured and recommend how
+          to capture it — do NOT guess at IAM/region/quota/config causes.
+        • Quote exact strings; never paraphrase an error you cannot see.
 
         Provide analysis in this format:
 
@@ -1857,11 +1979,13 @@ def generate_deployment_summary(result, stack_name, template_url):
         📋 Test Status: FAILED - [which step/test failed, from the error]
 
         🔍 Root Cause Analysis:
-        • Quote the exact error message from the test error
+        • Quote the exact error/cause from the Step Functions failure or logs
+        • If no concrete cause is present, state: "Root cause not captured"
         • Identify which test step failed and what it validates
 
         💡 Fix Guidance:
-        • Suggest specific fixes based on the error message
+        • Only suggest fixes that follow from evidence above
+        • If root cause not captured, say what evidence to collect next
         • Reference relevant CLI commands if applicable
 
         Keep each bullet point under 75 characters.
@@ -2095,19 +2219,32 @@ def validate_apigw_private_hosting(stack_name):
     return {"success": True, "web_url": web_url}
 
 
-def _capture_cf_events(result, stack_name):
-    """Snapshot CF failure events into the result dict before stack teardown.
+def _capture_cf_events(result, *stack_names):
+    """Snapshot CF failure events from candidate stacks before teardown.
 
-    The APIGW hosting test deletes its throwaway stack in a finally block, so
-    the summary generator (which runs after cleanup) cannot fetch events by
-    stack name — they must be captured while the stack still exists.
+    The APIGW hosting test can fail either in its throwaway IDP stack or in the
+    self-contained VPC stack it stands up first; both are deleted in a finally
+    block, so events must be captured while the stacks still exist. Passing all
+    candidates (and dropping ones that were never created) means the summary
+    sees the stack that actually rolled back — previously we only captured the
+    IDP stack, so a VPC-creation failure surfaced as "<stack> does not exist".
     """
-    try:
-        result["cf_events"] = get_cloudformation_logs(stack_name)
-    except Exception as e:  # noqa: BLE001
-        result["cf_events"] = [
-            {"error": f"Exception: {str(e)}", "stack_name": stack_name}
-        ]
+    events = []
+    for name in stack_names:
+        try:
+            stack_events = get_cloudformation_logs(name)
+        except Exception as e:  # noqa: BLE001
+            stack_events = [{"error": f"Exception: {str(e)}", "stack_name": name}]
+        # get_cloudformation_logs returns a single {"error": ...} entry when a
+        # stack doesn't exist; keep only real failure events so a genuine
+        # rollback in a sibling stack isn't buried under "does not exist" noise.
+        real = [e for e in stack_events if "error" not in e]
+        events.extend(real)
+    # If every candidate yielded only "does not exist"/errors, keep a note so
+    # the summary can say evidence was unavailable rather than showing nothing.
+    result["cf_events"] = events or [
+        {"error": "No CloudFormation events captured", "stacks": list(stack_names)}
+    ]
 
 
 def deploy_and_test_apigw_vpc_hosting(admin_email, template_url):
@@ -2152,7 +2289,7 @@ def deploy_and_test_apigw_vpc_hosting(admin_email, template_url):
         if "COMPLETE" not in status.stdout:
             result["error"] = f"Deploy status: {status.stdout.strip()}"
             result["failure_type"] = "deploy"
-            _capture_cf_events(result, stack_name)
+            _capture_cf_events(result, stack_name, vpc_stack_name)
             return result
 
         validation = validate_apigw_private_hosting(stack_name)
@@ -2164,7 +2301,9 @@ def deploy_and_test_apigw_vpc_hosting(admin_email, template_url):
         print(f"❌ APIGateway/VPC hosting test exception: {e}")
         result["error"] = str(e)
         result["failure_type"] = "deploy"
-        _capture_cf_events(result, stack_name)
+        # The failure can originate in the VPC stack (created first) or the IDP
+        # stack; capture both since both are torn down in the finally block.
+        _capture_cf_events(result, stack_name, vpc_stack_name)
         return result
     finally:
         # Tear down IDP stack first (frees ENIs in the VPC), then the VPC.
