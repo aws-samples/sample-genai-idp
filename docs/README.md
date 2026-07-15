@@ -102,6 +102,10 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 - [Batch Jobs REST API](./govcloud-batch-api.md) - API reference, authentication, and bastion tunnel setup
 - [GovCloud Operations](./govcloud-operations.md) - Monitoring, troubleshooting, and best practices
 
+## Blogs, Customer Stories & Research
+
+- [Blogs, Customer Stories & Research](./references.md) - AWS blog deep-dives into the accelerator, customer references with real-world metrics, and peer-reviewed research papers
+
 ## Screenshots and Diagrams
 
 The documentation references several screenshots and diagrams from the `../images` folder:

@@ -15,7 +15,7 @@ import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timezone
 from textwrap import dedent
 
 import boto3
@@ -1517,6 +1517,91 @@ def get_codebuild_logs():
         return f"Failed to retrieve CodeBuild logs: {str(e)}"
 
 
+def get_workflow_failure_details(stack_name, max_executions=5):
+    """Capture the real cause of a document processing failure before teardown.
+
+    When a smoke test fails because a document didn't process, the tracking
+    table / batch monitor only surface a generic "Unknown error" — the actual
+    exception (a Lambda traceback, a Bedrock/BDA InvokeDataAutomationAsync
+    error, a validation failure) lives in the Step Functions execution history
+    and is destroyed when cleanup_stack deletes the stack. This snapshots the
+    failed executions' error/cause so the summary can name the true root cause
+    instead of echoing "Unknown error".
+
+    Returns a list of {execution_arn, name, error, cause, failed_state} dicts
+    (empty if none found or the stack has no reachable state machine).
+    """
+    try:
+        cf = boto3.client("cloudformation")
+        outputs = {
+            o["OutputKey"]: o["OutputValue"]
+            for o in cf.describe_stacks(StackName=stack_name)["Stacks"][0].get(
+                "Outputs", []
+            )
+        }
+        state_machine_arn = outputs.get("StateMachineArn", "")
+        if not state_machine_arn:
+            return []
+
+        sfn = boto3.client("stepfunctions")
+        failed = sfn.list_executions(
+            stateMachineArn=state_machine_arn,
+            statusFilter="FAILED",
+            maxResults=max_executions,
+        ).get("executions", [])
+
+        details = []
+        for execution in failed:
+            arn = execution["executionArn"]
+            # Walk the execution history for the terminal failure event, which
+            # carries the concrete error + cause (Lambda stack trace, service
+            # exception) that the tracking table flattens to "Unknown error".
+            error = cause = failed_state = ""
+            try:
+                events = sfn.get_execution_history(
+                    executionArn=arn, reverseOrder=True, maxResults=25
+                ).get("events", [])
+                for event in events:
+                    for key in (
+                        "executionFailedEventDetails",
+                        "taskFailedEventDetails",
+                        "lambdaFunctionFailedEventDetails",
+                    ):
+                        detail = event.get(key)
+                        if detail:
+                            error = error or detail.get("error", "")
+                            cause = cause or detail.get("cause", "")
+                    # reverseOrder=True → the first StateEntered we see is the
+                    # last state the execution reached, i.e. the one that
+                    # failed. (Don't break once error/cause are set: the
+                    # terminal ExecutionFailed event precedes this in reverse
+                    # order, so an early break would miss the state name.)
+                    if not failed_state and event.get("type", "").endswith(
+                        "StateEntered"
+                    ):
+                        failed_state = event.get("stateEnteredEventDetails", {}).get(
+                            "name", ""
+                        )
+            except Exception as e:  # noqa: BLE001
+                cause = f"(could not read execution history: {e})"
+
+            details.append(
+                {
+                    "execution_arn": arn,
+                    "name": execution.get("name", ""),
+                    "error": error or "(no error field)",
+                    # Causes can be huge (full traceback) — cap so the summary
+                    # prompt stays small while keeping the actionable head.
+                    "cause": (cause or "(no cause field)")[:2000],
+                    "failed_state": failed_state or "(unknown state)",
+                }
+            )
+        return details
+
+    except Exception as e:  # noqa: BLE001
+        return [{"error": f"Failed to retrieve workflow failure details: {str(e)}"}]
+
+
 def generate_publish_failure_summary(publish_error):
     """Generate summary for publish/build failures"""
     try:
@@ -1797,31 +1882,37 @@ def generate_deployment_summary(result, stack_name, template_url):
             Deployment error:
             {error_text}
 
-            CloudFormation error events:
+            CloudFormation error events (may span multiple stacks — e.g. a
+            throwaway VPC stack AND the IDP stack; the real failure can be in
+            either, so read the `stack_name` field on each event):
             {json.dumps(logs, indent=2)}
 
-            IMPORTANT: Log retrieval may have failed (check for "error" fields).
-            In that case, base the analysis on the deployment error message.
-
-            Find the FIRST CREATE_FAILED events (chronologically) that have a
-            concrete ResourceStatusReason — later "Resource creation cancelled"
-            events are cascades caused by the original failure. Quote the exact
-            error message (e.g. quota exceeded, access denied, validation error).
+            GROUNDING RULES — follow strictly:
+            • Base the root cause ONLY on a concrete ResourceStatusReason
+              actually present in the events above. Do NOT invent causes.
+            • If the events list is empty or every entry has only an "error"
+              field (retrieval failed / stack already deleted), you MUST say the
+              root cause was NOT captured and recommend re-running with
+              `idp-cli deploy --no-rollback` to preserve the failed resources.
+              Do NOT guess at IAM/quota/API-limit causes with no evidence.
+            • Find the FIRST CREATE_FAILED events (chronologically) with a
+              concrete reason — later "Resource creation cancelled" events are
+              cascades. Quote the exact reason string verbatim.
 
             Provide analysis in this format:
 
             🚀 DEPLOYMENT RESULT
 
-            📋 Status: {stack_name} FAILED - [one-line root cause]
+            📋 Status: {stack_name} FAILED - [one-line root cause, or "root cause not captured"]
 
             🔍 CloudFormation Root Cause:
             • Quote the exact ResourceStatusReason of the original failure
-            • Identify which specific resources failed to create
-            • Distinguish the root failure from cancellation cascades
+            • Name the stack + logical resource that failed (from the events)
+            • If nothing concrete was captured, say so explicitly
 
             💡 Fix Commands:
             • Provide specific AWS CLI commands based on actual failures found
-            • Focus on the resources that actually failed
+            • If root cause not captured, give the --no-rollback re-run command
 
             Keep each bullet point under 75 characters.
             Respond ONLY with the format above, no other text.
@@ -1836,19 +1927,50 @@ def generate_deployment_summary(result, stack_name, template_url):
         suite_reference = "\n".join(
             f"• {step}: {desc}" for _, step, _, desc in ALL_TEST_STEPS
         )
+
+        # When a document failed to process, the test's own error is a generic
+        # "Unknown error" (the tracking table flattens the real cause). Pull the
+        # Step Functions execution failure now — the stack still exists (summary
+        # runs before cleanup_stack) but will be gone by the time anyone reads
+        # this. Prefer pre-captured details if the caller already snapshotted.
+        workflow_failures = result.get("workflow_failures")
+        if workflow_failures is None:
+            print(f"🔍 Capturing Step Functions failures for: {stack_name}")
+            workflow_failures = get_workflow_failure_details(stack_name)
+        if workflow_failures:
+            print(f"✅ Captured {len(workflow_failures)} workflow failure(s)")
+
         test_prompt = dedent(f"""
         An IDP deployment succeeded but a post-deployment smoke test failed.
 
         Stack Name: {stack_name}
 
-        Test error:
+        Test error (this is often a GENERIC wrapper like "Unknown error" or
+        "BDA config test failed" — it is NOT necessarily the root cause):
         {error_text}
 
         Test suite reference:
         {suite_reference}
 
-        Last build log lines (for context on the failure):
+        Step Functions execution failures (the AUTHORITATIVE root cause when
+        present — the `cause` field holds the real Lambda traceback / service
+        exception behind a generic "Unknown error"):
+        {json.dumps(workflow_failures, indent=2)}
+
+        Last build log lines (context only — note that "exit code -9" / SIGKILL
+        lines are fail-fast collateral from OTHER parallel tests being killed
+        after the first failure, NOT independent failures; do not report them):
         {log_tail}
+
+        GROUNDING RULES — follow strictly:
+        • Base the root cause ONLY on evidence actually present above (the
+          Step Functions `cause`/`error`, a concrete log line, or the test
+          error). Do NOT invent likely causes.
+        • If the Step Functions failures list is empty or contains only an
+          "error" field (capture failed), and no concrete cause appears in the
+          logs, you MUST say the root cause was not captured and recommend how
+          to capture it — do NOT guess at IAM/region/quota/config causes.
+        • Quote exact strings; never paraphrase an error you cannot see.
 
         Provide analysis in this format:
 
@@ -1857,11 +1979,13 @@ def generate_deployment_summary(result, stack_name, template_url):
         📋 Test Status: FAILED - [which step/test failed, from the error]
 
         🔍 Root Cause Analysis:
-        • Quote the exact error message from the test error
+        • Quote the exact error/cause from the Step Functions failure or logs
+        • If no concrete cause is present, state: "Root cause not captured"
         • Identify which test step failed and what it validates
 
         💡 Fix Guidance:
-        • Suggest specific fixes based on the error message
+        • Only suggest fixes that follow from evidence above
+        • If root cause not captured, say what evidence to collect next
         • Reference relevant CLI commands if applicable
 
         Keep each bullet point under 75 characters.
@@ -2001,80 +2125,206 @@ def cleanup_stack(result):
 
 
 # ---------------------------------------------------------------------------
-# API Gateway Web UI hosting test (VPC / PRIVATE)
+# API Gateway Web UI hosting test
 #
 # Separate from the primary shared-stack test suite (Steps 3-11), which deploys
-# once with default hosting (CloudFront, no VPC). This phase deploys a SECOND,
-# throwaway IDP stack configured for the new API-Gateway Web UI hosting option
-# WITH VPC support: WebUIHosting=APIGateway + ApiGatewayVisibility=PRIVATE +
-# DeployInVPC=true. It stands up a self-contained test VPC (NAT egress + a
-# single execute-api interface endpoint), deploys, validates the private
-# REST API is serving the UI, and tears everything down.
+# once with default hosting (CloudFront). This phase deploys a SECOND throwaway
+# IDP stack configured for API-Gateway Web UI hosting in its GLOBAL (regional,
+# internet-facing, NO VPC) form: WebUIHosting=APIGateway +
+# ApiGatewayVisibility=GLOBAL. It exercises the S3-proxy REST API hosting code
+# on every run and fetches the UI over HTTP, without consuming VPC quota.
 #
-# Gated by IDP_TEST_APIGW_VPC_HOSTING (default "true"); set to "false" to skip.
+# The VPC/PRIVATE variant is NOT run in routine CI: it stood up a throwaway VPC
+# per run, which leaked VPCs (Lambda ENIs blocking teardown) and consumed 1 of
+# only 5 VPC slots per concurrent run, exhausting the quota under parallel
+# pipelines. Validate the PRIVATE/VPC path out-of-band (manual/local) instead.
+# The self-contained VPC template (scripts/sdlc/apigw-hosting-test-vpc.yaml) is
+# retained for that manual use. delete_apigw_test_vpc / the startup reaper below
+# remain to clean up any historical *-apigw-vpc stragglers.
+#
+# Gated by IDP_TEST_APIGW_HOSTING (default "true"); set to "false" to skip.
 # ---------------------------------------------------------------------------
-APIGW_HOSTING_VPC_TEMPLATE = "scripts/sdlc/apigw-hosting-test-vpc.yaml"
 
 
-def create_apigw_test_vpc(vpc_stack_name):
-    """Create the self-contained test VPC and return its outputs dict."""
-    print(f"[{vpc_stack_name}] Creating test VPC for API Gateway hosting...")
-    cf = boto3.client("cloudformation")
-    with open(APIGW_HOSTING_VPC_TEMPLATE, "r") as f:
-        template_body = f.read()
+def _force_delete_vpc_stack_enis(vpc_stack_name):
+    """Delete detached Lambda ENIs that block a test VPC stack's teardown.
+
+    IDP deploys VPC-attached Lambdas (e.g. DashboardMergerFunction). When the
+    IDP stack is deleted, its ENIs linger in 'available' state for a while;
+    CloudFormation then can't delete the subnets/security group, so the VPC
+    stack goes DELETE_FAILED and the VPC leaks — eventually exhausting the
+    account's VPC quota and rolling back every later apigw hosting test. This
+    reaps the orphaned (unattached) ENIs so the stack delete can proceed.
+
+    Returns the number of ENIs deleted. Best effort — never raises.
+    """
+    deleted = 0
     try:
-        cf.create_stack(StackName=vpc_stack_name, TemplateBody=template_body)
-        cf.get_waiter("stack_create_complete").wait(
-            StackName=vpc_stack_name, WaiterConfig={"MaxAttempts": 60, "Delay": 15}
-        )
-    except cf.exceptions.AlreadyExistsException:
-        print(f"[{vpc_stack_name}] ℹ️ VPC stack already exists")
-    outputs = {
-        o["OutputKey"]: o["OutputValue"]
-        for o in cf.describe_stacks(StackName=vpc_stack_name)["Stacks"][0].get(
-            "Outputs", []
-        )
-    }
-    print(f"[{vpc_stack_name}] ✅ Test VPC ready: {outputs}")
-    return outputs
+        cf = boto3.client("cloudformation")
+        outputs = {
+            o["OutputKey"]: o["OutputValue"]
+            for o in cf.describe_stacks(StackName=vpc_stack_name)["Stacks"][0].get(
+                "Outputs", []
+            )
+        }
+        vpc_id = outputs.get("VpcId", "")
+        if not vpc_id:
+            return 0
+        ec2 = boto3.client("ec2")
+        enis = ec2.describe_network_interfaces(
+            Filters=[{"Name": "vpc-id", "Values": [vpc_id]}]
+        ).get("NetworkInterfaces", [])
+        for eni in enis:
+            # Only unattached ENIs are safe to delete directly; attached ones
+            # (VPC endpoint / NAT) are removed by CloudFormation with their
+            # owning resource.
+            if eni.get("Status") != "available" or eni.get("Attachment"):
+                continue
+            eni_id = eni["NetworkInterfaceId"]
+            try:
+                ec2.delete_network_interface(NetworkInterfaceId=eni_id)
+                deleted += 1
+                print(f"[{vpc_stack_name}]   force-deleted orphaned ENI {eni_id}")
+            except Exception as e:  # noqa: BLE001
+                print(f"[{vpc_stack_name}]   ⚠️ could not delete ENI {eni_id}: {e}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[{vpc_stack_name}]   ⚠️ ENI sweep failed: {e}")
+    return deleted
 
 
 def delete_apigw_test_vpc(vpc_stack_name):
-    """Delete the test VPC stack (best effort)."""
+    """Delete the test VPC stack, recovering from ENI-blocked DELETE_FAILED.
+
+    First attempt is a plain stack delete. If it fails (almost always because
+    orphaned Lambda ENIs hold the subnets/SG), sweep the detached ENIs and
+    retry once — this stops the VPC leak that otherwise exhausts the account's
+    VPC quota. Best effort — never raises.
+    """
     print(f"[{vpc_stack_name}] Deleting test VPC...")
-    try:
-        cf = boto3.client("cloudformation")
+    cf = boto3.client("cloudformation")
+
+    def _attempt():
         cf.delete_stack(StackName=vpc_stack_name)
         cf.get_waiter("stack_delete_complete").wait(
             StackName=vpc_stack_name, WaiterConfig={"MaxAttempts": 60, "Delay": 15}
         )
+
+    try:
+        _attempt()
         print(f"[{vpc_stack_name}] ✅ Test VPC deleted")
+        return
     except Exception as e:  # noqa: BLE001
-        print(f"[{vpc_stack_name}] ⚠️ Test VPC delete failed: {e}")
+        print(f"[{vpc_stack_name}] ⚠️ First delete failed ({e}); sweeping ENIs and retrying")
+
+    # Retry path: orphaned Lambda ENIs are the usual culprit. Give them a
+    # moment to detach, sweep, then delete again.
+    time.sleep(30)
+    swept = _force_delete_vpc_stack_enis(vpc_stack_name)
+    print(f"[{vpc_stack_name}] swept {swept} orphaned ENI(s); retrying delete")
+    try:
+        _attempt()
+        print(f"[{vpc_stack_name}] ✅ Test VPC deleted (after ENI sweep)")
+    except Exception as e:  # noqa: BLE001
+        print(
+            f"[{vpc_stack_name}] ❌ Test VPC still failed to delete after ENI sweep: {e}. "
+            f"Startup reaper will retry on the next run."
+        )
 
 
-def validate_apigw_private_hosting(stack_name):
-    """Assert the deployed stack serves the Web UI on a PRIVATE REST API.
+# Only reap *-apigw-vpc stacks older than this. A manual/local PRIVATE-VPC
+# test can legitimately be running concurrently with a CI job; a young stack
+# may be that in-flight test, so the age gate prevents this reaper from
+# deleting a VPC that is still in use. Historical leaks are always far older.
+APIGW_VPC_STALE_AGE_SECONDS = 2 * 3600
 
-    Cannot curl the endpoint (it's VPC-only, and CodeBuild is in a different
-    network), so validate structurally:
-      * the REST API "{stack}-api" has endpoint type PRIVATE, and
-      * the stack's ApplicationWebURL output is the execute-api /api URL.
+
+def cleanup_stale_apigw_test_vpcs():
+    """Reap OLD leftover apigw test VPC stacks (defense in depth).
+
+    Routine CI no longer creates test VPCs (the every-run apigw test is the
+    no-VPC GLOBAL variant), so this exists to clean up historical `*-apigw-vpc`
+    stragglers and any left by a manual PRIVATE-VPC test whose teardown failed.
+    Left unchecked these hold VPCs until the account hits its quota.
+
+    Age-gated (APIGW_VPC_STALE_AGE_SECONDS): a manual VPC test could be running
+    concurrently, so only stacks older than the threshold are deleted — never a
+    possibly-in-flight one. Best effort — never raises.
+    """
+    print("🧹 Cleaning up stale apigw test VPC stacks...")
+    try:
+        cf = boto3.client("cloudformation")
+        # Compare CreationTime against server-side "now" (a stack's own
+        # DeletionTime is unavailable pre-delete, and Date.now-style local
+        # clocks can skew); use a timezone-aware now from the newest stack's tz.
+        now = datetime.now(tz=timezone.utc)
+        stale, skipped_young = [], 0
+        paginator = cf.get_paginator("list_stacks")
+        for page in paginator.paginate(
+            StackStatusFilter=[
+                "CREATE_COMPLETE",
+                "CREATE_FAILED",
+                "ROLLBACK_COMPLETE",
+                "ROLLBACK_FAILED",
+                "DELETE_FAILED",
+                "UPDATE_COMPLETE",
+                "UPDATE_ROLLBACK_COMPLETE",
+            ]
+        ):
+            for s in page.get("StackSummaries", []):
+                name = s.get("StackName", "")
+                if not (name.startswith("idp-") and name.endswith("-apigw-vpc")):
+                    continue
+                created = s.get("CreationTime")
+                age = (now - created).total_seconds() if created else None
+                if age is None or age >= APIGW_VPC_STALE_AGE_SECONDS:
+                    stale.append(name)
+                else:
+                    skipped_young += 1
+                    print(
+                        f"[{name}] skipping — only {age / 60:.0f}m old "
+                        f"(may be an in-flight manual VPC test)"
+                    )
+
+        if not stale:
+            print(
+                f"✅ No stale apigw test VPC stacks to reap "
+                f"({skipped_young} young stack(s) skipped)"
+            )
+            return
+
+        for name in stale:
+            print(f"[{name}] reaping stale test VPC stack...")
+            delete_apigw_test_vpc(name)
+        print(f"✅ Reaped {len(stale)} stale apigw test VPC stack(s)")
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠️ Stale apigw VPC cleanup failed: {e}")
+
+
+def validate_apigw_global_hosting(stack_name):
+    """Assert the deployed stack serves the Web UI on a GLOBAL (REGIONAL) REST API.
+
+    This is the no-VPC APIGateway hosting path (WebUIHosting=APIGateway +
+    ApiGatewayVisibility=GLOBAL): the Web UI is served as an S3 proxy on a
+    regional, internet-facing REST API. Because it IS reachable, validate both
+    structurally and by actually fetching the UI:
+      * the REST API "{stack}-api" has endpoint type REGIONAL,
+      * the stack's ApplicationWebURL output is the execute-api /api URL, and
+      * an HTTP GET of that URL returns 200 with HTML (the S3-proxy served UI).
     """
     apig = boto3.client("apigateway")
     cf = boto3.client("cloudformation")
 
-    # 1. REST API is PRIVATE
+    # 1. REST API is REGIONAL (GLOBAL visibility maps to a REGIONAL endpoint)
     api_name = f"{stack_name}-api"
     apis = apig.get_rest_apis(limit=500).get("items", [])
     match = next((a for a in apis if a.get("name") == api_name), None)
     if not match:
         return {"success": False, "error": f"REST API {api_name} not found"}
     types = match.get("endpointConfiguration", {}).get("types", [])
-    if "PRIVATE" not in types:
+    if "REGIONAL" not in types:
         return {
             "success": False,
-            "error": f"REST API {api_name} endpoint types={types}, expected PRIVATE",
+            "error": f"REST API {api_name} endpoint types={types}, expected REGIONAL",
         }
 
     # 2. ApplicationWebURL output points at the execute-api /api URL
@@ -2091,50 +2341,77 @@ def validate_apigw_private_hosting(stack_name):
             "error": f"ApplicationWebURL={web_url!r} is not an execute-api /api URL",
         }
 
-    print(f"✅ PRIVATE REST API serving Web UI: {web_url} (types={types})")
+    # 3. The UI actually loads over HTTP (S3-proxy hosting served the app).
+    # Unlike the PRIVATE variant this endpoint is internet-reachable, so we can
+    # do a real end-to-end fetch instead of only checking structure.
+    fetch = run_command(
+        f"curl -s -o /dev/null -w '%{{http_code}}' -L {web_url}", check=False
+    )
+    http_code = fetch.stdout.strip()
+    if http_code != "200":
+        return {
+            "success": False,
+            "error": f"GET {web_url} returned HTTP {http_code!r}, expected 200",
+        }
+
+    print(f"✅ GLOBAL REST API serving Web UI: {web_url} (types={types}, HTTP 200)")
     return {"success": True, "web_url": web_url}
 
 
-def _capture_cf_events(result, stack_name):
-    """Snapshot CF failure events into the result dict before stack teardown.
+def _capture_cf_events(result, *stack_names):
+    """Snapshot CF failure events from candidate stacks before teardown.
 
-    The APIGW hosting test deletes its throwaway stack in a finally block, so
-    the summary generator (which runs after cleanup) cannot fetch events by
-    stack name — they must be captured while the stack still exists.
+    The APIGW hosting test can fail either in its throwaway IDP stack or in the
+    self-contained VPC stack it stands up first; both are deleted in a finally
+    block, so events must be captured while the stacks still exist. Passing all
+    candidates (and dropping ones that were never created) means the summary
+    sees the stack that actually rolled back — previously we only captured the
+    IDP stack, so a VPC-creation failure surfaced as "<stack> does not exist".
     """
-    try:
-        result["cf_events"] = get_cloudformation_logs(stack_name)
-    except Exception as e:  # noqa: BLE001
-        result["cf_events"] = [
-            {"error": f"Exception: {str(e)}", "stack_name": stack_name}
-        ]
+    events = []
+    for name in stack_names:
+        try:
+            stack_events = get_cloudformation_logs(name)
+        except Exception as e:  # noqa: BLE001
+            stack_events = [{"error": f"Exception: {str(e)}", "stack_name": name}]
+        # get_cloudformation_logs returns a single {"error": ...} entry when a
+        # stack doesn't exist; keep only real failure events so a genuine
+        # rollback in a sibling stack isn't buried under "does not exist" noise.
+        real = [e for e in stack_events if "error" not in e]
+        events.extend(real)
+    # If every candidate yielded only "does not exist"/errors, keep a note so
+    # the summary can say evidence was unavailable rather than showing nothing.
+    result["cf_events"] = events or [
+        {"error": "No CloudFormation events captured", "stacks": list(stack_names)}
+    ]
 
 
-def deploy_and_test_apigw_vpc_hosting(admin_email, template_url):
-    """Deploy + validate + tear down the APIGateway/VPC/PRIVATE hosting variant."""
+def deploy_and_test_apigw_hosting(admin_email, template_url):
+    """Deploy + validate + tear down the APIGateway (GLOBAL, no-VPC) hosting variant.
+
+    Exercises the S3-proxy REST API Web UI hosting (WebUIHosting=APIGateway,
+    ApiGatewayVisibility=GLOBAL) on every run WITHOUT a VPC. The previous
+    PRIVATE/VPC variant stood up a throwaway VPC per run, which (a) leaked VPCs
+    when Lambda ENIs blocked teardown and (b) consumed 1 of only 5 VPC slots
+    per concurrent run — so N>=5 overlapping pipelines exhausted the quota and
+    rolled back every apigw test. The regional endpoint is internet-reachable,
+    so this variant also does a real HTTP fetch of the UI. The VPC/PRIVATE path
+    is validated out-of-band (manual/local), not in routine CI.
+    """
     stack_name = f"{generate_stack_name()}-apigw"
-    vpc_stack_name = f"{stack_name}-vpc"
     result = {"stack_name": stack_name, "success": False}
     try:
-        vpc = create_apigw_test_vpc(vpc_stack_name)
         role_arn, boundary_arn = create_iam_resources(stack_name)
         if not role_arn or not boundary_arn:
-            raise Exception("Failed to create IAM resources for APIGateway VPC test")
+            raise Exception("Failed to create IAM resources for APIGateway test")
 
-        # idp-cli --parameters takes ONE comma-separated key=value string; its
-        # parser splits on `key=` boundaries so comma-containing values (the
-        # subnet lists) are preserved without needing per-value quoting.
+        # No VPC parameters: GLOBAL visibility = regional internet-facing REST
+        # API. idp-cli --parameters takes ONE comma-separated key=value string.
         params = ",".join(
             [
                 f"PermissionsBoundaryArn={boundary_arn}",
                 "WebUIHosting=APIGateway",
-                "ApiGatewayVisibility=PRIVATE",
-                "DeployInVPC=true",
-                f"VpcId={vpc['VpcId']}",
-                f"PrivateSubnetIds={vpc['PrivateSubnetIds']}",
-                f"LambdaSubnetIds={vpc['PrivateSubnetIds']}",
-                f"LambdaSecurityGroupId={vpc['LambdaSecurityGroupId']}",
-                f"ApiGatewayVpcEndpointId={vpc['ApiGatewayVpcEndpointId']}",
+                "ApiGatewayVisibility=GLOBAL",
             ]
         )
         cmd = (
@@ -2142,7 +2419,7 @@ def deploy_and_test_apigw_vpc_hosting(admin_email, template_url):
             f"--admin-email {admin_email} --wait --role-arn {role_arn} "
             f'--parameters "{params}"'
         )
-        print("APIGateway/VPC hosting: deploying stack...")
+        print("APIGateway (GLOBAL, no-VPC) hosting: deploying stack...")
         run_command(cmd, timeout=3 * 3600)
 
         status = run_command(
@@ -2155,21 +2432,19 @@ def deploy_and_test_apigw_vpc_hosting(admin_email, template_url):
             _capture_cf_events(result, stack_name)
             return result
 
-        validation = validate_apigw_private_hosting(stack_name)
+        validation = validate_apigw_global_hosting(stack_name)
         result.update(validation)
         if not validation.get("success"):
             result["failure_type"] = "test"
         return result
     except Exception as e:  # noqa: BLE001
-        print(f"❌ APIGateway/VPC hosting test exception: {e}")
+        print(f"❌ APIGateway hosting test exception: {e}")
         result["error"] = str(e)
         result["failure_type"] = "deploy"
         _capture_cf_events(result, stack_name)
         return result
     finally:
-        # Tear down IDP stack first (frees ENIs in the VPC), then the VPC.
         cleanup_stack({"stack_name": stack_name})
-        delete_apigw_test_vpc(vpc_stack_name)
 
 
 def publish_summary_to_s3(summary_text):
@@ -2234,8 +2509,11 @@ def main():
     # is actionable even if the AI summary generation itself breaks.
     failure_reason = ""
 
-    # Step 0: Clean up stale BDA blueprints from previous runs
+    # Step 0: Clean up stale resources leaked by prior runs (BDA blueprints and
+    # apigw test VPCs) — leaked VPCs otherwise exhaust the account VPC quota and
+    # roll back every apigw hosting test.
     cleanup_stale_bda_blueprints()
+    cleanup_stale_apigw_test_vpcs()
 
     # Step 1: Publish templates to S3
     try:
@@ -2276,17 +2554,17 @@ def main():
         # Step 4: clean up stack
         cleanup_stack(result)
 
-        # Step 4b: API Gateway Web UI hosting test (VPC / PRIVATE). Runs on its
-        # own throwaway stack + VPC, independent of the shared-stack suite.
-        # Gated by IDP_TEST_APIGW_VPC_HOSTING (default on). A failure here marks
-        # the overall run failed but does not affect the already-completed
-        # primary suite result.
-        if get_env_var("IDP_TEST_APIGW_VPC_HOSTING", "true").lower() == "true":
+        # Step 4b: API Gateway Web UI hosting test (GLOBAL, no VPC). Runs on its
+        # own throwaway stack, independent of the shared-stack suite. Gated by
+        # IDP_TEST_APIGW_HOSTING (default on). A failure here marks the overall
+        # run failed but does not affect the already-completed primary suite
+        # result. (The VPC/PRIVATE variant is validated out-of-band, not in CI.)
+        if get_env_var("IDP_TEST_APIGW_HOSTING", "true").lower() == "true":
             print(f"\n{'=' * 80}")
-            print("API Gateway Web UI hosting test (VPC / PRIVATE)...")
+            print("API Gateway Web UI hosting test (GLOBAL, no VPC)...")
             print(f"{'=' * 80}\n")
             try:
-                apigw_result = deploy_and_test_apigw_vpc_hosting(
+                apigw_result = deploy_and_test_apigw_hosting(
                     admin_email, template_url
                 )
             except Exception as e:  # noqa: BLE001
@@ -2297,13 +2575,13 @@ def main():
                     "failure_type": "deploy",
                 }
             if apigw_result.get("success"):
-                print("✅ API Gateway / VPC hosting test passed")
+                print("✅ API Gateway hosting test passed")
             else:
                 stack_success = False
                 apigw_error = apigw_result.get("error", "Unknown error")
-                print(f"❌ API Gateway / VPC hosting test failed: {apigw_error}")
+                print(f"❌ API Gateway hosting test failed: {apigw_error}")
                 if not failure_reason:
-                    failure_reason = f"APIGW/VPC hosting test failed: {apigw_error}"
+                    failure_reason = f"APIGW hosting test failed: {apigw_error}"
                 # The primary summary was generated before this phase ran and
                 # may say "All Tests Passed" — analyze this failure too (its
                 # CF events were captured before the throwaway stack teardown).
@@ -2317,11 +2595,11 @@ def main():
                     apigw_summary = f"⚠️ Failed to generate APIGW summary: {e}"
                 ai_summary = (
                     f"{ai_summary}\n\n"
-                    f"--- API Gateway / VPC hosting test (Step 4b) ---\n"
+                    f"--- API Gateway hosting test (Step 4b) ---\n"
                     f"{apigw_summary}"
                 )
         else:
-            print("ℹ️ Skipping API Gateway / VPC hosting test (disabled)")
+            print("ℹ️ Skipping API Gateway hosting test (disabled)")
 
     # Step 5: Print AI analysis results at the end
     print("\n🤖 Generating deployment summary with Bedrock...")

@@ -158,14 +158,30 @@ def find_pipeline_execution_by_version(pipeline_name, version_id, max_wait=300):
     return None
 
 
-def monitor_pipeline_execution(pipeline_name, execution_id, max_wait=7200):
-    """Monitor specific pipeline execution until completion with live progress"""
+def monitor_pipeline_execution(pipeline_name, execution_id, max_wait=6000):
+    """Monitor specific pipeline execution until completion with live progress
+
+    max_wait defaults to 6000s (100 min), deliberately BELOW the GitLab job's
+    2h ceiling: the script must own the deadline so it always returns and lets
+    after_script capture codebuild_logs.txt + the S3 summary. When max_wait
+    equalled the GitLab timeout (both 7200s), GitLab hard-killed the job before
+    the monitor could report or after_script could run — a fast pipeline
+    failure (e.g. ~64 min) still surfaced as an opaque "execution took longer
+    than 2h" with no logs. The pipeline itself failing fast is the norm; this
+    watcher just needs to notice and exit cleanly.
+    """
     console = Console()
     console.print(f"[cyan]Monitoring pipeline execution:[/cyan] {execution_id}")
-    
+
     codepipeline = boto3.client("codepipeline")
     poll_interval = 30
-    
+    # A persistent get_pipeline_execution failure (throttling, expired creds,
+    # wrong id) must NOT masquerade as a 2h hang: the old handler logged each
+    # error and kept polling to the deadline. Bail after this many consecutive
+    # errors so the real problem is visible in minutes, not hours.
+    max_consecutive_errors = 10
+    consecutive_errors = 0
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -173,9 +189,9 @@ def monitor_pipeline_execution(pipeline_name, execution_id, max_wait=7200):
         console=console,
         transient=False,
     ) as progress:
-        
+
         task = progress.add_task("[yellow]Pipeline executing...", total=None)
-        
+
         wait_time = 0
         while wait_time < max_wait:
             try:
@@ -183,34 +199,53 @@ def monitor_pipeline_execution(pipeline_name, execution_id, max_wait=7200):
                     pipelineName=pipeline_name,
                     pipelineExecutionId=execution_id
                 )
-                
+
+                consecutive_errors = 0
                 status = response["pipelineExecution"]["status"]
                 elapsed_mins = wait_time // 60
-                
+
+                # Terminal states: return IMMEDIATELY and log explicitly so a
+                # detection miss can never be confused with a timeout.
                 if status == "Succeeded":
                     progress.update(task, description="[green]✅ Pipeline completed successfully!")
-                    console.print("[green]✅ Pipeline completed successfully![/green]")
+                    console.print(
+                        f"[green]✅ Pipeline reached terminal state 'Succeeded' "
+                        f"after {elapsed_mins}m — monitor exiting.[/green]"
+                    )
                     return True
-                elif status in ["Failed", "Cancelled", "Superseded"]:
+                elif status in ["Failed", "Cancelled", "Superseded", "Stopped"]:
                     progress.update(task, description=f"[red]❌ Pipeline failed: {status}")
-                    console.print(f"[red]❌ Pipeline failed with status: {status}[/red]")
+                    console.print(
+                        f"[red]❌ Pipeline reached terminal state '{status}' "
+                        f"after {elapsed_mins}m — monitor exiting.[/red]"
+                    )
                     return False
                 elif status == "InProgress":
                     progress.update(task, description=f"[yellow]⏳ Pipeline running ({elapsed_mins}m elapsed)...")
-                    
+
             except Exception as e:
+                consecutive_errors += 1
                 progress.update(task, description=f"[red]Error: {str(e)[:50]}...")
-                console.print(f"[red]Error checking pipeline status: {e}[/red]")
-                
+                console.print(
+                    f"[red]Error checking pipeline status "
+                    f"({consecutive_errors}/{max_consecutive_errors}): {e}[/red]"
+                )
+                if consecutive_errors >= max_consecutive_errors:
+                    console.print(
+                        f"[red]❌ Aborting: {max_consecutive_errors} consecutive "
+                        f"errors querying pipeline status (not a timeout).[/red]"
+                    )
+                    return False
+
             time.sleep(poll_interval)
             wait_time += poll_interval
-        
+
         progress.update(task, description=f"[red]❌ Timeout after {max_wait//60} minutes")
         console.print(f"[red]❌ Pipeline monitoring timed out after {max_wait} seconds[/red]")
         return False
 
 
-def monitor_pipeline(pipeline_name, version_id, max_wait=7200):
+def monitor_pipeline(pipeline_name, version_id, max_wait=6000):
     """Monitor pipeline using version-based tracking"""
     # First find the execution that matches our version
     execution_id = find_pipeline_execution_by_version(pipeline_name, version_id)
