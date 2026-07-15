@@ -254,6 +254,37 @@ for that. The startup reaper age-gates deletions
 (`APIGW_VPC_STALE_AGE_SECONDS`, 2h) so it can never delete an in-flight manual
 VPC test.
 
+### TODO: generalize into a concurrent "deployment-variant probe" framework
+
+The APIGW hosting test is really a self-contained *deploy-a-config-variant +
+smoke-check-its-distinguishing-feature* unit: it stands up its own throwaway
+stack, opts its thread out of the primary suite's fail-fast
+(`_thread_local.never_abort`), validates, and cleans up in a `finally` — all
+concurrently with the primary functional suite (which runs Steps 3–12 on ONE
+default-hosting stack). That machinery is reusable.
+
+Later, refactor it into a generic table of `(name, deploy_params,
+validate_fn)` probes that the concurrent launcher iterates, so new deployment
+permutations become one table row + a validator rather than a copy-paste:
+
+- `--headless` (`EnableHeadless=true` + VPC): assert the Jobs API responds.
+- VPC / `ApiGatewayVisibility=PRIVATE`: currently out-of-band (VPC-quota); could
+  return once quota/concurrency budgeting exists.
+- `--govcloud` template lint/deploy (note: cannot deploy in the commercial CI
+  account — likely a synth/validate-only probe here).
+- BYO S3 VPC endpoint, WAF-enabled (`WAFAllowedIPv4Ranges`), custom domain, etc.
+
+**Constraints to design in first (learned the hard way — see the VPC-quota
+incident above):**
+- These are *deploy + feature-smoke* probes, NOT full functional coverage — a
+  variant can deploy clean yet still have a doc-processing regression only the
+  primary suite would catch. Keep that expectation explicit.
+- Each concurrent probe consumes real account quota simultaneously (stacks, IAM
+  roles/boundaries, and for VPC/headless variants: VPCs, NAT, endpoints). Add a
+  per-variant concurrency/quota budget and reuse the age-safe cleanup +
+  startup-reaper discipline, or N variants × parallel pipelines will re-hit the
+  quota wall.
+
 ---
 
 ## Test Studio Architecture
