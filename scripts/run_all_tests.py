@@ -85,6 +85,10 @@ RUN_ROOTS = [
     "src/lambda/version_check_resolver",
     "src/lambda/workflow_tracker",
     "config_library",
+    # SDLC CodeBuild harness unit tests (deployment-variant probe framework).
+    # Run the sdlc/tests subdir specifically — the parent `scripts` root stays
+    # quarantined because a bare `pytest scripts` mis-collects test_api_rbac.py.
+    "scripts/sdlc/tests",
 ]
 
 # --- Registry 2: roots explicitly EXCLUDED, each with a reason ----------------
