@@ -59,7 +59,14 @@ class SettingsCache:
         ssm_client: Optional[Any] = None,
     ) -> None:
         self._cache: Dict[str, Any] = {}
-        self._cache_time: float = 0.0
+        # None means "never loaded". Do NOT use 0.0 as the sentinel: expiry is
+        # measured with time.monotonic() (seconds since the host/microVM booted),
+        # which on a cold-start Lambda can be far below the TTL. With a 0.0
+        # sentinel, `monotonic() - 0.0 > ttl` is False on a fresh microVM, so the
+        # cache is wrongly treated as fresh, _refresh() never runs, and every
+        # get() returns empty (observed as "CloudWatchLogGroups not found in SSM
+        # Settings" on cold starts). None makes "never loaded" always-expired.
+        self._cache_time: Optional[float] = None
         self._ttl: int = ttl_seconds
         self._lock: threading.Lock = threading.Lock()
         self._ssm_client: Optional[Any] = ssm_client
@@ -76,6 +83,8 @@ class SettingsCache:
 
     def _is_expired(self) -> bool:
         """Return True if the cache has passed its TTL or has never been loaded."""
+        if self._cache_time is None:
+            return True
         return (time.monotonic() - self._cache_time) > self._ttl
 
     def _refresh(self) -> None:
@@ -177,7 +186,9 @@ class SettingsCache:
     def invalidate(self) -> None:
         """Force the next ``get()`` call to refresh from SSM."""
         with self._lock:
-            self._cache_time = 0.0
+            # None (not 0.0) so the next _is_expired() returns True regardless of
+            # the current monotonic clock value (see __init__ for why).
+            self._cache_time = None
 
 
 # ---------------------------------------------------------------------------
