@@ -17,12 +17,15 @@ The CI/CD pipeline runs a comprehensive smoke test suite that validates all majo
     on the shared UI app client (a stack-wide auth mutation) and restores it —
     interleaving with API-hitting parallel tests would corrupt them.
 
-### Concurrent APIGW hosting test (own stack)
-- The APIGW hosting test (below) deploys a SECOND, independent stack. It runs
-  **concurrently with the primary suite on its own thread**, so the two ~30-min
-  stack deploys overlap instead of running back-to-back (~30 min saved). It
-  opts out of the primary suite's fail-fast abort machinery, so a primary
-  failure never kills its in-flight deploy.
+### Concurrent deployment-variant probes (own stacks)
+- The **deployment-variant probe framework** (below) deploys one or more
+  SECOND, independent stacks — one per probe (the default is a single GLOBAL
+  APIGW hosting probe). Probes run **concurrently with the primary suite on
+  their own threads**, so their ~30-min deploys overlap the primary deploy
+  instead of running back-to-back (~30 min saved). Each opts out of the primary
+  suite's fail-fast abort machinery, so a primary failure never kills a probe's
+  in-flight deploy, and probe fan-out is capped by a per-variant quota budget
+  (`IDP_PROBE_MAX_CONCURRENCY`, default 1).
 
 ## Test Coverage
 
@@ -204,15 +207,32 @@ mutation — safe to interleave).
 
 ---
 
-## Additional Deployment Test: API Gateway Web UI Hosting (GLOBAL, no VPC)
+## Additional Deployment Tests: the deployment-variant probe framework
 
 Separate from the shared-stack suite above (Steps 3–12, which run against ONE
-stack deployed with default hosting — CloudFront), this test validates the
-**API Gateway Web UI hosting** option end-to-end in its **GLOBAL (regional,
-internet-facing, no-VPC)** form. It runs **concurrently** with that suite on
-its own thread (overlapping the two ~30-min deploys) using a SECOND, throwaway
-IDP stack, and
-tears it down afterward.
+stack deployed with default hosting — CloudFront), a **deployment-variant probe
+framework** validates alternative deployment permutations, each on its **own
+throwaway IDP stack**. The probes run **concurrently** with the shared-stack
+suite (overlapping the ~30-min deploys) and each tears its stack down
+afterward.
+
+Each probe is a self-contained *deploy-a-config-variant + smoke-check-its-
+distinguishing-feature* unit. The framework is a table of
+`Probe(name, stack_suffix, deploy_params, validate_fn)` rows that a concurrent
+launcher iterates — adding a new permutation is **one table row + a validator**,
+not a copy-pasted deploy/validate/cleanup function.
+
+> **Scope (important):** probes are **deploy + feature-smoke only, NOT full
+> functional coverage.** A variant can deploy clean yet still have a
+> doc-processing regression that only the shared-stack suite (Steps 3–12) would
+> catch. Don't read a green probe as "this variant processes documents
+> correctly" — only as "this variant deploys and its distinguishing feature
+> responds."
+
+### The GLOBAL APIGW hosting probe (the first / only default row)
+
+Validates the **API Gateway Web UI hosting** option in its **GLOBAL (regional,
+internet-facing, no-VPC)** form.
 
 **What it tests**:
 - `WebUIHosting=APIGateway` + `ApiGatewayVisibility=GLOBAL` (no VPC parameters)
@@ -224,14 +244,44 @@ tears it down afterward.
     internet-reachable, the UI load is verified end-to-end (unlike the
     VPC/PRIVATE variant, which could only be checked structurally).
 
-**Lifecycle**: creates per-stack IAM/boundary → deploys → validates →
-**always** tears down the IDP stack (in a `finally`).
+**Lifecycle** (every probe): creates per-stack IAM/boundary → deploys with the
+probe's extra CFN params → validates → captures CF failure events before
+teardown → **always** tears down the IDP stack (in a `finally`). Each probe
+runs on its own thread and opts that thread out of the shared suite's fail-fast
+abort machinery (`_thread_local.never_abort`), so a shared-suite failure's kill
+sweep can never terminate a probe's in-flight deploy, and one probe failing
+never affects the others or the already-completed shared-suite result.
 
-**Gating**: runs by default; set `IDP_TEST_APIGW_HOSTING=false` to skip.
-**Implementation**: `deploy_and_test_apigw_hosting()` in
-`scripts/sdlc/codebuild_deployment.py`, invoked from `main()` after the
-shared-stack suite.
-**Duration**: ~20–30 minutes (full nested-stack create + teardown).
+**Concurrency / quota budget**: the launcher fans out to at most
+`IDP_PROBE_MAX_CONCURRENCY` probes at once (default
+`DEFAULT_PROBE_MAX_CONCURRENCY = 1`). Each probe deploys a full stack (and, for
+VPC variants, a VPC) concurrently with the shared-stack deploy **and** with any
+other in-flight pipeline (pipelines run in PARALLEL mode). The conservative
+cap is deliberate — it is the guard that stops N variants × parallel pipelines
+from re-hitting the account's stack/VPC quota wall (the incident that removed
+the VPC variant from routine CI; see below). Raise it only after confirming the
+account has headroom for the extra simultaneous stacks/VPCs.
+
+**Gating**: the probes run by default; set `IDP_TEST_APIGW_HOSTING=false` to
+skip them all (the env name is kept for backward compatibility since the GLOBAL
+APIGW probe is the only default row).
+**Implementation**: `PROBE_VARIANTS` (the table), `deploy_and_test_probe()`
+(one probe's lifecycle), `run_variant_probes()` (the concurrent launcher), and
+`resolve_probe_concurrency()` (the quota budget) in
+`scripts/sdlc/codebuild_deployment.py`, launched from `main()` on its own
+supervisor thread concurrently with the shared-stack suite.
+**Duration**: ~20–30 minutes per probe (full nested-stack create + teardown);
+with the default cap of 1 they run one at a time.
+
+### Adding a future variant
+
+Uncomment the example `Probe(...)` row in `PROBE_VARIANTS` and supply a
+`validate_fn(stack_name) -> {"success": bool, ...}`. Keep the deploy+feature-
+smoke scope in mind (see above). A variant that stands up a **VPC** must also
+reuse the age-safe cleanup + startup-reaper discipline
+(`delete_apigw_test_vpc` / `cleanup_stale_apigw_test_vpcs`) and keep the
+concurrency cap low, or leaked VPCs will exhaust the 5-VPC account quota. See
+"Candidate future variants" at the end of this section.
 
 ### Why not the VPC/PRIVATE variant in CI?
 
@@ -254,36 +304,50 @@ for that. The startup reaper age-gates deletions
 (`APIGW_VPC_STALE_AGE_SECONDS`, 2h) so it can never delete an in-flight manual
 VPC test.
 
-### TODO: generalize into a concurrent "deployment-variant probe" framework
+### The concurrent "deployment-variant probe" framework (done)
 
-The APIGW hosting test is really a self-contained *deploy-a-config-variant +
-smoke-check-its-distinguishing-feature* unit: it stands up its own throwaway
-stack, opts its thread out of the primary suite's fail-fast
-(`_thread_local.never_abort`), validates, and cleans up in a `finally` — all
-concurrently with the primary functional suite (which runs Steps 3–12 on ONE
-default-hosting stack). That machinery is reusable.
+**Status: implemented.** The single hand-written APIGW hosting test has been
+generalized into a reusable table of `Probe(name, stack_suffix, deploy_params,
+validate_fn)` rows (`PROBE_VARIANTS`) that a concurrent launcher
+(`run_variant_probes`) iterates. Each probe stands up its own throwaway stack,
+opts its thread out of the shared suite's fail-fast (`_thread_local.never_abort`),
+validates, and cleans up in a `finally` — all concurrently with the shared
+functional suite (Steps 3–12 on ONE default-hosting stack). The GLOBAL/no-VPC
+APIGW hosting test is the first (and currently only default) row. See
+"Additional Deployment Tests" above for the full description.
 
-Later, refactor it into a generic table of `(name, deploy_params,
-validate_fn)` probes that the concurrent launcher iterates, so new deployment
-permutations become one table row + a validator rather than a copy-paste:
+The constraints below were designed in from the start (learned the hard way —
+see the VPC-quota incident above), and hold for every future variant:
+
+- **Deploy + feature-smoke only, NOT full functional coverage.** A variant can
+  deploy clean yet still have a doc-processing regression only the shared-stack
+  suite (Steps 3–12) would catch. This expectation is stated in the code
+  (`PROBE_VARIANTS` comment + the future-variant example) and above.
+- **Per-variant concurrency/quota budget.** `resolve_probe_concurrency()` caps
+  the fan-out at `IDP_PROBE_MAX_CONCURRENCY` (default
+  `DEFAULT_PROBE_MAX_CONCURRENCY = 1`), so N variants × parallel pipelines can't
+  re-hit the account's stack/VPC quota wall. Clamped to `[1, num_probes]`; a
+  malformed/≤0 override falls back to the default.
+- **Age-safe VPC cleanup + startup reaper** (`delete_apigw_test_vpc`,
+  `cleanup_stale_apigw_test_vpcs`) remain for any variant that stands up a VPC.
+
+The framework has mock-based unit coverage in
+`scripts/sdlc/tests/test_variant_probes.py` (quota cap, single-probe lifecycle,
+fail-fast isolation, launcher result-folding + concurrency cap).
+
+#### Candidate future variants (one table row + a validator each)
+
+Uncomment/adapt the example row in `PROBE_VARIANTS`:
 
 - `--headless` (`EnableHeadless=true` + VPC): assert the Jobs API responds.
-- VPC / `ApiGatewayVisibility=PRIVATE`: currently out-of-band (VPC-quota); could
-  return once quota/concurrency budgeting exists.
+- VPC / `ApiGatewayVisibility=PRIVATE`: still out-of-band (VPC-quota); can
+  return now that the concurrency budget exists — keep the cap at 1 and reuse
+  the VPC reaper.
 - `--govcloud` template lint/deploy (note: cannot deploy in the commercial CI
-  account — likely a synth/validate-only probe here).
+  account — likely a synth/validate-only probe here; an offline transform +
+  region-aware cfn-lint gate already exists as a fast-gate unit test — see the
+  Gap Backlog).
 - BYO S3 VPC endpoint, WAF-enabled (`WAFAllowedIPv4Ranges`), custom domain, etc.
-
-**Constraints to design in first (learned the hard way — see the VPC-quota
-incident above):**
-- These are *deploy + feature-smoke* probes, NOT full functional coverage — a
-  variant can deploy clean yet still have a doc-processing regression only the
-  primary suite would catch. Keep that expectation explicit.
-- Each concurrent probe consumes real account quota simultaneously (stacks, IAM
-  roles/boundaries, and for VPC/headless variants: VPCs, NAT, endpoints). Add a
-  per-variant concurrency/quota budget and reuse the age-safe cleanup +
-  startup-reaper discipline, or N variants × parallel pipelines will re-hit the
-  quota wall.
 
 ---
 
@@ -542,29 +606,41 @@ additions.
 
 ### Fast-gate additions (cheap, no live AWS account needed)
 
-- [ ] **`--govcloud` transform + cfn-lint job.** Add a `developer_tests` step that
-      runs the `GovCloudTemplateTransformer` and region-aware `cfn-lint` on the
-      transformed template (target `us-gov-west-1`). Fails the MR if a
+- [x] **`--govcloud` transform + cfn-lint gate (unit-level).** `GovCloudTemplate
+      Transformer` runs against the committed `template.yaml` and the result is
+      linted with real `cfn-lint --region us-gov-west-1`, asserting zero **E3006**
+      ("resource type does not exist in region"). Fails the gate if a
       GovCloud-unsupported resource (CloudFront, Lambda Function URL, etc.) is
-      reintroduced. `cfn-lint` is offline/no-credentials. **~30–45 min. Highest
-      value-for-effort of the cheap items.**
+      reintroduced — strictly stronger than the transformer's own hardcoded
+      resource check. Offline/no-credentials. See
+      `lib/idp_sdk/tests/unit/test_govcloud_template_transform.py::test_real_
+      template_passes_govcloud_region_cfn_lint`. *(Note: the raw repo template
+      carries SAM short-form tags, so a full lint of the **published/SAM-baked**
+      template still needs the publish pipeline — deferred to the integration
+      tier.)*
 - [ ] **`--headless` template-transform smoke.** At minimum, run the
       `HeadlessTemplateTransformer` + cfn-lint in the fast gate to catch transform
-      breakage without a deploy. (Full headless *deploy* e2e is below.)
-- [ ] **Register the `pytest.mark.unit` marker in the per-Lambda dirs.** Several
-      Lambda test dirs emit `PytestUnknownMarkWarning: Unknown pytest.mark.unit`.
-      Harmless but noisy; add a shared `pytest.ini`/marker registration.
+      breakage without a deploy. (Full headless *deploy* e2e is below.) *(A
+      real-template `HeadlessTemplateTransformer` dangling-ref test already
+      exists in `test_template_transform.py`; the remaining gap is a
+      region-aware `cfn-lint` pass over the transformed headless template like
+      the govcloud one above.)*
+- [x] **Register the `pytest.mark.unit` marker repo-wide.** A minimal repo-root
+      `pytest.ini` registers the `unit` / `integration` markers, so the ~12
+      per-Lambda/resolver dirs without their own config no longer emit
+      `PytestUnknownMarkWarning`. Suites with their own `pytest.ini` are
+      unaffected (closer config wins).
 
 ### Integration / e2e depth (need the CI account; run in the CodeBuild suite)
 
 - [ ] **`--headless` deploy e2e.** Wire the existing `scripts/e2e_test_headless.py`
       into the CodeBuild suite (deploy headless stack → smoke → teardown). Script
       already exists and works; just not invoked by CI.
-- [ ] **APIGW hosting: GLOBAL variant + HTTP smoke.** Step 4b currently covers
-      **PRIVATE + VPC only**, and validates the REST API is PRIVATE *structurally*
-      — it never fetches `/api/`. Add (a) a GLOBAL-visibility APIGW hosting run,
-      and (b) an actual HTTP GET of the served UI (`/api/` + a static asset) to
-      prove the S3-proxy path returns bytes.
+- [x] **APIGW hosting: GLOBAL variant + HTTP smoke.** The GLOBAL/no-VPC APIGW
+      hosting probe deploys `WebUIHosting=APIGateway` + `ApiGatewayVisibility=GLOBAL`
+      and does a real HTTP `GET` of the served UI (`validate_apigw_global_hosting`
+      asserts HTTP 200 from the execute-api `/api` URL, proving the S3-proxy path
+      returns bytes). Now the first row of the deployment-variant probe framework.
 - [ ] **Upgrade-in-place test. (HIGH VALUE.)** Deploy the previous released
       version, then update the stack to the current build, then smoke. This is the
       gap that would have caught the pricing-units rollback deadlock and the
@@ -622,6 +698,16 @@ but revisit:
       *(PR #497)*
 - [x] Stopped `idp_sdk` `test_create_config` writing a stray `config.yaml` to the
       repo root. *(PR #498)*
+- [x] Generalized the single APIGW hosting test into the **deployment-variant
+      probe framework** (`PROBE_VARIANTS` table + `run_variant_probes` launcher +
+      `resolve_probe_concurrency` quota budget), with mock-based unit tests in
+      `scripts/sdlc/tests/`. *(fix/ci-variant-probe-framework)*
+- [x] Repo-root `pytest.ini` registering the shared `unit`/`integration` markers
+      (silences `PytestUnknownMarkWarning` in ~12 per-Lambda dirs).
+      *(fix/ci-variant-probe-framework)*
+- [x] Real `cfn-lint --region us-gov-west-1` E3006 gate on the transformed
+      committed template (offline fast-gate unit test).
+      *(fix/ci-variant-probe-framework)*
 
 ---
 
