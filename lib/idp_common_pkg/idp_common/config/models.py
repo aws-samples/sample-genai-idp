@@ -1416,6 +1416,32 @@ TOOL USAGE:
 
 Always use at least 2 different tool sources before concluding a root cause. If a tool call returns no useful data, try an alternative — never guess without evidence.
 
+CRITICAL — DRILL INTO THE FAILING STAGE'S OWN LOGS:
+The Step Functions error and the DynamoDB status_reason usually show a
+GENERIC WRAPPER message (e.g. "Summarization failed for document X.pdf",
+"Extraction failed"), because each stage Lambda catches the underlying
+exception and re-raises a stage-level summary. That wrapper is a SYMPTOM,
+not the root cause. You MUST fetch the CloudWatch logs of the specific
+Lambda function for the failing stage and read the FIRST underlying
+exception/traceback it logged (e.g. a Bedrock ResourceNotFoundException,
+ThrottlingException, ValidationException, or a Python traceback). Search
+that stage's log group by the failing Lambda's request ID (from the
+Step Functions error cause or the X-Ray trace) with an "ERROR" filter, and
+quote the earliest real error — not the last wrapper line. If the wrapper
+message names a stage, the log group you need is that stage's function
+(e.g. SummarizationFunction, ExtractionFunction, AssessmentFunction).
+
+DO NOT CONFLATE UNRELATED NON-FATAL ISSUES WITH THE FAILURE:
+A document's DynamoDB record may carry `ProcessingIssue` entries with
+severity "warning" or non-terminal notes (e.g. an `assessment_incomplete`
+row that self-healed or was recorded but did not stop the pipeline). These
+are NOT necessarily the cause of a FAILED workflow. Before attributing the
+failure to a ProcessingIssue, confirm it occurred in the SAME stage that
+Step Functions reports as the failure point AND that its severity is
+"error". If the failing stage differs from the stage that logged the
+ProcessingIssue, treat the ProcessingIssue as context, not root cause, and
+keep drilling into the failing stage's logs.
+
 INVESTIGATION STRATEGY:
 Use this approach for all investigations, whether a single document or a large batch:
 
@@ -1479,6 +1505,10 @@ Use these patterns to guide your investigation and accelerate diagnosis:
 7. BEDROCK MODEL ERRORS — ModelErrorException, "model returned an error", context length exceeded
    Likely cause: Document content too large for model context window, model unavailable in region, prompt issue
    Check: Document page count, OCR text length, model availability, extraction prompt configuration
+
+8. RETIRED / UNAVAILABLE MODEL — ResourceNotFoundException, "This model version has reached the end of its life", "model identifier is invalid", "could not be found"
+   Likely cause: The model ID configured for a stage (OCR/classification/extraction/assessment/summarization) has been retired (end-of-life) by Bedrock, or is not enabled/available in this account/region
+   Check: The configured model ID for the FAILING stage in the config version the document used; whether that model is still offered and access is granted in this region. Root cause is a retired/unavailable model — recommend switching that stage to a currently-supported model in the UI Configuration panel.
 
 OUTPUT FORMAT:
 Always format your response with exactly these three sections in this order:
@@ -1611,6 +1641,32 @@ TOOL USAGE:
 
 Always use at least 2 different tool sources before concluding a root cause. If a tool call returns no useful data, try an alternative — never guess without evidence.
 
+CRITICAL — DRILL INTO THE FAILING STAGE'S OWN LOGS:
+The Step Functions error and the DynamoDB status_reason usually show a
+GENERIC WRAPPER message (e.g. "Summarization failed for document X.pdf",
+"Extraction failed"), because each stage Lambda catches the underlying
+exception and re-raises a stage-level summary. That wrapper is a SYMPTOM,
+not the root cause. You MUST fetch the CloudWatch logs of the specific
+Lambda function for the failing stage and read the FIRST underlying
+exception/traceback it logged (e.g. a Bedrock ResourceNotFoundException,
+ThrottlingException, ValidationException, or a Python traceback). Search
+that stage's log group by the failing Lambda's request ID (from the
+Step Functions error cause or the X-Ray trace) with an "ERROR" filter, and
+quote the earliest real error — not the last wrapper line. If the wrapper
+message names a stage, the log group you need is that stage's function
+(e.g. SummarizationFunction, ExtractionFunction, AssessmentFunction).
+
+DO NOT CONFLATE UNRELATED NON-FATAL ISSUES WITH THE FAILURE:
+A document's DynamoDB record may carry `ProcessingIssue` entries with
+severity "warning" or non-terminal notes (e.g. an `assessment_incomplete`
+row that self-healed or was recorded but did not stop the pipeline). These
+are NOT necessarily the cause of a FAILED workflow. Before attributing the
+failure to a ProcessingIssue, confirm it occurred in the SAME stage that
+Step Functions reports as the failure point AND that its severity is
+"error". If the failing stage differs from the stage that logged the
+ProcessingIssue, treat the ProcessingIssue as context, not root cause, and
+keep drilling into the failing stage's logs.
+
 INVESTIGATION STRATEGY:
 Use this approach for all investigations, whether a single document or a large batch:
 
@@ -1674,6 +1730,10 @@ Use these patterns to guide your investigation and accelerate diagnosis:
 7. BEDROCK MODEL ERRORS — ModelErrorException, "model returned an error", context length exceeded
    Likely cause: Document content too large for model context window, model unavailable in region, prompt issue
    Check: Document page count, OCR text length, model availability, extraction prompt configuration
+
+8. RETIRED / UNAVAILABLE MODEL — ResourceNotFoundException, "This model version has reached the end of its life", "model identifier is invalid", "could not be found"
+   Likely cause: The model ID configured for a stage (OCR/classification/extraction/assessment/summarization) has been retired (end-of-life) by Bedrock, or is not enabled/available in this account/region
+   Check: The configured model ID for the FAILING stage in the config version the document used; whether that model is still offered and access is granted in this region. Root cause is a retired/unavailable model — recommend switching that stage to a currently-supported model in the UI Configuration panel.
 
 OUTPUT FORMAT:
 Always format your response with exactly these three sections in this order:

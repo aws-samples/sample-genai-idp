@@ -9,6 +9,12 @@ SPDX-License-Identifier: MIT-0
 
 - **Blogs, Customer Stories & Research references page.** A new [references doc](docs/references.md) collects and summarizes external publications about the accelerator: AWS ML blog feature deep-dives, customer reference stories (Myriad Genetics, Associa, Ricoh, Built Technologies) with real-world accuracy/cost/throughput results, and the peer-reviewed research papers (the IDP Accelerator arxiv paper and DocSplit, both ACL 2026). Linked from the docs index and the Starlight sidebar. (#507)
 
+### Changed
+
+- **Summarization failures now surface the underlying error, not a generic wrapper.** When a section's summarization fails (e.g. a Bedrock `ResourceNotFoundException` from a retired model, or a context-window overflow), the Summarization Lambda now includes the real cause in the exception it raises to Step Functions instead of a bare `"Summarization failed for document X"`, so the failure is diagnosable from the execution error and tracking record without opening CloudWatch (GitHub #504).
+
+- **Error Analyzer agent drills into the failing stage's own logs and no longer conflates non-fatal issues with the failure.** The troubleshooting prompt now explicitly instructs the agent to treat stage-level wrapper messages as symptoms and read the first underlying exception in the failing Lambda's log group, to not attribute a `FAILED` workflow to unrelated non-fatal `ProcessingIssue` warnings from a different stage, and adds a "retired / unavailable model" error pattern (`ResourceNotFoundException` / end-of-life).
+
 ## [0.6.0]
 
 This release (v0.6) reframes **per-field confidence and bounding-box geometry as
