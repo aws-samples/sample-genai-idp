@@ -6,14 +6,23 @@ The CI/CD pipeline runs a comprehensive smoke test suite that validates all majo
 
 ## Test Execution Strategy
 
-### Parallel Execution (Steps 3-10)
-- **8 tests run concurrently** to minimize pipeline runtime
+### Parallel Execution (Steps 3-11)
+- **9 tests run concurrently** to minimize pipeline runtime
 - **Fail-fast enabled**: If any test fails, remaining tests are cancelled and cleanup begins
 - **Expected runtime**: ~25-35 minutes (vs 60+ minutes sequential)
 
-### Sequential Execution (Step 11)
-- **Step 11 (test-compare) runs after parallel tests** complete
-  - **Reason**: Requires multiple test runs to compare, runs after all other tests to avoid interference
+### Sequential Execution (Step 12)
+- **Step 12 (API RBAC) runs alone after the parallel pool drains**
+  - **Reason**: Its dynamic harness temporarily flips `ADMIN_USER_PASSWORD_AUTH`
+    on the shared UI app client (a stack-wide auth mutation) and restores it —
+    interleaving with API-hitting parallel tests would corrupt them.
+
+### Concurrent APIGW hosting test (own stack)
+- The APIGW hosting test (below) deploys a SECOND, independent stack. It runs
+  **concurrently with the primary suite on its own thread**, so the two ~30-min
+  stack deploys overlap instead of running back-to-back (~30 min saved). It
+  opts out of the primary suite's fail-fast abort machinery, so a primary
+  failure never kills its in-flight deploy.
 
 ## Test Coverage
 
@@ -174,7 +183,7 @@ The CI/CD pipeline runs a comprehensive smoke test suite that validates all majo
 
 ---
 
-### Step 11: Test Compare 🔄 *Sequential*
+### Step 11: Test Compare ⚡ *Parallel*
 **What it tests**: Test comparison CLI command
 - Multiple test run execution
 - Test result comparison via `idp-cli test-compare`
@@ -186,7 +195,8 @@ The CI/CD pipeline runs a comprehensive smoke test suite that validates all majo
 
 **Test Set**: `fake-w2` or `realkie-fcc-verified`  
 **Duration**: ~10-12 minutes (2 test runs + comparison)  
-**Why Sequential**: Runs after all other tests to avoid interference  
+**Execution**: Runs in the parallel pool (only runs inferences, no shared-stack
+mutation — safe to interleave).  
 **Implementation**: 
 - Runs 2 test inferences (2 documents each)
 - Waits for both to complete and evaluate
@@ -196,10 +206,12 @@ The CI/CD pipeline runs a comprehensive smoke test suite that validates all majo
 
 ## Additional Deployment Test: API Gateway Web UI Hosting (GLOBAL, no VPC)
 
-Separate from the shared-stack suite above (Steps 3–11, which run against ONE
+Separate from the shared-stack suite above (Steps 3–12, which run against ONE
 stack deployed with default hosting — CloudFront), this test validates the
 **API Gateway Web UI hosting** option end-to-end in its **GLOBAL (regional,
-internet-facing, no-VPC)** form. It deploys a SECOND, throwaway IDP stack and
+internet-facing, no-VPC)** form. It runs **concurrently** with that suite on
+its own thread (overlapping the two ~30-min deploys) using a SECOND, throwaway
+IDP stack, and
 tears it down afterward.
 
 **What it tests**:
