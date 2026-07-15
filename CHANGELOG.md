@@ -9,6 +9,10 @@ SPDX-License-Identifier: MIT-0
 
 - **Blogs, Customer Stories & Research references page.** A new [references doc](docs/references.md) collects and summarizes external publications about the accelerator: AWS ML blog feature deep-dives, customer reference stories (Myriad Genetics, Associa, Ricoh, Built Technologies) with real-world accuracy/cost/throughput results, and the peer-reviewed research papers (the IDP Accelerator arxiv paper and DocSplit, both ACL 2026). Linked from the docs index and the Starlight sidebar. (#507)
 
+### Fixed
+
+- **`rvl-cdip-package-sample` no longer fails at the Summarization stage on a retired model.** The config pinned `us.anthropic.claude-3-7-sonnet-20250219-v1:0` for OCR and Summarization, which Bedrock has since retired (end-of-life); every Summarization `Converse` call returned `ResourceNotFoundException` and failed the whole document. The preset is now reduced to only its custom `classes` (plus a `notes` label) and inherits every other section — OCR, classification, extraction, assessment/confidence, summarization, evaluation, discovery, and agents — from the current system defaults, so it always uses supported models and the latest prompts instead of drifting onto retired ones.
+
 ## [0.6.0]
 
 This release (v0.6) reframes **per-field confidence and bounding-box geometry as
