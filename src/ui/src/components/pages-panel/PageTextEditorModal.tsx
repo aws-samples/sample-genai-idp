@@ -219,12 +219,27 @@ const PageTextEditorModal = ({
 
           const pageDataResult = pageDataResponse.data?.getFileContents;
           if (pageDataResult && !pageDataResult.isBinary && pageDataResult.content) {
-            setPageData(JSON.parse(pageDataResult.content) as OcrPageData);
+            const parsed = JSON.parse(pageDataResult.content) as OcrPageData;
+            setPageData(parsed);
+            // If this backend produced no OCR lines (e.g. an older document with
+            // no pageData, or an empty page), default the right pane to Markdown
+            // so there is always something to show rather than an empty list.
+            if (!parsed.lines || parsed.lines.length === 0) {
+              setViewMode('markdown');
+            }
+          } else {
+            // No pageData content at all: fall back to the markdown view.
+            setViewMode('markdown');
           }
         } catch (err) {
           logger.warn('Failed to load OCR page data:', err);
           // Not critical - continue without geometry overlays
+          setViewMode('markdown');
         }
+      } else {
+        // Older documents predate the pageData.json artifact entirely; there are
+        // no OCR lines to list, so show the markdown text by default.
+        setViewMode('markdown');
       }
     } catch (err) {
       logger.error('Error fetching content:', err);
