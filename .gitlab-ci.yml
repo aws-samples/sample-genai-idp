@@ -18,27 +18,48 @@ default:
 #   paths:
 #     - .cache/pip
 
-# security_review (SRT, ~5-10 min) runs BEFORE integration_tests (~2h stack
-# deploy + smoke suite) so a pipeline that is going to fail the security gate
-# fails fast instead of after the expensive deploy.
+# Pipeline structure (see scripts/sdlc/docs/CI_TEST_COVERAGE.md for the full
+# trigger matrix):
+#   - fast_checks: cheap, no-AWS gate — code_checks (lint/typecheck/units/UI) and
+#     the SRT security scan run in PARALLEL here, on EVERY push and every MR.
+#     Both gate the expensive deploy that follows.
+#   - deployment_validation: pre-deploy IAM sanity check; runs only when the
+#     integration deploy is going to run.
+#   - integration_tests: the ~1h real AWS deploy + probe suite. Auto on develop
+#     and on non-Draft MRs targeting develop; a manual button on Draft MRs.
 stages:
-  - developer_tests
+  - fast_checks
   - deployment_validation
-  - security_review
   - integration_tests
 
-developer_tests:
-  stage: developer_tests
+# Prevent DUPLICATE pipelines: without this, a push to a branch that has an open
+# MR triggers BOTH a branch pipeline and an MR pipeline. Run the MR pipeline when
+# an MR is open, otherwise the branch pipeline — never both.
+workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-      when: always # Only run on merge requests (PRs), not on merged branches
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+code_checks:
+  stage: fast_checks
+  interruptible: true
+  # Cheap, no-AWS checks — run on EVERY push (any branch) and every MR, so
+  # developers get lint/typecheck/unit feedback (emailed by GitLab on failure)
+  # without waiting for an MR, and this gates the expensive deploy.
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
 
   before_script:
     - python --version
     - apt-get update -y
     - apt-get install make curl git -y
-    # Fetch target branch for comparison in typecheck-pr
-    - export TARGET_BRANCH="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-main}"
+    # Fetch target branch for comparison in typecheck-pr. On an MR, compare
+    # against its target; on a bare branch push (no MR), compare against develop
+    # (this repo's integration branch), not main.
+    - export TARGET_BRANCH="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-develop}"
     - echo "MR target branch (CI_MERGE_REQUEST_TARGET_BRANCH_NAME):$TARGET_BRANCH"
     - git fetch origin $TARGET_BRANCH:$TARGET_BRANCH || echo "Could not fetch $TARGET_BRANCH branch"
     # Install uv
@@ -92,8 +113,14 @@ developer_tests:
 
 deployment_validation:
   stage: deployment_validation
+  interruptible: true
+  # Pre-deploy IAM sanity check — only worth running when the integration deploy
+  # is actually going to run: on develop, or on an MR targeting develop (incl.
+  # Draft, so the manual integration button has a validated role when clicked).
   rules:
-    - when: on_success
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"
+    - when: never
 
   before_script:
     - apt-get update -y
@@ -118,6 +145,12 @@ integration_tests:
   # When this equalled the monitor's deadline, GitLab hard-killed the job first
   # and after_script never captured logs.
   timeout: 2h30m
+  # Serialize + auto-cancel superseded deploys: rapid pushes to a ready MR won't
+  # stack up N concurrent ~1h stack deploys (which previously exhausted account
+  # quotas). resource_group ensures one integration deploy at a time; a newer
+  # pipeline supersedes an older queued one.
+  interruptible: true
+  resource_group: integration_deploy
   variables:
     IDP_ADMIN_EMAIL: ${GITLAB_USER_EMAIL}
   # variables:
@@ -126,18 +159,24 @@ integration_tests:
   #   AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
   #   IDP_ACCOUNT_ID: ${IDP_ACCOUNT_ID}
 
-  # Add rules to only run on develop branch
+  # The expensive (~1h) real-AWS deploy + probe suite. Trigger policy:
+  #   - push to develop                          → auto
+  #   - NON-Draft MR targeting develop           → auto (gates the merge)
+  #   - Draft MR targeting develop               → MANUAL button on the MR page
+  #     (run it when you want, not on every WIP push)
+  #   - anything else                            → never
+  # Note: rules are ordered — the non-Draft rule must precede the catch-all MR
+  # rule so a Draft MR falls through to the manual rule, not the auto one.
   rules:
     - if: $CI_COMMIT_BRANCH == "develop"
       when: on_success
-    - if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
+    - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" && $CI_MERGE_REQUEST_TITLE !~ /^Draft:/
       when: on_success
-    - if: $CI_COMMIT_BRANCH =~ /^fix\/.*/
-      when: on_success
-    - if: $CI_COMMIT_BRANCH =~ /^hotfix\/.*/
+    - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"
+      # Draft MR → optional manual button; allow_failure so it doesn't block the
+      # pipeline while it sits un-clicked (manual rules block by default).
       when: manual
-    - if: $CI_COMMIT_BRANCH =~ /^release\/.*/
-      when: manual
+      allow_failure: true
     - when: never
 
   before_script:
@@ -242,10 +281,14 @@ integration_tests:
     expire_in: 1 week
 
 srt_security_review:
-  stage: security_review
+  stage: fast_checks
+  interruptible: true
   # Cold prerequisite install (checkov+semgrep+jupyter+syft+bandit into SRT's
   # managed venv, no pip cache) can take 10-15 min; setup.py retries once, then
   # the scan itself runs 5-15 min. 50m leaves headroom for the worst case.
+  # It's not "fast", but it needs no AWS and runs in PARALLEL with code_checks
+  # (needs: []), so it adds no wall-clock to the fast gate while still gating the
+  # expensive deploy.
   timeout: 50m
 
   # Use runner with more memory for SRT security scanning
@@ -253,22 +296,14 @@ srt_security_review:
   tags:
     - size:large
 
-  # Run on merge requests targeting develop AND on the branch pipelines that
-  # trigger integration_tests (develop/feature/fix). Without the branch rules
-  # SRT and the integration tests never share a pipeline, so SRT could not
-  # act as a fail-fast gate for the 2h integration stage.
+  # Run on EVERY push and every MR (same as code_checks) — no AWS needed, and
+  # this surfaces security regressions early on any branch (GitLab emails the
+  # committer on failure).
   rules:
-    - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"
-      when: on_success
-    - if: $CI_COMMIT_BRANCH == "develop"
-      when: on_success
-    - if: $CI_COMMIT_BRANCH =~ /^feature\/.*/
-      when: on_success
-    - if: $CI_COMMIT_BRANCH =~ /^fix\/.*/
-      when: on_success
-    - when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
 
-  # Start immediately — SRT needs no artifacts from earlier stages.
+  # Start immediately, in parallel with code_checks — SRT needs no artifacts.
   needs: []
 
   before_script:
@@ -280,7 +315,6 @@ srt_security_review:
 
   script:
     - echo "Running SRT (Sample Security Review Tool) security assessment..."
-    - echo "This stage only runs on merge requests targeting develop branch"
     - make srt-setup
     - make srt-scan
 

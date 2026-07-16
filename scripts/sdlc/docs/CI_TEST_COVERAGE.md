@@ -4,6 +4,39 @@
 
 The CI/CD pipeline runs a comprehensive smoke test suite that validates all major IDP Accelerator features. Tests run in **parallel** with **fail-fast** behavior for rapid feedback.
 
+## Pipeline stages & triggers
+
+The GitLab pipeline has three stages, gated so cheap checks run everywhere and
+the expensive AWS deploy runs only when it's worth it:
+
+| Stage | Jobs | AWS? | Cost |
+|-------|------|------|------|
+| **fast_checks** | `code_checks` (lint, typecheck, static RBAC scan, all unit suites, UI vitest) **and** `srt_security_review` (SRT security scan) — run in **parallel** | No | ~minutes |
+| **deployment_validation** | IAM service-role permission pre-check | Yes (read-only) | seconds |
+| **integration_tests** | Full stack deploy + primary suite (Steps 1–12) + deployment-variant probes | Yes (deploys) | ~1 hour |
+
+**Trigger matrix** — what runs, when:
+
+| Event | fast_checks (code + SRT) | deployment_validation | integration_tests |
+|-------|:---:|:---:|:---:|
+| Push to any branch, **no MR** | ✅ | — | — |
+| Push to branch with a **Draft** MR → `develop` | ✅ | ✅ | ▶️ **manual** (button on MR) |
+| Push to branch with a **non-Draft** MR → `develop` | ✅ | ✅ | ✅ auto |
+| Push to **`develop`** | ✅ | ✅ | ✅ auto |
+
+Notes:
+- **Every push runs fast_checks** (code checks + SRT), so lint/typecheck/unit and
+  security feedback is immediate on any branch. GitLab emails the committer on
+  failure.
+- The **~1h integration deploy runs only** on `develop` and on **non-Draft** MRs
+  targeting `develop`. On a **Draft** MR it's a **manual play button** on the MR
+  page — run it on demand, not on every WIP push.
+- A `workflow:` rule prevents **duplicate** branch+MR pipelines (a branch with an
+  open MR runs only the MR pipeline).
+- integration_tests uses `resource_group` + `interruptible`, so rapid pushes
+  don't stack up concurrent ~1h deploys (a newer run supersedes an older queued
+  one).
+
 ## Test Execution Strategy
 
 ### Parallel Execution (Steps 3-11)

@@ -71,8 +71,13 @@ Parameters:
   AdminEmail:
     Type: String
     Description: >-
-      Email address of the admin user (e.g. jdoe+admin@example.com). 
+      Email address of the admin user (e.g. jdoe+admin@example.com).
       An initial temporary password is automatically sent to this user via email.
+      (CI/automation sentinel: the special value
+      "citest@suppress.welcome.email" creates the admin user WITHOUT sending the
+      Cognito invitation email — see the AdminUser resource — so automated
+      deployments that never use the emailed password don't exhaust Cognito's
+      low default daily email quota. Do not use it for real deployments.)
     AllowedPattern: '^[\w.+-]+@([\w-]+\.)+[\w-]{2,6}$'
 
   AllowedSignUpEmailDomain:
@@ -1075,6 +1080,10 @@ Conditions:
   DeployInVPC: !Equals [!Ref DeployInVPC, 'true']
   DeployApiGateway: !Equals [!Ref EnableHeadless, 'true']
   ShouldDeployBastionHost: !Equals [!Ref DeployBastionHost, 'true']
+  # CI/automation sentinel: this exact AdminEmail suppresses the Cognito invite
+  # email (keeps automated multi-stack deploys under Cognito's daily email quota).
+  # Keep in sync with SUPPRESS_INVITE_ADMIN_EMAIL in scripts/sdlc/codebuild_deployment.py.
+  SuppressAdminInvite: !Equals [!Ref AdminEmail, 'citest@suppress.welcome.email']
 
   HasGuardrailConfig:
     !And [
@@ -9009,6 +9018,11 @@ Resources:
     Type: AWS::Cognito::UserPoolUser
     DependsOn: CognitoUserPoolEmailDomainVerifyPermissionReady
     Properties:
+      # When AdminEmail is the CI sentinel (see the SuppressAdminInvite
+      # condition), create the user WITHOUT sending the Cognito invite email —
+      # avoids exhausting Cognito's low default daily email quota when many
+      # stacks deploy. Any other email sends the invite as normal.
+      MessageAction: !If [SuppressAdminInvite, 'SUPPRESS', !Ref 'AWS::NoValue']
       DesiredDeliveryMediums:
         - EMAIL
       UserAttributes:
