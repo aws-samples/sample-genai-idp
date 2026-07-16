@@ -338,10 +338,19 @@ def bda_standard_output_to_textract_blocks(
             lc = line.get("confidence")
             line_conf = float(lc) * 100.0 if isinstance(lc, (int, float)) else 0.0
 
+        # BDA leaves ``text`` empty on table-cell lines (the content lives only in
+        # ``text_words``). Synthesize the LINE text from its child words so the line
+        # is not later discarded by the pageData builder, which drops empty-text
+        # LINE blocks and would otherwise strip all table-cell text/confidence/
+        # geometry for BDA-as-OCR runs.
+        line_text = line.get("text", "")
+        if not line_text and word_blocks:
+            line_text = " ".join(wb["Text"] for wb in word_blocks if wb.get("Text"))
+
         line_block: Dict[str, Any] = {
             "BlockType": "LINE",
             "Id": line_id,
-            "Text": line.get("text", ""),
+            "Text": line_text,
             "Confidence": line_conf,
             "Geometry": _bbox_to_geometry(_first_bbox(line), _corners_for(line)),
         }

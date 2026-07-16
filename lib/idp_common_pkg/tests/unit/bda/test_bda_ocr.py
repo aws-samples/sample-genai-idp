@@ -169,6 +169,112 @@ def test_line_to_word_child_relationships():
 
 
 @pytest.mark.unit
+def test_empty_text_table_cell_line_synthesizes_text_from_words():
+    """BDA leaves ``text`` empty on table-cell lines; the content lives only in
+    ``text_words``. The converter must synthesize the LINE text from its child
+    words so the line survives the pageData builder's empty-text filter (which
+    would otherwise strip all table-cell text/confidence/geometry for BDA OCR).
+    """
+    payload = _sample_standard_output()
+    # A table-cell line: no line-level text, but two child words carry the value.
+    payload["text_lines"].append(
+        {
+            "id": "line-cell",
+            "text": "",  # BDA emits empty text for table cells
+            "confidence": 0.99,
+            "page_index": 0,
+            "locations": [
+                {
+                    "page_index": 0,
+                    "bounding_box": {
+                        "left": 0.5,
+                        "top": 0.5,
+                        "width": 0.2,
+                        "height": 0.05,
+                    },
+                }
+            ],
+        }
+    )
+    payload["text_words"].extend(
+        [
+            {
+                "id": "wc1",
+                "text": "1159.3",
+                "confidence": 0.95,
+                "line_id": "line-cell",
+                "page_index": 0,
+                "locations": [
+                    {
+                        "bounding_box": {
+                            "left": 0.5,
+                            "top": 0.5,
+                            "width": 0.1,
+                            "height": 0.05,
+                        }
+                    }
+                ],
+            },
+            {
+                "id": "wc2",
+                "text": "grams",
+                "confidence": 0.85,
+                "line_id": "line-cell",
+                "page_index": 0,
+                "locations": [
+                    {
+                        "bounding_box": {
+                            "left": 0.6,
+                            "top": 0.5,
+                            "width": 0.1,
+                            "height": 0.05,
+                        }
+                    }
+                ],
+            },
+        ]
+    )
+
+    out = bda_standard_output_to_textract_blocks(payload)
+    cell = next(b for b in out["Blocks"] if b.get("Id") == "line-cell")
+    # Text is joined from the child words rather than left empty.
+    assert cell["Text"] == "1159.3 grams"
+    # Confidence is still the word-confidence mean, not the broken BDA value.
+    assert cell["Confidence"] == pytest.approx(90.0)
+    # Word children (with their own text/confidence/geometry) are preserved.
+    assert cell["Relationships"][0]["Ids"] == ["wc1", "wc2"]
+
+
+@pytest.mark.unit
+def test_empty_text_line_without_words_stays_empty():
+    """A truly empty line (no words) has no text to synthesize and stays empty."""
+    payload = _sample_standard_output()
+    payload["text_lines"].append(
+        {
+            "id": "line-blank",
+            "text": "",
+            "confidence": 0.5,
+            "page_index": 0,
+            "locations": [
+                {
+                    "page_index": 0,
+                    "bounding_box": {
+                        "left": 0.5,
+                        "top": 0.7,
+                        "width": 0.2,
+                        "height": 0.05,
+                    },
+                }
+            ],
+        }
+    )
+    out = bda_standard_output_to_textract_blocks(payload)
+    blank = next(b for b in out["Blocks"] if b.get("Id") == "line-blank")
+    assert blank["Text"] == ""
+    assert "Relationships" not in blank
+
+
+@pytest.mark.unit
 def test_geometry_is_normalized_boundingbox_and_polygon():
     out = bda_standard_output_to_textract_blocks(_sample_standard_output())
     line1 = next(b for b in out["Blocks"] if b.get("Id") == "line-1")
