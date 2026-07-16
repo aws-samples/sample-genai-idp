@@ -14,15 +14,17 @@ import pytest
 from unittest.mock import MagicMock
 
 from idp_common.bda.bda_ocr import (
-    OCR_PROJECT_NAME,
+    OCR_PROJECT_NAME_SUFFIX,
     _map_point,
     _normalize_corners,
     bda_standard_output_to_textract_blocks,
     build_ocr_project_override_config,
     build_ocr_project_standard_output_config,
     build_profile_arn,
+    delete_ocr_project_by_name,
     extract_markdown,
-    resolve_ocr_project_arn,
+    find_or_create_ocr_project,
+    sanitize_ocr_project_name,
 )
 
 
@@ -557,15 +559,18 @@ def _mock_control_client(existing_projects, project_detail):
     return client
 
 
+_PROJECT_NAME = "mystack_OCR_StdOutput"
+
+
 @pytest.mark.unit
-def test_resolve_reuses_project_and_repairs_missing_routing():
+def test_find_or_create_reuses_project_and_repairs_missing_routing():
     """A pre-existing project without modality routing must be repaired in place."""
     arn = "arn:aws:bedrock:us-west-2:111122223333:data-automation-project/abc"
     client = _mock_control_client(
-        existing_projects=[{"projectName": OCR_PROJECT_NAME, "projectArn": arn}],
+        existing_projects=[{"projectName": _PROJECT_NAME, "projectArn": arn}],
         project_detail={"status": "COMPLETED", "overrideConfiguration": {}},
     )
-    result = resolve_ocr_project_arn(bda_control_client=client)
+    result = find_or_create_ocr_project(_PROJECT_NAME, bda_control_client=client)
     assert result == arn
     client.create_data_automation_project.assert_not_called()
     # Missing routing -> project updated with the override.
@@ -575,10 +580,10 @@ def test_resolve_reuses_project_and_repairs_missing_routing():
 
 
 @pytest.mark.unit
-def test_resolve_reuses_project_without_update_when_routing_present():
+def test_find_or_create_reuses_project_without_update_when_routing_present():
     arn = "arn:aws:bedrock:us-west-2:111122223333:data-automation-project/abc"
     client = _mock_control_client(
-        existing_projects=[{"projectName": OCR_PROJECT_NAME, "projectArn": arn}],
+        existing_projects=[{"projectName": _PROJECT_NAME, "projectArn": arn}],
         project_detail={
             "status": "COMPLETED",
             "overrideConfiguration": {
@@ -586,9 +591,114 @@ def test_resolve_reuses_project_without_update_when_routing_present():
             },
         },
     )
-    result = resolve_ocr_project_arn(bda_control_client=client)
+    result = find_or_create_ocr_project(_PROJECT_NAME, bda_control_client=client)
     assert result == arn
     client.update_data_automation_project.assert_not_called()
+
+
+@pytest.mark.unit
+def test_find_or_create_creates_when_absent_and_waits_for_completed():
+    """No existing project -> create with routing override, wait for COMPLETED."""
+    new_arn = "arn:aws:bedrock:us-west-2:111122223333:data-automation-project/new"
+    client = MagicMock()
+    client.get_paginator.side_effect = Exception("no paginator")
+    client.list_data_automation_projects.return_value = {"projects": []}
+    client.create_data_automation_project.return_value = {"projectArn": new_arn}
+    client.get_data_automation_project.return_value = {
+        "project": {"status": "COMPLETED"}
+    }
+    result = find_or_create_ocr_project(_PROJECT_NAME, bda_control_client=client)
+    assert result == new_arn
+    kwargs = client.create_data_automation_project.call_args.kwargs
+    assert kwargs["projectName"] == _PROJECT_NAME
+    assert kwargs["projectType"] == "SYNC"
+    assert kwargs["overrideConfiguration"]["modalityRouting"]["png"] == "DOCUMENT"
+
+
+@pytest.mark.unit
+def test_find_or_create_handles_conflict_by_refetching():
+    """A concurrent create (ConflictException) is resolved by re-fetching by name."""
+    arn = "arn:aws:bedrock:us-west-2:111122223333:data-automation-project/abc"
+
+    class _Conflict(Exception):
+        pass
+
+    client = MagicMock()
+    client.get_paginator.side_effect = Exception("no paginator")
+    client.exceptions.ConflictException = _Conflict
+    client.create_data_automation_project.side_effect = _Conflict()
+    # First list (find) is empty; second list (re-fetch) returns the project.
+    client.list_data_automation_projects.side_effect = [
+        {"projects": []},
+        {"projects": [{"projectName": _PROJECT_NAME, "projectArn": arn}]},
+    ]
+    client.get_data_automation_project.return_value = {
+        "project": {
+            "status": "COMPLETED",
+            "overrideConfiguration": {
+                "modalityRouting": {"jpeg": "DOCUMENT", "png": "DOCUMENT"}
+            },
+        },
+    }
+    result = find_or_create_ocr_project(_PROJECT_NAME, bda_control_client=client)
+    assert result == arn
+
+
+@pytest.mark.unit
+def test_delete_ocr_project_by_name_deletes_matched_arn():
+    arn = "arn:aws:bedrock:us-west-2:111122223333:data-automation-project/abc"
+    client = MagicMock()
+    client.get_paginator.side_effect = Exception("no paginator")
+    client.list_data_automation_projects.return_value = {
+        "projects": [{"projectName": _PROJECT_NAME, "projectArn": arn}]
+    }
+    result = delete_ocr_project_by_name(_PROJECT_NAME, bda_control_client=client)
+    assert result == arn
+    client.delete_data_automation_project.assert_called_once_with(projectArn=arn)
+
+
+@pytest.mark.unit
+def test_delete_ocr_project_by_name_noop_when_absent():
+    client = MagicMock()
+    client.get_paginator.side_effect = Exception("no paginator")
+    client.list_data_automation_projects.return_value = {"projects": []}
+    result = delete_ocr_project_by_name(_PROJECT_NAME, bda_control_client=client)
+    assert result is None
+    client.delete_data_automation_project.assert_not_called()
+
+
+@pytest.mark.unit
+def test_delete_ocr_project_by_name_swallows_delete_error():
+    """A delete failure must not raise (stack deletion must not be blocked)."""
+    arn = "arn:aws:bedrock:us-west-2:111122223333:data-automation-project/abc"
+    client = MagicMock()
+    client.get_paginator.side_effect = Exception("no paginator")
+    client.list_data_automation_projects.return_value = {
+        "projects": [{"projectName": _PROJECT_NAME, "projectArn": arn}]
+    }
+    client.delete_data_automation_project.side_effect = Exception("boom")
+    result = delete_ocr_project_by_name(_PROJECT_NAME, bda_control_client=client)
+    assert result is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "stack_name,expected",
+    [
+        ("mystack", "mystack_OCR_StdOutput"),
+        ("My-Stack-123", "My-Stack-123_OCR_StdOutput"),
+        ("weird name.with/chars", "weird-name-with-chars_OCR_StdOutput"),
+    ],
+)
+def test_sanitize_ocr_project_name(stack_name, expected):
+    assert sanitize_ocr_project_name(stack_name) == expected
+
+
+@pytest.mark.unit
+def test_sanitize_ocr_project_name_truncates_but_keeps_suffix():
+    name = sanitize_ocr_project_name("a" * 200)
+    assert len(name) <= 128
+    assert name.endswith(OCR_PROJECT_NAME_SUFFIX)
 
 
 @pytest.mark.unit
@@ -638,6 +748,23 @@ def test_bda_metering_key_maps_to_pricing_entry():
     assert call["inputConfiguration"] == {"s3Uri": "s3://b/pages/1/image.jpg"}
     assert "| Title | 99.0 |" in tc["text"]
     assert text == "# Title\n\n| a | b |"
+
+
+@pytest.mark.unit
+def test_ensure_bda_arns_raises_without_project_arn():
+    """The OCR hot path never creates a project; it errors clearly if none set."""
+    import threading
+
+    from idp_common.ocr.service import OcrService
+
+    svc = OcrService.__new__(OcrService)
+    svc.bda_project_arn = None
+    svc._bda_profile_arn = None
+    svc.region = "us-west-2"
+    svc._bda_arn_lock = threading.Lock()
+
+    with pytest.raises(ValueError, match="no project ARN"):
+        svc._ensure_bda_arns()
 
 
 @pytest.mark.unit
