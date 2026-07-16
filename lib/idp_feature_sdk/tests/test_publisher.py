@@ -14,22 +14,14 @@ bare `extensions/<id>/...` the catalog's `templateKey` records:
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 
 import boto3
-import pytest
 from idp_feature_sdk import FeaturePublisher
 
-# These tests drive a real `sam build` / `sam package` (FeaturePublisher.publish
-# shells out to the SAM CLI). They are integration-level, not offline unit
-# tests, so skip them when the SAM CLI isn't installed — e.g. the offline CI
-# fast-gate (`code_checks`). They still run wherever SAM is present (local
-# `make test`, or any job that installs it).
-pytestmark = pytest.mark.skipif(
-    shutil.which("sam") is None,
-    reason="requires the AWS SAM CLI (FeaturePublisher.publish runs `sam build`)",
-)
+# NOTE: these drive a real `sam build`/`sam package`; the shared conftest
+# autouse fixture skips them when the SAM CLI is absent (e.g. the offline CI
+# fast gate) and lets them run where SAM is installed.
 
 _FEATURE_ID = "demo-feature"
 _VERSION = "1.2.3"
