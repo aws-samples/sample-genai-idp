@@ -27,13 +27,39 @@ pytestmark = pytest.mark.unit
 # --------------------------------------------------------------------------- #
 
 
-def _make_probe(cbd, name="Test probe", suffix="test", params=None, validate=None):
+def _make_probe(
+    cbd,
+    name="Test probe",
+    suffix="test",
+    params=None,
+    validate=None,
+    requires_vpc=False,
+):
     return cbd.Probe(
         name=name,
         stack_suffix=suffix,
         deploy_params=params if params is not None else {"Foo": "Bar"},
         validate_fn=validate or (lambda stack_name: {"success": True}),
+        requires_vpc=requires_vpc,
     )
+
+
+_TEST_VPC_ENV = {
+    "IDP_TEST_VPC_ID": "vpc-abc123",
+    "IDP_TEST_PRIVATE_SUBNET_IDS": "subnet-a,subnet-b",
+    "IDP_TEST_LAMBDA_SG_ID": "sg-xyz789",
+    "IDP_TEST_APIGW_VPCE_ID": "vpce-def456",
+}
+
+
+def _set_test_vpc_env(monkeypatch):
+    for k, v in _TEST_VPC_ENV.items():
+        monkeypatch.setenv(k, v)
+
+
+def _clear_test_vpc_env(monkeypatch):
+    for k in _TEST_VPC_ENV:
+        monkeypatch.delenv(k, raising=False)
 
 
 def _stub_lifecycle(cbd, monkeypatch, *, deploy_status="CREATE_COMPLETE"):
@@ -81,13 +107,14 @@ class _Completed:
 # --------------------------------------------------------------------------- #
 
 
-def test_concurrency_default_is_conservative(cbd, monkeypatch):
+def test_concurrency_default_runs_probes_in_parallel(cbd, monkeypatch):
     monkeypatch.delenv("IDP_PROBE_MAX_CONCURRENCY", raising=False)
-    # Default is 1 even when there are several probes: probes deploy full stacks
-    # concurrently with the primary suite and other pipelines, so the safe
-    # default is one-at-a-time.
-    assert cbd.resolve_probe_concurrency(5) == cbd.DEFAULT_PROBE_MAX_CONCURRENCY
-    assert cbd.DEFAULT_PROBE_MAX_CONCURRENCY == 1
+    # VPCs no longer bound probe concurrency (one shared persistent test VPC),
+    # so the default fans out several probes at once — enough to cover the
+    # default table in parallel. Clamped to the probe count.
+    assert cbd.DEFAULT_PROBE_MAX_CONCURRENCY >= len(cbd.PROBE_VARIANTS)
+    assert cbd.resolve_probe_concurrency(5) == 5
+    assert cbd.resolve_probe_concurrency(3) == 3
 
 
 def test_concurrency_env_override_is_clamped_to_probe_count(cbd, monkeypatch):
@@ -104,14 +131,17 @@ def test_concurrency_env_override_honored_within_bounds(cbd, monkeypatch):
 
 def test_concurrency_invalid_env_falls_back_to_default(cbd, monkeypatch):
     monkeypatch.setenv("IDP_PROBE_MAX_CONCURRENCY", "not-a-number")
-    assert cbd.resolve_probe_concurrency(5) == cbd.DEFAULT_PROBE_MAX_CONCURRENCY
+    # Falls back to the default, then clamps to the probe count.
+    expected = min(cbd.DEFAULT_PROBE_MAX_CONCURRENCY, 5)
+    assert cbd.resolve_probe_concurrency(5) == expected
 
 
 def test_concurrency_nonpositive_env_falls_back_to_default(cbd, monkeypatch):
+    expected = min(cbd.DEFAULT_PROBE_MAX_CONCURRENCY, 5)
     monkeypatch.setenv("IDP_PROBE_MAX_CONCURRENCY", "0")
-    assert cbd.resolve_probe_concurrency(5) == cbd.DEFAULT_PROBE_MAX_CONCURRENCY
+    assert cbd.resolve_probe_concurrency(5) == expected
     monkeypatch.setenv("IDP_PROBE_MAX_CONCURRENCY", "-3")
-    assert cbd.resolve_probe_concurrency(5) == cbd.DEFAULT_PROBE_MAX_CONCURRENCY
+    assert cbd.resolve_probe_concurrency(5) == expected
 
 
 def test_concurrency_never_zero_even_with_zero_probes(cbd, monkeypatch):
@@ -420,10 +450,321 @@ def test_launcher_empty_table_is_noop(cbd, monkeypatch):
 def test_default_probe_table_has_global_apigw_row(cbd):
     names = [p.name for p in cbd.PROBE_VARIANTS]
     assert any("APIGateway" in n and "GLOBAL" in n for n in names)
-    apigw = next(p for p in cbd.PROBE_VARIANTS if "APIGateway" in p.name)
+    apigw = next(
+        p
+        for p in cbd.PROBE_VARIANTS
+        if "APIGateway" in p.name and "GLOBAL" in p.name
+    )
     assert apigw.stack_suffix == "apigw"
     assert apigw.deploy_params == {
         "WebUIHosting": "APIGateway",
         "ApiGatewayVisibility": "GLOBAL",
     }
     assert apigw.validate_fn is cbd.validate_apigw_global_hosting
+    assert apigw.requires_vpc is False
+
+
+def test_default_probe_table_covers_all_four_variants(cbd):
+    by_suffix = {p.stack_suffix: p for p in cbd.PROBE_VARIANTS}
+    # All four requested variants present.
+    assert set(by_suffix) == {"apigw", "waf", "apigwpriv", "headless"}
+    # No-VPC probes.
+    assert by_suffix["apigw"].requires_vpc is False
+    assert by_suffix["waf"].requires_vpc is False
+    # VPC-requiring probes flagged so their VPC params are injected from env.
+    assert by_suffix["apigwpriv"].requires_vpc is True
+    assert by_suffix["headless"].requires_vpc is True
+    # Distinguishing params.
+    assert by_suffix["waf"].deploy_params.get("WAFAllowedIPv4Ranges")
+    assert by_suffix["apigwpriv"].deploy_params["ApiGatewayVisibility"] == "PRIVATE"
+    assert by_suffix["headless"].deploy_params["EnableHeadless"] == "true"
+    # Every row wires a distinct validator.
+    validators = {p.validate_fn for p in cbd.PROBE_VARIANTS}
+    assert len(validators) == len(cbd.PROBE_VARIANTS)
+
+
+def test_probe_deploy_params_carry_no_vpc_params_statically(cbd):
+    # VPC params must NOT be hardcoded in the table — they are injected at
+    # runtime from env so the same row works with or without the test VPC.
+    for p in cbd.PROBE_VARIANTS:
+        assert "VpcId" not in p.deploy_params
+        assert "DeployInVPC" not in p.deploy_params
+
+
+# --------------------------------------------------------------------------- #
+# _test_vpc_params — persistent-test-VPC env resolution
+# --------------------------------------------------------------------------- #
+
+
+def test_vpc_params_none_when_env_unset(cbd, monkeypatch):
+    _clear_test_vpc_env(monkeypatch)
+    assert cbd._test_vpc_params() is None
+
+
+def test_vpc_params_none_when_partially_set(cbd, monkeypatch):
+    _set_test_vpc_env(monkeypatch)
+    # Missing any one of the four core ids → None (can't deploy in-VPC safely).
+    monkeypatch.delenv("IDP_TEST_APIGW_VPCE_ID", raising=False)
+    assert cbd._test_vpc_params() is None
+
+
+def test_vpc_params_full_mapping(cbd, monkeypatch):
+    _set_test_vpc_env(monkeypatch)
+    params = cbd._test_vpc_params()
+    assert params["DeployInVPC"] == "true"
+    assert params["VpcId"] == "vpc-abc123"
+    # subnet list passed verbatim (comma-joined) to both subnet params
+    assert params["PrivateSubnetIds"] == "subnet-a,subnet-b"
+    assert params["LambdaSubnetIds"] == "subnet-a,subnet-b"
+    assert params["LambdaSecurityGroupId"] == "sg-xyz789"
+    assert params["ApiGatewayVpcEndpointId"] == "vpce-def456"
+
+
+# --------------------------------------------------------------------------- #
+# VPC-probe skip + injection behavior
+# --------------------------------------------------------------------------- #
+
+
+def test_vpc_probe_skips_when_no_test_vpc(cbd, monkeypatch):
+    _clear_test_vpc_env(monkeypatch)
+    calls = _stub_lifecycle(cbd, monkeypatch)
+    probe = _make_probe(cbd, name="Headless", suffix="headless", requires_vpc=True)
+
+    result = cbd.deploy_and_test_probe(probe, "a@b.com", "https://tmpl")
+
+    # Skipped, not failed — absent infra is not a regression.
+    assert result["success"] is True
+    assert result["skipped"] is True
+    assert result["probe"] == "Headless"
+    # Nothing deployed: no IAM, no commands, no cleanup.
+    assert calls["iam"] == []
+    assert calls["commands"] == []
+    assert calls["cleanup"] == []
+
+
+def test_vpc_probe_injects_vpc_params_into_deploy(cbd, monkeypatch):
+    _set_test_vpc_env(monkeypatch)
+    calls = _stub_lifecycle(cbd, monkeypatch)
+    probe = _make_probe(
+        cbd,
+        name="PRIVATE",
+        suffix="apigwpriv",
+        params={"WebUIHosting": "APIGateway", "ApiGatewayVisibility": "PRIVATE"},
+        requires_vpc=True,
+    )
+
+    result = cbd.deploy_and_test_probe(probe, "a@b.com", "https://tmpl")
+
+    assert result["success"] is True
+    deploy_cmd = next(c for c in calls["commands"] if "idp-cli deploy" in c)
+    # Probe params AND injected VPC params both present.
+    assert "ApiGatewayVisibility=PRIVATE" in deploy_cmd
+    assert "DeployInVPC=true" in deploy_cmd
+    assert "VpcId=vpc-abc123" in deploy_cmd
+    assert "LambdaSubnetIds=subnet-a,subnet-b" in deploy_cmd
+    assert "ApiGatewayVpcEndpointId=vpce-def456" in deploy_cmd
+
+
+def test_no_vpc_probe_injects_nothing(cbd, monkeypatch):
+    # A requires_vpc=False probe must not get VPC params even if the env is set.
+    _set_test_vpc_env(monkeypatch)
+    calls = _stub_lifecycle(cbd, monkeypatch)
+    probe = _make_probe(
+        cbd, suffix="apigw", params={"WebUIHosting": "APIGateway"}, requires_vpc=False
+    )
+
+    cbd.deploy_and_test_probe(probe, "a@b.com", "https://tmpl")
+
+    deploy_cmd = next(c for c in calls["commands"] if "idp-cli deploy" in c)
+    assert "DeployInVPC" not in deploy_cmd
+    assert "VpcId" not in deploy_cmd
+
+
+def test_launcher_folds_skipped_probe(cbd, monkeypatch):
+    _clear_test_vpc_env(monkeypatch)
+    monkeypatch.setenv("IDP_PROBE_MAX_CONCURRENCY", "4")
+    # Real deploy_and_test_probe (not stubbed) so the skip path executes; stub
+    # only the AWS-touching helpers in case a non-VPC probe runs.
+    _stub_lifecycle(cbd, monkeypatch)
+    probes = [
+        _make_probe(cbd, name="novpc", suffix="nv", requires_vpc=False),
+        _make_probe(cbd, name="needsvpc", suffix="hv", requires_vpc=True),
+    ]
+    results = cbd.run_variant_probes("a@b.com", "https://tmpl", probes=probes)
+    by_name = {r["probe"]: r for r in results}
+    assert by_name["novpc"]["success"] is True
+    assert not by_name["novpc"].get("skipped")
+    assert by_name["needsvpc"]["skipped"] is True
+
+
+# --------------------------------------------------------------------------- #
+# New validators (mock boto3)
+# --------------------------------------------------------------------------- #
+
+
+def _fake_boto3(cbd, monkeypatch, clients):
+    """Patch cbd.boto3.client to return the given {service: mock} objects."""
+    monkeypatch.setattr(cbd.boto3, "client", lambda name, *a, **k: clients[name])
+
+
+class _FakeApiGw:
+    def __init__(self, apis=None, rest_api=None):
+        self._apis = apis or []
+        self._rest_api = rest_api
+
+    def get_rest_apis(self, limit=500):
+        return {"items": self._apis}
+
+    def get_rest_api(self, restApiId):
+        if self._rest_api is None:
+            raise Exception("NotFoundException")
+        return self._rest_api
+
+
+class _FakeCfn:
+    def __init__(self, outputs):
+        self._outputs = outputs
+
+    def describe_stacks(self, StackName):
+        return {
+            "Stacks": [
+                {"Outputs": [{"OutputKey": k, "OutputValue": v} for k, v in self._outputs.items()]}
+            ]
+        }
+
+
+def test_validate_private_hosting_pass(cbd, monkeypatch):
+    apis = [{"name": "idp-s-api", "endpointConfiguration": {"types": ["PRIVATE"]}, "policy": "{...}"}]
+    _fake_boto3(cbd, monkeypatch, {"apigateway": _FakeApiGw(apis=apis)})
+    res = cbd.validate_apigw_private_hosting("idp-s")
+    assert res["success"] is True
+    assert "PRIVATE" in res["endpoint_types"]
+
+
+def test_validate_private_hosting_fails_when_regional(cbd, monkeypatch):
+    apis = [{"name": "idp-s-api", "endpointConfiguration": {"types": ["REGIONAL"]}, "policy": "{...}"}]
+    _fake_boto3(cbd, monkeypatch, {"apigateway": _FakeApiGw(apis=apis)})
+    res = cbd.validate_apigw_private_hosting("idp-s")
+    assert res["success"] is False
+    assert "PRIVATE" in res["error"]
+
+
+def test_validate_private_hosting_fails_without_policy(cbd, monkeypatch):
+    apis = [{"name": "idp-s-api", "endpointConfiguration": {"types": ["PRIVATE"]}}]
+    _fake_boto3(cbd, monkeypatch, {"apigateway": _FakeApiGw(apis=apis)})
+    res = cbd.validate_apigw_private_hosting("idp-s")
+    assert res["success"] is False
+    assert "resource policy" in res["error"]
+
+
+def test_validate_headless_pass(cbd, monkeypatch):
+    outputs = {"ApiGatewayEndpoint": "https://abc123.execute-api.us-east-1.amazonaws.com/beta"}
+    _fake_boto3(
+        cbd,
+        monkeypatch,
+        {"cloudformation": _FakeCfn(outputs), "apigateway": _FakeApiGw(rest_api={"id": "abc123"})},
+    )
+    res = cbd.validate_headless_jobs_api("idp-s")
+    assert res["success"] is True
+    assert "execute-api" in res["jobs_url"]
+
+
+def test_validate_headless_fails_without_output(cbd, monkeypatch):
+    _fake_boto3(cbd, monkeypatch, {"cloudformation": _FakeCfn({}), "apigateway": _FakeApiGw()})
+    res = cbd.validate_headless_jobs_api("idp-s")
+    assert res["success"] is False
+    assert "ApiGatewayEndpoint" in res["error"]
+
+
+class _FakeWafv2:
+    def __init__(self, acls=None, resources=None):
+        self._acls = acls or []
+        self._resources = resources or []
+
+    def list_web_acls(self, Scope, Limit=100):
+        return {"WebACLs": self._acls}
+
+    def list_resources_for_web_acl(self, WebACLArn, ResourceType):
+        return {"ResourceArns": self._resources}
+
+
+def test_validate_waf_pass(cbd, monkeypatch):
+    acls = [{"Name": "idp-s-api-acl", "ARN": "arn:aws:wafv2:...:webacl/idp-s-api-acl"}]
+    _fake_boto3(
+        cbd, monkeypatch, {"wafv2": _FakeWafv2(acls=acls, resources=["arn:...:stage"])}
+    )
+    res = cbd.validate_waf_enabled("idp-s")
+    assert res["success"] is True
+
+
+def test_validate_waf_fails_when_absent(cbd, monkeypatch):
+    _fake_boto3(cbd, monkeypatch, {"wafv2": _FakeWafv2(acls=[])})
+    res = cbd.validate_waf_enabled("idp-s")
+    assert res["success"] is False
+    assert "not found" in res["error"]
+
+
+def test_validate_waf_fails_when_unassociated(cbd, monkeypatch):
+    acls = [{"Name": "idp-s-api-acl", "ARN": "arn:aws:wafv2:...:webacl/idp-s-api-acl"}]
+    _fake_boto3(cbd, monkeypatch, {"wafv2": _FakeWafv2(acls=acls, resources=[])})
+    res = cbd.validate_waf_enabled("idp-s")
+    assert res["success"] is False
+    assert "not associated" in res["error"]
+
+
+# --------------------------------------------------------------------------- #
+# build_consolidated_summary — the always-on status table
+# --------------------------------------------------------------------------- #
+
+
+def test_consolidated_summary_pass(cbd):
+    primary = {
+        "stack_name": "idp-x",
+        "success": True,
+        "step_results": {
+            "Step 3: Default config": {"status": "passed", "error": ""},
+            "Step 4: BDA mode": {"status": "passed", "error": ""},
+        },
+    }
+    probes = [
+        {"probe": "GLOBAL", "success": True},
+        {"probe": "Headless", "success": True, "skipped": True, "detail": "no VPC"},
+    ]
+    out = cbd.build_consolidated_summary("idp-x", primary, probes, True)
+    assert "OVERALL: PASS" in out
+    assert "Step 3: Default config" in out
+    assert "GLOBAL" in out
+    assert "Headless" in out
+    # A skipped probe must NOT flip the overall result to FAIL.
+    assert "OVERALL: FAIL" not in out
+
+
+def test_consolidated_summary_fail_on_primary_step(cbd):
+    primary = {
+        "stack_name": "idp-y",
+        "success": False,
+        "failure_type": "test",
+        "error": "boom",
+        "step_results": {
+            "Step 3: Default config": {"status": "passed", "error": ""},
+            "Step 7: Test Studio": {"status": "failed", "error": "eval timeout"},
+            "Step 12: API RBAC": {"status": "cancelled", "error": ""},
+        },
+    }
+    out = cbd.build_consolidated_summary("idp-y", primary, [], True)
+    assert "OVERALL: FAIL" in out
+    assert "eval timeout" in out
+
+
+def test_consolidated_summary_fail_on_probe(cbd):
+    primary = {"stack_name": "idp-z", "success": True, "step_results": {}}
+    probes = [{"probe": "WAF", "success": False, "error": "WebACL missing"}]
+    out = cbd.build_consolidated_summary("idp-z", primary, probes, True)
+    assert "OVERALL: FAIL" in out
+    assert "WebACL missing" in out
+
+
+def test_consolidated_summary_publish_failure(cbd):
+    out = cbd.build_consolidated_summary("idp-z", None, [], False)
+    assert "OVERALL: FAIL" in out
+    assert "Not run (publish failed)" in out
