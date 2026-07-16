@@ -63,7 +63,13 @@ flowchart TD
 
 ### Tool Ecosystem
 
-The Error Analyzer uses 8 specialized tools organized in a modular architecture:
+The Error Analyzer uses a set of specialized tools organized in a modular
+architecture. These include CloudWatch log search, DynamoDB document-record
+lookup, Step Functions execution analysis, X-Ray tracing, and
+`fetch_pipeline_configuration` — which returns the Bedrock model ID configured
+for each pipeline stage of a document's config version. The last is what lets
+the agent name the exact model behind a retired/unavailable-model error (the
+Bedrock error text itself does not name the model):
 
 ```mermaid
 flowchart LR
