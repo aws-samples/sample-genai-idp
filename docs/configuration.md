@@ -695,8 +695,9 @@ ocr:
     - name: TABLES
     - name: LAYOUT
 
-  # For BDA backend (optional): reuse a specific standard-output SYNC project
-  # instead of the auto-managed GENAIIDP-OCR-StandardOutput project.
+  # For BDA backend (optional): use a specific standard-output SYNC project
+  # instead of the per-stack <stackname>_OCR_StdOutput project the stack
+  # provisions (delivered via the BDA_OCR_PROJECT_ARN env var).
   bda_project_arn: null
 
   # For Bedrock backend:

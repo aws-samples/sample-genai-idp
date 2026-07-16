@@ -34,8 +34,13 @@ uploaded to S3, then processed one page at a time via the **synchronous**
 `InvokeDataAutomation` API. Per-page invocation is required because sync BDA is
 capped at ~10 pages per call; it also gives per-page concurrency and retry
 isolation. A standard-output-only **SYNC** project named
-`GENAIIDP-OCR-StandardOutput` is auto-created and reused (override via
-`ocr.bda_project_arn`). The project sets `modalityRouting: {jpeg: DOCUMENT,
+`<stackname>_OCR_StdOutput` is provisioned per-stack at deploy time by a
+CloudFormation custom resource (`Custom::BDAOCRProject`) and its ARN is passed
+to the OCR function via the `BDA_OCR_PROJECT_ARN` env var (override via
+`ocr.bda_project_arn`). The OCR function never creates the project at runtime;
+if no ARN is available (e.g. a region without Bedrock Data Automation, where the
+custom resource returns empty), selecting the `bda` backend raises a clear error
+— use the Textract backend there. The project sets `modalityRouting: {jpeg: DOCUMENT,
 png: DOCUMENT}` and the page is passed by **`s3Uri`** (extension-bearing) so BDA
 reliably treats each page image as a document — inline `bytes` lack an
 extension and BDA misclassifies some page images as `IMAGE` (empty OCR) under
@@ -186,8 +191,9 @@ ocr:
     target_width: 1024
     target_height: 1024
     preprocessing: false  # Enable adaptive binarization
-  # For BDA backend only (optional): reuse a specific standard-output SYNC
-  # project instead of the auto-managed GENAIIDP-OCR-StandardOutput project.
+  # For BDA backend only (optional): use a specific standard-output SYNC
+  # project instead of the per-stack <stackname>_OCR_StdOutput project the
+  # stack provisions (delivered via the BDA_OCR_PROJECT_ARN env var).
   bda_project_arn: null
   # For Bedrock backend only:
   model_id: "anthropic.claude-3-sonnet-20240229-v1:0"

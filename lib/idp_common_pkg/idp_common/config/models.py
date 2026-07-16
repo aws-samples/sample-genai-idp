@@ -1219,8 +1219,10 @@ class OCRConfig(BaseModel):
         default=None,
         description=(
             "ARN of a Bedrock Data Automation standard-output SYNC project used "
-            "when backend='bda'. If unset, a standard-output OCR project is "
-            "auto-created and reused."
+            "when backend='bda'. Normally left unset: the stack provisions a "
+            "per-stack BDA OCR project (via a CloudFormation custom resource) "
+            "and delivers its ARN through the BDA_OCR_PROJECT_ARN env var. "
+            "Setting this overrides the stack-provided project."
         ),
     )
     model_id: Optional[str] = Field(
