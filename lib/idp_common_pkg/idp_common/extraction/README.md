@@ -522,6 +522,37 @@ The ExtractionService has built-in error handling:
 3. All errors are logged for debugging
 4. Few-shot example loading errors are handled gracefully with fallback to standard prompts
 
+### Schema-compliance filtering (Simple mode)
+
+Advanced (agentic) extraction validates its output through a generated Pydantic
+model, which structurally **ignores any field the class schema does not define**.
+Simple (traditional) extraction has no such step — it does a raw `json.loads` and
+keeps whatever the model emits — so a model that hallucinates or bleeds attributes
+across classes (e.g. a `resume` section coming back with `publications`, or a
+`scientific_publication` with `invoice_number`) would carry those off-schema fields
+into `inference_result`. Downstream that breaks the confidence assessment: the
+enhancer collapses a **list emitted for an attribute the schema does not declare as
+an array**, leaving those rows permanently unscored and failing the section
+(`assessment_schema_mismatch`).
+
+To close that gap at zero extra model cost, `_filter_extracted_to_schema` runs on
+the simple path right after parsing and **drops top-level keys not present in the
+class schema's `properties`**, mirroring the agentic Pydantic behavior. It is
+conservative and fail-open:
+
+- No-op when the schema has no `properties` (can't tell what's off-schema).
+- Only drops **unknown** top-level keys; defined fields pass through untouched
+  (value/type correction remains assessment's job, not this filter's).
+- Dropped names are logged and surfaced as an **`extraction_off_schema_fields`**
+  (info) `ProcessingIssue` naming the fields, so a systematic prompt/schema
+  mismatch is visible rather than silent.
+
+> **Note on `additionalProperties`.** Enabling the agentic `validation` gate does
+> *not* catch off-schema extras on its own: JSON-Schema validation allows unknown
+> properties unless the class schema sets `additionalProperties: false`. Agentic
+> mode is safe here because its Pydantic model ignores extras regardless; this
+> filter gives Simple mode the same guarantee.
+
 ## Performance Optimization
 
 For optimal performance, especially in serverless environments:
