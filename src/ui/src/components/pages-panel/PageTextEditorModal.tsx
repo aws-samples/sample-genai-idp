@@ -142,6 +142,9 @@ const PageTextEditorModal = ({
 
   const geometryAvailable = Boolean(pageData?.geometryAvailable);
   const lines = useMemo(() => pageData?.lines ?? [], [pageData]);
+  // Whether any line actually carries a confidence score (matches the per-line
+  // score column and legend below), so the description can reflect reality.
+  const hasConfidence = useMemo(() => lines.some((l) => l.confidence != null), [lines]);
 
   // Only the currently-selected line's box is drawn on the image (the section
   // Visual Editor pattern). Drawing every line at once is unreadable.
@@ -488,7 +491,15 @@ const PageTextEditorModal = ({
                 {viewMode === 'ocr-lines' ? (
                   <>
                     <Box fontSize="body-s" color="text-label" margin={{ bottom: 'xxxs' }}>
-                      OCR Text Lines {hasVisualView && geometryAvailable ? '(click a line to highlight it on the image)' : ''}
+                      OCR Text Lines
+                    </Box>
+                    <Box fontSize="body-s" color="text-body-secondary" margin={{ bottom: 'xxs' }}>
+                      {hasVisualView && geometryAvailable
+                        ? 'Click a row to highlight its bounding box on the image.'
+                        : 'Bounding boxes are not available for this page.'}
+                      {hasConfidence
+                        ? ' The number on the right is the OCR confidence score for the line.'
+                        : ' Confidence scores are not available for this page.'}
                     </Box>
                     {hasVisualView && !geometryAvailable && (
                       <Box margin={{ bottom: 'xs' }}>
@@ -551,7 +562,7 @@ const PageTextEditorModal = ({
                         })
                       )}
                     </div>
-                    {lines.some((l) => l.confidence != null) && (
+                    {hasConfidence && (
                       <Box fontSize="body-s" color="text-body-secondary" margin={{ top: 'xxs' }}>
                         Confidence color: <Badge color="green">≥ {CONFIDENCE_HIGH}</Badge>{' '}
                         <Badge color="severity-medium">≥ {CONFIDENCE_MEDIUM}</Badge> <Badge color="red">below</Badge>
@@ -564,6 +575,9 @@ const PageTextEditorModal = ({
                       {markdownSubMode === 'raw'
                         ? `Raw markdown (${isReadOnly ? 'read-only' : 'editable'})`
                         : 'Rendered markdown (read-only)'}
+                    </Box>
+                    <Box fontSize="body-s" color="text-body-secondary" margin={{ bottom: 'xxs' }}>
+                      Confidence scores and bounding boxes are not available in the markdown view — switch to OCR Lines for those.
                     </Box>
                     {markdownSubMode === 'raw' ? (
                       <div style={{ border: '1px solid #e9ebed', height: EDITOR_HEIGHT }}>
