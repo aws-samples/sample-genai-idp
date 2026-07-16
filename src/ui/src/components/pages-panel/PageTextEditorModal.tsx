@@ -117,18 +117,21 @@ const PageTextEditorModal = ({
 
   const pageId = currentPage?.Id ?? currentPageId;
   const textUri = currentPage?.TextUri;
-  const confidenceUri = currentPage?.TextConfidenceUri;
   const imageUri = currentPage?.ImageUri;
   const ocrPageDataUri = currentPage?.OcrPageDataUri;
 
   // Whether the visual (image) view is available for this page.
   const hasVisualView = Boolean(imageUri);
 
-  const [viewMode, setViewMode] = useState(hasVisualView ? 'visual-editor' : 'text-markdown');
+  // Right-pane view: 'ocr-lines' (clickable OCR lines with confidence + bbox) or
+  // 'markdown' (the page's extracted markdown). The page image is always shown on
+  // the left when available, regardless of which right-pane view is active.
+  const [viewMode, setViewMode] = useState('ocr-lines');
+  // Within the markdown view, toggle between the rendered preview and the raw
+  // markdown source (the raw source is the editable surface in edit mode).
+  const [markdownSubMode, setMarkdownSubMode] = useState('rendered');
   const [textContent, setTextContent] = useState('');
-  const [confidenceContent, setConfidenceContent] = useState('');
   const [originalTextContent, setOriginalTextContent] = useState('');
-  const [originalConfidenceContent, setOriginalConfidenceContent] = useState('');
   const [pageData, setPageData] = useState<OcrPageData | null>(null);
   const [selectedLineIndex, setSelectedLineIndex] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -139,6 +142,9 @@ const PageTextEditorModal = ({
 
   const geometryAvailable = Boolean(pageData?.geometryAvailable);
   const lines = useMemo(() => pageData?.lines ?? [], [pageData]);
+  // Whether any line actually carries a confidence score (matches the per-line
+  // score column and legend below), so the description can reflect reality.
+  const hasConfidence = useMemo(() => lines.some((l) => l.confidence != null), [lines]);
 
   // Only the currently-selected line's box is drawn on the image (the section
   // Visual Editor pattern). Drawing every line at once is unreadable.
@@ -164,22 +170,21 @@ const PageTextEditorModal = ({
   // Reset line selection / default view whenever the shown page changes.
   useEffect(() => {
     setSelectedLineIndex(null);
-    setViewMode(hasVisualView ? 'visual-editor' : 'text-markdown');
-  }, [currentPageId, hasVisualView]);
+    setViewMode('ocr-lines');
+    setMarkdownSubMode('rendered');
+  }, [currentPageId]);
 
   // Fetch content when modal opens
   useEffect(() => {
     if (visible && textUri) {
       fetchContent();
     }
-  }, [visible, textUri, confidenceUri, ocrPageDataUri]);
+  }, [visible, textUri, ocrPageDataUri]);
 
   // Track unsaved changes
   useEffect(() => {
-    const textChanged = textContent !== originalTextContent;
-    const confidenceChanged = confidenceContent !== originalConfidenceContent;
-    setHasUnsavedChanges(textChanged || confidenceChanged);
-  }, [textContent, confidenceContent, originalTextContent, originalConfidenceContent]);
+    setHasUnsavedChanges(textContent !== originalTextContent);
+  }, [textContent, originalTextContent]);
 
   const fetchContent = async () => {
     setIsLoading(true);
@@ -205,27 +210,6 @@ const PageTextEditorModal = ({
       setTextContent(plainText);
       setOriginalTextContent(plainText);
 
-      // Fetch confidence content if available
-      if (confidenceUri) {
-        try {
-          const confResponse = await client.graphql({
-            query: getFileContents,
-            variables: { s3Uri: confidenceUri },
-          });
-
-          const confResult = confResponse.data?.getFileContents;
-          if (confResult && !confResult.isBinary) {
-            // Extract markdown from JSON wrapper for confidence content
-            const confidenceMarkdown = extractPlainText(confResult.content ?? '');
-            setConfidenceContent(confidenceMarkdown);
-            setOriginalConfidenceContent(confidenceMarkdown);
-          }
-        } catch (err) {
-          logger.warn('Failed to load confidence content:', err);
-          // Not critical - continue without confidence
-        }
-      }
-
       // Fetch consolidated OCR page data (text + confidence + geometry) if
       // available. Older documents predate this artifact, so absence is normal
       // and the visual view simply omits bounding-box overlays.
@@ -238,12 +222,27 @@ const PageTextEditorModal = ({
 
           const pageDataResult = pageDataResponse.data?.getFileContents;
           if (pageDataResult && !pageDataResult.isBinary && pageDataResult.content) {
-            setPageData(JSON.parse(pageDataResult.content) as OcrPageData);
+            const parsed = JSON.parse(pageDataResult.content) as OcrPageData;
+            setPageData(parsed);
+            // If this backend produced no OCR lines (e.g. an older document with
+            // no pageData, or an empty page), default the right pane to Markdown
+            // so there is always something to show rather than an empty list.
+            if (!parsed.lines || parsed.lines.length === 0) {
+              setViewMode('markdown');
+            }
+          } else {
+            // No pageData content at all: fall back to the markdown view.
+            setViewMode('markdown');
           }
         } catch (err) {
           logger.warn('Failed to load OCR page data:', err);
           // Not critical - continue without geometry overlays
+          setViewMode('markdown');
         }
+      } else {
+        // Older documents predate the pageData.json artifact entirely; there are
+        // no OCR lines to list, so show the markdown text by default.
+        setViewMode('markdown');
       }
     } catch (err) {
       logger.error('Error fetching content:', err);
@@ -257,18 +256,12 @@ const PageTextEditorModal = ({
     setTextContent(value || '');
   };
 
-  const handleConfidenceChange = (value: string | undefined): void => {
-    // Store the raw markdown - will wrap in JSON when saving
-    setConfidenceContent(value || '');
-  };
-
   const handleSave = async () => {
     setIsSaving(true);
     setError(null);
 
     try {
       let newTextUri = null;
-      let newConfidenceUri = null;
 
       // Save text content if changed
       if (textContent !== originalTextContent) {
@@ -276,19 +269,13 @@ const PageTextEditorModal = ({
         logger.info('Saved text content to:', newTextUri);
       }
 
-      // Save confidence content if changed (wrap in JSON)
-      if (confidenceContent !== originalConfidenceContent && confidenceUri) {
-        newConfidenceUri = await saveToS3(confidenceUri, wrapInJson(confidenceContent), 'application/json');
-        logger.info('Saved confidence content to:', newConfidenceUri);
-      }
-
       // Update original content to mark as saved
       setOriginalTextContent(textContent);
-      setOriginalConfidenceContent(confidenceContent);
 
-      // Notify parent of save
+      // Notify parent of save. Confidence is no longer edited here, so the
+      // confidence URI is always passed through unchanged (null).
       if (onSave) {
-        onSave(pageId, newTextUri, newConfidenceUri);
+        onSave(pageId, newTextUri, null);
       }
 
       // Close modal after successful save
@@ -368,9 +355,7 @@ const PageTextEditorModal = ({
   const handleCloseModal = () => {
     setShowCloseWarning(false);
     setTextContent('');
-    setConfidenceContent('');
     setOriginalTextContent('');
-    setOriginalConfidenceContent('');
     setPageData(null);
     setSelectedLineIndex(null);
     setError(null);
@@ -460,40 +445,63 @@ const PageTextEditorModal = ({
               </Box>
             </Box>
           ) : (
-            <>
-              <Box margin={{ bottom: 's' }}>
-                <SegmentedControl
-                  selectedId={viewMode}
-                  onChange={({ detail }) => setViewMode(detail.selectedId)}
-                  options={[
-                    { id: 'visual-editor', text: 'Visual Editor', disabled: !hasVisualView },
-                    { id: 'text-markdown', text: 'Text + Markdown' },
-                    { id: 'text-confidence', text: 'Text + Confidence', disabled: !confidenceUri },
-                  ]}
-                />
-              </Box>
+            <div style={{ display: 'flex', gap: '12px', minHeight: EDITOR_HEIGHT, alignItems: 'stretch' }}>
+              {/* Left pane: page image with the selected line's bounding box.
+                  Always shown when the page has an image, regardless of the
+                  right-pane view (OCR lines vs. markdown). */}
+              {hasVisualView && (
+                <div style={{ flex: '0 0 50%', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                  <PageImageViewer
+                    key={String(pageId)}
+                    pageIds={pageIds}
+                    documentPages={documentPages}
+                    initialPage={String(pageId)}
+                    onPageChange={(newPageId) => setCurrentPageId(newPageId)}
+                    height={EDITOR_HEIGHT}
+                    activeFieldGeometry={activeFieldGeometry}
+                  />
+                </div>
+              )}
 
-              {viewMode === 'visual-editor' ? (
-                <div style={{ display: 'flex', gap: '12px', minHeight: EDITOR_HEIGHT, alignItems: 'stretch' }}>
-                  {/* Left pane: page image with the selected line's bounding box */}
-                  <div style={{ flex: '0 0 55%', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                    <PageImageViewer
-                      key={String(pageId)}
-                      pageIds={pageIds}
-                      documentPages={documentPages}
-                      initialPage={String(pageId)}
-                      onPageChange={(newPageId) => setCurrentPageId(newPageId)}
-                      height={EDITOR_HEIGHT}
-                      activeFieldGeometry={activeFieldGeometry}
+              {/* Right pane: toggle between clickable OCR lines and the page markdown. */}
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                <Box margin={{ bottom: 'xs' }}>
+                  <SpaceBetween direction="horizontal" size="xs">
+                    <SegmentedControl
+                      selectedId={viewMode}
+                      onChange={({ detail }) => setViewMode(detail.selectedId)}
+                      options={[
+                        { id: 'ocr-lines', text: 'OCR Lines' },
+                        { id: 'markdown', text: 'Markdown' },
+                      ]}
                     />
-                  </div>
+                    {viewMode === 'markdown' && (
+                      <SegmentedControl
+                        selectedId={markdownSubMode}
+                        onChange={({ detail }) => setMarkdownSubMode(detail.selectedId)}
+                        options={[
+                          { id: 'rendered', text: 'Rendered' },
+                          { id: 'raw', text: isReadOnly ? 'Raw' : 'Raw (editable)' },
+                        ]}
+                      />
+                    )}
+                  </SpaceBetween>
+                </Box>
 
-                  {/* Right pane: clickable OCR text lines */}
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                {viewMode === 'ocr-lines' ? (
+                  <>
                     <Box fontSize="body-s" color="text-label" margin={{ bottom: 'xxxs' }}>
-                      OCR Text Lines {geometryAvailable ? '(click a line to highlight it on the image)' : ''}
+                      OCR Text Lines
                     </Box>
-                    {!geometryAvailable && (
+                    <Box fontSize="body-s" color="text-body-secondary" margin={{ bottom: 'xxs' }}>
+                      {hasVisualView && geometryAvailable
+                        ? 'Click a row to highlight its bounding box on the image.'
+                        : 'Bounding boxes are not available for this page.'}
+                      {hasConfidence
+                        ? ' The number on the right is the OCR confidence score for the line.'
+                        : ' Confidence scores are not available for this page.'}
+                    </Box>
+                    {hasVisualView && !geometryAvailable && (
                       <Box margin={{ bottom: 'xs' }}>
                         <Alert type="info">
                           This OCR backend did not provide bounding-box geometry for this page, so lines cannot be highlighted on the image.
@@ -514,17 +522,17 @@ const PageTextEditorModal = ({
                         </Box>
                       ) : (
                         lines.map((line, index) => {
-                          const hasGeometry = Boolean(line.geometry?.boundingBox);
+                          const canHighlight = hasVisualView && Boolean(line.geometry?.boundingBox);
                           const isSelected = selectedLineIndex === index;
                           return (
                             <div
                               // eslint-disable-next-line react/no-array-index-key -- lines are a stable ordered OCR list
                               key={`ocr-line-${index}`}
-                              onClick={() => hasGeometry && setSelectedLineIndex(isSelected ? null : index)}
-                              role={hasGeometry ? 'button' : undefined}
-                              tabIndex={hasGeometry ? 0 : undefined}
+                              onClick={() => canHighlight && setSelectedLineIndex(isSelected ? null : index)}
+                              role={canHighlight ? 'button' : undefined}
+                              tabIndex={canHighlight ? 0 : undefined}
                               onKeyDown={(e) => {
-                                if (hasGeometry && (e.key === 'Enter' || e.key === ' ')) {
+                                if (canHighlight && (e.key === 'Enter' || e.key === ' ')) {
                                   e.preventDefault();
                                   setSelectedLineIndex(isSelected ? null : index);
                                 }
@@ -536,7 +544,7 @@ const PageTextEditorModal = ({
                                 gap: '8px',
                                 padding: '4px 8px',
                                 borderBottom: '1px solid #f2f3f3',
-                                cursor: hasGeometry ? 'pointer' : 'default',
+                                cursor: canHighlight ? 'pointer' : 'default',
                                 backgroundColor: isSelected ? '#f0f7ff' : 'transparent',
                                 borderLeft: isSelected ? '3px solid #0972d3' : '3px solid transparent',
                               }}
@@ -554,65 +562,61 @@ const PageTextEditorModal = ({
                         })
                       )}
                     </div>
-                    {geometryAvailable && (
+                    {hasConfidence && (
                       <Box fontSize="body-s" color="text-body-secondary" margin={{ top: 'xxs' }}>
                         Confidence color: <Badge color="green">≥ {CONFIDENCE_HIGH}</Badge>{' '}
                         <Badge color="severity-medium">≥ {CONFIDENCE_MEDIUM}</Badge> <Badge color="red">below</Badge>
                       </Box>
                     )}
-                  </div>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', gap: '4px', minHeight: EDITOR_HEIGHT }}>
-                  {/* Left pane: Text editor */}
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, margin: 0 }}>
+                  </>
+                ) : (
+                  <>
                     <Box fontSize="body-s" color="text-label" margin={{ bottom: 'xxxs' }}>
-                      {viewMode === 'text-markdown'
-                        ? `Text (${isReadOnly ? 'read-only' : 'editable'})`
-                        : `Confidence Table (${isReadOnly ? 'read-only' : 'editable'})`}
+                      {markdownSubMode === 'raw'
+                        ? `Raw markdown (${isReadOnly ? 'read-only' : 'editable'})`
+                        : 'Rendered markdown (read-only)'}
                     </Box>
-                    <div style={{ border: '1px solid #e9ebed', height: EDITOR_HEIGHT }}>
-                      <Editor
-                        key={`editor-${viewMode}`}
-                        height={EDITOR_HEIGHT}
-                        defaultLanguage="text"
-                        value={viewMode === 'text-markdown' ? textContent : confidenceContent}
-                        onChange={viewMode === 'text-markdown' ? handleTextChange : handleConfidenceChange}
-                        options={{
-                          readOnly: isReadOnly,
-                          minimap: { enabled: false },
-                          fontSize: 14,
-                          wordWrap: 'on',
-                          wrappingIndent: 'indent',
-                          automaticLayout: true,
-                          scrollBeyondLastLine: false,
+                    <Box fontSize="body-s" color="text-body-secondary" margin={{ bottom: 'xxs' }}>
+                      Confidence scores and bounding boxes are not available in the markdown view — switch to OCR Lines for those.
+                    </Box>
+                    {markdownSubMode === 'raw' ? (
+                      <div style={{ border: '1px solid #e9ebed', height: EDITOR_HEIGHT }}>
+                        <Editor
+                          key="editor-markdown"
+                          height={EDITOR_HEIGHT}
+                          defaultLanguage="markdown"
+                          value={textContent}
+                          onChange={handleTextChange}
+                          options={{
+                            readOnly: isReadOnly,
+                            minimap: { enabled: false },
+                            fontSize: 14,
+                            wordWrap: 'on',
+                            wrappingIndent: 'indent',
+                            automaticLayout: true,
+                            scrollBeyondLastLine: false,
+                          }}
+                          theme="vs-light"
+                        />
+                      </div>
+                    ) : (
+                      <div
+                        style={{
+                          border: '1px solid #e9ebed',
+                          height: EDITOR_HEIGHT,
+                          overflow: 'auto',
+                          padding: '16px',
+                          backgroundColor: '#fafafa',
                         }}
-                        theme="vs-light"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Right pane: Markdown Preview */}
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, margin: 0 }}>
-                    <Box fontSize="body-s" color="text-label" margin={{ bottom: 'xxxs' }}>
-                      Markdown Preview (read-only)
-                    </Box>
-                    <div
-                      style={{
-                        border: '1px solid #e9ebed',
-                        height: EDITOR_HEIGHT,
-                        overflow: 'auto',
-                        padding: '16px',
-                        backgroundColor: '#fafafa',
-                      }}
-                      className="page-text-markdown-preview"
-                    >
-                      <MarkdownViewer simple content={viewMode === 'text-markdown' ? textContent : confidenceContent} />
-                    </div>
-                  </div>
-                </div>
-              )}
-            </>
+                        className="page-text-markdown-preview"
+                      >
+                        <MarkdownViewer simple content={textContent} />
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
           )}
         </Box>
       </Modal>
