@@ -118,8 +118,7 @@ class TestCollectStageModels:
         assert by_stage["extraction"] == "us.anthropic.claude-sonnet-5"
         assert by_stage["extraction.confidence"] == "us.amazon.nova-lite-v1:0"
         assert (
-            by_stage["summarization"]
-            == "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
+            by_stage["summarization"] == "us.anthropic.claude-3-7-sonnet-20250219-v1:0"
         )
         assert by_stage["evaluation.llm_method"] == "us.amazon.nova-pro-v1:0"
 

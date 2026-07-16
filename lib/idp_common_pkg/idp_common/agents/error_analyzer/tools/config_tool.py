@@ -26,9 +26,7 @@ logger = logging.getLogger(__name__)
 _MODEL_KEYS = ("model", "model_id")
 
 
-def _collect_stage_models(
-    node: Any, path: str, out: List[Dict[str, str]]
-) -> None:
+def _collect_stage_models(node: Any, path: str, out: List[Dict[str, str]]) -> None:
     """Recursively collect every ``model`` / ``model_id`` value in the config.
 
     Walking the config generically (rather than hardcoding a per-stage list)
