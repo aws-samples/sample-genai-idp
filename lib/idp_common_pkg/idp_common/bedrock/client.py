@@ -1121,8 +1121,13 @@ class BedrockClient:
                         context=context,
                     )
 
+                # Include model_id: errors like ResourceNotFoundException
+                # ("model version has reached the end of its life") do not name
+                # the model, so logging it here makes the offending model
+                # explicit in the function logs for troubleshooting.
                 logger.error(
-                    f"Non-retryable Bedrock error: {error_code} - {error_message}"
+                    f"Non-retryable Bedrock error for model {model_id}: "
+                    f"{error_code} - {error_message}"
                 )
                 self._put_metric("BedrockRequestsFailed", 1)
                 self._put_metric("BedrockNonRetryableErrors", 1)
@@ -1545,7 +1550,8 @@ class BedrockClient:
                 )
             else:
                 logger.error(
-                    f"Non-retryable Bedrock error for embedding: {error_code} - {error_message}"
+                    f"Non-retryable Bedrock error for embedding model {model_id}: "
+                    f"{error_code} - {error_message}"
                 )
                 self._put_metric("BedrockEmbeddingRequestsFailed", 1)
                 self._put_metric("BedrockEmbeddingNonRetryableErrors", 1)

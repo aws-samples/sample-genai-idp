@@ -9,6 +9,8 @@ SPDX-License-Identifier: MIT-0
 
 - **Blogs, Customer Stories & Research references page.** A new [references doc](docs/references.md) collects and summarizes external publications about the accelerator: AWS ML blog feature deep-dives (including automated schema generation / multi-document discovery), customer reference stories (Myriad Genetics, Associa, Ricoh, Built Technologies) with real-world accuracy/cost/throughput results, and the peer-reviewed research papers (the IDP Accelerator arxiv paper and DocSplit, both ACL 2026). Linked from the docs index and the Starlight sidebar. (#507)
 
+- **Error Analyzer agent can name the exact model behind a Bedrock model error.** A new `fetch_pipeline_configuration` tool returns the Bedrock model ID configured for each pipeline stage of a document's config version. Because a retired/unavailable-model error (`ResourceNotFoundException` — "This model version has reached the end of its life") does not name the model, the agent previously could only tell the user to "go confirm the configured model". It now reads the failing stage's model and names it definitively (GitHub #504 follow-up).
+
 ### Fixed
 
 - **`rvl-cdip-package-sample` no longer fails at the Summarization stage on a retired model.** The config pinned `us.anthropic.claude-3-7-sonnet-20250219-v1:0` for OCR and Summarization, which Bedrock has since retired (end-of-life); every Summarization `Converse` call returned `ResourceNotFoundException` and failed the whole document. The preset is now reduced to only its custom `classes` (plus a `notes` label) and inherits every other section — OCR, classification, extraction, assessment/confidence, summarization, evaluation, discovery, and agents — from the current system defaults, so it always uses supported models and the latest prompts instead of drifting onto retired ones.
@@ -19,7 +21,9 @@ SPDX-License-Identifier: MIT-0
 
 - **Summarization failures now surface the underlying error, not a generic wrapper.** When a section's summarization fails (e.g. a Bedrock `ResourceNotFoundException` from a retired model, or a context-window overflow), the Summarization Lambda now includes the real cause in the exception it raises to Step Functions instead of a bare `"Summarization failed for document X"`, so the failure is diagnosable from the execution error and tracking record without opening CloudWatch (GitHub #504).
 
-- **Error Analyzer agent drills into the failing stage's own logs and no longer conflates non-fatal issues with the failure.** The troubleshooting prompt now explicitly instructs the agent to treat stage-level wrapper messages as symptoms and read the first underlying exception in the failing Lambda's log group, to not attribute a `FAILED` workflow to unrelated non-fatal `ProcessingIssue` warnings from a different stage, and adds a "retired / unavailable model" error pattern (`ResourceNotFoundException` / end-of-life).
+- **Error Analyzer agent drills into the failing stage's own logs and no longer conflates non-fatal issues with the failure.** The troubleshooting prompt now explicitly instructs the agent to treat stage-level wrapper messages as symptoms and read the first underlying exception in the failing Lambda's log group, to not attribute a `FAILED` workflow to unrelated non-fatal `ProcessingIssue` warnings from a different stage, and (for a Bedrock model error) to call `fetch_pipeline_configuration` and name the exact configured model rather than telling the user to check it.
+
+- **Bedrock client logs the model ID on non-retryable errors.** Non-retryable `Converse` and embedding failures now include the model ID in the log line (e.g. `Non-retryable Bedrock error for model us.anthropic.claude-3-7-sonnet-20250219-v1:0: ResourceNotFoundException - ...`), so the offending model is explicit in the function logs — Bedrock's own message for a retired model does not name it.
 
 ## [0.6.0]
 

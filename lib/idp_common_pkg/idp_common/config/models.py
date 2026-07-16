@@ -1411,6 +1411,8 @@ TOOL USAGE:
   → Use stepfunction_details for the execution event history
 - Lambda configuration and environment context:
   → Use lambda_lookup to check timeout settings, memory, and environment variables
+- Which Bedrock model a pipeline stage uses (e.g. after a model error):
+  → Use fetch_pipeline_configuration with the document's config version to read the per-stage model IDs
 - Distributed service interaction issues:
   → Use xray_trace or xray_performance_analysis
 
@@ -1508,7 +1510,7 @@ Use these patterns to guide your investigation and accelerate diagnosis:
 
 8. RETIRED / UNAVAILABLE MODEL — ResourceNotFoundException, "This model version has reached the end of its life", "model identifier is invalid", "could not be found"
    Likely cause: The model ID configured for a stage (OCR/classification/extraction/assessment/summarization) has been retired (end-of-life) by Bedrock, or is not enabled/available in this account/region
-   Check: The configured model ID for the FAILING stage in the config version the document used; whether that model is still offered and access is granted in this region. Root cause is a retired/unavailable model — recommend switching that stage to a currently-supported model in the UI Configuration panel.
+   Check: The Bedrock error does NOT name the model. To identify it, call fetch_pipeline_configuration with the document's config version (the ConfigVersion field from fetch_document_record) and read the model configured for the FAILING stage (match the stage to the failing Lambda — e.g. the "summarization" stage for SummarizationFunction). Name that exact model ID as the root cause and recommend switching that stage to a currently-supported model in the UI Configuration panel — do NOT just tell the user to "confirm the configured model".
 
 OUTPUT FORMAT:
 Always format your response with exactly these three sections in this order:
@@ -1636,6 +1638,8 @@ TOOL USAGE:
   → Use stepfunction_details for the execution event history
 - Lambda configuration and environment context:
   → Use lambda_lookup to check timeout settings, memory, and environment variables
+- Which Bedrock model a pipeline stage uses (e.g. after a model error):
+  → Use fetch_pipeline_configuration with the document's config version to read the per-stage model IDs
 - Distributed service interaction issues:
   → Use xray_trace or xray_performance_analysis
 
@@ -1733,7 +1737,7 @@ Use these patterns to guide your investigation and accelerate diagnosis:
 
 8. RETIRED / UNAVAILABLE MODEL — ResourceNotFoundException, "This model version has reached the end of its life", "model identifier is invalid", "could not be found"
    Likely cause: The model ID configured for a stage (OCR/classification/extraction/assessment/summarization) has been retired (end-of-life) by Bedrock, or is not enabled/available in this account/region
-   Check: The configured model ID for the FAILING stage in the config version the document used; whether that model is still offered and access is granted in this region. Root cause is a retired/unavailable model — recommend switching that stage to a currently-supported model in the UI Configuration panel.
+   Check: The Bedrock error does NOT name the model. To identify it, call fetch_pipeline_configuration with the document's config version (the ConfigVersion field from fetch_document_record) and read the model configured for the FAILING stage (match the stage to the failing Lambda — e.g. the "summarization" stage for SummarizationFunction). Name that exact model ID as the root cause and recommend switching that stage to a currently-supported model in the UI Configuration panel — do NOT just tell the user to "confirm the configured model".
 
 OUTPUT FORMAT:
 Always format your response with exactly these three sections in this order:
