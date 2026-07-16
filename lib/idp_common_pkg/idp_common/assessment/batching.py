@@ -1509,9 +1509,7 @@ def _retry_missing_rows(
     # ACTUALLY affected — i.e. it currently has missing rows — so a validly-typed
     # field is never blocked.)
     mismatch_reason = _schema_field_mismatch_reason(big_field, class_schema)
-    if mismatch_reason and _missing_row_indices(
-        merged_assessment.get(big_field), rows
-    ):
+    if mismatch_reason and _missing_row_indices(merged_assessment.get(big_field), rows):
         stats.setdefault("schema_mismatch_fields", [])
         if big_field not in stats["schema_mismatch_fields"]:
             stats["schema_mismatch_fields"].append(big_field)
