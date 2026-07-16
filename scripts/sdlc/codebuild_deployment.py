@@ -1264,9 +1264,25 @@ SEQUENTIAL_TEST_STEPS = [
 ALL_TEST_STEPS = PARALLEL_TEST_STEPS + SEQUENTIAL_TEST_STEPS
 
 
-def deploy_and_test_stack(stack_name, admin_email, template_url):
-    """Deploy and test the unified IDP stack"""
+def deploy_and_test_stack(stack_name, admin_email, template_url, progress_cb=None):
+    """Deploy and test the unified IDP stack.
+
+    progress_cb, if given, is called with the current step_results dict at each
+    milestone (after the parallel pool drains, and after each sequential step).
+    It lets main() publish a running summary to S3 BEFORE the whole primary
+    suite finishes — so the GitLab monitor's ~45-min handoff always finds a
+    current snapshot even when the suite (e.g. a slow Step 12) runs long. Best
+    effort: a callback error must never fail the suite.
+    """
     print(f"Starting deployment: {stack_name}")
+
+    def _emit(step_results):
+        if progress_cb is None:
+            return
+        try:
+            progress_cb(step_results)
+        except Exception as e:  # noqa: BLE001
+            print(f"⚠️ progress_cb failed (non-fatal): {e}")
 
     try:
         # Step 0: Create IAM resources
@@ -1356,6 +1372,11 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
             _kill_running_commands()
         executor.shutdown(wait=failed_test is None, cancel_futures=True)
 
+        # Publish a snapshot now that the parallel pool has drained — this is
+        # well before the ~45-min handoff even when the sequential steps below
+        # (Step 12 API RBAC can be slow) push the suite past it.
+        _emit(step_results)
+
         # Check if any parallel test failed
         if failed_test:
             test_name, result = failed_test
@@ -1383,6 +1404,7 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
                 err = result.get("error", "Unknown error")
                 print(f"❌ {step}: {name} failed: {err}")
                 step_results[key] = {"status": "failed", "error": err}
+                _emit(step_results)
                 return {
                     "stack_name": stack_name,
                     "success": False,
@@ -1390,6 +1412,7 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
                     "error": f"{step}: {name} failed: {err}",
                     "step_results": step_results,
                 }
+            _emit(step_results)
 
         print("✅ All tests passed")
         return {
@@ -3324,8 +3347,34 @@ def main():
         # Step 2b: Deploy + test the primary shared stack (runs concurrently
         # with the APIGW thread above).
         print(f"🚀 Starting deployment for stack: {stack_name}")
+
+        # Publish a PROGRESSIVE summary after each primary-suite milestone so the
+        # GitLab monitor's ~45-min handoff always finds a current snapshot in S3
+        # — even when the primary suite itself runs long (a slow Step 12 pushed
+        # a run's only upload past the handoff, so after_script saw "No summary
+        # found" despite the run finishing fine). Marked IN-PROGRESS; overwritten
+        # by the interim (post-primary) and final (post-probe) uploads below.
+        def _publish_progress(step_results):
+            partial = {
+                "stack_name": stack_name,
+                # success unknown mid-run; build_consolidated_summary derives
+                # PASS/FAIL from the per-step statuses, not this flag.
+                "success": False,
+                "step_results": step_results,
+            }
+            snapshot = build_consolidated_summary(
+                stack_name, partial, [], publish_success
+            )
+            snapshot = (
+                "⏳ IN-PROGRESS SUMMARY (primary suite still running; "
+                "probes not yet joined — updated as steps complete)\n\n" + snapshot
+            )
+            publish_summary_to_s3(snapshot)
+
         try:
-            result = deploy_and_test_stack(stack_name, admin_email, template_url)
+            result = deploy_and_test_stack(
+                stack_name, admin_email, template_url, progress_cb=_publish_progress
+            )
             if not result["success"]:
                 print(f"[{stack_name}] ❌ Failed")
             else:
