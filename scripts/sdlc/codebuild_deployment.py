@@ -2381,6 +2381,90 @@ def cleanup_stale_apigw_test_vpcs():
         print(f"⚠️ Stale apigw VPC cleanup failed: {e}")
 
 
+# Reap idp- test stacks (main, -iam, and probe stacks) older than this. A CI
+# run completes in well under 2h, so anything older is a leftover from a run
+# whose own cleanup was interrupted (e.g. creds expired mid-teardown, which is
+# how the ~600 orphaned IAM roles accumulated). Age-gated so a concurrently
+# running pipeline's in-flight stacks are never touched.
+IDP_STACK_STALE_AGE_SECONDS = 3 * 3600  # 3h
+
+
+def cleanup_stale_idp_stacks():
+    """Reap OLD leftover idp- test stacks so their IAM roles don't leak (defense in depth).
+
+    Every run's cleanup_stack/cleanup_iam_resources deletes its own stacks, but
+    if that cleanup is interrupted (creds expire mid-teardown, job killed), the
+    stack — and crucially its `-iam` helper stack holding the CFServiceRole +
+    permissions boundary + per-run roles — is orphaned. Hundreds of these
+    accumulated and exhausted the account's RolesPerAccount quota, failing every
+    deploy. This startup reaper converges the account back to clean regardless
+    of whether any individual run finished its own cleanup.
+
+    Targets top-level idp- stacks (main deploy stacks, their `-iam` stacks, and
+    the -apigw/-waf/-apigwpriv/-headless probe stacks + their -iam stacks).
+    Age-gated (IDP_STACK_STALE_AGE_SECONDS) so a concurrent pipeline's in-flight
+    run is never deleted. Best effort — never raises. Skips *-apigw-vpc (owned
+    by cleanup_stale_apigw_test_vpcs) and the persistent pipeline stack.
+    """
+    print("🧹 Cleaning up stale idp- test stacks (IAM role leak guard)...")
+    try:
+        cf = boto3.client("cloudformation")
+        now = datetime.now(tz=timezone.utc)
+        stale, skipped_young = [], 0
+        paginator = cf.get_paginator("list_stacks")
+        for page in paginator.paginate(
+            StackStatusFilter=[
+                "CREATE_COMPLETE",
+                "CREATE_FAILED",
+                "ROLLBACK_COMPLETE",
+                "ROLLBACK_FAILED",
+                "DELETE_FAILED",
+                "UPDATE_COMPLETE",
+                "UPDATE_ROLLBACK_COMPLETE",
+            ]
+        ):
+            for s in page.get("StackSummaries", []):
+                name = s.get("StackName", "")
+                # Only our timestamped test stacks (idp-MMDD-HHMMSS[...]). The
+                # apigw-vpc reaper owns *-apigw-vpc; skip those here.
+                if not name.startswith("idp-") or name.endswith("-apigw-vpc"):
+                    continue
+                # Only reap TOP-LEVEL stacks: nested stacks (RootId set) are
+                # deleted by their parent, and deleting a parent cascades.
+                if s.get("RootId") or s.get("ParentId"):
+                    continue
+                created = s.get("CreationTime")
+                age = (now - created).total_seconds() if created else None
+                if age is None or age >= IDP_STACK_STALE_AGE_SECONDS:
+                    stale.append(name)
+                else:
+                    skipped_young += 1
+
+        if skipped_young:
+            print(f"  ({skipped_young} young idp- stack(s) skipped — may be in-flight)")
+        if not stale:
+            print("✅ No stale idp- test stacks to reap")
+            return
+
+        # Delete non-iam stacks first (they reference their -iam CFServiceRole /
+        # boundary), then the -iam stacks — mirrors cleanup_stack ordering so a
+        # main stack isn't stranded when its service role is deleted first.
+        non_iam = [n for n in stale if not n.endswith("-iam")]
+        iam_stacks = [n for n in stale if n.endswith("-iam")]
+        for name in non_iam + iam_stacks:
+            try:
+                print(f"[{name}] reaping stale idp- stack...")
+                cf.delete_stack(StackName=name)
+            except Exception as e:  # noqa: BLE001
+                print(f"[{name}] ⚠️ delete failed: {e}")
+        print(
+            f"✅ Issued delete for {len(stale)} stale idp- stack(s) "
+            f"({len(non_iam)} main/probe + {len(iam_stacks)} -iam)"
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠️ Stale idp- stack cleanup failed: {e}")
+
+
 def validate_apigw_global_hosting(stack_name):
     """Assert the deployed stack serves the Web UI on a GLOBAL (REGIONAL) REST API.
 
@@ -3063,11 +3147,16 @@ def main():
     # is actionable even if the AI summary generation itself breaks.
     failure_reason = ""
 
-    # Step 0: Clean up stale resources leaked by prior runs (BDA blueprints and
-    # apigw test VPCs) — leaked VPCs otherwise exhaust the account VPC quota and
-    # roll back every apigw hosting test.
+    # Step 0: Clean up stale resources leaked by PRIOR runs whose own cleanup
+    # was interrupted (creds expiring mid-teardown is the usual cause). These
+    # startup reapers converge the account back to clean regardless — otherwise
+    # leaked test VPCs exhaust the VPC quota, and leaked -iam stacks' roles
+    # exhaust the RolesPerAccount quota (which failed every deploy once ~600
+    # roles had accumulated). All are age-gated so a concurrent pipeline's
+    # in-flight run is never touched.
     cleanup_stale_bda_blueprints()
     cleanup_stale_apigw_test_vpcs()
+    cleanup_stale_idp_stacks()
 
     # Step 1: Publish templates to S3
     try:
@@ -3136,6 +3225,27 @@ def main():
         # Step 4: clean up the primary stack (the APIGW thread cleans up its own
         # stack in its finally block).
         cleanup_stack(result)
+
+        # Step 4a: Upload an INTERIM summary now — BEFORE blocking on the probe
+        # join below. The probes can run well past the GitLab monitor's ~45-min
+        # handoff (main() stays alive under CodeBuild's own longer timeout), so
+        # if we only uploaded after the join, after_script would fetch the S3
+        # summary key before it exists and report "No summary found" (exactly
+        # what happened once the probe count grew from 1 to 4). Publishing the
+        # primary result here guarantees the handoff always finds at least that;
+        # Step 5 overwrites it with the full consolidated version once probes
+        # finish. Marked INTERIM so a reader knows probe rows may still be
+        # pending.
+        interim = build_consolidated_summary(
+            stack_name, result, probe_results, publish_success
+        )
+        interim = (
+            "⏳ INTERIM SUMMARY (primary suite done; deployment-variant probes "
+            "may still be running — final summary overwrites this)\n\n" + interim
+        )
+        if ai_summary:
+            interim = f"{interim}\n\n{ai_summary}"
+        publish_summary_to_s3(interim)
 
         # Step 4b: Join the concurrent deployment-variant probes and fold in
         # their results. A probe failure marks the overall run failed but does
