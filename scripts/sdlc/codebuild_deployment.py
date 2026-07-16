@@ -33,6 +33,15 @@ ABORT_TESTS = threading.Event()
 _RUNNING_PROCS = set()
 _RUNNING_PROCS_LOCK = threading.Lock()
 
+# Per-thread opt-out of the fail-fast abort machinery. The APIGW hosting test
+# runs on its OWN thread concurrently with the primary suite (to overlap the
+# two ~30m stack deploys), but it operates on an independent stack — a primary-
+# suite fail-fast must NOT kill its in-flight deploy. Threads that set
+# _thread_local.never_abort mark their run_command subprocesses non-abortable:
+# they are neither registered in _RUNNING_PROCS nor refused when ABORT_TESTS is
+# set, so the kill sweep can't touch them.
+_thread_local = threading.local()
+
 
 def _kill_proc_group(proc):
     """Best-effort SIGKILL of a subprocess's entire process group."""
@@ -65,7 +74,13 @@ def run_command(cmd, check=True, timeout=DEFAULT_COMMAND_TIMEOUT):
     ones refuse to start, so abandoned test threads cannot keep mutating the
     stack while cleanup deletes it.
     """
-    abortable = threading.current_thread() is not threading.main_thread()
+    # Abortable = runs on a test-pool thread AND has not opted out. The APIGW
+    # hosting thread opts out (never_abort) so a primary-suite fail-fast kill
+    # sweep leaves its independent-stack deploy untouched.
+    abortable = (
+        threading.current_thread() is not threading.main_thread()
+        and not getattr(_thread_local, "never_abort", False)
+    )
     if abortable and ABORT_TESTS.is_set():
         raise Exception(f"Command aborted (test suite failed fast): {cmd}")
     print(f"Running: {cmd}")
@@ -966,11 +981,11 @@ def test_step10_multi_doc_discovery(stack_name):
 def test_step12_api_rbac(stack_name):
     """Step 12: API RBAC authorization tests (static scan + dynamic matrix).
 
-    Runs sequentially (like Step 11) because the dynamic harness temporarily
-    enables ADMIN_USER_PASSWORD_AUTH on the UI app client and restores it —
-    safest not to interleave with the parallel suite. Creates temporary
-    Cognito users, exercises every API op across all roles + unauthenticated
-    + token negatives, then tears the users down.
+    Runs sequentially (the only sequential step) because the dynamic harness
+    temporarily enables ADMIN_USER_PASSWORD_AUTH on the UI app client and
+    restores it — unsafe to interleave with the parallel suite. Creates
+    temporary Cognito users, exercises every API op across all roles +
+    unauthenticated + token negatives, then tears the users down.
     """
     print("Step 12: API RBAC authorization tests (static + dynamic)...")
     report_dir = "/tmp/api-test-results"  # nosec B108
@@ -1173,7 +1188,7 @@ def test_step11_test_compare(stack_name):
 # Single source of truth for the smoke-test suite: (func, step, name,
 # description). The parallel runner, the success summary, and the AI
 # failure-analysis prompt are all derived from this list — add or remove a
-# test here only. Step 11 runs sequentially after the parallel steps.
+# test here only. Step 12 runs sequentially after the parallel steps.
 PARALLEL_TEST_STEPS = [
     (
         test_step3_default_config,
@@ -1223,14 +1238,21 @@ PARALLEL_TEST_STEPS = [
         "Multi-doc discovery",
         "Multi-document discovery",
     ),
-]
-SEQUENTIAL_TEST_STEPS = [
+    # Step 11 (test-compare) only runs inferences against a test set — same
+    # shape as Steps 3-10 with no shared-stack mutation — so it is safe to run
+    # in the parallel pool. (Previously sequential for no functional reason.)
     (
         test_step11_test_compare,
         "Step 11",
         "test-compare",
         "Test comparison (idp-cli test-compare)",
     ),
+]
+# Step 12 stays sequential: its dynamic RBAC harness temporarily flips
+# ADMIN_USER_PASSWORD_AUTH on the shared UI app client (a stack-wide auth
+# mutation) and restores it, so interleaving it with API-hitting parallel
+# tests would corrupt them. Runs alone after the parallel pool drains.
+SEQUENTIAL_TEST_STEPS = [
     (
         test_step12_api_rbac,
         "Step 12",
@@ -2397,7 +2419,13 @@ def deploy_and_test_apigw_hosting(admin_email, template_url):
     rolled back every apigw test. The regional endpoint is internet-reachable,
     so this variant also does a real HTTP fetch of the UI. The VPC/PRIVATE path
     is validated out-of-band (manual/local), not in routine CI.
+
+    Runs concurrently with the primary suite (to overlap the two ~30m stack
+    deploys), on its own thread and independent stack. It opts this thread out
+    of the fail-fast abort machinery so a primary-suite failure's kill sweep
+    cannot terminate this deploy mid-flight.
     """
+    _thread_local.never_abort = True
     stack_name = f"{generate_stack_name()}-apigw"
     result = {"stack_name": stack_name, "success": False}
     try:
@@ -2526,7 +2554,31 @@ def main():
         ai_summary = generate_publish_failure_summary(str(e))
 
     if publish_success:
-        # Step 2: Deploy and test patterns concurrently (only if publish succeeded)
+        # Step 2: Launch the APIGW hosting test (GLOBAL, no VPC) on its OWN
+        # thread FIRST so its ~30m stack deploy overlaps the primary suite's
+        # ~30m deploy instead of running after it (~30m wall-clock saved). It
+        # uses an independent throwaway stack and opts out of the fail-fast
+        # abort machinery, so the two are fully isolated. Gated by
+        # IDP_TEST_APIGW_HOSTING (default on).
+        apigw_enabled = (
+            get_env_var("IDP_TEST_APIGW_HOSTING", "true").lower() == "true"
+        )
+        apigw_future = None
+        apigw_executor = None
+        if apigw_enabled:
+            print(
+                "\n🚀 Launching API Gateway hosting test (GLOBAL, no VPC) "
+                "concurrently with the primary suite...\n"
+            )
+            apigw_executor = ThreadPoolExecutor(max_workers=1)
+            apigw_future = apigw_executor.submit(
+                deploy_and_test_apigw_hosting, admin_email, template_url
+            )
+        else:
+            print("ℹ️ Skipping API Gateway hosting test (disabled)")
+
+        # Step 2b: Deploy + test the primary shared stack (runs concurrently
+        # with the APIGW thread above).
         print(f"🚀 Starting deployment for stack: {stack_name}")
         try:
             result = deploy_and_test_stack(stack_name, admin_email, template_url)
@@ -2551,22 +2603,19 @@ def main():
         except Exception as e:
             ai_summary = f"⚠️ Failed to generate deployment summary: {e}"
 
-        # Step 4: clean up stack
+        # Step 4: clean up the primary stack (the APIGW thread cleans up its own
+        # stack in its finally block).
         cleanup_stack(result)
 
-        # Step 4b: API Gateway Web UI hosting test (GLOBAL, no VPC). Runs on its
-        # own throwaway stack, independent of the shared-stack suite. Gated by
-        # IDP_TEST_APIGW_HOSTING (default on). A failure here marks the overall
-        # run failed but does not affect the already-completed primary suite
-        # result. (The VPC/PRIVATE variant is validated out-of-band, not in CI.)
-        if get_env_var("IDP_TEST_APIGW_HOSTING", "true").lower() == "true":
+        # Step 4b: Join the concurrent APIGW hosting test and fold in its
+        # result. A failure here marks the overall run failed but does not
+        # affect the already-completed primary suite result.
+        if apigw_future is not None:
             print(f"\n{'=' * 80}")
-            print("API Gateway Web UI hosting test (GLOBAL, no VPC)...")
+            print("Waiting for API Gateway hosting test (GLOBAL, no VPC)...")
             print(f"{'=' * 80}\n")
             try:
-                apigw_result = deploy_and_test_apigw_hosting(
-                    admin_email, template_url
-                )
+                apigw_result = apigw_future.result()
             except Exception as e:  # noqa: BLE001
                 apigw_result = {
                     "stack_name": f"{stack_name}-apigw",
@@ -2574,6 +2623,8 @@ def main():
                     "error": str(e),
                     "failure_type": "deploy",
                 }
+            finally:
+                apigw_executor.shutdown(wait=True)
             if apigw_result.get("success"):
                 print("✅ API Gateway hosting test passed")
             else:
@@ -2582,9 +2633,9 @@ def main():
                 print(f"❌ API Gateway hosting test failed: {apigw_error}")
                 if not failure_reason:
                     failure_reason = f"APIGW hosting test failed: {apigw_error}"
-                # The primary summary was generated before this phase ran and
-                # may say "All Tests Passed" — analyze this failure too (its
-                # CF events were captured before the throwaway stack teardown).
+                # The primary summary was generated before this join and may say
+                # "All Tests Passed" — analyze this failure too (its CF events
+                # were captured before the throwaway stack teardown).
                 try:
                     apigw_summary = generate_deployment_summary(
                         apigw_result,
@@ -2598,8 +2649,6 @@ def main():
                     f"--- API Gateway hosting test (Step 4b) ---\n"
                     f"{apigw_summary}"
                 )
-        else:
-            print("ℹ️ Skipping API Gateway hosting test (disabled)")
 
     # Step 5: Print AI analysis results at the end
     print("\n🤖 Generating deployment summary with Bedrock...")
