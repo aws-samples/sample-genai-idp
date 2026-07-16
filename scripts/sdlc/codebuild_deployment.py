@@ -27,6 +27,12 @@ import boto3
 # pass explicit larger timeouts.
 DEFAULT_COMMAND_TIMEOUT = 3600
 
+# Sentinel admin email that makes the template create the admin user WITHOUT
+# sending the Cognito invite (MessageAction=SUPPRESS). Used for ALL CI stacks so
+# many-stacks-per-run deploys don't exhaust Cognito's low default daily email
+# quota. MUST match the SuppressAdminInvite condition in template.yaml.
+SUPPRESS_INVITE_ADMIN_EMAIL = "citest@suppress.welcome.email"
+
 # Set when the test suite fails fast: newly started commands abort
 # immediately, and _kill_running_commands() terminates in-flight ones so
 # abandoned test threads cannot keep mutating the stack during cleanup.
@@ -3273,11 +3279,17 @@ def main():
     """Main execution function"""
     print("Starting CodeBuild deployment process...")
 
-    admin_email = get_env_var("IDP_ADMIN_EMAIL", "tanimath@amazon.com")
+    # Every CI stack (primary + all probes) uses the sentinel admin email that
+    # makes the template SUPPRESS the Cognito invite email. No CI test signs in
+    # via the emailed temp password (Step 12 RBAC creates its own users), and
+    # each stack's admin invite burns Cognito's low daily email quota — 6
+    # stacks/run (primary + 5 probes) exhausts it and rolls back the deploy.
+    # Must match the SuppressAdminInvite condition in template.yaml.
+    admin_email = SUPPRESS_INVITE_ADMIN_EMAIL
     stack_name = generate_stack_name()
 
     print(f"Stack Name: {stack_name}")
-    print(f"Admin Email: {admin_email}")
+    print(f"Admin Email: {admin_email} (Cognito invite suppressed)")
 
     # initialize AI summary
     ai_summary = ""
