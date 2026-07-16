@@ -212,6 +212,52 @@ def resolve_codebuild_log_stream(pipeline_name, execution_id):
     return None
 
 
+def fetch_summary_verdict(log_stream):
+    """Read the build's S3 summary and return a pass/fail verdict, if available.
+
+    The build uploads its summary to a deterministic S3 key derived from the
+    CodeBuild stream id. The primary suite's result is written there (an INTERIM
+    summary) as soon as the primary stack finishes — BEFORE the deployment
+    variant probes join — so this verdict is usually available well within the
+    45-min credential window, even though the pipeline itself runs longer.
+
+    Returns:
+      True  — summary present and shows OVERALL: PASS.
+      False — summary present and shows OVERALL: FAIL.
+      None  — no summary yet / unreadable / no OVERALL line (undecided).
+
+    This lets the handoff path fail the GitLab job on a real failure instead of
+    always exiting neutral — the gap that let a failed run show as a green job.
+
+    Limitation: at handoff the summary is usually the INTERIM one (primary suite
+    done, probes may still be running). So a PASS here means "nothing has failed
+    YET" — a probe that fails after handoff still only surfaces via SNS/S3, since
+    the 1h role-chained creds can't watch the run to completion. This reliably
+    catches primary-suite / early-deploy failures (the common case), not late
+    probe failures.
+    """
+    if not log_stream:
+        return None
+    account = os.environ.get("IDP_ACCOUNT_ID", "020432867916")
+    region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+    bucket = f"genaiic-sdlc-sourcecode-{account}-{region}"
+    key = f"deploy/summaries/{log_stream}.txt"
+    try:
+        body = (
+            boto3.client("s3")
+            .get_object(Bucket=bucket, Key=key)["Body"]
+            .read()
+            .decode("utf-8", "replace")
+        )
+    except Exception:
+        return None  # not uploaded yet / no access — undecided
+    if "OVERALL: FAIL" in body:
+        return False
+    if "OVERALL: PASS" in body:
+        return True
+    return None
+
+
 def stream_new_milestones(logs_client, log_stream, next_token, console, max_pages=20):
     """Print new milestone log lines since next_token; return updated token.
 
@@ -368,6 +414,20 @@ def monitor_pipeline_execution(
                         progress.update(
                             task, description="[cyan]↪ Handing off (still running)"
                         )
+                        # Before handing off neutral, check the S3 summary: the
+                        # primary suite uploads its result (INTERIM) as soon as
+                        # it finishes, well within this window. If it already
+                        # shows OVERALL: FAIL, FAIL the job now rather than
+                        # exiting green — the gap that let a failed run pass.
+                        verdict = fetch_summary_verdict(log_stream)
+                        if verdict is False:
+                            console.print(
+                                f"[red]✗ Pipeline still running after "
+                                f"{elapsed_mins}m, but the deploy summary already "
+                                f"reports OVERALL: FAIL — failing the job.[/red]"
+                            )
+                            console.print(f"[red]  Execution: {execution_id}[/red]")
+                            return False
                         console.print(
                             f"[cyan]↪ Pipeline still running after {elapsed_mins}m. "
                             f"Handing off before the ~60m credential window closes "
@@ -376,10 +436,16 @@ def monitor_pipeline_execution(
                         console.print(
                             f"[cyan]  Execution: {execution_id}[/cyan]"
                         )
-                        console.print(
-                            "[cyan]  Result will be published to the S3 deploy "
-                            "summary + SNS when the pipeline finishes.[/cyan]"
-                        )
+                        if verdict is True:
+                            console.print(
+                                "[cyan]  Primary suite passed so far; probes may "
+                                "still be running. Final result in S3 + SNS.[/cyan]"
+                            )
+                        else:
+                            console.print(
+                                "[cyan]  No summary yet — result will be published "
+                                "to the S3 deploy summary + SNS on finish.[/cyan]"
+                            )
                         return None
                     # Heartbeat: show minutes since the last log activity so a
                     # genuine stall (build hung) is visually distinct from a
