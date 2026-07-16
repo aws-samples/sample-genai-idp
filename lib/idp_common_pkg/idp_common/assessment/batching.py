@@ -293,6 +293,54 @@ def _missing_row_indices(assessment_list: Any, data_list: Any) -> list[int]:
     return [i for i in range(n) if _row_confidence_missing(assessment_list[i])]
 
 
+def _schema_field_mismatch_reason(
+    field: str, class_schema: dict[str, Any] | None
+) -> str | None:
+    """Return a human-readable reason a list ``field`` can NEVER be row-scored,
+    or None when the field IS validly list-typed in the class schema.
+
+    The confidence enhancer (``AssessmentService.assess_results``) keys per-row
+    scoring off the schema: a field the schema declares ``type: array`` gets a
+    list of per-row leaves, but a field that is MISSING from the schema (an
+    off-schema/hallucinated attribute) or declared as a scalar (``type: string``
+    etc.) is collapsed to a single default ``{"confidence": 0.5}`` leaf. When the
+    EXTRACTED data for such a field is a list, reconciliation then pads it to N
+    null placeholders that ``_missing_row_indices`` reports as unscored — forever.
+    A stronger model repeats the identical collapse, so escalating those rows only
+    burns a large-model call. This detects that dead-end so the ladder can skip it
+    and the report can name the true root cause (extraction produced list-valued
+    data for an attribute the class schema does not define as an array).
+
+    Returns None (do not skip) when no schema was threaded in, so behavior is
+    unchanged for callers that don't supply one.
+    """
+    from idp_common.config.schema_constants import (
+        SCHEMA_PROPERTIES,
+        SCHEMA_TYPE,
+        TYPE_ARRAY,
+    )
+
+    if not isinstance(class_schema, dict) or not class_schema:
+        return None
+    properties = class_schema.get(SCHEMA_PROPERTIES)
+    if not isinstance(properties, dict):
+        return None
+    if field not in properties:
+        return (
+            f"attribute '{field}' is not defined in the class schema "
+            "(extraction produced an off-schema/hallucinated field); its "
+            "list rows cannot be confidence-scored"
+        )
+    prop_type = (properties.get(field) or {}).get(SCHEMA_TYPE)
+    if prop_type != TYPE_ARRAY:
+        return (
+            f"attribute '{field}' is declared as '{prop_type or 'scalar'}' in "
+            "the class schema but extraction returned a list; its rows cannot be "
+            "confidence-scored as a list"
+        )
+    return None
+
+
 def compute_token_aware_batch_size(
     model_id: str | None,
     sample_row: Any,
@@ -402,6 +450,11 @@ def _new_split_stats() -> dict[str, Any]:
         "deadline_reached": False,  # ladder stopped early on the wall-clock guard (1.5)
         "batch_count": None,  # number of list batches (item 4)
         "concurrent_batches": None,  # batches run concurrently after cache warm (item 4)
+        # List fields whose recovery was SKIPPED because the data is a list but the
+        # class schema does not define them as arrays (off-schema or scalar-typed).
+        # A stronger model can't fix a schema mismatch, so escalation is futile —
+        # see _schema_field_mismatch_reason / _retry_missing_rows.
+        "schema_mismatch_fields": [],
     }
 
 
@@ -425,6 +478,7 @@ def split_stats_are_notable(stats: dict[str, Any] | None) -> bool:
         or stats.get("unrecoverable_rows")
         or stats.get("escalation_rounds")
         or stats.get("rows_recovered_by_escalation")
+        or stats.get("schema_mismatch_fields")
     )
 
 
@@ -469,6 +523,14 @@ def merge_split_stats(
     merged["deadline_reached"] = bool(
         a.get("deadline_reached") or b.get("deadline_reached")
     )
+    # Union the schema-mismatch fields across shards (order-preserving, deduped) so
+    # a mismatch surfaced by any shard is reported once for the merged section.
+    merged_mismatch: list[str] = []
+    for src in (a.get("schema_mismatch_fields"), b.get("schema_mismatch_fields")):
+        for fld in src or []:
+            if fld not in merged_mismatch:
+                merged_mismatch.append(fld)
+    merged["schema_mismatch_fields"] = merged_mismatch
     # Batch counts sum across shards; concurrency takes the max any shard used.
     bc = [v for v in (a.get("batch_count"), b.get("batch_count")) if v is not None]
     merged["batch_count"] = sum(bc) if bc else None
@@ -505,6 +567,13 @@ def format_split_stats_report(stats: dict[str, Any] | None) -> str:
             f"(rounds: {stats.get('escalation_rounds', 0)}, rows recovered: "
             f"{stats.get('rows_recovered_by_escalation', 0)})"
         )
+    if stats.get("schema_mismatch_fields"):
+        fields_str = ", ".join(stats["schema_mismatch_fields"])
+        lines.append(
+            f"  - ⚠ Schema mismatch (retry/escalation skipped): {fields_str} — "
+            "extraction returned a list for attribute(s) the class schema does not "
+            "define as arrays; fix the schema/extraction prompt."
+        )
     if stats.get("deadline_reached"):
         lines.append(
             "  - ⏱ Self-healing stopped early: Lambda wall-clock budget reached "
@@ -534,8 +603,13 @@ def build_assessment_issues(
     notable happened (a clean run produces no issues). Severity ladder (only the
     FIRST matching rung is emitted):
 
-    - ``unrecoverable_rows > 0`` → ``assessment_incomplete`` (**error**): rows are
-      still unscored after the full self-healing ladder.
+    - ``schema_mismatch_fields`` set → ``assessment_schema_mismatch`` (**error**):
+      extraction returned list-valued data for an attribute the class schema does
+      not define as an array; the enhancer collapsed it so no model can score its
+      rows. Takes precedence — the true fix is upstream (schema/extraction), not a
+      stronger confidence model.
+    - else ``unrecoverable_rows > 0`` → ``assessment_incomplete`` (**error**): rows
+      are still unscored after the full self-healing ladder.
     - else ``deadline_reached`` → ``assessment_deadline_reached`` (**warning**):
       the wall-clock guard stopped escalation before coverage completed.
     - else rows were ACTUALLY recovered (retry or escalation counters > 0) →
@@ -551,6 +625,14 @@ def build_assessment_issues(
     success — it usually means extraction under-produced rows (see the
     extraction-side ``extraction_incomplete`` issue) and the confidence pass hit
     its ceiling on whatever little was there.
+
+    **Schema-mismatch takes precedence over all rungs.** When
+    ``schema_mismatch_fields`` is set, the unscored rows are NOT a model/truncation
+    problem — extraction produced list-valued data for an attribute the class
+    schema does not define as an array, so the confidence enhancer collapsed it and
+    no model can score it per-row. That is emitted as ``assessment_schema_mismatch``
+    (**error**) naming the offending field(s) and the true fix (correct the
+    extraction schema / prompt), instead of a misleading "escalation failed" story.
     """
     from idp_common.models import ProcessingIssue
 
@@ -565,6 +647,7 @@ def build_assessment_issues(
     recovered_by_retry = int(stats.get("rows_recovered_by_retry", 0) or 0)
     recovered_by_escalation = int(stats.get("rows_recovered_by_escalation", 0) or 0)
     total_recovered = recovered_by_retry + recovered_by_escalation
+    schema_mismatch_fields = list(stats.get("schema_mismatch_fields") or [])
 
     # Compose a technical root-cause string shared by all severities.
     parts: list[str] = []
@@ -582,6 +665,40 @@ def build_assessment_issues(
             f"(recovered {recovered_by_escalation} row(s))"
         )
     root_cause = "; ".join(parts)
+
+    # Highest precedence: a schema mismatch is the TRUE root cause when it fired.
+    # The unscored rows are not a model/truncation problem — extraction produced a
+    # list for an attribute the class schema does not define as an array, so the
+    # confidence enhancer collapsed it to one default leaf and reconciliation padded
+    # the data rows with null placeholders no model can fill. Name the field(s) and
+    # point at the real fix (correct the extraction schema/prompt) so the report
+    # doesn't tell a misleading "escalation failed" story.
+    if schema_mismatch_fields:
+        fields_str = ", ".join(f"'{f}'" for f in schema_mismatch_fields)
+        return [
+            ProcessingIssue(
+                stage="assessment",
+                severity="error",
+                code="assessment_schema_mismatch",
+                message=(
+                    f"Extraction returned list-valued data for {fields_str}, which "
+                    "the class schema does not define as a list attribute; those "
+                    "rows cannot be confidence-scored. This is an extraction/schema "
+                    "mismatch — fix the class schema or extraction prompt (a "
+                    "stronger confidence model cannot resolve it, so escalation was "
+                    "skipped). Consider enabling Advanced (agentic) extraction, "
+                    "which validates output against the schema and drops off-schema "
+                    "fields before assessment."
+                ),
+                root_cause=(
+                    (root_cause + "; " if root_cause else "")
+                    + f"off-schema/non-array attribute(s) {fields_str} extracted as "
+                    "list(s); confidence enhancer collapsed to a scalar leaf"
+                ),
+                section_id=section_id,
+                details=dict(stats),
+            )
+        ]
 
     if unrecoverable > 0:
         chain = f" after escalation to {escalation_model}" if escalation_model else ""
@@ -919,6 +1036,7 @@ def assess_results_batched(
     max_escalation_rounds: int = 2,
     deadline_epoch: float | None = None,
     max_concurrent_batches: int = 1,
+    class_schema: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assess one scope, batching large list fields across multiple inferences.
 
@@ -957,7 +1075,13 @@ def assess_results_batched(
       ``escalation_model`` is available, rows still unscored after token-aware
       shrink + same-model retries are re-assessed on the stronger model (bigger
       output cap) — the step that actually fixes small-cap truncation. Bounded by
-      ``max_escalation_rounds``.
+      ``max_escalation_rounds``. **Guarded against schema mismatch:** when
+      ``class_schema`` is supplied and a "missing"-row list field is not declared
+      ``type: array`` in it (an off-schema/hallucinated attribute or a
+      scalar-typed one that extraction returned as a list), the enhancer collapses
+      it to a single default leaf that no model can turn into per-row scores — so
+      both retry and escalation are SKIPPED for that field (recorded in
+      ``schema_mismatch_fields``) instead of wasting a large-model call.
 
     Returns ``{"assessment", "alerts", "metering", "parsing_succeeded",
     "duration_seconds", "split_stats"}``. Falls back to a single call (still
@@ -1064,6 +1188,7 @@ def assess_results_batched(
                     escalation_batch_size=escalation_batch_size,
                     max_escalation_rounds=max_escalation_rounds,
                     deadline_epoch=deadline_epoch,
+                    class_schema=class_schema,
                 )
             )
             duration_seconds += dur
@@ -1243,6 +1368,7 @@ def assess_results_batched(
         escalation_batch_size=escalation_batch_size,
         max_escalation_rounds=max_escalation_rounds,
         deadline_epoch=deadline_epoch,
+        class_schema=class_schema,
     )
     duration_seconds += dur
 
@@ -1332,10 +1458,22 @@ def _retry_missing_rows(
     escalation_batch_size: int | None = None,
     max_escalation_rounds: int = 0,
     deadline_epoch: float | None = None,
+    class_schema: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any], float]:
     """Re-assess ONLY the list rows the model left unscored, splicing real scores
     back by index so large-list confidence coverage reaches 100% (not just null
     placeholders).
+
+    **Schema-mismatch guard:** ``big_field`` may look permanently unscored not
+    because the model dropped rows but because the extracted data is a list while
+    the class schema does not declare the field as ``type: array`` (an off-schema
+    attribute, or one typed as a scalar). The confidence enhancer collapses such a
+    field to a single default leaf, so its rows are padded to null placeholders
+    that never recover — no model can fix a schema mismatch. When ``class_schema``
+    is supplied and flags this, BOTH recovery rungs are skipped for the field, the
+    reason is recorded in ``split_stats['schema_mismatch_fields']``, and the rows
+    are left as-is (surfaced by the caller as a schema-mismatch issue, not a futile
+    escalation).
 
     The self-healing ladder, cheapest-first:
     1. **Same-model retry** — up to ``max_retries`` rounds on ``one_call`` (each
@@ -1362,6 +1500,27 @@ def _retry_missing_rows(
     stats = split_stats if split_stats is not None else _new_split_stats()
     base_results = {k: v for k, v in extraction_results.items() if k != big_field}
     added_duration = 0.0
+
+    # Schema-mismatch guard: if the "missing" rows are an artifact of the field
+    # not being an array in the class schema (off-schema/scalar-typed, so the
+    # enhancer collapsed it to one default leaf), NO model can score them per-row.
+    # Record the reason and skip BOTH rungs — escalating here only burns a slow
+    # large-model call to re-collapse the same list. (Only skip when the field is
+    # ACTUALLY affected — i.e. it currently has missing rows — so a validly-typed
+    # field is never blocked.)
+    mismatch_reason = _schema_field_mismatch_reason(big_field, class_schema)
+    if mismatch_reason and _missing_row_indices(merged_assessment.get(big_field), rows):
+        stats.setdefault("schema_mismatch_fields", [])
+        if big_field not in stats["schema_mismatch_fields"]:
+            stats["schema_mismatch_fields"].append(big_field)
+        logger.warning(
+            "assess_results_batched: skipping retry/escalation for '%s' — %s. "
+            "A stronger model cannot fix a schema mismatch; leaving rows unscored "
+            "and flagging the root cause.",
+            big_field,
+            mismatch_reason,
+        )
+        return merged_assessment, merged_alerts, merged_metering, added_duration
 
     # Rung 1: same-model retry rounds.
     for _round in range(max_retries):
