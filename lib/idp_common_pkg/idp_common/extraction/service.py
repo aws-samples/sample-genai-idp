@@ -833,6 +833,10 @@ class ExtractionService:
         self._page_images = []
         self._image_uris = []
         self._grounded_assessment = None
+        # Top-level fields the simple-extraction schema-compliance filter dropped
+        # because the class schema does not define them (off-schema/hallucinated).
+        # Set by _filter_extracted_to_schema, surfaced by _build_extraction_issues.
+        self._off_schema_fields: list[str] = []
         # Wall-clock deadline (epoch seconds) for the in-shard assessment ladder
         # (1.5); set per-invocation from the Lambda context. None = no guard.
         self._assessment_deadline_epoch = None
@@ -1777,6 +1781,53 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             "empty_fields": empty_paths[:50],
         }
 
+    def _filter_extracted_to_schema(
+        self, extracted_fields: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Drop top-level fields not defined in the class schema (simple mode).
+
+        Advanced (agentic) extraction validates output through a generated Pydantic
+        model, which structurally ignores keys the schema does not declare. Simple
+        extraction has no such step — it keeps whatever the model returns — so
+        hallucinated or cross-class attributes reach ``inference_result`` and later
+        break the confidence assessment (the enhancer collapses a list emitted for a
+        non-array/undefined attribute, leaving those rows permanently unscored — the
+        IDP1 ``assessment_schema_mismatch`` failure). This mirrors the agentic
+        behavior for simple mode at zero extra model cost.
+
+        Conservative and fail-open:
+        - No-op when the class schema has no ``properties`` (can't tell what's
+          off-schema → keep everything, unchanged behavior).
+        - Preserves the raw dict when a ``$defs``/``properties`` schema is absent.
+        - Only drops UNKNOWN top-level keys; known fields (and their values, however
+          malformed) pass through untouched — value/type correction is assessment's
+          job, not this filter's.
+
+        Records dropped names on ``self._off_schema_fields`` for the processing
+        report. Returns the filtered dict (same object identity not guaranteed).
+        """
+        from idp_common.config.schema_constants import SCHEMA_PROPERTIES
+
+        self._off_schema_fields = []
+        properties = (self._class_schema or {}).get(SCHEMA_PROPERTIES) or {}
+        if not isinstance(properties, dict) or not properties:
+            return extracted_fields
+
+        allowed = set(properties.keys())
+        dropped = [k for k in extracted_fields if k not in allowed]
+        if not dropped:
+            return extracted_fields
+
+        self._off_schema_fields = dropped
+        logger.warning(
+            "Simple extraction returned %d off-schema field(s) not defined in the "
+            "'%s' class schema; dropping them: %s",
+            len(dropped),
+            self._class_label,
+            ", ".join(dropped),
+        )
+        return {k: v for k, v in extracted_fields.items() if k in allowed}
+
     def _build_extraction_issues(
         self,
         *,
@@ -1851,7 +1902,42 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                 )
             )
 
-        # 2) Below-threshold population heuristic (agentic populates this today).
+        # 2) Off-schema fields dropped by the simple-mode schema-compliance filter.
+        # The model returned attributes the class schema does not define; they were
+        # dropped (mirroring agentic Pydantic validation) so they can't corrupt
+        # downstream assessment. Info severity — the data was never valid for this
+        # class — but surfaced so a systematic prompt/schema mismatch is visible.
+        off_schema = list(getattr(self, "_off_schema_fields", []) or [])
+        if off_schema:
+            fields_str = ", ".join(off_schema)
+            rec = (
+                " Advanced (agentic) extraction enforces this automatically."
+                if not is_agentic
+                else ""
+            )
+            issues.append(
+                ProcessingIssue(
+                    stage="extraction",
+                    severity="info",
+                    code="extraction_off_schema_fields",
+                    message=(
+                        f"Extraction returned {len(off_schema)} field(s) not defined "
+                        f"in the class schema; they were dropped before assessment: "
+                        f"{fields_str}. This usually indicates a prompt/schema "
+                        f"mismatch or cross-class hallucination.{rec}"
+                    ),
+                    root_cause=(
+                        f"{'agentic' if is_agentic else 'traditional'} extraction "
+                        f"with model "
+                        f"{self._pending_extraction_model or self.config.extraction.model}; "
+                        f"off-schema field(s): {fields_str}"
+                    ),
+                    section_id=section_id,
+                    details={"off_schema_fields": off_schema, "agentic": is_agentic},
+                )
+            )
+
+        # 3) Below-threshold population heuristic (agentic populates this today).
         pop = metadata.get("population_check")
         if isinstance(pop, dict) and pop.get("below_threshold"):
             issues.append(
@@ -3163,6 +3249,22 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     extracted_fields = {"raw_output": extracted_text}
                     parsing_succeeded = False
 
+            # Schema-compliance filter (simple/traditional extraction only): drop
+            # any top-level fields the model returned that the class schema does
+            # NOT define. Unlike Advanced (agentic) extraction — which validates
+            # through a Pydantic model that structurally ignores off-schema keys —
+            # the simple path does a raw ``json.loads`` and keeps whatever the model
+            # emits, so hallucinated/cross-class attributes (e.g. a ``resume`` with
+            # ``publications`` or a ``scientific_publication`` with ``invoice_number``)
+            # flow downstream and later break assessment (the enhancer collapses a
+            # list-for-non-array field, leaving its rows permanently unscored). This
+            # closes that gap for simple mode at zero extra model cost; the dropped
+            # names are recorded in metadata and surfaced as an
+            # ``extraction_off_schema_fields`` issue. Runs only when parsing produced
+            # a real object (not an error/raw_output sentinel) and a schema exists.
+            if parsing_succeeded and isinstance(extracted_fields, dict):
+                extracted_fields = self._filter_extracted_to_schema(extracted_fields)
+
             # Non-agentic INTEGRATED confidence: the single extraction inference
             # was asked (via the 1S-TopK prompt) to return, per field, its top-K
             # guesses with probabilities (G1/P1 … GK/PK). Split it so
@@ -4189,6 +4291,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             max_escalation_rounds=confidence_cfg.max_escalation_rounds,
             deadline_epoch=self._assessment_deadline_epoch,
             max_concurrent_batches=self.config.extraction.agentic.max_concurrent_batches,
+            class_schema=assessment_service._get_class_schema(class_label),
         )
 
     def _build_assess_runner(

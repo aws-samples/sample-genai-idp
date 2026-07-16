@@ -523,5 +523,160 @@ def test_sequential_when_concurrency_disabled():
     assert result["split_stats"]["concurrent_batches"] == 1
 
 
+# --------------------------------------------------------------------------- #
+# Schema-mismatch guard: skip futile escalation for off-schema/non-array fields
+# (the IDP1 rvl_cdip failure — extraction returned a list for an attribute the
+# class schema does not define as an array, so the enhancer collapsed it to a
+# single default leaf that NO model can turn into per-row scores).
+# --------------------------------------------------------------------------- #
+from idp_common.assessment.batching import (  # noqa: E402
+    _schema_field_mismatch_reason,
+    build_assessment_issues,
+)
+
+# A class schema where "publications" is NOT an array (declared scalar) and
+# "ftc_testing_conditions" is entirely absent (off-schema/hallucinated).
+_MISMATCH_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "publications": {"type": "string"},  # scalar, but extraction returned a list
+        "account_holder": {"type": "string"},
+    },
+}
+
+
+class CollapsingService:
+    """Stand-in mirroring AssessmentService's real behavior for a list field the
+    schema does NOT define as an array: the enhancer collapses it to a single
+    ``{"confidence": 0.5}`` scalar leaf (see service.py's non-list branch). A
+    stronger escalation model repeats the identical collapse — so the ladder can
+    never recover the rows. Records every call so tests can assert escalation was
+    NOT wasted."""
+
+    def __init__(self, list_field: str, escalation_model: str):
+        self.list_field = list_field
+        self.escalation_model = escalation_model
+        self.primary_calls = 0
+        self.escalation_calls = 0
+
+    def assess_results(self, **kw):
+        if kw.get("model_id_override") == self.escalation_model:
+            self.escalation_calls += 1
+        else:
+            self.primary_calls += 1
+        # Collapse: the list field comes back as a single scalar confidence leaf,
+        # NOT a per-row list — exactly what the enhancer produces for a non-array
+        # attribute. Reconciliation then pads it to null placeholders.
+        return AssessmentCoreResult(
+            enhanced_assessment={
+                self.list_field: {"confidence": 0.5, "confidence_reason": "collapsed"},
+                "account_holder": {"confidence": 0.95},
+            },
+            parsing_succeeded=True,
+            truncated=False,
+            duration_seconds=1.0,
+            metering={"Assessment/bedrock/model": {"outputTokens": 50}},
+        )
+
+    def _resolve_confidence_escalation_model(self, class_label: str):
+        return self.escalation_model
+
+
+def test_schema_mismatch_reason_detects_absent_and_scalar_fields():
+    """The helper flags a field missing from the schema and a scalar-typed one,
+    and passes a validly array-typed field."""
+    assert _schema_field_mismatch_reason("ftc_testing_conditions", _MISMATCH_SCHEMA)
+    assert _schema_field_mismatch_reason("publications", _MISMATCH_SCHEMA)
+    array_schema = {"type": "object", "properties": {"txns": {"type": "array"}}}
+    assert _schema_field_mismatch_reason("txns", array_schema) is None
+    # No schema threaded in → never blocks (unchanged behavior).
+    assert _schema_field_mismatch_reason("anything", None) is None
+
+
+def test_schema_mismatch_skips_escalation_and_flags_root_cause():
+    """A list extracted for a scalar-typed schema attribute must NOT trigger
+    escalation (a stronger model can't fix a schema mismatch); the run records
+    the field in schema_mismatch_fields and emits an assessment_schema_mismatch
+    error naming the field and the real fix."""
+    svc = CollapsingService("publications", CLAUDE_SONNET)
+    data = {"publications": _rows(5), "account_holder": "Jane Doe"}
+
+    result = assess_results_batched(
+        svc,
+        class_label="resume",
+        extraction_results=data,
+        document_text="...",
+        page_images=[],
+        batch_size=25,
+        confidence_model_id=NOVA_LITE,
+        geometry_mode="ocr_only",
+        escalation_enabled=True,
+        escalation_model=CLAUDE_SONNET,
+        max_escalation_rounds=2,
+        class_schema=_MISMATCH_SCHEMA,
+    )
+
+    stats = result["split_stats"]
+    assert stats["schema_mismatch_fields"] == ["publications"]
+    # The whole point: the stronger model was NEVER called for a schema mismatch.
+    assert svc.escalation_calls == 0
+    assert stats["rows_recovered_by_escalation"] == 0
+
+    issues = build_assessment_issues(stats, section_id="4", confidence_model=NOVA_LITE)
+    assert len(issues) == 1
+    issue = issues[0]
+    assert issue.code == "assessment_schema_mismatch"
+    assert issue.severity == "error"
+    assert "publications" in issue.message
+    assert "schema" in issue.message.lower()
+
+
+def test_schema_mismatch_issue_takes_precedence_over_incomplete():
+    """When both a schema mismatch and leftover unrecoverable rows are present,
+    the schema-mismatch issue (the true root cause) is emitted, not the generic
+    assessment_incomplete."""
+    stats = {
+        "schema_mismatch_fields": ["ftc_testing_conditions"],
+        "unrecoverable_rows": 6,
+        "escalation_rounds": 0,
+    }
+    issues = build_assessment_issues(stats, section_id="2")
+    assert len(issues) == 1
+    assert issues[0].code == "assessment_schema_mismatch"
+
+
+def test_validly_typed_list_field_still_escalates():
+    """Regression guard: a field the schema DOES define as an array is never
+    blocked by the mismatch guard — escalation still runs for it."""
+    svc = LadderService("transactions", CLAUDE_SONNET, primary_max_rows=0)
+    data = {"transactions": _rows(8), "account_holder": "Jane Doe"}
+    array_schema = {
+        "type": "object",
+        "properties": {
+            "transactions": {"type": "array"},
+            "account_holder": {"type": "string"},
+        },
+    }
+
+    result = assess_results_batched(
+        svc,
+        class_label="bank-statement",
+        extraction_results=data,
+        document_text="...",
+        page_images=[],
+        batch_size=4,
+        confidence_model_id=NOVA_LITE,
+        geometry_mode="llm_grounded",
+        escalation_enabled=True,
+        escalation_model=CLAUDE_SONNET,
+        max_escalation_rounds=2,
+        class_schema=array_schema,
+    )
+
+    assert svc.escalation_calls  # escalation still happened for the valid list
+    assert result["split_stats"]["rows_recovered_by_escalation"] == 8
+    assert not result["split_stats"]["schema_mismatch_fields"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
