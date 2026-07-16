@@ -325,36 +325,26 @@ deploy+feature-smoke scope in mind (see above).
 
 ## End-of-run summary (every pipeline, pass or fail)
 
-Every pipeline run prints a report visible in the GitLab job log (and uploads it
-to S3 + sends it on SNS for failures), in two layers:
+Every run produces a report in the GitLab job log, uploaded to S3 and emailed via
+SNS on failure. It has two layers:
 
-1. **Consolidated status table (always renders).**
-   `build_consolidated_summary()` emits a deterministic table — independent of
-   Bedrock — listing **every** test and its status:
-   - the publish/build step,
-   - each primary-suite step (Steps 3–12) with ✅ passed / ❌ failed / ⚪
-     cancelled (fail-fast stops the rest) — driven by per-step results the suite
-     now records in `result["step_results"]`,
-   - each deployment-variant probe with ✅ / ❌ / ⏭️ skipped (VPC probe with no
-     test VPC),
-   - an **OVERALL: PASS/FAIL** banner. A *skipped* probe does not flip the run
-     to FAIL.
+- **A deterministic status table** listing every test — the build/publish step,
+  each primary-suite step, and each deployment-variant probe — as passed / failed
+  / cancelled / skipped, with an **OVERALL: PASS/FAIL** verdict. It always
+  renders, even if the AI layer is unavailable.
+- **An AI (Bedrock) narrative** on both pass and fail — a short PASS report, or a
+  grounded root-cause analysis for an infrastructure or test failure.
 
-   This is the reliable "here is everything that ran and how it went" view, and
-   it renders even when Bedrock is unavailable.
+The summary is uploaded **progressively** as steps complete (not just at the
+end), so the result is available even when a run is long.
 
-2. **Bedrock narrative (pass AND fail).** `generate_deployment_summary()` asks
-   Bedrock (Opus 4.8) to write a grounded report:
-   - **Success** → a brief PASS report (grounded: only what passed; notes these
-     are smoke checks). Falls back to the deterministic test list if Bedrock is
-     down.
-   - **Infrastructure failure** → CloudFormation root-cause analysis from
-     pre-captured CF events (grounded: only concrete `ResourceStatusReason`s;
-     says "root cause not captured" rather than guessing).
-   - **Test failure** → Step Functions execution-history root cause (the real
-     Lambda/service error behind a generic "Unknown error") + a bounded build-log
-     tail.
-   - Each failed probe is analyzed the same way and appended.
+**Watching long runs.** The CodeBuild pipeline runs ~60–70 min and is not
+time-capped. The GitLab monitor that watches it has credentials capped at 1 hour
+(a hard AWS limit on role-chained sessions), so it **refreshes them mid-run** to
+keep watching to ~110 min. If a run outlives that, the monitor hands off
+gracefully — the pipeline finishes on its own and the authoritative result still
+arrives via the S3 summary + SNS email. A failure detected at handoff fails the
+GitLab job (it isn't masked by a green handoff).
 
 ---
 
@@ -435,6 +425,16 @@ run_command("idp-cli test-result --stack-name {stack} --test-run-id {id} --wait"
 - Deletes nested stacks first (AppSync, Pattern, DocumentKB, MultiDocDiscovery)
 - Deletes main stack
 - Cleans up S3 buckets, DynamoDB tables, Lambda functions
+
+### Startup reapers (converge leaks from interrupted prior runs)
+
+Each run tears down its own stacks and buckets, but an interrupted teardown (e.g.
+credentials expiring mid-cleanup) can leak them — and leaked test resources had
+previously exhausted the account's IAM-role quota and piled up thousands of
+buckets. To stay self-healing, every run first reaps **stale** leftovers from
+prior runs: test VPCs, IDP stacks (and their IAM helper stacks), and orphaned S3
+buckets. All reapers are **age-gated and skip anything a concurrent pipeline is
+still using**, so they never touch a live run.
 
 ## Success Criteria
 
@@ -732,6 +732,17 @@ but revisit:
       always rendered to the GitLab log and uploaded to S3/SNS; Bedrock now writes
       a grounded report on **pass as well as fail**.
       *(fix/ci-variant-probe-framework)*
+- [x] **Startup reapers for leaked test stacks, IAM roles, and buckets** —
+      age-gated and concurrent-run-safe, so an interrupted cleanup can't exhaust
+      the account's IAM-role quota or pile up buckets again.
+- [x] **Handoff FAIL verdict** — the monitor fails the GitLab job when the
+      summary shows OVERALL: FAIL, instead of exiting green.
+- [x] **Progressive summary upload** — a current result reaches S3 before the
+      monitor handoff even when a run is long (fixed a finished run showing "No
+      summary found").
+- [x] **Mid-run monitor credential refresh** — the monitor refreshes its
+      1h-capped credentials to watch long runs to ~110 min. *(Needs a live >1h
+      run to fully validate.)*
 
 ---
 
