@@ -216,10 +216,9 @@ def fetch_summary_verdict(log_stream):
     """Read the build's S3 summary and return a pass/fail verdict, if available.
 
     The build uploads its summary to a deterministic S3 key derived from the
-    CodeBuild stream id. The primary suite's result is written there (an INTERIM
-    summary) as soon as the primary stack finishes — BEFORE the deployment
-    variant probes join — so this verdict is usually available well within the
-    45-min credential window, even though the pipeline itself runs longer.
+    CodeBuild stream id. The primary suite writes a progressive/interim summary
+    there as steps complete (well before the whole suite finishes), so this
+    verdict is usually available before the monitor's handoff deadline.
 
     Returns:
       True  — summary present and shows OVERALL: PASS.
@@ -306,38 +305,111 @@ def stream_new_milestones(logs_client, log_stream, next_token, console, max_page
 
 # The GitLab runner's AWS credentials are vended by assuming idp-sdlc-GitLab
 # FROM the already-assumed gitlab-runners-prod role. That is STS role chaining,
-# which AWS hard-caps at 1 hour regardless of the role's MaxSessionDuration —
-# so the job's creds expire ~60 min in, but the pipeline itself runs ~60-90 min
-# (publish ~28m + deploy ~29m + tests). The monitor therefore CANNOT reliably
-# watch a run to completion on one credential. Instead it watches within the
-# credential window and, if the pipeline is still running, hands off: prints
-# where the authoritative result will land (S3 summary + SNS) and exits
-# NEUTRALLY (not failed). Set below the ~60m token life minus before_script
-# (~5m) and after_script (~2m) headroom.
-MONITOR_HANDOFF_SECONDS = 2700  # 45 min
+# which AWS hard-caps EACH session at 1 hour regardless of the role's
+# MaxSessionDuration (confirmed empirically: STS rejects DurationSeconds>3600
+# for a chained assume). The CodeBuild pipeline itself is NOT capped (its own
+# service role, ~64-68 min observed, completes fine) — only the monitor's creds
+# expire ~60 min in.
+#
+# To watch a long run to completion, the monitor REFRESHES its credentials
+# before they expire: it re-assumes idp-sdlc-GitLab again (a fresh 1h session —
+# role chaining allows repeated re-assumes, each capped at 1h) and rebuilds its
+# boto3 clients. So MONITOR_HANDOFF_SECONDS can now exceed the 1h cap. It is set
+# below the GitLab job timeout (2h30m) with headroom for before/after_script.
+# If refresh ever fails (e.g. the self-assume permission is missing), the
+# monitor still hands off gracefully to the S3 summary + SNS email.
+MONITOR_HANDOFF_SECONDS = 6600  # 110 min
+# Re-assume this far before the ~1h chained-session expiry.
+CREDENTIAL_REFRESH_SECONDS = 3000  # 50 min
+GITLAB_ROLE_NAME = "idp-sdlc-GitLab"
+
+
+class _CredentialRefresher:
+    """Keep the monitor's AWS creds alive past the 1h role-chaining cap.
+
+    The GitLab job's creds are a chained assume of idp-sdlc-GitLab, hard-capped
+    at 1h. Re-assuming the SAME role (chaining again) mints a fresh 1h session,
+    so calling refresh() every <1h keeps the monitor alive for the whole run.
+
+    build_clients() returns freshly-credentialed (codepipeline, logs) clients.
+    On the first call it uses the ambient job creds; subsequent refreshes use
+    the newly-vended session. If the re-assume fails (missing self-assume
+    permission, expired base creds), it returns None so the caller falls back to
+    the graceful S3/SNS handoff rather than crashing.
+    """
+
+    def __init__(self, region):
+        self._region = region
+        self._session_kwargs = {}  # empty = ambient creds
+        self._role_arn = self._resolve_role_arn()
+
+    def _resolve_role_arn(self):
+        # The job identity is an assumed-role ARN:
+        #   arn:aws:sts::<acct>:assumed-role/idp-sdlc-GitLab/<session>
+        # Convert to the role ARN we re-assume:
+        #   arn:aws:iam::<acct>:role/idp-sdlc-GitLab
+        try:
+            acct = boto3.client("sts").get_caller_identity()["Account"]
+            return f"arn:aws:iam::{acct}:role/{GITLAB_ROLE_NAME}"
+        except Exception as e:  # noqa: BLE001
+            print(f"⚠️ Could not resolve GitLab role ARN for refresh: {e}")
+            return None
+
+    def refresh(self):
+        """Re-assume the role for a fresh 1h session. Returns True on success."""
+        if not self._role_arn:
+            return False
+        try:
+            # Use whatever creds we currently hold (ambient or last-refreshed).
+            sts = boto3.client("sts", **self._session_kwargs)
+            creds = sts.assume_role(
+                RoleArn=self._role_arn,
+                RoleSessionName="idp-monitor-refresh",
+                # 1h is the max for a chained assume; request it explicitly.
+                DurationSeconds=3600,
+            )["Credentials"]
+            self._session_kwargs = {
+                "aws_access_key_id": creds["AccessKeyId"],
+                "aws_secret_access_key": creds["SecretAccessKey"],
+                "aws_session_token": creds["SessionToken"],
+            }
+            return True
+        except Exception as e:  # noqa: BLE001
+            print(f"⚠️ Credential refresh failed ({e}); will hand off at deadline")
+            return False
+
+    def build_clients(self):
+        """Return (codepipeline, logs) clients on the current credentials."""
+        cp = boto3.client("codepipeline", region_name=self._region, **self._session_kwargs)
+        logs = boto3.client("logs", region_name=self._region, **self._session_kwargs)
+        return cp, logs
 
 
 def monitor_pipeline_execution(
-    pipeline_name, execution_id, max_wait=6000, handoff_after=MONITOR_HANDOFF_SECONDS
+    pipeline_name, execution_id, max_wait=8100, handoff_after=MONITOR_HANDOFF_SECONDS
 ):
     """Monitor a pipeline execution with live progress; hand off if it outlives creds.
 
     Returns:
       True  — pipeline reached a terminal Succeeded state.
       False — pipeline reached a terminal failure state, or polling failed hard.
-      None  — still running when the credential window (handoff_after) elapsed:
-              a graceful HANDOFF, not a failure. The caller exits neutrally and
-              the run's real result surfaces via the S3 summary + SNS.
+      None  — still running when handoff_after elapsed: a graceful HANDOFF, not
+              a failure. The caller exits neutrally and the run's real result
+              surfaces via the S3 summary + SNS.
 
-    max_wait (100 min) is a hard backstop below the GitLab job's 2h30m ceiling;
-    handoff_after (45 min) is the normal exit for a still-running pipeline,
-    chosen to stay within the 1h role-chained credential lifetime.
+    max_wait (135 min) is a hard backstop below the GitLab job's 2h30m ceiling;
+    handoff_after (110 min) is the normal exit for a still-running pipeline.
+    The monitor refreshes its 1h-capped creds every ~50 min (see
+    _CredentialRefresher), so it can watch past the single-credential lifetime.
     """
     console = Console()
     console.print(f"[cyan]Monitoring pipeline execution:[/cyan] {execution_id}")
 
-    codepipeline = boto3.client("codepipeline")
-    logs_client = boto3.client("logs")
+    region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+    refresher = _CredentialRefresher(region)
+    codepipeline, logs_client = refresher.build_clients()
+    # Re-assume before the 1h chained-session cap; recompute clients on refresh.
+    next_refresh_at = CREDENTIAL_REFRESH_SECONDS
     poll_interval = 30
     # A persistent get_pipeline_execution failure (throttling, expired creds,
     # wrong id) must NOT masquerade as a 2h hang: the old handler logged each
@@ -366,6 +438,21 @@ def monitor_pipeline_execution(
 
         wait_time = 0
         while wait_time < max_wait:
+            # Refresh creds before the ~1h chained-session cap so the monitor
+            # can watch a long run to completion. On success, rebuild the
+            # clients on the new session; on failure, keep the old clients and
+            # let the graceful handoff take over when they expire.
+            if wait_time >= next_refresh_at:
+                if refresher.refresh():
+                    codepipeline, logs_client = refresher.build_clients()
+                    console.print(
+                        f"[dim]🔑 Refreshed monitor credentials at "
+                        f"{wait_time // 60}m (fresh 1h session).[/dim]"
+                    )
+                # Schedule the next refresh regardless; a failed refresh will
+                # just retry at the next interval until the handoff/deadline.
+                next_refresh_at += CREDENTIAL_REFRESH_SECONDS
+
             try:
                 response = codepipeline.get_pipeline_execution(
                     pipelineName=pipeline_name,
@@ -429,9 +516,9 @@ def monitor_pipeline_execution(
                             console.print(f"[red]  Execution: {execution_id}[/red]")
                             return False
                         console.print(
-                            f"[cyan]↪ Pipeline still running after {elapsed_mins}m. "
-                            f"Handing off before the ~60m credential window closes "
-                            f"(role-chained creds cannot be extended).[/cyan]"
+                            f"[cyan]↪ Pipeline still running after {elapsed_mins}m "
+                            f"(monitor deadline reached). Handing off; the run "
+                            f"continues and its result lands in S3 + SNS email.[/cyan]"
                         )
                         console.print(
                             f"[cyan]  Execution: {execution_id}[/cyan]"
@@ -485,7 +572,7 @@ def monitor_pipeline_execution(
         return False
 
 
-def monitor_pipeline(pipeline_name, version_id, max_wait=6000):
+def monitor_pipeline(pipeline_name, version_id, max_wait=8100):
     """Monitor pipeline using version-based tracking"""
     # First find the execution that matches our version
     execution_id = find_pipeline_execution_by_version(pipeline_name, version_id)

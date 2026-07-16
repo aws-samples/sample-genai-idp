@@ -111,11 +111,12 @@ deployment_validation:
 
 integration_tests:
   stage: integration_tests
-  # Must exceed the pipeline monitor's max_wait (6000s / 100 min in
-  # integration_test_deployment.py) plus before_script (~5 min) and
-  # after_script log capture (~2 min), so the SCRIPT owns the deadline and
-  # always exits cleanly. When this equalled the monitor's 7200s deadline,
-  # GitLab hard-killed the job first and after_script never captured logs.
+  # Must exceed the pipeline monitor's max_wait (8100s / 135 min in
+  # integration_test_deployment.py — the monitor refreshes its 1h-capped creds
+  # so it can watch that long) plus before_script (~5 min) and after_script log
+  # capture (~2 min), so the SCRIPT owns the deadline and always exits cleanly.
+  # When this equalled the monitor's deadline, GitLab hard-killed the job first
+  # and after_script never captured logs.
   timeout: 2h30m
   variables:
     IDP_ADMIN_EMAIL: ${GITLAB_USER_EMAIL}
