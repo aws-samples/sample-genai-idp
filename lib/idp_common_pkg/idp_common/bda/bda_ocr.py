@@ -426,6 +426,14 @@ def extract_markdown(
     return doc_rep.get("markdown") or doc_rep.get("text") or ""
 
 
+# NOTE: The project-lifecycle helpers below (config builders, sanitizer,
+# find/create/delete) are the canonical, unit-tested source, but they are
+# *duplicated* — not imported — by the deploy-time custom-resource Lambda at
+# ``src/lambda/bda_ocr_project/index.py`` (SAM's builder can't reach ``lib/`` at
+# build time). A drift guard in that Lambda's tests asserts the two produce
+# identical output; keep the copies in sync when changing either.
+
+
 def build_ocr_project_standard_output_config() -> Dict[str, Any]:
     """Standard-output-only configuration for a pure-OCR BDA project.
 

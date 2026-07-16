@@ -10,11 +10,15 @@ one account no longer share/interfere with a single account-global project.
 
 The project configuration logic (standard-output config, jpeg/png->DOCUMENT
 modality-routing override, routing-override repair, find/create/delete) is
-inlined here to keep this deploy-time Lambda's ZIP small: importing it from
-``idp_common.bda.bda_ocr`` would eagerly pull the heavy ``bda_service`` /
-``bda_invocation`` chain via ``idp_common/bda/__init__.py``. The canonical
-source of that logic is ``lib/idp_common_pkg/idp_common/bda/bda_ocr.py`` —
-keep the two in sync.
+**duplicated** from ``lib/idp_common_pkg/idp_common/bda/bda_ocr.py`` rather than
+imported, because SAM's makefile builder runs against an isolated copy of this
+function's CodeUri and cannot reach ``lib/`` at build time (and importing
+``idp_common.bda`` would also pull the heavy ``bda_service`` / ``bda_invocation``
+chain via ``idp_common/bda/__init__.py``). The library module is the canonical,
+unit-tested source; the inlined config/sanitizer helpers must stay behaviorally
+identical to it — a drift guard
+(``tests/test_index.py::test_inlined_helpers_match_library``) asserts they
+produce the same output. If you change one, change the other.
 """
 
 import logging
@@ -24,6 +28,11 @@ import time
 
 import boto3
 import cfnresponse
+from botocore.exceptions import (
+    EndpointConnectionError,
+    NoRegionError,
+    UnknownServiceError,
+)
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -158,8 +167,21 @@ def find_or_create_ocr_project(client, project_name):
 
 
 def delete_ocr_project_by_name(client, project_name):
-    """Best-effort delete by name; never raise (stack deletion must not fail)."""
-    arn = _find_project_arn_by_name(client, project_name)
+    """Best-effort delete by name; never raise (stack deletion must not fail).
+
+    Both the lookup and the delete are guarded: a project we can't find or
+    reach during teardown (including a region where BDA is unavailable) must
+    not block stack deletion.
+    """
+    try:
+        arn = _find_project_arn_by_name(client, project_name)
+    except Exception:
+        logger.warning(
+            "Could not list BDA OCR projects to delete %s; skipping",
+            project_name,
+            exc_info=True,
+        )
+        return None
     if not arn:
         logger.info("BDA OCR project %s not found; nothing to delete", project_name)
         return None
@@ -172,6 +194,34 @@ def delete_ocr_project_by_name(client, project_name):
         return None
 
 
+# Prefix for the custom resource's physical id; the project name follows it.
+_PHYSICAL_ID_PREFIX = "bda-ocr-project/"
+
+# botocore errors that mean "Bedrock Data Automation is not usable in this
+# region/partition" rather than a real, fixable failure. Note this is detected
+# on the first API *call*, not at client construction: botocore happily builds
+# a client (and a synthetic endpoint URL) for a region that has no BDA, and the
+# failure only surfaces when the endpoint can't be reached.
+_BDA_UNAVAILABLE_ERRORS = (EndpointConnectionError, UnknownServiceError, NoRegionError)
+
+
+def _delete_project_name(event):
+    """Resolve the project name to delete from the resource's physical id.
+
+    On Delete (including the delete half of a rename-triggered replacement),
+    the physical id identifies the resource that is actually going away — which
+    may carry the *old* name. Prefer it over recomputing from StackName so a
+    rename deletes the old project, not the new one. Falls back to StackName if
+    the physical id isn't in the expected form (e.g. a legacy resource).
+    """
+    physical_id = event.get("PhysicalResourceId") or ""
+    if physical_id.startswith(_PHYSICAL_ID_PREFIX):
+        return physical_id[len(_PHYSICAL_ID_PREFIX) :]
+    props = event.get("ResourceProperties", {}) or {}
+    stack_name = props.get("StackName") or os.environ.get("STACK_NAME", "")
+    return sanitize_ocr_project_name(stack_name)
+
+
 def handler(event, context):
     logger.info("Event received: %s", event)
     request_type = event.get("RequestType")
@@ -179,32 +229,17 @@ def handler(event, context):
     stack_name = props.get("StackName") or os.environ.get("STACK_NAME", "")
     project_name = sanitize_ocr_project_name(stack_name)
     # Stable physical id keyed on the project name: a name change (stack rename)
-    # is treated by CloudFormation as a replace + delete of the old resource.
-    physical_id = f"bda-ocr-project/{project_name}"
+    # is treated by CloudFormation as a replace, and the old resource's Delete
+    # carries this (old-name) physical id.
+    physical_id = f"{_PHYSICAL_ID_PREFIX}{project_name}"
 
-    try:
-        client = boto3.client("bedrock-data-automation")
-    except Exception:
-        # Bedrock Data Automation is unavailable in this region/partition (e.g.
-        # some GovCloud regions). Degrade gracefully so Textract-only stacks
-        # still deploy; the OCR service errors only if the 'bda' backend is
-        # actually selected here.
-        logger.warning(
-            "bedrock-data-automation client unavailable; returning empty ProjectArn",
-            exc_info=True,
-        )
-        cfnresponse.send(
-            event,
-            context,
-            cfnresponse.SUCCESS,
-            {"ProjectArn": ""},
-            physicalResourceId=physical_id,
-        )
-        return
+    client = boto3.client("bedrock-data-automation")
 
     try:
         if request_type == "Delete":
-            delete_ocr_project_by_name(client, project_name)
+            # Delete the project identified by the physical id (the resource
+            # going away), which may differ from StackName on a rename.
+            delete_ocr_project_by_name(client, _delete_project_name(event))
             cfnresponse.send(
                 event,
                 context,
@@ -223,10 +258,29 @@ def handler(event, context):
             {"ProjectArn": arn},
             physicalResourceId=physical_id,
         )
+    except _BDA_UNAVAILABLE_ERRORS:
+        # Bedrock Data Automation is unavailable in this region/partition (e.g.
+        # some GovCloud regions). Degrade gracefully so Textract-only stacks
+        # still deploy; the OCR service errors only if the 'bda' backend is
+        # actually selected here. This applies to Delete too — a project that
+        # could never be created also never needs deleting.
+        logger.warning(
+            "Bedrock Data Automation unavailable in this region; "
+            "returning empty ProjectArn",
+            exc_info=True,
+        )
+        cfnresponse.send(
+            event,
+            context,
+            cfnresponse.SUCCESS,
+            {"ProjectArn": ""},
+            physicalResourceId=physical_id,
+        )
     except Exception as e:
         logger.error("Error managing BDA OCR project: %s", e, exc_info=True)
-        # On a create/update failure, fail the stack op with a clear reason.
-        # (Delete already returns SUCCESS above and never reaches here.)
+        # A real create/update failure: fail the stack op with a clear reason.
+        # (Delete's own failures are swallowed inside delete_ocr_project_by_name
+        # so teardown is never blocked, and never reach here.)
         cfnresponse.send(
             event,
             context,
