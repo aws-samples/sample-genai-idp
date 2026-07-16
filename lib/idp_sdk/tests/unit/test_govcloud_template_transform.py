@@ -364,9 +364,7 @@ def test_real_template_passes_govcloud_region_cfn_lint():
 
     result = GovCloudTemplateTransformer().apply_transforms(template)
 
-    with tempfile.NamedTemporaryFile(
-        "w", suffix=".yaml", delete=False
-    ) as fh:
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as fh:
         yaml.safe_dump(result, fh)
         out_path = fh.name
 
@@ -388,7 +386,6 @@ def test_real_template_passes_govcloud_region_cfn_lint():
         "GovCloud-unsupported resource type(s) survived the transform "
         "(cfn-lint E3006). Add them to a strip set in template_transform.py: "
         + "; ".join(
-            f"{f.get('Location', {}).get('Path')}: {f.get('Message')}"
-            for f in e3006
+            f"{f.get('Location', {}).get('Path')}: {f.get('Message')}" for f in e3006
         )
     )
