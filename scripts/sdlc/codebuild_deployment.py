@@ -14,6 +14,7 @@ import sys
 import tempfile
 import threading
 import time
+from collections import namedtuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from textwrap import dedent
@@ -1310,6 +1311,13 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
             (func, f"{step}: {name}") for func, step, name, _ in PARALLEL_TEST_STEPS
         ]
 
+        # Per-step status for the consolidated end-of-run summary table. Steps
+        # not reached (fail-fast cancels the rest) stay "cancelled".
+        step_results = {
+            f"{step}: {name}": {"status": "cancelled", "error": ""}
+            for _, step, name, _ in ALL_TEST_STEPS
+        }
+
         failed_test = None
         # No `with` block: its shutdown(wait=True) would join still-running
         # test threads on failure, burning the CodeBuild job timeout before
@@ -1326,14 +1334,16 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
                 result = future.result()
                 if result["success"]:
                     print(f"✅ {test_name} passed")
+                    step_results[test_name] = {"status": "passed", "error": ""}
                 else:
-                    print(
-                        f"❌ {test_name} failed: {result.get('error', 'Unknown error')}"
-                    )
+                    err = result.get("error", "Unknown error")
+                    print(f"❌ {test_name} failed: {err}")
+                    step_results[test_name] = {"status": "failed", "error": err}
                     failed_test = (test_name, result)
                     break
             except Exception as e:
                 print(f"❌ {test_name} exception: {e}")
+                step_results[test_name] = {"status": "failed", "error": str(e)}
                 failed_test = (test_name, {"success": False, "error": str(e)})
                 break
 
@@ -1355,6 +1365,7 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
                 "success": False,
                 "failure_type": "test",
                 "error": f"{test_name} failed: {result.get('error', 'Unknown error')}",
+                "step_results": step_results,
             }
 
         # Run the sequential steps (test-compare, API RBAC) after parallel tests
@@ -1363,22 +1374,29 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
             print(f"Running {step} ({name}) sequentially...")
             print(f"{'=' * 80}\n")
 
+            key = f"{step}: {name}"
             result = func(stack_name)
             if result["success"]:
                 print(f"✅ {step}: {name} passed")
+                step_results[key] = {"status": "passed", "error": ""}
             else:
-                print(
-                    f"❌ {step}: {name} failed: {result.get('error', 'Unknown error')}"
-                )
+                err = result.get("error", "Unknown error")
+                print(f"❌ {step}: {name} failed: {err}")
+                step_results[key] = {"status": "failed", "error": err}
                 return {
                     "stack_name": stack_name,
                     "success": False,
                     "failure_type": "test",
-                    "error": f"{step}: {name} failed: {result.get('error', 'Unknown error')}",
+                    "error": f"{step}: {name} failed: {err}",
+                    "step_results": step_results,
                 }
 
         print("✅ All tests passed")
-        return {"stack_name": stack_name, "success": True}
+        return {
+            "stack_name": stack_name,
+            "success": True,
+            "step_results": step_results,
+        }
 
     except Exception as e:
         print(f"❌ Testing failed: {e}")
@@ -1859,13 +1877,16 @@ def generate_deployment_summary(result, stack_name, template_url):
     try:
         error_text = result.get("error", "")
 
-        # Case C: success — static summary, no analysis needed
+        # Case C: success — Bedrock writes a short PASS narrative (the user
+        # asked for a Bedrock report on both pass and fail). The deterministic
+        # test list is always included below the narrative, and if Bedrock is
+        # unavailable the except-clause fallback still yields a usable summary.
         if result.get("success"):
             test_lines = "\n".join(
                 f"• Test {i} ({step}): {desc} ✓"
                 for i, (_, step, _, desc) in enumerate(ALL_TEST_STEPS, 1)
             )
-            return dedent(f"""
+            deterministic = dedent(f"""
             🚀 DEPLOYMENT RESULTS
 
             📋 Stack Status: {stack_name} deployed successfully
@@ -1874,6 +1895,44 @@ def generate_deployment_summary(result, stack_name, template_url):
             ✅ All Tests Passed ({len(ALL_TEST_STEPS)} tests):
             {{test_lines}}
             """).format(test_lines=test_lines)
+
+            success_prompt = dedent(f"""
+            An IDP CloudFormation deployment succeeded and ALL post-deployment
+            smoke tests passed. Write a brief, upbeat PASS report.
+
+            Stack Name: {stack_name}
+            Template: {template_url}
+            Tests that passed:
+            {test_lines}
+
+            GROUNDING RULES — follow strictly:
+            • State only what the evidence supports: the deploy succeeded and
+              every listed test passed. Do NOT invent metrics, timings, or
+              coverage claims not present above.
+            • Remind the reader (one bullet) that these are deploy + smoke
+              checks, not exhaustive functional coverage.
+
+            Provide the report in this format:
+
+            🚀 DEPLOYMENT RESULTS — ✅ PASS
+
+            📋 Status: {stack_name} deployed; all {len(ALL_TEST_STEPS)} tests passed
+
+            ✅ What passed:
+            • One concise bullet naming the test areas covered
+            • One bullet noting these are deploy + smoke checks, not full coverage
+
+            Keep each bullet under 75 characters.
+            Respond ONLY with the format above, no other text.
+            """)
+            try:
+                narrative = _invoke_bedrock(success_prompt)
+            except Exception as e:  # noqa: BLE001
+                # Bedrock down / no text block — the deterministic list alone is
+                # a complete, accurate PASS summary.
+                print(f"⚠️ Bedrock PASS narrative unavailable ({e}); using list only")
+                return deterministic
+            return f"{narrative}\n\n{deterministic}"
 
         # Case B: infrastructure failure — the deploy itself failed, so pull
         # CloudFormation events for root cause. failure_type is set where the
@@ -2380,6 +2439,123 @@ def validate_apigw_global_hosting(stack_name):
     return {"success": True, "web_url": web_url}
 
 
+def _stack_outputs(stack_name):
+    """Return the deployed stack's Outputs as a {key: value} dict."""
+    cf = boto3.client("cloudformation")
+    return {
+        o["OutputKey"]: o["OutputValue"]
+        for o in cf.describe_stacks(StackName=stack_name)["Stacks"][0].get(
+            "Outputs", []
+        )
+    }
+
+
+def validate_apigw_private_hosting(stack_name):
+    """Assert the stack serves the Web UI on a PRIVATE REST API (VPC-only).
+
+    ApiGatewayVisibility=PRIVATE + DeployInVPC=true: the REST API is reachable
+    ONLY through the VPC execute-api interface endpoint, so — unlike the GLOBAL
+    probe — we CANNOT HTTP-fetch it from CodeBuild (which is not in the test
+    VPC). Validate structurally:
+      * the REST API "{stack}-api" has endpoint type PRIVATE, and
+      * it carries a resource policy (the private API denies traffic not from
+        its VPCE, so a policy MUST be present).
+    """
+    apig = boto3.client("apigateway")
+    api_name = f"{stack_name}-api"
+    apis = apig.get_rest_apis(limit=500).get("items", [])
+    match = next((a for a in apis if a.get("name") == api_name), None)
+    if not match:
+        return {"success": False, "error": f"REST API {api_name} not found"}
+    types = match.get("endpointConfiguration", {}).get("types", [])
+    if "PRIVATE" not in types:
+        return {
+            "success": False,
+            "error": f"REST API {api_name} endpoint types={types}, expected PRIVATE",
+        }
+    # A PRIVATE REST API must carry a resource policy binding it to the VPCE;
+    # without one it would be unreachable (or, worse, open). get_rest_apis
+    # returns `policy` as an escaped JSON string when set.
+    if not match.get("policy"):
+        return {
+            "success": False,
+            "error": f"PRIVATE REST API {api_name} has no resource policy (VPCE binding)",
+        }
+    print(f"✅ PRIVATE REST API present with resource policy: {api_name} (types={types})")
+    return {"success": True, "api_name": api_name, "endpoint_types": types}
+
+
+def validate_headless_jobs_api(stack_name):
+    """Assert the headless Jobs REST API deployed (EnableHeadless=true + VPC).
+
+    The Jobs API is a PRIVATE API Gateway reachable only inside the test VPC,
+    so — like the PRIVATE hosting probe — CodeBuild can't call it. Validate
+    structurally that the headless deployment stood up:
+      * the stack exposes the ApiGatewayEndpoint output (only present when
+        EnableHeadless=true / the Jobs API + Cognito M2M client deployed), and
+      * that output is an execute-api URL for a real REST API.
+    """
+    outputs = _stack_outputs(stack_name)
+    jobs_url = outputs.get("ApiGatewayEndpoint", "")
+    if not jobs_url:
+        return {
+            "success": False,
+            "error": (
+                "Stack has no ApiGatewayEndpoint output — the headless Jobs API "
+                "did not deploy (EnableHeadless=true expected)"
+            ),
+        }
+    if "execute-api" not in jobs_url:
+        return {
+            "success": False,
+            "error": f"ApiGatewayEndpoint={jobs_url!r} is not an execute-api URL",
+        }
+    # Confirm the underlying REST API actually exists (the output is a !Sub, so
+    # it is always a well-formed string even if the API failed to create).
+    apig = boto3.client("apigateway")
+    api_id = jobs_url.split("//", 1)[-1].split(".", 1)[0]
+    try:
+        api = apig.get_rest_api(restApiId=api_id)
+    except Exception as e:  # noqa: BLE001
+        return {
+            "success": False,
+            "error": f"Jobs API {api_id} from ApiGatewayEndpoint not found: {e}",
+        }
+    print(f"✅ Headless Jobs API deployed: {jobs_url} (restApiId={api.get('id')})")
+    return {"success": True, "jobs_url": jobs_url}
+
+
+def validate_waf_enabled(stack_name):
+    """Assert the WAFv2 IP allow-list WebACL deployed and is associated.
+
+    WAFAllowedIPv4Ranges set to a non-default CIDR creates a REGIONAL WebACL
+    "{stack}-api-acl" (DefaultAction=Block + an allow-list rule) associated with
+    the REST API stage. Validate:
+      * a REGIONAL WebACL named "{stack}-api-acl" exists, and
+      * it is associated with at least one resource (the API stage).
+    """
+    waf = boto3.client("wafv2")
+    acl_name = f"{stack_name}-api-acl"
+    acls = waf.list_web_acls(Scope="REGIONAL", Limit=100).get("WebACLs", [])
+    match = next((a for a in acls if a.get("Name") == acl_name), None)
+    if not match:
+        return {
+            "success": False,
+            "error": f"WAFv2 WebACL {acl_name} not found (WAF not enabled?)",
+        }
+    acl_arn = match["ARN"]
+    resources = waf.list_resources_for_web_acl(
+        WebACLArn=acl_arn, ResourceType="API_GATEWAY"
+    ).get("ResourceArns", [])
+    if not resources:
+        return {
+            "success": False,
+            "error": f"WebACL {acl_name} is not associated with any API Gateway stage",
+        }
+    print(f"✅ WAF WebACL {acl_name} associated with {len(resources)} resource(s)")
+    return {"success": True, "web_acl_arn": acl_arn, "associated": resources}
+
+
 def _capture_cf_events(result, *stack_names):
     """Snapshot CF failure events from candidate stacks before teardown.
 
@@ -2408,46 +2584,219 @@ def _capture_cf_events(result, *stack_names):
     ]
 
 
-def deploy_and_test_apigw_hosting(admin_email, template_url):
-    """Deploy + validate + tear down the APIGateway (GLOBAL, no-VPC) hosting variant.
+# ---------------------------------------------------------------------------
+# Deployment-variant probe framework
+#
+# A "probe" is a self-contained *deploy-a-config-variant + smoke-check-its-
+# distinguishing-feature* unit: it stands up its OWN throwaway IDP stack with a
+# set of extra CloudFormation parameters, runs a validator against the deployed
+# stack, and tears the stack down in a finally — all concurrently with the
+# primary functional suite (Steps 3-12, which run on ONE default-hosting stack).
+#
+# This is a table of Probe(...) rows that a concurrent launcher iterates. Adding
+# a new deployment permutation is one table row + a validator, not a copy-pasted
+# deploy/validate/cleanup function.
+#
+# CONSTRAINTS (learned the hard way — see the VPC-quota incident in
+# scripts/sdlc/docs/CI_TEST_COVERAGE.md):
+#   * Probes are DEPLOY + FEATURE-SMOKE ONLY, not full functional coverage. A
+#     variant can deploy clean yet still have a doc-processing regression that
+#     only the primary suite would catch. Keep that expectation explicit.
+#   * Each concurrent probe deploys a FULL IDP stack (+ IAM role/boundary) at
+#     the same time as the primary suite and any other in-flight pipeline. That
+#     is bounded stack/IAM quota, so fan-out is capped at
+#     DEFAULT_PROBE_MAX_CONCURRENCY.
+#   * VPC-requiring variants (headless, PRIVATE hosting) do NOT create a VPC per
+#     run anymore. A single PERSISTENT test VPC is owned by the pipeline stack
+#     (scripts/sdlc/cfn/codepipeline-s3.yml, CreateTestVpc) and passed to every
+#     run via env vars (IDP_TEST_VPC_ID / IDP_TEST_PRIVATE_SUBNET_IDS /
+#     IDP_TEST_LAMBDA_SG_ID / IDP_TEST_APIGW_VPCE_ID). Probes REFERENCE it
+#     (never mutate/create/destroy it), so VPCs no longer bound probe
+#     concurrency and the 5-VPC quota is never approached. If those env vars are
+#     unset (CreateTestVpc=false), a requires_vpc probe SKIPS itself with a note.
+# ---------------------------------------------------------------------------
 
-    Exercises the S3-proxy REST API Web UI hosting (WebUIHosting=APIGateway,
-    ApiGatewayVisibility=GLOBAL) on every run WITHOUT a VPC. The previous
-    PRIVATE/VPC variant stood up a throwaway VPC per run, which (a) leaked VPCs
-    when Lambda ENIs blocked teardown and (b) consumed 1 of only 5 VPC slots
-    per concurrent run — so N>=5 overlapping pipelines exhausted the quota and
-    rolled back every apigw test. The regional endpoint is internet-reachable,
-    so this variant also does a real HTTP fetch of the UI. The VPC/PRIVATE path
-    is validated out-of-band (manual/local), not in routine CI.
+# name:         human-readable label (summary + AI failure analysis).
+# stack_suffix: appended to the generated stack name (e.g. "apigw" ->
+#               "idp-MMDD-HHMMSS-apigw"); keep short and DNS/CFN-safe.
+# deploy_params: dict of EXTRA CFN parameter key->value merged into the deploy
+#               (PermissionsBoundaryArn is added automatically). VPC params are
+#               NOT listed here — set requires_vpc and they are injected at
+#               runtime from the persistent-test-VPC env vars.
+# validate_fn:  callable(stack_name) -> {"success": bool, ...}; asserts the
+#               variant's distinguishing feature (endpoint type, reachable URL,
+#               API responds, ...). Must not raise for an expected failure —
+#               return {"success": False, "error": ...} instead.
+# requires_vpc: True if the variant needs the persistent test VPC. Its
+#               DeployInVPC/VpcId/PrivateSubnetIds/LambdaSubnetIds/
+#               LambdaSecurityGroupId/ApiGatewayVpcEndpointId params are injected
+#               from env at runtime; the probe skips (not fails) if the VPC env
+#               vars are absent.
+Probe = namedtuple(
+    "Probe",
+    ["name", "stack_suffix", "deploy_params", "validate_fn", "requires_vpc"],
+    defaults=[False],
+)
 
-    Runs concurrently with the primary suite (to overlap the two ~30m stack
-    deploys), on its own thread and independent stack. It opts this thread out
-    of the fail-fast abort machinery so a primary-suite failure's kill sweep
-    cannot terminate this deploy mid-flight.
+# Max concurrent probes. Each probe deploys a FULL IDP stack concurrently with
+# the primary suite's stack AND any other in-flight pipeline. VPCs NO LONGER
+# bound this (a single persistent pipeline-owned test VPC is shared read-only —
+# see the framework header), so the cap only guards bounded stack/IAM quota. Set
+# high enough to run every default probe in parallel; override with
+# IDP_PROBE_MAX_CONCURRENCY.
+DEFAULT_PROBE_MAX_CONCURRENCY = 8
+
+# The probe table. The primary suite (Steps 3-12) still runs separately on ONE
+# default-hosting (CloudFront) stack; these are ADDITIONAL deploy+smoke probes
+# of alternative deployment permutations, each on its own throwaway stack.
+PROBE_VARIANTS = [
+    # No VPC. GLOBAL visibility = regional internet-facing REST API serving the
+    # SPA as an S3 proxy. Asserts REGIONAL endpoint, ApplicationWebURL is the
+    # execute-api /api URL, and a real HTTP GET returns 200.
+    Probe(
+        name="APIGateway hosting (GLOBAL, no VPC)",
+        stack_suffix="apigw",
+        deploy_params={
+            "WebUIHosting": "APIGateway",
+            "ApiGatewayVisibility": "GLOBAL",
+        },
+        validate_fn=validate_apigw_global_hosting,
+    ),
+    # WAFv2 IP allow-list (no VPC). A non-default WAFAllowedIPv4Ranges creates a
+    # REGIONAL WebACL (DefaultAction=Block + allow-list) associated with the API
+    # stage. Structural check (WebACL exists + associated). Uses APIGateway
+    # hosting so there is a REST API stage to associate the WebACL with.
+    Probe(
+        name="WAF-enabled (IP allow-list, no VPC)",
+        stack_suffix="waf",
+        deploy_params={
+            "WebUIHosting": "APIGateway",
+            "ApiGatewayVisibility": "GLOBAL",
+            # Any non-default CIDR turns WAF on; 10.0.0.0/8 is arbitrary.
+            "WAFAllowedIPv4Ranges": "10.0.0.0/8",
+        },
+        validate_fn=validate_waf_enabled,
+    ),
+    # PRIVATE API Gateway hosting (needs the persistent test VPC). The REST API
+    # is VPC-only, so CodeBuild can't fetch it — structural check (endpoint type
+    # PRIVATE + resource policy present). VPC params injected from env.
+    Probe(
+        name="APIGateway hosting (PRIVATE, VPC)",
+        stack_suffix="apigwpriv",
+        deploy_params={
+            "WebUIHosting": "APIGateway",
+            "ApiGatewayVisibility": "PRIVATE",
+        },
+        validate_fn=validate_apigw_private_hosting,
+        requires_vpc=True,
+    ),
+    # Headless Jobs REST API (needs the persistent test VPC). Private API GW +
+    # /jobs Lambdas. Structural check (ApiGatewayEndpoint output + the REST API
+    # exists). VPC params injected from env.
+    Probe(
+        name="Headless Jobs API (VPC)",
+        stack_suffix="headless",
+        deploy_params={"EnableHeadless": "true"},
+        validate_fn=validate_headless_jobs_api,
+        requires_vpc=True,
+    ),
+    # --- Adding a future variant: one row + a validator ----------------------
+    # deploy_params are extra CFN params; validate_fn is a new
+    # callable(stack_name) -> {"success": bool, ...}. Set requires_vpc=True to
+    # get the persistent-test-VPC params injected. Remember: DEPLOY +
+    # FEATURE-SMOKE only, not full functional coverage. Candidates: BYO S3 VPC
+    # endpoint, custom domain, GovCloud (deploy-only where the account allows).
+]
+
+
+def _test_vpc_params():
+    """Resolve the persistent-test-VPC CFN params from env, or None if unset.
+
+    Returns the dict of VPC params a requires_vpc probe must pass, populated
+    from the pipeline-stack env vars (IDP_TEST_VPC_ID / IDP_TEST_PRIVATE_SUBNET_IDS
+    / IDP_TEST_LAMBDA_SG_ID / IDP_TEST_APIGW_VPCE_ID). Returns None when the
+    core ids are absent (CreateTestVpc=false), signalling the caller to SKIP the
+    probe rather than fail it. Subnet lists are passed verbatim as comma-joined
+    values — idp-cli's --parameters parser splits only on commas followed by a
+    `key=`, so an embedded subnet list survives.
+    """
+    vpc_id = os.environ.get("IDP_TEST_VPC_ID", "").strip()
+    subnets = os.environ.get("IDP_TEST_PRIVATE_SUBNET_IDS", "").strip()
+    sg_id = os.environ.get("IDP_TEST_LAMBDA_SG_ID", "").strip()
+    vpce_id = os.environ.get("IDP_TEST_APIGW_VPCE_ID", "").strip()
+    if not (vpc_id and subnets and sg_id and vpce_id):
+        return None
+    return {
+        "DeployInVPC": "true",
+        "VpcId": vpc_id,
+        "PrivateSubnetIds": subnets,
+        "LambdaSubnetIds": subnets,
+        "LambdaSecurityGroupId": sg_id,
+        "ApiGatewayVpcEndpointId": vpce_id,
+    }
+
+
+def deploy_and_test_probe(probe, admin_email, template_url):
+    """Deploy + validate + tear down ONE deployment-variant probe.
+
+    Stands up a throwaway IDP stack with the probe's extra CFN params (plus, for
+    requires_vpc probes, the persistent-test-VPC params from env), runs its
+    validator, and ALWAYS tears the stack down (finally). Runs on its own pool
+    thread and opts that thread out of the primary suite's fail-fast abort
+    machinery (_thread_local.never_abort) so a primary failure's kill sweep
+    cannot terminate this independent-stack deploy mid-flight. CF failure events
+    are captured before teardown so the AI summary can name the root cause.
+
+    A requires_vpc probe with no test-VPC env vars configured returns a SKIPPED
+    result (success=True, skipped=True) — it is absent infra, not a failure.
+
+    Returns a result dict shaped like the primary suite's:
+    {"stack_name", "success", "probe", ["error", "failure_type", "skipped", ...]}.
     """
     _thread_local.never_abort = True
-    stack_name = f"{generate_stack_name()}-apigw"
-    result = {"stack_name": stack_name, "success": False}
+
+    # Resolve VPC params up front so a requires_vpc probe skips cleanly (before
+    # creating any IAM/stack) when the persistent test VPC isn't configured.
+    vpc_params = {}
+    if probe.requires_vpc:
+        vpc_params = _test_vpc_params()
+        if vpc_params is None:
+            msg = (
+                f"Probe [{probe.name}] SKIPPED — requires the persistent test "
+                "VPC but IDP_TEST_* env vars are unset (CreateTestVpc=false)"
+            )
+            print(f"⏭️  {msg}")
+            return {
+                "stack_name": f"<{probe.stack_suffix} probe>",
+                "success": True,
+                "skipped": True,
+                "probe": probe.name,
+                "detail": msg,
+            }
+
+    stack_name = f"{generate_stack_name()}-{probe.stack_suffix}"
+    result = {"stack_name": stack_name, "success": False, "probe": probe.name}
     try:
         role_arn, boundary_arn = create_iam_resources(stack_name)
         if not role_arn or not boundary_arn:
-            raise Exception("Failed to create IAM resources for APIGateway test")
+            raise Exception(
+                f"Failed to create IAM resources for probe {probe.name!r}"
+            )
 
-        # No VPC parameters: GLOBAL visibility = regional internet-facing REST
-        # API. idp-cli --parameters takes ONE comma-separated key=value string.
-        params = ",".join(
-            [
-                f"PermissionsBoundaryArn={boundary_arn}",
-                "WebUIHosting=APIGateway",
-                "ApiGatewayVisibility=GLOBAL",
-            ]
-        )
+        # idp-cli --parameters takes ONE comma-separated key=value string.
+        # PermissionsBoundaryArn is always required; the probe's extra params
+        # follow, then any injected VPC params. idp-cli's parser splits only on
+        # commas preceding a `key=`, so the comma-joined subnet list is safe.
+        merged = {**probe.deploy_params, **vpc_params}
+        param_pairs = [f"PermissionsBoundaryArn={boundary_arn}"]
+        param_pairs += [f"{k}={v}" for k, v in merged.items()]
+        params = ",".join(param_pairs)
         cmd = (
             f"idp-cli deploy --stack-name {stack_name} --template-url {template_url} "
             f"--admin-email {admin_email} --wait --role-arn {role_arn} "
             f'--parameters "{params}"'
         )
-        print("APIGateway (GLOBAL, no-VPC) hosting: deploying stack...")
+        print(f"Probe [{probe.name}]: deploying stack {stack_name}...")
         run_command(cmd, timeout=3 * 3600)
 
         status = run_command(
@@ -2460,19 +2809,105 @@ def deploy_and_test_apigw_hosting(admin_email, template_url):
             _capture_cf_events(result, stack_name)
             return result
 
-        validation = validate_apigw_global_hosting(stack_name)
+        validation = probe.validate_fn(stack_name)
         result.update(validation)
         if not validation.get("success"):
             result["failure_type"] = "test"
         return result
     except Exception as e:  # noqa: BLE001
-        print(f"❌ APIGateway hosting test exception: {e}")
+        print(f"❌ Probe [{probe.name}] exception: {e}")
         result["error"] = str(e)
         result["failure_type"] = "deploy"
         _capture_cf_events(result, stack_name)
         return result
     finally:
         cleanup_stack({"stack_name": stack_name})
+
+
+def resolve_probe_concurrency(num_probes):
+    """Resolve the probe fan-out cap from IDP_PROBE_MAX_CONCURRENCY.
+
+    Clamped to [1, num_probes]: never spins up more workers than there are
+    probes, and a malformed/<=0 override falls back to the conservative
+    default rather than deploying an unbounded number of concurrent stacks.
+    """
+    raw = get_env_var(
+        "IDP_PROBE_MAX_CONCURRENCY", str(DEFAULT_PROBE_MAX_CONCURRENCY)
+    )
+    try:
+        cap = int(raw)
+    except (TypeError, ValueError):
+        print(
+            f"⚠️ Invalid IDP_PROBE_MAX_CONCURRENCY={raw!r}; "
+            f"using default {DEFAULT_PROBE_MAX_CONCURRENCY}"
+        )
+        cap = DEFAULT_PROBE_MAX_CONCURRENCY
+    if cap < 1:
+        cap = DEFAULT_PROBE_MAX_CONCURRENCY
+    return max(1, min(cap, num_probes))
+
+
+def run_variant_probes(admin_email, template_url, probes=None):
+    """Run the deployment-variant probes concurrently, capped at the quota budget.
+
+    Intended to run on its OWN supervisor thread so its probe deploys overlap
+    the primary suite's ~30m deploy (the caller in main() submits it to a
+    single-worker executor). Internally it fans out to at most
+    IDP_PROBE_MAX_CONCURRENCY probes at a time — the budget that bounds how many
+    full IDP stacks deploy at once (VPCs no longer bound this: VPC-requiring
+    probes share one persistent pipeline-owned test VPC read-only).
+
+    Each probe deploys/validates/tears-down its own throwaway stack and opts out
+    of fail-fast independently, so one probe failing (or the primary suite
+    failing) never affects the others. Returns a list of per-probe result dicts
+    (order not significant; each carries its own "probe" label; VPC-requiring
+    probes with no test VPC configured come back skipped=True).
+    """
+    probes = PROBE_VARIANTS if probes is None else probes
+    if not probes:
+        print("ℹ️ No deployment-variant probes configured")
+        return []
+
+    cap = resolve_probe_concurrency(len(probes))
+    print(
+        f"🚀 Launching {len(probes)} deployment-variant probe(s) "
+        f"(max {cap} concurrent) alongside the primary suite..."
+    )
+    for p in probes:
+        print(f"   • {p.name} (stack suffix -{p.stack_suffix})")
+
+    results = []
+    # No `with`: match the primary suite's pattern — shutdown(wait=True) in a
+    # finally, never an implicit join that could burn the job timeout.
+    executor = ThreadPoolExecutor(max_workers=cap)
+    try:
+        futures = {
+            executor.submit(
+                deploy_and_test_probe, probe, admin_email, template_url
+            ): probe
+            for probe in probes
+        }
+        for future in as_completed(futures):
+            probe = futures[future]
+            try:
+                results.append(future.result())
+            except Exception as e:  # noqa: BLE001
+                # deploy_and_test_probe already catches its own exceptions, so
+                # this is a last-resort guard (e.g. the thread died) — record a
+                # failure rather than losing the probe from the summary.
+                print(f"❌ Probe [{probe.name}] supervisor exception: {e}")
+                results.append(
+                    {
+                        "stack_name": f"<{probe.stack_suffix} probe>",
+                        "success": False,
+                        "error": str(e),
+                        "failure_type": "deploy",
+                        "probe": probe.name,
+                    }
+                )
+    finally:
+        executor.shutdown(wait=True)
+    return results
 
 
 def publish_summary_to_s3(summary_text):
@@ -2495,6 +2930,93 @@ def publish_summary_to_s3(summary_text):
         print(f"📁 Summary uploaded to s3://{bucket}/{key}")
     except Exception as e:  # noqa: BLE001
         print(f"⚠️ Failed to upload summary to S3: {e}")
+
+
+def build_consolidated_summary(
+    stack_name, primary_result, probe_results, publish_success
+):
+    """Build the deterministic end-of-run status table for EVERY test.
+
+    Independent of Bedrock — this ALWAYS renders (the GitLab log needs a
+    reliable "here is every test and its status" view even when Bedrock is
+    unavailable). Covers the publish step, the primary suite's per-step results
+    (from result["step_results"]), and each deployment-variant probe. The
+    Bedrock pass/fail narrative is layered on top of this, not instead of it.
+
+    Returns the summary text; the caller prints and uploads it.
+    """
+    lines = []
+    overall_ok = True
+
+    def row(status, label, detail=""):
+        icon = {
+            "passed": "✅",
+            "failed": "❌",
+            "skipped": "⏭️",
+            "cancelled": "⚪",
+        }.get(status, "❓")
+        text = f"  {icon} {label}"
+        if detail:
+            # Keep the table readable — trim long errors.
+            text += f" — {detail[:120]}"
+        return text
+
+    # Publish / build
+    lines.append("📦 Build & Publish")
+    if publish_success:
+        lines.append(row("passed", "Publish templates to S3"))
+    else:
+        lines.append(row("failed", "Publish templates to S3"))
+        overall_ok = False
+
+    # Primary shared-stack suite (Steps 3-12)
+    lines.append("")
+    lines.append(f"🧪 Primary suite (shared stack {stack_name})")
+    if not publish_success:
+        lines.append(row("cancelled", "Not run (publish failed)"))
+    else:
+        step_results = (primary_result or {}).get("step_results")
+        if step_results:
+            for label, info in step_results.items():
+                lines.append(row(info["status"], label, info.get("error", "")))
+                if info["status"] == "failed":
+                    overall_ok = False
+        else:
+            # Deploy failed before any step ran (or an exception result dict
+            # with no step_results) — reflect the primary result directly.
+            if (primary_result or {}).get("success"):
+                lines.append(row("passed", "All steps passed"))
+            else:
+                lines.append(
+                    row(
+                        "failed",
+                        "Deployment/health check",
+                        (primary_result or {}).get("error", "Unknown error"),
+                    )
+                )
+                overall_ok = False
+
+    # Deployment-variant probes
+    lines.append("")
+    lines.append("🔬 Deployment-variant probes")
+    if not probe_results:
+        lines.append(row("cancelled", "None run"))
+    else:
+        for pr in probe_results:
+            name = pr.get("probe", "probe")
+            if pr.get("skipped"):
+                lines.append(row("skipped", name, pr.get("detail", "")))
+            elif pr.get("success"):
+                lines.append(row("passed", name))
+            else:
+                lines.append(row("failed", name, pr.get("error", "Unknown error")))
+                overall_ok = False
+
+    header = "🎉 OVERALL: PASS" if overall_ok else "💥 OVERALL: FAIL"
+    banner = "=" * 72
+    return "\n".join(
+        [banner, "CONSOLIDATED TEST SUMMARY", banner, "", *lines, "", header, banner]
+    )
 
 
 def send_failure_notification(subject, summary_text):
@@ -2533,6 +3055,10 @@ def main():
     ai_summary = ""
     publish_success = False
     stack_success = False
+    # Primary-suite + probe results, initialized so the consolidated summary
+    # renders even if publish fails before either runs.
+    result = None
+    probe_results = []
     # One-line root cause carried onto the final 🎉/💥 line so the job result
     # is actionable even if the AI summary generation itself breaks.
     failure_reason = ""
@@ -2554,28 +3080,32 @@ def main():
         ai_summary = generate_publish_failure_summary(str(e))
 
     if publish_success:
-        # Step 2: Launch the APIGW hosting test (GLOBAL, no VPC) on its OWN
-        # thread FIRST so its ~30m stack deploy overlaps the primary suite's
-        # ~30m deploy instead of running after it (~30m wall-clock saved). It
-        # uses an independent throwaway stack and opts out of the fail-fast
-        # abort machinery, so the two are fully isolated. Gated by
-        # IDP_TEST_APIGW_HOSTING (default on).
-        apigw_enabled = (
+        # Step 2: Launch the deployment-variant probes on their OWN supervisor
+        # thread FIRST so their ~30m stack deploys overlap the primary suite's
+        # ~30m deploy instead of running after it (~30m wall-clock saved). Each
+        # probe uses an independent throwaway stack and opts out of the fail-
+        # fast abort machinery, so probes and the primary suite are fully
+        # isolated. The supervisor internally caps concurrent probes at the
+        # quota budget (IDP_PROBE_MAX_CONCURRENCY). Gated by
+        # IDP_TEST_APIGW_HOSTING (default on) — the historical env name is kept
+        # for backward compatibility since the GLOBAL APIGW probe is the only
+        # default row.
+        probes_enabled = (
             get_env_var("IDP_TEST_APIGW_HOSTING", "true").lower() == "true"
         )
-        apigw_future = None
-        apigw_executor = None
-        if apigw_enabled:
+        probes_future = None
+        probes_executor = None
+        if probes_enabled:
             print(
-                "\n🚀 Launching API Gateway hosting test (GLOBAL, no VPC) "
-                "concurrently with the primary suite...\n"
+                "\n🚀 Launching deployment-variant probes concurrently with "
+                "the primary suite...\n"
             )
-            apigw_executor = ThreadPoolExecutor(max_workers=1)
-            apigw_future = apigw_executor.submit(
-                deploy_and_test_apigw_hosting, admin_email, template_url
+            probes_executor = ThreadPoolExecutor(max_workers=1)
+            probes_future = probes_executor.submit(
+                run_variant_probes, admin_email, template_url
             )
         else:
-            print("ℹ️ Skipping API Gateway hosting test (disabled)")
+            print("ℹ️ Skipping deployment-variant probes (disabled)")
 
         # Step 2b: Deploy + test the primary shared stack (runs concurrently
         # with the APIGW thread above).
@@ -2607,54 +3137,76 @@ def main():
         # stack in its finally block).
         cleanup_stack(result)
 
-        # Step 4b: Join the concurrent APIGW hosting test and fold in its
-        # result. A failure here marks the overall run failed but does not
-        # affect the already-completed primary suite result.
-        if apigw_future is not None:
+        # Step 4b: Join the concurrent deployment-variant probes and fold in
+        # their results. A probe failure marks the overall run failed but does
+        # not affect the already-completed primary suite result.
+        if probes_future is not None:
             print(f"\n{'=' * 80}")
-            print("Waiting for API Gateway hosting test (GLOBAL, no VPC)...")
+            print("Waiting for deployment-variant probes...")
             print(f"{'=' * 80}\n")
             try:
-                apigw_result = apigw_future.result()
+                probe_results = probes_future.result()
             except Exception as e:  # noqa: BLE001
-                apigw_result = {
-                    "stack_name": f"{stack_name}-apigw",
-                    "success": False,
-                    "error": str(e),
-                    "failure_type": "deploy",
-                }
+                # run_variant_probes catches per-probe failures itself; this
+                # only fires if the supervisor thread itself died.
+                print(f"❌ Deployment-variant probe supervisor exception: {e}")
+                probe_results = [
+                    {
+                        "stack_name": "<probe supervisor>",
+                        "success": False,
+                        "error": str(e),
+                        "failure_type": "deploy",
+                        "probe": "probe supervisor",
+                    }
+                ]
             finally:
-                apigw_executor.shutdown(wait=True)
-            if apigw_result.get("success"):
-                print("✅ API Gateway hosting test passed")
-            else:
+                probes_executor.shutdown(wait=True)
+
+            for probe_result in probe_results:
+                probe_name = probe_result.get("probe", "deployment-variant probe")
+                if probe_result.get("skipped"):
+                    print(f"⏭️  Probe [{probe_name}] skipped: {probe_result.get('detail', '')}")
+                    continue
+                if probe_result.get("success"):
+                    print(f"✅ Probe [{probe_name}] passed")
+                    continue
                 stack_success = False
-                apigw_error = apigw_result.get("error", "Unknown error")
-                print(f"❌ API Gateway hosting test failed: {apigw_error}")
+                probe_error = probe_result.get("error", "Unknown error")
+                print(f"❌ Probe [{probe_name}] failed: {probe_error}")
                 if not failure_reason:
-                    failure_reason = f"APIGW hosting test failed: {apigw_error}"
+                    failure_reason = f"Probe [{probe_name}] failed: {probe_error}"
                 # The primary summary was generated before this join and may say
-                # "All Tests Passed" — analyze this failure too (its CF events
-                # were captured before the throwaway stack teardown).
+                # "All Tests Passed" — analyze each probe failure too (its CF
+                # events were captured before the throwaway stack teardown).
                 try:
-                    apigw_summary = generate_deployment_summary(
-                        apigw_result,
-                        apigw_result.get("stack_name", f"{stack_name}-apigw"),
+                    probe_summary = generate_deployment_summary(
+                        probe_result,
+                        probe_result.get("stack_name", "<probe stack>"),
                         template_url,
                     )
                 except Exception as e:  # noqa: BLE001
-                    apigw_summary = f"⚠️ Failed to generate APIGW summary: {e}"
+                    probe_summary = f"⚠️ Failed to generate probe summary: {e}"
                 ai_summary = (
                     f"{ai_summary}\n\n"
-                    f"--- API Gateway hosting test (Step 4b) ---\n"
-                    f"{apigw_summary}"
+                    f"--- Deployment-variant probe: {probe_name} (Step 4b) ---\n"
+                    f"{probe_summary}"
                 )
 
-    # Step 5: Print AI analysis results at the end
+    # Step 5: Print the deterministic consolidated status table FIRST (always
+    # renders, Bedrock or not — the GitLab log needs a reliable "every test +
+    # status" view), then the Bedrock pass/fail narrative(s). Both are uploaded
+    # to S3 so the GitLab job can fetch the full report.
+    consolidated = build_consolidated_summary(
+        stack_name, result, probe_results, publish_success
+    )
+    print(f"\n{consolidated}\n")
+
     print("\n🤖 Generating deployment summary with Bedrock...")
+    full_summary = consolidated
     if ai_summary:
         print(ai_summary)
-        publish_summary_to_s3(ai_summary)
+        full_summary = f"{consolidated}\n\n{ai_summary}"
+    publish_summary_to_s3(full_summary)
 
     # Check final status after all cleanups are done. Use os._exit so the
     # concurrent.futures atexit hook doesn't block on abandoned test threads
@@ -2668,7 +3220,7 @@ def main():
         send_failure_notification(
             f"IDP CI failure: {stack_name}",
             f"Stack: {stack_name}\nRoot cause: {failure_reason or 'unknown'}\n\n"
-            f"{ai_summary or 'No AI summary available.'}",
+            f"{full_summary or 'No summary available.'}",
         )
         exit_code = 1
     sys.stdout.flush()
