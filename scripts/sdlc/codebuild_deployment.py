@@ -2465,6 +2465,127 @@ def cleanup_stale_idp_stacks():
         print(f"⚠️ Stale idp- stack cleanup failed: {e}")
 
 
+# Reap idp- test buckets older than this. Same rationale as the stack reaper:
+# a run's `idp-cli delete` deletes its buckets, but if interrupted (creds
+# expire mid-teardown), buckets with content survive — CloudFormation skips
+# non-empty buckets, so the stack reaper above can't remove them. Thousands can
+# accumulate. Age-gated + protected against any prefix with a live stack so a
+# concurrent pipeline's in-flight buckets are never touched.
+IDP_BUCKET_STALE_AGE_SECONDS = 6 * 3600  # 6h
+
+# idp- run-prefix: "idp-MMDD-HHMMSS". A bucket name is
+# "idp-MMDD-HHMMSS[-suffix]-<role>bucket-<rand>"; we group by this prefix so a
+# bucket is protected iff its RUN still has any CloudFormation stack.
+_IDP_RUN_PREFIX_RE = re.compile(r"^(idp-\d{4}-\d{6})")
+
+
+def _live_idp_run_prefixes():
+    """Run-prefixes (idp-MMDD-HHMMSS) that still have ANY CloudFormation stack.
+
+    A bucket whose run-prefix is in this set belongs to a run that isn't fully
+    torn down (possibly in-flight), so it must NOT be reaped. Includes stacks in
+    every non-terminal and terminal-but-present state.
+    """
+    prefixes = set()
+    cf = boto3.client("cloudformation")
+    paginator = cf.get_paginator("list_stacks")
+    # All statuses EXCEPT DELETE_COMPLETE (a completed delete means the stack is
+    # gone, so its buckets — if any survived — are fair game).
+    statuses = [
+        "CREATE_IN_PROGRESS",
+        "CREATE_FAILED",
+        "CREATE_COMPLETE",
+        "ROLLBACK_IN_PROGRESS",
+        "ROLLBACK_FAILED",
+        "ROLLBACK_COMPLETE",
+        "DELETE_IN_PROGRESS",
+        "DELETE_FAILED",
+        "UPDATE_IN_PROGRESS",
+        "UPDATE_COMPLETE_CLEANUP_IN_PROGRESS",
+        "UPDATE_COMPLETE",
+        "UPDATE_FAILED",
+        "UPDATE_ROLLBACK_IN_PROGRESS",
+        "UPDATE_ROLLBACK_FAILED",
+        "UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS",
+        "UPDATE_ROLLBACK_COMPLETE",
+        "REVIEW_IN_PROGRESS",
+        "IMPORT_IN_PROGRESS",
+        "IMPORT_COMPLETE",
+        "IMPORT_ROLLBACK_IN_PROGRESS",
+        "IMPORT_ROLLBACK_FAILED",
+        "IMPORT_ROLLBACK_COMPLETE",
+    ]
+    for page in paginator.paginate(StackStatusFilter=statuses):
+        for s in page.get("StackSummaries", []):
+            name = s.get("StackName", "")
+            m = _IDP_RUN_PREFIX_RE.match(name)
+            if m:
+                prefixes.add(m.group(1))
+    return prefixes
+
+
+def cleanup_stale_idp_buckets():
+    """Reap OLD leftover idp- test S3 buckets whose run is fully torn down.
+
+    Companion to cleanup_stale_idp_stacks: buckets leak independently of stacks
+    because CloudFormation cannot delete a non-empty bucket, so an interrupted
+    `idp-cli delete` leaves the bucket behind even after the stack is gone.
+    Thousands accumulated this way. This converges them back regardless.
+
+    Safety: a bucket is deleted only if BOTH
+      * its run-prefix (idp-MMDD-HHMMSS) has NO surviving CloudFormation stack
+        (so no in-flight/partly-deployed run owns it), AND
+      * it is older than IDP_BUCKET_STALE_AGE_SECONDS (backstop for a brand-new
+        bucket whose stack hasn't registered yet).
+    Best effort — never raises.
+    """
+    print("🧹 Cleaning up stale idp- test buckets (S3 leak guard)...")
+    try:
+        s3 = boto3.client("s3")
+        s3r = boto3.resource("s3")
+        now = datetime.now(tz=timezone.utc)
+        protected = _live_idp_run_prefixes()
+
+        stale, skipped_protected, skipped_young = [], 0, 0
+        for b in s3.list_buckets().get("Buckets", []):
+            name = b.get("Name", "")
+            if not name.startswith("idp-"):
+                continue
+            m = _IDP_RUN_PREFIX_RE.match(name)
+            if m and m.group(1) in protected:
+                skipped_protected += 1
+                continue
+            created = b.get("CreationDate")
+            age = (now - created).total_seconds() if created else None
+            if age is not None and age < IDP_BUCKET_STALE_AGE_SECONDS:
+                skipped_young += 1
+                continue
+            stale.append(name)
+
+        if skipped_protected or skipped_young:
+            print(
+                f"  ({skipped_protected} protected by a live stack, "
+                f"{skipped_young} younger than the age gate — skipped)"
+            )
+        if not stale:
+            print("✅ No stale idp- test buckets to reap")
+            return
+
+        deleted = 0
+        for name in stale:
+            try:
+                # Empty first — versions, delete markers, and objects — then
+                # delete the (now empty) bucket.
+                s3r.Bucket(name).object_versions.delete()
+                s3.delete_bucket(Bucket=name)
+                deleted += 1
+            except Exception as e:  # noqa: BLE001
+                print(f"[{name}] ⚠️ bucket delete failed: {e}")
+        print(f"✅ Reaped {deleted}/{len(stale)} stale idp- test bucket(s)")
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠️ Stale idp- bucket cleanup failed: {e}")
+
+
 def validate_apigw_global_hosting(stack_name):
     """Assert the deployed stack serves the Web UI on a GLOBAL (REGIONAL) REST API.
 
@@ -3157,6 +3278,10 @@ def main():
     cleanup_stale_bda_blueprints()
     cleanup_stale_apigw_test_vpcs()
     cleanup_stale_idp_stacks()
+    # Buckets last: a stack the reaper above just deleted frees its buckets for
+    # reaping here (CloudFormation can't delete a non-empty bucket, so they'd
+    # otherwise leak — thousands accumulated this way).
+    cleanup_stale_idp_buckets()
 
     # Step 1: Publish templates to S3
     try:
