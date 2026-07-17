@@ -162,15 +162,16 @@ See notebook [Bedrock Client Prompt Cache Testing Notebook](../../../../notebook
 
 ## OpenAI GPT-5.x Models (bedrock-mantle Responses API)
 
-OpenAI's frontier models — **GPT-5.4** (`openai.gpt-5.4`) and **GPT-5.5**
-(`openai.gpt-5.5`) — are **not** served on the Converse API like every other
-model. They are available only on the **`bedrock-mantle` endpoint via the OpenAI
-Responses API**. The client hides this difference: when a model ID starts with
-`openai.gpt-5`, `invoke_model` transparently routes the request to a
-SigV4-signed HTTP call against `bedrock-mantle` (implemented in
-[`openai_responses.py`](openai_responses.py)) and returns the **same
-`{"response", "metering"}` structure** every caller already expects — so no
-caller code changes.
+OpenAI's frontier models — **GPT-5.4** (`openai.gpt-5.4`), **GPT-5.5**
+(`openai.gpt-5.5`), and the **GPT-5.6** family (`openai.gpt-5.6-sol`,
+`openai.gpt-5.6-terra`, `openai.gpt-5.6-luna`) — are **not** served on the
+Converse API like every other model. They are available only on the
+**`bedrock-mantle` endpoint via the OpenAI Responses API**. The client hides
+this difference: when a model ID starts with `openai.gpt-5`, `invoke_model`
+transparently routes the request to a SigV4-signed HTTP call against
+`bedrock-mantle` (implemented in [`openai_responses.py`](openai_responses.py))
+and returns the **same `{"response", "metering"}` structure** every caller
+already expects — so no caller code changes.
 
 ```python
 from idp_common.bedrock import invoke_model
@@ -195,11 +196,20 @@ text = response["response"]["output"]["message"]["content"][0]["text"]
 - **Input modalities**: text and images only. Converse `document` blocks (e.g.
   whole-PDF input) are **not** supported and are dropped — callers needing PDF
   ingestion (Discovery) must use a Claude/Nova model.
-- **Prompt caching**: not supported; `<<CACHEPOINT>>` markers are stripped.
+- **Prompt caching**: differs by generation. GPT-5.4/5.5 cache **automatically**
+  (any prefix > ~1,024 tokens; `<<CACHEPOINT>>` markers are stripped). GPT-5.6
+  caches **explicitly** — a `<<CACHEPOINT>>` marker (or `cachePoint` block) is
+  translated into `prompt_cache_options`/`prompt_cache_breakpoint` with a
+  deterministic `prompt_cache_key` derived from the cached prefix. Cache reads
+  and (5.6-only) cache writes are metered via `cacheReadInputTokens` /
+  `cacheWriteInputTokens`. Note: this is separate from `CACHEPOINT_SUPPORTED_MODELS`,
+  which governs the Converse path only.
 - **Service tiers**: standard only (no `:priority`/`:flex`).
-- **Regions**: US only — GPT-5.5 in `us-east-2`; GPT-5.4 in `us-east-2`,
-  `us-west-2`, `us-gov-west-1`. No EU/global. When the configured region lacks
-  the model, the request is routed to a known-available region (override with
+- **Regions**: US only. GPT-5.4 in `us-east-1`, `us-east-2`, `us-west-2`,
+  `us-gov-west-1`; GPT-5.5 in `us-east-1`, `us-east-2`; GPT-5.6 Sol in
+  `us-east-1`, `us-east-2`; GPT-5.6 Terra/Luna add `us-west-2`. No EU/global;
+  GovCloud is GPT-5.4 only. When the configured region lacks the model, the
+  request is routed to a known-available region (override with
   `BEDROCK_MANTLE_REGION`).
 - **Agentic extraction / Discovery**: not supported (the Strands path and
   Discovery's PDF document blocks are incompatible); these are rejected by

@@ -52,6 +52,15 @@ class TestModelDetection:
     def test_detects_future_gpt_5_variant(self):
         assert oar.is_openai_responses_model("openai.gpt-5.6") is True
 
+    def test_detects_gpt_5_6_sol(self):
+        assert oar.is_openai_responses_model("openai.gpt-5.6-sol") is True
+
+    def test_detects_gpt_5_6_terra(self):
+        assert oar.is_openai_responses_model("openai.gpt-5.6-terra") is True
+
+    def test_detects_gpt_5_6_luna(self):
+        assert oar.is_openai_responses_model("openai.gpt-5.6-luna") is True
+
     def test_rejects_claude(self):
         assert oar.is_openai_responses_model("us.anthropic.claude-opus-4-8") is False
 
@@ -74,14 +83,30 @@ class TestRegionResolution:
 
     def test_falls_back_for_gpt_5_5(self, monkeypatch):
         monkeypatch.delenv("BEDROCK_MANTLE_REGION", raising=False)
-        # gpt-5.5 only in us-east-2
-        assert oar.resolve_mantle_region("openai.gpt-5.5", "us-east-1") == "us-east-2"
+        # gpt-5.5 is in us-east-1/us-east-2; an unavailable region falls back to
+        # the per-model default (us-east-1).
+        assert oar.resolve_mantle_region("openai.gpt-5.5", "eu-west-1") == "us-east-1"
 
     def test_falls_back_to_gov_region(self, monkeypatch):
         monkeypatch.delenv("BEDROCK_MANTLE_REGION", raising=False)
         assert (
             oar.resolve_mantle_region("openai.gpt-5.4", "us-gov-east-1")
             == "us-gov-west-1"
+        )
+
+    def test_gpt_5_6_terra_available_in_us_west_2(self, monkeypatch):
+        monkeypatch.delenv("BEDROCK_MANTLE_REGION", raising=False)
+        assert (
+            oar.resolve_mantle_region("openai.gpt-5.6-terra", "us-west-2")
+            == "us-west-2"
+        )
+
+    def test_gpt_5_6_sol_not_in_us_west_2_falls_back(self, monkeypatch):
+        monkeypatch.delenv("BEDROCK_MANTLE_REGION", raising=False)
+        # Sol is only in us-east-1/us-east-2; us-west-2 is not available for it.
+        assert (
+            oar.resolve_mantle_region("openai.gpt-5.6-sol", "us-west-2")
+            == "us-east-1"
         )
 
 
@@ -135,6 +160,76 @@ class TestRequestTranslation:
         items = body["input"][0]["content"]
         assert all("cachePoint" not in str(i) for i in items)
         assert len(items) == 1
+
+    def test_gpt_5_6_cachepoint_marker_emits_explicit_breakpoint(self):
+        body = oar.build_responses_request(
+            system_prompt="You are helpful",
+            content=[
+                {"text": "static instructions <<CACHEPOINT>>"},
+                {"text": "dynamic question"},
+            ],
+            max_tokens=100,
+            model_id="openai.gpt-5.6-sol",
+        )
+        assert body["prompt_cache_options"] == {"mode": "explicit"}
+        assert body["prompt_cache_key"].startswith("idp:")
+        items = body["input"][0]["content"]
+        # Marker stripped from the text, breakpoint attached to the first block.
+        assert "<<CACHEPOINT>>" not in items[0]["text"]
+        assert items[0]["prompt_cache_breakpoint"] == {"mode": "explicit"}
+        # The second (dynamic) block carries no breakpoint.
+        assert "prompt_cache_breakpoint" not in items[1]
+
+    def test_gpt_5_6_cachepoint_block_emits_explicit_breakpoint(self):
+        body = oar.build_responses_request(
+            system_prompt="sys",
+            content=[{"text": "prefix"}, {"cachePoint": {"type": "default"}}],
+            max_tokens=100,
+            model_id="openai.gpt-5.6-terra",
+        )
+        items = body["input"][0]["content"]
+        assert len(items) == 1  # cachePoint block itself is not emitted
+        assert items[0]["prompt_cache_breakpoint"] == {"mode": "explicit"}
+        assert body["prompt_cache_options"] == {"mode": "explicit"}
+
+    def test_gpt_5_5_does_not_emit_explicit_cache_fields(self):
+        body = oar.build_responses_request(
+            system_prompt="sys",
+            content=[{"text": "prefix <<CACHEPOINT>>"}, {"text": "rest"}],
+            max_tokens=100,
+            model_id="openai.gpt-5.5",
+        )
+        # 5.5 caches automatically: no explicit fields, marker stripped.
+        assert "prompt_cache_options" not in body
+        assert "prompt_cache_key" not in body
+        items = body["input"][0]["content"]
+        assert "<<CACHEPOINT>>" not in items[0]["text"]
+        assert all("prompt_cache_breakpoint" not in i for i in items)
+
+    def test_gpt_5_6_no_marker_no_cache_fields(self):
+        body = oar.build_responses_request(
+            system_prompt="sys",
+            content=[{"text": "no marker here"}],
+            max_tokens=100,
+            model_id="openai.gpt-5.6-luna",
+        )
+        assert "prompt_cache_options" not in body
+        assert "prompt_cache_key" not in body
+
+    def test_cache_key_stable_for_identical_prefix_and_differs_otherwise(self):
+        def key_for(prefix_text, model="openai.gpt-5.6-sol", system="sys"):
+            body = oar.build_responses_request(
+                system_prompt=system,
+                content=[{"text": f"{prefix_text} <<CACHEPOINT>>"}, {"text": "q"}],
+                max_tokens=100,
+                model_id=model,
+            )
+            return body["prompt_cache_key"]
+
+        assert key_for("same prefix") == key_for("same prefix")
+        assert key_for("prefix A") != key_for("prefix B")
+        # Different system prompt → different key.
+        assert key_for("p", system="sys1") != key_for("p", system="sys2")
 
     def test_reasoning_effort_passed_through(self):
         body = oar.build_responses_request(
@@ -201,6 +296,26 @@ class TestResponseTranslation:
 
     def test_reasoning_tokens_helper(self):
         assert oar._reasoning_tokens(_SAMPLE_RESPONSE) == 12
+
+    def test_map_usage_reports_cache_write_tokens_when_present(self):
+        payload = {
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 40,
+                "total_tokens": 140,
+                "input_tokens_details": {
+                    "cached_tokens": 25,
+                    "cache_creation_tokens": 60,
+                },
+            }
+        }
+        usage = oar._map_usage(payload)
+        assert usage["cacheReadInputTokens"] == 25
+        assert usage["cacheWriteInputTokens"] == 60
+
+    def test_map_usage_cache_write_defaults_zero(self):
+        usage = oar._map_usage(_SAMPLE_RESPONSE)
+        assert usage["cacheWriteInputTokens"] == 0
 
 
 @pytest.mark.unit

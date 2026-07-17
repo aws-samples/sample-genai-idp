@@ -5,10 +5,13 @@ title: "OpenAI GPT-5.x Models"
 Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 SPDX-License-Identifier: MIT-0
 
-# OpenAI GPT-5.x Models (GPT-5.4 / GPT-5.5)
+# OpenAI GPT-5.x Models (GPT-5.4 / GPT-5.5 / GPT-5.6)
 
-The GenAIIDP accelerator supports OpenAI's frontier models **GPT-5.4**
-(`openai.gpt-5.4`) and **GPT-5.5** (`openai.gpt-5.5`) on Amazon Bedrock.
+The GenAIIDP accelerator supports OpenAI's frontier models on Amazon Bedrock:
+**GPT-5.4** (`openai.gpt-5.4`), **GPT-5.5** (`openai.gpt-5.5`), and the
+**GPT-5.6** family — **Sol** (`openai.gpt-5.6-sol`, flagship reasoning),
+**Terra** (`openai.gpt-5.6-terra`, GPT-5.5-class quality at roughly half the
+cost), and **Luna** (`openai.gpt-5.6-luna`, fastest / lowest cost).
 
 Unlike every other model in the accelerator, these are **not** served on the
 Bedrock Converse / InvokeModel APIs. They are available only on the
@@ -20,26 +23,43 @@ transparently routes the request to a SigV4-signed HTTP call against
 same response/metering shape every service already expects — so no per-service
 code changes are required.
 
-> **TL;DR** — GPT-5.4/5.5 work for **OCR, classification, extraction,
+> **TL;DR** — all GPT-5.x models work for **OCR, classification, extraction,
 > assessment, summarization, evaluation, and Chat-with-Document**. They do
 > **not** work for **agentic extraction**, **Discovery**, or **Policy
-> Discovery**, and are available in **US regions only**. See the support matrix
-> below.
+> Discovery**, and are available in **US regions only**. GPT-5.6 adds prompt
+> caching (see below). See the support matrix below.
 
 ## At a glance
 
-| | GPT-5.4 | GPT-5.5 |
-|---|---|---|
-| Model ID | `openai.gpt-5.4` | `openai.gpt-5.5` |
-| Context window | 272K tokens | 272K tokens |
-| Max output tokens (capped by accelerator) | 128,000 | 128,000 |
-| Endpoint | `bedrock-mantle` (OpenAI Responses API) | `bedrock-mantle` (OpenAI Responses API) |
-| In-Region availability | `us-east-2`, `us-west-2`, `us-gov-west-1` | `us-east-2` |
-| Geo / Global cross-region inference | Not available | Not available |
-| Service tier | Standard only | Standard only |
+| | GPT-5.4 | GPT-5.5 | GPT-5.6 Sol | GPT-5.6 Terra | GPT-5.6 Luna |
+|---|---|---|---|---|---|
+| Model ID | `openai.gpt-5.4` | `openai.gpt-5.5` | `openai.gpt-5.6-sol` | `openai.gpt-5.6-terra` | `openai.gpt-5.6-luna` |
+| Context window | 272K | 272K | 272K | 272K | 272K |
+| Max output tokens (capped by accelerator) | 128,000 | 128,000 | 128,000 | 128,000 | 128,000 |
+| Endpoint | `bedrock-mantle` (Responses API) | ← | ← | ← | ← |
+| In-Region availability | `us-east-1`, `us-east-2`, `us-west-2`, `us-gov-west-1` | `us-east-1`, `us-east-2` | `us-east-1`, `us-east-2` | `us-east-1`, `us-east-2`, `us-west-2` | `us-east-1`, `us-east-2`, `us-west-2` |
+| Geo / Global cross-region inference | Not available | ← | ← | ← | ← |
+| Service tier | Standard only | ← | ← | ← | ← |
+| Prompt caching | Automatic (prefix > 1,024 tokens) | Automatic | **Explicit** breakpoints | **Explicit** | **Explicit** |
+| Price / 1M (in / cache-read / out) | $2.75 / $0.275 / $16.50 | $5.50 / $0.55 / $33.00 | $5.50 / $0.55 / $33.00 | $2.75 / $0.28 / $16.50 | $1.10 / $0.11 / $6.60 |
 
 There are **no** `eu.*` or `global.*` variants and **no** `:1m` context suffix —
-the model IDs carry no region prefix.
+the model IDs carry no region prefix. GPT-5.6 Sol is **not** available in
+`us-west-2` (Terra and Luna are). GovCloud (`us-gov-west-1`) offers GPT-5.4 only.
+
+## Prompt caching
+
+`GPT-5.4`/`GPT-5.5` cache **automatically** — any prompt prefix over ~1,024
+tokens is reused with no request changes, so `<<CACHEPOINT>>` markers are simply
+stripped for these models.
+
+`GPT-5.6` (Sol/Terra/Luna) uses **explicit** caching: place a `<<CACHEPOINT>>`
+marker at the end of the static portion of your prompt and the client translates
+it into the Responses API's `prompt_cache_options` / `prompt_cache_breakpoint`
+fields with a deterministic `prompt_cache_key` derived from the cached prefix.
+Cache reads are billed at a 90% discount; GPT-5.6 also has a (30-minute)
+cache-write price (reflected in `config_library/pricing.yaml`). Both are metered
+via `cacheReadInputTokens` / `cacheWriteInputTokens`.
 
 ## What is supported
 
@@ -65,7 +85,7 @@ the model IDs carry no region prefix.
 | **Discovery** (classes / without- & with-ground-truth / auto-split) | ❌ | Discovery ingests whole PDFs as Converse `document` blocks, which the Responses API cannot accept (text + image only). Rejected by `config-validate` and **guarded at runtime**. |
 | **Policy / Rule Discovery** | ❌ | Same PDF-document-block limitation; agentic rule discovery also uses Strands. Rejected by `config-validate` and guarded at runtime. |
 | PDF `document` input blocks | ❌ | The Responses API accepts text and images only. Pipelines that need whole-PDF ingestion should use a Claude or Nova model. |
-| Prompt caching (`<<CACHEPOINT>>`) | ❌ | Not supported by these models; `<<CACHEPOINT>>` markers are stripped automatically. |
+| Prompt caching (`<<CACHEPOINT>>`) | ✅ (5.6) / auto (5.4/5.5) | GPT-5.6 translates `<<CACHEPOINT>>` into explicit Responses cache breakpoints; GPT-5.4/5.5 cache automatically for prefixes > 1,024 tokens (markers stripped). See [Prompt caching](#prompt-caching). |
 | Service tiers (`:priority` / `:flex`) | ❌ | Standard tier only. |
 | `temperature` / `top_p` / `top_k` | ❌ | These are reasoning models; sampling parameters are ignored. Use `reasoning_effort` instead. |
 | EU / global cross-region inference | ❌ | US (and us-gov) in-region only; hidden in EU-region deployments. |
@@ -107,9 +127,11 @@ extraction:
 
 ## Regional availability and routing
 
-GPT-5.5 is available in `us-east-2` only; GPT-5.4 in `us-east-2`, `us-west-2`,
-and `us-gov-west-1`. There is no EU availability and no geo/global cross-region
-inference.
+GPT-5.4 is available in `us-east-1`, `us-east-2`, `us-west-2`, and
+`us-gov-west-1`; GPT-5.5 in `us-east-1` and `us-east-2`. For GPT-5.6, Sol is in
+`us-east-1` and `us-east-2`; Terra and Luna add `us-west-2`. There is no EU
+availability and no geo/global cross-region inference, and GovCloud offers
+GPT-5.4 only.
 
 If the IDP stack is deployed in a region where the selected model is not
 available, the accelerator routes the `bedrock-mantle` request to a
@@ -137,17 +159,22 @@ cross-account hub role, that role must also grant these `bedrock-mantle` actions
 
 ## Pricing
 
-Pricing for `bedrock/openai.gpt-5.4` and `bedrock/openai.gpt-5.5` is defined in
+Pricing for all `bedrock/openai.gpt-5.*` models is defined in
 `config_library/pricing.yaml` and matches OpenAI first-party rates on Bedrock
-(per 1M tokens):
+(in-region on-demand, per 1M tokens):
 
-| Model | Input | Cached input | Output |
-|---|---|---|---|
-| GPT-5.4 | $2.75 | $0.275 | $16.50 |
-| GPT-5.5 | $5.50 | $0.55 | $33.00 |
+| Model | Input | Cache write (30m) | Cache read | Output |
+|---|---|---|---|---|
+| GPT-5.4 | $2.75 | — | $0.275 | $16.50 |
+| GPT-5.5 | $5.50 | — | $0.55 | $33.00 |
+| GPT-5.6 Sol | $5.50 | $6.88 | $0.55 | $33.00 |
+| GPT-5.6 Terra | $2.75 | $3.44 | $0.28 | $16.50 |
+| GPT-5.6 Luna | $1.10 | $1.38 | $0.11 | $6.60 |
 
-Confirm against the [Amazon Bedrock pricing page](https://aws.amazon.com/bedrock/pricing/)
-if rates change.
+GPT-5.4/5.5 cache automatically and have no cache-write cost. GPT-5.6 caches via
+explicit breakpoints and bills a 30-minute cache-write. Confirm against the
+[Amazon Bedrock pricing page](https://aws.amazon.com/bedrock/pricing/) if rates
+change.
 
 ## Choosing a model
 

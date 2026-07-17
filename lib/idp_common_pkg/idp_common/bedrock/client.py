@@ -604,8 +604,10 @@ class BedrockClient:
         # an OpenAI-compatible REST endpoint. The backend translates the same
         # (system_prompt, content) inputs and returns the identical
         # {"response": ..., "metering": ...} structure, so callers are unaffected.
-        # <<CACHEPOINT>> markers are stripped during translation (prompt caching
-        # is not supported for these models).
+        # Prompt caching is handled inside openai_responses.py: GPT-5.4/5.5 cache
+        # automatically (markers stripped); GPT-5.6 translates <<CACHEPOINT>>
+        # markers into explicit prompt_cache_breakpoint fields. (This is separate
+        # from CACHEPOINT_SUPPORTED_MODELS, which governs the Converse path only.)
         if is_openai_responses_model(model_id):
             return invoke_responses_api(
                 client=self,
