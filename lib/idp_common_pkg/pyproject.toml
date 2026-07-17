@@ -126,9 +126,18 @@ multi_document_discovery = [
   "strands-agents==1.14.0; python_version>='3.10'",  # Agentic schema generation
 ]
 
-# Synthesis / cold-start bootstrap dependencies
+# Synthesis / cold-start bootstrap dependencies. Schema authoring + config /
+# test-set creation only need jsonschema; the document GENERATOR is a separate,
+# heavier extra (see synthesis-generator) so the base capability stays light.
 synthesis = [
   "jsonschema>=4.0.0",
+]
+
+# Optional synthetic-document generator (SEED). Heavy (Strands + Bedrock +
+# rendering); install only where document generation actually runs. The engine
+# adapter imports it lazily and degrades gracefully when absent.
+synthesis-generator = [
+  "seed-data>=0.0.5",
 ]
 
 # Code intelligence module dependencies

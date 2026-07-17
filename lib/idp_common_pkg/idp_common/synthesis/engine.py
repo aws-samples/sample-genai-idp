@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT-0
 
 """
-Runtime-agnostic adapter to the SEED document generator (``doc-gen-agent``).
+Runtime-agnostic adapter to the SEED document generator (``seed-data``).
 
 This module is the SINGLE seam between the accelerator and the standalone
 generator. It is imported lazily (never from ``synthesis/__init__.py``) so that
@@ -25,8 +25,9 @@ Two responsibilities:
    Runtime, or locally.
 
 The generator's import path / entrypoint is intentionally indirected through
-``_import_generator`` so the packaging decision (pip package vs git submodule,
-deferred to the SEED team) is isolated to one place.
+``_import_generator`` so the packaging decision is isolated to one place. The
+generator is the published ``seed-data`` package (module ``seed_data``); we call
+its typed ``Generator`` facade (``seed_data.Generator.generate_batch``).
 """
 
 from __future__ import annotations
@@ -45,7 +46,8 @@ StatusCallback = Callable[[float, str], None]
 # CLI, the agent, and the GraphQL capability field all give the same message.
 INSTALL_HINT = (
     "The synthetic document generator is not installed. Install it with "
-    '`pip install "idp_common[synthesis]"`, or in a deployed stack set the '
+    "`pip install seed-data` (or `idp_common[synthesis-generator]`), or in a "
+    "deployed stack set the "
     "`EnableConfigBootstrap` parameter to true (requires an AgentCore Runtime "
     "in a supported region). Schema authoring and config creation still work "
     "without it; you can also upload your own example documents to build a "
@@ -79,19 +81,25 @@ class SynthesisResult:
 
 
 def _import_generator():
-    """Import the SEED generator entrypoint, or raise ImportError.
+    """Import the SEED generator module, or raise ImportError.
 
-    Indirected so the packaging mechanism is isolated. Tries the pip package
-    name first, then a vendored/submodule fallback module name.
+    Indirected so the packaging mechanism is isolated. The published package is
+    ``seed-data`` (module ``seed_data``); the legacy ``doc_gen_agent`` name is
+    kept as a transitional fallback for older/vendored builds.
     """
     try:
-        import doc_gen_agent  # type: ignore  # noqa: F401
-
-        return doc_gen_agent
+        import seed_data  # type: ignore  # noqa: F401
     except ImportError:
-        import idp_doc_gen_agent as doc_gen_agent  # type: ignore  # noqa: F401
+        import doc_gen_agent as seed_data  # type: ignore  # noqa: F401
 
-        return doc_gen_agent
+    # Require the typed Generator facade (seed-data >= 0.0.5). An older build
+    # that only exposed run_batch would import fine but fail in synthesize(), so
+    # treat a missing Generator as "not available" with actionable guidance.
+    if not hasattr(seed_data, "Generator"):
+        raise ImportError(
+            "Installed generator lacks the 'Generator' API (needs seed-data >= 0.0.5)"
+        )
+    return seed_data
 
 
 def generator_available() -> Tuple[bool, str]:
@@ -120,9 +128,10 @@ def synthesize(
     not installed - callers should check :func:`generator_available` first and
     degrade gracefully rather than relying on this exception.
 
-    Calls the SEED generator's ``run_batch`` (diversity driven by ``job.extra``)
-    and shapes the flat batch output into the IDP test-set ``input/`` +
-    ``baseline/<pdf>/sections/<N>/result.json`` layout under ``job.out_dir``.
+    Calls the SEED generator's ``Generator.generate_batch`` (diversity driven by
+    ``job.extra`` as the scenario) and shapes the batch result into the IDP
+    test-set ``input/`` + ``baseline/<pdf>/sections/<N>/result.json`` layout
+    under ``job.out_dir``.
     """
 
     def _report(pct: float, msg: str) -> None:
@@ -139,26 +148,34 @@ def synthesize(
 
     _report(5.0, f"Starting generation of {job.count} document(s)")
 
-    from doc_gen_agent.batch import run_batch
+    from seed_data import Generator, ModelConfig
 
     batch_out = os.path.join(job.out_dir, "_batch")
-    data_model = job.model_id or "gpt-oss"
-    doc_model = job.model_id or "gpt-oss"
+    # A single model_id override applies to the data + doc agents; the critic and
+    # augmentor keep SEED's defaults. Omitted fields fall back to ModelConfig defaults.
+    model_kwargs = {"data": job.model_id, "doc": job.model_id} if job.model_id else {}
 
-    manifest = run_batch(
-        schema_dir=job.schema_dir,
-        count=job.count,
-        brief=job.extra or "",
-        output_dir=batch_out,
-        data_model=data_model,
-        doc_model=doc_model,
-        critic_model="sonnet",
-        aug_model="gpt-oss",
+    generator = Generator(
+        models=ModelConfig(**model_kwargs),
         threshold=job.threshold,
+        output_dir=batch_out,
         augment=job.augment,
     )
 
-    documents = [d for d in manifest.get("documents", []) if d.get("success")]
+    # SEED fires on_document(index, total, GeneratedDoc) as each result lands;
+    # map it onto our 5-80% progress band.
+    def _on_document(index: int, total: int, _doc: Any) -> None:
+        pct = 5.0 + 75.0 * (index / max(total, 1))
+        _report(pct, f"Generated {index}/{total} document(s)")
+
+    result = generator.generate_batch(
+        job.schema_dir,
+        count=job.count,
+        scenario=job.extra or "",
+        on_document=_on_document,
+    )
+
+    documents = list(result.succeeded)
     succeeded = len(documents)
     _report(80.0, f"Generated {succeeded}/{job.count}; shaping into test-set layout")
 
@@ -180,7 +197,7 @@ def synthesize(
     )
 
 
-def _shape_batch_to_packet(documents: List[Dict[str, Any]], job: SynthesisJob) -> str:
+def _shape_batch_to_packet(documents: List[Any], job: SynthesisJob) -> str:
     import json
     import shutil
 
@@ -190,17 +207,15 @@ def _shape_batch_to_packet(documents: List[Dict[str, Any]], job: SynthesisJob) -
     os.makedirs(input_dir, exist_ok=True)
 
     for idx, doc in enumerate(documents, start=1):
-        src_pdf = doc.get("augmented") or doc.get("pdf")
-        data_json_path = doc.get("data_json")
+        # doc is a seed_data GeneratedDoc: typed attrs, with .data lazily
+        # loading the paired ground-truth label from data_json_path.
+        src_pdf = doc.augmented_path or doc.pdf_path
         if not src_pdf or not os.path.isfile(src_pdf):
             continue
         pdf_name = f"doc_{idx:04d}.pdf"
         shutil.copyfile(src_pdf, os.path.join(input_dir, pdf_name))
 
-        inference_result = {}
-        if data_json_path and os.path.isfile(data_json_path):
-            with open(data_json_path, "r", encoding="utf-8") as fh:
-                inference_result = json.load(fh)
+        inference_result = doc.data or {}
 
         page_indices = _pdf_page_indices(os.path.join(input_dir, pdf_name))
         section = {
