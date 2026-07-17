@@ -543,6 +543,10 @@ Resources:
   BootstrapProcessorFunction:
     Type: AWS::Serverless::Function
     # checkov:skip=CKV_AWS_116: "DLQ handled at the SQS source mapping"
+    # requirements.txt installs ./idp_common_pkg[synthesis] — a copy staged into
+    # this CodeUri by package_agent_source.sh at publish time (the sibling
+    # lib/idp_common_pkg can't be referenced by relative path once SAM copies the
+    # CodeUri to a scratch dir). The staged dir is git-ignored.
     Properties:
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Handler: index.handler
