@@ -110,6 +110,9 @@ export const EXTRACTION_MODEL_OVERRIDE_OPTIONS = [
   // OpenAI GPT-5.x (bedrock-mantle Responses API) - US regions only
   { label: 'openai.gpt-5.4', value: 'openai.gpt-5.4' },
   { label: 'openai.gpt-5.5', value: 'openai.gpt-5.5' },
+  { label: 'openai.gpt-5.6-sol', value: 'openai.gpt-5.6-sol' },
+  { label: 'openai.gpt-5.6-terra', value: 'openai.gpt-5.6-terra' },
+  { label: 'openai.gpt-5.6-luna', value: 'openai.gpt-5.6-luna' },
   { label: 'eu.amazon.nova-lite-v1:0', value: 'eu.amazon.nova-lite-v1:0' },
   { label: 'eu.amazon.nova-pro-v1:0', value: 'eu.amazon.nova-pro-v1:0' },
   { label: 'eu.amazon.nova-2-lite-v1:0', value: 'eu.amazon.nova-2-lite-v1:0' },

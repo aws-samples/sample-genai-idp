@@ -113,7 +113,7 @@ model_limits:
   - pattern: "openai\\.gpt-5"
     max_output_tokens: 128000
     max_input_tokens: 272000
-    description: "OpenAI GPT-5.4 / GPT-5.5 via Bedrock Mantle Responses API (272K context)"
+    description: "OpenAI GPT-5.4 / GPT-5.5 / GPT-5.6 (Sol/Terra/Luna) via Bedrock Mantle Responses API (272K context)"
     reference: "https://docs.aws.amazon.com/bedrock/latest/userguide/model-cards-openai.html"
 
   # ---------------------------------------------------------------------------

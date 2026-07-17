@@ -2691,6 +2691,20 @@ class ConfigurationRecord(BaseModel):
         # Remove the discriminator field - it's only for Pydantic, not DynamoDB
         config_dict.pop("config_type", None)
 
+        # Rollback-safety: omit scalar fields whose value is a "default sentinel"
+        # that an OLDER release's Pydantic model would reject. A stack rollback
+        # reverts the config custom-resource Lambda to the PRIOR release's code
+        # but leaves this (current-shape) record in DynamoDB; the old code then
+        # re-reads it. Two current-shape values are known to break older models:
+        #   - None on a field the old model coerces with a bare int()  -> int(None) TypeError
+        #   - 0   on a field the old model constrains with gt=0         -> ValidationError
+        # Omitting a field that equals its own default is a no-op on read for the
+        # CURRENT model (absent == default), so this is behavior-neutral here while
+        # sparing the reverted old model from values it can't parse. Only None and
+        # integer 0 (the two proven-breaking classes) are stripped; positive
+        # defaults and float 0.0 (e.g. temperature) are preserved untouched.
+        config_dict = self._omit_rollback_hostile_defaults(self.config, config_dict)
+
         # Stringify values (preserve booleans, convert numbers to strings)
         stringified = self._stringify_values(config_dict)
 
@@ -2849,6 +2863,66 @@ class ConfigurationRecord(BaseModel):
                 created_at=item.get("CreatedAt"), updated_at=item.get("UpdatedAt")
             ),
         )
+
+    @staticmethod
+    def _omit_rollback_hostile_defaults(model: Any, dumped: Any) -> Any:
+        """
+        Strip scalar fields whose stored value equals their model default AND is a
+        value that older-release Pydantic models are known to reject on read.
+
+        Walks the live Pydantic ``model`` alongside its ``dumped`` dict (from
+        ``model_dump``) so each field's declared default is known. A scalar is
+        omitted only when ALL of:
+          * its value equals the field's declared default (so removal is a no-op
+            for the current model — absent == default on the next read), and
+          * that value is ``None`` or integer ``0`` (the two classes proven to
+            break prior models: bare ``int(None)`` and ``gt=0`` constraints).
+
+        Booleans (``0``-like but semantically real), float ``0.0`` (e.g.
+        ``temperature``), and any positive default are preserved. Non-model
+        containers (plain dicts/lists with no schema) pass through unchanged,
+        since we can't know a default for them.
+        """
+        from pydantic import BaseModel as _BaseModel
+
+        def _hostile(value: Any) -> bool:
+            if value is None:
+                return True
+            # bool is a subclass of int; never treat True/False as a hostile 0
+            if isinstance(value, bool):
+                return False
+            return isinstance(value, int) and value == 0
+
+        if isinstance(model, _BaseModel) and isinstance(dumped, dict):
+            fields = type(model).model_fields
+            result: Dict[str, Any] = {}
+            for key, value in dumped.items():
+                if key not in fields:
+                    # Unknown/extra key (e.g. hook passthrough) — keep as-is.
+                    result[key] = value
+                    continue
+                child = getattr(model, key, None)
+                if isinstance(child, _BaseModel) or isinstance(value, (dict, list)):
+                    result[key] = ConfigurationRecord._omit_rollback_hostile_defaults(
+                        child, value
+                    )
+                elif value == fields[key].default and _hostile(value):
+                    # Omit: equals default AND is a prior-model-breaking sentinel.
+                    continue
+                else:
+                    result[key] = value
+            return result
+
+        if isinstance(dumped, list):
+            # Lists of sub-models: recurse element-wise when we have the models.
+            if isinstance(model, list) and len(model) == len(dumped):
+                return [
+                    ConfigurationRecord._omit_rollback_hostile_defaults(m, d)
+                    for m, d in zip(model, dumped)
+                ]
+            return dumped
+
+        return dumped
 
     @staticmethod
     def _stringify_values(obj: Any) -> Any:
