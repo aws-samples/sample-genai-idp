@@ -732,6 +732,20 @@ class TestValidateAgenticOpenAI:
         assert "agentic" in result["errors"][0].lower()
         assert "openai.gpt-5.4" in result["errors"][0]
 
+    def test_gpt_5_6_variant_with_agentic_errors(self):
+        """GPT-5.6 suffixed IDs are also rejected for agentic extraction."""
+        config = {
+            "extraction": {
+                "model": "openai.gpt-5.6-terra",
+                "agentic": {"enabled": True},
+            }
+        }
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_agentic_openai(config, result)
+
+        assert result["valid"] is False
+        assert "openai.gpt-5.6-terra" in result["errors"][0]
+
     def test_openai_without_agentic_ok(self):
         """OpenAI model with agentic disabled is fine."""
         config = {
@@ -804,6 +818,17 @@ class TestValidateDiscoveryOpenAI:
         _validate_discovery_openai(config, result)
         assert result["valid"] is False
         assert "discovery.rules.model" in result["errors"][0]
+
+    def test_gpt_5_6_variant_discovery_errors(self):
+        from idp_common.config.merge_utils import _validate_discovery_openai
+
+        config = {
+            "discovery": {"without_ground_truth": {"model_id": "openai.gpt-5.6-luna"}}
+        }
+        result = {"valid": True, "errors": [], "warnings": []}
+        _validate_discovery_openai(config, result)
+        assert result["valid"] is False
+        assert "discovery.without_ground_truth.model_id" in result["errors"][0]
 
     def test_non_openai_discovery_ok(self):
         from idp_common.config.merge_utils import _validate_discovery_openai

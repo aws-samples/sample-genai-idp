@@ -42,8 +42,9 @@ The following Nova 2 Lite models are available with service tier suffixes:
 - `global.amazon.nova-2-lite-v1:0:flex` (Flex tier)
 - `global.amazon.nova-2-lite-v1:0:priority` (Priority tier)
 
-> **Note:** OpenAI GPT-5.x models (`openai.gpt-5.4` / `openai.gpt-5.5`) support
-> the **Standard** tier only — the `:flex` and `:priority` suffixes do not apply.
+> **Note:** OpenAI GPT-5.x models (`openai.gpt-5.4`, `openai.gpt-5.5`, and
+> GPT-5.6 Sol/Terra/Luna) support the **Standard** tier only — the `:flex` and
+> `:priority` suffixes do not apply.
 > See [OpenAI GPT-5.x Models](openai-models.md).
 
 ## Configuration

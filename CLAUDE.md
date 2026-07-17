@@ -466,6 +466,7 @@ that domain:
 | `.claude/skills/live-eval-and-cost.md` | Live benchmark A/B, upgrade testing, reading accuracy/cost/confidence + prompt-cache/model cost facts |
 | `.claude/skills/run-benchmarks.md` | Running the empirical benchmark suite in `benchmarks/` (config × doc-size matrix with exact ground truth; success/completeness/accuracy/calibration/time/tokens/cost) to produce the guidance paper or gate a change vs baseline |
 | `.claude/skills/documentation.md` | Documentation standards, two doc tiers, CHANGELOG, docs-site, and the "adding a Bedrock model" checklist |
+| `.claude/skills/add-model.md` | Adding or changing a selectable Bedrock model (model IDs, regions, limits, pricing, template enums, client routing, UI, both doc tiers, tests) — the full expanded checklist |
 | `.claude/skills/prepare-changelog.md` | Preparing the `[Unreleased]` CHANGELOG section for release — three-section shape (Added/Changed/Fixed), net-since-release entries (drop intra-cycle churn), compact entries with doc/PR links |
 
 > **Note:** `.claude/skills/` is canonical. The Cline assistant's

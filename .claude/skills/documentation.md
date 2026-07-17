@@ -117,6 +117,10 @@ See `CONTRIBUTING.md` for:
 
 ## Checklist: adding (or changing) a Bedrock model
 
+> **See `.claude/skills/add-model.md`** for the full expanded workflow (gather
+> ground truth from the model card first, sibling-grep to find touchpoints,
+> per-file map, validation, common traps). The list below is the quick version.
+
 A new selectable model touches MANY files — it is easy to miss one. Work
 through this list (skip items that genuinely don't apply, and note why):
 
