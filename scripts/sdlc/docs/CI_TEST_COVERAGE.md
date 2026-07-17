@@ -45,10 +45,19 @@ Notes:
 - **Expected runtime**: ~25-35 minutes (vs 60+ minutes sequential)
 
 ### Sequential Execution (Step 12)
-- **Step 12 (API RBAC) runs alone after the parallel pool drains**
+- **Step 12 (API RBAC + security-focused suites) runs alone after the parallel
+  pool drains**
   - **Reason**: Its dynamic harness temporarily flips `ADMIN_USER_PASSWORD_AUTH`
-    on the shared UI app client (a stack-wide auth mutation) and restores it —
-    interleaving with API-hitting parallel tests would corrupt them.
+    on the shared UI app client (a stack-wide auth mutation) and restores it, and
+    its logout suite performs a global sign-out — interleaving with API-hitting
+    parallel tests would corrupt them.
+  - **Coverage**: beyond the role permission matrix, Step 12 runs the mandatory
+    AppSec API security checklist — IDOR (2.1), token expiry/logout (2.3/2.4),
+    deleted-resource (2.5), input validation (3), and TLS (4). See the mapping
+    table in `.claude/skills/api-rbac-test.md`. Input validation runs in
+    **tolerant** mode here (a 5xx on malformed input is WARNed, not failed) until
+    central schema validation lands; set `IDP_SECTEST_STRICT_INPUT=true` to gate
+    on a clean 4xx.
 
 ### Concurrent deployment-variant probes (own stacks)
 - The **deployment-variant probe framework** (below) deploys SECOND,
@@ -767,6 +776,13 @@ but revisit:
       `s3://…/deploy/zap/…`. Requires `PrivilegedMode: true` on `app-sdlc`.
       Complements SRT (static) + RBAC (authorization) with injection/headers/TLS
       coverage. *(feature/zap-dast-ci-probe)*
+- [x] **Mandatory AppSec API security test cases.** Extended the live API harness
+      (`make api-test`, CodeBuild Step 12) with the AppSec checklist suites:
+      IDOR/BOLA (2.1), token expiry + logout revocation (2.3/2.4), deleted-resource
+      inaccessibility (2.5), input validation (3, tolerant→strict), and TLS
+      downgrade/cleartext (4). Implemented in `scripts/api_security_cases.py` with
+      unit tests; threat entries AUTH.T09–T11. The stateless-JWT post-logout reuse
+      is surfaced as a documented gap (GAP-SEC-LOGOUT). *(feature/zap-dast-ci-probe)*
 - [x] `idp_common` `-m "unit"` filter → `-m "not integration"` (recovered ~810
       silently-skipped tests; fixed 28 rotted tests). *(PR #493)*
 - [x] Missing package/Lambda suites added to `developer_tests` via
