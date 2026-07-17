@@ -82,6 +82,10 @@ code_checks:
     - curl -fsSL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-x64.tar.xz | tar -xJ -C /usr/local --strip-components=1
     - npm install -g npm@11.1.0 || { echo "npm upgrade failed"; exit 1; }
     - npm install -g basedpyright
+    # Install UI deps ONCE here (restored from cache when unchanged). The
+    # lint-cicd UI targets run with SKIP_NPM_CI=1 so they reuse this instead of
+    # each doing its own `npm ci` (which previously happened 3× per run).
+    - cd src/ui && npm ci --prefer-offline --no-audit && cd ../..
     - uv pip install ruff
     # Install dependencies needed by publish.py for test imports
     - uv pip install typer rich boto3
@@ -93,7 +97,9 @@ code_checks:
     - cd lib/idp_feature_sdk && uv pip install -e ".[test]" && cd ../..
 
   script:
-    - make lint-cicd
+    # SKIP_NPM_CI=1: UI deps already installed once in before_script, so the UI
+    # lint/build/codegen targets don't each re-run `npm ci`.
+    - make lint-cicd SKIP_NPM_CI=1
     - echo "=== Type Checking Configuration ==="
     - echo "MR target branch:$TARGET_BRANCH"
     - echo "Comparing:$TARGET_BRANCH...HEAD"
@@ -103,7 +109,10 @@ code_checks:
     # Static API RBAC/authorization scan (no AWS needed; catches op/schema/
     # expectations drift and missing server-side group checks).
     - make api-test-static
-    - make test-cicd -C lib/idp_common_pkg
+    # SKIP_INSTALL=1: idp_common[test] already installed via uv above (avoids a
+    # redundant plain-pip resolve that recompiled numpy from source). PYTEST_ARGS
+    # `-n auto` parallelizes the suite across the runner's cores (pytest-xdist).
+    - make test-cicd -C lib/idp_common_pkg SKIP_INSTALL=1 PYTEST_ARGS="-n auto"
     # Package/Lambda suites not covered by idp_common_pkg (idp_cli, idp_sdk,
     # idp_feature_sdk, feature-platform, capacity, circuit-breaker, chat,
     # config_library) — all green headless, previously CI-untested.
