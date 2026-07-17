@@ -1,11 +1,38 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, Box, SpaceBetween, Button, FormField, Input, Textarea, Select, Checkbox, Alert, Tabs } from '@cloudscape-design/components';
 import type { SelectProps } from '@cloudscape-design/components';
 import useSyntheticDataGenerator from '../../hooks/use-synthetic-data-generator';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import { getErrorMessage } from '../../utils/errorUtils';
+
+// Extract the document-class names from a fetched config version. The config
+// dicts arrive as AWSJSON strings; classes live under `.classes[]`, keyed by
+// `$id` / `x-aws-idp-document-type` (same identity the backend uses). The custom
+// (version) config is preferred; fall back to default.
+const _parse = (v: unknown): Record<string, unknown> => {
+  if (typeof v === 'string' && v) {
+    try {
+      return JSON.parse(v) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+  return (v as Record<string, unknown>) || {};
+};
+
+const extractClassNames = (custom: unknown, def: unknown): string[] => {
+  const names = new Set<string>();
+  for (const cfg of [_parse(custom), _parse(def)]) {
+    const classes = (cfg.classes as Array<Record<string, unknown>> | undefined) || [];
+    for (const c of classes) {
+      const id = (c['x-aws-idp-document-type'] || c.$id || c.title || c.name) as string | undefined;
+      if (id) names.add(id);
+    }
+  }
+  return Array.from(names).sort();
+};
 
 interface GenerateSyntheticDataModalProps {
   visible: boolean;
@@ -25,14 +52,19 @@ const MAX_COUNT = 50;
  */
 const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateSyntheticDataModalProps): React.JSX.Element => {
   const { submitting, generateFromPrompt, generateFromConfig } = useSyntheticDataGenerator();
-  const { versions } = useConfigurationVersions();
+  const { versions, fetchVersion } = useConfigurationVersions();
 
   const [activeTab, setActiveTab] = useState<'prompt' | 'config'>('prompt');
   const [prompt, setPrompt] = useState('');
-  const [className, setClassName] = useState('');
+  // Prompt-mode class is free text (no version to derive from). Config-mode
+  // class is chosen from the selected version's classes (a Select).
+  const [promptClassName, setPromptClassName] = useState('');
   const [count, setCount] = useState('5');
   const [augment, setAugment] = useState(false);
   const [selectedVersion, setSelectedVersion] = useState<SelectProps.Option | null>(null);
+  const [selectedClass, setSelectedClass] = useState<SelectProps.Option | null>(null);
+  const [classOptions, setClassOptions] = useState<SelectProps.Option[]>([]);
+  const [classesLoading, setClassesLoading] = useState(false);
   const [error, setError] = useState('');
 
   const versionOptions = useMemo<SelectProps.Option[]>(
@@ -40,18 +72,51 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
     [versions],
   );
 
+  // Load the selected version's document classes to populate the class Select,
+  // so a user picks a valid class rather than typing (and mistyping) one.
+  useEffect(() => {
+    const versionName = selectedVersion?.value;
+    if (!versionName) {
+      setClassOptions([]);
+      setSelectedClass(null);
+      return;
+    }
+    let cancelled = false;
+    setClassesLoading(true);
+    setSelectedClass(null);
+    fetchVersion(versionName)
+      .then((cfg) => {
+        if (cancelled) return;
+        const names = extractClassNames(cfg.custom, cfg.default);
+        setClassOptions(names.map((n) => ({ label: n, value: n })));
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setClassOptions([]);
+          setError(getErrorMessage(err));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setClassesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedVersion, fetchVersion]);
+
   const parsedCount = Number(count);
   const countValid = Number.isInteger(parsedCount) && parsedCount >= MIN_COUNT && parsedCount <= MAX_COUNT;
 
-  const canSubmit =
-    countValid && (activeTab === 'prompt' ? prompt.trim().length > 0 : Boolean(selectedVersion) && className.trim().length > 0);
+  const canSubmit = countValid && (activeTab === 'prompt' ? prompt.trim().length > 0 : Boolean(selectedVersion) && Boolean(selectedClass));
 
   const reset = () => {
     setPrompt('');
-    setClassName('');
+    setPromptClassName('');
     setCount('5');
     setAugment(false);
     setSelectedVersion(null);
+    setSelectedClass(null);
+    setClassOptions([]);
     setError('');
   };
 
@@ -69,13 +134,13 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
         jobId = await generateFromPrompt({
           prompt: prompt.trim(),
           count: parsedCount,
-          className: className.trim() || undefined,
+          className: promptClassName.trim() || undefined,
           augment,
         });
       } else {
         jobId = await generateFromConfig({
           configVersion: selectedVersion?.value as string,
-          className: className.trim(),
+          className: selectedClass?.value as string,
           count: parsedCount,
           augment,
         });
@@ -129,7 +194,7 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
                     />
                   </FormField>
                   <FormField label="Document class name (optional)" description="Defaults to a name inferred from the description.">
-                    <Input value={className} onChange={({ detail }) => setClassName(detail.value)} placeholder="Payslip" />
+                    <Input value={promptClassName} onChange={({ detail }) => setPromptClassName(detail.value)} placeholder="Payslip" />
                   </FormField>
                 </SpaceBetween>
               ),
@@ -149,7 +214,16 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
                     />
                   </FormField>
                   <FormField label="Document class" description="The class within that version to generate.">
-                    <Input value={className} onChange={({ detail }) => setClassName(detail.value)} placeholder="Payslip" />
+                    <Select
+                      selectedOption={selectedClass}
+                      onChange={({ detail }) => setSelectedClass(detail.selectedOption)}
+                      options={classOptions}
+                      disabled={!selectedVersion}
+                      statusType={classesLoading ? 'loading' : 'finished'}
+                      loadingText="Loading classes…"
+                      placeholder={selectedVersion ? 'Select a document class' : 'Select a version first'}
+                      empty="No document classes in this version"
+                    />
                   </FormField>
                 </SpaceBetween>
               ),
