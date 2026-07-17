@@ -243,6 +243,114 @@ def call(api_base, field, args, token):
     return status, et, in_band, request_id
 
 
+def call_body(api_base, field, args, token):
+    """Like call(), but returns (status, response_body_text). Used by the
+    security suites (IDOR / deleted-resource) that must assert on RESPONSE
+    CONTENT — e.g. 'User A's marker must NOT appear in User B's response' —
+    because a status code alone can't distinguish non-disclosure from disclosure
+    (the API returns 200 for many not-found/denied cases)."""
+    body = json.dumps({"arguments": args}).encode()
+    req = urllib.request.Request(
+        f"{api_base}/op/{field}",
+        data=body,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    if token:
+        req.add_header("Authorization", token)
+    try:
+        with urllib.request.urlopen(req) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace")
+    except Exception as e:  # noqa: BLE001
+        return 0, f"<request error: {e}>"
+
+
+def seed_agent_job(ctx, job_id, marker):
+    """Seed an agent job OWNED BY the Admin test user directly in the AgentTable,
+    for the IDOR suite. The getAgentJobStatus resolver keys by
+    PK='agent#<caller-identity>', SK=jobId, where caller-identity is the token's
+    username (email for admin-created users). We write the row under the Admin
+    user's email so ONLY the Admin token can read it back — a foreign caller's
+    identity-derived PK cannot.
+
+    Returns the owner user id (email) on success, or None if the agent table is
+    absent / the write fails (-> suite SKIPs).
+    """
+    table = _agent_table_name(ctx)
+    if not table:
+        return None
+    owner = test_email("Admin")
+    item = {
+        "PK": {"S": f"agent#{owner}"},
+        "SK": {"S": job_id},
+        "jobId": {"S": job_id},
+        "userId": {"S": owner},
+        "status": {"S": "COMPLETED"},
+        # The marker lives in a field the resolver returns, so a leak is visible.
+        "result": {"S": marker},
+    }
+    try:
+        aws(
+            "dynamodb",
+            "put-item",
+            "--table-name",
+            table,
+            "--item",
+            json.dumps(item),
+            region=ctx["region"],
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"  (seed_agent_job failed: {e})")
+        return None
+    ctx.setdefault("_seeded_agent_jobs", []).append((owner, job_id))
+    return owner
+
+
+def _agent_table_name(ctx):
+    """Resolve the AgentTable physical name from the stack (cached on ctx)."""
+    if "_agent_table" in ctx:
+        return ctx["_agent_table"]
+    try:
+        name = aws(
+            "cloudformation",
+            "list-stack-resources",
+            "--stack-name",
+            ctx["stack"],
+            "--query",
+            "StackResourceSummaries[?LogicalResourceId=='AgentTable']"
+            ".PhysicalResourceId",
+            "--output",
+            "text",
+            region=ctx["region"],
+        )
+    except Exception:
+        name = ""
+    ctx["_agent_table"] = name or ""
+    return ctx["_agent_table"]
+
+
+def cleanup_seeded_agent_jobs(ctx):
+    """Delete any agent-job rows seeded by the IDOR suite (best-effort)."""
+    table = ctx.get("_agent_table")
+    for owner, job_id in ctx.get("_seeded_agent_jobs", []):
+        if not table:
+            continue
+        try:
+            aws(
+                "dynamodb",
+                "delete-item",
+                "--table-name",
+                table,
+                "--key",
+                json.dumps({"PK": {"S": f"agent#{owner}"}, "SK": {"S": job_id}}),
+                region=ctx["region"],
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+
 # ----------------------------------------------------------------------------
 # Outcome classification
 # ----------------------------------------------------------------------------
@@ -738,8 +846,17 @@ def main():
         # --- Mandatory security-focused test cases (checklist 2.1-4) ---------
         # These run AFTER the RBAC matrix. The logout test globally signs out a
         # dedicated user (UserB), so it must run last (its token is consumed).
-        sec.run_idor_suite(ctx, call, _record, results, tokens)
-        sec.run_deleted_resource_suite(ctx, call, _record, results, tokens)
+        sec.run_idor_suite(
+            ctx,
+            _record,
+            results,
+            tokens,
+            seed_fn=lambda jid, marker: seed_agent_job(ctx, jid, marker),
+            call_body=call_body,
+        )
+        sec.run_deleted_resource_suite(
+            ctx, call, _record, results, tokens, call_body=call_body
+        )
         strict_input = os.environ.get("IDP_SECTEST_STRICT_INPUT", "").lower() in (
             "1",
             "true",
@@ -775,6 +892,9 @@ def main():
             print("ALL HARD CHECKS PASSED")
         return 1 if hard_fails else 0
     finally:
+        # Always remove any agent-job rows the IDOR suite seeded (independent of
+        # --no-teardown, which only preserves the Cognito users for debugging).
+        cleanup_seeded_agent_jobs(ctx)
         if args.no_teardown:
             print(f"--no-teardown: keeping test users (password: {TEST_PW})")
         else:

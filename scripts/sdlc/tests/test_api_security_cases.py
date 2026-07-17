@@ -82,53 +82,104 @@ def _scripted_call(script):
 
 
 # --------------------------------------------------------------------------- #
-# IDOR (2.1)
+# IDOR (2.1) — content-based (marker must not appear in User B's response)
 # --------------------------------------------------------------------------- #
-def test_idor_denied_when_userb_blocked():
+def _body_call(per_token_bodies):
+    """Fake call_body(api_base, field, args, token) -> (status, body). Bodies are
+    keyed by (field, token) so User A and User B can get different responses for
+    the same jobId."""
+
+    def _cb(api_base, field, args, token):
+        return per_token_bodies.get((field, token), (200, "{}"))
+
+    return _cb
+
+
+def test_idor_no_leak_when_userb_response_lacks_marker():
     rec = _Recorder()
     results = []
-    script = {
-        "sendChatDocumentMessage": [(200, None, None, "r1")],  # A seeds session
-        "getChatMessages": [
-            (403, "Unauthorized", None, "r2"),  # B denied
-            (200, None, None, "r4"),  # A reads own -> allowed
-        ],
-        "deleteChatSession": [(403, "Unauthorized", None, "r3")],  # B delete denied
-    }
+    marker_holder = {}
+
+    def seed(job_id, marker):
+        marker_holder["m"] = marker
+        return "admin@example.invalid"  # owner uid
+
+    # We can't know the marker before seed() runs, so build the body-call to
+    # reference marker_holder lazily.
+    def call_body(api_base, field, args, token):
+        m = marker_holder.get("m", "")
+        if token == "b":  # User B: ownership defense -> no marker (500 not-found)
+            return 500, '{"errors":[{"message":"not found for this user"}]}'
+        if token == "a" and field == "getAgentJobStatus":  # owner sees marker
+            return 200, f'{{"result":"{m}","status":"COMPLETED"}}'
+        return 200, "{}"
+
     sec.run_idor_suite(
-        CTX, _scripted_call(script), rec, results, {"Admin": "a", "userB": "b"}
+        CTX,
+        rec,
+        results,
+        {"Admin": "a", "userB": "b"},
+        seed_fn=seed,
+        call_body=call_body,
     )
-    # B's read is recorded as passed (denied), A's read passed (allowed).
-    b_read = rec.by_principal("userB(reads")[0]
-    assert b_read["passed"] is True
-    a_read = rec.by_principal("userA(reads own")[0]
-    assert a_read["passed"] is True
-    assert all("SEC-2.1-IDOR" in r["detail"] for r in rec.rows)
+    assert rec.by_principal("userB(reads")[0]["passed"] is True  # no disclosure
+    assert rec.by_principal("userA(reads own")[0]["passed"] is True  # owner OK
 
 
-def test_idor_leak_when_userb_reads_as_200_with_data_is_still_ok_only_if_empty():
-    # A 200 to User B counts as pass ONLY under the owner-scoped-empty semantics
-    # documented in the module. This test pins that behavior so a future change
-    # that makes 200 a leak is a conscious decision.
+def test_idor_leak_when_userb_response_contains_marker():
     rec = _Recorder()
     results = []
-    script = {
-        "sendChatDocumentMessage": [(200, None, None, "r1")],
-        "getChatMessages": [(200, None, None, "r2"), (200, None, None, "r4")],
-        "deleteChatSession": [(404, None, None, "r3")],
-    }
+    marker_holder = {}
+
+    def seed(job_id, marker):
+        marker_holder["m"] = marker
+        return "admin@example.invalid"
+
+    def call_body(api_base, field, args, token):
+        m = marker_holder.get("m", "")
+        # BROKEN backend: User B's response leaks A's marker.
+        return 200, f'{{"result":"{m}"}}'
+
     sec.run_idor_suite(
-        CTX, _scripted_call(script), rec, results, {"Admin": "a", "userB": "b"}
+        CTX,
+        rec,
+        results,
+        {"Admin": "a", "userB": "b"},
+        seed_fn=seed,
+        call_body=call_body,
     )
-    assert rec.by_principal("userB(reads")[0]["passed"] is True
+    assert rec.by_principal("userB(reads")[0]["passed"] is False  # LEAK detected
 
 
-def test_idor_skips_without_second_user():
+def test_idor_skips_without_preconditions():
     rec = _Recorder()
     results = []
-    sec.run_idor_suite(CTX, _scripted_call({}), rec, results, {"Admin": "a"})
-    assert len(rec.rows) == 1 and rec.rows[0]["http_status"] == "SKIP"
-    assert rec.rows[0]["passed"] is True
+    # No second user.
+    sec.run_idor_suite(
+        CTX,
+        rec,
+        results,
+        {"Admin": "a"},
+        seed_fn=lambda j, m: "o",
+        call_body=_body_call({}),
+    )
+    assert rec.rows[-1]["http_status"] == "SKIP" and rec.rows[-1]["passed"] is True
+
+
+def test_idor_skips_when_seed_fails():
+    rec = _Recorder()
+    results = []
+    sec.run_idor_suite(
+        CTX,
+        rec,
+        results,
+        {"Admin": "a", "userB": "b"},
+        seed_fn=lambda j, m: None,  # cannot seed
+        call_body=_body_call({}),
+    )
+    assert any(
+        r["http_status"] == "SKIP" and "idor-seed" in r["principal"] for r in rec.rows
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -201,69 +252,110 @@ def test_logout_revoked_is_pass_no_gap():
 
 
 # --------------------------------------------------------------------------- #
-# Deleted resource (2.5)
+# Deleted resource (2.5) — list-membership oracle (getConfigVersion 200s for any
+# name, so we assert the version is listed before delete and absent after).
 # --------------------------------------------------------------------------- #
+def _deleted_resource_setup(listed_before, listed_after):
+    """Build (call, call_body) fakes: `call` handles create/delete (status-only),
+    `call_body` answers getConfigVersions with a list whose membership flips."""
+    state = {"listed": listed_before}
+    version_holder = {}
+
+    def call(api_base, field, args, token):
+        if field == "updateConfiguration":
+            version_holder["v"] = args["versionName"]
+            return 200, None, None, "c"
+        return 200, None, None, "x"
+
+    def call_body(api_base, field, args, token):
+        if field == "deleteConfigVersion":
+            state["listed"] = listed_after
+            return 200, '{"success": true}'
+        if field == "getConfigVersions":
+            v = version_holder.get("v", "")
+            body = f'{{"versions": ["{v}"]}}' if state["listed"] else '{"versions": []}'
+            return 200, body
+        return 200, "{}"
+
+    return call, call_body
+
+
 def test_deleted_resource_gone_passes():
     rec = _Recorder()
     results = []
-    script = {
-        "updateConfiguration": [(200, None, None, "c")],  # create
-        "getConfigVersion": [
-            (200, None, None, "g1"),  # present before
-            (404, None, None, "g2"),
-        ],  # gone after
-        "deleteConfigVersion": [(200, None, None, "d")],  # delete
-    }
+    call, call_body = _deleted_resource_setup(listed_before=True, listed_after=False)
     sec.run_deleted_resource_suite(
-        CTX, _scripted_call(script), rec, results, {"Admin": "a"}
+        CTX, call, rec, results, {"Admin": "a"}, call_body=call_body
     )
     row = rec.by_principal("after-delete")[0]
     assert row["passed"] is True and "SEC-2.5" in row["detail"]
 
 
-def test_deleted_resource_still_readable_fails():
+def test_deleted_resource_still_listed_fails():
     rec = _Recorder()
     results = []
-    script = {
-        "updateConfiguration": [(200, None, None, "c")],
-        "getConfigVersion": [
-            (200, None, None, "g1"),
-            (200, None, None, "g2"),
-        ],  # STILL readable -> leak
-        "deleteConfigVersion": [(200, None, None, "d")],
-    }
+    # Still enumerable after delete -> leak.
+    call, call_body = _deleted_resource_setup(listed_before=True, listed_after=True)
     sec.run_deleted_resource_suite(
-        CTX, _scripted_call(script), rec, results, {"Admin": "a"}
+        CTX, call, rec, results, {"Admin": "a"}, call_body=call_body
     )
     assert rec.by_principal("after-delete")[0]["passed"] is False
+
+
+def test_deleted_resource_skips_without_body_call():
+    rec = _Recorder()
+    results = []
+    sec.run_deleted_resource_suite(
+        CTX, _scripted_call({}), rec, results, {"Admin": "a"}, call_body=None
+    )
+    assert rec.rows[-1]["http_status"] == "SKIP" and rec.rows[-1]["passed"] is True
 
 
 # --------------------------------------------------------------------------- #
 # Input validation (3) — tolerant vs strict
 # --------------------------------------------------------------------------- #
-def test_input_validation_tolerant_accepts_500():
-    # Pre-PR-B: a 5xx on malformed input is a documented weakness (WARN), not a
-    # hard fail, in tolerant mode.
+def test_input_validation_tolerant_500_is_warn_not_hardfail():
+    # Pre-PR-B: a 5xx on malformed input is a documented weakness (WARN via
+    # known_gap), not an unqualified pass and not a hard fail, in tolerant mode.
     rec = _Recorder()
     results = []
-    # Every op returns 500 (resolver blew up on bad shape).
     call = lambda ab, f, a, t: (500, None, None, "r")  # noqa: E731
     sec.run_input_validation_suite(
         CTX, call, rec, results, {"Admin": "a"}, strict=False
     )
     rows = [r for r in rec.rows if r["op"] != "input-validation"]
     assert rows, "expected malformed-input cases to be recorded"
-    assert all(r["passed"] for r in rows)  # tolerated
-    assert all(r["known_gap"] == "GAP-SEC-INPUT-500" for r in rows)  # but WARNed
+    assert all(not r["passed"] for r in rows)  # not an unqualified pass
+    assert all(r["known_gap"] == "GAP-SEC-INPUT" for r in rows)  # WARN, not hard fail
+
+
+def test_input_validation_tolerant_silent_200_is_warn_not_hardfail():
+    # The real current-stack behavior: malformed input silently accepted (200).
+    # Pre-PR-B this must be a WARN (documented gap), so PR A doesn't break the
+    # CI gate against a stack without central validation.
+    rec = _Recorder()
+    results = []
+    call = lambda ab, f, a, t: (200, None, None, "r")  # noqa: E731
+    sec.run_input_validation_suite(
+        CTX, call, rec, results, {"Admin": "a"}, strict=False
+    )
+    rows = [r for r in rec.rows if r["op"] != "input-validation"]
+    assert rows and all(not r["passed"] for r in rows)
+    assert all(r["known_gap"] == "GAP-SEC-INPUT" for r in rows)  # WARN, not hard fail
 
 
 def test_input_validation_strict_requires_clean_4xx():
-    rec = _Recorder()
-    results = []
-    call = lambda ab, f, a, t: (500, None, None, "r")  # noqa: E731
-    sec.run_input_validation_suite(CTX, call, rec, results, {"Admin": "a"}, strict=True)
-    rows = [r for r in rec.rows if r["op"] != "input-validation"]
-    assert rows and all(not r["passed"] for r in rows)  # 500 fails in strict mode
+    # In strict mode both a 500 and a silent 200 are HARD failures (no gap).
+    for status in (500, 200):
+        rec2 = _Recorder()
+        results2 = []
+        call = lambda ab, f, a, t, s=status: (s, None, None, "r")  # noqa: E731
+        sec.run_input_validation_suite(
+            CTX, call, rec2, results2, {"Admin": "a"}, strict=True
+        )
+        rows = [r for r in rec2.rows if r["op"] != "input-validation"]
+        assert rows and all(not r["passed"] for r in rows)
+        assert all(r["known_gap"] is None for r in rows)  # hard fail, not WARN
 
 
 def test_input_validation_clean_400_passes_both_modes():
@@ -276,17 +368,6 @@ def test_input_validation_clean_400_passes_both_modes():
         )
         rows = [r for r in rec.rows if r["op"] != "input-validation"]
         assert rows and all(r["passed"] for r in rows)
-
-
-def test_input_validation_silent_200_always_fails():
-    rec = _Recorder()
-    results = []
-    call = lambda ab, f, a, t: (200, None, None, "r")  # noqa: E731
-    sec.run_input_validation_suite(
-        CTX, call, rec, results, {"Admin": "a"}, strict=False
-    )
-    rows = [r for r in rec.rows if r["op"] != "input-validation"]
-    assert rows and all(not r["passed"] for r in rows)  # 200 = silent accept = fail
 
 
 # --------------------------------------------------------------------------- #
