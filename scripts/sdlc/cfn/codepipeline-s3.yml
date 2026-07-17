@@ -792,6 +792,11 @@ Resources:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_LARGE
         Image: aws/codebuild/standard:7.0
+        # Required so the ZAP DAST probe can `docker run` the official OWASP ZAP
+        # image (ghcr.io/zaproxy/zaproxy) against its own throwaway stack. The
+        # publish/SAM container builds already assume a Docker daemon; this makes
+        # it explicit. See validate_zap_dast in scripts/sdlc/codebuild_deployment.py.
+        PrivilegedMode: true
         EnvironmentVariables:
           - Name: SOURCE_BUCKET
             Value: !Sub '${BucketNamePrefix}-${AWS::AccountId}-${AWS::Region}'

@@ -294,6 +294,19 @@ integration_tests:
           else
             echo "⚠️ No deployment summary found - check codebuild_logs.txt for details"
           fi
+          # Pull this run's ZAP DAST report (if the probe ran) into a GitLab
+          # artifact. The probe uploads to deploy/zap/<stack>-<LOG_STREAM_NAME>-*
+          # so filter by the build's log-stream tag. Best effort — absent when
+          # IDP_TEST_ZAP=false or the probe didn't run.
+          aws s3 cp "s3://${SOURCE_BUCKET}/deploy/zap/" ./ --recursive \
+            --exclude "*" --include "*${LOG_STREAM_NAME}-zap-report.html" 2>/dev/null || true
+          ZAP_HTML=$(ls -1 *${LOG_STREAM_NAME}-zap-report.html 2>/dev/null | head -1 || true)
+          if [ -n "$ZAP_HTML" ]; then
+            cp "$ZAP_HTML" zap-report.html
+            echo -e "\033[1;34m🔗 ZAP DAST report: ${CI_JOB_URL}/artifacts/external_file/zap-report.html\033[0m"
+          else
+            echo "ℹ️ No ZAP DAST report for this run (probe skipped or not yet uploaded)"
+          fi
         else
           echo "Could not find CodeBuild execution"
         fi
@@ -307,6 +320,9 @@ integration_tests:
       - pipeline_execution_id.txt
       - codebuild_logs.txt
       - deployment_summary.txt
+      # ZAP DAST HTML report, if the zapdast probe ran (best effort — the
+      # after_script copies it out of S3; absent runs just have no file).
+      - zap-report.html
     expire_in: 1 week
 
 srt_security_review:

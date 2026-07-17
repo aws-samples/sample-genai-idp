@@ -52,9 +52,9 @@ Notes:
 
 ### Concurrent deployment-variant probes (own stacks)
 - The **deployment-variant probe framework** (below) deploys SECOND,
-  independent stacks — one per probe. Four probes run by default (GLOBAL APIGW,
-  WAF, PRIVATE APIGW, headless), **concurrently with the primary suite AND with
-  each other** on their own threads, so their ~30-min deploys overlap the
+  independent stacks — one per probe. Five probes run by default (GLOBAL APIGW,
+  WAF, PRIVATE APIGW, headless, ZAP DAST), **concurrently with the primary suite
+  AND with each other** on their own threads, so their ~30-min deploys overlap the
   primary deploy instead of running back-to-back. Each opts out of the primary
   suite's fail-fast abort machinery, so a primary failure never kills a probe's
   in-flight deploy. VPC-requiring probes share one persistent pipeline-owned
@@ -263,7 +263,7 @@ a validator**, not a copy-pasted deploy/validate/cleanup function.
 > correctly" — only as "this variant deploys and its distinguishing feature
 > responds."
 
-### The default probes (all four run every pipeline)
+### The default probes (all run every pipeline)
 
 | Probe | `stack_suffix` | Distinguishing params | VPC? | Validator asserts |
 |-------|----------------|-----------------------|------|-------------------|
@@ -271,10 +271,47 @@ a validator**, not a copy-pasted deploy/validate/cleanup function.
 | **WAF-enabled (IP allow-list)** | `waf` | `WAFAllowedIPv4Ranges` set (+ APIGateway/GLOBAL hosting to have a stage) | no | REGIONAL WebACL `{stack}-api-acl` **exists and is associated** with an API-Gateway stage |
 | **APIGateway hosting (PRIVATE)** | `apigwpriv` | `WebUIHosting=APIGateway`, `ApiGatewayVisibility=PRIVATE` | yes | REST API endpoint type is **PRIVATE** and carries a **resource policy** (VPC-only → structural check; CodeBuild can't fetch a private endpoint) |
 | **Headless Jobs API** | `headless` | `EnableHeadless=true` | yes | stack exposes the **`ApiGatewayEndpoint`** output and its REST API exists (private → structural check) |
+| **ZAP DAST scan** | `zapdast` | *(default hosting)* | no | authenticated **OWASP ZAP** dynamic scan of the deployed UI API — injection/headers/TLS/info-leak classes; **WARN-only** (reports, does not gate yet) |
 
 Validators live in `scripts/sdlc/codebuild_deployment.py`:
 `validate_apigw_global_hosting`, `validate_waf_enabled`,
-`validate_apigw_private_hosting`, `validate_headless_jobs_api`.
+`validate_apigw_private_hosting`, `validate_headless_jobs_api`,
+`validate_zap_dast`.
+
+#### ZAP DAST probe (dynamic security testing)
+
+The `zapdast` probe adds the one class of coverage neither SRT (static code) nor
+the RBAC harness (authorization semantics) provides: **dynamic** application
+security testing of the *running* UI REST API — reflected/persistent XSS, SQL/OS/
+code injection, missing security headers (CSP, HSTS, X-Frame-Options,
+X-Content-Type-Options), cookie flags, TLS issues, and information disclosure.
+
+It runs the official **OWASP ZAP** Docker image (`ghcr.io/zaproxy/zaproxy`)
+via `zap-api-scan.py` — which requires **`PrivilegedMode: true`** on the
+`app-sdlc` CodeBuild project (`scripts/sdlc/cfn/codepipeline-s3.yml`). Because
+the UI API is a single Cognito-gated route `POST /op/{field}` with **no OpenAPI
+spec**, ZAP's spider finds nothing to crawl, so the probe **seeds** the scan
+with a minimal OpenAPI doc generated from `scripts/api_rbac_expectations.yaml`
+(the same op source-of-truth the RBAC tests use — one authenticated request per
+operation). Authentication reuses `scripts/rbac_common.py` (shared with
+`test_api_rbac.py`): it mints a Cognito **ID token** and injects it on every
+request via ZAP's `replacer`; the temporary `ADMIN_USER_PASSWORD_AUTH` app-client
+flip is safe here because it happens on the probe's **own** throwaway stack, and
+is always restored.
+
+- **Passive baseline** (spider + passive rules, no attack payloads) runs every
+  time. The **active scan** (real injection payloads) is opt-in via
+  **`IDP_ZAP_ACTIVE=true`** — run it on demand/nightly, not on every MR, and only
+  ever against these throwaway probe stacks.
+- **WARN-only today:** `validate_zap_dast` reports alert counts (in the
+  consolidated summary) and uploads the full HTML/JSON report to
+  `s3://<sourcecode-bucket>/deploy/zap/…`, but never fails the build. Rule
+  actions live in `scripts/sdlc/zap-rules.conf` (IGNORE/WARN/FAIL). Promote
+  high-confidence rules to FAIL and flip the `# TODO promote` gate in
+  `validate_zap_dast` once the baseline is triaged — the same maturity path SRT
+  took.
+- **Gating flag:** set **`IDP_TEST_ZAP=false`** to skip only this probe (the
+  other probes still run).
 
 **Lifecycle** (every probe): creates per-stack IAM/boundary → (for `requires_vpc`
 probes) injects the persistent-test-VPC params → deploys with the probe's extra
@@ -302,7 +339,7 @@ Because probes **reference** the VPC (never create/destroy/mutate it):
   matter how many VPC variants or concurrent pipelines run.
 - **No per-run VPC churn or ENI-leak teardown failures** — the incident that
   removed the PRIVATE/VPC variant from CI simply can't recur.
-- **Fully parallel** — VPCs no longer bound concurrency, so all four probes run
+- **Fully parallel** — VPCs no longer bound concurrency, so all probes run
   at once.
 
 If the pipeline is deployed with `CreateTestVpc=false`, the VPC env vars are
@@ -336,11 +373,13 @@ injection + skip), `run_variant_probes()` (the concurrent launcher),
 `resolve_probe_concurrency()` (the budget), and `_test_vpc_params()` (env → CFN
 params). Launched from `main()` on its own supervisor thread concurrently with
 the shared-stack suite. Mock-based unit coverage:
-`scripts/sdlc/tests/test_variant_probes.py` (41 tests — quota cap, single-probe
-lifecycle, fail-fast isolation, VPC-param injection + skip, all four validators,
-consolidated summary).
+`scripts/sdlc/tests/test_variant_probes.py` (quota cap, single-probe
+lifecycle, fail-fast isolation, VPC-param injection + skip, the hosting-variant
+validators, consolidated summary) and `scripts/sdlc/tests/test_zap_dast_probe.py`
+(ZAP probe registration, IDP_TEST_ZAP gate, OpenAPI seed, alert parsing,
+WARN-only + always-restore).
 **Duration**: ~20–30 minutes per probe (full nested-stack create + teardown);
-all four run in parallel by default.
+all run in parallel by default.
 
 ### Adding a future variant
 
@@ -722,6 +761,12 @@ but revisit:
 
 ### Done (this cycle — no longer gaps)
 
+- [x] **Dynamic security testing (DAST).** OWASP ZAP scan of the deployed UI API
+      added as the `zapdast` deployment-variant probe — authenticated scan seeded
+      from `api_rbac_expectations.yaml`, WARN-only, report to
+      `s3://…/deploy/zap/…`. Requires `PrivilegedMode: true` on `app-sdlc`.
+      Complements SRT (static) + RBAC (authorization) with injection/headers/TLS
+      coverage. *(feature/zap-dast-ci-probe)*
 - [x] `idp_common` `-m "unit"` filter → `-m "not integration"` (recovered ~810
       silently-skipped tests; fixed 28 rotted tests). *(PR #493)*
 - [x] Missing package/Lambda suites added to `developer_tests` via

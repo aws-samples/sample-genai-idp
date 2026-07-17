@@ -1,0 +1,267 @@
+"""Unit tests for the OWASP ZAP DAST probe.
+
+Exercise the pure/seed/parse logic of the ZAP probe in
+`scripts/sdlc/codebuild_deployment.py` WITHOUT any AWS, Docker, or subprocess
+calls (rbac_common, run_command, and the report upload are monkeypatched). They
+verify the behaviors that are easy to regress on:
+
+  * the probe is registered in PROBE_VARIANTS and is NOT a VPC probe (a PRIVATE
+    API would be unreachable from CodeBuild),
+  * IDP_TEST_ZAP=false removes only the ZAP probe from the launcher,
+  * the OpenAPI seed emits one POST /op/{field} path per operation in
+    api_rbac_expectations.yaml, hung under the api_base's path + host,
+  * the ZAP JSON report parser maps riskcode → human labels + counts, and
+  * validate_zap_dast stays WARN-only (success=True even with High findings)
+    and always restores the app-client auth flow + deletes its test user.
+"""
+
+import json
+
+import pytest
+
+pytestmark = pytest.mark.unit
+
+
+# --------------------------------------------------------------------------- #
+# Registration
+# --------------------------------------------------------------------------- #
+
+
+def test_zap_probe_registered_and_not_vpc(cbd):
+    zap = [p for p in cbd.PROBE_VARIANTS if p.stack_suffix == "zapdast"]
+    assert len(zap) == 1, "exactly one ZAP DAST probe expected"
+    probe = zap[0]
+    assert probe.validate_fn is cbd.validate_zap_dast
+    # Must be internet-reachable from CodeBuild → default hosting, NOT a VPC/
+    # PRIVATE API (which CodeBuild can't reach).
+    assert probe.requires_vpc is False
+    assert probe.deploy_params == {}
+
+
+def test_default_concurrency_still_covers_all_probes(cbd):
+    # Adding the ZAP probe must not silently serialize the pool.
+    assert cbd.DEFAULT_PROBE_MAX_CONCURRENCY >= len(cbd.PROBE_VARIANTS)
+
+
+# --------------------------------------------------------------------------- #
+# IDP_TEST_ZAP gate
+# --------------------------------------------------------------------------- #
+
+
+def test_idp_test_zap_false_skips_only_zap(cbd, monkeypatch):
+    monkeypatch.setenv("IDP_TEST_ZAP", "false")
+    launched = []
+    monkeypatch.setattr(
+        cbd,
+        "deploy_and_test_probe",
+        lambda probe, email, url: (
+            launched.append(probe.stack_suffix)
+            or {"success": True, "probe": probe.name}
+        ),
+    )
+    cbd.run_variant_probes("admin@example.invalid", "https://tmpl")
+    assert "zapdast" not in launched
+    # The other probes still ran.
+    assert "apigw" in launched
+
+
+def test_idp_test_zap_true_includes_zap(cbd, monkeypatch):
+    monkeypatch.setenv("IDP_TEST_ZAP", "true")
+    launched = []
+    monkeypatch.setattr(
+        cbd,
+        "deploy_and_test_probe",
+        lambda probe, email, url: (
+            launched.append(probe.stack_suffix)
+            or {"success": True, "probe": probe.name}
+        ),
+    )
+    cbd.run_variant_probes("admin@example.invalid", "https://tmpl")
+    assert "zapdast" in launched
+
+
+# --------------------------------------------------------------------------- #
+# OpenAPI seed generation
+# --------------------------------------------------------------------------- #
+
+
+def test_generate_zap_openapi_one_path_per_op(cbd):
+    api_base = "https://abc123.execute-api.us-east-1.amazonaws.com/api"
+    fields = ["getDocument", "listDocuments", "deleteConfiguration"]
+    spec = cbd.generate_zap_openapi(api_base, fields)
+
+    assert spec["openapi"].startswith("3.")
+    # Server is scheme+host; path prefix stays on each path.
+    assert spec["servers"] == [
+        {"url": "https://abc123.execute-api.us-east-1.amazonaws.com"}
+    ]
+    assert set(spec["paths"]) == {
+        "/api/op/getDocument",
+        "/api/op/listDocuments",
+        "/api/op/deleteConfiguration",
+    }
+    op = spec["paths"]["/api/op/getDocument"]["post"]
+    assert op["operationId"] == "getDocument"
+    body = op["requestBody"]["content"]["application/json"]
+    assert body["example"] == {"arguments": {}}
+
+
+def test_zap_op_fields_reads_expectations(cbd):
+    # Reads the real repo file — asserts it is non-empty and includes a known op.
+    fields = cbd._zap_op_fields()
+    assert isinstance(fields, list) and fields
+    assert "getDocument" in fields
+    # Sorted for determinism.
+    assert fields == sorted(fields)
+
+
+# --------------------------------------------------------------------------- #
+# ZAP JSON report parsing
+# --------------------------------------------------------------------------- #
+
+
+def test_parse_zap_alerts_maps_riskcode_to_labels(cbd, tmp_path):
+    report = {
+        "site": [
+            {
+                "alerts": [
+                    {
+                        "alert": "XSS",
+                        "riskcode": "3",
+                        "pluginid": "40012",
+                        "instances": [{}, {}],
+                    },
+                    {
+                        "alert": "CSP missing",
+                        "riskcode": "2",
+                        "pluginid": "10038",
+                        "count": "1",
+                    },
+                    {
+                        "alert": "Timestamp",
+                        "riskcode": "0",
+                        "pluginid": "10096",
+                        "instances": [],
+                    },
+                ]
+            }
+        ]
+    }
+    path = tmp_path / "zap-report.json"
+    path.write_text(json.dumps(report))
+    counts, alerts = cbd._parse_zap_alerts(str(path))
+
+    assert counts == {"High": 1, "Medium": 1, "Low": 0, "Informational": 1}
+    high = next(a for a in alerts if a["risk"] == "High")
+    assert high["name"] == "XSS" and high["count"] == 2
+
+
+def test_parse_zap_alerts_empty_report(cbd, tmp_path):
+    path = tmp_path / "zap-report.json"
+    path.write_text(json.dumps({"site": []}))
+    counts, alerts = cbd._parse_zap_alerts(str(path))
+    assert counts == {"High": 0, "Medium": 0, "Low": 0, "Informational": 0}
+    assert alerts == []
+
+
+# --------------------------------------------------------------------------- #
+# validate_zap_dast: WARN-only + always-restore
+# --------------------------------------------------------------------------- #
+
+
+class _FakeRbac:
+    """Stand-in for the rbac_common module the probe imports."""
+
+    def __init__(self):
+        self.restored = False
+        self.deleted = None
+
+    def resolve_stack(self, stack, region):
+        return {
+            "stack": stack,
+            "region": region,
+            "user_pool": "pool",
+            "client": "client",
+            "api_base": "https://abc.execute-api.us-east-1.amazonaws.com/api",
+            "users_table": "users",
+            "circuit_breaker": False,
+        }
+
+    def enable_admin_auth(self, ctx):
+        pass
+
+    def create_cognito_user(self, ctx, email, group, password):
+        pass
+
+    def get_id_token(self, ctx, email, password):
+        return "fake.jwt.token"
+
+    def delete_cognito_user(self, ctx, email):
+        self.deleted = email
+
+    def restore_auth_flows(self, ctx):
+        self.restored = True
+
+
+def _install_fake_rbac(cbd, monkeypatch, fake):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "rbac_common", fake)
+
+
+def test_validate_zap_dast_warn_only_with_high_findings(cbd, monkeypatch, tmp_path):
+    fake = _FakeRbac()
+    _install_fake_rbac(cbd, monkeypatch, fake)
+
+    # Docker/scan is a no-op; write a report with a High finding into the workdir.
+    def fake_run_command(cmd, check=True, timeout=None):
+        # The workdir is the -v mount source in the docker cmd.
+        workdir = cmd.split("-v ", 1)[1].split(":", 1)[0]
+        report = {
+            "site": [
+                {
+                    "alerts": [
+                        {
+                            "alert": "SQLi",
+                            "riskcode": "3",
+                            "pluginid": "40018",
+                            "instances": [{}],
+                        },
+                    ]
+                }
+            ]
+        }
+        with open(f"{workdir}/zap-report.json", "w") as fh:
+            json.dump(report, fh)
+        return type("R", (), {"returncode": 2, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(cbd, "run_command", fake_run_command)
+    monkeypatch.setattr(cbd, "_upload_zap_report", lambda s, w: "s3://b/zap.html")
+
+    result = cbd.validate_zap_dast("idp-test-zapdast")
+
+    # WARN-only: High findings do NOT fail the probe.
+    assert result["success"] is True
+    assert result["zap_alerts"]["High"] == 1
+    assert result["report_url"] == "s3://b/zap.html"
+    # Always cleaned up the auth-flow flip + test user.
+    assert fake.restored is True
+    assert fake.deleted == "zap-dast@example.invalid"
+
+
+def test_validate_zap_dast_restores_on_error(cbd, monkeypatch):
+    fake = _FakeRbac()
+    _install_fake_rbac(cbd, monkeypatch, fake)
+
+    # Force the scan to blow up AFTER auth was enabled.
+    def boom(cmd, check=True, timeout=None):
+        raise RuntimeError("docker exploded")
+
+    monkeypatch.setattr(cbd, "run_command", boom)
+
+    result = cbd.validate_zap_dast("idp-test-zapdast")
+    assert result["success"] is False
+    assert "docker exploded" in result["error"]
+    # Even on error, the app client auth flow is restored and the user removed.
+    assert fake.restored is True
+    assert fake.deleted == "zap-dast@example.invalid"

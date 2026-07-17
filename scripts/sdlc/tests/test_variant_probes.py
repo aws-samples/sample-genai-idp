@@ -73,7 +73,9 @@ def _stub_lifecycle(cbd, monkeypatch, *, deploy_status="CREATE_COMPLETE"):
     monkeypatch.setattr(
         cbd,
         "create_iam_resources",
-        lambda stack_name: (calls["iam"].append(stack_name) or ("role-arn", "boundary-arn")),
+        lambda stack_name: (
+            calls["iam"].append(stack_name) or ("role-arn", "boundary-arn")
+        ),
     )
     monkeypatch.setattr(cbd, "generate_stack_name", lambda: "idp-0101-000000")
 
@@ -85,7 +87,9 @@ def _stub_lifecycle(cbd, monkeypatch, *, deploy_status="CREATE_COMPLETE"):
 
     monkeypatch.setattr(cbd, "run_command", fake_run_command)
     monkeypatch.setattr(
-        cbd, "cleanup_stack", lambda result: calls["cleanup"].append(result["stack_name"])
+        cbd,
+        "cleanup_stack",
+        lambda result: calls["cleanup"].append(result["stack_name"]),
     )
     monkeypatch.setattr(
         cbd,
@@ -164,8 +168,10 @@ def test_probe_happy_path_deploys_validates_cleans_up(cbd, monkeypatch):
         cbd,
         suffix="apigw",
         params={"WebUIHosting": "APIGateway", "ApiGatewayVisibility": "GLOBAL"},
-        validate=lambda stack_name: validated.append(stack_name)
-        or {"success": True, "web_url": "https://x/api"},
+        validate=lambda stack_name: (
+            validated.append(stack_name)
+            or {"success": True, "web_url": "https://x/api"}
+        ),
     )
 
     result = cbd.deploy_and_test_probe(probe, "a@b.com", "https://tmpl")
@@ -273,8 +279,8 @@ def _logs_race_event():
         "logical_id": "WorkflowTrackerLogGroup",
         "status": "CREATE_FAILED",
         "reason": (
-            "Resource handler returned message: \"The specified log group does "
-            "not exist. (Service: CloudWatchLogs, Status Code: 400)\" "
+            'Resource handler returned message: "The specified log group does '
+            'not exist. (Service: CloudWatchLogs, Status Code: 400)" '
             "(HandlerErrorCode: InvalidRequest)"
         ),
     }
@@ -540,7 +546,11 @@ def test_launcher_runs_all_probes_and_folds_results(cbd, monkeypatch):
 
     def fake_deploy(probe, admin_email, template_url):
         ran.append(probe.name)
-        return {"stack_name": f"s-{probe.stack_suffix}", "success": True, "probe": probe.name}
+        return {
+            "stack_name": f"s-{probe.stack_suffix}",
+            "success": True,
+            "probe": probe.name,
+        }
 
     monkeypatch.setattr(cbd, "deploy_and_test_probe", fake_deploy)
 
@@ -569,7 +579,11 @@ def test_launcher_isolates_one_probe_failure(cbd, monkeypatch):
                 "failure_type": "deploy",
                 "probe": "B",
             }
-        return {"stack_name": f"s-{probe.stack_suffix}", "success": True, "probe": probe.name}
+        return {
+            "stack_name": f"s-{probe.stack_suffix}",
+            "success": True,
+            "probe": probe.name,
+        }
 
     monkeypatch.setattr(cbd, "deploy_and_test_probe", fake_deploy)
     probes = [_make_probe(cbd, name=n, suffix=n.lower()) for n in ("A", "B", "C")]
@@ -643,9 +657,7 @@ def test_default_probe_table_has_global_apigw_row(cbd):
     names = [p.name for p in cbd.PROBE_VARIANTS]
     assert any("APIGateway" in n and "GLOBAL" in n for n in names)
     apigw = next(
-        p
-        for p in cbd.PROBE_VARIANTS
-        if "APIGateway" in p.name and "GLOBAL" in p.name
+        p for p in cbd.PROBE_VARIANTS if "APIGateway" in p.name and "GLOBAL" in p.name
     )
     assert apigw.stack_suffix == "apigw"
     assert apigw.deploy_params == {
@@ -658,8 +670,9 @@ def test_default_probe_table_has_global_apigw_row(cbd):
 
 def test_default_probe_table_covers_all_four_variants(cbd):
     by_suffix = {p.stack_suffix: p for p in cbd.PROBE_VARIANTS}
-    # All four requested variants present.
-    assert set(by_suffix) == {"apigw", "waf", "apigwpriv", "headless"}
+    # The four deployment-hosting variants are present (the ZAP DAST probe is a
+    # fifth row, asserted separately in test_zap_dast_probe.py).
+    assert {"apigw", "waf", "apigwpriv", "headless"} <= set(by_suffix)
     # No-VPC probes.
     assert by_suffix["apigw"].requires_vpc is False
     assert by_suffix["waf"].requires_vpc is False
@@ -820,13 +833,24 @@ class _FakeCfn:
     def describe_stacks(self, StackName):
         return {
             "Stacks": [
-                {"Outputs": [{"OutputKey": k, "OutputValue": v} for k, v in self._outputs.items()]}
+                {
+                    "Outputs": [
+                        {"OutputKey": k, "OutputValue": v}
+                        for k, v in self._outputs.items()
+                    ]
+                }
             ]
         }
 
 
 def test_validate_private_hosting_pass(cbd, monkeypatch):
-    apis = [{"name": "idp-s-api", "endpointConfiguration": {"types": ["PRIVATE"]}, "policy": "{...}"}]
+    apis = [
+        {
+            "name": "idp-s-api",
+            "endpointConfiguration": {"types": ["PRIVATE"]},
+            "policy": "{...}",
+        }
+    ]
     _fake_boto3(cbd, monkeypatch, {"apigateway": _FakeApiGw(apis=apis)})
     res = cbd.validate_apigw_private_hosting("idp-s")
     assert res["success"] is True
@@ -834,7 +858,13 @@ def test_validate_private_hosting_pass(cbd, monkeypatch):
 
 
 def test_validate_private_hosting_fails_when_regional(cbd, monkeypatch):
-    apis = [{"name": "idp-s-api", "endpointConfiguration": {"types": ["REGIONAL"]}, "policy": "{...}"}]
+    apis = [
+        {
+            "name": "idp-s-api",
+            "endpointConfiguration": {"types": ["REGIONAL"]},
+            "policy": "{...}",
+        }
+    ]
     _fake_boto3(cbd, monkeypatch, {"apigateway": _FakeApiGw(apis=apis)})
     res = cbd.validate_apigw_private_hosting("idp-s")
     assert res["success"] is False
@@ -850,11 +880,16 @@ def test_validate_private_hosting_fails_without_policy(cbd, monkeypatch):
 
 
 def test_validate_headless_pass(cbd, monkeypatch):
-    outputs = {"ApiGatewayEndpoint": "https://abc123.execute-api.us-east-1.amazonaws.com/beta"}
+    outputs = {
+        "ApiGatewayEndpoint": "https://abc123.execute-api.us-east-1.amazonaws.com/beta"
+    }
     _fake_boto3(
         cbd,
         monkeypatch,
-        {"cloudformation": _FakeCfn(outputs), "apigateway": _FakeApiGw(rest_api={"id": "abc123"})},
+        {
+            "cloudformation": _FakeCfn(outputs),
+            "apigateway": _FakeApiGw(rest_api={"id": "abc123"}),
+        },
     )
     res = cbd.validate_headless_jobs_api("idp-s")
     assert res["success"] is True
@@ -862,7 +897,9 @@ def test_validate_headless_pass(cbd, monkeypatch):
 
 
 def test_validate_headless_fails_without_output(cbd, monkeypatch):
-    _fake_boto3(cbd, monkeypatch, {"cloudformation": _FakeCfn({}), "apigateway": _FakeApiGw()})
+    _fake_boto3(
+        cbd, monkeypatch, {"cloudformation": _FakeCfn({}), "apigateway": _FakeApiGw()}
+    )
     res = cbd.validate_headless_jobs_api("idp-s")
     assert res["success"] is False
     assert "ApiGatewayEndpoint" in res["error"]

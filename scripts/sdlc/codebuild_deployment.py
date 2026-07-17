@@ -8,6 +8,7 @@ Handles IDP stack deployment and testing in AWS CodeBuild environment.
 import json
 import os
 import re
+import secrets
 import signal
 import subprocess
 import sys
@@ -2324,7 +2325,9 @@ def delete_apigw_test_vpc(vpc_stack_name):
         print(f"[{vpc_stack_name}] ✅ Test VPC deleted")
         return
     except Exception as e:  # noqa: BLE001
-        print(f"[{vpc_stack_name}] ⚠️ First delete failed ({e}); sweeping ENIs and retrying")
+        print(
+            f"[{vpc_stack_name}] ⚠️ First delete failed ({e}); sweeping ENIs and retrying"
+        )
 
     # Retry path: orphaned Lambda ENIs are the usual culprit. Give them a
     # moment to detach, sweep, then delete again.
@@ -2715,7 +2718,9 @@ def validate_apigw_private_hosting(stack_name):
             "success": False,
             "error": f"PRIVATE REST API {api_name} has no resource policy (VPCE binding)",
         }
-    print(f"✅ PRIVATE REST API present with resource policy: {api_name} (types={types})")
+    print(
+        f"✅ PRIVATE REST API present with resource policy: {api_name} (types={types})"
+    )
     return {"success": True, "api_name": api_name, "endpoint_types": types}
 
 
@@ -2788,6 +2793,306 @@ def validate_waf_enabled(stack_name):
         }
     print(f"✅ WAF WebACL {acl_name} associated with {len(resources)} resource(s)")
     return {"success": True, "web_acl_arn": acl_arn, "associated": resources}
+
+
+# ---------------------------------------------------------------------------
+# ZAP DAST probe
+#
+# Dynamic Application Security Testing of the deployed UI REST API using the
+# official OWASP ZAP Docker image. Complements the RBAC probe (authorization
+# semantics) and SRT (static code) with the class of bugs neither can see:
+# injection (XSS/SQLi/…), missing security headers, TLS/cookie flags, and info
+# leaks against the RUNNING API.
+#
+# Why a probe (own throwaway stack) and not a primary-suite step: the scan needs
+# a Cognito token, which means temporarily enabling ADMIN_USER_PASSWORD_AUTH on
+# the app client — the exact stack-wide mutation that forces Step 12 (RBAC) to
+# run sequentially. On the probe's OWN stack that flip is safe and the whole
+# thing runs fully concurrently with everything else (zero added wall-clock).
+#
+# The UI API is a single Cognito-gated route POST /op/{field} with NO OpenAPI
+# spec, so ZAP's spider finds nothing to crawl. We SEED the scan by generating a
+# minimal OpenAPI 3 doc from scripts/api_rbac_expectations.yaml (the same op
+# source-of-truth the RBAC tests use), giving ZAP one authenticated request per
+# operation to attack.
+#
+# WARN-only for now: findings are reported (build log + S3 report) but do not
+# fail the build. Promote high-confidence rules to FAIL in scripts/sdlc/
+# zap-rules.conf once the baseline is triaged (the path SRT took).
+# ---------------------------------------------------------------------------
+
+ZAP_DOCKER_IMAGE = os.environ.get("ZAP_DOCKER_IMAGE", "ghcr.io/zaproxy/zaproxy:stable")
+# Passive baseline (spider + passive rules, no attack payloads) every run.
+# Active scan (real injection/XSS payloads) is opt-in via IDP_ZAP_ACTIVE so the
+# intrusive traffic runs on demand/nightly, not on every MR — and wall-clock
+# stays flat. Only ever run against these throwaway probe stacks.
+ZAP_ACTIVE_SCAN = os.environ.get("IDP_ZAP_ACTIVE", "false").lower() == "true"
+ZAP_RULES_CONF = os.path.join(os.path.dirname(__file__), "zap-rules.conf")
+
+
+def _zap_op_fields():
+    """The set of UI API operation names, from the RBAC expectations file.
+
+    This is the shared op source-of-truth (also consumed by scan_api_rbac.py and
+    test_api_rbac.py). Returns a sorted list of field names; raises if the file
+    is missing/empty so a silently-empty scan can't look like a pass.
+    """
+    import yaml
+
+    expectations = os.path.join(
+        os.path.dirname(__file__), os.pardir, "api_rbac_expectations.yaml"
+    )
+    with open(expectations) as fh:
+        spec = yaml.safe_load(fh)
+    ops = sorted((spec.get("operations") or {}).keys())
+    if not ops:
+        raise RuntimeError(
+            f"No operations found in {expectations}; refusing an empty ZAP scan"
+        )
+    return ops
+
+
+def generate_zap_openapi(api_base, fields):
+    """Build a minimal OpenAPI 3 doc describing the UI API for ZAP.
+
+    Every operation is the same shape — POST {api_base}/op/{field} with a JSON
+    body {"arguments": {}} — so we emit one path per field. ZAP imports this as
+    its scan surface (a spider would find nothing on this single-route API).
+
+    Returns the spec as a dict (the caller writes it as JSON).
+    """
+    # api_base is like https://<id>.execute-api.<region>.amazonaws.com/api
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(api_base)
+    server_url = f"{parts.scheme}://{parts.netloc}"
+    base_path = parts.path.rstrip("/")  # e.g. "/api"
+
+    paths = {}
+    for field in fields:
+        paths[f"{base_path}/op/{field}"] = {
+            "post": {
+                "operationId": field,
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {"arguments": {"type": "object"}},
+                            },
+                            "example": {"arguments": {}},
+                        }
+                    },
+                },
+                "responses": {"200": {"description": "op result"}},
+            }
+        }
+    return {
+        "openapi": "3.0.0",
+        "info": {"title": "IDP UI API (ZAP DAST seed)", "version": "1.0"},
+        "servers": [{"url": server_url}],
+        "paths": paths,
+    }
+
+
+def _parse_zap_alerts(report_json_path):
+    """Summarize a ZAP JSON report into {risk: count} + a flat alert list.
+
+    ZAP's JSON report nests alerts under site[].alerts[]; each alert has a
+    'riskcode' ("0"=Info, "1"=Low, "2"=Medium, "3"=High) and 'riskdesc'.
+    Returns (counts_by_risk, alerts) — counts keyed by the human risk label.
+    """
+    with open(report_json_path) as fh:
+        report = json.load(fh)
+    risk_label = {"0": "Informational", "1": "Low", "2": "Medium", "3": "High"}
+    counts = {"High": 0, "Medium": 0, "Low": 0, "Informational": 0}
+    alerts = []
+    for site in report.get("site", []):
+        for alert in site.get("alerts", []):
+            label = risk_label.get(str(alert.get("riskcode", "0")), "Informational")
+            counts[label] = counts.get(label, 0) + 1
+            alerts.append(
+                {
+                    "risk": label,
+                    "name": alert.get("alert") or alert.get("name", ""),
+                    "pluginid": alert.get("pluginid", ""),
+                    "count": len(alert.get("instances", []))
+                    or int(alert.get("count", 0) or 0),
+                }
+            )
+    return counts, alerts
+
+
+def _upload_zap_report(stack_name, workdir):
+    """Upload the ZAP HTML/JSON reports to the SDLC source bucket. Best effort.
+
+    Returns the s3:// URL of the HTML report (or "" if not uploaded), so the
+    build log and the GitLab after_script can point at it.
+    """
+    bucket = os.environ.get("SOURCE_BUCKET", "")
+    build_id = os.environ.get("CODEBUILD_BUILD_ID", "")
+    if not bucket:
+        print("ℹ️ Skipping ZAP report upload (no SOURCE_BUCKET)")
+        return ""
+    tag = build_id.split(":")[-1] if build_id else stack_name
+    s3 = boto3.client("s3")
+    html_url = ""
+    for name, ctype in (
+        ("zap-report.html", "text/html"),
+        ("zap-report.json", "application/json"),
+    ):
+        path = os.path.join(workdir, name)
+        if not os.path.exists(path):
+            continue
+        key = f"deploy/zap/{stack_name}-{tag}-{name}"
+        try:
+            with open(path, "rb") as fh:
+                s3.put_object(Bucket=bucket, Key=key, Body=fh.read(), ContentType=ctype)
+            print(f"📁 ZAP report uploaded to s3://{bucket}/{key}")
+            if name.endswith(".html"):
+                html_url = f"s3://{bucket}/{key}"
+        except Exception as e:  # noqa: BLE001
+            print(f"⚠️ Failed to upload ZAP report {name}: {e}")
+    return html_url
+
+
+def validate_zap_dast(stack_name):
+    """Run an authenticated OWASP ZAP DAST scan against the deployed UI API.
+
+    Resolves the API base + Cognito ids from the stack, mints an ID token
+    (temporarily enabling ADMIN_USER_PASSWORD_AUTH on this probe's OWN app
+    client and always restoring it), seeds a minimal OpenAPI doc from the op
+    source-of-truth, and runs zap-api-scan.py in the official ZAP Docker image
+    with the token injected on every request via ZAP's `replacer`.
+
+    WARN-only: returns success=True even with findings, carrying the alert
+    counts + report URL for the consolidated summary. The `# TODO promote`
+    marks where to gate the build once zap-rules.conf is triaged.
+    """
+    # rbac_common lives in scripts/; add it to the path (this file is in
+    # scripts/sdlc/). Shared with test_api_rbac.py so stack resolution + the
+    # auth-flow capture/restore can't drift.
+    sys.path.insert(
+        0, os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    )
+    import rbac_common
+
+    region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+    try:
+        ctx = rbac_common.resolve_stack(stack_name, region)
+    except Exception as e:  # noqa: BLE001
+        return {"success": False, "error": f"Could not resolve UI API: {e}"}
+
+    api_base = ctx["api_base"]
+    if not api_base:
+        return {
+            "success": False,
+            "error": "Stack has no HttpApiEndpoint output — UI API not deployed",
+        }
+
+    workdir = tempfile.mkdtemp(prefix="zap-")
+    email = "zap-dast@example.invalid"
+    password = "Aa1!" + secrets.token_urlsafe(24)
+    token = None
+    try:
+        # Own stack → this app-client auth-flow flip is safe (nothing else uses
+        # it). Always restored in finally.
+        rbac_common.enable_admin_auth(ctx)
+        rbac_common.create_cognito_user(ctx, email, "Admin", password)
+        token = rbac_common.get_id_token(ctx, email, password)
+        if not token or token == "None":
+            return {"success": False, "error": "Failed to mint Cognito ID token"}
+
+        fields = _zap_op_fields()
+        spec = generate_zap_openapi(api_base, fields)
+        spec_path = os.path.join(workdir, "openapi.json")
+        with open(spec_path, "w") as fh:
+            json.dump(spec, fh)
+        print(
+            f"🕷️  ZAP DAST: {len(fields)} operations seeded, target {api_base} "
+            f"(active_scan={ZAP_ACTIVE_SCAN})"
+        )
+
+        # ZAP `replacer` injects the raw ID token into the Authorization header
+        # on every request (the API Gateway authorizer expects the raw token,
+        # no "Bearer " prefix). Write the replacer settings — including the token
+        # — to a ZAP config-file loaded via `-configfile`, NOT onto the command
+        # line: run_command prints every cmd it runs, so a token on argv would
+        # leak into the CodeBuild/CloudWatch log. The options file lives only in
+        # the mounted workdir and is never uploaded (only zap-report.* are).
+        options_prop = os.path.join(workdir, "zap-options.prop")
+        with open(options_prop, "w") as fh:
+            fh.write(
+                "replacer.full_list(0).description=auth\n"
+                "replacer.full_list(0).enabled=true\n"
+                "replacer.full_list(0).matchtype=REQ_HEADER\n"
+                "replacer.full_list(0).matchstr=Authorization\n"
+                "replacer.full_list(0).regex=false\n"
+                f"replacer.full_list(0).replacement={token}\n"
+            )
+        rules_flag = ""
+        if os.path.exists(ZAP_RULES_CONF):
+            import shutil
+
+            shutil.copy(ZAP_RULES_CONF, os.path.join(workdir, "zap-rules.conf"))
+            rules_flag = "-c zap-rules.conf"
+        # zap-api-scan runs passive by default; active scan is its default too,
+        # so DISABLE active unless opted in (-S = safe mode, no active attacks).
+        active_flag = "" if ZAP_ACTIVE_SCAN else "-S"
+        docker_cmd = (
+            f"docker run --rm -v {workdir}:/zap/wrk:rw {ZAP_DOCKER_IMAGE} "
+            f"zap-api-scan.py -t /zap/wrk/openapi.json -f openapi {active_flag} "
+            f"{rules_flag} "
+            '-z "-configfile /zap/wrk/zap-options.prop" '
+            "-J zap-report.json -r zap-report.html -w zap-report.md"
+        )
+        # zap-api-scan exits non-zero when it FINDS issues (WARN/FAIL rules) —
+        # that is not a probe failure in WARN mode, so check=False and rely on
+        # the parsed report. Cap runtime so a hung scan can't eat the job.
+        run_command(docker_cmd, check=False, timeout=45 * 60)
+
+        report_json = os.path.join(workdir, "zap-report.json")
+        if not os.path.exists(report_json):
+            return {
+                "success": False,
+                "error": "ZAP produced no JSON report (scan did not run?)",
+            }
+        counts, alerts = _parse_zap_alerts(report_json)
+        report_url = _upload_zap_report(stack_name, workdir)
+
+        summary = (
+            f"High={counts.get('High', 0)} Medium={counts.get('Medium', 0)} "
+            f"Low={counts.get('Low', 0)} Info={counts.get('Informational', 0)}"
+        )
+        print(f"🔎 ZAP DAST alerts: {summary}")
+        for a in alerts:
+            if a["risk"] in ("High", "Medium"):
+                print(f"   • [{a['risk']}] {a['name']} (x{a['count']})")
+
+        # TODO promote: once zap-rules.conf is triaged, gate the build here, e.g.
+        #   if counts.get("High", 0) > 0: return {"success": False, ...}
+        # For now WARN-only: always succeed, carry the findings in the result.
+        return {
+            "success": True,
+            "zap_alerts": counts,
+            "zap_summary": summary,
+            "report_url": report_url,
+            "active_scan": ZAP_ACTIVE_SCAN,
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"success": False, "error": f"ZAP DAST scan error: {e}"}
+    finally:
+        # Always clean up the test user + the app-client auth-flow flip, even on
+        # error (mirrors the RBAC harness's finally).
+        try:
+            rbac_common.delete_cognito_user(ctx, email)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            rbac_common.restore_auth_flows(ctx)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _capture_cf_events(result, *stack_names):
@@ -2934,6 +3239,19 @@ PROBE_VARIANTS = [
         validate_fn=validate_headless_jobs_api,
         requires_vpc=True,
     ),
+    # OWASP ZAP DAST scan of the deployed UI REST API. Default hosting
+    # (CloudFront) → the REST API is REGIONAL/internet-reachable so CodeBuild can
+    # scan it (NOT requires_vpc — a PRIVATE API would be unreachable). Its own
+    # stack means the Cognito auth-flow flip needed to mint a token is isolated,
+    # so it runs fully concurrently. WARN-only (see validate_zap_dast). Gated by
+    # IDP_TEST_ZAP (see run_variant_probes filtering in main()).
+    Probe(
+        name="ZAP DAST scan",
+        stack_suffix="zapdast",
+        deploy_params={},
+        validate_fn=validate_zap_dast,
+        requires_vpc=False,
+    ),
     # --- Adding a future variant: one row + a validator ----------------------
     # deploy_params are extra CFN params; validate_fn is a new
     # callable(stack_name) -> {"success": bool, ...}. Set requires_vpc=True to
@@ -3005,9 +3323,10 @@ def _is_transient_logs_race(result):
             continue
         if ev.get("resource_type") != "AWS::Logs::LogGroup":
             continue
-        if ev.get("status") == "CREATE_FAILED" and "does not exist" in (
-            ev.get("reason") or ""
-        ).lower():
+        if (
+            ev.get("status") == "CREATE_FAILED"
+            and "does not exist" in (ev.get("reason") or "").lower()
+        ):
             return True
     return False
 
@@ -3024,9 +3343,7 @@ def _run_probe_attempt(probe, admin_email, template_url, vpc_params):
     try:
         role_arn, boundary_arn = create_iam_resources(stack_name)
         if not role_arn or not boundary_arn:
-            raise Exception(
-                f"Failed to create IAM resources for probe {probe.name!r}"
-            )
+            raise Exception(f"Failed to create IAM resources for probe {probe.name!r}")
 
         # idp-cli --parameters takes ONE comma-separated key=value string.
         # PermissionsBoundaryArn is always required; the probe's extra params
@@ -3120,10 +3437,7 @@ def deploy_and_test_probe(probe, admin_email, template_url):
         # Retry ONLY the tightly-scoped CWL create race, and only if attempts
         # remain. The prior attempt's stack + IAM are already torn down (its
         # finally), so the retry is a clean, independent redeploy.
-        if (
-            attempt < PROBE_TRANSIENT_MAX_ATTEMPTS
-            and _is_transient_logs_race(result)
-        ):
+        if attempt < PROBE_TRANSIENT_MAX_ATTEMPTS and _is_transient_logs_race(result):
             print(
                 f"♻️ Probe [{probe.name}] hit the transient CloudWatch Logs "
                 f"create-consistency race (attempt {attempt}/"
@@ -3142,9 +3456,7 @@ def resolve_probe_concurrency(num_probes):
     probes, and a malformed/<=0 override falls back to the conservative
     default rather than deploying an unbounded number of concurrent stacks.
     """
-    raw = get_env_var(
-        "IDP_PROBE_MAX_CONCURRENCY", str(DEFAULT_PROBE_MAX_CONCURRENCY)
-    )
+    raw = get_env_var("IDP_PROBE_MAX_CONCURRENCY", str(DEFAULT_PROBE_MAX_CONCURRENCY))
     try:
         cap = int(raw)
     except (TypeError, ValueError):
@@ -3175,6 +3487,14 @@ def run_variant_probes(admin_email, template_url, probes=None):
     probes with no test VPC configured come back skipped=True).
     """
     probes = PROBE_VARIANTS if probes is None else probes
+    # The ZAP DAST probe is individually gateable (it needs Docker/PrivilegedMode
+    # and pulls the ZAP image); default on, set IDP_TEST_ZAP=false to skip it
+    # without disabling the other probes.
+    if get_env_var("IDP_TEST_ZAP", "true").lower() != "true":
+        skipped = [p.name for p in probes if p.stack_suffix == "zapdast"]
+        probes = [p for p in probes if p.stack_suffix != "zapdast"]
+        for name in skipped:
+            print(f"⏭️  Skipping probe [{name}] (IDP_TEST_ZAP=false)")
     if not probes:
         print("ℹ️ No deployment-variant probes configured")
         return []
@@ -3416,9 +3736,7 @@ def main():
         # IDP_TEST_APIGW_HOSTING (default on) — the historical env name is kept
         # for backward compatibility since the GLOBAL APIGW probe is the only
         # default row.
-        probes_enabled = (
-            get_env_var("IDP_TEST_APIGW_HOSTING", "true").lower() == "true"
-        )
+        probes_enabled = get_env_var("IDP_TEST_APIGW_HOSTING", "true").lower() == "true"
         probes_future = None
         probes_executor = None
         if probes_enabled:
@@ -3538,7 +3856,9 @@ def main():
             for probe_result in probe_results:
                 probe_name = probe_result.get("probe", "deployment-variant probe")
                 if probe_result.get("skipped"):
-                    print(f"⏭️  Probe [{probe_name}] skipped: {probe_result.get('detail', '')}")
+                    print(
+                        f"⏭️  Probe [{probe_name}] skipped: {probe_result.get('detail', '')}"
+                    )
                     continue
                 if probe_result.get("success"):
                     print(f"✅ Probe [{probe_name}] passed")
