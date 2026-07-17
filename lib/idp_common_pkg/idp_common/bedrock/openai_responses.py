@@ -4,8 +4,9 @@
 """
 OpenAI Responses API backend for Amazon Bedrock (``bedrock-mantle`` endpoint).
 
-The OpenAI frontier models on Bedrock (GPT-5.4, GPT-5.5) are served **only**
-through the OpenAI-compatible Responses API on the ``bedrock-mantle`` endpoint.
+The OpenAI frontier models on Bedrock (GPT-5.4, GPT-5.5, GPT-5.6
+Sol/Terra/Luna) are served **only** through the OpenAI-compatible Responses API
+on the ``bedrock-mantle`` endpoint.
 They do NOT support the Converse / InvokeModel / Chat Completions / Messages
 APIs that the rest of the accelerator relies on (confirmed via the Bedrock
 model cards and the API-compatibility table). This module provides a second
@@ -28,12 +29,20 @@ These models are reasoning models that reject ``temperature``/``top_p``/
 :func:`idp_common.bedrock.client.is_claude_4_7_model`). Sampling parameters are
 intentionally omitted and ``reasoning.effort`` is set to a sensible default.
 
-Prompt-prefix caching is not supported for these models (they are absent from
-the Bedrock prompt-caching supported-models table), so ``<<CACHEPOINT>>`` tags
-are stripped by the caller before translation.
+Prompt caching differs by model generation:
+
+  * **GPT-5.4 / GPT-5.5** cache **automatically** — any prompt prefix over ~1,024
+    tokens is cached with no request changes. ``<<CACHEPOINT>>`` markers carry no
+    meaning here and are stripped during translation.
+  * **GPT-5.6** (Sol/Terra/Luna) caches **explicitly** — the request must carry
+    ``prompt_cache_options={"mode": "explicit"}``, a stable ``prompt_cache_key``,
+    and a ``prompt_cache_breakpoint`` on the content block ending the cached
+    prefix. When a ``<<CACHEPOINT>>`` marker (or ``cachePoint`` block) is present
+    for a 5.6 model, this module translates it into those explicit fields.
 """
 
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -101,21 +110,43 @@ _RESPONSES_API_MODELS = frozenset(
     {
         "openai.gpt-5.4",
         "openai.gpt-5.5",
+        "openai.gpt-5.6-sol",
+        "openai.gpt-5.6-terra",
+        "openai.gpt-5.6-luna",
     }
 )
 
 # Region availability per model (no geo/global cross-region inference; model IDs
-# carry no region prefix). Source: Bedrock model cards for GPT-5.4 / GPT-5.5.
+# carry no region prefix). Source: Bedrock model cards + region-compatibility
+# page (GPT-5.4/5.5/5.6). GPT-5.6 Sol is not in us-west-2; Terra/Luna are.
 _MODEL_REGIONS: Dict[str, frozenset] = {
-    "openai.gpt-5.5": frozenset({"us-east-2"}),
-    "openai.gpt-5.4": frozenset({"us-east-2", "us-west-2", "us-gov-west-1"}),
+    "openai.gpt-5.5": frozenset({"us-east-1", "us-east-2"}),
+    "openai.gpt-5.4": frozenset(
+        {"us-east-1", "us-east-2", "us-west-2", "us-gov-west-1"}
+    ),
+    "openai.gpt-5.6-sol": frozenset({"us-east-1", "us-east-2"}),
+    "openai.gpt-5.6-terra": frozenset({"us-east-1", "us-east-2", "us-west-2"}),
+    "openai.gpt-5.6-luna": frozenset({"us-east-1", "us-east-2", "us-west-2"}),
 }
 
 # Per-model fallback region when the configured region is unavailable.
 _MODEL_DEFAULT_REGION: Dict[str, str] = {
-    "openai.gpt-5.5": "us-east-2",
-    "openai.gpt-5.4": "us-east-2",
+    "openai.gpt-5.5": "us-east-1",
+    "openai.gpt-5.4": "us-east-1",
+    "openai.gpt-5.6-sol": "us-east-1",
+    "openai.gpt-5.6-terra": "us-east-1",
+    "openai.gpt-5.6-luna": "us-east-1",
 }
+
+
+def _model_supports_explicit_cache(base_model_id: str) -> bool:
+    """Return True if the model uses explicit prompt-cache breakpoints.
+
+    GPT-5.6 (Sol/Terra/Luna) requires explicit ``prompt_cache_options`` +
+    ``prompt_cache_breakpoint``; GPT-5.4/5.5 cache automatically and need no
+    request changes.
+    """
+    return base_model_id.startswith("openai.gpt-5.6")
 
 
 def _strip_region_prefix(model_id: str) -> str:
@@ -261,13 +292,22 @@ def build_responses_request(
         A dict suitable for JSON-encoding as the Responses request body.
     """
     base_model_id = _strip_region_prefix(model_id)
+    explicit_cache = _model_supports_explicit_cache(base_model_id)
 
+    # Track the index of the last input item that ends a cache prefix, so we can
+    # attach an explicit ``prompt_cache_breakpoint`` to it (GPT-5.6 only). For
+    # GPT-5.4/5.5 caching is automatic and markers are simply stripped.
     input_items: List[Dict[str, Any]] = []
+    cache_breakpoint_index: Optional[int] = None
     for item in content or []:
         if "text" in item and isinstance(item["text"], str):
-            # Defensively strip any cachepoint markers (caching unsupported).
-            text = item["text"].replace("<<CACHEPOINT>>", "")
+            raw_text = item["text"]
+            has_marker = "<<CACHEPOINT>>" in raw_text
+            text = raw_text.replace("<<CACHEPOINT>>", "")
             input_items.append({"type": "input_text", "text": text})
+            if has_marker and explicit_cache:
+                # The prefix up to and including this block is cacheable.
+                cache_breakpoint_index = len(input_items) - 1
         elif "image" in item:
             data_uri = _image_to_data_uri(item)
             if data_uri:
@@ -275,8 +315,10 @@ def build_responses_request(
             else:
                 logger.warning("Skipping unparseable image content block.")
         elif "cachePoint" in item:
-            # Prompt-prefix caching is not supported for these models.
-            continue
+            # A structured cachePoint block marks the end of a cacheable prefix.
+            if explicit_cache and input_items:
+                cache_breakpoint_index = len(input_items) - 1
+            # (No content of its own to append.)
         else:
             logger.debug("Skipping unsupported content block keys: %s", list(item))
 
@@ -318,7 +360,48 @@ def build_responses_request(
     if resolved_max:
         body["max_output_tokens"] = resolved_max
 
+    # Explicit prompt caching (GPT-5.6 only). Attach a breakpoint to the content
+    # block that ends the cacheable prefix and derive a stable cache key from the
+    # cached prefix so identical prefixes reuse the cache and different prefixes
+    # do not. Instructions (system prompt) are part of the cached prefix.
+    if explicit_cache and cache_breakpoint_index is not None:
+        input_items[cache_breakpoint_index]["prompt_cache_breakpoint"] = {
+            "mode": "explicit"
+        }
+        body["prompt_cache_options"] = {"mode": "explicit"}
+        body["prompt_cache_key"] = _derive_cache_key(
+            base_model_id, system_text, input_items[: cache_breakpoint_index + 1]
+        )
+
     return body
+
+
+def _derive_cache_key(
+    base_model_id: str,
+    system_text: str,
+    cached_items: List[Dict[str, Any]],
+) -> str:
+    """Derive a deterministic prompt cache key for the cached prefix.
+
+    The key is a hash of the model, the system instructions, and the cached
+    prefix content (text verbatim; images by their data-URI). Identical prefixes
+    yield the same key (cache hit); any change yields a different key (no stale
+    reuse). ``prompt_cache_breakpoint`` markers are excluded from the hash so
+    they don't perturb the key.
+    """
+    hasher = hashlib.sha256()
+    hasher.update(base_model_id.encode("utf-8"))
+    hasher.update(b"\x00")
+    hasher.update((system_text or "").encode("utf-8"))
+    for item in cached_items:
+        hasher.update(b"\x00")
+        if item.get("type") == "input_text":
+            hasher.update(b"t:")
+            hasher.update(item.get("text", "").encode("utf-8"))
+        elif item.get("type") == "input_image":
+            hasher.update(b"i:")
+            hasher.update(item.get("image_url", "").encode("utf-8"))
+    return f"idp:{hasher.hexdigest()[:32]}"
 
 
 def _extract_output_text(openai_json: Dict[str, Any]) -> str:
@@ -359,19 +442,32 @@ def _map_usage(openai_json: Dict[str, Any]) -> Dict[str, int]:
     usage = openai_json.get("usage", {}) or {}
     input_tokens = int(usage.get("input_tokens", 0) or 0)
     output_tokens = int(usage.get("output_tokens", 0) or 0)
-    total_tokens = int(
-        usage.get("total_tokens", input_tokens + output_tokens) or 0
+    total_tokens = int(usage.get("total_tokens", input_tokens + output_tokens) or 0)
+    input_details = usage.get("input_tokens_details") or {}
+    cached_tokens = int(input_details.get("cached_tokens", 0) or 0)
+    # GPT-5.6 explicit caching has a (30-min) cache-write price. If the Responses
+    # usage object reports written tokens, meter them; otherwise 0. The key name
+    # is not yet documented, so probe the likely candidates defensively.
+    cache_write_tokens = int(
+        input_details.get("cache_creation_tokens")
+        or input_details.get("cache_write_tokens")
+        or 0
     )
-    cached_tokens = int(
-        (usage.get("input_tokens_details") or {}).get("cached_tokens", 0) or 0
-    )
+    # IMPORTANT: OpenAI's ``input_tokens`` is the TOTAL prompt count and
+    # *includes* the cached + cache-write tokens as a subset. The accelerator's
+    # cost model (and the Bedrock Converse convention it mirrors) expects
+    # ``inputTokens`` to be the DISJOINT fresh/uncached count, billed separately
+    # from cacheReadInputTokens / cacheWriteInputTokens. Subtract the cache
+    # portions so cached tokens are not billed twice (full input rate + cache
+    # rate). Clamp at 0 defensively. Verified live: input_tokens 4508 with
+    # cache_read 3193 → fresh 1315 (consistent cold vs warm).
+    fresh_input_tokens = max(0, input_tokens - cached_tokens - cache_write_tokens)
     return {
-        "inputTokens": input_tokens,
+        "inputTokens": fresh_input_tokens,
         "outputTokens": output_tokens,
         "totalTokens": total_tokens,
         "cacheReadInputTokens": cached_tokens,
-        # No cache-write cost: Responses caching (when present) is automatic.
-        "cacheWriteInputTokens": 0,
+        "cacheWriteInputTokens": cache_write_tokens,
     }
 
 
@@ -399,24 +495,18 @@ def translate_response(
     usage = _map_usage(openai_json)
 
     converse_response = {
-        "output": {
-            "message": {"role": "assistant", "content": [{"text": text}]}
-        },
+        "output": {"message": {"role": "assistant", "content": [{"text": text}]}},
         "stopReason": openai_json.get("status", "end_turn"),
         "usage": usage,
     }
 
     return {
         "response": converse_response,
-        "metering": {
-            f"{context}/bedrock/{model_id}": {**usage, "requests": 1}
-        },
+        "metering": {f"{context}/bedrock/{model_id}": {**usage, "requests": 1}},
     }
 
 
-def _sign_and_send(
-    body: Dict[str, Any], region: str
-) -> "URLLib3Session.send":  # type: ignore[name-defined]
+def _sign_and_send(body: Dict[str, Any], region: str) -> "URLLib3Session.send":  # type: ignore[name-defined]
     """SigV4-sign and POST the request body to the bedrock-mantle endpoint.
 
     Returns the botocore HTTP response object (has ``.status_code`` and
@@ -425,7 +515,9 @@ def _sign_and_send(
     session = get_bedrock_session(region)
     credentials = session.get_credentials()
     if credentials is None:
-        raise RuntimeError("No AWS credentials available to sign bedrock-mantle request")
+        raise RuntimeError(
+            "No AWS credentials available to sign bedrock-mantle request"
+        )
     frozen = credentials.get_frozen_credentials()
 
     url = _mantle_endpoint(region)
@@ -452,7 +544,9 @@ def _sign_request(body: Dict[str, Any], region: str) -> tuple:
     session = get_bedrock_session(region)
     credentials = session.get_credentials()
     if credentials is None:
-        raise RuntimeError("No AWS credentials available to sign bedrock-mantle request")
+        raise RuntimeError(
+            "No AWS credentials available to sign bedrock-mantle request"
+        )
     frozen = credentials.get_frozen_credentials()
 
     url = _mantle_endpoint(region)
@@ -492,7 +586,9 @@ def _iter_sse_data_objects(raw_stream):
                 try:
                     yield json.loads(payload)
                 except json.JSONDecodeError:
-                    logger.debug("Skipping unparseable SSE data line: %s", payload[:120])
+                    logger.debug(
+                        "Skipping unparseable SSE data line: %s", payload[:120]
+                    )
 
 
 def stream_responses_api(
@@ -616,9 +712,7 @@ def stream_responses_api(
         client._put_metric("OpenAIReasoningTokens", reasoning_tokens)
 
     yield {
-        "metering": {
-            f"{context}/bedrock/{model_id}": {**final_usage, "requests": 1}
-        },
+        "metering": {f"{context}/bedrock/{model_id}": {**final_usage, "requests": 1}},
         "text": "".join(full_text_parts),
     }
 

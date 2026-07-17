@@ -64,7 +64,7 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 - [Post-Processing Lambda Hook](./post-processing-lambda-hook.md) - Custom downstream processing integration
 - [Lambda Hook Inference](./lambda-hook-inference.md) - Custom LLM integration via Lambda hooks
 - [Nova Fine-Tuning](./nova-finetuning.md) - Fine-tuning Amazon Nova models for IDP tasks
-- [OpenAI GPT-5.x Models](./openai-models.md) - GPT-5.4 / GPT-5.5 via the bedrock-mantle Responses API: support matrix, limitations, regions
+- [OpenAI GPT-5.x Models](./openai-models.md) - GPT-5.4 / GPT-5.5 / GPT-5.6 (Sol/Terra/Luna) via the bedrock-mantle Responses API: support matrix, limitations, regions, caching
 - [Service Tiers](./service-tiers.md) - Configurable service tier options
 
 ## Monitoring & Operations

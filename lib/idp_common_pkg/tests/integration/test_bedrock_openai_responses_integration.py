@@ -6,8 +6,10 @@
 These make REAL calls to the ``bedrock-mantle`` endpoint and require:
   - AWS credentials with ``bedrock-mantle:CreateInference`` permission
   - Access to the OpenAI models in the target region(s):
-      * GPT-5.4: us-east-2, us-west-2, us-gov-west-1
-      * GPT-5.5: us-east-2
+      * GPT-5.4: us-east-1, us-east-2, us-west-2, us-gov-west-1
+      * GPT-5.5: us-east-1, us-east-2
+      * GPT-5.6 Sol: us-east-1, us-east-2
+      * GPT-5.6 Terra/Luna: us-east-1, us-east-2, us-west-2
 
 Like all integration tests in this package they are excluded from the default
 run (``addopts = -m "not integration"`` in pytest.ini) and only execute with::
@@ -64,7 +66,7 @@ class TestOpenAIResponsesIntegration:
 
     @pytest.fixture
     def client(self):
-        # us-west-2 supports GPT-5.4 in-region; GPT-5.5 falls back to us-east-2.
+        # us-west-2 supports GPT-5.4 in-region; GPT-5.5 falls back to us-east-1.
         return BedrockClient(region="us-west-2", metrics_enabled=False)
 
     def test_gpt_5_4_text(self, client):
@@ -123,7 +125,7 @@ class TestOpenAIResponsesIntegration:
         assert "CAT-42" in text
 
     def test_gpt_5_5_cross_region_fallback(self, client):
-        """GPT-5.5 (us-east-2 only) is reachable from a us-west-2 client."""
+        """GPT-5.5 (us-east-1/us-east-2) is reachable from a us-west-2 client."""
         try:
             result = client.invoke_model(
                 model_id="openai.gpt-5.5",
@@ -154,3 +156,28 @@ class TestOpenAIResponsesIntegration:
             _skip_if_unavailable(e)
 
         assert client.extract_text_from_response(result).strip() != ""
+
+    def test_gpt_5_6_terra_explicit_cache(self, client):
+        """GPT-5.6 Terra accepts an explicit prompt-cache breakpoint end-to-end.
+
+        Sends a <<CACHEPOINT>> marker (translated to prompt_cache_breakpoint) and
+        asserts the call succeeds and reports cache metering keys.
+        """
+        try:
+            result = client.invoke_model(
+                model_id="openai.gpt-5.6-terra",
+                system_prompt="Reply with one word.",
+                content=[
+                    {"text": "Static reusable context. <<CACHEPOINT>>"},
+                    {"text": "What color is a clear daytime sky?"},
+                ],
+                max_tokens=2000,
+                context="IntegrationTest",
+            )
+        except Exception as e:  # noqa: BLE001
+            _skip_if_unavailable(e)
+
+        assert client.extract_text_from_response(result).strip() != ""
+        usage = result["response"]["usage"]
+        assert "cacheReadInputTokens" in usage
+        assert "cacheWriteInputTokens" in usage

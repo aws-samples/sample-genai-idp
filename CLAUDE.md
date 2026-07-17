@@ -463,9 +463,11 @@ that domain:
 | `.claude/skills/create-hf-dataset-pr.md` | Contributing a data/label correction to an external HuggingFace dataset via a community PR (parquet key-order gotcha, verification, review artifacts) |
 | `.claude/skills/testing-qa.md` | Writing tests, pytest patterns, moto, conftest setup |
 | `.claude/skills/full-test-battery.md` | Running the FULL test battery (all suites + lint/typecheck) to validate a branch/merge; includes the known pre-existing-failure baseline so real regressions stand out |
+| `.claude/skills/test-upgrade.md` | Validating an in-place CloudFormation stack upgrade between two published releases (X→Y) — deploy the FROM template, `update-stack` to the TO template, watch the `UpdateDefaultConfig` custom resource, diagnose/recover a rollback deadlock, tear down |
 | `.claude/skills/live-eval-and-cost.md` | Live benchmark A/B, upgrade testing, reading accuracy/cost/confidence + prompt-cache/model cost facts |
 | `.claude/skills/run-benchmarks.md` | Running the empirical benchmark suite in `benchmarks/` (config × doc-size matrix with exact ground truth; success/completeness/accuracy/calibration/time/tokens/cost) to produce the guidance paper or gate a change vs baseline |
 | `.claude/skills/documentation.md` | Documentation standards, two doc tiers, CHANGELOG, docs-site, and the "adding a Bedrock model" checklist |
+| `.claude/skills/add-model.md` | Adding or changing a selectable Bedrock model (model IDs, regions, limits, pricing, template enums, client routing, UI, both doc tiers, tests) — the full expanded checklist |
 | `.claude/skills/prepare-changelog.md` | Preparing the `[Unreleased]` CHANGELOG section for release — three-section shape (Added/Changed/Fixed), net-since-release entries (drop intra-cycle churn), compact entries with doc/PR links |
 
 > **Note:** `.claude/skills/` is canonical. The Cline assistant's

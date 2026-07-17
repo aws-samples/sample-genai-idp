@@ -235,8 +235,8 @@ All Policy Discovery settings live under the `discovery.rules` section of the Co
 > **⚠️ OpenAI GPT-5.x is NOT supported for Policy/Rule Discovery.** Rule
 > discovery sends whole-PDF `document` blocks (and agentic rule discovery uses
 > the Converse-based Strands path), neither of which the OpenAI Responses API
-> supports. `openai.gpt-5.4` / `openai.gpt-5.5` are rejected by
-> `idp-cli config-validate` and guarded at runtime. See
+> supports. All `openai.gpt-5.*` models (including GPT-5.6 Sol/Terra/Luna) are
+> rejected by `idp-cli config-validate` and guarded at runtime. See
 > [OpenAI GPT-5.x Models](openai-models.md).
 
 **Parameter Guidelines:**
