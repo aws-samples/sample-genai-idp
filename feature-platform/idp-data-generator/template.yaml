@@ -339,7 +339,9 @@ Resources:
                 Resource: "*"
                 Condition:
                   StringEquals:
-                    cloudwatch:namespace: bedrock-agentcore
+                    # bedrock-agentcore: the runtime's own metrics; GENAIDP:
+                    # idp_common's Bedrock client token/latency metrics.
+                    cloudwatch:namespace: [bedrock-agentcore, GENAIDP]
               - Sid: WorkloadIdentity
                 Effect: Allow
                 Action:
@@ -612,6 +614,13 @@ Resources:
               Resource:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+            # idp_common's Bedrock client publishes token/latency metrics.
+            - Effect: Allow
+              Action: cloudwatch:PutMetricData
+              Resource: '*'
+              Condition:
+                StringEquals:
+                  cloudwatch:namespace: GENAIDP
 
   BootstrapProcessorFunctionLogGroup:
     Type: AWS::Logs::LogGroup
