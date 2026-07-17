@@ -11,9 +11,12 @@ and the surface the feature UI page calls.
 Routes
 ------
 POST /generate
-    Body: { schema: <json-schema obj>, configVersion: str, docCount?: int,
-            threshold?: int, augment?: bool }
-    Enqueues a generation job (preauthored schema). Returns { jobId }.
+    Body (one of):
+      - { prompt: str, className?: str, docCount?: int, threshold?: int,
+          augment?: bool } — the processor authors a schema from the prompt.
+      - { schema: <json-schema obj>, configVersion: str, docCount?: int,
+          threshold?: int, augment?: bool } — preauthored schema.
+    Enqueues a generation job. Returns { jobId }.
 
 POST /generate-from-config
     Body: { versionName: str, className: str, docCount?: int, threshold?: int,
@@ -71,20 +74,27 @@ def _enqueue(message: Dict[str, Any]) -> str:
 
 
 def _handle_generate(body: Dict[str, Any]) -> Dict[str, Any]:
+    # Two shapes: a natural-language prompt (the processor authors a schema), or
+    # a preauthored schema + target version. Require one or the other.
+    prompt = (body.get("prompt") or "").strip()
     schema = body.get("schema")
-    config_version = body.get("configVersion")
-    if not schema or not config_version:
-        return _resp(400, {"error": "schema and configVersion are required"})
+    if not prompt and not schema:
+        return _resp(400, {"error": "either prompt or schema is required"})
+
     message = {
         "jobId": uuid.uuid4().hex,
-        "prompt": "",
-        "targetVersion": config_version,
+        "prompt": prompt,
+        "className": body.get("className"),
         "docCount": int(body.get("docCount", 3)),
         "threshold": int(body.get("threshold", 7)),
         "augment": bool(body.get("augment", False)),
         "generateDocs": True,
-        "preauthoredSchema": schema,
     }
+    if schema:
+        # Preauthored path — the processor uses the schema as-is and writes it
+        # into targetVersion (defaults to a bootstrap-<class> version otherwise).
+        message["preauthoredSchema"] = schema
+        message["targetVersion"] = body.get("configVersion")
     return _resp(202, {"jobId": _enqueue(message)})
 
 

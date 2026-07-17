@@ -84,22 +84,26 @@ const useSyntheticDataGenerator = () => {
   );
 
   const generateFromPrompt = useCallback(
+    // Field names match the feature-api /generate contract (prompt path):
+    // prompt + className + docCount (NOT count).
     (args: GenerateFromPromptArgs): Promise<string> =>
       _post('/generate', {
         prompt: args.prompt,
-        count: args.count,
         className: args.className || undefined,
+        docCount: args.count,
         augment: Boolean(args.augment),
       }),
     [_post],
   );
 
   const generateFromConfig = useCallback(
+    // Field names match the feature-api /generate-from-config contract:
+    // versionName + className + docCount (NOT configVersion/count).
     (args: GenerateFromConfigArgs): Promise<string> =>
       _post('/generate-from-config', {
-        configVersion: args.configVersion,
+        versionName: args.configVersion,
         className: args.className,
-        count: args.count,
+        docCount: args.count,
         augment: Boolean(args.augment),
       }),
     [_post],
