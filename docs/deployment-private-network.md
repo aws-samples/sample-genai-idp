@@ -770,6 +770,163 @@ From the browser (DevTools → Network tab):
 
 ---
 
+## Optional: custom (vanity) domain for the Web UI
+
+By default the UI is reached at the regional execute-api `/api/` URL (the `ApplicationWebURL`
+output). You can front it with a vanity hostname (e.g. `https://idp.example.gov`) that resolves
+only inside the VPC. This is **optional** and — unlike the former ALB hosting — it uses the
+**API Gateway private custom domain** feature. The IDP stack does **not** create the domain,
+DNS, or routing; you provision those with the steps below and tell IDP about the hostname via
+the `CustomDomainUrl` parameter.
+
+### What changed from ALB hosting
+
+| | v0.5.x (ALB) | v0.6.x (private API Gateway) |
+|---|---|---|
+| UI served at | root path `/` on an internal ALB | the `/api` **stage path** on the private REST API |
+| TLS certificate | on the ALB HTTPS listener (`ALBCertificateArn`) | ACM cert on an API Gateway **private** custom domain name |
+| DNS target | alias/CNAME to the internal ALB DNS | Route 53 PHZ **A-alias to the execute-api VPCE DNS name** |
+| Extra resources | none | private domain name + **domain name access association** + base path mapping + a domain resource policy |
+| OAuth origin | matched root — "just worked" | app under `/api`, OAuth returns to root — see the base-path note below |
+
+The `ALB*` parameters (`ALBVpcId`, `ALBSubnetIds`, `ALBCertificateArn`, `ALBScheme`,
+`ALBAllowedCIDRs`) were **removed** in v0.6.
+
+### What `CustomDomainUrl` does (and does not) do
+
+- **Does**: adds `https://idp.example.gov` (with and without a trailing slash) to the Cognito
+  App Client callback/logout URLs; adds it to every browser-accessed S3 bucket's CORS origins;
+  sets `VITE_CLOUDFRONT_DOMAIN=""` so the SPA's OAuth `redirectSignIn`/`redirectSignOut` use
+  `window.location.origin` (see `src/ui/src/aws-exports.js`).
+- **Does not**: create the ACM certificate, the API Gateway custom domain name, the base path
+  mapping, the domain name access association, or any DNS record.
+
+Value format: **host only** — `https://<host>` with no path or trailing slash (e.g.
+`https://idp.example.gov`). Enforced by the parameter's `AllowedPattern`.
+
+### Required AWS resources
+
+1. **ACM certificate** in this region covering the hostname. Private custom domains support
+   **RSA-2048** or **ECDSA P-256/P-384** certificates only, and enforce **TLS 1.2**.
+2. **API Gateway private custom domain name** — `EndpointConfiguration.Types=[PRIVATE]`,
+   routing mode "API mappings only", with the ACM cert and a **resource policy** allowing
+   `execute-api:Invoke` only from your execute-api VPC endpoint. (This is a *separate* policy
+   from the private API's own resource policy — both must permit the endpoint.)
+3. **Base path mapping(s)** from the custom domain to the IDP REST API + the `api` stage (see
+   the base-path note below).
+4. **Domain name access association** between the private custom domain and your execute-api
+   VPC endpoint (the `ApiGatewayVpcEndpointId`). Takes ~15 minutes to become ready.
+5. **Route 53 private hosted zone** for the hostname, associated to the VPC, with an
+   **A-record (Alias)** to the execute-api VPCE DNS name (add an AAAA alias for dualstack
+   endpoints).
+
+> Multi-level base path mappings (e.g. `/team/app`) are not supported for private custom
+> domains; single-level base paths (empty or `api`) are fine.
+
+### The `/api` base-path consideration (read before mapping)
+
+The v6 SPA is built with `VITE_UI_BASE_PATH=/api/`, so its assets are referenced under `/api/`
+(this matches the `api` stage on the raw execute-api URL). But with a custom domain the OAuth
+redirect is the **domain root** — `window.location.origin + '/'` → `https://idp.example.gov/` —
+because `window.location.origin` never includes a path. That interaction drives the base path
+mapping:
+
+- A single mapping with base path **`api`** (app at `https://idp.example.gov/api/`) loads the
+  SPA and its assets, **but OAuth returns to `https://idp.example.gov/` (root), which that
+  mapping does not serve → `Forbidden`.**
+- A single **empty** base path mapping serves the shell at the root (good for the OAuth return)
+  **but the SPA's `/api/assets/...` requests then fail to resolve.**
+
+To satisfy both, create **two base path mappings to the same `api` stage**:
+
+| Base path | Serves |
+|---|---|
+| *(empty)* | the app shell at `https://idp.example.gov/` — the OAuth redirect target |
+| `api` | the SPA assets at `https://idp.example.gov/api/...` |
+
+`VITE_API_BASE_URL` points at the raw execute-api `/api` URL, so backend data operations
+(`POST /op/{field}`) are unaffected by the custom domain — the vanity domain only serves the UI
+shell + assets and anchors the OAuth origin.
+
+> **Validate in a non-production deployment first.** Confirm the full login round-trip *and*
+> that the SPA loads and routes correctly through the vanity domain before requesting any
+> production DNS change. If a clean single-mapping experience is required, the alternative is
+> CloudFront hosting (which builds the UI with `base=/`) — but CloudFront is public-facing and
+> is generally not used in strict private-network deployments.
+
+### Implementation steps
+
+```bash
+REGION=us-east-1
+HOST=idp.example.gov
+API_ID=<your-rest-api-id>            # from ApplicationWebURL
+EXECAPI_VPCE_ID=<execute-api-vpce>   # the ApiGatewayVpcEndpointId
+
+# 1) ACM certificate for the hostname (request + validate, or import). Capture the ARN:
+CERT_ARN=<acm-cert-arn>
+
+# 2) Resource policy allowing only your execute-api VPCE (save as domain-policy.json):
+cat > domain-policy.json <<EOF
+{ "Version":"2012-10-17","Statement":[
+  {"Effect":"Allow","Principal":"*","Action":"execute-api:Invoke","Resource":["execute-api:/*"]},
+  {"Effect":"Deny","Principal":"*","Action":"execute-api:Invoke","Resource":["execute-api:/*"],
+   "Condition":{"StringNotEquals":{"aws:SourceVpce":"$EXECAPI_VPCE_ID"}}}
+]}
+EOF
+
+# 3) Create the PRIVATE custom domain name:
+DN_ID=$(aws apigateway create-domain-name \
+  --domain-name "$HOST" \
+  --certificate-arn "$CERT_ARN" \
+  --security-policy TLS_1_2 \
+  --endpoint-configuration '{"types":["PRIVATE"]}' \
+  --policy file://domain-policy.json \
+  --region $REGION --query domainNameId --output text)
+
+# 4) Base path mappings → the "api" stage (empty + api, per the base-path note):
+aws apigateway create-base-path-mapping --domain-name "$HOST" --domain-name-id $DN_ID \
+  --rest-api-id $API_ID --stage api --region $REGION                      # empty base path
+aws apigateway create-base-path-mapping --domain-name "$HOST" --domain-name-id $DN_ID \
+  --rest-api-id $API_ID --stage api --base-path api --region $REGION      # /api
+
+# 5) Associate the domain with the execute-api VPC endpoint:
+aws apigateway create-domain-name-access-association \
+  --domain-name-arn arn:aws:apigateway:$REGION:<account-id>:/domainnames/$HOST+$DN_ID \
+  --access-association-source $EXECAPI_VPCE_ID \
+  --access-association-source-type VPCE --region $REGION
+
+# 6) Route 53 private hosted zone + A-alias to the execute-api VPCE DNS name
+#    (same alias mechanics as "Solution A" above — reuse VPCE_DNS / VPCE_HZ_ID there).
+```
+
+### DNS target for your DNS team
+
+The vanity hostname must ultimately resolve to the **execute-api VPC endpoint's regional DNS
+name**:
+
+```
+vpce-XXXXXXXXXXXX.execute-api.<region>.vpce.amazonaws.com
+```
+
+Recommended: a **Route 53 private hosted zone** for the hostname with an **A-record, Alias=ON**
+targeting that VPCE DNS name (and an AAAA alias for dualstack endpoints). If the record must
+live in enterprise DNS instead, a **CNAME** to the same VPCE DNS name works — but because the
+execute-api endpoint has `PrivateDnsEnabled: true`, a plain CNAME can fail to resolve inside the
+VPC that hosts the private API; the Route 53 private-hosted-zone A-alias avoids that interaction.
+
+### After the domain is live
+
+1. Set `CustomDomainUrl=https://idp.example.gov` on the stack (triggers a UI rebuild that
+   switches the OAuth origin to the domain).
+2. Confirm the Cognito App Client callback/logout lists include the domain (added automatically
+   when the parameter is set).
+3. Access the app **only via the vanity domain** — not the raw execute-api `/api/` URL. With a
+   custom domain configured, that raw URL will not complete OAuth (its origin has no `/api/`).
+4. **Okta/SAML is unchanged**: the IdP still posts its assertion to the Cognito hosted-UI
+   `/saml2/idpresponse` endpoint; only the app-facing origin changes.
+
+---
+
 ## Troubleshooting
 
 | Issue | Resolution |
@@ -795,6 +952,10 @@ From the browser (DevTools → Network tab):
 | **Browser UI/API fails: `ERR_NAME_NOT_RESOLVED` on `<api-id>.execute-api.<region>.amazonaws.com`** | Browser cannot resolve the regional REST API hostname. In cross-VPC/hybrid deployments, the execute-api VPC endpoint's `PrivateDnsEnabled` only works within the VPC that owns the endpoint. See "Private REST API DNS resolution" section above — create the API-ID-scoped Route 53 PHZ (`<api-id>.execute-api.<region>.amazonaws.com`), add an apex alias to the execute-api endpoint, and associate it with the VPC where DNS queries originate. |
 | **UI loads but data operations (`POST /op/{field}`) fail / time out** | (a) The execute-api endpoint SG is missing ingress 443 from the browser's source network (see SG matrix). (b) The API resource policy pins access to a different `ApiGatewayVpcEndpointId` than the endpoint the request arrived through. Confirm the request carries the pinned endpoint id in `x-amzn-vpce-id`. |
 | **`nslookup` resolves the API to public IPs (not VPC endpoint IPs)** | The scoped PHZ is not associated with the VPC where the DNS query runs, or `PrivateDnsEnabled` interference. Verify the association: `aws route53 get-hosted-zone --id <phz-id>` → check the `VPCs` list. |
+| **Custom domain: `Forbidden` after login (redirect lands on the domain root)** | The custom domain has only a base-path=`api` mapping, so the OAuth return to `https://<host>/` (root) isn't served. Add the **empty** base path mapping to the `api` stage as well (see "The `/api` base-path consideration"). |
+| **Custom domain: shell loads at root but assets 404 under `/api/`** | The **`api`** base path mapping is missing. Add it (in addition to the empty mapping) so `https://<host>/api/...` resolves the SPA assets. |
+| **Custom domain: OAuth returns to root but raw execute-api `/api/` URL now fails** | Expected once `CustomDomainUrl` is set — the SPA uses `window.location.origin` (root), which the raw execute-api host has no `/api/` for. Access the app via the vanity domain only. |
+| **Custom domain doesn't resolve inside the VPC** | A plain CNAME plus `PrivateDnsEnabled: true` on the execute-api endpoint can fail to resolve within the endpoint's VPC. Use a Route 53 **private hosted zone** with an **A-alias** to the VPCE DNS name instead. |
 
 ---
 
@@ -818,4 +979,5 @@ From the browser (DevTools → Network tab):
 - Test VPC template — `scripts/sdlc/apigw-hosting-test-vpc.yaml` (NAT egress + execute-api endpoint)
 - Lambda S3 client pattern — `nested/api-resolvers/src/lambda/upload_resolver/index.py`, `src/lambda/api_handler/index.py`
 - AWS docs: [Create a private REST API in API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-private-apis.html) (private API, execute-api VPC endpoint, resource policy)
+- AWS docs: [Custom domain names for private APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-private-custom-domains.html) and the [private custom domain tutorial](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-private-custom-domains-tutorial.html) (private domain name, domain name access association, base path mapping, Route 53 A-alias to the VPCE)
 - AWS docs: [Centralized access to VPC private endpoints](https://docs.aws.amazon.com/whitepapers/latest/building-scalable-secure-multi-vpc-network-infrastructure/centralized-access-to-vpc-private-endpoints.html) (Route 53 PHZ pattern for cross-VPC/cross-account/hybrid access to Interface VPC Endpoints)
