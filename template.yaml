@@ -805,18 +805,20 @@ Parameters:
     AllowedValues: ['true', 'false']
     Description: >-
       Set to 'true' to place all document-processing Lambdas inside the
-      customer-supplied VPC (required for Headless API deployments and for
-      any compliance/exfil-control use cases). Default 'false' = Lambdas run
+      customer-supplied VPC. Required when ApiGatewayVisibility=PRIVATE and
+      for Headless API deployments, and recommended for any
+      compliance/exfil-control use case. Default 'false' = Lambdas run
       in the default AWS-owned network. When 'true', you must populate
-      VpcId, PrivateSubnetIds, and LambdaSecurityGroupId.
+      VpcId, PrivateSubnetIds, and LambdaSecurityGroupId (and LambdaSubnetIds
+      when ApiGatewayVisibility=PRIVATE).
 
   VpcId:
     Type: String
     Default: ""
     Description: >-
       Required when DeployInVPC=true. The customer-owned VPC that Lambdas
-      and (if Headless) the Private API Gateway VPC endpoint are attached
-      to. Leave empty for non-VPC deployments.
+      and (for PRIVATE or Headless mode) the execute-api VPC endpoint are
+      attached to. Leave empty for non-VPC deployments.
 
   PrivateSubnetIds:
     Type: CommaDelimitedList
@@ -839,10 +841,12 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      Required when EnableHeadless=true. The com.amazonaws.<region>.execute-api
-      Interface VPC endpoint that the Private API Gateway is bound to. The
+      Required when ApiGatewayVisibility=PRIVATE or EnableHeadless=true. The
+      com.amazonaws.<region>.execute-api Interface VPC endpoint that the
+      private REST API (Web UI and/or the Headless Jobs API) is bound to. The
       API's resource policy denies all traffic not sourced from this VPCE.
-      Leave empty if EnableHeadless=false.
+      Leave empty only when ApiGatewayVisibility=GLOBAL and
+      EnableHeadless=false.
 
   ApiStageName:
     Type: String
@@ -1317,16 +1321,19 @@ Metadata:
           default: "Private Network (ApiGatewayVisibility=PRIVATE — VPC-only REST API + Web UI)"
         Parameters:
           - ApiGatewayVisibility
+      - Label:
+          default: "VPC Configuration (required when ApiGatewayVisibility=PRIVATE, DeployInVPC=true, or EnableHeadless=true)"
+        Parameters:
+          - DeployInVPC
+          - VpcId
+          - PrivateSubnetIds
           - LambdaSubnetIds
+          - LambdaSecurityGroupId
+          - ApiGatewayVpcEndpointId
       - Label:
           default: "Headless API Deployment (required for GovCloud)"
         Parameters:
           - EnableHeadless
-          - DeployInVPC
-          - VpcId
-          - PrivateSubnetIds
-          - LambdaSecurityGroupId
-          - ApiGatewayVpcEndpointId
           - ApiStageName
       - Label:
           default: "Headless API Deployment - Bastion Host (optional, requires VPC Secured Mode)"
@@ -1467,7 +1474,7 @@ Metadata:
       EnableHeadless:
         default: "Enable Headless API (Jobs REST API, required for GovCloud)"
       DeployInVPC:
-        default: "Enable VPC Secured Mode (required when Headless API is enabled)"
+        default: "Enable VPC Secured Mode (required when ApiGatewayVisibility=PRIVATE or Headless API is enabled)"
       VpcId:
         default: "VPC ID (required when VPC Secured Mode is enabled)"
       PrivateSubnetIds:
@@ -1475,7 +1482,7 @@ Metadata:
       LambdaSecurityGroupId:
         default: "Lambda Security Group ID (required when VPC Secured Mode is enabled)"
       ApiGatewayVpcEndpointId:
-        default: "API Gateway VPC Endpoint ID (required when Headless API is enabled)"
+        default: "API Gateway VPC Endpoint ID (execute-api; required when ApiGatewayVisibility=PRIVATE or Headless API is enabled)"
       ApiStageName:
         default: "API Gateway Stage Name (Headless API)"
       DeployBastionHost:
