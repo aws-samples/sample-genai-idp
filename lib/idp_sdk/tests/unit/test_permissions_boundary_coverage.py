@@ -213,7 +213,7 @@ def test_nested_stacks_forward_permissions_boundary():
         if not (root / child_src).is_file():
             # Child template isn't a committed source we can introspect; skip.
             continue
-        child_params = (_load(child_src).get("Parameters") or {})
+        child_params = _load(child_src).get("Parameters") or {}
         if "PermissionsBoundaryArn" not in child_params:
             continue  # child doesn't take the param -> nothing to forward
         passed = props.get("Parameters") or {}
