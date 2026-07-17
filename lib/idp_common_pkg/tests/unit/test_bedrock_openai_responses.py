@@ -105,8 +105,7 @@ class TestRegionResolution:
         monkeypatch.delenv("BEDROCK_MANTLE_REGION", raising=False)
         # Sol is only in us-east-1/us-east-2; us-west-2 is not available for it.
         assert (
-            oar.resolve_mantle_region("openai.gpt-5.6-sol", "us-west-2")
-            == "us-east-1"
+            oar.resolve_mantle_region("openai.gpt-5.6-sol", "us-west-2") == "us-east-1"
         )
 
 
