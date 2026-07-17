@@ -57,6 +57,7 @@ Requires: awscli v2 on PATH; credentials with Cognito admin + CloudFormation rea
 """
 
 import argparse
+import base64
 import json
 import os
 import secrets
@@ -509,13 +510,20 @@ def run_token_negatives(ctx, tokens, results):
     gateway (401)."""
     print("\n=== TOKEN NEGATIVES (expect 401) ===")
     good = tokens["Admin"]
-    # tamper: flip the last char of the signature segment
+    # tamper: flip a real byte of the decoded signature. NOTE: do NOT flip the
+    # last base64url char of the signature segment — an RS256 signature is 256
+    # bytes, whose base64url encoding ends on a char carrying only 2 significant
+    # bits (the low bits are discarded padding). ~25% of tokens end in 'A', and
+    # 'A'<->'B' differ only in a padding bit, so that "tamper" decodes to the
+    # SAME signature bytes and is legitimately accepted (200) — a false failure.
     parts = good.split(".")
     tampered = good
     if len(parts) == 3:
         sig = parts[2]
-        flipped = ("A" if sig[-1] != "A" else "B")
-        tampered = f"{parts[0]}.{parts[1]}.{sig[:-1]}{flipped}"
+        raw = bytearray(base64.urlsafe_b64decode(sig + "=" * (-len(sig) % 4)))
+        raw[0] ^= 0x01  # flip a byte away from the padding tail
+        new_sig = base64.urlsafe_b64encode(bytes(raw)).rstrip(b"=").decode()
+        tampered = f"{parts[0]}.{parts[1]}.{new_sig}"
     cases = {
         "no-token": None,
         "garbage": "not-a-jwt",
