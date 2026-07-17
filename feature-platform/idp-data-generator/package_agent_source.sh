@@ -22,8 +22,11 @@ STAGE="$SCRIPT_DIR/idp_common_pkg"
 echo "Staging idp_common_pkg into the build context..."
 rm -rf "$STAGE"
 cp -R "$REPO_ROOT/lib/idp_common_pkg" "$STAGE"
-# Drop local build artifacts that would bloat/pollute the image context.
-find "$STAGE" -type d \( -name '__pycache__' -o -name '*.egg-info' -o -name '.pytest_cache' \) -prune -exec rm -rf {} + 2>/dev/null || true
+# Drop local build artifacts that would bloat/pollute the image context and can
+# shadow the real source at pip-install time (setuptools' build/lib copies).
+find "$STAGE" -type d \( -name 'build' -o -name 'dist' -o -name '__pycache__' \
+  -o -name '*.egg-info' -o -name '.pytest_cache' -o -name 'tests' \) \
+  -prune -exec rm -rf {} + 2>/dev/null || true
 
 echo "Zipping agent-source.zip (build context root)..."
 cd "$SCRIPT_DIR"
