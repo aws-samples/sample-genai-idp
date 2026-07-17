@@ -15,6 +15,18 @@ The Test Studio consists of two main tabs:
 https://github.com/user-attachments/assets/7c5adf30-8d5c-4292-93b0-0149506322c7
 
 
+## Generating synthetic test sets
+
+When the [IDP Data Generator](extensions/idp-data-generator.md) extension is
+installed, the **Test Sets** tab shows a **Generate Synthetic Data** button. It
+opens a modal to generate labeled synthetic documents (PDF + ground-truth JSON)
+— either from a plain-language description of a document type, or from an
+existing configuration version's document class. Generation runs as a background
+job; the resulting test set appears in the list when it completes. See the
+[IDP Data Generator extension](extensions/idp-data-generator.md) for details and
+installation.
+
+
 ## Pre-Deployed Test Sets
 
 The accelerator automatically deploys **four benchmark datasets** from HuggingFace as ready-to-use test sets during stack deployment:

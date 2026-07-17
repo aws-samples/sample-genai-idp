@@ -160,6 +160,10 @@ export default defineConfig({
                   slug: "extensions/auto-optimizer",
                 },
                 {
+                  label: "IDP Data Generator",
+                  slug: "extensions/idp-data-generator",
+                },
+                {
                   label: "Sample: Document Status (feature add-on)",
                   slug: "extensions/sample-document-status",
                 },
