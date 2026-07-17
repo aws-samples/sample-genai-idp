@@ -137,7 +137,9 @@ lint-cicd: ## CI/CD lint — checks only, no modifications
 		exit 1; \
 	fi
 
-	@if ! make ui-build; then \
+	@# ui-build-only (vite build, NO lint/typecheck) — ui-lint above already ran
+	@# eslint + tsc, so the default `ui-build` would redundantly run them again.
+	@if ! make ui-build-only; then \
 		echo -e "$(RED)ERROR: UI build failed$(NC)"; \
 		exit 1; \
 	fi
@@ -368,9 +370,13 @@ ui-lint: ## Run UI linting with checksum caching (skips if unchanged). Use FORCE
 		echo -e "$(GREEN)✅ UI code checksum unchanged - skipping lint (use FORCE=1 to force re-run)$(NC)"; \
 	fi
 
-ui-build: ## Build UI for production
+ui-build: ## Build UI for production (runs lint + typecheck + vite build)
 	@echo "Checking UI build"
 	cd src/ui && npm ci --prefer-offline --no-audit && npm run build
+
+ui-build-only: ## Vite production build ONLY (no lint/typecheck) — for CI, where ui-lint already ran them
+	@echo "Building UI (vite only; lint+typecheck already done by ui-lint)"
+	cd src/ui && npm ci --prefer-offline --no-audit && npm run build:only
 
 ui-test: ## Run UI unit tests (Vitest, jsdom — no browser required)
 	@echo "Running UI unit tests..."
