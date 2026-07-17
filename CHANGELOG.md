@@ -5,6 +5,10 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Feature Platform stack now honors `PermissionsBoundaryArn`, fixing rollback in SCP-enforced accounts.** When `EnableFeaturePlatform=true`, the main template did not forward `PermissionsBoundaryArn` to the Feature Platform nested stack (`feature-platform/main-stack-extensions`), and that nested template neither declared the parameter nor attached a boundary to its `FeaturePlatformLambdaRole` — so in accounts whose SCP requires a permissions boundary on every IAM role, `iam:CreateRole` was denied and the nested stack rolled back on creation. The parameter is now declared in the nested template, attached to the role, and forwarded from the main stack. The same gap on the SAM-auto-role Lambda functions in the installable feature templates (`feature-template`, `sample-feature`, `sample-health-insurance-review`) and on the conditional `BastionRole` / AgentCore roles/function in the main template is fixed as well. A static regression test (`lib/idp_sdk/tests/unit/test_permissions_boundary_coverage.py`) now asserts every deployed-stack template attaches the boundary to each role it creates and forwards the parameter to every nested stack that accepts it.
+
 ## [0.6.1]
 
 ### Added

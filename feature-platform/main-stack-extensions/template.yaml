@@ -197,6 +197,14 @@ Parameters:
     Default: 'INFO'
     AllowedValues: [DEBUG, INFO, WARNING, ERROR]
 
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ARN of an existing IAM Permissions Boundary policy to attach to
+      all IAM roles. Required by some organizations with Service Control
+      Policies (SCPs). Forwarded from the main stack's PermissionsBoundaryArn.
+
 Conditions:
 
   HasConfigurationTable: !Not [!Equals [!Ref ConfigurationTableName, '']]
@@ -207,6 +215,7 @@ Conditions:
   HasDiscoveryBucket: !Not [!Equals [!Ref DiscoveryBucketName, '']]
   HasCustomerManagedEncryptionKey: !Not [!Equals [!Ref CustomerManagedEncryptionKeyArn, '']]
   HasSellerBuckets: !Not [!Equals [!Join ['', !Ref SellerBucketObjectArns], '']]
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, '']]
 
 Globals:
 
@@ -246,6 +255,7 @@ Resources:
   FeaturePlatformLambdaRole:
     Type: AWS::IAM::Role
     Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref 'AWS::NoValue']
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
