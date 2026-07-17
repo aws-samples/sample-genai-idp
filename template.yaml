@@ -1839,6 +1839,7 @@ Resources:
     Type: AWS::IAM::Role
     Condition: ShouldDeployBastionHost
     Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       RoleName: !Sub '${AWS::StackName}BastionHost-Role'
       Description: 'Assumed by bastion host'
       AssumeRolePolicyDocument:
@@ -2135,6 +2136,10 @@ Resources:
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
+      # SAM auto-generates this function's execution role. Set the boundary on
+      # the function so it flows onto that generated role — otherwise creation
+      # fails in accounts whose SCP requires a boundary on every IAM role.
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       FunctionName: !Sub "${AWS::StackName}-agentcore-mcp-handler"
       CodeUri: src/lambda/agentcore_mcp_handler/
       Handler: index.lambda_handler
@@ -2451,6 +2456,7 @@ Resources:
     Type: AWS::IAM::Role
     Condition: CreateAgentCoreLambda
     Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       RoleName: !Sub "${AWS::StackName}-AgentCoreGatewayExecutionRole"
       Description: Execution role for AgentCore Gateway
       AssumeRolePolicyDocument:
@@ -2922,6 +2928,12 @@ Resources:
         # read it at runtime — the catalog source, no artifacts-bucket dependency.
         ConfigurationBucketName: !Ref ConfigurationBucket
         LogLevel: !Ref LogLevel
+        # Forward the permissions boundary so the nested stack's IAM role
+        # (FeaturePlatformLambdaRole) is created with it. Without this,
+        # accounts with an SCP that requires a boundary on every role fail
+        # nested-stack creation and roll back. See the other nested stacks
+        # (bedrockkb, pattern, reporting, discovery) which all forward this.
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
   # === Feature Platform (optional) — END =================================
 
   CustomerManagedEncryptionKey:
