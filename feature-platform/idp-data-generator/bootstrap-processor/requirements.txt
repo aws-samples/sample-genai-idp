@@ -1,0 +1,14 @@
+# BootstrapProcessor (Lambda) dependencies.
+#
+# This Lambda authors a schema, writes the config version to the HOST
+# Configuration table, and INVOKES the AgentCore generator runtime — it does not
+# run generation itself, so it needs idp_common (the synthesis adapter +
+# ConfigurationManager) but NOT seed-data. The [synthesis] extra is light
+# (jsonschema only), avoiding the numpy 2.x conflict that seed-data would bring.
+#
+# SAM build installs these with the function code; the relative path resolves to
+# lib/idp_common_pkg from feature-platform/idp-data-generator/bootstrap-processor/.
+../../../lib/idp_common_pkg[synthesis]
+
+aws-requests-auth>=0.4.3
+requests>=2.32.0

@@ -1,0 +1,24 @@
+{
+  "name": "idp-data-generator-feature-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@cloudscape-design/components": "^3.0.900",
+    "@cloudscape-design/design-tokens": "^3.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "aws-amplify": "^6.6.0",
+    "typescript": "^5.5.0",
+    "vite": "^7.3.6"
+  }
+}

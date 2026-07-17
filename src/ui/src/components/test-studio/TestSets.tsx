@@ -34,6 +34,8 @@ import {
 } from '../../graphql/generated';
 import type { DocumentClassType } from '../../graphql/generated/schema-types';
 import { getErrorMessage } from '../../utils/errorUtils';
+import useSyntheticDataGenerator from '../../hooks/use-synthetic-data-generator';
+import GenerateSyntheticDataModal from './GenerateSyntheticDataModal';
 
 const client = generateClient();
 
@@ -95,6 +97,10 @@ const TestSets = (): React.JSX.Element => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [showGenerateModal, setShowGenerateModal] = useState(false);
+  // The synthetic-data generator is an optional extension; the button is only
+  // shown when it's installed (available).
+  const { available: generatorAvailable } = useSyntheticDataGenerator();
   const [warningMessage, setWarningMessage] = useState('');
   const [confirmReplacement, setConfirmReplacement] = useState(false);
   const [showFileStructure, setShowFileStructure] = useState(() => {
@@ -865,6 +871,11 @@ const TestSets = (): React.JSX.Element => {
               >
                 Add Documents
               </ButtonDropdown>
+              {generatorAvailable && (
+                <Button iconName="gen-ai" disabled={loading} onClick={() => setShowGenerateModal(true)}>
+                  Generate Synthetic Data
+                </Button>
+              )}
               <ButtonDropdown
                 variant="primary"
                 items={[
@@ -1698,6 +1709,17 @@ const TestSets = (): React.JSX.Element => {
           </ul>
         </Box>
       </Modal>
+
+      <GenerateSyntheticDataModal
+        visible={showGenerateModal}
+        onDismiss={() => setShowGenerateModal(false)}
+        onStarted={(jobId) => {
+          setShowGenerateModal(false);
+          setSuccessMessage(
+            `Synthetic data generation started (job ${jobId}). The test set will appear here when it completes; use Refresh to check.`,
+          );
+        }}
+      />
     </Container>
   );
 };
