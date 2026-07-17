@@ -45,6 +45,11 @@ workflow:
 code_checks:
   stage: fast_checks
   interruptible: true
+  # Larger runner (4 vCPU / 16 GB, same as SRT): the Vite production build and
+  # tsc/eslint are CPU-bound and ran ~6 min on the default small runner vs
+  # seconds locally; more cores also make `pytest -n auto` worthwhile.
+  tags:
+    - size:large
   # Cheap, no-AWS checks — run on EVERY push (any branch) and every MR, so
   # developers get lint/typecheck/unit feedback (emailed by GitLab on failure)
   # without waiting for an MR, and this gates the expensive deploy.
@@ -52,10 +57,10 @@ code_checks:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH
 
-  # Cache the UI dependencies across runs so the two `npm ci` invocations
-  # (ui-lint + ui-build-only) are near-instant instead of ~1 min each. Keyed on
-  # the lockfile so a dependency change invalidates it. `npm ci --prefer-offline`
-  # then serves from the restored node_modules.
+  # Cache the UI dependencies across runs so the single `npm ci` (in
+  # before_script) is near-instant. Keyed on the lockfile so a dependency change
+  # invalidates it; `npm ci --prefer-offline` then serves from the restored
+  # node_modules.
   cache:
     key:
       files:
