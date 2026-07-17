@@ -83,8 +83,12 @@ code_checks:
     # Create virtual environment
     - uv venv .venv
     - source .venv/bin/activate
-    # Install pinned Node.js 22.14.0 and npm 11.1.0 for basedpyright
-    - curl -fsSL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-x64.tar.xz | tar -xJ -C /usr/local --strip-components=1
+    # Install pinned Node.js 22.14.0 and npm 11.1.0 for basedpyright. Pick the
+    # tarball matching the runner arch — the size:large pool is arm64, so a
+    # hardcoded x64 binary fails with "Syntax error: ')' unexpected".
+    - NODE_ARCH=$(case "$(uname -m)" in x86_64) echo x64;; aarch64|arm64) echo arm64;; *) echo x64;; esac)
+    - echo "Runner arch $(uname -m) -> node $NODE_ARCH"
+    - curl -fsSL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-$NODE_ARCH.tar.xz | tar -xJ -C /usr/local --strip-components=1
     - npm install -g npm@11.1.0 || { echo "npm upgrade failed"; exit 1; }
     - npm install -g basedpyright
     # Install UI deps ONCE here (restored from cache when unchanged). The
