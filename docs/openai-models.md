@@ -65,6 +65,15 @@ Cache reads are billed at a 90% discount; GPT-5.6 also has a (30-minute)
 cache-write price (reflected in `config_library/pricing.yaml`). Both are metered
 via `cacheReadInputTokens` / `cacheWriteInputTokens`.
 
+> **Token accounting note.** The OpenAI Responses `usage.input_tokens` is the
+> *total* prompt size and already **includes** the cached / cache-written
+> tokens. The accelerator's metering reports `inputTokens` as the **disjoint**
+> fresh (uncached) count — `input_tokens − cached − cache_write` — so a cached
+> token is billed once (at the cache rate), not twice. This matches the Bedrock
+> Converse convention the cost model assumes. Verified live: a warm GPT-5.6
+> extraction with `input_tokens=4508` / `cached=3193` reports
+> `inputTokens=1315` + `cacheReadInputTokens=3193` (which reconcile to 4508).
+
 ## What is supported
 
 | Capability | Supported? | Notes |
