@@ -453,8 +453,17 @@ def _map_usage(openai_json: Dict[str, Any]) -> Dict[str, int]:
         or input_details.get("cache_write_tokens")
         or 0
     )
+    # IMPORTANT: OpenAI's ``input_tokens`` is the TOTAL prompt count and
+    # *includes* the cached + cache-write tokens as a subset. The accelerator's
+    # cost model (and the Bedrock Converse convention it mirrors) expects
+    # ``inputTokens`` to be the DISJOINT fresh/uncached count, billed separately
+    # from cacheReadInputTokens / cacheWriteInputTokens. Subtract the cache
+    # portions so cached tokens are not billed twice (full input rate + cache
+    # rate). Clamp at 0 defensively. Verified live: input_tokens 4508 with
+    # cache_read 3193 → fresh 1315 (consistent cold vs warm).
+    fresh_input_tokens = max(0, input_tokens - cached_tokens - cache_write_tokens)
     return {
-        "inputTokens": input_tokens,
+        "inputTokens": fresh_input_tokens,
         "outputTokens": output_tokens,
         "totalTokens": total_tokens,
         "cacheReadInputTokens": cached_tokens,

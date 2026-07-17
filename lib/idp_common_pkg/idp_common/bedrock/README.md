@@ -197,7 +197,8 @@ text = response["response"]["output"]["message"]["content"][0]["text"]
   whole-PDF input) are **not** supported and are dropped — callers needing PDF
   ingestion (Discovery) must use a Claude/Nova model.
 - **Prompt caching**: differs by generation. GPT-5.4/5.5 cache **automatically**
-  (any prefix > ~1,024 tokens; `<<CACHEPOINT>>` markers are stripped). GPT-5.6
+  (any prefix > ~1,024 tokens, populated server-side and reused on repeat calls,
+  no cache-write charge; `<<CACHEPOINT>>` markers are stripped). GPT-5.6
   caches **explicitly** — a `<<CACHEPOINT>>` marker (or `cachePoint` block) is
   translated into `prompt_cache_options`/`prompt_cache_breakpoint` with a
   deterministic `prompt_cache_key` derived from the cached prefix. Cache reads

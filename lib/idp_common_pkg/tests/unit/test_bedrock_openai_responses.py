@@ -271,8 +271,11 @@ class TestResponseTranslation:
         assert text == "Hello world"
 
         usage = result["response"]["usage"]
+        # OpenAI input_tokens (100) is the TOTAL and includes cached_tokens (25);
+        # inputTokens is reported as the DISJOINT fresh count (100 - 25 = 75) so
+        # cached tokens are not billed at both the input and cache-read rate.
         assert usage == {
-            "inputTokens": 100,
+            "inputTokens": 75,
             "outputTokens": 40,
             "totalTokens": 140,
             "cacheReadInputTokens": 25,
@@ -281,7 +284,7 @@ class TestResponseTranslation:
 
         metering = result["metering"]["Extraction/bedrock/openai.gpt-5.4"]
         assert metering["requests"] == 1
-        assert metering["inputTokens"] == 100
+        assert metering["inputTokens"] == 75
         # reasoning_tokens must NOT be a metering key
         assert "reasoning_tokens" not in metering
         assert "reasoningTokens" not in metering
@@ -311,10 +314,44 @@ class TestResponseTranslation:
         usage = oar._map_usage(payload)
         assert usage["cacheReadInputTokens"] == 25
         assert usage["cacheWriteInputTokens"] == 60
+        # Fresh input = total(100) - cached(25) - cache_write(60) = 15
+        assert usage["inputTokens"] == 15
 
     def test_map_usage_cache_write_defaults_zero(self):
         usage = oar._map_usage(_SAMPLE_RESPONSE)
         assert usage["cacheWriteInputTokens"] == 0
+
+    def test_map_usage_disjoint_token_accounting_matches_converse(self):
+        """OpenAI input_tokens is a TOTAL; we report disjoint fresh input so the
+        cost model does not bill cached tokens twice (input rate + cache rate).
+
+        Mirrors the live-observed GPT-5.6 warm-cache case: input_tokens 4508 with
+        cached_tokens 3193 must yield fresh inputTokens 1315.
+        """
+        warm = {
+            "usage": {
+                "input_tokens": 4508,
+                "output_tokens": 558,
+                "total_tokens": 5066,
+                "input_tokens_details": {"cached_tokens": 3193},
+            }
+        }
+        u = oar._map_usage(warm)
+        assert u["inputTokens"] == 1315
+        assert u["cacheReadInputTokens"] == 3193
+        # Fresh + cache-read reconstructs the original prompt total.
+        assert u["inputTokens"] + u["cacheReadInputTokens"] == 4508
+
+    def test_map_usage_never_negative_fresh_input(self):
+        # Defensive: if cache counts exceed input_tokens, clamp fresh at 0.
+        payload = {
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "input_tokens_details": {"cached_tokens": 8, "cache_write_tokens": 6},
+            }
+        }
+        assert oar._map_usage(payload)["inputTokens"] == 0
 
 
 @pytest.mark.unit
@@ -399,7 +436,8 @@ class TestInvocationAndRouting:
                 content=[{"text": "hi"}],
             )
         assert mock_send.call_count == 2
-        assert result["response"]["usage"]["inputTokens"] == 100
+        # _SAMPLE_RESPONSE: input_tokens 100 total, cached_tokens 25 → fresh 75.
+        assert result["response"]["usage"]["inputTokens"] == 75
 
     def test_raises_after_max_retries(self, client):
         client.max_retries = 2
@@ -528,7 +566,8 @@ class TestStreamResponsesApi:
         assert "".join(deltas) == "Hello, world!"
         assert isinstance(final, dict)
         usage = final["metering"]["ChatWithDocument/bedrock/openai.gpt-5.4"]
-        assert usage["inputTokens"] == 12
+        # input_tokens 12 total includes cached 4 → disjoint fresh input 8.
+        assert usage["inputTokens"] == 8
         assert usage["outputTokens"] == 5
         assert usage["cacheReadInputTokens"] == 4
         assert usage["cacheWriteInputTokens"] == 0

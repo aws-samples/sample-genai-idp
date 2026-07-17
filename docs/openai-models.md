@@ -50,8 +50,12 @@ the model IDs carry no region prefix. GPT-5.6 Sol is **not** available in
 ## Prompt caching
 
 `GPT-5.4`/`GPT-5.5` cache **automatically** — any prompt prefix over ~1,024
-tokens is reused with no request changes, so `<<CACHEPOINT>>` markers are simply
-stripped for these models.
+tokens is eligible for reuse with **no request changes** (the cache is populated
+server-side after the prefix is first seen, so hits register on repeat calls),
+and there is **no separate cache-write charge**. `<<CACHEPOINT>>` markers are
+simply stripped for these models. (Verified live for GPT-5.5: `cached_tokens`
+began registering on a repeated >1,024-token prefix with `cache_write_tokens`
+staying 0.)
 
 `GPT-5.6` (Sol/Terra/Luna) uses **explicit** caching: place a `<<CACHEPOINT>>`
 marker at the end of the static portion of your prompt and the client translates
