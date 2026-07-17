@@ -552,6 +552,34 @@ def monitor_pipeline_execution(
 
             except Exception as e:
                 consecutive_errors += 1
+                # Expired creds are NOT a pipeline failure: if the refresh path
+                # ever fails (e.g. missing sts:TagSession on the self-assume) the
+                # monitor's 1h role-chained session expires while a HEALTHY run is
+                # still going, and boto3 raises ExpiredTokenException every poll.
+                # Treat that like the handoff: consult the authoritative S3
+                # verdict, and only fail on a real OVERALL: FAIL. Otherwise exit
+                # neutral so a SUCCESSFUL deploy is never painted red by our own
+                # credential lifetime. (This is what turned a fully-passing run
+                # into a red job before the trust-policy TagSession fix.)
+                if "ExpiredToken" in type(e).__name__ or "ExpiredToken" in str(e):
+                    console.print(
+                        "[cyan]↪ Monitor credentials expired while the pipeline "
+                        "is still running — cannot refresh. Handing off to the S3 "
+                        "summary + SNS instead of failing a healthy run.[/cyan]"
+                    )
+                    verdict = fetch_summary_verdict(log_stream)
+                    if verdict is False:
+                        console.print(
+                            "[red]✗ Deploy summary already reports OVERALL: FAIL "
+                            "— failing the job.[/red]"
+                        )
+                        console.print(f"[red]  Execution: {execution_id}[/red]")
+                        return False
+                    console.print(
+                        f"[cyan]  Execution: {execution_id} — final result in "
+                        f"S3 + SNS email.[/cyan]"
+                    )
+                    return None
                 progress.update(task, description=f"[red]Error: {str(e)[:50]}...")
                 console.print(
                     f"[red]Error checking pipeline status "

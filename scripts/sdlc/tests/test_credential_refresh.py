@@ -116,3 +116,50 @@ def test_handoff_constants_allow_watching_past_one_hour(itd):
     # refresh before that cap.
     assert itd.MONITOR_HANDOFF_SECONDS > 3600
     assert itd.CREDENTIAL_REFRESH_SECONDS < 3600
+
+
+class _ExpiredTokenException(Exception):
+    """Mimic botocore's ExpiredTokenException by name (that's what we match)."""
+
+
+def _drive_monitor(itd, monkeypatch, verdict):
+    """Run monitor_pipeline_execution with a codepipeline that raises
+    ExpiredTokenException on every poll, and a stubbed S3 verdict."""
+    # A refresher whose refresh() always fails (the real-world bug: TagSession
+    # denied) and whose clients raise expired-token on every call.
+    class _ExpiredCP:
+        def get_pipeline_execution(self, **k):
+            raise _ExpiredTokenException("The security token ... is expired")
+
+    class _FakeRefresher:
+        def __init__(self, region):
+            pass
+
+        def refresh(self):
+            return False
+
+        def build_clients(self):
+            return _ExpiredCP(), object()
+
+    monkeypatch.setattr(itd, "_CredentialRefresher", _FakeRefresher)
+    monkeypatch.setattr(itd, "resolve_codebuild_log_stream", lambda *a, **k: "stream-x")
+    monkeypatch.setattr(itd, "fetch_summary_verdict", lambda *a, **k: verdict)
+    monkeypatch.setattr(itd.time, "sleep", lambda *_a, **_k: None)
+    # Force the handoff/refresh windows past so we exercise the expired branch
+    # immediately on the first poll.
+    return itd.monitor_pipeline_execution(
+        "pipe", "exec-1", max_wait=120, handoff_after=999999
+    )
+
+
+def test_expired_creds_hand_off_neutral_when_no_fail_verdict(itd, monkeypatch):
+    # A HEALTHY run whose creds expire mid-flight must NOT be failed: with no
+    # OVERALL: FAIL in the summary, the monitor exits neutral (None), not False.
+    assert _drive_monitor(itd, monkeypatch, verdict=None) is None
+    assert _drive_monitor(itd, monkeypatch, verdict=True) is None
+
+
+def test_expired_creds_still_fail_on_overall_fail_verdict(itd, monkeypatch):
+    # But if the authoritative S3 summary already says OVERALL: FAIL, the
+    # expired-creds path must still fail the job.
+    assert _drive_monitor(itd, monkeypatch, verdict=False) is False
