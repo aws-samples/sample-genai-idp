@@ -264,3 +264,43 @@ def get_id_token(ctx, email, password):
         "text",
         region=ctx["region"],
     )
+
+
+def get_auth_result(ctx, email, password):
+    """Mint a full auth result (IdToken + AccessToken + RefreshToken) via
+    ADMIN_USER_PASSWORD_AUTH. Used by the token-lifecycle security tests, which
+    need the AccessToken (for global-sign-out revocation checks) alongside the
+    IdToken (the API bearer). Returns the AuthenticationResult dict, or {} on
+    failure."""
+    res = aws(
+        "cognito-idp",
+        "admin-initiate-auth",
+        "--user-pool-id",
+        ctx["user_pool"],
+        "--client-id",
+        ctx["client"],
+        "--auth-flow",
+        "ADMIN_USER_PASSWORD_AUTH",
+        "--auth-parameters",
+        f"USERNAME={email},PASSWORD={password}",
+        "--query",
+        "AuthenticationResult",
+        region=ctx["region"],
+    )
+    return res or {}
+
+
+def global_sign_out(ctx, email):
+    """Globally sign a user out (admin-user-global-sign-out). Revokes the user's
+    refresh tokens and, per Cognito docs, marks issued access/ID tokens for
+    revocation checking. Best-effort — used by the logout-revocation security
+    test to observe whether previously-issued tokens remain accepted."""
+    return aws(
+        "cognito-idp",
+        "admin-user-global-sign-out",
+        "--user-pool-id",
+        ctx["user_pool"],
+        "--username",
+        email,
+        region=ctx["region"],
+    )

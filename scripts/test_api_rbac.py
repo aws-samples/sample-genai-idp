@@ -73,6 +73,9 @@ from pathlib import Path
 # (scripts/sdlc/codebuild_deployment.py) via scripts/rbac_common.py so the two
 # can't drift on the stack shape or auth-flow capture/restore logic.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# Mandatory security-focused test cases (IDOR, token lifecycle, deleted-resource,
+# input validation, TLS) layered on top of the RBAC matrix below.
+import api_security_cases as sec  # noqa: E402
 from rbac_common import (  # noqa: E402
     AWS_BIN,
     aws,
@@ -80,11 +83,16 @@ from rbac_common import (  # noqa: E402
     delete_cognito_user,
     enable_admin_auth,
     get_id_token,
+    global_sign_out,
     resolve_stack,
     restore_auth_flows,
 )
 
 ROLES = ["Admin", "Author", "Viewer", "Reviewer"]
+# A second, independent user for indirect-object-reference (IDOR) tests: proves
+# User B cannot reach User A's data. Created as an Author (a normal, non-admin
+# authenticated user).
+USER_B = "UserB"
 SCOPED = "ScopedAuthor"  # an Author with a restrictive allowedConfigVersions
 # Random per-run password (one test user is an Admin — a static password in a
 # public repo would be a standing credential if teardown is ever skipped/killed).
@@ -123,6 +131,9 @@ def setup_users(ctx):
         create_cognito_user(ctx, test_email(role), role, TEST_PW)
     # Scoped user: an Author in Cognito, restricted via UsersTable.
     create_cognito_user(ctx, test_email(SCOPED), "Author", TEST_PW)
+    # Second independent user (Author) for IDOR tests — a distinct Cognito sub so
+    # "User B cannot reach User A's data" is a real cross-identity check.
+    create_cognito_user(ctx, test_email(USER_B), "Author", TEST_PW)
     _seed_scoped_user(ctx)
     enable_admin_auth(ctx)
     print(
@@ -165,7 +176,7 @@ def _seed_scoped_user(ctx):
 
 
 def teardown_users(ctx):
-    for role in [*ROLES, SCOPED]:
+    for role in [*ROLES, SCOPED, USER_B]:
         delete_cognito_user(ctx, test_email(role))
     key = ctx.get("_scoped_user_key")
     if key and ctx.get("users_table"):
@@ -630,6 +641,43 @@ def _render_md(ctx, results, hard_fails, gap_fails, known_gaps, stamp, account):
     return "\n".join(lines)
 
 
+def _run_token_lifecycle(ctx, results):
+    """Orchestrate the token expiry (2.3) + logout revocation (2.4) suites.
+
+    Mints a FRESH token for USER_B (so signing it out doesn't disturb the other
+    suites, which have already run), then:
+      * expiry: if IDP_SECTEST_WAIT_EXPIRY is set, mint a token, sleep past its
+        lifetime, and use it as the "expired" token; otherwise skip with a note
+        (token validity is provider-configured — often 1h — too long for CI).
+      * logout: global-sign-out USER_B and re-test its token.
+    """
+    logout_email = test_email(USER_B)
+    logout_token = get_token(ctx, USER_B)
+
+    expired_token = None
+    wait = os.environ.get("IDP_SECTEST_WAIT_EXPIRY")
+    if wait:
+        try:
+            secs = int(wait)
+        except ValueError:
+            secs = 0
+        if secs > 0:
+            print(f"\n[expiry] minting a token and waiting {secs}s for it to expire...")
+            expired_token = get_token(ctx, USER_B)
+            time.sleep(secs)
+
+    sec.run_token_lifecycle_suite(
+        ctx,
+        call,
+        _record,
+        results,
+        expired_token=expired_token,
+        logout_token=logout_token,
+        logout_email=logout_email,
+        sign_out_fn=lambda email: global_sign_out(ctx, email),
+    )
+
+
 # ----------------------------------------------------------------------------
 # Main
 # ----------------------------------------------------------------------------
@@ -677,10 +725,31 @@ def main():
                 print(f"ERROR: failed to mint token for {r}")
                 return 2
 
+        # Second user for IDOR (checklist 2.1). Minted alongside the roles.
+        ub = get_token(ctx, USER_B)
+        if ub and len(ub) > 100:
+            tokens["userB"] = ub
+
         results = []
         run_group_matrix(ops, ctx, tokens, results)
         run_scope_suite(ctx, tokens, results)
         run_token_negatives(ctx, tokens, results)
+
+        # --- Mandatory security-focused test cases (checklist 2.1-4) ---------
+        # These run AFTER the RBAC matrix. The logout test globally signs out a
+        # dedicated user (UserB), so it must run last (its token is consumed).
+        sec.run_idor_suite(ctx, call, _record, results, tokens)
+        sec.run_deleted_resource_suite(ctx, call, _record, results, tokens)
+        strict_input = os.environ.get("IDP_SECTEST_STRICT_INPUT", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        sec.run_input_validation_suite(
+            ctx, call, _record, results, tokens, strict=strict_input
+        )
+        sec.run_tls_suite(ctx, _record, results)
+        _run_token_lifecycle(ctx, results)
 
         hard_fails = [r for r in results if not r["passed"] and not r["known_gap"]]
         gap_fails = [r for r in results if not r["passed"] and r["known_gap"]]
