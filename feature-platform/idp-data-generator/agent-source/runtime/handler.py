@@ -144,12 +144,8 @@ def invoke(payload, context=None):
 
 
 def _post_status(payload, job_id, status, message):
-    # The runtime owns TERMINAL status: the BootstrapProcessor invokes this
-    # runtime asynchronously and returns (leaving the job IN_PROGRESS), so only
-    # the runtime knows when generation actually finishes. Write status to the
-    # feature's BootstrapTrackingTable (read back via the FeatureApi GET /jobs).
-    # The AppSync status channel was removed with the host's AppSync->REST
-    # migration. Best-effort: never let a status write failure crash the run.
+    # The processor invokes this runtime asynchronously and returns, so the
+    # runtime writes terminal status to BootstrapTrackingTable itself. Best-effort.
     logger.info("synthesis job %s: %s — %s", job_id, status, message)
     table_name = os.environ.get("BOOTSTRAP_TRACKING_TABLE")
     if not (table_name and job_id):
