@@ -74,8 +74,11 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
 
   // Load the selected version's document classes to populate the class Select,
   // so a user picks a valid class rather than typing (and mistyping) one.
+  // Depend ONLY on the version name string: fetchVersion from the hook is not
+  // memoized (a fresh reference each render), so including it in the deps would
+  // re-fire this effect on every render — an infinite getConfigVersion loop.
+  const versionName = selectedVersion?.value;
   useEffect(() => {
-    const versionName = selectedVersion?.value;
     if (!versionName) {
       setClassOptions([]);
       setSelectedClass(null);
@@ -102,7 +105,7 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
     return () => {
       cancelled = true;
     };
-  }, [selectedVersion, fetchVersion]);
+  }, [versionName]);
 
   const parsedCount = Number(count);
   const countValid = Number.isInteger(parsedCount) && parsedCount >= MIN_COUNT && parsedCount <= MAX_COUNT;
