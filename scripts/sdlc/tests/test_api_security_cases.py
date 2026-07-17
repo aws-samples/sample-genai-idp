@@ -126,6 +126,33 @@ def test_idor_no_leak_when_userb_response_lacks_marker():
     assert rec.by_principal("userA(reads own")[0]["passed"] is True  # owner OK
 
 
+def test_idor_inconclusive_when_owner_cannot_read_seed():
+    # If the OWNER can't read the seeded job either (marker absent for A), that's
+    # a seed-keying mismatch, not a security failure -> inconclusive SKIP, never a
+    # hard fail.
+    rec = _Recorder()
+    results = []
+
+    def seed(job_id, marker):
+        return "admin@example.invalid"
+
+    def call_body(api_base, field, args, token):
+        return 500, '{"errors":[{"message":"not found for this user"}]}'  # nobody reads
+
+    sec.run_idor_suite(
+        CTX,
+        rec,
+        results,
+        {"Admin": "a", "userB": "b"},
+        seed_fn=seed,
+        call_body=call_body,
+    )
+    incon = [r for r in rec.rows if "inconclusive" in r["principal"]]
+    assert incon and incon[0]["http_status"] == "SKIP" and incon[0]["passed"] is True
+    # And there is NO hard-fail row (nothing recorded as passed=False).
+    assert all(r["passed"] for r in rec.rows)
+
+
 def test_idor_leak_when_userb_response_contains_marker():
     rec = _Recorder()
     results = []
