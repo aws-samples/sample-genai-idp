@@ -393,9 +393,14 @@ Resources:
                 Effect: Allow
                 Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
                 Resource: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
-              # (AppSync status-posting removed — the host no longer runs AppSync.
-              # Per-job status lives in the feature's BootstrapTrackingTable, read
-              # back through the FeatureApi.)
+              # The runtime writes terminal job status (COMPLETED/FAILED) to the
+              # feature's tracking table — the host has no AppSync status channel,
+              # and the processor already returned by the time generation finishes.
+              - Sid: TrackingTableWrite
+                Effect: Allow
+                Action: [dynamodb:UpdateItem, dynamodb:PutItem]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${BootstrapTrackingTable}"
 
   ###########################################################################
   # AgentCore Runtime control-plane custom resource (create/update/delete).
@@ -484,6 +489,10 @@ Resources:
         TEST_SET_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
         WORKING_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
         CONFIGURATION_TABLE_NAME: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }
+        # The runtime is the only component that knows when generation actually
+        # finishes, so it writes terminal job status to the tracking table (the
+        # processor invokes it async and returns). The FeatureApi reads it back.
+        BOOTSTRAP_TRACKING_TABLE: !Ref BootstrapTrackingTable
         GENERATOR_MODEL_ID: !Ref GeneratorModelId
         # Strands file_write/editor tools prompt for interactive confirmation
         # otherwise, which auto-cancels in the headless runtime.

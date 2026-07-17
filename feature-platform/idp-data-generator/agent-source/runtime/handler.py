@@ -144,12 +144,30 @@ def invoke(payload, context=None):
 
 
 def _post_status(payload, job_id, status, message):
-    # Job status is owned by the BootstrapProcessor Lambda, which brackets this
-    # runtime invocation with IN_PROGRESS/COMPLETED/FAILED writes to the feature's
-    # BootstrapTrackingTable (read via the FeatureApi). The AppSync status channel
-    # was removed with the host's AppSync->REST migration, so the runtime only
-    # logs progress here rather than posting to the host.
+    # The runtime owns TERMINAL status: the BootstrapProcessor invokes this
+    # runtime asynchronously and returns (leaving the job IN_PROGRESS), so only
+    # the runtime knows when generation actually finishes. Write status to the
+    # feature's BootstrapTrackingTable (read back via the FeatureApi GET /jobs).
+    # The AppSync status channel was removed with the host's AppSync->REST
+    # migration. Best-effort: never let a status write failure crash the run.
     logger.info("synthesis job %s: %s — %s", job_id, status, message)
+    table_name = os.environ.get("BOOTSTRAP_TRACKING_TABLE")
+    if not (table_name and job_id):
+        return
+    attrs = {"status": status}
+    if message:
+        attrs["statusMessage"] = message
+    if status == "FAILED" and message:
+        attrs["errorMessage"] = message
+    try:
+        boto3.resource("dynamodb").Table(table_name).update_item(
+            Key={"jobId": job_id},
+            UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in attrs),
+            ExpressionAttributeNames={f"#{k}": k for k in attrs},
+            ExpressionAttributeValues={f":{k}": v for k, v in attrs.items()},
+        )
+    except Exception:  # noqa: BLE001 — status is best-effort
+        logger.warning("Failed to write job status for %s", job_id, exc_info=True)
 
 
 if __name__ == "__main__":
