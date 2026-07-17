@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Any, Dict, List, Optional, Union
 
@@ -50,8 +51,30 @@ import boto3
 
 logger = logging.getLogger(__name__)
 
-# Well-known name for the auto-managed pure-OCR BDA project.
-OCR_PROJECT_NAME = "GENAIIDP-OCR-StandardOutput"
+# Suffix appended to the (sanitized) stack name to form the pure-OCR BDA
+# project name. The project is now stack-scoped rather than account-global so
+# that multiple stacks in one account do not share/interfere with a single
+# project. BDA project names must match ``^[a-zA-Z0-9-_]+$`` (max 128 chars);
+# underscores are allowed, so ``<stackname>_OCR_StdOutput`` is valid.
+OCR_PROJECT_NAME_SUFFIX = "_OCR_StdOutput"
+
+# Maximum length of a BDA project name.
+_MAX_PROJECT_NAME_LEN = 128
+
+
+def sanitize_ocr_project_name(stack_name: str) -> str:
+    """Build the stack-scoped OCR project name from a stack name.
+
+    The stack name is sanitized to the BDA-allowed character set (alphanumeric
+    and hyphens) and truncated so that the ``_OCR_StdOutput`` suffix always
+    survives within the 128-character project-name limit.
+    """
+    # Replace disallowed chars with hyphens and collapse runs of hyphens.
+    sanitized = re.sub(r"[^a-zA-Z0-9-]", "-", stack_name or "")
+    sanitized = re.sub(r"-+", "-", sanitized).strip("-")
+    max_stack_len = _MAX_PROJECT_NAME_LEN - len(OCR_PROJECT_NAME_SUFFIX)
+    sanitized = sanitized[:max_stack_len].strip("-")
+    return f"{sanitized}{OCR_PROJECT_NAME_SUFFIX}"
 
 
 # A "corners" quad that is (within tolerance) the unit square: the rectified
@@ -338,10 +361,19 @@ def bda_standard_output_to_textract_blocks(
             lc = line.get("confidence")
             line_conf = float(lc) * 100.0 if isinstance(lc, (int, float)) else 0.0
 
+        # BDA leaves ``text`` empty on table-cell lines (the content lives only in
+        # ``text_words``). Synthesize the LINE text from its child words so the line
+        # is not later discarded by the pageData builder, which drops empty-text
+        # LINE blocks and would otherwise strip all table-cell text/confidence/
+        # geometry for BDA-as-OCR runs.
+        line_text = line.get("text", "")
+        if not line_text and word_blocks:
+            line_text = " ".join(wb["Text"] for wb in word_blocks if wb.get("Text"))
+
         line_block: Dict[str, Any] = {
             "BlockType": "LINE",
             "Id": line_id,
-            "Text": line.get("text", ""),
+            "Text": line_text,
             "Confidence": line_conf,
             "Geometry": _bbox_to_geometry(_first_bbox(line), _corners_for(line)),
         }
@@ -392,6 +424,14 @@ def extract_markdown(
         "representation", {}
     ) or {}
     return doc_rep.get("markdown") or doc_rep.get("text") or ""
+
+
+# NOTE: The project-lifecycle helpers below (config builders, sanitizer,
+# find/create/delete) are the canonical, unit-tested source, but they are
+# *duplicated* — not imported — by the deploy-time custom-resource Lambda at
+# ``src/lambda/bda_ocr_project/index.py`` (SAM's builder can't reach ``lib/`` at
+# build time). A drift guard in that Lambda's tests asserts the two produce
+# identical output; keep the copies in sync when changing either.
 
 
 def build_ocr_project_standard_output_config() -> Dict[str, Any]:
@@ -457,17 +497,43 @@ def _ensure_project_routing_override(client: Any, project_arn: str) -> None:
     )
 
 
-def resolve_ocr_project_arn(
+def _find_project_arn_by_name(client: Any, project_name: str) -> Optional[str]:
+    """Return the ARN of the project with ``project_name``, or None."""
+    try:
+        paginator = client.get_paginator("list_data_automation_projects")
+    except Exception:
+        paginator = None
+
+    if paginator is not None:
+        for page in paginator.paginate():
+            for proj in page.get("projects", []):
+                if proj.get("projectName") == project_name:
+                    return proj["projectArn"]
+        return None
+
+    for proj in client.list_data_automation_projects().get("projects", []):
+        if proj.get("projectName") == project_name:
+            return proj["projectArn"]
+    return None
+
+
+def find_or_create_ocr_project(
+    project_name: str,
     region: Optional[str] = None,
     bda_control_client: Optional[Any] = None,
 ) -> str:
-    """Find or create the auto-managed pure-OCR standard-output SYNC project.
+    """Find or create the stack-scoped pure-OCR standard-output SYNC project.
 
-    Looks for a project named :data:`OCR_PROJECT_NAME`; creates it (projectType
+    Looks for a project named ``project_name``; creates it (projectType
     ``SYNC``, standard output only) if absent and waits for it to reach
     ``COMPLETED``. Returns the project ARN.
 
+    This is a control-plane helper invoked at stack deploy time (by the BDA OCR
+    project CloudFormation custom resource) — not on the OCR hot path.
+
     Args:
+        project_name: The stack-scoped project name
+            (see :func:`sanitize_ocr_project_name`).
         region: AWS region (defaults to the client/session region).
         bda_control_client: Optional pre-built ``bedrock-data-automation`` client.
     """
@@ -476,27 +542,7 @@ def resolve_ocr_project_arn(
     )
 
     # Reuse an existing project of this name if present.
-    paginator = None
-    try:
-        paginator = client.get_paginator("list_data_automation_projects")
-    except Exception:
-        paginator = None
-
-    existing_arn = None
-    if paginator is not None:
-        for page in paginator.paginate():
-            for proj in page.get("projects", []):
-                if proj.get("projectName") == OCR_PROJECT_NAME:
-                    existing_arn = proj["projectArn"]
-                    break
-            if existing_arn:
-                break
-    else:
-        for proj in client.list_data_automation_projects().get("projects", []):
-            if proj.get("projectName") == OCR_PROJECT_NAME:
-                existing_arn = proj["projectArn"]
-                break
-
+    existing_arn = _find_project_arn_by_name(client, project_name)
     if existing_arn:
         # Verify the project carries the modality-routing override. A project
         # left over from an earlier build may lack it, which silently breaks OCR
@@ -505,11 +551,11 @@ def resolve_ocr_project_arn(
         logger.info("Reusing BDA OCR project %s", existing_arn)
         return existing_arn
 
-    logger.info("Creating BDA OCR project %s", OCR_PROJECT_NAME)
+    logger.info("Creating BDA OCR project %s", project_name)
     try:
         resp = client.create_data_automation_project(
-            projectName=OCR_PROJECT_NAME,
-            projectDescription="Auto-managed GenAIIDP pure-OCR standard-output project",
+            projectName=project_name,
+            projectDescription="GenAIIDP stack-scoped pure-OCR standard-output project",
             projectStage="LIVE",
             projectType="SYNC",
             standardOutputConfiguration=build_ocr_project_standard_output_config(),
@@ -517,13 +563,13 @@ def resolve_ocr_project_arn(
         )
         project_arn = resp["projectArn"]
     except client.exceptions.ConflictException:
-        # Another concurrent worker created it first; re-fetch by name and route
+        # Another concurrent caller created it first; re-fetch by name and route
         # through the same routing-override repair check as the primary reuse path.
         logger.info("BDA OCR project already created concurrently; re-fetching")
-        for proj in client.list_data_automation_projects().get("projects", []):
-            if proj.get("projectName") == OCR_PROJECT_NAME:
-                _ensure_project_routing_override(client, proj["projectArn"])
-                return proj["projectArn"]
+        existing_arn = _find_project_arn_by_name(client, project_name)
+        if existing_arn:
+            _ensure_project_routing_override(client, existing_arn)
+            return existing_arn
         raise
 
     # A freshly created project is IN_PROGRESS until provisioned.
@@ -544,6 +590,36 @@ def resolve_ocr_project_arn(
             status,
         )
     return project_arn
+
+
+def delete_ocr_project_by_name(
+    project_name: str,
+    region: Optional[str] = None,
+    bda_control_client: Optional[Any] = None,
+) -> Optional[str]:
+    """Best-effort delete of the stack-scoped OCR project by name.
+
+    Invoked by the CloudFormation custom resource on stack delete. Swallows a
+    missing project (already deleted / never created) so stack deletion never
+    fails. Returns the deleted project ARN, or None if nothing was deleted.
+    """
+    client = bda_control_client or boto3.client(
+        "bedrock-data-automation", region_name=region
+    )
+
+    arn = _find_project_arn_by_name(client, project_name)
+    if not arn:
+        logger.info("BDA OCR project %s not found; nothing to delete", project_name)
+        return None
+
+    try:
+        client.delete_data_automation_project(projectArn=arn)
+        logger.info("Deleted BDA OCR project %s", arn)
+        return arn
+    except Exception:
+        # Best-effort teardown: never let a delete failure block stack deletion.
+        logger.warning("Failed to delete BDA OCR project %s", arn, exc_info=True)
+        return None
 
 
 # Geo prefixes used by BDA cross-region data-automation profiles. The naive

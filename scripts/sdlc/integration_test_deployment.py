@@ -158,14 +158,274 @@ def find_pipeline_execution_by_version(pipeline_name, version_id, max_wait=300):
     return None
 
 
-def monitor_pipeline_execution(pipeline_name, execution_id, max_wait=7200):
-    """Monitor specific pipeline execution until completion with live progress"""
+# CodeBuild streams every codebuild_deployment.py print to this log group.
+CODEBUILD_LOG_GROUP = "/aws/codebuild/app-sdlc"
+
+# Substrings that mark a meaningful step boundary or result. Surfacing only
+# these keeps the monitor readable (the raw log is tens of thousands of lines
+# of boto3/idp_sdk chatter) while still showing what the pipeline is doing.
+MILESTONE_MARKERS = (
+    "Step ",
+    "Running tests",
+    "Deploying stack",
+    "Deployment completed",
+    "Publishing templates",
+    "Template published",
+    "API Gateway Web UI hosting",
+    "All tests passed",
+    "Test suite failed",
+    "✅",
+    "❌",
+    "🎉",
+    "💥",
+    "🧹",
+    "📦",
+)
+
+
+def resolve_codebuild_log_stream(pipeline_name, execution_id):
+    """Find the CodeBuild log stream backing this pipeline execution.
+
+    Mirrors the after_script: the BuildAction's externalExecutionId is
+    '<project>:<streamName>'. Returns the stream name, or None if the build
+    hasn't started/registered yet (caller retries on later polls).
+    """
+    try:
+        cp = boto3.client("codepipeline")
+        actions = cp.list_action_executions(
+            pipelineName=pipeline_name,
+            filter={"pipelineExecutionId": execution_id},
+        ).get("actionExecutionDetails", [])
+        for a in actions:
+            if a.get("actionName") != "BuildAction":
+                continue
+            ext = (
+                a.get("output", {})
+                .get("executionResult", {})
+                .get("externalExecutionId", "")
+            )
+            if ":" in ext:
+                return ext.split(":", 1)[1]
+    except Exception:
+        # Non-fatal: status polling continues without the log stream.
+        pass
+    return None
+
+
+def fetch_summary_verdict(log_stream):
+    """Read the build's S3 summary and return a pass/fail verdict, if available.
+
+    The build uploads its summary to a deterministic S3 key derived from the
+    CodeBuild stream id. The primary suite writes a progressive/interim summary
+    there as steps complete (well before the whole suite finishes), so this
+    verdict is usually available before the monitor's handoff deadline.
+
+    Returns:
+      True  — summary present and shows OVERALL: PASS.
+      False — summary present and shows OVERALL: FAIL.
+      None  — no summary yet / unreadable / no OVERALL line (undecided).
+
+    This lets the handoff path fail the GitLab job on a real failure instead of
+    always exiting neutral — the gap that let a failed run show as a green job.
+
+    Limitation: at handoff the summary is usually the INTERIM one (primary suite
+    done, probes may still be running). So a PASS here means "nothing has failed
+    YET" — a probe that fails after handoff still only surfaces via SNS/S3, since
+    the 1h role-chained creds can't watch the run to completion. This reliably
+    catches primary-suite / early-deploy failures (the common case), not late
+    probe failures.
+    """
+    if not log_stream:
+        return None
+    account = os.environ.get("IDP_ACCOUNT_ID", "020432867916")
+    region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+    bucket = f"genaiic-sdlc-sourcecode-{account}-{region}"
+    key = f"deploy/summaries/{log_stream}.txt"
+    try:
+        body = (
+            boto3.client("s3")
+            .get_object(Bucket=bucket, Key=key)["Body"]
+            .read()
+            .decode("utf-8", "replace")
+        )
+    except Exception:
+        return None  # not uploaded yet / no access — undecided
+    if "OVERALL: FAIL" in body:
+        return False
+    if "OVERALL: PASS" in body:
+        return True
+    return None
+
+
+def stream_new_milestones(logs_client, log_stream, next_token, console, max_pages=20):
+    """Print new milestone log lines since next_token; return updated token.
+
+    Returns (token, saw_activity): saw_activity is True when ANY new events
+    arrived (even non-milestone), so the caller can show a real "last activity"
+    heartbeat and distinguish a working build from a genuinely stalled one.
+
+    Drains up to max_pages of get_log_events per call: a single page caps at
+    ~1MB/10k events, and a busy build easily produces more between 30s polls,
+    so paging fully keeps the milestone stream from falling behind. The cap
+    bounds a single poll's work (a fresh monitor attaching to a long build).
+    """
+    saw_activity = False
+    try:
+        for _ in range(max_pages):
+            kwargs = {
+                "logGroupName": CODEBUILD_LOG_GROUP,
+                "logStreamName": log_stream,
+                "startFromHead": True,
+            }
+            if next_token:
+                kwargs["nextToken"] = next_token
+            resp = logs_client.get_log_events(**kwargs)
+            events = resp.get("events", [])
+            if events:
+                saw_activity = True
+            for e in events:
+                msg = e["message"].rstrip()
+                if any(marker in msg for marker in MILESTONE_MARKERS):
+                    # Trim to keep one line per milestone; the log prefix (bare
+                    # timestamps) adds no value here.
+                    console.print(f"  [dim]│[/dim] {msg[:160]}")
+            new_token = resp.get("nextForwardToken", next_token)
+            # get_log_events returns the SAME nextForwardToken at the stream
+            # head — that's the "no more pages" signal; stop draining.
+            if new_token == next_token:
+                next_token = new_token
+                break
+            next_token = new_token
+    except Exception:
+        # Log group/stream may not exist yet, or a transient error — the
+        # status poller remains the source of truth for completion.
+        pass
+    return next_token, saw_activity
+
+
+# The GitLab runner's AWS credentials are vended by assuming idp-sdlc-GitLab
+# FROM the already-assumed gitlab-runners-prod role. That is STS role chaining,
+# which AWS hard-caps EACH session at 1 hour regardless of the role's
+# MaxSessionDuration (confirmed empirically: STS rejects DurationSeconds>3600
+# for a chained assume). The CodeBuild pipeline itself is NOT capped (its own
+# service role, ~64-68 min observed, completes fine) — only the monitor's creds
+# expire ~60 min in.
+#
+# To watch a long run to completion, the monitor REFRESHES its credentials
+# before they expire: it re-assumes idp-sdlc-GitLab again (a fresh 1h session —
+# role chaining allows repeated re-assumes, each capped at 1h) and rebuilds its
+# boto3 clients. So MONITOR_HANDOFF_SECONDS can now exceed the 1h cap. It is set
+# below the GitLab job timeout (2h30m) with headroom for before/after_script.
+# If refresh ever fails (e.g. the self-assume permission is missing), the
+# monitor still hands off gracefully to the S3 summary + SNS email.
+MONITOR_HANDOFF_SECONDS = 6600  # 110 min
+# Re-assume this far before the ~1h chained-session expiry.
+CREDENTIAL_REFRESH_SECONDS = 3000  # 50 min
+GITLAB_ROLE_NAME = "idp-sdlc-GitLab"
+
+
+class _CredentialRefresher:
+    """Keep the monitor's AWS creds alive past the 1h role-chaining cap.
+
+    The GitLab job's creds are a chained assume of idp-sdlc-GitLab, hard-capped
+    at 1h. Re-assuming the SAME role (chaining again) mints a fresh 1h session,
+    so calling refresh() every <1h keeps the monitor alive for the whole run.
+
+    build_clients() returns freshly-credentialed (codepipeline, logs) clients.
+    On the first call it uses the ambient job creds; subsequent refreshes use
+    the newly-vended session. If the re-assume fails (missing self-assume
+    permission, expired base creds), it returns None so the caller falls back to
+    the graceful S3/SNS handoff rather than crashing.
+    """
+
+    def __init__(self, region):
+        self._region = region
+        self._session_kwargs = {}  # empty = ambient creds
+        self._role_arn = self._resolve_role_arn()
+
+    def _resolve_role_arn(self):
+        # The job identity is an assumed-role ARN:
+        #   arn:aws:sts::<acct>:assumed-role/idp-sdlc-GitLab/<session>
+        # Convert to the role ARN we re-assume:
+        #   arn:aws:iam::<acct>:role/idp-sdlc-GitLab
+        try:
+            acct = boto3.client("sts").get_caller_identity()["Account"]
+            return f"arn:aws:iam::{acct}:role/{GITLAB_ROLE_NAME}"
+        except Exception as e:  # noqa: BLE001
+            print(f"⚠️ Could not resolve GitLab role ARN for refresh: {e}")
+            return None
+
+    def refresh(self):
+        """Re-assume the role for a fresh 1h session. Returns True on success."""
+        if not self._role_arn:
+            return False
+        try:
+            # Use whatever creds we currently hold (ambient or last-refreshed).
+            sts = boto3.client("sts", **self._session_kwargs)
+            creds = sts.assume_role(
+                RoleArn=self._role_arn,
+                RoleSessionName="idp-monitor-refresh",
+                # 1h is the max for a chained assume; request it explicitly.
+                DurationSeconds=3600,
+            )["Credentials"]
+            self._session_kwargs = {
+                "aws_access_key_id": creds["AccessKeyId"],
+                "aws_secret_access_key": creds["SecretAccessKey"],
+                "aws_session_token": creds["SessionToken"],
+            }
+            return True
+        except Exception as e:  # noqa: BLE001
+            print(f"⚠️ Credential refresh failed ({e}); will hand off at deadline")
+            return False
+
+    def build_clients(self):
+        """Return (codepipeline, logs) clients on the current credentials."""
+        cp = boto3.client("codepipeline", region_name=self._region, **self._session_kwargs)
+        logs = boto3.client("logs", region_name=self._region, **self._session_kwargs)
+        return cp, logs
+
+
+def monitor_pipeline_execution(
+    pipeline_name, execution_id, max_wait=8100, handoff_after=MONITOR_HANDOFF_SECONDS
+):
+    """Monitor a pipeline execution with live progress; hand off if it outlives creds.
+
+    Returns:
+      True  — pipeline reached a terminal Succeeded state.
+      False — pipeline reached a terminal failure state, or polling failed hard.
+      None  — still running when handoff_after elapsed: a graceful HANDOFF, not
+              a failure. The caller exits neutrally and the run's real result
+              surfaces via the S3 summary + SNS.
+
+    max_wait (135 min) is a hard backstop below the GitLab job's 2h30m ceiling;
+    handoff_after (110 min) is the normal exit for a still-running pipeline.
+    The monitor refreshes its 1h-capped creds every ~50 min (see
+    _CredentialRefresher), so it can watch past the single-credential lifetime.
+    """
     console = Console()
     console.print(f"[cyan]Monitoring pipeline execution:[/cyan] {execution_id}")
-    
-    codepipeline = boto3.client("codepipeline")
+
+    region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+    refresher = _CredentialRefresher(region)
+    codepipeline, logs_client = refresher.build_clients()
+    # Re-assume before the 1h chained-session cap; recompute clients on refresh.
+    next_refresh_at = CREDENTIAL_REFRESH_SECONDS
     poll_interval = 30
-    
+    # A persistent get_pipeline_execution failure (throttling, expired creds,
+    # wrong id) must NOT masquerade as a 2h hang: the old handler logged each
+    # error and kept polling to the deadline. Bail after this many consecutive
+    # errors so the real problem is visible in minutes, not hours.
+    max_consecutive_errors = 10
+    consecutive_errors = 0
+
+    # Live milestone stream from the CodeBuild log so the monitor shows what
+    # the tests are actually doing (which step, pass/fail) instead of an opaque
+    # spinner. Resolving the stream may lag the execution start, so retry until
+    # it appears. Track "last activity" to expose a real stall heartbeat.
+    log_stream = None
+    log_token = None
+    wait_time_at_last_activity = 0
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -173,44 +433,174 @@ def monitor_pipeline_execution(pipeline_name, execution_id, max_wait=7200):
         console=console,
         transient=False,
     ) as progress:
-        
+
         task = progress.add_task("[yellow]Pipeline executing...", total=None)
-        
+
         wait_time = 0
         while wait_time < max_wait:
+            # Refresh creds before the ~1h chained-session cap so the monitor
+            # can watch a long run to completion. On success, rebuild the
+            # clients on the new session; on failure, keep the old clients and
+            # let the graceful handoff take over when they expire.
+            if wait_time >= next_refresh_at:
+                if refresher.refresh():
+                    codepipeline, logs_client = refresher.build_clients()
+                    console.print(
+                        f"[dim]🔑 Refreshed monitor credentials at "
+                        f"{wait_time // 60}m (fresh 1h session).[/dim]"
+                    )
+                # Schedule the next refresh regardless; a failed refresh will
+                # just retry at the next interval until the handoff/deadline.
+                next_refresh_at += CREDENTIAL_REFRESH_SECONDS
+
             try:
                 response = codepipeline.get_pipeline_execution(
                     pipelineName=pipeline_name,
                     pipelineExecutionId=execution_id
                 )
-                
+
+                consecutive_errors = 0
                 status = response["pipelineExecution"]["status"]
                 elapsed_mins = wait_time // 60
-                
+
+                # Surface new CodeBuild milestone lines (best effort). Resolve
+                # the log stream lazily once the BuildAction has started.
+                if log_stream is None:
+                    log_stream = resolve_codebuild_log_stream(
+                        pipeline_name, execution_id
+                    )
+                if log_stream is not None:
+                    log_token, saw_activity = stream_new_milestones(
+                        logs_client, log_stream, log_token, console
+                    )
+                    if saw_activity:
+                        wait_time_at_last_activity = wait_time
+
+                # Terminal states: return IMMEDIATELY and log explicitly so a
+                # detection miss can never be confused with a timeout.
                 if status == "Succeeded":
                     progress.update(task, description="[green]✅ Pipeline completed successfully!")
-                    console.print("[green]✅ Pipeline completed successfully![/green]")
+                    console.print(
+                        f"[green]✅ Pipeline reached terminal state 'Succeeded' "
+                        f"after {elapsed_mins}m — monitor exiting.[/green]"
+                    )
                     return True
-                elif status in ["Failed", "Cancelled", "Superseded"]:
+                elif status in ["Failed", "Cancelled", "Superseded", "Stopped"]:
                     progress.update(task, description=f"[red]❌ Pipeline failed: {status}")
-                    console.print(f"[red]❌ Pipeline failed with status: {status}[/red]")
+                    console.print(
+                        f"[red]❌ Pipeline reached terminal state '{status}' "
+                        f"after {elapsed_mins}m — monitor exiting.[/red]"
+                    )
                     return False
                 elif status == "InProgress":
-                    progress.update(task, description=f"[yellow]⏳ Pipeline running ({elapsed_mins}m elapsed)...")
-                    
+                    # Graceful handoff: the pipeline is healthy but will outlive
+                    # our 1h role-chained credentials. Stop before they expire
+                    # (which would otherwise spew ExpiredToken errors and burn
+                    # the job slot) and point at the authoritative result.
+                    if wait_time >= handoff_after:
+                        progress.update(
+                            task, description="[cyan]↪ Handing off (still running)"
+                        )
+                        # Before handing off neutral, check the S3 summary: the
+                        # primary suite uploads its result (INTERIM) as soon as
+                        # it finishes, well within this window. If it already
+                        # shows OVERALL: FAIL, FAIL the job now rather than
+                        # exiting green — the gap that let a failed run pass.
+                        verdict = fetch_summary_verdict(log_stream)
+                        if verdict is False:
+                            console.print(
+                                f"[red]✗ Pipeline still running after "
+                                f"{elapsed_mins}m, but the deploy summary already "
+                                f"reports OVERALL: FAIL — failing the job.[/red]"
+                            )
+                            console.print(f"[red]  Execution: {execution_id}[/red]")
+                            return False
+                        console.print(
+                            f"[cyan]↪ Pipeline still running after {elapsed_mins}m "
+                            f"(monitor deadline reached). Handing off; the run "
+                            f"continues and its result lands in S3 + SNS email.[/cyan]"
+                        )
+                        console.print(
+                            f"[cyan]  Execution: {execution_id}[/cyan]"
+                        )
+                        if verdict is True:
+                            console.print(
+                                "[cyan]  Primary suite passed so far; probes may "
+                                "still be running. Final result in S3 + SNS.[/cyan]"
+                            )
+                        else:
+                            console.print(
+                                "[cyan]  No summary yet — result will be published "
+                                "to the S3 deploy summary + SNS on finish.[/cyan]"
+                            )
+                        return None
+                    # Heartbeat: show minutes since the last log activity so a
+                    # genuine stall (build hung) is visually distinct from a
+                    # healthy long-running step.
+                    idle_mins = (wait_time - wait_time_at_last_activity) // 60
+                    idle_note = (
+                        f", no log activity for {idle_mins}m" if idle_mins >= 3 else ""
+                    )
+                    stream_note = "" if log_stream else ", awaiting build logs"
+                    progress.update(
+                        task,
+                        description=(
+                            f"[yellow]⏳ Pipeline running "
+                            f"({elapsed_mins}m elapsed{idle_note}{stream_note})..."
+                        ),
+                    )
+
             except Exception as e:
+                consecutive_errors += 1
+                # Expired creds are NOT a pipeline failure: if the refresh path
+                # ever fails (e.g. missing sts:TagSession on the self-assume) the
+                # monitor's 1h role-chained session expires while a HEALTHY run is
+                # still going, and boto3 raises ExpiredTokenException every poll.
+                # Treat that like the handoff: consult the authoritative S3
+                # verdict, and only fail on a real OVERALL: FAIL. Otherwise exit
+                # neutral so a SUCCESSFUL deploy is never painted red by our own
+                # credential lifetime. (This is what turned a fully-passing run
+                # into a red job before the trust-policy TagSession fix.)
+                if "ExpiredToken" in type(e).__name__ or "ExpiredToken" in str(e):
+                    console.print(
+                        "[cyan]↪ Monitor credentials expired while the pipeline "
+                        "is still running — cannot refresh. Handing off to the S3 "
+                        "summary + SNS instead of failing a healthy run.[/cyan]"
+                    )
+                    verdict = fetch_summary_verdict(log_stream)
+                    if verdict is False:
+                        console.print(
+                            "[red]✗ Deploy summary already reports OVERALL: FAIL "
+                            "— failing the job.[/red]"
+                        )
+                        console.print(f"[red]  Execution: {execution_id}[/red]")
+                        return False
+                    console.print(
+                        f"[cyan]  Execution: {execution_id} — final result in "
+                        f"S3 + SNS email.[/cyan]"
+                    )
+                    return None
                 progress.update(task, description=f"[red]Error: {str(e)[:50]}...")
-                console.print(f"[red]Error checking pipeline status: {e}[/red]")
-                
+                console.print(
+                    f"[red]Error checking pipeline status "
+                    f"({consecutive_errors}/{max_consecutive_errors}): {e}[/red]"
+                )
+                if consecutive_errors >= max_consecutive_errors:
+                    console.print(
+                        f"[red]❌ Aborting: {max_consecutive_errors} consecutive "
+                        f"errors querying pipeline status (not a timeout).[/red]"
+                    )
+                    return False
+
             time.sleep(poll_interval)
             wait_time += poll_interval
-        
+
         progress.update(task, description=f"[red]❌ Timeout after {max_wait//60} minutes")
         console.print(f"[red]❌ Pipeline monitoring timed out after {max_wait} seconds[/red]")
         return False
 
 
-def monitor_pipeline(pipeline_name, version_id, max_wait=7200):
+def monitor_pipeline(pipeline_name, version_id, max_wait=8100):
     """Monitor pipeline using version-based tracking"""
     # First find the execution that matches our version
     execution_id = find_pipeline_execution_by_version(pipeline_name, version_id)
@@ -246,10 +636,21 @@ def main():
     create_deployment_package()
     version_id = upload_to_s3(bucket_name)
 
-    success = monitor_pipeline(pipeline_name, version_id)
+    result = monitor_pipeline(pipeline_name, version_id)
 
-    if success:
+    if result is True:
         print("🎉 Integration test deployment completed successfully!")
+        sys.exit(0)
+    elif result is None:
+        # Handoff: pipeline still running when the credential window closed.
+        # Not a failure — the real result lands in the S3 summary + SNS. Exit 0
+        # so a healthy long run doesn't show as a red job; monitoring it to
+        # completion is impossible on 1h role-chained creds.
+        print(
+            "↪ Integration test pipeline still running at handoff; "
+            "monitor exited cleanly. See the S3 deploy summary / SNS for the "
+            "final result."
+        )
         sys.exit(0)
     else:
         print("💥 Integration test deployment failed!")

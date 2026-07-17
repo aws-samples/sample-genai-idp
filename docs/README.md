@@ -64,7 +64,7 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 - [Post-Processing Lambda Hook](./post-processing-lambda-hook.md) - Custom downstream processing integration
 - [Lambda Hook Inference](./lambda-hook-inference.md) - Custom LLM integration via Lambda hooks
 - [Nova Fine-Tuning](./nova-finetuning.md) - Fine-tuning Amazon Nova models for IDP tasks
-- [OpenAI GPT-5.x Models](./openai-models.md) - GPT-5.4 / GPT-5.5 via the bedrock-mantle Responses API: support matrix, limitations, regions
+- [OpenAI GPT-5.x Models](./openai-models.md) - GPT-5.4 / GPT-5.5 / GPT-5.6 (Sol/Terra/Luna) via the bedrock-mantle Responses API: support matrix, limitations, regions, caching
 - [Service Tiers](./service-tiers.md) - Configurable service tier options
 
 ## Monitoring & Operations
@@ -101,6 +101,10 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 - [GovCloud Architecture](./govcloud-architecture.md) - Services removed vs. retained, limitations, and workarounds
 - [Batch Jobs REST API](./govcloud-batch-api.md) - API reference, authentication, and bastion tunnel setup
 - [GovCloud Operations](./govcloud-operations.md) - Monitoring, troubleshooting, and best practices
+
+## Blogs, Customer Stories & Research
+
+- [Blogs, Customer Stories & Research](./references.md) - AWS blog deep-dives into the accelerator, customer references with real-world metrics, and peer-reviewed research papers
 
 ## Screenshots and Diagrams
 

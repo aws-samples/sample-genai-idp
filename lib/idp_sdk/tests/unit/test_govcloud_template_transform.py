@@ -321,3 +321,71 @@ def test_real_template_has_no_cloudfront_after_transform():
     assert result["Parameters"]["WebUIHosting"]["AllowedValues"] == ["APIGateway"]
     assert "UseApiGatewayHosting" in result["Conditions"]
     assert "WebUIProxyRole" in result["Resources"]
+
+
+def test_real_template_passes_govcloud_region_cfn_lint():
+    """Transform the ACTUAL template.yaml and run REAL cfn-lint for a GovCloud region.
+
+    This is the offline "GovCloud transform + region-aware cfn-lint" fast-gate
+    probe (see scripts/sdlc/docs/CI_TEST_COVERAGE.md). It is strictly stronger
+    than ``validate_no_cloudfront`` / ``test_real_template_has_no_cloudfront_
+    after_transform``: those only check the transformer's own hardcoded
+    resource lists, whereas cfn-lint ``--region us-gov-west-1`` flags E3006 for
+    *any* GovCloud-unsupported resource type — so a NEWLY introduced one (a
+    future ``AWS::CloudFront::*``, ``AWS::Lambda::Url``, etc.) fails here even
+    though the transformer doesn't know to strip it.
+
+    No AWS credentials needed (cfn-lint's region check is offline). Skips
+    cleanly if cfn-lint or its decoder isn't installed.
+    """
+    import json
+    import shutil
+    import subprocess  # nosec B404 - fixed args, no user input
+    import tempfile
+
+    import yaml
+
+    cfnlint_decode = pytest.importorskip("cfnlint.decode.cfn_yaml")
+    if shutil.which("cfn-lint") is None:
+        pytest.skip("cfn-lint not installed")
+
+    def _plain(node):
+        if isinstance(node, dict):
+            return {str(k): _plain(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [_plain(x) for x in node]
+        if isinstance(node, str):
+            return str(node)
+        return node
+
+    loaded = cfnlint_decode.load(str(_repo_root() / "template.yaml"))
+    # cfn_yaml.load may return the template or a (template, matches) tuple.
+    template = _plain(loaded[0] if isinstance(loaded, tuple) else loaded)
+
+    result = GovCloudTemplateTransformer().apply_transforms(template)
+
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as fh:
+        yaml.safe_dump(result, fh)
+        out_path = fh.name
+
+    proc = subprocess.run(  # nosec B603 - fixed executable + args
+        ["cfn-lint", out_path, "--region", "us-gov-west-1", "--format", "json"],
+        capture_output=True,
+        text=True,
+    )
+    try:
+        findings = json.loads(proc.stdout) if proc.stdout.strip() else []
+    except json.JSONDecodeError:
+        findings = []
+    # Only E3006 ("Resource type ... does not exist in <region>") is the
+    # GovCloud-support signal we gate on. Other cfn-lint findings (W-codes,
+    # unrelated E-codes from the round-tripped/plain-dumped template) are not in
+    # scope for THIS probe and would make it flaky.
+    e3006 = [f for f in findings if f.get("Rule", {}).get("Id") == "E3006"]
+    assert e3006 == [], (
+        "GovCloud-unsupported resource type(s) survived the transform "
+        "(cfn-lint E3006). Add them to a strip set in template_transform.py: "
+        + "; ".join(
+            f"{f.get('Location', {}).get('Path')}: {f.get('Message')}" for f in e3006
+        )
+    )

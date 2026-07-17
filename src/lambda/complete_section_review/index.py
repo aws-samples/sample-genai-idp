@@ -338,6 +338,18 @@ def skip_all_sections_review(object_key, username="", user_email=""):
 
     logger.info(f"All sections skipped for document {object_key}. Skipped: {all_skipped}, Completed: {list(completed)}")
 
+    # Skipping all reviews resolves every pending section, so the document is now
+    # fully reviewed — exactly like completing the final section via
+    # complete_section_review (which calls trigger_reprocessing on all_completed).
+    # Trigger the same downstream reprocessing here so the two "finish review"
+    # paths behave identically: it re-runs Summarization/Evaluation with the
+    # existing (unedited) data and, on workflow success, emits the Step Functions
+    # "SUCCEEDED" event that drives the optional post-processing Lambda hook
+    # (PostProcessingLambdaHookFunctionArn). Without this call, skipping reviews
+    # would finalize the document but never run post-processing — an inconsistency
+    # with the section-by-section completion path.
+    trigger_reprocessing(object_key)
+
     return build_document_response(object_key)
 
 

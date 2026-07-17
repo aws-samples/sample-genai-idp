@@ -10,10 +10,20 @@ false positives, and the two ways to make a HIGH finding go away: **mitigate**
 ## What SRT is and how the gate works
 
 - `make srt-setup` downloads the `srt` binary into `.srt/`, writes
-  `.srt/srtconfig.json`, installs prerequisites (bandit, checkov, semgrep —
-  semgrep often fails to install; that's tolerated), and **copies the committed
+  `.srt/srtconfig.json`, installs prerequisites, and **copies the committed
   baseline `scripts/srt/issues.json` → `.srt/issues.json`** (this is how
   suppressions are restored).
+- **Prerequisites are five scanners** — `checkov`, `semgrep`, `bandit`, `syft`
+  (`anchore_syft`), `jupyter` — that SRT pip-installs into its OWN managed venv
+  at `.srt/.venv/bin/` (NOT the system PATH). `srt assess` calls
+  `checkAllInstalled()` and aborts with **`✗ Prerequisites not installed. Run
+  'srt config' first`** (exit 1) if **any one** is missing. **Contrary to older
+  guidance, semgrep is NOT optional** for SRT ≥ v1.0.2 — a missing semgrep
+  blocks the scan exactly like any other scanner. `scripts/srt/setup.py` now
+  verifies all five landed in the venv, retries `./srt config
+  --reinstall-prerequisites` once, and hard-fails the setup step in CI if they
+  didn't (instead of printing a misleading "✅ setup complete"). A cold install
+  (no pip cache) of all five is slow (~10-15 min); the CI job allows 50 min.
 - `make srt-scan` runs `scripts/srt/run.py`, which shells out to
   `./srt assess -y -p <repo> --no-diagrams --no-threat-models --no-license-update`.
   SRT merges new findings into `.srt/issues.json`, then `run.py` parses that
@@ -72,7 +82,9 @@ cat > .srt/srtconfig.json <<'EOF'
 { "AWS_PROFILE": "default", "AWS_REGION": "us-east-1",
   "TELEMETRY_ENABLED": false, "INSTALLATION_ID": "local-dev" }
 EOF
-( cd .srt && yes '' | ./srt config )   # installs bandit/checkov; semgrep may fail — OK
+( cd .srt && yes '' | ./srt config )   # installs all 5 scanners into .srt/.venv/bin/
+# Verify every scanner landed — assess needs ALL of them (a missing one → "Prerequisites not installed"):
+ls .srt/.venv/bin/{checkov,semgrep,bandit,syft,jupyter}
 cp scripts/srt/issues.json .srt/issues.json   # restore suppressions before re-scan
 ```
 

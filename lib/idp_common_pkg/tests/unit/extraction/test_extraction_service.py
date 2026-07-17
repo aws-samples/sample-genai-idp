@@ -449,6 +449,65 @@ class TestExtractionService:
         result = extract_json_from_text(text)
         assert result == "No JSON here"
 
+    def test_filter_extracted_to_schema_drops_off_schema_fields(self, service):
+        """Simple-mode schema filter drops top-level keys the class schema does
+        not define (the IDP1 cross-class hallucination), records them, and keeps
+        defined fields untouched."""
+        service._class_schema = service._get_class_schema("invoice")
+        service._class_label = "invoice"
+        extracted = {
+            "invoice_number": "INV-1",
+            "invoice_date": "2025-01-01",
+            "publications": [{"title": "x"}],  # off-schema (cross-class)
+            "ftc_testing_conditions": [{"a": 1}],  # off-schema/hallucinated
+        }
+        filtered = service._filter_extracted_to_schema(extracted)
+        assert "invoice_number" in filtered and filtered["invoice_number"] == "INV-1"
+        assert "publications" not in filtered
+        assert "ftc_testing_conditions" not in filtered
+        assert sorted(service._off_schema_fields) == [
+            "ftc_testing_conditions",
+            "publications",
+        ]
+
+    def test_filter_extracted_to_schema_noop_when_all_defined(self, service):
+        """No fields are dropped (and none recorded) when every key is in schema."""
+        service._class_schema = service._get_class_schema("invoice")
+        service._class_label = "invoice"
+        extracted = {"invoice_number": "INV-1", "invoice_date": "2025-01-01"}
+        filtered = service._filter_extracted_to_schema(extracted)
+        assert filtered == extracted
+        assert service._off_schema_fields == []
+
+    def test_filter_extracted_to_schema_noop_without_properties(self, service):
+        """Fail-open: an empty/property-less schema keeps everything unchanged."""
+        service._class_schema = {}
+        service._class_label = "unknown"
+        extracted = {"anything": 1, "else": 2}
+        filtered = service._filter_extracted_to_schema(extracted)
+        assert filtered == extracted
+        assert service._off_schema_fields == []
+
+    def test_build_extraction_issues_reports_off_schema_fields(self, service):
+        """The dropped off-schema fields surface as an info-severity
+        extraction_off_schema_fields issue naming the fields."""
+        service._class_schema = service._get_class_schema("invoice")
+        service._class_label = "invoice"
+        service._off_schema_fields = ["publications", "ftc_testing_conditions"]
+        issues = service._build_extraction_issues(
+            extracted_fields={"invoice_number": "INV-1"},
+            metadata={},
+            section_id="1",
+        )
+        off = [i for i in issues if i.code == "extraction_off_schema_fields"]
+        assert len(off) == 1
+        assert off[0].severity == "info"
+        assert "publications" in off[0].message
+        assert off[0].details["off_schema_fields"] == [
+            "publications",
+            "ftc_testing_conditions",
+        ]
+
 
 @pytest.mark.unit
 class TestPerClassExtractionModelOverride:

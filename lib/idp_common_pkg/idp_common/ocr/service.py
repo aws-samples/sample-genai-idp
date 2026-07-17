@@ -308,19 +308,25 @@ class OcrService:
             # config; otherwise a standard-output SYNC OCR project is
             # auto-created and reused. Resolution is deferred to first use to
             # keep __init__ side-effect-free when possible.
+            # The stack-scoped BDA OCR project is provisioned at deploy time by
+            # the BDA OCR project CloudFormation custom resource and delivered
+            # via the BDA_OCR_PROJECT_ARN env var. An explicit config value
+            # overrides it. We never create the project at runtime.
             self.bda_project_arn = (
-                self.config.ocr.bda_project_arn if hasattr(self, "config") else None
+                (self.config.ocr.bda_project_arn if hasattr(self, "config") else None)
+                or os.environ.get("BDA_OCR_PROJECT_ARN")
+                or None
             )
             self._bda_profile_arn: Optional[str] = None
-            # Guards lazy ARN resolution so parallel page workers resolve/create
-            # the project exactly once instead of racing.
+            # Guards lazy profile-ARN resolution so parallel page workers build
+            # the profile ARN exactly once instead of racing.
             self._bda_arn_lock = threading.Lock()
             logger.info(
                 "OCR Service initialized with BDA backend"
                 + (
                     f", project {self.bda_project_arn}"
                     if self.bda_project_arn
-                    else " (project auto-managed)"
+                    else " (no project ARN provided)"
                 )
             )
         elif self.backend == "none":
@@ -1969,10 +1975,14 @@ class OcrService:
         return response_payload, placeholder
 
     def _ensure_bda_arns(self) -> None:
-        """Lazily resolve the BDA project + profile ARNs on first use.
+        """Lazily build the BDA profile ARN on first use.
 
-        Serialized with a lock so parallel page workers resolve/create the
-        auto-managed project exactly once rather than racing to create it.
+        The project ARN must have been provided via config or the
+        ``BDA_OCR_PROJECT_ARN`` env var (the stack provisions a per-stack BDA
+        OCR project via a CloudFormation custom resource). We never create the
+        project at runtime; if no ARN is available we raise a clear error.
+        Serialized with a lock so parallel page workers build the profile ARN
+        exactly once rather than racing.
         """
         if self.bda_project_arn and self._bda_profile_arn:
             return
@@ -1980,8 +1990,12 @@ class OcrService:
 
         with self._bda_arn_lock:
             if not self.bda_project_arn:
-                self.bda_project_arn = bda_ocr.resolve_ocr_project_arn(
-                    region=self.region
+                raise ValueError(
+                    "BDA OCR backend selected but no project ARN is available. "
+                    "Set ocr.bda_project_arn in config or the BDA_OCR_PROJECT_ARN "
+                    "environment variable (provisioned by the stack's BDA OCR "
+                    "project custom resource). In regions without Bedrock Data "
+                    "Automation, use the Textract OCR backend instead."
                 )
             if not self._bda_profile_arn:
                 identity = boto3.client(

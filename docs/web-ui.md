@@ -125,11 +125,10 @@ The Edit Pages feature provides an intelligent interface for modifying individua
 ### Key Capabilities
 
 - **View Page Text**: Access clean, readable page text without JSON formatting in a modal editor
-- **Visual Editor**: Default view — the page image on the left and OCR text lines on the right; click a line to highlight its bounding box on the image (when the OCR backend provides geometry). Supports mouse-wheel zoom, click-drag pan, and Next/Previous page navigation across the document
+- **Visual Editor**: The page image is shown on the left (when available) alongside a right-pane toggle between **OCR Lines** and **Markdown**. In OCR Lines, click a line to highlight its bounding box on the image (when the OCR backend provides geometry). Supports mouse-wheel zoom, click-drag pan, and Next/Previous page navigation across the document
+- **Markdown view**: Read the page's extracted markdown with a Rendered ↔ Raw toggle; the Raw view is the editable surface in edit mode
 - **Classification Reset**: Reset page classifications to force reclassification during reprocessing
-- **Text Editing**: Modify page OCR text with immediate S3 saves to prevent data loss
-- **Confidence Editing**: Edit OCR confidence data displayed as markdown tables
-- **Split-Pane Editor**: Side-by-side layout with text editor and live markdown preview
+- **Text Editing**: Modify page OCR text (via the Raw markdown editor) with immediate S3 saves to prevent data loss
 - **Intelligent Reprocessing**: Only affected sections are reprocessed based on modification type
 - **Pattern Compatibility**: Available for Pattern-2 and Pattern-3, with informative guidance for Pattern-1
 
@@ -144,9 +143,8 @@ The Edit Pages feature provides an intelligent interface for modifying individua
 
 ##### View Mode (Default)
 - Click "View Page Text" button to view page content in read-only mode
-- The modal opens on the **Visual Editor** view: the page image on the left and the OCR text lines (with per-line confidence) on the right. Click a text line to draw its bounding box on the image; zoom with the mouse wheel, pan by dragging, and move between pages with the Next/Previous arrows. (Bounding boxes require an OCR backend that provides geometry, e.g. Textract or the Mistral hook; otherwise the lines are shown without overlays.)
-- Switch to "Text + Markdown" to read the page text with live markdown preview
-- Switch to "Text + Confidence" view to see the OCR confidence table
+- The page image is shown on the left, with a right-pane toggle. **OCR Lines** (the default) lists the OCR text lines with per-line confidence; click a text line to draw its bounding box on the image; zoom with the mouse wheel, pan by dragging, and move between pages with the Next/Previous arrows. (Bounding boxes require an OCR backend that provides geometry, e.g. Textract or the Mistral hook; otherwise the lines are shown without overlays.)
+- Switch the right pane to **Markdown** to read the page's extracted markdown, with a Rendered ↔ Raw toggle
 
 ##### Edit Mode
 1. **Click "Edit Pages"**: Activates edit mode for all pages
@@ -155,8 +153,7 @@ The Edit Pages feature provides an intelligent interface for modifying individua
    - Page becomes "Unclassified" and will be reclassified during reprocessing
 3. **Edit Page Text**:
    - Click "Edit Page Text" button to open modal editor
-   - **Text + Markdown View**: Edit plain text (left) with live markdown preview (right)
-   - **Text + Confidence View**: Edit markdown confidence table (left) with rendered preview (right)
+   - Switch the right pane to **Markdown** and choose **Raw (editable)** to edit the page text; use **Rendered** to preview
    - Click "Save" to write changes to S3 immediately
    - Unsaved changes warning prevents data loss
 4. **Submit Changes**: Click "Save & Process Changes" to trigger reprocessing
@@ -380,7 +377,7 @@ Chat has its own dedicated configuration section (**Configuration tab → "Chat-
 
 The Chat panel includes a **Model** selector that defaults to the `chat.model` configured in the version of the config that was used to process the document. You can override the model for the current chat session via the dropdown. The list of selectable models comes from the `chat.model` enum in the configuration schema.
 
-> **OpenAI GPT-5.x in chat:** `openai.gpt-5.4` / `openai.gpt-5.5` are supported for Chat-with-Document and **stream** token-by-token like other models. They run on the `bedrock-mantle` Responses API (US regions only) and are tuned via `chat.reasoning_effort` rather than temperature/top_p. They are hidden from the model selector in EU-region deployments. Note: chat sends the document as **text** (extracted full text), so the PDF-document-block limitation that excludes GPT-5.x from Discovery does not apply here. See [OpenAI GPT-5.x Models](./openai-models.md).
+> **OpenAI GPT-5.x in chat:** `openai.gpt-5.4`, `openai.gpt-5.5`, and GPT-5.6 (`openai.gpt-5.6-sol` / `-terra` / `-luna`) are supported for Chat-with-Document and **stream** token-by-token like other models. They run on the `bedrock-mantle` Responses API (US regions only) and are tuned via `chat.reasoning_effort` rather than temperature/top_p. They are hidden from the model selector in EU-region deployments. Note: chat sends the document as **text** (extracted full text), so the PDF-document-block limitation that excludes GPT-5.x from Discovery does not apply here. See [OpenAI GPT-5.x Models](./openai-models.md).
 
 If a document is "too large for chat context window" — i.e. Bedrock returns an `Input Tokens Exceeded` error — pick a larger-context model in the Chat panel's Model selector and retry. For documents that are larger than any single-prompt model can fit, use the [Knowledge Base](./knowledge-base.md) feature instead.
 

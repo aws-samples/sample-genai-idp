@@ -14,6 +14,7 @@ Provides comprehensive error analysis capabilities including:
 """
 
 from .cloudwatch_tool import search_cloudwatch_logs, search_performance_issues
+from .config_tool import fetch_pipeline_configuration
 from .dynamodb_tool import (
     fetch_document_record,
     fetch_recent_records,
@@ -28,6 +29,7 @@ from .xray_tool import (
 __all__ = [
     "search_cloudwatch_logs",
     "search_performance_issues",
+    "fetch_pipeline_configuration",
     "retrieve_document_context",
     "fetch_document_record",
     "fetch_recent_records",

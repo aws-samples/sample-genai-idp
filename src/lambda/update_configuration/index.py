@@ -147,7 +147,13 @@ def filter_models_by_region(data: Any, region_type: str) -> Any:
     # Models that carry no region prefix but are only available in US (and
     # us-gov) regions via the bedrock-mantle endpoint. They must NOT be offered
     # in EU-region deployments where they are not callable. See openai_responses.py.
-    US_ONLY_MODELS = {"openai.gpt-5.4", "openai.gpt-5.5"}
+    US_ONLY_MODELS = {
+        "openai.gpt-5.4",
+        "openai.gpt-5.5",
+        "openai.gpt-5.6-sol",
+        "openai.gpt-5.6-terra",
+        "openai.gpt-5.6-luna",
+    }
 
     def _is_us_only(item: str) -> bool:
         return item in US_ONLY_MODELS or item.startswith("openai.gpt-5")

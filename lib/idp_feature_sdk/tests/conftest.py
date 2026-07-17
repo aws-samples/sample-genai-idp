@@ -2,12 +2,37 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from textwrap import dedent
 
 import boto3
 import pytest
 from moto import mock_aws
+
+
+@pytest.fixture(autouse=True)
+def _skip_when_sam_absent(monkeypatch):
+    """Skip (not fail) any test that reaches the real `sam build`/`sam package`.
+
+    FeaturePublisher.publish shells out to the SAM CLI to rewrite local CodeUri
+    paths; PackPublisher delegates to the same method. Those tests are
+    integration-level, but the suite runs in the offline `code_checks` fast gate
+    (via `make test-packages-cicd`), which doesn't install SAM. Rather than
+    hard-fail there, replace the sam step with a `pytest.skip` when the CLI is
+    absent — so only tests that ACTUALLY invoke sam skip, while non-publishing
+    tests (`--template-url`, mutex/error paths) still run. Where SAM is present
+    (local `make test`, or any job that installs it) the real step runs
+    unchanged. Future publish-path tests are covered automatically.
+    """
+    if shutil.which("sam") is not None:
+        return
+    from idp_feature_sdk.publisher import FeaturePublisher
+
+    def _skip(*_args, **_kwargs):
+        pytest.skip("requires the AWS SAM CLI (publish runs `sam build`)")
+
+    monkeypatch.setattr(FeaturePublisher, "_sam_build_and_package", _skip)
 
 
 def _bundle_body(feature_id: str, version: str) -> str:

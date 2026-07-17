@@ -279,7 +279,7 @@ def _parse_tags(tags: Optional[str]) -> Dict[str, str]:
 
 
 @click.group()
-@click.version_option(version="0.6.0")
+@click.version_option(version="0.6.1")
 def cli():
     """
     IDP CLI - Batch document processing for IDP Accelerator
