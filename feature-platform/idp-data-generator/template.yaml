@@ -393,12 +393,9 @@ Resources:
                 Effect: Allow
                 Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
                 Resource: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
-              - Sid: AppSyncStatus
-                Effect: Allow
-                Action: appsync:GraphQL
-                Resource: !Sub
-                  - "${ApiArn}/*"
-                  - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
+              # (AppSync status-posting removed — the host no longer runs AppSync.
+              # Per-job status lives in the feature's BootstrapTrackingTable, read
+              # back through the FeatureApi.)
 
   ###########################################################################
   # AgentCore Runtime control-plane custom resource (create/update/delete).
@@ -487,7 +484,6 @@ Resources:
         TEST_SET_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
         WORKING_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
         CONFIGURATION_TABLE_NAME: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }
-        APPSYNC_API_URL: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiUrl' }
         GENERATOR_MODEL_ID: !Ref GeneratorModelId
         # Strands file_write/editor tools prompt for interactive confirmation
         # otherwise, which auto-cancels in the headless runtime.
@@ -495,9 +491,10 @@ Resources:
 
   ###########################################################################
   # Bootstrap job plumbing — OWNED by this extension (moved out of the host).
-  # The FeatureApi enqueues jobs; the processor authors/stages the schema and
-  # invokes the AgentCore runtime; the runtime writes the test set + posts
-  # status to the host AppSync.
+  # The FeatureApi enqueues jobs; the processor authors/stages the schema,
+  # records status in BootstrapTrackingTable, and invokes the AgentCore runtime,
+  # which writes the test set into the host TestSet bucket. Status is read back
+  # through the FeatureApi (GET /jobs/{id}) — the host has no AppSync channel.
   ###########################################################################
   BootstrapTrackingTable:
     Type: AWS::DynamoDB::Table
@@ -563,7 +560,6 @@ Resources:
           CONFIGURATION_TABLE_NAME: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }
           TEST_SET_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
           WORKING_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
-          APPSYNC_API_URL: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiUrl' }
           SYNTHESIS_RUNTIME_ARN: !GetAtt GeneratorAgentRuntime.AgentRuntimeArn
       Events:
         SQSEvent:
@@ -603,11 +599,8 @@ Resources:
               Resource:
                 - !GetAtt GeneratorAgentRuntime.AgentRuntimeArn
                 - !Sub "${GeneratorAgentRuntime.AgentRuntimeArn}/*"
-            - Effect: Allow
-              Action: appsync:GraphQL
-              Resource: !Sub
-                - "${ApiArn}/types/Mutation/*"
-                - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
+            # (AppSync status-posting removed — host has no AppSync. Per-job
+            # status lives in BootstrapTrackingTable, read via the FeatureApi.)
             - Effect: Allow
               Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
               Resource: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
@@ -737,19 +730,16 @@ Resources:
                 Resource: !Sub
                   - 'arn:${AWS::Partition}:s3:::${Bucket}/features/${FeatureId}/*'
                   - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-WebUIBucketName' }
-        - PolicyName: InvokeAppSync
+        - PolicyName: InvokeRegisterFeature
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
+              # AppSync transport was removed — register/unregister by invoking
+              # the host's registerFeature resolver Lambda directly.
               - Effect: Allow
-                Action: appsync:GraphQL
+                Action: lambda:InvokeFunction
                 Resource:
-                  - !Sub
-                    - '${ApiArn}/types/Mutation/fields/registerFeature'
-                    - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
-                  - !Sub
-                    - '${ApiArn}/types/Mutation/fields/unregisterFeature'
-                    - ApiArn: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiArn' }
+                  - { 'Fn::ImportValue': !Sub '${MainStackName}-RegisterFeatureFunctionArn' }
 
   UiDeployerFunction:
     Type: AWS::Serverless::Function
@@ -767,7 +757,7 @@ Resources:
           WEBUI_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WebUIBucketName' }
           FEATURE_BUCKET: !Ref FeatureBucket
           FEATURE_ARTIFACT_PREFIX: '<FEATURE_ARTIFACT_PREFIX_TOKEN>'
-          APPSYNC_API_URL: { 'Fn::ImportValue': !Sub '${MainStackName}-AppSyncApiUrl' }
+          REGISTER_FEATURE_FUNCTION_ARN: { 'Fn::ImportValue': !Sub '${MainStackName}-RegisterFeatureFunctionArn' }
           FEATURE_API_ENDPOINT: !GetAtt FeatureApi.ApiEndpoint
           GENERATION_QUEUE_ARN: !GetAtt BootstrapQueue.Arn
           LOG_LEVEL: !Ref LogLevel

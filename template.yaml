@@ -2872,6 +2872,9 @@ Resources:
         # host's Rules Discovery flow (sample-health-insurance-review) know where
         # uploadDiscoveryDocument presigns uploads.
         DiscoveryBucketName: !Ref DiscoveryBucket
+        # Test Set bucket name re-exported so feature stacks that generate test
+        # sets (idp-data-generator) can write documents Test Studio discovers.
+        TestSetBucketName: !Ref TestSetBucket
         # Reporting bucket name re-exported (as name + ARN) so feature stacks
         # that read reporting/analytics data or write Athena query results
         # (e.g. idp-monitor) can grant themselves scoped s3 access. Mirrors the

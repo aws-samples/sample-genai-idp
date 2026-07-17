@@ -45,8 +45,8 @@ WORKDIR /app
 # API from this version.
 RUN pip install "seed-data>=0.0.5"
 
-# Extra runtime deps not in seed-data (AgentCore HTTP server + AppSync SigV4
-# status posting) plus idp_common[synthesis] for the synthesis adapter glue.
+# Extra runtime deps not in seed-data (AgentCore HTTP server + SigV4 helpers)
+# plus idp_common[synthesis] for the synthesis adapter glue.
 # idp_common_pkg is staged into the build-context root by package_agent_source.sh;
 # requirements.txt references it as ./idp_common_pkg[synthesis].
 COPY idp_common_pkg /app/idp_common_pkg

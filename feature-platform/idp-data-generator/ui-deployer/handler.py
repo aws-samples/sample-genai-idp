@@ -4,14 +4,16 @@
 """CloudFormation custom-resource Lambda — runs on Create / Update / Delete.
 
 Copies the UMD UI bundle into the host WebUIBucket and registers the feature
-with the host (registerFeature, IAM-signed AppSync), passing the FeatureApi
-endpoint so the host's Quick Start tools can discover and call this extension.
+with the host, passing the FeatureApi endpoint + the generation queue ARN so the
+host's Quick Start tools and the Test Studio "Generate Synthetic Data" button
+can discover and call this extension.
 
-This is the minimal variant (modeled on sample-feature's ui-deployer): no
-config preset and no pipeline hooks — the generator is invoked on-demand via
-the FeatureApi, not as a per-document pipeline mutation. (The advanced
-sample-health-insurance-review ui-deployer additionally applies a config preset
-and registers a postRuleValidation hook; neither applies here.)
+The AppSync transport was removed from the host; the host's registerFeature /
+unregisterFeature resolver Lambda already parses the AppSync resolver event
+shape {info:{fieldName}, arguments, identity}, so we invoke it directly (same
+pattern as sample-health-insurance-review). No config preset and no pipeline
+hooks — the generator is invoked on-demand via the FeatureApi / generation
+queue, not as a per-document pipeline mutation.
 
 The execution role carries the tag `idp:feature-id=<FEATURE_ID>` so the main
 stack's WebUIBucketPolicy allows writes under `features/<FEATURE_ID>/*` only.
@@ -24,12 +26,8 @@ import logging
 import os
 import urllib.request
 from typing import Any, Dict, Optional
-from urllib.parse import urlparse
 
 import boto3
-from botocore.auth import SigV4Auth
-from botocore.awsrequest import AWSRequest
-from botocore.session import Session
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -41,7 +39,8 @@ _MAIN_STACK_NAME = os.environ["MAIN_STACK_NAME"]
 _WEBUI_BUCKET = os.environ["WEBUI_BUCKET"]
 _FEATURE_BUCKET = os.environ["FEATURE_BUCKET"]
 _FEATURE_ARTIFACT_PREFIX = os.environ["FEATURE_ARTIFACT_PREFIX"].rstrip("/")
-_APPSYNC_URL = os.environ["APPSYNC_API_URL"]
+# ARN of the host's registerFeature resolver Lambda (AppSync transport removed).
+_REGISTER_FEATURE_FUNCTION_ARN = os.environ["REGISTER_FEATURE_FUNCTION_ARN"]
 _FEATURE_API_ENDPOINT = os.environ.get("FEATURE_API_ENDPOINT", "")
 _GENERATION_QUEUE_ARN = os.environ.get("GENERATION_QUEUE_ARN", "")
 
@@ -97,58 +96,36 @@ def _bundle_ui(request_type: str) -> str:
     return f"features/{_FEATURE_ID}/v{_FEATURE_VERSION}/"
 
 
-_REGISTER_QUERY = """
-mutation Register($input: RegisterFeatureInput!) {
-  registerFeature(input: $input) {
-    featureId
-    installedVersion
-    installedAt
-  }
-}
-"""
-
-_UNREGISTER_QUERY = """
-mutation Unregister($featureId: String!) {
-  unregisterFeature(featureId: $featureId)
-}
-"""
+# Feature registration — direct Lambda invoke of the host's registerFeature
+# resolver. The AppSync transport was removed; the resolver Lambda parses the
+# AppSync resolver event shape {info:{fieldName}, arguments, identity}, so we
+# hand it that event directly (same pattern as sample-health-insurance-review).
+_lambda = boto3.client("lambda")
 
 
-def _call_appsync(query: str, variables: Dict[str, Any]) -> Dict[str, Any]:
-    """POST a SigV4-signed GraphQL operation to the host AppSync API."""
-    session = Session()
-    creds = session.get_credentials()
-    parsed = urlparse(_APPSYNC_URL)
-    region = parsed.hostname.split(".")[-3] if parsed.hostname else "us-east-1"
-
-    body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
-    request = AWSRequest(
-        method="POST",
-        url=_APPSYNC_URL,
-        data=body,
-        headers={"Content-Type": "application/json"},
+def _invoke_resolver(field_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """Synchronously invoke the host registerFeature resolver for one field."""
+    payload = {
+        "info": {"fieldName": field_name},
+        "arguments": arguments,
+        "identity": {"username": "feature-install", "groups": ["Admin"]},
+    }
+    resp = _lambda.invoke(
+        FunctionName=_REGISTER_FEATURE_FUNCTION_ARN,
+        InvocationType="RequestResponse",
+        Payload=json.dumps(payload).encode("utf-8"),
     )
-    SigV4Auth(creds, "appsync", region).add_auth(request)
-
-    req = urllib.request.Request(
-        _APPSYNC_URL,
-        data=body,
-        headers=dict(request.headers.items()),
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
-        resp_body = resp.read().decode("utf-8")
-    parsed_body = json.loads(resp_body)
-    if parsed_body.get("errors"):
-        raise RuntimeError(f"AppSync errors: {parsed_body['errors']}")
-    return parsed_body.get("data") or {}
+    body = resp["Payload"].read().decode("utf-8")
+    if resp.get("FunctionError"):
+        raise RuntimeError(f"{field_name} resolver failed: {body}")
+    return json.loads(body) if body else {}
 
 
 def _register(ui_bundle_path: str, stack_id: str) -> None:
     caller = boto3.client("sts").get_caller_identity()
     region = os.environ.get("AWS_REGION", "us-east-1")
-    _call_appsync(
-        _REGISTER_QUERY,
+    _invoke_resolver(
+        "registerFeature",
         {
             "input": {
                 "featureId": _FEATURE_ID,
@@ -169,7 +146,7 @@ def _register(ui_bundle_path: str, stack_id: str) -> None:
 
 
 def _unregister() -> None:
-    _call_appsync(_UNREGISTER_QUERY, {"featureId": _FEATURE_ID})
+    _invoke_resolver("unregisterFeature", {"featureId": _FEATURE_ID})
 
 
 def _send_response(

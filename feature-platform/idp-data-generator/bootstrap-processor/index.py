@@ -20,30 +20,49 @@ import uuid
 import boto3
 from idp_common.synthesis import bootstrap as bootstrap_mod
 from idp_common.synthesis import engine, schema_bridge
-from idp_common.synthesis.appsync_status import post_synthesis_status
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-APPSYNC_API_URL = os.environ.get("APPSYNC_API_URL")
 WORKING_BUCKET = os.environ.get("WORKING_BUCKET")
 TEST_SET_BUCKET = os.environ.get("TEST_SET_BUCKET")
 SYNTHESIS_RUNTIME_ARN = os.environ.get("SYNTHESIS_RUNTIME_ARN")
 CONFIGURATION_TABLE_NAME = os.environ.get("CONFIGURATION_TABLE_NAME")
+BOOTSTRAP_TRACKING_TABLE = os.environ.get("BOOTSTRAP_TRACKING_TABLE")
+
+_ddb = boto3.resource("dynamodb")
 
 
 def _status(
     job_id, status, message=None, error=None, config_version=None, test_set_id=None
 ):
-    post_synthesis_status(
-        APPSYNC_API_URL,
-        job_id,
-        status,
-        status_message=message,
-        error_message=error,
-        config_version=config_version,
-        test_set_id=test_set_id,
-    )
+    """Record job status in the feature's own tracking table.
+
+    The AppSync transport was removed from the host, so per-job status lives in
+    this feature-owned table (BootstrapTrackingTable) and is read back through
+    the FeatureApi (GET /jobs/{id}) — the host has no status channel to post to.
+    """
+    if not (BOOTSTRAP_TRACKING_TABLE and job_id):
+        return
+    attrs = {"status": status}
+    if message is not None:
+        attrs["statusMessage"] = message
+    if error is not None:
+        attrs["errorMessage"] = error
+    if config_version is not None:
+        attrs["configVersion"] = config_version
+    if test_set_id is not None:
+        attrs["testSetId"] = test_set_id
+    expr = "SET " + ", ".join(f"#{k} = :{k}" for k in attrs)
+    try:
+        _ddb.Table(BOOTSTRAP_TRACKING_TABLE).update_item(
+            Key={"jobId": job_id},
+            UpdateExpression=expr,
+            ExpressionAttributeNames={f"#{k}": k for k in attrs},
+            ExpressionAttributeValues={f":{k}": v for k, v in attrs.items()},
+        )
+    except Exception as exc:  # noqa: BLE001 — status is best-effort
+        logger.warning("Could not write job status for %s: %s", job_id, exc)
 
 
 def handler(event, context):

@@ -144,15 +144,12 @@ def invoke(payload, context=None):
 
 
 def _post_status(payload, job_id, status, message):
-    api_url = os.environ.get("APPSYNC_API_URL")
-    if not api_url:
-        return
-    try:
-        from idp_common.synthesis.appsync_status import post_synthesis_status
-
-        post_synthesis_status(api_url, job_id, status, message)
-    except Exception:
-        logger.warning("Failed to post status to AppSync", exc_info=True)
+    # Job status is owned by the BootstrapProcessor Lambda, which brackets this
+    # runtime invocation with IN_PROGRESS/COMPLETED/FAILED writes to the feature's
+    # BootstrapTrackingTable (read via the FeatureApi). The AppSync status channel
+    # was removed with the host's AppSync->REST migration, so the runtime only
+    # logs progress here rather than posting to the host.
+    logger.info("synthesis job %s: %s — %s", job_id, status, message)
 
 
 if __name__ == "__main__":

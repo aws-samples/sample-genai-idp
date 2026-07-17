@@ -70,14 +70,17 @@ the `{testSetId}/input` + `{testSetId}/baseline` layout).
 
 Stable interface owned by the accelerator (must not break):
 - Host exports via `Fn::ImportValue ${MainStackName}-X`: `ConfigurationTableName`,
-  `WorkingBucketName`, `TestSetBucketName`, `AppSyncApiUrl`, `AppSyncApiArn`,
+  `WorkingBucketName`, `TestSetBucketName`, `RegisterFeatureFunctionArn`,
   `CustomerManagedEncryptionKeyArn`, `WebUIBucketName`, `UserPoolId`,
-  `UserPoolClientId`.
+  `UserPoolClientId`. (`TestSetBucketName` is re-exported by the host's
+  FeaturePlatformStack — added for this extension.)
 - Config storage: `idp_common.config.ConfigurationManager` (gzip-compressed
   Binary format) — the extension installs `idp_common` so it shares the host's
   exact read/write format rather than vendoring or round-tripping.
-- AppSync status-post mutation (via `idp_common.synthesis.appsync_status`).
-- `registerFeature` mutation + `featureApiEndpoint`.
+- Feature registration: direct invoke of the host's `RegisterFeatureFunction`
+  Lambda with the resolver event shape (AppSync transport was removed).
+- Per-job status is feature-owned (BootstrapTrackingTable), read via the
+  FeatureApi `GET /jobs/{id}` — there is no host status channel.
 
 ## Publish & install
 
