@@ -5,6 +5,8 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.6.1]
+
 ### Added
 
 - **OpenAI GPT-5.6 (Sol / Terra / Luna) models on Amazon Bedrock.** Adds `openai.gpt-5.6-sol` (flagship reasoning), `openai.gpt-5.6-terra` (GPT-5.5-class quality at roughly half the cost), and `openai.gpt-5.6-luna` (fastest / lowest cost), served on the `bedrock-mantle` OpenAI Responses API alongside the existing GPT-5.4/5.5. Selectable for OCR, classification, extraction, assessment, summarization, evaluation, and Chat-with-Document. Unlike 5.4/5.5 (which cache automatically), GPT-5.6 supports **explicit prompt caching** via `<<CACHEPOINT>>` markers (90% cache-read discount; a 30-minute cache-write is metered). **Not supported:** agentic extraction, Discovery, and Policy Discovery (rejected by `config-validate` and at runtime). **Regions:** US only — Sol in `us-east-1`/`us-east-2`, Terra/Luna add `us-west-2`; no EU/global and **no GovCloud** (GovCloud remains GPT-5.4 only). See [OpenAI GPT-5.x Models](docs/openai-models.md). (#519)
@@ -42,6 +44,11 @@ SPDX-License-Identifier: MIT-0
 - **Assessment no longer wastes a model escalation (or hard-fails a document) on a schema mismatch.** When extraction returned list-valued data for an attribute the class schema does not define as an array, the confidence enhancer collapsed it to a single default leaf, leaving every row "unscored" — and the self-healing ladder then escalated to a stronger confidence model that re-emitted the same list and recovered **0 rows**, marking the section `assessment_incomplete` (error) and failing the document. The ladder now detects this schema mismatch, **skips both retry and escalation** for the field (a stronger model cannot fix a schema mismatch), and emits a clear `assessment_schema_mismatch` (error) processing issue naming the field(s) and the real fix (correct the schema/extraction, or use Advanced extraction) instead of a misleading "escalation failed" story. Paired with the simple-mode off-schema filter above, the offending field is normally dropped at extraction so the section no longer fails at all. See the [assessment README](lib/idp_common_pkg/idp_common/assessment/README.md) (GitHub #510).
 
 - **HITL "Skip All Reviews" now finalizes the document like completing the last section.** Skipping all pending sections previously updated tracking status but did **not** trigger downstream reprocessing, so Summarization/Evaluation never re-ran and the optional post-processing Lambda hook (`PostProcessingLambdaHookFunctionArn`) never fired — inconsistent with the section-by-section completion path, which does. `skip_all_sections_review` now calls the same `trigger_reprocessing` used when the final section is completed, so both "finish review" paths behave identically. See [docs/human-review.md](docs/human-review.md).
+
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.6.1.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.6.1.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.6.1.yaml`
 
 ## [0.6.0]
 
