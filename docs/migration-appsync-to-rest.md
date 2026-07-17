@@ -192,13 +192,50 @@ as follows:
   with IAM instead of the old AppSync SigV4 mutation (see
   [§5 Feature Platform](#5-feature-platform)).
 
-The authoritative RBAC baseline remains
+### Input-shape validation parity
+
+AppSync also validated every request's **input shape** against the schema for
+free — it rejected an unknown argument, a missing non-null argument, a wrong
+scalar type (e.g. an object where a `String!` was expected), or an out-of-set
+enum value **before** the resolver ran. The REST API's Cognito authorizer does
+none of this, so without a replacement a malformed request flowed straight into
+a resolver (silently accepted, or a 500 deep in the code). That is a
+defense-in-depth regression — the type-confusion / unexpected-argument class,
+distinct from the authorization parity above.
+
+Parity is restored by **central argument validation in the dispatcher**:
+
+- **A build-time spec, not a runtime GraphQL parser.**
+  [`scripts/sdlc/generate_api_validation_spec.py`](../scripts/sdlc/generate_api_validation_spec.py)
+  parses `schema.graphql` (reusing `scan_api_rbac.py`'s parser) into a compact
+  `api_validation_spec.json` — each field's argument signature, the enum value
+  sets, and input-object shapes. The JSON is committed next to the dispatcher (in
+  its CodeUri, so SAM bundles it) and the Lambda validates against it with
+  **stdlib only** (no `graphql-core` dependency).
+- **What it rejects (HTTP 400 `BadRequest`).** Unknown arguments, missing
+  non-null arguments, wrong JSON type (string/int/float/bool/list), and
+  out-of-set enum values. Rejection raises `ValueError`, which the dispatcher
+  already maps to 400 — the same status AppSync returned for a malformed query.
+- **Conservative by design.** Type-only checks (no date/email/URL *format* regex
+  yet); input objects are validated shallowly (must be an object); `AWSJSON`
+  accepts a JSON string or an already-parsed object/array. The validator
+  **fails open on its own internal errors** (a validator bug never 500s the API)
+  and fails closed only on genuine input violations.
+- **Drift-guarded.** A unit test (and `generate_api_validation_spec.py --check`)
+  fails CI if the committed spec falls out of sync with `schema.graphql`, so the
+  spec can't silently rot as operations are added.
+
+See [`validation.py`](../nested/api-resolvers/src/lambda/http_api_dispatcher/validation.py).
+
+The authoritative baseline for BOTH authorization and input shape remains
 `nested/api-resolvers/src/api/schema.graphql` (its `Query`/`Mutation` group
-directives). A live verification harness,
+directives and argument signatures). A live verification harness,
 [`scripts/test_api_rbac.py`](../scripts/README.md), drives the deployed API as
 each Cognito group (Admin/Author/Viewer/Reviewer) plus unauthenticated and
-asserts every operation's authorization outcome against that baseline — run it
-after any change to a resolver, the dispatcher, `ddb_direct`, or the REST client.
+asserts every operation's authorization outcome against that baseline — plus
+mandatory security-focused suites (IDOR, token lifecycle, deleted-resource,
+input validation, TLS) — run it after any change to a resolver, the dispatcher,
+`ddb_direct`, or the REST client.
 
 ## 5. Feature Platform
 
@@ -294,6 +331,7 @@ published under a different account.
 | Chat streaming | mutation → subscription | Lambda Function URL `RESPONSE_STREAM` | Same events, true streaming |
 | AuthN | Cognito (AppSync) | Cognito User Pools authorizer | Equivalent |
 | AuthZ / RBAC | schema `cognito_groups` directive | per-resolver group check (+ `ddb_direct`) | Enforced; verified by `test_api_rbac.py` |
+| Input-shape validation | GraphQL schema (types/non-null/enums) | dispatcher validates against a schema-derived spec (`validation.py`) | Restored centrally; drift-guarded |
 | Availability | not GovCloud / FedRAMP | GovCloud/FedRAMP-eligible services only | **Improved** |
 | Private + WAF | not supported | REST API PRIVATE + WAFv2 | **Improved** |
 
