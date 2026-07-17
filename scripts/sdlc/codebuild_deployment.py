@@ -2970,44 +2970,55 @@ def _test_vpc_params():
     }
 
 
-def deploy_and_test_probe(probe, admin_email, template_url):
-    """Deploy + validate + tear down ONE deployment-variant probe.
+# One redeploy after a transient-only deploy failure (see
+# _is_transient_logs_race). 2 = original attempt + 1 retry; a genuine config
+# error fails identically both times and still surfaces.
+PROBE_TRANSIENT_MAX_ATTEMPTS = 2
 
-    Stands up a throwaway IDP stack with the probe's extra CFN params (plus, for
-    requires_vpc probes, the persistent-test-VPC params from env), runs its
-    validator, and ALWAYS tears the stack down (finally). Runs on its own pool
-    thread and opts that thread out of the primary suite's fail-fast abort
-    machinery (_thread_local.never_abort) so a primary failure's kill sweep
-    cannot terminate this independent-stack deploy mid-flight. CF failure events
-    are captured before teardown so the AI summary can name the root cause.
 
-    A requires_vpc probe with no test-VPC env vars configured returns a SKIPPED
-    result (success=True, skipped=True) — it is absent infra, not a failure.
+def _is_transient_logs_race(result):
+    """True iff the deploy rolled back on the known CloudWatch Logs create race.
 
-    Returns a result dict shaped like the primary suite's:
-    {"stack_name", "success", "probe", ["error", "failure_type", "skipped", ...]}.
+    Root cause (verified from a real run — NOT a blanket "retry any rollback"):
+    an AWS::Logs::LogGroup with RetentionInDays set makes CFN's handler issue
+    two sequential CWL calls — CreateLogGroup then PutRetentionPolicy. Under
+    heavy CONCURRENT stack creation (primary + N probes standing up ~250 log
+    groups at once) CWL's control plane isn't read-your-write consistent, so
+    PutRetentionPolicy occasionally hits the just-created group before it has
+    propagated and returns ResourceNotFoundException — surfaced as
+    CREATE_FAILED "The specified log group does not exist" / InvalidRequest.
+
+    This is the ONLY failure we retry, because it is non-deterministic (a fresh
+    deploy re-rolls the race) whereas a real config/permission/KMS error fails
+    IDENTICALLY every time and must surface, not be masked. The match is scoped
+    tightly to resource type + message so nothing else qualifies:
+      * failure_type must be "deploy" (never a validation failure), and
+      * some captured event is a CREATE_FAILED on an AWS::Logs::LogGroup whose
+        reason contains "does not exist" (the initiating cause — the collateral
+        rolled-back resources carry "Resource creation cancelled", which this
+        deliberately does NOT match).
     """
-    _thread_local.never_abort = True
+    if result.get("failure_type") != "deploy":
+        return False
+    for ev in result.get("cf_events") or []:
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("resource_type") != "AWS::Logs::LogGroup":
+            continue
+        if ev.get("status") == "CREATE_FAILED" and "does not exist" in (
+            ev.get("reason") or ""
+        ).lower():
+            return True
+    return False
 
-    # Resolve VPC params up front so a requires_vpc probe skips cleanly (before
-    # creating any IAM/stack) when the persistent test VPC isn't configured.
-    vpc_params = {}
-    if probe.requires_vpc:
-        vpc_params = _test_vpc_params()
-        if vpc_params is None:
-            msg = (
-                f"Probe [{probe.name}] SKIPPED — requires the persistent test "
-                "VPC but IDP_TEST_* env vars are unset (CreateTestVpc=false)"
-            )
-            print(f"⏭️  {msg}")
-            return {
-                "stack_name": f"<{probe.stack_suffix} probe>",
-                "success": True,
-                "skipped": True,
-                "probe": probe.name,
-                "detail": msg,
-            }
 
+def _run_probe_attempt(probe, admin_email, template_url, vpc_params):
+    """One deploy+validate+teardown attempt for a probe (fresh stack + IAM).
+
+    Generates its OWN stack name and creates/deletes its own IAM so that a retry
+    reuses no names and leaves nothing behind — cleanup always runs in finally.
+    Returns the same result-dict shape as deploy_and_test_probe.
+    """
     stack_name = f"{generate_stack_name()}-{probe.stack_suffix}"
     result = {"stack_name": stack_name, "success": False, "probe": probe.name}
     try:
@@ -3056,6 +3067,72 @@ def deploy_and_test_probe(probe, admin_email, template_url):
         return result
     finally:
         cleanup_stack({"stack_name": stack_name})
+
+
+def deploy_and_test_probe(probe, admin_email, template_url):
+    """Deploy + validate + tear down ONE deployment-variant probe.
+
+    Stands up a throwaway IDP stack with the probe's extra CFN params (plus, for
+    requires_vpc probes, the persistent-test-VPC params from env), runs its
+    validator, and ALWAYS tears the stack down (finally). Runs on its own pool
+    thread and opts that thread out of the primary suite's fail-fast abort
+    machinery (_thread_local.never_abort) so a primary failure's kill sweep
+    cannot terminate this independent-stack deploy mid-flight. CF failure events
+    are captured before teardown so the AI summary can name the root cause.
+
+    A requires_vpc probe with no test-VPC env vars configured returns a SKIPPED
+    result (success=True, skipped=True) — it is absent infra, not a failure.
+
+    A deploy that rolls back on the KNOWN-TRANSIENT CloudWatch Logs create
+    consistency race (_is_transient_logs_race) is retried ONCE on a fresh stack;
+    every other failure (validation, or any other deploy error) returns
+    immediately without retry so real regressions surface fast.
+
+    Returns a result dict shaped like the primary suite's:
+    {"stack_name", "success", "probe", ["error", "failure_type", "skipped", ...]}.
+    """
+    _thread_local.never_abort = True
+
+    # Resolve VPC params up front so a requires_vpc probe skips cleanly (before
+    # creating any IAM/stack) when the persistent test VPC isn't configured.
+    vpc_params = {}
+    if probe.requires_vpc:
+        vpc_params = _test_vpc_params()
+        if vpc_params is None:
+            msg = (
+                f"Probe [{probe.name}] SKIPPED — requires the persistent test "
+                "VPC but IDP_TEST_* env vars are unset (CreateTestVpc=false)"
+            )
+            print(f"⏭️  {msg}")
+            return {
+                "stack_name": f"<{probe.stack_suffix} probe>",
+                "success": True,
+                "skipped": True,
+                "probe": probe.name,
+                "detail": msg,
+            }
+
+    result = None
+    for attempt in range(1, PROBE_TRANSIENT_MAX_ATTEMPTS + 1):
+        result = _run_probe_attempt(probe, admin_email, template_url, vpc_params)
+        if result.get("success"):
+            return result
+        # Retry ONLY the tightly-scoped CWL create race, and only if attempts
+        # remain. The prior attempt's stack + IAM are already torn down (its
+        # finally), so the retry is a clean, independent redeploy.
+        if (
+            attempt < PROBE_TRANSIENT_MAX_ATTEMPTS
+            and _is_transient_logs_race(result)
+        ):
+            print(
+                f"♻️ Probe [{probe.name}] hit the transient CloudWatch Logs "
+                f"create-consistency race (attempt {attempt}/"
+                f"{PROBE_TRANSIENT_MAX_ATTEMPTS}); redeploying a fresh stack once..."
+            )
+            result["retried_transient_logs_race"] = True
+            continue
+        return result
+    return result
 
 
 def resolve_probe_concurrency(num_probes):

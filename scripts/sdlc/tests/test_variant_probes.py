@@ -262,6 +262,198 @@ def test_probe_iam_failure_still_cleans_up(cbd, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# scoped retry — ONLY the transient CloudWatch Logs create-consistency race
+# --------------------------------------------------------------------------- #
+
+
+def _logs_race_event():
+    # Shape matches get_cloudformation_logs()'s failure-event dicts.
+    return {
+        "resource_type": "AWS::Logs::LogGroup",
+        "logical_id": "WorkflowTrackerLogGroup",
+        "status": "CREATE_FAILED",
+        "reason": (
+            "Resource handler returned message: \"The specified log group does "
+            "not exist. (Service: CloudWatchLogs, Status Code: 400)\" "
+            "(HandlerErrorCode: InvalidRequest)"
+        ),
+    }
+
+
+def test_is_transient_logs_race_matches_the_cwl_create_race(cbd):
+    result = {"failure_type": "deploy", "cf_events": [_logs_race_event()]}
+    assert cbd._is_transient_logs_race(result) is True
+
+
+def test_is_transient_logs_race_ignores_collateral_cancelled_events(cbd):
+    # The rolled-back siblings say "Resource creation cancelled" — NOT a match;
+    # only the initiating LogGroup "does not exist" event qualifies.
+    result = {
+        "failure_type": "deploy",
+        "cf_events": [
+            {
+                "resource_type": "AWS::S3::Bucket",
+                "status": "CREATE_FAILED",
+                "reason": "Resource creation cancelled",
+            },
+            {
+                "resource_type": "AWS::SQS::Queue",
+                "status": "CREATE_FAILED",
+                "reason": "Resource creation cancelled",
+            },
+        ],
+    }
+    assert cbd._is_transient_logs_race(result) is False
+
+
+def test_is_transient_logs_race_ignores_other_loggroup_errors(cbd):
+    # A real config/permission error on a log group (e.g. KMS access denied)
+    # is deterministic and must NOT be retried.
+    result = {
+        "failure_type": "deploy",
+        "cf_events": [
+            {
+                "resource_type": "AWS::Logs::LogGroup",
+                "status": "CREATE_FAILED",
+                "reason": "AccessDenied: not authorized to perform kms:GenerateDataKey",
+            }
+        ],
+    }
+    assert cbd._is_transient_logs_race(result) is False
+
+
+def test_is_transient_logs_race_never_matches_validation_failure(cbd):
+    # Even if a stray "log group does not exist" string is present, a TEST
+    # (validation) failure is never a deploy race.
+    result = {
+        "failure_type": "test",
+        "cf_events": [_logs_race_event()],
+    }
+    assert cbd._is_transient_logs_race(result) is False
+
+
+def test_is_transient_logs_race_handles_missing_or_malformed_events(cbd):
+    assert cbd._is_transient_logs_race({"failure_type": "deploy"}) is False
+    assert (
+        cbd._is_transient_logs_race(
+            {"failure_type": "deploy", "cf_events": [None, "junk", 42]}
+        )
+        is False
+    )
+
+
+def _stub_attempts(cbd, monkeypatch, results):
+    """Make _run_probe_attempt return each of `results` in order; record count."""
+    seq = list(results)
+    calls = {"attempts": 0}
+
+    def fake_attempt(probe, admin_email, template_url, vpc_params):
+        calls["attempts"] += 1
+        return seq.pop(0)
+
+    monkeypatch.setattr(cbd, "_run_probe_attempt", fake_attempt)
+    return calls
+
+
+def test_probe_retries_once_on_transient_logs_race_then_succeeds(cbd, monkeypatch):
+    first = {
+        "stack_name": "idp-0101-000000-test",
+        "success": False,
+        "probe": "Test probe",
+        "failure_type": "deploy",
+        "cf_events": [_logs_race_event()],
+    }
+    second = {
+        "stack_name": "idp-0101-000001-test",
+        "success": True,
+        "probe": "Test probe",
+    }
+    calls = _stub_attempts(cbd, monkeypatch, [first, second])
+    probe = _make_probe(cbd)
+
+    result = cbd.deploy_and_test_probe(probe, "a@b.com", "https://tmpl")
+
+    assert calls["attempts"] == 2  # retried exactly once
+    assert result["success"] is True
+    assert result["stack_name"] == "idp-0101-000001-test"
+
+
+def test_probe_retries_transient_race_at_most_once(cbd, monkeypatch):
+    # Race twice in a row: attempt-1 retries, attempt-2 is the last attempt and
+    # its result is returned as-is (no third attempt).
+    race = lambda sfx: {  # noqa: E731
+        "stack_name": f"idp-0101-{sfx}-test",
+        "success": False,
+        "probe": "Test probe",
+        "failure_type": "deploy",
+        "cf_events": [_logs_race_event()],
+    }
+    calls = _stub_attempts(cbd, monkeypatch, [race("000000"), race("000001")])
+    probe = _make_probe(cbd)
+
+    result = cbd.deploy_and_test_probe(probe, "a@b.com", "https://tmpl")
+
+    assert calls["attempts"] == 2  # capped — no third attempt
+    assert result["success"] is False
+    assert result["failure_type"] == "deploy"
+
+
+def test_probe_does_not_retry_a_real_deploy_failure(cbd, monkeypatch):
+    # A non-race deploy failure (e.g. genuine config error) must fail fast with
+    # NO retry so real regressions surface immediately.
+    real_fail = {
+        "stack_name": "idp-0101-000000-test",
+        "success": False,
+        "probe": "Test probe",
+        "failure_type": "deploy",
+        "cf_events": [
+            {
+                "resource_type": "AWS::IAM::Role",
+                "status": "CREATE_FAILED",
+                "reason": "MalformedPolicyDocument",
+            }
+        ],
+    }
+    calls = _stub_attempts(cbd, monkeypatch, [real_fail])
+    probe = _make_probe(cbd)
+
+    result = cbd.deploy_and_test_probe(probe, "a@b.com", "https://tmpl")
+
+    assert calls["attempts"] == 1  # no retry
+    assert result["success"] is False
+
+
+def test_probe_does_not_retry_a_validation_failure(cbd, monkeypatch):
+    val_fail = {
+        "stack_name": "idp-0101-000000-test",
+        "success": False,
+        "probe": "Test probe",
+        "failure_type": "test",
+        "error": "bad endpoint",
+    }
+    calls = _stub_attempts(cbd, monkeypatch, [val_fail])
+    probe = _make_probe(cbd)
+
+    result = cbd.deploy_and_test_probe(probe, "a@b.com", "https://tmpl")
+
+    assert calls["attempts"] == 1  # no retry on a test failure
+    assert result["success"] is False
+
+
+def test_probe_skips_before_any_attempt_when_vpc_missing(cbd, monkeypatch):
+    # A requires_vpc probe with no VPC env must skip WITHOUT calling an attempt.
+    _clear_test_vpc_env(monkeypatch)
+    calls = _stub_attempts(cbd, monkeypatch, [])
+    probe = _make_probe(cbd, requires_vpc=True)
+
+    result = cbd.deploy_and_test_probe(probe, "a@b.com", "https://tmpl")
+
+    assert calls["attempts"] == 0
+    assert result["success"] is True
+    assert result["skipped"] is True
+
+
+# --------------------------------------------------------------------------- #
 # fail-fast isolation — a primary-suite abort must not kill a probe's commands
 # --------------------------------------------------------------------------- #
 
