@@ -5,10 +5,6 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
-### Fixed
-
-- **Feature Platform stack now honors `PermissionsBoundaryArn`, fixing rollback in SCP-enforced accounts.** When `EnableFeaturePlatform=true`, the main template did not forward `PermissionsBoundaryArn` to the Feature Platform nested stack (`feature-platform/main-stack-extensions`), and that nested template neither declared the parameter nor attached a boundary to its `FeaturePlatformLambdaRole` — so in accounts whose SCP requires a permissions boundary on every IAM role, `iam:CreateRole` was denied and the nested stack rolled back on creation. The parameter is now declared in the nested template, attached to the role, and forwarded from the main stack. The same gap on the SAM-auto-role Lambda functions in the installable feature templates (`feature-template`, `sample-feature`, `sample-health-insurance-review`) and on the conditional `BastionRole` / AgentCore roles/function in the main template is fixed as well. A static regression test (`lib/idp_sdk/tests/unit/test_permissions_boundary_coverage.py`) now asserts every deployed-stack template attaches the boundary to each role it creates and forwards the parameter to every nested stack that accepts it.
-
 ## [0.6.1]
 
 ### Added
@@ -34,6 +30,8 @@ SPDX-License-Identifier: MIT-0
 - **Bedrock client logs the model ID on non-retryable errors.** Non-retryable `Converse` and embedding failures now include the model ID in the log line (e.g. `Non-retryable Bedrock error for model us.anthropic.claude-3-7-sonnet-20250219-v1:0: ResourceNotFoundException - ...`), so the offending model is explicit in the function logs — Bedrock's own message for a retired model does not name it.
 
 ### Fixed
+
+- **Feature Platform stack now honors `PermissionsBoundaryArn`, fixing rollback in SCP-enforced accounts.** When `EnableFeaturePlatform=true`, the main template did not forward `PermissionsBoundaryArn` to the Feature Platform nested stack (`feature-platform/main-stack-extensions`), and that nested template neither declared the parameter nor attached a boundary to its `FeaturePlatformLambdaRole` — so in accounts whose SCP requires a permissions boundary on every IAM role, `iam:CreateRole` was denied and the nested stack rolled back on creation. The parameter is now declared in the nested template, attached to the role, and forwarded from the main stack. The same gap on the SAM-auto-role Lambda functions in the installable feature templates (`feature-template`, `sample-feature`, `sample-health-insurance-review`) and on the conditional `BastionRole` / AgentCore roles/function in the main template is fixed as well. A static regression test (`lib/idp_sdk/tests/unit/test_permissions_boundary_coverage.py`) now asserts every deployed-stack template attaches the boundary to each role it creates and forwards the parameter to every nested stack that accepts it. (#521)
 
 - **OpenAI (bedrock-mantle) metering no longer double-counts cached tokens.** OpenAI's Responses `usage.input_tokens` is the *total* prompt count and already **includes** the cached / cache-write tokens as a subset — unlike Bedrock Converse, where `inputTokens` is the disjoint uncached count. The mantle usage mapper reported that total as `inputTokens` while *also* emitting `cacheReadInputTokens` / `cacheWriteInputTokens`, so the cost calculator billed cached tokens twice (full input rate **and** cache rate) — turning the cache discount into a ~64% overcharge on warm calls. `inputTokens` is now the disjoint fresh count (`input_tokens − cached − cache_write`), so `inputTokens + cacheReadInputTokens` reconciles to the true prompt size. Affects all GPT-5.x models (5.4 / 5.5 / 5.6). Verified live end-to-end. See the [bedrock module README](lib/idp_common_pkg/idp_common/bedrock/README.md#openai-gpt-5x-models-bedrock-mantle-responses-api). (#519)
 
