@@ -899,6 +899,10 @@ aws apigateway create-domain-name-access-association \
 #    (same alias mechanics as "Solution A" above — reuse VPCE_DNS / VPCE_HZ_ID there).
 ```
 
+> **GovCloud / non-standard partitions:** the `--domain-name-arn` above uses the
+> `arn:aws:` partition. In AWS GovCloud (US) use `arn:aws-us-gov:` (and in China
+> `arn:aws-cn:`); substitute the partition that matches your deployment account.
+
 ### DNS target for your DNS team
 
 The vanity hostname must ultimately resolve to the **execute-api VPC endpoint's regional DNS
