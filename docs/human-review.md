@@ -50,7 +50,7 @@ The HITL system operates independently from the document processing workflow:
 - **Built-in Review Portal**: Web interface integrated into the GenAI-IDP UI for validation and correction
 - **User Management**: Cognito-based authentication with role-based access control
 - **Section Review Tracking**: DynamoDB-based tracking of review progress per document section
-- **Decoupled Design**: HITL operations update document status directly without triggering reprocessing
+- **Decoupled Design**: Per-section review actions update tracking status directly; when the final pending section is resolved (completed or skipped), the document is finalized and downstream reprocessing (Summarization/Evaluation) is triggered automatically
 
 ### Review Flow
 
@@ -192,7 +192,7 @@ Admins have additional capabilities:
 - **Skip All Reviews**: Click **Skip All Reviews** to mark all pending sections as skipped
   - Document status changes to **Review Skipped**
   - The **Review Completed By** field records the admin who skipped
-  - No reprocessing is triggered
+  - Downstream reprocessing (Summarization/Evaluation) is triggered automatically — consistent with completing all sections — which also fires the optional post-processing Lambda hook (`PostProcessingLambdaHookFunctionArn`) on workflow completion
   
 - **Release Any Review**: Admins can release reviews owned by other users
 
@@ -204,7 +204,7 @@ When all sections are reviewed or skipped:
 - **Review Completed By** field records who completed/skipped the review
 - Review history is recorded with reviewer information and timestamps
 
-**Note:** Completing or skipping reviews does not automatically trigger document reprocessing. Use the **Reprocess** button if you need to re-run summarization or evaluation with the corrected data.
+**Note:** Finalizing reviews — either completing the last pending section or using **Skip All Reviews** — automatically triggers document reprocessing to re-run Summarization/Evaluation and fire the optional post-processing Lambda hook on workflow completion. Use the **Reprocess** button if you later edit data and need to re-run those steps again.
 
 ## Configuration
 
