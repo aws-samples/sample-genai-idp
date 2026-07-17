@@ -73,6 +73,7 @@ RUN_ROOTS = [
     "samples/lambda-hook-inference/GENAIIDP-mistral-ocr-hook",
     "src/lambda/api_handler",
     "src/lambda/batch_pre_processor",
+    "src/lambda/bda_ocr_project/tests",
     "src/lambda/calculate_capacity",
     "src/lambda/chat_stream_processor/tests",
     "src/lambda/chat_with_document_processor/tests",
