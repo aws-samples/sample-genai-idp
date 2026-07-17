@@ -1322,7 +1322,7 @@ Metadata:
         Parameters:
           - ApiGatewayVisibility
       - Label:
-          default: "VPC Configuration (required when ApiGatewayVisibility=PRIVATE, DeployInVPC=true, or EnableHeadless=true)"
+          default: "VPC Configuration (populate when DeployInVPC=true — which ApiGatewayVisibility=PRIVATE and EnableHeadless=true both force)"
         Parameters:
           - DeployInVPC
           - VpcId
