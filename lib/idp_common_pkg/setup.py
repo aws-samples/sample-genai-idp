@@ -100,6 +100,10 @@ extras_require = {
     # Optional synthetic-document generator (SEED, published as seed-data). Heavy
     # (Strands + Bedrock + rendering); install only where generation runs. The
     # engine adapter imports it lazily and degrades gracefully when absent.
+    # NOTE: seed-data requires numpy 2.x (opencv/scikit-image/numba), which
+    # CONFLICTS with the numpy==1.26.4 pin in the ocr/evaluation/all extras.
+    # Install this in an isolated environment (the generator's own container /
+    # AgentCore runtime), NOT alongside idp_common[ocr|evaluation|all].
     "synthesis-generator": [
         "seed-data>=0.0.5",
     ],
