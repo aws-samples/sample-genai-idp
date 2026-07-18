@@ -770,10 +770,10 @@ def deploy(
 
         # Note: --headless (the CLI flag) controls TEMPLATE TRANSFORMATION
         # — strip UI / AppSync / Cognito / WAF / Agents / HITL / KB from the
-        # template. The CFN parameter `EnableHeadless=true` is a separate
-        # opt-in for the Private API Gateway (/jobs REST API), which by
-        # design requires a VPC + ApiGatewayVpcEndpointId. Users who want
-        # the Jobs API must pass `--parameters EnableHeadless=true,...VPC params`
+        # template. The CFN parameter `EnableJobsApi=true` is a separate,
+        # additive opt-in for the Private API Gateway (/jobs REST API), which
+        # by design requires a VPC + ApiGatewayVpcEndpointId. Users who want
+        # the Jobs API must pass `--parameters EnableJobsApi=true,...VPC params`
         # explicitly.
 
         # Deploy stack via SDK (build_parameters is called internally by client.stack.deploy)

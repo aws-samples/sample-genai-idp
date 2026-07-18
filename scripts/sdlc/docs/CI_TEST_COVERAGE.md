@@ -53,7 +53,7 @@ Notes:
 ### Concurrent deployment-variant probes (own stacks)
 - The **deployment-variant probe framework** (below) deploys SECOND,
   independent stacks — one per probe. Four probes run by default (GLOBAL APIGW,
-  WAF, PRIVATE APIGW, headless), **concurrently with the primary suite AND with
+  WAF, PRIVATE APIGW, Jobs API), **concurrently with the primary suite AND with
   each other** on their own threads, so their ~30-min deploys overlap the
   primary deploy instead of running back-to-back. Each opts out of the primary
   suite's fail-fast abort machinery, so a primary failure never kills a probe's
@@ -270,11 +270,18 @@ a validator**, not a copy-pasted deploy/validate/cleanup function.
 | **APIGateway hosting (GLOBAL)** | `apigw` | `WebUIHosting=APIGateway`, `ApiGatewayVisibility=GLOBAL` | no | REST API is **REGIONAL**, `ApplicationWebURL` is the execute-api `/api` URL, **HTTP GET → 200** (internet-reachable, so a real end-to-end UI fetch) |
 | **WAF-enabled (IP allow-list)** | `waf` | `WAFAllowedIPv4Ranges` set (+ APIGateway/GLOBAL hosting to have a stage) | no | REGIONAL WebACL `{stack}-api-acl` **exists and is associated** with an API-Gateway stage |
 | **APIGateway hosting (PRIVATE)** | `apigwpriv` | `WebUIHosting=APIGateway`, `ApiGatewayVisibility=PRIVATE` | yes | REST API endpoint type is **PRIVATE** and carries a **resource policy** (VPC-only → structural check; CodeBuild can't fetch a private endpoint) |
-| **Headless Jobs API** | `headless` | `EnableHeadless=true` | yes | stack exposes the **`ApiGatewayEndpoint`** output and its REST API exists (private → structural check) |
+| **Jobs API** | `jobsapi` | `EnableJobsApi=true` | yes | stack exposes the **`ApiGatewayEndpoint`** output and its REST API exists (private → structural check) |
+
+> **Note:** the Jobs API probe exercises the *additive* `EnableJobsApi` CFN
+> parameter on the STANDARD published template — it does **not** exercise the
+> `idp-cli deploy --headless` template transform (which removes the UI). The
+> `--headless` / `--govcloud` transforms are covered by the offline unit tests
+> in `lib/idp_sdk/tests/unit/` (region-aware `cfn-lint`); a `--headless` *deploy*
+> probe remains a follow-up.
 
 Validators live in `scripts/sdlc/codebuild_deployment.py`:
 `validate_apigw_global_hosting`, `validate_waf_enabled`,
-`validate_apigw_private_hosting`, `validate_headless_jobs_api`.
+`validate_apigw_private_hosting`, `validate_jobs_api`.
 
 **Lifecycle** (every probe): creates per-stack IAM/boundary → (for `requires_vpc`
 probes) injects the persistent-test-VPC params → deploys with the probe's extra
@@ -287,7 +294,7 @@ others or the already-completed shared-suite result.
 
 ### The persistent test VPC (why VPC probes are now quota-safe)
 
-VPC-requiring probes (PRIVATE hosting, headless) no longer stand up a throwaway
+VPC-requiring probes (PRIVATE hosting, Jobs API) no longer stand up a throwaway
 VPC per run. A **single persistent test VPC is owned by the pipeline
 CloudFormation stack** (`scripts/sdlc/cfn/codepipeline-s3.yml`, parameter
 `CreateTestVpc`, default `true`) and reused by every run. Its ids are handed to
@@ -673,13 +680,16 @@ additions.
 
 ### Integration / e2e depth (need the CI account; run in the CodeBuild suite)
 
-- [x] **`--headless` deploy e2e (deploy + feature-smoke).** Now a
-      deployment-variant probe (`headless`): deploys `EnableHeadless=true` against
-      the persistent test VPC and asserts the Jobs API deployed
-      (`validate_headless_jobs_api`). *Deploy + smoke only* — the private Jobs API
-      isn't call-tested from CodeBuild (not in-VPC), and full doc-processing
-      through the headless path is still not exercised, so the deeper
-      `scripts/e2e_test_headless.py` flow remains a follow-up.
+- [x] **Jobs API deploy e2e (deploy + feature-smoke).** A deployment-variant
+      probe (`jobsapi`): deploys the STANDARD template with `EnableJobsApi=true`
+      against the persistent test VPC and asserts the Jobs API deployed
+      (`validate_jobs_api`). *Deploy + smoke only* — the private Jobs API isn't
+      call-tested from CodeBuild (not in-VPC), and full doc-processing through
+      the Jobs API path is still not exercised, so the deeper
+      `scripts/e2e_test_headless.py` flow remains a follow-up. NOTE: this probe
+      exercises the additive `EnableJobsApi` CFN parameter, **not** the
+      `idp-cli deploy --headless` template transform — a `--headless` *deploy*
+      probe is a separate follow-up (see below).
 - [x] **APIGW hosting: GLOBAL variant + HTTP smoke.** The GLOBAL/no-VPC APIGW
       hosting probe deploys `WebUIHosting=APIGateway` + `ApiGatewayVisibility=GLOBAL`
       and does a real HTTP `GET` of the served UI (`validate_apigw_global_hosting`
@@ -757,7 +767,7 @@ but revisit:
       and fully parallel; no per-run VPC create/destroy or ENI leaks.
       *(fix/ci-variant-probe-framework)*
 - [x] **Three new probes** — WAF-enabled (IP allow-list), PRIVATE APIGW hosting,
-      and headless Jobs API — added to `PROBE_VARIANTS` (all default-on), plus
+      and the Jobs API (`EnableJobsApi=true`) — added to `PROBE_VARIANTS` (all default-on), plus
       `DEFAULT_PROBE_MAX_CONCURRENCY` raised so the whole table runs in parallel.
       *(fix/ci-variant-probe-framework)*
 - [x] **Every-run consolidated summary** (`build_consolidated_summary`) listing
