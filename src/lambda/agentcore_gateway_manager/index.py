@@ -223,13 +223,34 @@ def create_gateway(props, gateway_name, client: GatewayClient):
         }
     }
 
-    # Create gateway
-    gateway = client.create_mcp_gateway(
-        name=gateway_name,
-        role_arn=execution_role_arn,
-        authorizer_config=authorizer_config,
-        enable_semantic_search=True,
-    )
+    # Create gateway. Semantic search (natural-language tool discovery) is not
+    # available for AgentCore Gateway in GovCloud regions — CreateGateway there
+    # raises ValidationException: "SEMANTIC search type is not supported". Fall
+    # back to a gateway without semantic search rather than failing the whole
+    # stack; the gateway and its Lambda target still work, just without the
+    # x_amz_bedrock_agentcore_search tool.
+    try:
+        gateway = client.create_mcp_gateway(
+            name=gateway_name,
+            role_arn=execution_role_arn,
+            authorizer_config=authorizer_config,
+            enable_semantic_search=True,
+        )
+    except Exception as e:
+        if "SEMANTIC search type is not supported" in str(e):
+            logger.warning(
+                "Semantic search unsupported in this region — creating gateway "
+                "without it: %s",
+                e,
+            )
+            gateway = client.create_mcp_gateway(
+                name=gateway_name,
+                role_arn=execution_role_arn,
+                authorizer_config=authorizer_config,
+                enable_semantic_search=False,
+            )
+        else:
+            raise
 
     logger.info(f"Gateway created: {gateway.get('gatewayUrl')}")
 
