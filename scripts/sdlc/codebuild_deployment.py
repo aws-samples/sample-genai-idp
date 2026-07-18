@@ -2433,7 +2433,7 @@ def cleanup_stale_idp_stacks():
     of whether any individual run finished its own cleanup.
 
     Targets top-level idp- stacks (main deploy stacks, their `-iam` stacks, and
-    the -apigw/-waf/-apigwpriv/-headless probe stacks + their -iam stacks).
+    the -apigw/-waf/-apigwpriv/-jobsapi probe stacks + their -iam stacks).
     Age-gated (IDP_STACK_STALE_AGE_SECONDS) so a concurrent pipeline's in-flight
     run is never deleted. Best effort — never raises. Skips *-apigw-vpc (owned
     by cleanup_stale_apigw_test_vpcs) and the persistent pipeline stack.
@@ -2724,14 +2724,14 @@ def validate_apigw_private_hosting(stack_name):
     return {"success": True, "api_name": api_name, "endpoint_types": types}
 
 
-def validate_headless_jobs_api(stack_name):
-    """Assert the headless Jobs REST API deployed (EnableHeadless=true + VPC).
+def validate_jobs_api(stack_name):
+    """Assert the Jobs REST API deployed (EnableJobsApi=true + VPC).
 
     The Jobs API is a PRIVATE API Gateway reachable only inside the test VPC,
     so — like the PRIVATE hosting probe — CodeBuild can't call it. Validate
-    structurally that the headless deployment stood up:
+    structurally that the Jobs API deployment stood up:
       * the stack exposes the ApiGatewayEndpoint output (only present when
-        EnableHeadless=true / the Jobs API + Cognito M2M client deployed), and
+        EnableJobsApi=true / the Jobs API + Cognito M2M client deployed), and
       * that output is an execute-api URL for a real REST API.
     """
     outputs = _stack_outputs(stack_name)
@@ -2740,8 +2740,8 @@ def validate_headless_jobs_api(stack_name):
         return {
             "success": False,
             "error": (
-                "Stack has no ApiGatewayEndpoint output — the headless Jobs API "
-                "did not deploy (EnableHeadless=true expected)"
+                "Stack has no ApiGatewayEndpoint output — the Jobs API "
+                "did not deploy (EnableJobsApi=true expected)"
             ),
         }
     if "execute-api" not in jobs_url:
@@ -2760,7 +2760,7 @@ def validate_headless_jobs_api(stack_name):
             "success": False,
             "error": f"Jobs API {api_id} from ApiGatewayEndpoint not found: {e}",
         }
-    print(f"✅ Headless Jobs API deployed: {jobs_url} (restApiId={api.get('id')})")
+    print(f"✅ Jobs API deployed: {jobs_url} (restApiId={api.get('id')})")
     return {"success": True, "jobs_url": jobs_url}
 
 
@@ -3168,7 +3168,7 @@ def _capture_cf_events(result, *stack_names):
 #     the same time as the primary suite and any other in-flight pipeline. That
 #     is bounded stack/IAM quota, so fan-out is capped at
 #     DEFAULT_PROBE_MAX_CONCURRENCY.
-#   * VPC-requiring variants (headless, PRIVATE hosting) do NOT create a VPC per
+#   * VPC-requiring variants (jobsapi, PRIVATE hosting) do NOT create a VPC per
 #     run anymore. A single PERSISTENT test VPC is owned by the pipeline stack
 #     (scripts/sdlc/cfn/codepipeline-s3.yml, CreateTestVpc) and passed to every
 #     run via env vars (IDP_TEST_VPC_ID / IDP_TEST_PRIVATE_SUBNET_IDS /
@@ -3252,14 +3252,16 @@ PROBE_VARIANTS = [
         validate_fn=validate_apigw_private_hosting,
         requires_vpc=True,
     ),
-    # Headless Jobs REST API (needs the persistent test VPC). Private API GW +
-    # /jobs Lambdas. Structural check (ApiGatewayEndpoint output + the REST API
-    # exists). VPC params injected from env.
+    # Jobs REST API (needs the persistent test VPC). EnableJobsApi=true stands
+    # up a private API GW + /jobs Lambdas. Structural check (ApiGatewayEndpoint
+    # output + the REST API exists). VPC params injected from env. NOTE: this
+    # exercises the additive EnableJobsApi CFN parameter on the STANDARD
+    # template — NOT the `idp-cli deploy --headless` template transform.
     Probe(
-        name="Headless Jobs API (VPC)",
-        stack_suffix="headless",
-        deploy_params={"EnableHeadless": "true"},
-        validate_fn=validate_headless_jobs_api,
+        name="Jobs API (VPC)",
+        stack_suffix="jobsapi",
+        deploy_params={"EnableJobsApi": "true"},
+        validate_fn=validate_jobs_api,
         requires_vpc=True,
     ),
     # OWASP ZAP DAST scan of the deployed UI REST API. Default hosting

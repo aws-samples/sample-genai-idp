@@ -672,17 +672,17 @@ def test_default_probe_table_covers_all_four_variants(cbd):
     by_suffix = {p.stack_suffix: p for p in cbd.PROBE_VARIANTS}
     # The four deployment-hosting variants are present (the ZAP DAST probe is a
     # fifth row, asserted separately in test_zap_dast_probe.py).
-    assert {"apigw", "waf", "apigwpriv", "headless"} <= set(by_suffix)
+    assert {"apigw", "waf", "apigwpriv", "jobsapi"} <= set(by_suffix)
     # No-VPC probes.
     assert by_suffix["apigw"].requires_vpc is False
     assert by_suffix["waf"].requires_vpc is False
     # VPC-requiring probes flagged so their VPC params are injected from env.
     assert by_suffix["apigwpriv"].requires_vpc is True
-    assert by_suffix["headless"].requires_vpc is True
+    assert by_suffix["jobsapi"].requires_vpc is True
     # Distinguishing params.
     assert by_suffix["waf"].deploy_params.get("WAFAllowedIPv4Ranges")
     assert by_suffix["apigwpriv"].deploy_params["ApiGatewayVisibility"] == "PRIVATE"
-    assert by_suffix["headless"].deploy_params["EnableHeadless"] == "true"
+    assert by_suffix["jobsapi"].deploy_params["EnableJobsApi"] == "true"
     # Every row wires a distinct validator.
     validators = {p.validate_fn for p in cbd.PROBE_VARIANTS}
     assert len(validators) == len(cbd.PROBE_VARIANTS)
@@ -733,14 +733,14 @@ def test_vpc_params_full_mapping(cbd, monkeypatch):
 def test_vpc_probe_skips_when_no_test_vpc(cbd, monkeypatch):
     _clear_test_vpc_env(monkeypatch)
     calls = _stub_lifecycle(cbd, monkeypatch)
-    probe = _make_probe(cbd, name="Headless", suffix="headless", requires_vpc=True)
+    probe = _make_probe(cbd, name="Jobs API", suffix="jobsapi", requires_vpc=True)
 
     result = cbd.deploy_and_test_probe(probe, "a@b.com", "https://tmpl")
 
     # Skipped, not failed — absent infra is not a regression.
     assert result["success"] is True
     assert result["skipped"] is True
-    assert result["probe"] == "Headless"
+    assert result["probe"] == "Jobs API"
     # Nothing deployed: no IAM, no commands, no cleanup.
     assert calls["iam"] == []
     assert calls["commands"] == []
@@ -879,7 +879,7 @@ def test_validate_private_hosting_fails_without_policy(cbd, monkeypatch):
     assert "resource policy" in res["error"]
 
 
-def test_validate_headless_pass(cbd, monkeypatch):
+def test_validate_jobs_api_pass(cbd, monkeypatch):
     outputs = {
         "ApiGatewayEndpoint": "https://abc123.execute-api.us-east-1.amazonaws.com/beta"
     }
@@ -891,16 +891,16 @@ def test_validate_headless_pass(cbd, monkeypatch):
             "apigateway": _FakeApiGw(rest_api={"id": "abc123"}),
         },
     )
-    res = cbd.validate_headless_jobs_api("idp-s")
+    res = cbd.validate_jobs_api("idp-s")
     assert res["success"] is True
     assert "execute-api" in res["jobs_url"]
 
 
-def test_validate_headless_fails_without_output(cbd, monkeypatch):
+def test_validate_jobs_api_fails_without_output(cbd, monkeypatch):
     _fake_boto3(
         cbd, monkeypatch, {"cloudformation": _FakeCfn({}), "apigateway": _FakeApiGw()}
     )
-    res = cbd.validate_headless_jobs_api("idp-s")
+    res = cbd.validate_jobs_api("idp-s")
     assert res["success"] is False
     assert "ApiGatewayEndpoint" in res["error"]
 
@@ -957,13 +957,13 @@ def test_consolidated_summary_pass(cbd):
     }
     probes = [
         {"probe": "GLOBAL", "success": True},
-        {"probe": "Headless", "success": True, "skipped": True, "detail": "no VPC"},
+        {"probe": "Jobs API", "success": True, "skipped": True, "detail": "no VPC"},
     ]
     out = cbd.build_consolidated_summary("idp-x", primary, probes, True)
     assert "OVERALL: PASS" in out
     assert "Step 3: Default config" in out
     assert "GLOBAL" in out
-    assert "Headless" in out
+    assert "Jobs API" in out
     # A skipped probe must NOT flip the overall result to FAIL.
     assert "OVERALL: FAIL" not in out
 
