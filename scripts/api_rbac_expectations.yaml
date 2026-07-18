@@ -159,7 +159,8 @@ operations:
     groups: [Admin, Author]
     kind: mutation
     enforced_in: nested/api-resolvers/src/lambda/copy_to_baseline_resolver/index.py
-    args: { objectKeys: ["__nope__"] }
+    # schema: copyToBaseline(objectKey: String!) — single key, not a list
+    args: { objectKey: "__nope__" }
   uploadDocument:
     groups: [Admin, Author]
     kind: mutation
@@ -198,7 +199,8 @@ operations:
     kind: mutation
     scope_checked: true
     enforced_in: *cfg
-    args: { configuration: "{}" }
+    # schema: updateConfiguration(versionName: String!, customConfig: AWSJSON!, description: String)
+    args: { versionName: "__nope__", customConfig: "{}" }
     note: saveAsVersion/saveAsDefault flags are additionally Admin-only in-code
   setActiveVersion:
     groups: [Admin, Author]
@@ -221,7 +223,8 @@ operations:
     groups: [Admin]
     kind: mutation
     enforced_in: *cfg
-    args: { pricing: "{}" }
+    # schema: updatePricing(pricingConfig: AWSJSON!)
+    args: { pricingConfig: "{}" }
   restoreDefaultPricing:
     groups: [Admin]
     kind: mutation
@@ -305,7 +308,8 @@ operations:
     groups: [Admin, Author]
     kind: mutation
     enforced_in: nested/api-resolvers/src/lambda/test_runner/index.py
-    args: {}
+    # schema: startTestRun(input: TestRunInput!) — wrapped input object
+    args: { input: {} }
   getTestRun:
     groups: [Admin, Author]
     kind: read
@@ -330,7 +334,8 @@ operations:
     groups: [Admin, Author]
     kind: mutation
     enforced_in: nested/api-resolvers/src/lambda/delete_tests/index.py
-    args: { testIds: ["__x__"] }
+    # schema: deleteTests(testRunIds: [String!]!) — arg is testRunIds, not testIds
+    args: { testRunIds: ["__x__"] }
   abortTestRuns:
     groups: [Admin, Author]
     kind: mutation
@@ -350,7 +355,8 @@ operations:
     groups: [Admin, Author]
     kind: mutation
     enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
-    args: {}
+    # schema: addTestSetFromUpload(input: TestSetUploadInput!)
+    args: { input: {} }
   addDocumentsToTestSet:
     groups: [Admin, Author]
     kind: mutation
@@ -360,12 +366,14 @@ operations:
     groups: [Admin, Author]
     kind: mutation
     enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
-    args: {}
+    # schema: addDocumentsToTestSetFromUpload(input: TestSetDocumentsUploadInput!)
+    args: { input: {} }
   updateTestSet:
     groups: [Admin, Author]
     kind: mutation
     enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
-    args: {}
+    # schema: updateTestSet(input: UpdateTestSetInput!)
+    args: { input: {} }
   deleteTestSets:
     groups: [Admin, Author]
     kind: mutation
@@ -509,17 +517,20 @@ operations:
     groups: [Admin]
     kind: mutation
     enforced_in: src/lambda/user_management/index.py
-    args: { email: "__no@no.invalid", group: "Viewer" }
+    # schema: createUser(email: String!, persona: String!, allowedConfigVersions: [String])
+    args: { email: "__no@no.invalid", persona: "Viewer" }
   updateUser:
     groups: [Admin]
     kind: mutation
     enforced_in: src/lambda/user_management/index.py
-    args: { email: "__no@no.invalid", group: "Viewer" }
+    # schema: updateUser(userId: ID!, allowedConfigVersions: [String]) — keyed by userId
+    args: { userId: "__nope__" }
   deleteUser:
     groups: [Admin]
     kind: mutation
     enforced_in: src/lambda/user_management/index.py
-    args: { email: "__no@no.invalid" }
+    # schema: deleteUser(userId: ID!) — keyed by userId, not email
+    args: { userId: "__nope__" }
   listUsers:
     groups: ANY
     kind: read
@@ -539,7 +550,8 @@ operations:
     groups: [Admin, Author]
     kind: mutation
     enforced_in: nested/api-resolvers/src/lambda/finetuning_jobs_resolver/index.py
-    args: {}
+    # schema: createFinetuningJob(input: CreateFinetuningJobInput!)
+    args: { input: {} }
   deleteFinetuningJob:
     groups: [Admin, Author]
     kind: mutation
