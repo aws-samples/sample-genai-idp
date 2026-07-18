@@ -176,6 +176,7 @@ class PublishOperation:
             try:
                 publisher = IDPPublisher(verbose=verbose)
                 publisher.headless = headless
+                publisher.govcloud = govcloud
                 publisher.run(publish_args)
             except SystemExit as e:
                 if e.code != 0:

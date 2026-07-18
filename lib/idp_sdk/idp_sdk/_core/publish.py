@@ -65,6 +65,7 @@ class IDPPublisher:
         self.skip_validation = False
         self.lint_enabled = True
         self.headless = False  # Set by operations layer when --headless is requested
+        self.govcloud = False  # Set by operations layer when --govcloud is requested
         self.account_id = None
         self._layer_arns = {}  # Store built layer ARNs for template injection
 
@@ -2972,12 +2973,13 @@ STDERR:
         # List of templates to lint (packaged templates after token replacement)
         templates_to_lint = []
 
-        # In headless mode (GovCloud), the main template still contains UI/AppSync
-        # /CloudFront/Cognito resources that will be stripped by the headless transformer
-        # later in the publish flow. Linting them here always fails for GovCloud regions
-        # because those resource types don't exist. Skip the main template and any nested
-        # templates that contain headless-stripped resources — the outer publish flow
-        # lints the generated idp-headless.yaml separately.
+        # In headless or govcloud mode, the main template still contains UI/AppSync/
+        # CloudFront/Cognito resources that will be stripped by the headless/govcloud
+        # transformer later in the publish flow. Linting them here always fails for
+        # GovCloud regions because those resource types don't exist. Skip the main
+        # template and any nested templates that contain headless-stripped resources —
+        # the outer publish flow lints the generated idp-headless.yaml / idp-govcloud.yaml
+        # separately, with region-aware checks.
         main_packaged = ".aws-sam/idp-main.yaml"
         if self.headless:
             headless_packaged = ".aws-sam/idp-headless.yaml"
@@ -2987,6 +2989,10 @@ STDERR:
                 self.console.print(
                     "[dim]Skipping main template lint — headless transformation runs later.[/dim]"
                 )
+        elif self.govcloud:
+            self.console.print(
+                "[dim]Skipping main template lint — GovCloud transformation runs later.[/dim]"
+            )
         elif os.path.exists(main_packaged):
             templates_to_lint.append(("Main template", main_packaged))
 
