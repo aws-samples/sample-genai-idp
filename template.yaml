@@ -330,8 +330,17 @@ Parameters:
       - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "global.anthropic.claude-sonnet-5"
+      # GovCloud: none of the us./eu./global. cross-region inference-profile
+      # prefixes above work in GovCloud regions (ValidationException: "The
+      # provided model identifier is invalid."). Bare model IDs and the
+      # us-gov. inference profile (for models that require one) are the only
+      # forms that work. Verified live against us-gov-west-1 via
+      # bedrock-runtime Converse on 2026-07-17.
+      - "amazon.nova-pro-v1:0"
+      - "amazon.nova-lite-v1:0"
+      - "us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
-    Description: Model to use for optional Document Knowledge Base. Model access MUST be enabled in Amazon Bedrock. Note - Nova Premier may not be available in all EU regions.
+    Description: Model to use for optional Document Knowledge Base. Model access MUST be enabled in Amazon Bedrock. Note - Nova Premier may not be available in all EU regions. GovCloud deployments must use one of the GovCloud-verified entries above (amazon.nova-pro-v1:0, amazon.nova-lite-v1:0, or us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0) — the commercial default is overridden automatically by the --govcloud template transform.
 
   # Optional - Post processing Lambda hook
   PostProcessingLambdaHookFunctionArn:
