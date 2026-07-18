@@ -176,10 +176,15 @@ integration_tests:
   timeout: 2h30m
   # Serialize + auto-cancel superseded deploys: rapid pushes to a ready MR won't
   # stack up N concurrent ~1h stack deploys (which previously exhausted account
-  # quotas). resource_group ensures one integration deploy at a time; a newer
-  # pipeline supersedes an older queued one.
+  # quotas). The resource_group is a size-1 mutex, so scoping it PER-BRANCH
+  # (CI_COMMIT_REF_SLUG) still serializes rapid pushes to the SAME MR (a newer
+  # pipeline supersedes an older queued one via interruptible) while letting
+  # DIFFERENT MRs deploy concurrently. Concurrency is therefore bounded by the
+  # number of active MRs (typically <=5); this is NOT a hard cap of 5. If
+  # concurrent deploys ever exhaust account quotas again, revert to a single
+  # shared group (`resource_group: integration_deploy`).
   interruptible: true
-  resource_group: integration_deploy
+  resource_group: integration_deploy_$CI_COMMIT_REF_SLUG
   variables:
     IDP_ADMIN_EMAIL: ${GITLAB_USER_EMAIL}
   # variables:

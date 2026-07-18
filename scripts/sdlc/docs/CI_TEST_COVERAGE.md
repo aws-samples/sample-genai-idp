@@ -33,9 +33,13 @@ Notes:
   page — run it on demand, not on every WIP push.
 - A `workflow:` rule prevents **duplicate** branch+MR pipelines (a branch with an
   open MR runs only the MR pipeline).
-- integration_tests uses `resource_group` + `interruptible`, so rapid pushes
-  don't stack up concurrent ~1h deploys (a newer run supersedes an older queued
-  one).
+- integration_tests uses a **per-branch** `resource_group`
+  (`integration_deploy_$CI_COMMIT_REF_SLUG`) + `interruptible`, so rapid pushes
+  to the *same* MR still serialize (a newer run supersedes an older queued one),
+  while *different* MRs deploy concurrently. Concurrency is bounded by the number
+  of active MRs (typically ≤5) — not a hard cap. If concurrent deploys ever
+  exhaust account quotas, revert to a single shared `resource_group:
+  integration_deploy`.
 
 ## Test Execution Strategy
 
