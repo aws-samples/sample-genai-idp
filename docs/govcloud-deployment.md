@@ -208,7 +208,7 @@ No `--admin-email` is needed — the headless template has no Cognito user
 pool. Interact with the stack via direct S3 upload, `idp-cli`, or the SDK
 (see [Processing documents](#processing-documents-headless) below).
 
-#### Option B: Headless + Jobs REST API (all Lambdas in VPC)
+#### Option B: No-UI (`--headless`) + Jobs REST API (all Lambdas in VPC)
 
 Deploys the `/jobs` REST API as a **private** API Gateway reachable only
 through your VPC's `execute-api` interface endpoint, with all Lambda
