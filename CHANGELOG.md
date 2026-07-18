@@ -5,6 +5,10 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Closed three API authorization gaps (server-side RBAC now matches the schema).** Three operations previously relied on a schema directive that the REST dispatcher's Cognito authorizer does not enforce, with no matching server-side check: (1) **`listUsers`** was readable by any authenticated user, exposing every user's email and role to Viewers/Reviewers — now Admin-only (server-side check + `@aws_cognito_user_pools(cognito_groups:["Admin"])`); (2) **`calculateCapacity`** had no server-side group check despite a schema directive, so a Reviewer calling it directly succeeded — now enforces Admin/Author/Viewer server-side; (3) the feature-platform ops **`subscribeFeature`/`unsubscribeFeature`/`getFeatureLaunchUrl`** declared the silently-ignored `@aws_auth` directive (or none) — now declare `@aws_cognito_user_pools(cognito_groups:["Admin"])` matching the Admin enforcement their resolvers already performed (defense-in-depth; these three were not exploitable). All were previously tracked as accepted-risk GAP-04/05/06 in the RBAC test register; they are now hard-gated (a regression fails `make api-test`). Threat model updated (AUTH.T08). See the [api-rbac-test skill](.claude/skills/api-rbac-test.md).
+
 ## [0.6.1]
 
 ### Added

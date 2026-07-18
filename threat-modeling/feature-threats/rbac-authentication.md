@@ -174,7 +174,7 @@ flowchart TD
 | **Likelihood** | Medium |
 | **Severity** | High |
 | **Affected Components** | `schema.graphql`, resolver Lambdas |
-| **Mitigations** | Server-side group checks are the source of truth; schema directives are defense-in-depth only. The **static scan in `make api-test-static`** flags `@aws_auth`-only / directive-vs-code drift (tracked as GAP-06 for feature-platform ops) and fails when an operation lacks a documented server-side check; new operations must add a resolver check plus an expectations entry. |
+| **Mitigations** | Server-side group checks are the source of truth; schema directives are defense-in-depth only. The **static scan in `make api-test-static`** flags `@aws_auth`-only / directive-vs-code drift and fails when an operation lacks a documented server-side check; new operations must add a resolver check plus an expectations entry. The feature-platform ops that formerly relied on the silently-ignored `@aws_auth` directive (tracked as GAP-06) now declare `@aws_cognito_user_pools(cognito_groups:["Admin"])` matching their resolver enforcement. |
 
 ## 4. Security Controls Summary
 
