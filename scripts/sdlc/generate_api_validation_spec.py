@@ -72,6 +72,45 @@ def _read(path: Path) -> str:
     return path.read_text()
 
 
+# --- schema sanitization -----------------------------------------------------
+
+
+def _strip_descriptions_and_comments(text: str) -> str:
+    """Remove GraphQL descriptions and comments before any structural parsing.
+
+    The regex field/arg parsers below (and scan_api_rbac's `_iter_fields`) look
+    for ``name: Type`` patterns. A GraphQL **block description** (``\"\"\"…\"\"\"``)
+    or a ``#`` comment can contain a line like ``Idempotent: re-applying…`` — a
+    prose colon that the parsers would otherwise mistake for a field or argument
+    (this produced a phantom ``Idempotent`` field in the spec, and — worse — a
+    description/comment of the form ``word: Type!`` sitting INSIDE an argument
+    list or ``input`` block would inject a spurious, possibly-required arg that
+    would then 400 every call to that operation).
+
+    We neutralize descriptions/comments while PRESERVING line structure (replace
+    their content with spaces, keep newlines) so downstream line- and
+    offset-based scans are unaffected:
+      * ``\"\"\"…\"\"\"`` block strings (may span lines),
+      * ``"…"`` single-line string descriptions,
+      * ``#`` line comments (to end of line).
+    String/enum VALUES in this schema are not affected: GraphQL enum values are
+    bare identifiers, and no default-value string literals appear in Query/
+    Mutation argument lists.
+    """
+
+    def _blank(m: "re.Match[str]") -> str:
+        # Keep newlines so line numbers / multi-line arg scans stay aligned;
+        # replace everything else with spaces.
+        return re.sub(r"[^\n]", " ", m.group(0))
+
+    # Order matters: block strings first (greedy over newlines), then line
+    # comments, then remaining single-line double-quoted descriptions.
+    text = re.sub(r'"""[\s\S]*?"""', _blank, text)
+    text = re.sub(r"#[^\n]*", _blank, text)
+    text = re.sub(r'"[^"\n]*"', _blank, text)
+    return text
+
+
 # --- type-expression + argument-list parsing ---------------------------------
 
 
@@ -198,6 +237,11 @@ def _parse_enum_values(body: str) -> list[str]:
 
 def build_spec(schema_text: str) -> dict:
     """Build the validation spec dict from schema.graphql text."""
+    # Strip descriptions/comments FIRST so a prose ``word: Type`` inside a
+    # """…""" block or a # comment can never be misparsed as a field/arg (see
+    # _strip_descriptions_and_comments — this removed the phantom `Idempotent`
+    # field and closes a latent "description injects a required arg" landmine).
+    schema_text = _strip_descriptions_and_comments(schema_text)
     fields: dict[str, dict] = {}
     for type_name in ("Query", "Mutation"):
         body = _extract_type_body(schema_text, type_name)

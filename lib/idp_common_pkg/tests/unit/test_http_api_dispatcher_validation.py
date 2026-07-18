@@ -19,6 +19,9 @@ Coverage (per PR B spec):
     valid request routes.
   * validator-bug fail-open: a malformed spec entry does NOT raise/500.
   * spec drift: generator --check passes against the committed JSON.
+  * parser correctness: the committed spec's field/arg names match a real
+    graphql-core parse of schema.graphql (an oracle the self-referential drift
+    test can't provide — catches misparses like a description injecting a field).
   * acceptance corpus: every field accepts {} UNLESS it has a non-null arg, and
     that required-arg set is exactly the one derived from the schema.
 """
@@ -306,6 +309,47 @@ def test_spec_matches_schema_no_drift():
         "api_validation_spec.json is out of date with schema.graphql; "
         "regenerate with scripts/sdlc/generate_api_validation_spec.py"
     )
+
+
+# --------------------- parser correctness (real GraphQL) ------------------- #
+# The drift test above is SELF-REFERENTIAL: it compares build_spec() to a file
+# produced by build_spec(), so it can only catch "schema edited, spec not
+# regenerated" — NOT a parser bug (a misparse would sit in both sides). This
+# test is the missing oracle: it parses schema.graphql with the real graphql-core
+# library and asserts the committed spec's field/arg *names* match, so a
+# regex-parser regression (e.g. a description colon injecting a phantom field, or
+# a dropped/duplicated arg) fails CI. Skipped if graphql-core isn't installed
+# (it's a test-only dependency, not shipped in the Lambda).
+def test_spec_field_and_arg_names_match_real_graphql_parse():
+    graphql = pytest.importorskip("graphql")
+    # schema.graphql uses AppSync scalars/directives that aren't declared; parse
+    # the SDL leniently (we only need the Query/Mutation field+arg structure).
+    doc = graphql.parse(_SCHEMA.read_text())
+
+    truth: dict[str, set[str]] = {}
+    for defn in doc.definitions:
+        if not isinstance(
+            defn, graphql.ObjectTypeDefinitionNode
+        ) or defn.name.value not in ("Query", "Mutation"):
+            continue
+        for field in defn.fields:
+            truth[field.name.value] = {a.name.value for a in field.arguments}
+
+    spec = json.loads(_SPEC_PATH.read_text())
+    spec_fields = {f: {a["name"] for a in v["args"]} for f, v in spec["fields"].items()}
+
+    # No phantom fields in the spec that aren't real Query/Mutation fields.
+    phantom = set(spec_fields) - set(truth)
+    assert not phantom, f"spec has fields not in the real schema: {sorted(phantom)}"
+    # No real field missing from the spec.
+    missing = set(truth) - set(spec_fields)
+    assert not missing, f"spec is missing real schema fields: {sorted(missing)}"
+    # Arg-name sets match exactly per field (catches dropped/duplicated/phantom args).
+    for field, real_args in truth.items():
+        assert spec_fields[field] == real_args, (
+            f"arg mismatch for {field}: spec={sorted(spec_fields[field])} "
+            f"real={sorted(real_args)}"
+        )
 
 
 # --------------------------- acceptance corpus ----------------------------- #

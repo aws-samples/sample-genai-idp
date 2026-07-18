@@ -24,9 +24,6 @@
     ]
   },
   "fields": {
-    "Idempotent": {
-      "args": []
-    },
     "abortTestRuns": {
       "args": [
         {

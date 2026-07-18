@@ -203,7 +203,9 @@ a resolver (silently accepted, or a 500 deep in the code). That is a
 defense-in-depth regression — the type-confusion / unexpected-argument class,
 distinct from the authorization parity above.
 
-Parity is restored by **central argument validation in the dispatcher**:
+This boundary gate is re-established by **central argument validation in the
+dispatcher** — intentionally **stricter than AppSync on input coercion** (see the
+last bullet), not a byte-for-byte re-creation of it:
 
 - **A build-time spec, not a runtime GraphQL parser.**
   [`scripts/sdlc/generate_api_validation_spec.py`](../scripts/sdlc/generate_api_validation_spec.py)
@@ -217,13 +219,23 @@ Parity is restored by **central argument validation in the dispatcher**:
   out-of-set enum values. Rejection raises `ValueError`, which the dispatcher
   already maps to 400 — the same status AppSync returned for a malformed query.
 - **Conservative by design.** Type-only checks (no date/email/URL *format* regex
-  yet); input objects are validated shallowly (must be an object); `AWSJSON`
-  accepts a JSON string or an already-parsed object/array. The validator
+  yet); input objects are validated shallowly (must be an object). The validator
   **fails open on its own internal errors** (a validator bug never 500s the API)
   and fails closed only on genuine input violations.
+- **Stricter than AppSync on coercion (safe for the UI).** AppSync *coerced* some
+  inputs before validating; this validator *rejects* them instead: a scalar
+  passed for a list arg (AppSync → one-element list), an integer passed for an
+  `ID` (AppSync → string), and a bare-scalar `AWSJSON` value (AppSync accepts any
+  JSON). The current Web UI never sends those shapes — it sends list args as
+  arrays, IDs as strings, and `AWSJSON` as `JSON.stringify` objects (verified
+  across all UI operations) — so nothing breaks, but a non-UI client relying on
+  AppSync-style coercion would get a 400. Coercing (rather than rejecting) these
+  is a documented follow-up (see the `TODO`s in `validation.py`).
 - **Drift-guarded.** A unit test (and `generate_api_validation_spec.py --check`)
   fails CI if the committed spec falls out of sync with `schema.graphql`, so the
-  spec can't silently rot as operations are added.
+  spec can't silently rot as operations are added. (The generator strips GraphQL
+  `"""` descriptions and `#` comments before parsing, so prose containing a
+  `word: Type` colon can't be misread as a field or argument.)
 
 See [`validation.py`](../nested/api-resolvers/src/lambda/http_api_dispatcher/validation.py).
 

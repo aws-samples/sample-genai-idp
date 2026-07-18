@@ -5,12 +5,26 @@
 Central argument-shape validation for the HTTP API dispatcher.
 
 AppSync validated every operation's input arguments against ``schema.graphql``
-for free. The HTTP API that replaced it has no such gate, so this module
-restores it: it loads a build-time-generated JSON spec
-(``api_validation_spec.json``, bundled in this Lambda's CodeUri) describing each
-Query/Mutation field's argument signature, and rejects requests whose arguments
-don't match. Rejections raise ``ValueError`` so the dispatcher's existing
-``except (ValueError, KeyError)`` maps them to HTTP 400 / ``BadRequest``.
+before the resolver ran. The HTTP API that replaced it has no such gate, so a
+malformed request flowed straight into a resolver (silently accepted, or a 500
+deep in the code). This module restores a boundary input-shape gate: it loads a
+build-time-generated JSON spec (``api_validation_spec.json``, bundled in this
+Lambda's CodeUri) describing each Query/Mutation field's argument signature, and
+rejects requests whose arguments don't match. Rejections raise ``ValueError`` so
+the dispatcher's existing ``except (ValueError, KeyError)`` maps them to HTTP
+400 / ``BadRequest``.
+
+Relationship to AppSync's behavior — this validator is intentionally **stricter
+than AppSync on input coercion**, not a byte-for-byte re-creation of it. AppSync
+coerced some inputs before validating (a scalar passed for a list arg became a
+one-element list; an integer passed for an ``ID`` was serialized to a string;
+``AWSJSON`` accepted any JSON value including bare scalars). This validator does
+NOT coerce — it rejects those shapes. That is safe for the current Web UI, which
+already sends list args as arrays, IDs as strings, and ``AWSJSON`` as
+``JSON.stringify`` objects (verified across all UI operations); but a non-UI API
+client that relied on AppSync-style coercion would get a 400 where AppSync
+accepted. Softening these to coerce (rather than reject) is a documented
+follow-up; see the type-map notes below.
 
 Design principles (see scripts/sdlc/generate_api_validation_spec.py for the
 build side):
@@ -38,6 +52,10 @@ _SPEC_PATH = os.path.join(os.path.dirname(__file__), "api_validation_spec.json")
 # Custom AWS scalars + standard scalars, grouped by the Python type(s) accepted.
 # AWSDateTime/AWSDate/AWSEmail/AWSURL are validated as strings only (no FORMAT
 # regex in v1 — TODO: tighten once real UI payloads are confirmed).
+# NOTE: `ID` is treated as string-only here. GraphQL/AppSync also accept an
+# integer for ID (serializing it to a string); we require a string. Safe for the
+# UI (it sends IDs as strings) but stricter than AppSync — TODO: coerce int→str
+# for ID if a non-UI client needs it.
 _STRING_TYPES = frozenset(
     {"String", "ID", "AWSDateTime", "AWSDate", "AWSEmail", "AWSURL"}
 )
@@ -46,8 +64,11 @@ _INT_TYPES = frozenset({"Int", "AWSTimestamp"})
 _FLOAT_TYPES = frozenset({"Float"})
 _BOOL_TYPES = frozenset({"Boolean"})
 # AWSJSON is a JSON-encoded STRING in AppSync, but the thin REST client / UI may
-# pass the already-parsed object. Accept str OR dict OR list to avoid breaking
-# real calls (see SUMMARY: main agent to confirm live).
+# pass the already-parsed object. Accept str OR dict OR list (the shapes the UI
+# actually sends — verified). NOTE: AppSync's AWSJSON also accepts bare JSON
+# scalars (a number/bool); we reject those. Stricter than AppSync but safe for
+# the UI (every AWSJSON arg is sent as a JSON.stringify'd object) — TODO: accept
+# any JSON value if a non-UI client needs it.
 _JSON_TYPES = frozenset({"AWSJSON"})
 
 
