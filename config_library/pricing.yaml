@@ -205,7 +205,22 @@ pricing:
         price: "3.3E-7"
       - name: cacheWriteInputTokens
         price: "4.125E-6"
-  
+
+  # GovCloud cross-region inference profile for the same underlying model as
+  # bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0 above — no separate
+  # GovCloud per-token pricing is published, so this mirrors the commercial
+  # us. rate. No cacheReadInputTokens/cacheWriteInputTokens units: verified
+  # live against us-gov-west-1 that cachePoint does not reduce input tokens
+  # through this inference profile (repeated identical prompt still reports
+  # cacheReadInputTokens=0), so GovCloud Claude calls should always be costed
+  # as a full cache miss.
+  - name: bedrock/us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
+    units:
+      - name: inputTokens
+        price: "3.3E-6"
+      - name: outputTokens
+        price: "1.65E-5"
+
   - name: bedrock/us.anthropic.claude-sonnet-4-6
     units:
       - name: inputTokens
