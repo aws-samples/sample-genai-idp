@@ -1211,7 +1211,27 @@ class GovCloudTemplateTransformer:
         template = self._remove_lambda_function_urls(template)
         # 4. Force WebUIHosting=APIGateway.
         template = self._force_apigateway_hosting(template)
-        # 5. Partition + description.
+        # 5. Default the Knowledge Base vector store to OpenSearch Serverless —
+        #    S3 Vectors is not yet supported for Bedrock Knowledge Bases in
+        #    GovCloud (ValidationException: "KnowledgeBase storage type
+        #    S3_VECTORS is not supported"), so the commercial default would
+        #    fail DOCUMENTKB creation on every GovCloud deploy.
+        template = self._force_opensearch_vector_store(template)
+        # 6. Default ConfigurationPreset to the GovCloud-safe sample config.
+        #    The commercial default (lending-package-sample) pins Bedrock
+        #    model IDs (e.g. us.amazon.nova-2-lite-v1:0) that either don't
+        #    exist or aren't offered in GovCloud regions, so every processing
+        #    invocation would fail with ValidationException: "The provided
+        #    model identifier is invalid." until a caller manually selects
+        #    lending-package-sample-govcloud.
+        template = self._update_configuration_maps_for_govcloud(template)
+        # 7. Default KnowledgeBaseModelId to a GovCloud-verified model. The
+        #    commercial default (us.amazon.nova-pro-v1:0) uses a us. cross-
+        #    region inference-profile prefix that doesn't exist in GovCloud
+        #    (ValidationException: "The provided model identifier is
+        #    invalid."), which would fail every Knowledge Base query.
+        template = self._force_govcloud_kb_model(template)
+        # 8. Partition + description.
         template = self._update_arn_partitions(template)
         template = self._update_description(template)
         return template
@@ -1509,6 +1529,60 @@ class GovCloudTemplateTransformer:
             logger.info("Forced WebUIHosting=APIGateway (CloudFront removed)")
         return template
 
+    def _force_opensearch_vector_store(
+        self, template: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Default KnowledgeBaseVectorStore to OpenSearch Serverless.
+
+        S3 Vectors is not yet supported for Bedrock Knowledge Bases in GovCloud
+        regions. The commercial template defaults to S3_VECTORS; override the
+        default here so a GovCloud deploy that doesn't explicitly pass this
+        parameter still succeeds. Both AllowedValues are kept (not forced,
+        unlike WebUIHosting) since S3_VECTORS may become available later and
+        OpenSearch Serverless requires its own IAM/network setup.
+        """
+        params = template.get("Parameters", {})
+        vector_store = params.get("KnowledgeBaseVectorStore")
+        if (
+            isinstance(vector_store, dict)
+            and vector_store.get("Default") != "OPENSEARCH_SERVERLESS"
+        ):
+            vector_store["Default"] = "OPENSEARCH_SERVERLESS"
+            logger.info(
+                "Defaulted KnowledgeBaseVectorStore=OPENSEARCH_SERVERLESS "
+                "(S3 Vectors unsupported for Bedrock Knowledge Bases in GovCloud)"
+            )
+        return template
+
+    # GovCloud-verified value for KnowledgeBaseModelId (see the AllowedValues
+    # comment in template.yaml for how these were verified).
+    GOVCLOUD_KB_MODEL_DEFAULT = "amazon.nova-pro-v1:0"
+
+    def _force_govcloud_kb_model(self, template: Dict[str, Any]) -> Dict[str, Any]:
+        """Default KnowledgeBaseModelId to a GovCloud-verified model.
+
+        The commercial default (us.amazon.nova-pro-v1:0) uses a us.
+        cross-region inference-profile prefix that returns ValidationException
+        ("The provided model identifier is invalid.") in GovCloud regions —
+        none of the us./eu./global. prefixed AllowedValues work there. Only
+        override the Default; AllowedValues already carries the GovCloud-safe
+        entries (added alongside the commercial ones in template.yaml) so a
+        caller can still pick a different verified model explicitly.
+        """
+        params = template.get("Parameters", {})
+        kb_model = params.get("KnowledgeBaseModelId")
+        if (
+            isinstance(kb_model, dict)
+            and kb_model.get("Default") != self.GOVCLOUD_KB_MODEL_DEFAULT
+        ):
+            kb_model["Default"] = self.GOVCLOUD_KB_MODEL_DEFAULT
+            logger.info(
+                f"Defaulted KnowledgeBaseModelId={self.GOVCLOUD_KB_MODEL_DEFAULT} "
+                "(commercial us./eu./global. inference-profile prefixes are "
+                "invalid in GovCloud)"
+            )
+        return template
+
     # ---- Parameter-group tidy (drop dangling CloudFront param labels) ----
 
     def _clean_parameter_groups(self, template: Dict[str, Any]) -> Dict[str, Any]:
@@ -1523,6 +1597,47 @@ class GovCloudTemplateTransformer:
         for p in list(labels.keys()):
             if p in removed:
                 del labels[p]
+        return template
+
+    # ---- Configuration preset default (mirrors HeadlessTemplateTransformer's
+    # ---- helper of the same name — kept independent since the two classes
+    # ---- transform disjoint templates and neither imports the other) ----
+
+    def _update_configuration_maps_for_govcloud(
+        self, template: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Default ConfigurationPreset to the GovCloud-safe sample config.
+
+        The commercial default (lending-package-sample) pins Bedrock model
+        IDs that either don't exist or aren't offered in GovCloud regions
+        (e.g. ``us.amazon.nova-2-lite-v1:0``), so document processing fails
+        with ``ValidationException: The provided model identifier is
+        invalid.`` until ``lending-package-sample-govcloud`` — which pins
+        GovCloud-available models — is selected instead.
+        """
+        logger.info("Updating configuration maps for GovCloud deployment")
+
+        mappings = template.get("Mappings", {})
+        parameters = template.get("Parameters", {})
+
+        if "ConfigurationMap" in mappings:
+            mappings["ConfigurationMap"]["lending-package-sample-govcloud"] = {
+                "ConfigPath": "lending-package-sample-govcloud"
+            }
+            logger.debug("Added lending-package-sample-govcloud to ConfigurationMap")
+
+        if "ConfigurationPreset" in parameters:
+            parameters["ConfigurationPreset"]["Default"] = (
+                "lending-package-sample-govcloud"
+            )
+            allowed_values = parameters["ConfigurationPreset"].get("AllowedValues", [])
+            if "lending-package-sample-govcloud" not in allowed_values:
+                allowed_values.insert(0, "lending-package-sample-govcloud")
+                parameters["ConfigurationPreset"]["AllowedValues"] = allowed_values
+            logger.info(
+                "Updated ConfigurationPreset default to 'lending-package-sample-govcloud'"
+            )
+
         return template
 
     # ---- ARN partition + description (mirror the headless helpers) ----
