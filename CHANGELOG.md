@@ -5,6 +5,10 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Changed
+
+- **Renamed the `EnableHeadless` CloudFormation parameter to `EnableJobsApi`.** The old name conflated this parameter with "headless mode" — but it is an *additive* switch that stands up the Jobs REST API (Private API Gateway + `/jobs` endpoints + supporting Lambdas + a machine-to-machine Cognito OAuth client) **in addition to** the Web UI; it does not remove the UI. (That is the separate `idp-cli deploy --headless` template transform, which is unchanged.) The parameter, its metadata (ParameterGroups/ParameterLabels), the `JobsApiRequiresVPC` rule, and all docs now say "Jobs API". **Upgrade note (breaking parameter rename):** existing stacks deployed with `EnableHeadless` must supply `EnableJobsApi` (with the same `true`/`false` value) on their next stack update — the old parameter name is no longer recognized. See [docs/govcloud-deployment.md](docs/govcloud-deployment.md). (#525)
+
 ## [0.6.1]
 
 ### Added
