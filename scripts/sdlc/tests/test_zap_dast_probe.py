@@ -215,6 +215,9 @@ def test_validate_zap_dast_warn_only_with_high_findings(cbd, monkeypatch, tmp_pa
 
     # Docker/scan is a no-op; write a report with a High finding into the workdir.
     def fake_run_command(cmd, check=True, timeout=None):
+        # The Docker-availability preflight must pass so we reach the scan.
+        if cmd.strip() == "docker info":
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
         # The workdir is the -v mount source in the docker cmd.
         workdir = cmd.split("-v ", 1)[1].split(":", 1)[0]
         report = {
@@ -253,8 +256,10 @@ def test_validate_zap_dast_restores_on_error(cbd, monkeypatch):
     fake = _FakeRbac()
     _install_fake_rbac(cbd, monkeypatch, fake)
 
-    # Force the scan to blow up AFTER auth was enabled.
+    # Preflight passes (docker available); the SCAN blows up AFTER auth was enabled.
     def boom(cmd, check=True, timeout=None):
+        if cmd.strip() == "docker info":
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
         raise RuntimeError("docker exploded")
 
     monkeypatch.setattr(cbd, "run_command", boom)
@@ -263,5 +268,44 @@ def test_validate_zap_dast_restores_on_error(cbd, monkeypatch):
     assert result["success"] is False
     assert "docker exploded" in result["error"]
     # Even on error, the app client auth flow is restored and the user removed.
+    assert fake.restored is True
+    assert fake.deleted == "zap-dast@example.invalid"
+
+
+def test_validate_zap_dast_skips_when_docker_unavailable(cbd, monkeypatch):
+    # No Docker daemon (PrivilegedMode not deployed) -> SKIP, not FAIL, and never
+    # touches Cognito (preflight returns before user/token setup).
+    fake = _FakeRbac()
+    _install_fake_rbac(cbd, monkeypatch, fake)
+
+    def no_docker(cmd, check=True, timeout=None):
+        assert cmd.strip() == "docker info", f"should not run {cmd!r} without docker"
+        return type("R", (), {"returncode": 1, "stdout": "", "stderr": "no daemon"})()
+
+    monkeypatch.setattr(cbd, "run_command", no_docker)
+
+    result = cbd.validate_zap_dast("idp-test-zapdast")
+    assert result["success"] is True and result["skipped"] is True
+    assert "Docker daemon unavailable" in result["detail"]
+    # Preflight ran before any auth mutation, so nothing to restore/delete.
+    assert fake.restored is False and fake.deleted is None
+
+
+def test_validate_zap_dast_skips_when_no_report(cbd, monkeypatch, tmp_path):
+    # Daemon up but the scan produced no report (e.g. image pull failed) -> SKIP,
+    # and still restore auth flow + delete the test user.
+    fake = _FakeRbac()
+    _install_fake_rbac(cbd, monkeypatch, fake)
+
+    def fake_run_command(cmd, check=True, timeout=None):
+        # docker info passes; the scan runs but writes NO report file.
+        rc = 0 if cmd.strip() == "docker info" else 1
+        return type("R", (), {"returncode": rc, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(cbd, "run_command", fake_run_command)
+
+    result = cbd.validate_zap_dast("idp-test-zapdast")
+    assert result["success"] is True and result["skipped"] is True
+    assert "no JSON report" in result["detail"]
     assert fake.restored is True
     assert fake.deleted == "zap-dast@example.invalid"
