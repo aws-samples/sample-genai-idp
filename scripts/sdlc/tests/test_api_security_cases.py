@@ -108,9 +108,9 @@ def test_idor_no_leak_when_userb_response_lacks_marker():
     # reference marker_holder lazily.
     def call_body(api_base, field, args, token):
         m = marker_holder.get("m", "")
-        if token == "b":  # User B: ownership defense -> no marker (500 not-found)
+        if token == "b":  # nosec B105 - "b" is a fake test token id, not a credential  # noqa: E501
             return 500, '{"errors":[{"message":"not found for this user"}]}'
-        if token == "a" and field == "getAgentJobStatus":  # owner sees marker
+        if token == "a" and field == "getAgentJobStatus":  # nosec B105 - "a" is a fake test token id, not a credential  # noqa: E501
             return 200, f'{{"result":"{m}","status":"COMPLETED"}}'
         return 200, "{}"
 
@@ -221,7 +221,7 @@ def test_expired_token_rejected():
         _scripted_call(script),
         rec,
         results,
-        expired_token="expired",
+        expired_token="expired",  # nosec B106 - fake test token literal, not a credential  # noqa: E501
         logout_token=None,
         logout_email=None,
         sign_out_fn=None,
@@ -248,7 +248,7 @@ def test_logout_still_accepted_is_warn_not_fail():
         rec,
         results,
         expired_token=None,
-        logout_token="t",
+        logout_token="t",  # nosec B106 - fake test token literal, not a credential
         logout_email="u@x.invalid",
         sign_out_fn=lambda e: signed_out.setdefault("called", e),
     )
@@ -270,7 +270,7 @@ def test_logout_revoked_is_pass_no_gap():
         rec,
         results,
         expired_token=None,
-        logout_token="t",
+        logout_token="t",  # nosec B106 - fake test token literal, not a credential
         logout_email="u@x.invalid",
         sign_out_fn=lambda e: None,
     )
