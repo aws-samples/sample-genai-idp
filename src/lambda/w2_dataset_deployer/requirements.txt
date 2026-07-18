@@ -2,7 +2,7 @@
 huggingface-hub==0.20.0
 
 # For reading parquet metadata files efficiently
-pyarrow==23.0.1
+pyarrow==20.0.0
 
 # For CloudFormation custom resource responses
 cfnresponse
