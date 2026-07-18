@@ -205,3 +205,140 @@ def test_real_template_transforms_without_dangling_refs():
         "Headless transform left dangling references to removed resources "
         f"(add them to a strip set in template_transform.py): {findings}"
     )
+
+
+def _load_real_template_plain():
+    """Load the committed template.yaml as plain dict/list/str (no cfn nodes).
+
+    cfn-lint ships a CloudFormation-aware YAML decoder that understands the
+    shorthand !Ref/!GetAtt/!Sub tags plain yaml.safe_load chokes on. The
+    transform round-trips through yaml.safe_dump/load internally, which can't
+    serialize those node types — so coerce the whole tree to plain
+    dict/list/str/scalars first.
+    """
+    cfnlint_decode = pytest.importorskip("cfnlint.decode.cfn_yaml")
+
+    def _plain(node):
+        if isinstance(node, dict):
+            return {str(k): _plain(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [_plain(x) for x in node]
+        if isinstance(node, str):
+            return str(node)
+        return node
+
+    loaded = cfnlint_decode.load(str(_repo_root() / "template.yaml"))
+    # cfn_yaml.load may return the template or a (template, matches) tuple.
+    template = _plain(loaded[0] if isinstance(loaded, tuple) else loaded)
+    assert isinstance(template, dict) and "Resources" in template
+    return template
+
+
+def test_real_template_headless_ui_surface_fully_removed():
+    """Transform the ACTUAL template.yaml; assert the whole UI surface is gone.
+
+    The dangling-ref tests only prove nothing *references* a removed resource —
+    they'd still pass if the transform silently stopped removing, say, the
+    Cognito UserPool (a resource with no inbound refs would just survive). This
+    asserts the transform's *intent*: headless = no UI, so the representative
+    UI/auth/edge resources and their families must actually be absent, while the
+    document-processing core survives.
+    """
+    result = HeadlessTemplateTransformer().apply_transforms(_load_real_template_plain())
+    resources = result["Resources"]
+
+    # Representative resources from each family the headless transform removes.
+    must_be_absent = {
+        "CloudFront": "CloudFrontDistribution",
+        "Web UI bucket": "WebUIBucket",
+        "UI CodeBuild": "UICodeBuildProject",
+        "UI REST API stack": "APIRESOLVERSTACK",
+        "Cognito user pool": "UserPool",
+        "WAF web ACL": "WAFWebACL",
+        "Agent table": "AgentTable",
+        "Feature platform stack": "FeaturePlatformStack",
+    }
+    still_present = {
+        family: name for family, name in must_be_absent.items() if name in resources
+    }
+    assert not still_present, (
+        "Headless transform left UI-surface resources in place "
+        f"(they should be stripped): {still_present}"
+    )
+
+    # No AWS::CloudFront::* / WAFv2 types anywhere either — these are
+    # unambiguously edge/UI-only, so a renamed logical id (which the name-based
+    # strip set above would miss) still gets caught here.
+    #
+    # NOTE: Cognito is deliberately NOT banned by type. The interactive Web-UI
+    # user pool (`UserPool`) is stripped (asserted by name above), but the
+    # Jobs API keeps its OWN Cognito pool for machine-to-machine OAuth
+    # (`ApiUserPool` / `ApiAppClient` / ..., gated on EnableJobsApi=true). Those
+    # AWS::Cognito::* resources surviving is correct, not a UI leak.
+    surviving_ui_types = sorted(
+        str(r.get("Type"))
+        for r in resources.values()
+        if isinstance(r, dict)
+        and str(r.get("Type", "")).startswith(("AWS::CloudFront::", "AWS::WAFv2::"))
+    )
+    assert surviving_ui_types == [], (
+        f"Headless transform left edge/UI-only resource types: {surviving_ui_types}"
+    )
+
+    # The document-processing core must survive.
+    for core in ("InputBucket", "OutputBucket", "TrackingTable", "PATTERNSTACK"):
+        assert core in resources, f"Headless transform dropped core resource {core}"
+
+
+def test_real_template_headless_passes_govcloud_region_cfn_lint():
+    """Transform template.yaml to headless and run REAL cfn-lint for GovCloud.
+
+    Mirror of the GovCloud transform's region-lint probe (see
+    ``test_govcloud_template_transform.py::test_real_template_passes_govcloud_
+    region_cfn_lint`` and scripts/sdlc/docs/CI_TEST_COVERAGE.md). The headless
+    template is the API-only variant used for GovCloud batch deployments, so it
+    must also be free of GovCloud-unsupported resource types (CloudFront,
+    Lambda::Url, ...). This is strictly stronger than the dangling-ref tests:
+    cfn-lint ``--region us-gov-west-1`` flags E3006 for *any* unsupported type,
+    including a newly introduced one the transformer doesn't yet know to strip.
+
+    No AWS credentials needed (cfn-lint's region check is offline). Skips
+    cleanly if cfn-lint isn't installed.
+    """
+    import json
+    import shutil
+    import subprocess  # nosec B404 - fixed args, no user input
+    import tempfile
+
+    import yaml
+
+    if shutil.which("cfn-lint") is None:
+        pytest.skip("cfn-lint not installed")
+
+    result = HeadlessTemplateTransformer().apply_transforms(_load_real_template_plain())
+
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as fh:
+        yaml.safe_dump(result, fh)
+        out_path = fh.name
+
+    proc = subprocess.run(  # nosec B603 - fixed executable + args
+        ["cfn-lint", out_path, "--region", "us-gov-west-1", "--format", "json"],
+        capture_output=True,
+        text=True,
+    )
+    try:
+        findings = json.loads(proc.stdout) if proc.stdout.strip() else []
+    except json.JSONDecodeError:
+        findings = []
+    # Only E3006 ("Resource type ... does not exist in <region>") is the
+    # GovCloud-support signal we gate on. Other cfn-lint findings (W-codes,
+    # unrelated E-codes from the round-tripped/plain-dumped template) are out of
+    # scope for THIS probe and would make it flaky.
+    e3006 = [f for f in findings if f.get("Rule", {}).get("Id") == "E3006"]
+    assert e3006 == [], (
+        "GovCloud-unsupported resource type(s) survived the headless transform "
+        "(cfn-lint E3006). Add them to a strip set in template_transform.py: "
+        + "; ".join(
+            f"{f.get('Location', {}).get('Path')}: {f.get('Message')}" for f in e3006
+        )
+    )
