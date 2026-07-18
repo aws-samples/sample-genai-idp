@@ -769,16 +769,21 @@ Parameters:
       (Optional) Lambda ARN for custom error handling when circuit breaker opens.
       This Lambda is invoked asynchronously when the circuit opens, allowing
       custom alerting or remediation logic.
-  # Headless API Configuration
+  # Jobs API Configuration
   # ------------------------------------------------------------------------
-  # Headless API Deployment (required for GovCloud)
+  # Jobs REST API Deployment (required for GovCloud)
   #
-  # These parameters control the optional "headless" deployment mode, where
-  # the stack deploys a private Jobs REST API (API Gateway + Lambda) instead
-  # of (or in addition to) the web UI. This mode is REQUIRED for GovCloud
-  # regions because some UI-layer services (e.g. CloudFront, Cognito UI
-  # pool) aren't available there. In Commercial regions the mode is OPTIONAL
-  # and useful for API-only / machine-to-machine integrations.
+  # These parameters control the optional Jobs REST API, an ADDITIVE switch
+  # (formerly called headless mode) that stands up a private Jobs REST API
+  # (API Gateway + Lambda + a machine-to-machine Cognito OAuth client) IN
+  # ADDITION TO the web UI. This is REQUIRED for GovCloud regions because
+  # some UI-layer services (e.g. CloudFront, Cognito UI pool) aren't
+  # available there. In Commercial regions the Jobs API is OPTIONAL and
+  # useful for API-only / machine-to-machine integrations.
+  #
+  # NOTE: This is distinct from the `idp-cli deploy --headless` CLI flag,
+  # which is a template transform that REMOVES the web UI entirely.
+  # EnableJobsApi does NOT remove the UI — it adds the Jobs API alongside it.
   #
   # All parameters below default to OFF / empty. Leaving them at defaults
   # keeps the stack as a pure web-UI deployment with no Jobs API, no VPC
@@ -788,12 +793,12 @@ Parameters:
   # docs/govcloud-batch-api.md for the Jobs API reference.
   # ------------------------------------------------------------------------
 
-  EnableHeadless:
+  EnableJobsApi:
     Type: String
     Default: 'false'
     AllowedValues: ['true', 'false']
     Description: >-
-      Set to 'true' to deploy the headless Jobs REST API (Private API Gateway
+      Set to 'true' to deploy the Jobs REST API (Private API Gateway
       + /jobs endpoints + supporting Lambdas). Default 'false' = no Jobs API
       is deployed. Required for GovCloud. When 'true', you must also set
       DeployInVPC=true and populate VpcId, PrivateSubnetIds,
@@ -806,7 +811,7 @@ Parameters:
     Description: >-
       Set to 'true' to place all document-processing Lambdas inside the
       customer-supplied VPC. Required when ApiGatewayVisibility=PRIVATE and
-      for Headless API deployments, and recommended for any
+      for Jobs API deployments, and recommended for any
       compliance/exfil-control use case. Default 'false' = Lambdas run
       in the default AWS-owned network. When 'true', you must populate
       VpcId, PrivateSubnetIds, and LambdaSecurityGroupId (and LambdaSubnetIds
@@ -817,7 +822,7 @@ Parameters:
     Default: ""
     Description: >-
       Required when DeployInVPC=true. The customer-owned VPC that Lambdas
-      and (for PRIVATE or Headless mode) the execute-api VPC endpoint are
+      and (for PRIVATE or Jobs API mode) the execute-api VPC endpoint are
       attached to. Leave empty for non-VPC deployments.
 
   PrivateSubnetIds:
@@ -841,22 +846,22 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      Required when ApiGatewayVisibility=PRIVATE or EnableHeadless=true. The
+      Required when ApiGatewayVisibility=PRIVATE or EnableJobsApi=true. The
       com.amazonaws.<region>.execute-api Interface VPC endpoint that the
-      private REST API (Web UI and/or the Headless Jobs API) is bound to. The
+      private REST API (Web UI and/or the Jobs API) is bound to. The
       API's resource policy denies all traffic not sourced from this VPCE.
       Leave empty only when ApiGatewayVisibility=GLOBAL and
-      EnableHeadless=false.
+      EnableJobsApi=false.
 
   ApiStageName:
     Type: String
     Default: 'beta'
     Description: >-
-      Stage name for the Headless Jobs API Gateway (e.g. 'beta', 'prod').
-      Ignored when EnableHeadless=false.
+      Stage name for the Jobs API Gateway (e.g. 'beta', 'prod').
+      Ignored when EnableJobsApi=false.
 
   # ------------------------------------------------------------------------
-  # Headless API Deployment - Bastion Host (optional, requires VPC Secured Mode)
+  # Jobs API Deployment - Bastion Host (optional, requires VPC Secured Mode)
   #
   # The bastion host is an OPTIONAL developer-convenience feature for
   # reaching the Private API Gateway from outside the VPC during
@@ -984,22 +989,22 @@ Rules:
       - Assert: !Not [ !Equals [ !Ref MlflowTrackingURI, "" ] ]
         AssertDescription: "MlflowTrackingURI is required when EnableMLflow is true"
 
-  # EnableHeadless=true stands up a Private API Gateway + VPC-resident Lambdas
+  # EnableJobsApi=true stands up a Private API Gateway + VPC-resident Lambdas
   # that !Ref VpcId/PrivateSubnetIds/ApiGatewayVpcEndpointId/LambdaSecurityGroupId
   # unconditionally. Those params default to empty, so without this rule a
   # misconfigured deploy would fail deep in CREATE_IN_PROGRESS with an opaque
   # Lambda/API Gateway error. Fail fast at changeset creation instead.
-  HeadlessRequiresVPC:
-    RuleCondition: !Equals [ !Ref EnableHeadless, "true" ]
+  JobsApiRequiresVPC:
+    RuleCondition: !Equals [ !Ref EnableJobsApi, "true" ]
     Assertions:
       - Assert: !Equals [ !Ref DeployInVPC, "true" ]
-        AssertDescription: "EnableHeadless=true requires DeployInVPC=true (the Jobs API uses a Private API Gateway and VPC-resident Lambdas)."
+        AssertDescription: "EnableJobsApi=true requires DeployInVPC=true (the Jobs API uses a Private API Gateway and VPC-resident Lambdas)."
       - Assert: !Not [ !Equals [ !Ref VpcId, "" ] ]
-        AssertDescription: "VpcId is required when EnableHeadless=true"
+        AssertDescription: "VpcId is required when EnableJobsApi=true"
       - Assert: !Not [ !Equals [ !Ref ApiGatewayVpcEndpointId, "" ] ]
-        AssertDescription: "ApiGatewayVpcEndpointId is required when EnableHeadless=true"
+        AssertDescription: "ApiGatewayVpcEndpointId is required when EnableJobsApi=true"
       - Assert: !Not [ !Equals [ !Ref LambdaSecurityGroupId, "" ] ]
-        AssertDescription: "LambdaSecurityGroupId is required when EnableHeadless=true"
+        AssertDescription: "LambdaSecurityGroupId is required when EnableJobsApi=true"
       # Note: PrivateSubnetIds is a CommaDelimitedList. The Rules-block
       # intrinsic-function set (Fn::And / Contains / EachMember* / Equals /
       # If / Not / Or / RefAll / ValueOf*) has no portable way to assert
@@ -1082,7 +1087,7 @@ Conditions:
   # conditions are needed — the REST API resources deploy unconditionally.
   # Headless/VPC/Bastion feature conditions
   DeployInVPC: !Equals [!Ref DeployInVPC, 'true']
-  DeployApiGateway: !Equals [!Ref EnableHeadless, 'true']
+  DeployApiGateway: !Equals [!Ref EnableJobsApi, 'true']
   ShouldDeployBastionHost: !Equals [!Ref DeployBastionHost, 'true']
   # CI/automation sentinel: this exact AdminEmail suppresses the Cognito invite
   # email (keeps automated multi-stack deploys under Cognito's daily email quota).
@@ -1322,7 +1327,7 @@ Metadata:
         Parameters:
           - ApiGatewayVisibility
       - Label:
-          default: "VPC Configuration (populate when DeployInVPC=true — which ApiGatewayVisibility=PRIVATE and EnableHeadless=true both force)"
+          default: "VPC Configuration (populate when DeployInVPC=true — which ApiGatewayVisibility=PRIVATE and EnableJobsApi=true both force)"
         Parameters:
           - DeployInVPC
           - VpcId
@@ -1331,12 +1336,12 @@ Metadata:
           - LambdaSecurityGroupId
           - ApiGatewayVpcEndpointId
       - Label:
-          default: "Headless API Deployment (required for GovCloud)"
+          default: "Jobs API Deployment (required for GovCloud)"
         Parameters:
-          - EnableHeadless
+          - EnableJobsApi
           - ApiStageName
       - Label:
-          default: "Headless API Deployment - Bastion Host (optional, requires VPC Secured Mode)"
+          default: "Jobs API Deployment - Bastion Host (optional, requires VPC Secured Mode)"
         Parameters:
           - DeployBastionHost
           - BastionHostSubnetId
@@ -1471,10 +1476,10 @@ Metadata:
         default: "Circuit Breaker Recovery Timeout (seconds)"
       CircuitBreakerErrorHandlerArn:
         default: "Circuit Breaker Error Handler Lambda ARN (optional)"
-      EnableHeadless:
-        default: "Enable Headless API (Jobs REST API, required for GovCloud)"
+      EnableJobsApi:
+        default: "Enable Jobs API (Jobs REST API, required for GovCloud)"
       DeployInVPC:
-        default: "Enable VPC Secured Mode (required when ApiGatewayVisibility=PRIVATE or Headless API is enabled)"
+        default: "Enable VPC Secured Mode (required when ApiGatewayVisibility=PRIVATE or Jobs API is enabled)"
       VpcId:
         default: "VPC ID (required when VPC Secured Mode is enabled)"
       PrivateSubnetIds:
@@ -1482,9 +1487,9 @@ Metadata:
       LambdaSecurityGroupId:
         default: "Lambda Security Group ID (required when VPC Secured Mode is enabled)"
       ApiGatewayVpcEndpointId:
-        default: "API Gateway VPC Endpoint ID (execute-api; required when ApiGatewayVisibility=PRIVATE or Headless API is enabled)"
+        default: "API Gateway VPC Endpoint ID (execute-api; required when ApiGatewayVisibility=PRIVATE or Jobs API is enabled)"
       ApiStageName:
-        default: "API Gateway Stage Name (Headless API)"
+        default: "API Gateway Stage Name (Jobs API)"
       DeployBastionHost:
         default: "Deploy Bastion Host (optional, for dev access to Private API)"
       BastionHostSubnetId:
@@ -1664,11 +1669,11 @@ Resources:
       Timeout: 30
       Layers:
         - !Ref IDPCommonBaseLayer
-      # HeadlessRequiresVPC rule (see top-level Rules: block) already asserts
-      # DeployInVPC=true whenever EnableHeadless=true, so in practice this !If
+      # JobsApiRequiresVPC rule (see top-level Rules: block) already asserts
+      # DeployInVPC=true whenever EnableJobsApi=true, so in practice this !If
       # always takes the first branch when this Function is deployed. The
       # guard is defense-in-depth: if the coupling is ever relaxed (e.g. a
-      # future "headless API without VPC" pattern), this Function will still
+      # future "Jobs API without VPC" pattern), this Function will still
       # render as a valid no-VpcConfig Lambda rather than fail on empty !Refs.
       VpcConfig: !If
         - DeployInVPC
@@ -1761,7 +1766,7 @@ Resources:
         Size: 5120
       Layers:
         - !Ref IDPCommonBaseLayer
-      # See ApiHandlerFunction for rationale — HeadlessRequiresVPC rule gates
+      # See ApiHandlerFunction for rationale — JobsApiRequiresVPC rule gates
       # this at changeset creation; the !If is defense-in-depth.
       VpcConfig: !If
         - DeployInVPC

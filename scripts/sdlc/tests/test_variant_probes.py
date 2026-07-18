@@ -669,7 +669,7 @@ def test_default_probe_table_covers_all_four_variants(cbd):
     # Distinguishing params.
     assert by_suffix["waf"].deploy_params.get("WAFAllowedIPv4Ranges")
     assert by_suffix["apigwpriv"].deploy_params["ApiGatewayVisibility"] == "PRIVATE"
-    assert by_suffix["headless"].deploy_params["EnableHeadless"] == "true"
+    assert by_suffix["headless"].deploy_params["EnableJobsApi"] == "true"
     # Every row wires a distinct validator.
     validators = {p.validate_fn for p in cbd.PROBE_VARIANTS}
     assert len(validators) == len(cbd.PROBE_VARIANTS)

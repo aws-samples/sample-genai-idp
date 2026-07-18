@@ -2720,13 +2720,13 @@ def validate_apigw_private_hosting(stack_name):
 
 
 def validate_headless_jobs_api(stack_name):
-    """Assert the headless Jobs REST API deployed (EnableHeadless=true + VPC).
+    """Assert the Jobs REST API deployed (EnableJobsApi=true + VPC).
 
     The Jobs API is a PRIVATE API Gateway reachable only inside the test VPC,
     so — like the PRIVATE hosting probe — CodeBuild can't call it. Validate
-    structurally that the headless deployment stood up:
+    structurally that the Jobs API deployment stood up:
       * the stack exposes the ApiGatewayEndpoint output (only present when
-        EnableHeadless=true / the Jobs API + Cognito M2M client deployed), and
+        EnableJobsApi=true / the Jobs API + Cognito M2M client deployed), and
       * that output is an execute-api URL for a real REST API.
     """
     outputs = _stack_outputs(stack_name)
@@ -2735,8 +2735,8 @@ def validate_headless_jobs_api(stack_name):
         return {
             "success": False,
             "error": (
-                "Stack has no ApiGatewayEndpoint output — the headless Jobs API "
-                "did not deploy (EnableHeadless=true expected)"
+                "Stack has no ApiGatewayEndpoint output — the Jobs API "
+                "did not deploy (EnableJobsApi=true expected)"
             ),
         }
     if "execute-api" not in jobs_url:
@@ -2930,7 +2930,7 @@ PROBE_VARIANTS = [
     Probe(
         name="Headless Jobs API (VPC)",
         stack_suffix="headless",
-        deploy_params={"EnableHeadless": "true"},
+        deploy_params={"EnableJobsApi": "true"},
         validate_fn=validate_headless_jobs_api,
         requires_vpc=True,
     ),

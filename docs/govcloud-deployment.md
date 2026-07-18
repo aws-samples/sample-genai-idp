@@ -170,16 +170,17 @@ base), keeping the full document-processing backend. See the
 [Headless Deployment Guide](./headless-deployment.md) for the general
 (non-GovCloud-specific) reference.
 
-> **`--headless` vs. `EnableHeadless=true`** — these are different things:
+> **`--headless` vs. `EnableJobsApi=true`** — these are different things:
 >
 > - `--headless` (CLI flag) transforms the **template**: it strips the UI
 >   resource groups above. It does **not** set any stack parameters.
-> - `EnableHeadless=true` (CloudFormation parameter) additionally deploys the
->   **Batch Jobs REST API** (`/jobs` endpoints on a private API Gateway with
->   OAuth2 machine-to-machine auth). It requires `DeployInVPC=true` plus your
+> - `EnableJobsApi=true` (CloudFormation parameter, formerly `EnableHeadless`)
+>   is an **additive** switch that deploys the **Batch Jobs REST API** (`/jobs`
+>   endpoints on a private API Gateway with OAuth2 machine-to-machine auth) —
+>   it does **not** remove the UI. It requires `DeployInVPC=true` plus your
 >   VPC parameters — the template rejects it otherwise at changeset creation.
 >
-> If you want the Jobs API you must pass `EnableHeadless=true` and the VPC
+> If you want the Jobs API you must pass `EnableJobsApi=true` and the VPC
 > parameters explicitly, as in [Option B](#option-b-headless--jobs-rest-api-all-lambdas-in-vpc) below.
 
 ### Deployment Packages
@@ -190,7 +191,7 @@ base), keeping the full document-processing backend. See the
 | **Access methods** | S3 direct upload, IDP CLI, SDK | Vanilla methods + `/jobs` REST API (private API Gateway) | Same, plus local access through the bastion tunnel |
 | **Networking** | No VPC required | All Lambdas + private API Gateway in your VPC | Same, plus an EC2 bastion host (SSM only, no inbound rules) |
 | **Authentication** | IAM only | Cognito client credentials (OAuth2 bearer tokens) | Same as Option B |
-| **Extra parameters** | None | `EnableHeadless=true`, `DeployInVPC=true`, `VpcId`, `PrivateSubnetIds`, `ApiGatewayVpcEndpointId`, `LambdaSecurityGroupId` | Option B + `DeployBastionHost=true`, `BastionHostSubnetId`, `BastionHostSecurityGroupId` |
+| **Extra parameters** | None | `EnableJobsApi=true`, `DeployInVPC=true`, `VpcId`, `PrivateSubnetIds`, `ApiGatewayVpcEndpointId`, `LambdaSecurityGroupId` | Option B + `DeployBastionHost=true`, `BastionHostSubnetId`, `BastionHostSecurityGroupId` |
 
 #### Option A: Vanilla (no API, no VPC)
 
@@ -221,7 +222,7 @@ idp-cli deploy \
   --from-code . \
   --headless \
   --wait \
-  --parameters "EnableHeadless=true,DeployInVPC=true,VpcId=vpc-xxxxxxxxx,PrivateSubnetIds=subnet-xxxxx,subnet-xxxxx,ApiGatewayVpcEndpointId=vpce-xxxxxxxxx,LambdaSecurityGroupId=sg-xxxxxxxxx,ApiStageName=beta"
+  --parameters "EnableJobsApi=true,DeployInVPC=true,VpcId=vpc-xxxxxxxxx,PrivateSubnetIds=subnet-xxxxx,subnet-xxxxx,ApiGatewayVpcEndpointId=vpce-xxxxxxxxx,LambdaSecurityGroupId=sg-xxxxxxxxx,ApiStageName=beta"
 ```
 
 See [Batch Jobs REST API](./govcloud-batch-api.md) for authentication and
@@ -239,7 +240,7 @@ idp-cli deploy \
   --from-code . \
   --headless \
   --wait \
-  --parameters "EnableHeadless=true,DeployInVPC=true,VpcId=vpc-xxxxxxxxx,PrivateSubnetIds=subnet-xxxxx,subnet-xxxxx,ApiGatewayVpcEndpointId=vpce-xxxxxxxxx,LambdaSecurityGroupId=sg-xxxxxxxxx,ApiStageName=beta,DeployBastionHost=true,BastionHostSubnetId=subnet-xxxxxxxxx,BastionHostSecurityGroupId=sg-xxxxxxxxx"
+  --parameters "EnableJobsApi=true,DeployInVPC=true,VpcId=vpc-xxxxxxxxx,PrivateSubnetIds=subnet-xxxxx,subnet-xxxxx,ApiGatewayVpcEndpointId=vpce-xxxxxxxxx,LambdaSecurityGroupId=sg-xxxxxxxxx,ApiStageName=beta,DeployBastionHost=true,BastionHostSubnetId=subnet-xxxxxxxxx,BastionHostSecurityGroupId=sg-xxxxxxxxx"
 ```
 
 See [Private API Access via Bastion Tunnel](./govcloud-batch-api.md#private-api-access-via-bastion-tunnel)

@@ -270,7 +270,7 @@ a validator**, not a copy-pasted deploy/validate/cleanup function.
 | **APIGateway hosting (GLOBAL)** | `apigw` | `WebUIHosting=APIGateway`, `ApiGatewayVisibility=GLOBAL` | no | REST API is **REGIONAL**, `ApplicationWebURL` is the execute-api `/api` URL, **HTTP GET → 200** (internet-reachable, so a real end-to-end UI fetch) |
 | **WAF-enabled (IP allow-list)** | `waf` | `WAFAllowedIPv4Ranges` set (+ APIGateway/GLOBAL hosting to have a stage) | no | REGIONAL WebACL `{stack}-api-acl` **exists and is associated** with an API-Gateway stage |
 | **APIGateway hosting (PRIVATE)** | `apigwpriv` | `WebUIHosting=APIGateway`, `ApiGatewayVisibility=PRIVATE` | yes | REST API endpoint type is **PRIVATE** and carries a **resource policy** (VPC-only → structural check; CodeBuild can't fetch a private endpoint) |
-| **Headless Jobs API** | `headless` | `EnableHeadless=true` | yes | stack exposes the **`ApiGatewayEndpoint`** output and its REST API exists (private → structural check) |
+| **Jobs API** | `headless` | `EnableJobsApi=true` | yes | stack exposes the **`ApiGatewayEndpoint`** output and its REST API exists (private → structural check) |
 
 Validators live in `scripts/sdlc/codebuild_deployment.py`:
 `validate_apigw_global_hosting`, `validate_waf_enabled`,
@@ -674,7 +674,7 @@ additions.
 ### Integration / e2e depth (need the CI account; run in the CodeBuild suite)
 
 - [x] **`--headless` deploy e2e (deploy + feature-smoke).** Now a
-      deployment-variant probe (`headless`): deploys `EnableHeadless=true` against
+      deployment-variant probe (`headless`): deploys `EnableJobsApi=true` against
       the persistent test VPC and asserts the Jobs API deployed
       (`validate_headless_jobs_api`). *Deploy + smoke only* — the private Jobs API
       isn't call-tested from CodeBuild (not in-VPC), and full doc-processing
