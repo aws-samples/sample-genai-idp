@@ -162,6 +162,7 @@ test = [
   "moto[s3,cloudformation]==5.1.8", # For mocking AWS services in tests (cloudformation extra needed by feature-platform launch-url tests)
   "Pillow==12.2.0",                 # Required for image processing in assessment tests
   "rich>=13.0.0",                   # Required for publish tests
+  "graphql-core>=3.2,<4",           # Real GraphQL parser: oracle for the API-validation-spec parser-correctness test
   "idp_common[agentic-extraction]", # Required for agentic_idp tests
   # "s3fs==2023.12.2",  # Required for criteria validation tests - disabled till we fix package dependencies
   "moto>=5.1.8",
