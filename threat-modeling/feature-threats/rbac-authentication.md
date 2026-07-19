@@ -174,7 +174,21 @@ flowchart TD
 | **Likelihood** | Medium |
 | **Severity** | High |
 | **Affected Components** | `schema.graphql`, resolver Lambdas |
-| **Mitigations** | Server-side group checks are the source of truth; schema directives are defense-in-depth only. The **static scan in `make api-test-static`** flags `@aws_auth`-only / directive-vs-code drift (tracked as GAP-06 for feature-platform ops) and fails when an operation lacks a documented server-side check; new operations must add a resolver check plus an expectations entry. |
+| **Mitigations** | Server-side group checks are the source of truth; schema directives are defense-in-depth only. The **static scan in `make api-test-static`** flags `@aws_auth`-only / directive-vs-code drift and fails when an operation lacks a documented server-side check; new operations must add a resolver check plus an expectations entry. The feature-platform ops that formerly relied on the silently-ignored `@aws_auth` directive (tracked as GAP-06) now declare `@aws_cognito_user_pools(cognito_groups:["Admin"])` matching their resolver enforcement. |
+
+### AUTH.T12: Missing Input-Shape Validation (Type Confusion via Lost Schema Validation)
+
+| Attribute | Value |
+|-----------|-------|
+| **Threat ID** | AUTH.T12 |
+| **Category** | STRIDE: Tampering, Denial of Service |
+| **Description** | AppSync validated every operation's input arguments against the GraphQL schema (unknown args rejected, non-null enforced, scalar types + enums checked) **before** the resolver ran. The REST dispatcher that replaced it originally passed `event["arguments"]` through unvalidated, so a caller could send an object/array where a scalar was expected, an unknown argument, or a missing required argument — reaching resolver code that indexes into the shape untyped. Depending on the resolver this caused silent acceptance or an uncaught 500, and widened the surface for type-confusion / NoSQL-style injection payloads flowing into DynamoDB expressions or LLM prompts. |
+| **Attack Vector** | A caller posts `POST /op/{field}` with a malformed `arguments` object (e.g. `{"ObjectKey": {"$ne": null}}` where a `String!` is expected) that the resolver was not written to defend against. |
+| **Impact** | Type-confusion / unexpected-shape handling in resolvers; denial of service via uncaught 500s; loss of the boundary that constrained input before business logic. |
+| **Likelihood** | Medium |
+| **Severity** | Medium |
+| **Affected Components** | `http_api_dispatcher` (index.py), all resolver Lambdas, `ddb_direct` |
+| **Mitigations** | **Central schema-shape validation in the dispatcher** (`validation.py` + build-time `api_validation_spec.json` generated from `schema.graphql`) rejects unknown args, missing non-null args, wrong scalar types, and bad enum values with HTTP 400 before routing — restoring AppSync's input gate for all operations at once. The validator is conservative (type-only, shallow input-objects) and fails open on its own errors so it can't 500 the API. A drift guard (`generate_api_validation_spec.py --check` + unit test) keeps the spec in sync with the schema. The **input-validation suite in `make api-test`** exercises malformed payloads per op (strict mode asserts a clean 4xx). |
 
 ### AUTH.T09: Insecure Direct Object Reference (IDOR / BOLA)
 
@@ -226,8 +240,9 @@ flowchart TD
 | **Token management** | Short-lived tokens, secure storage | AUTH.T02, AUTH.T05, AUTH.T10 |
 | **Resolver auth** | Per-operation `cognito:groups` checks inside every resolver Lambda (the API Gateway authorizer only authenticates) | AUTH.T03, AUTH.T08 |
 | **Object-level authorization** | Owner-scoped keys / `ownerSub`-vs-caller checks on user-owned resources (chat sessions, agent jobs) | AUTH.T09 |
+| **Central input-shape validation** | Dispatcher validates `arguments` against a schema-derived spec (`validation.py`); rejects unknown/missing/wrong-typed args with 400 | AUTH.T12 |
 | **Config-version scope** | `allowedConfigVersions` enforced in scope-aware resolvers; resolver IAM roles granted UsersTable GSI Query | AUTH.T07 |
-| **Automated authorization testing** | `make api-test-static` (static scan of op↔schema↔expectations drift + missing checks) and `make api-test` (live multi-role + scoped-user + token-negative + **IDOR + token-lifecycle + deleted-resource + input-validation + TLS** suites, with an auditable report); known gaps tracked as WARN so real regressions fail the gate | AUTH.T03, AUTH.T07, AUTH.T08, AUTH.T09, AUTH.T10, AUTH.T11 |
+| **Automated authorization testing** | `make api-test-static` (static scan of op↔schema↔expectations drift + missing checks) and `make api-test` (live multi-role + scoped-user + token-negative + **IDOR + token-lifecycle + deleted-resource + input-validation + TLS** suites, with an auditable report); known gaps tracked as WARN so real regressions fail the gate | AUTH.T03, AUTH.T07, AUTH.T08, AUTH.T09, AUTH.T10, AUTH.T11, AUTH.T12 |
 | **Transport security** | API Gateway/CloudFront TLS 1.2+ minimum, no cleartext HTTP | AUTH.T11 |
 | **Cognito config** | No self-signup, strong passwords, email verification | AUTH.T04 |
 | **Defense-in-depth** | `@aws_cognito_user_pools` schema directives in addition to resolver checks | AUTH.T03, AUTH.T08 |

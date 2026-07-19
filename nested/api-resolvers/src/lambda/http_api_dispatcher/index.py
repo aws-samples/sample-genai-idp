@@ -34,6 +34,7 @@ from typing import Any, Dict
 import boto3
 import ddb_direct
 from idp_common.api_adapter import _http_response, normalize_event
+from validation import validate_arguments
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -138,6 +139,14 @@ def handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         )
 
     try:
+        # Central schema-shape validation (restores what AppSync did for free).
+        # Validate under the ORIGINAL field name — aliases (getFilePresignedUrl,
+        # etc.) resolve to a target only for ROUTING; their own name is what the
+        # UI sends and, when present in schema.graphql, what we validate against.
+        # Fields not in the spec (unknown / non-schema) are a no-op here and get
+        # rejected/served downstream. Raises ValueError → 400/BadRequest below.
+        validate_arguments(field, appsync_event.get("arguments") or {})
+
         # A mapped-but-empty ARN means the resolver is feature-flagged off (its
         # Lambda is conditional and absent), e.g. the circuit-breaker fields when
         # CircuitBreakerEnabled=false. Treat empty as unroutable so it falls
