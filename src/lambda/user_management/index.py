@@ -67,12 +67,13 @@ def handler(event, context):
     arguments = event.get("arguments", {})
 
     # Defense-in-depth authorization. The GraphQL schema restricts these
-    # mutations to the Admin group via @aws_cognito_user_pools(cognito_groups),
-    # but we also enforce the group server-side so the mutating operations are
-    # never reachable by a non-Admin caller even if the schema directive is
-    # missing or misconfigured (e.g. the prior @aws_auth directive, which
-    # AppSync silently ignores on a multi-auth API).
-    if field in ("createUser", "updateUser", "deleteUser"):
+    # operations to the Admin group via @aws_cognito_user_pools(cognito_groups),
+    # but the REST dispatcher's Cognito authorizer only authenticates — it does
+    # not enforce the group — so we also enforce it server-side. listUsers is
+    # included because it exposes every user's email + role; it must be Admin-only
+    # (closes GAP-04, where any authenticated user — incl. Viewer/Reviewer — could
+    # enumerate all users). getMyProfile stays open (a caller reads only itself).
+    if field in ("createUser", "updateUser", "deleteUser", "listUsers"):
         caller = _get_caller_identity(event)
         if not caller["is_admin"]:
             logger.warning(
