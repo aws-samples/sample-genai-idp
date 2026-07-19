@@ -19,6 +19,10 @@ from textwrap import dedent
 import boto3
 from idp_feature_sdk.pack import PackPublisher
 
+# NOTE: these drive a real `sam build`/`sam package`; the shared conftest
+# autouse fixture skips them when the SAM CLI is absent (e.g. the offline CI
+# fast gate) and lets them run where SAM is installed.
+
 _FEATURE_ID = "demo-feature"
 _VERSION = "1.2.3"
 _BASE = f"extensions/{_FEATURE_ID}"  # default prefix="" → bare extensions/<id>

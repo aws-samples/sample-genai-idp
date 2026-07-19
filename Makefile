@@ -137,7 +137,9 @@ lint-cicd: ## CI/CD lint — checks only, no modifications
 		exit 1; \
 	fi
 
-	@if ! make ui-build; then \
+	@# ui-build-only (vite build, NO lint/typecheck) — ui-lint above already ran
+	@# eslint + tsc, so the default `ui-build` would redundantly run them again.
+	@if ! make ui-build-only; then \
 		echo -e "$(RED)ERROR: UI build failed$(NC)"; \
 		exit 1; \
 	fi
@@ -351,6 +353,13 @@ endif
 	@echo "Starting UI development server..."
 	cd src/ui && npm run start
 
+# `npm ci` wipes and reinstalls node_modules (~1 min). The UI targets below each
+# ran it, so a single `make lint-cicd` did it 3× (ui-lint + ui-build-only +
+# codegen-check). Set SKIP_NPM_CI=1 when the caller has ALREADY installed UI
+# deps (the CI code_checks job installs once in before_script) to make these a
+# no-op; unset (local) installs as before.
+NPM_CI := $(if $(SKIP_NPM_CI),true,npm ci --prefer-offline --no-audit)
+
 ui-lint: ## Run UI linting with checksum caching (skips if unchanged). Use FORCE=1 to force re-run.
 	@echo "Checking if UI lint is needed..."
 	@CURRENT_HASH=$$($(PYTHON) -c "from publish import IDPPublisher; p = IDPPublisher(); print(p.get_directory_checksum('src/ui'))"); \
@@ -361,16 +370,20 @@ ui-lint: ## Run UI linting with checksum caching (skips if unchanged). Use FORCE
 		else \
 			echo "UI code checksum changed - running lint..."; \
 		fi; \
-		cd src/ui && npm ci --prefer-offline --no-audit && npm run lint -- --fix && npm run typecheck || exit 1; \
+		cd src/ui && $(NPM_CI) && npm run lint -- --fix && npm run typecheck || exit 1; \
 		echo "$$CURRENT_HASH" > .checksum; \
 		echo -e "$(GREEN)✅ UI lint and typecheck completed and checksum updated$(NC)"; \
 	else \
 		echo -e "$(GREEN)✅ UI code checksum unchanged - skipping lint (use FORCE=1 to force re-run)$(NC)"; \
 	fi
 
-ui-build: ## Build UI for production
+ui-build: ## Build UI for production (runs lint + typecheck + vite build)
 	@echo "Checking UI build"
-	cd src/ui && npm ci --prefer-offline --no-audit && npm run build
+	cd src/ui && $(NPM_CI) && npm run build
+
+ui-build-only: ## Vite production build ONLY (no lint/typecheck) — for CI, where ui-lint already ran them
+	@echo "Building UI (vite only; lint+typecheck already done by ui-lint)"
+	cd src/ui && $(NPM_CI) && npm run build:only
 
 ui-test: ## Run UI unit tests (Vitest, jsdom — no browser required)
 	@echo "Running UI unit tests..."
@@ -383,7 +396,7 @@ codegen: ## Regenerate GraphQL types and operations
 
 codegen-check: ## Verify GraphQL codegen output is up-to-date
 	@echo "Checking if GraphQL codegen output is up-to-date..."
-	@cd src/ui && npm ci --prefer-offline --no-audit && npm run codegen
+	@cd src/ui && $(NPM_CI) && npm run codegen
 	@if ! git diff --quiet src/ui/src/graphql/generated/; then \
 		if [ -n "$$CI" ] || [ -n "$$GITHUB_ACTIONS" ]; then \
 			echo -e "$(RED)ERROR: Generated GraphQL files are out of date!$(NC)"; \

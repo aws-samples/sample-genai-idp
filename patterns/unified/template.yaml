@@ -369,6 +369,9 @@ Resources:
                   - "us.anthropic.claude-opus-4-8:1m"
                   - "openai.gpt-5.4"
                   - "openai.gpt-5.5"
+                  - "openai.gpt-5.6-sol"
+                  - "openai.gpt-5.6-terra"
+                  - "openai.gpt-5.6-luna"
                   - "eu.amazon.nova-lite-v1:0"
                   - "eu.amazon.nova-pro-v1:0"
                   - "eu.amazon.nova-2-lite-v1:0"
@@ -563,6 +566,9 @@ Resources:
                     - "us.anthropic.claude-opus-4-8:1m"
                     - "openai.gpt-5.4"
                     - "openai.gpt-5.5"
+                    - "openai.gpt-5.6-sol"
+                    - "openai.gpt-5.6-terra"
+                    - "openai.gpt-5.6-luna"
                     - "eu.amazon.nova-lite-v1:0"
                     - "eu.amazon.nova-pro-v1:0"
                     - "eu.amazon.nova-2-lite-v1:0"
@@ -858,6 +864,9 @@ Resources:
                   - "us.anthropic.claude-opus-4-8:1m"
                   - "openai.gpt-5.4"
                   - "openai.gpt-5.5"
+                  - "openai.gpt-5.6-sol"
+                  - "openai.gpt-5.6-terra"
+                  - "openai.gpt-5.6-luna"
                   - "eu.amazon.nova-lite-v1:0"
                   - "eu.amazon.nova-pro-v1:0"
                   - "eu.amazon.nova-2-lite-v1:0"
@@ -1215,6 +1224,9 @@ Resources:
                           - "us.anthropic.claude-opus-4-8:1m"
                           - "openai.gpt-5.4"
                           - "openai.gpt-5.5"
+                          - "openai.gpt-5.6-sol"
+                          - "openai.gpt-5.6-terra"
+                          - "openai.gpt-5.6-luna"
                           - "eu.amazon.nova-lite-v1:0"
                           - "eu.amazon.nova-pro-v1:0"
                           - "eu.amazon.nova-2-lite-v1:0"
@@ -1332,6 +1344,9 @@ Resources:
                   - "us.anthropic.claude-opus-4-8:1m"
                   - "openai.gpt-5.4"
                   - "openai.gpt-5.5"
+                  - "openai.gpt-5.6-sol"
+                  - "openai.gpt-5.6-terra"
+                  - "openai.gpt-5.6-luna"
                   - "eu.amazon.nova-lite-v1:0"
                   - "eu.amazon.nova-pro-v1:0"
                   - "eu.amazon.nova-2-lite-v1:0"
@@ -1512,6 +1527,9 @@ Resources:
                         "us.anthropic.claude-opus-4-8:1m",
                         "openai.gpt-5.4",
                         "openai.gpt-5.5",
+                        "openai.gpt-5.6-sol",
+                        "openai.gpt-5.6-terra",
+                        "openai.gpt-5.6-luna",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1751,6 +1769,9 @@ Resources:
                     "us.anthropic.claude-opus-4-8:1m",
                     "openai.gpt-5.4",
                     "openai.gpt-5.5",
+                    "openai.gpt-5.6-sol",
+                    "openai.gpt-5.6-terra",
+                    "openai.gpt-5.6-luna",
                     "eu.amazon.nova-lite-v1:0",
                     "eu.amazon.nova-pro-v1:0",
                     "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1948,6 +1969,9 @@ Resources:
                         "us.anthropic.claude-opus-4-8:1m",
                         "openai.gpt-5.4",
                         "openai.gpt-5.5",
+                        "openai.gpt-5.6-sol",
+                        "openai.gpt-5.6-terra",
+                        "openai.gpt-5.6-luna",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -2642,6 +2666,9 @@ Resources:
                     "us.anthropic.claude-opus-4-8:1m",
                     "openai.gpt-5.4",
                     "openai.gpt-5.5",
+                    "openai.gpt-5.6-sol",
+                    "openai.gpt-5.6-terra",
+                    "openai.gpt-5.6-luna",
                     "eu.amazon.nova-lite-v1:0",
                     "eu.amazon.nova-pro-v1:0",
                     "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -3688,11 +3715,117 @@ Resources:
 
 
   ##########################################################################
+  # Stack-scoped BDA OCR project (CloudFormation custom resource)
+  #
+  # Provisions a per-stack Bedrock Data Automation standard-output SYNC project
+  # for the 'bda' OCR backend, created on stack create and deleted on stack
+  # delete. Replaces the former account-global auto-created project so multiple
+  # stacks in one account no longer interfere. Degrades gracefully (empty ARN)
+  # in regions/partitions without Bedrock Data Automation.
+  ##########################################################################
+
+  BDAOCRProjectFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      Runtime: python3.12
+      Handler: index.handler
+      CodeUri: ../../src/lambda/bda_ocr_project
+      Description: Manages the stack-scoped BDA OCR standard-output project
+      # Timeout must exceed the ~120s wait for the project to reach COMPLETED.
+      Timeout: 300
+      MemorySize: 128
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          # Main stack name (not the verbose nested stack name) so the project
+          # is named <mainstack>_OCR_StdOutput.
+          STACK_NAME: !Ref StackName
+      LoggingConfig:
+        LogGroup: !Ref BDAOCRProjectFunctionLogGroup
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - !If
+          - DeployInVPC
+          - Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                Resource: "*"
+          - !Ref AWS::NoValue
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+            # Control-plane management of the stack-scoped BDA OCR project.
+            - Effect: Allow
+              Action:
+                - bedrock:CreateDataAutomationProject
+                - bedrock:GetDataAutomationProject
+                - bedrock:UpdateDataAutomationProject
+                - bedrock:DeleteDataAutomationProject
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:data-automation-project/*"
+            # ListDataAutomationProjects is a collection op without resource-level scoping.
+            - Effect: Allow
+              Action:
+                - bedrock:ListDataAutomationProjects
+              Resource: "*"
+
+  BDAOCRProjectFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/BDAOCRProjectFunction"
+      RetentionInDays: !Ref LogRetentionDays
+
+  BDAOCRProject:
+    Type: Custom::BDAOCRProject
+    Properties:
+      ServiceToken: !GetAtt BDAOCRProjectFunction.Arn
+      StackName: !Ref StackName
+      # Bump ConfigVersion to force the custom resource to re-run (e.g. after
+      # changing the project's standard-output / modality-routing config).
+      ConfigVersion: "1"
+
+  ##########################################################################
   # Pipeline Branch Lambda Functions (from Pattern-2)
   ##########################################################################
 
   OCRFunction:
     Type: AWS::Serverless::Function
+    # Ordering on BDAOCRProject is enforced implicitly by the !GetAtt on its
+    # ProjectArn in the environment below.
     DependsOn: DockerBuildRun
     Metadata:
       SkipBuild: True
@@ -3745,6 +3878,9 @@ Resources:
           TRACKING_TABLE: !Ref TrackingTable
           DOCUMENT_TRACKING_MODE: dynamodb
           WORKING_BUCKET: !Ref WorkingBucket
+          # ARN of the stack-scoped BDA OCR project (empty in regions without
+          # Bedrock Data Automation; the 'bda' backend then errors clearly).
+          BDA_OCR_PROJECT_ARN: !GetAtt BDAOCRProject.ProjectArn
           BEDROCK_ASSUME_ROLE_ARN:
             !If [HasBedrockHubRole, !Ref BedrockHubRoleArn, !Ref AWS::NoValue]
           BEDROCK_ASSUME_ROLE_EXTERNAL_ID:
@@ -3830,9 +3966,11 @@ Resources:
               Condition:
                 StringLike:
                   "lambda:FunctionName": "GENAIIDP-*"
-            # Bedrock Data Automation permissions for the 'bda' OCR backend.
-            # Sync InvokeDataAutomation on the auto-managed standard-output
-            # project + the standard data-automation profile.
+            # Bedrock Data Automation data-plane permission for the 'bda' OCR
+            # backend. Sync InvokeDataAutomation on the stack-scoped standard-
+            # output project (provisioned by the BDAOCRProject custom resource)
+            # + the standard data-automation profile. Control-plane management
+            # of the project lives on BDAOCRProjectFunction, not here.
             - Effect: Allow
               Action:
                 - bedrock:InvokeDataAutomation
@@ -3840,18 +3978,6 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:data-automation-project/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:data-automation-profile/*.data-automation-v1"
                 - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:data-automation-profile/*.data-automation-v1"
-            # Control-plane actions to find-or-create the OCR standard-output project.
-            - Effect: Allow
-              Action:
-                - bedrock:CreateDataAutomationProject
-                - bedrock:GetDataAutomationProject
-              Resource:
-                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:data-automation-project/*"
-            # ListDataAutomationProjects is a collection op without resource-level scoping.
-            - Effect: Allow
-              Action:
-                - bedrock:ListDataAutomationProjects
-              Resource: "*"
 
   OCRFunctionLogGroup:
     Type: AWS::Logs::LogGroup

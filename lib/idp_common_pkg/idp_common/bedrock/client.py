@@ -604,8 +604,10 @@ class BedrockClient:
         # an OpenAI-compatible REST endpoint. The backend translates the same
         # (system_prompt, content) inputs and returns the identical
         # {"response": ..., "metering": ...} structure, so callers are unaffected.
-        # <<CACHEPOINT>> markers are stripped during translation (prompt caching
-        # is not supported for these models).
+        # Prompt caching is handled inside openai_responses.py: GPT-5.4/5.5 cache
+        # automatically (markers stripped); GPT-5.6 translates <<CACHEPOINT>>
+        # markers into explicit prompt_cache_breakpoint fields. (This is separate
+        # from CACHEPOINT_SUPPORTED_MODELS, which governs the Converse path only.)
         if is_openai_responses_model(model_id):
             return invoke_responses_api(
                 client=self,
@@ -1121,8 +1123,13 @@ class BedrockClient:
                         context=context,
                     )
 
+                # Include model_id: errors like ResourceNotFoundException
+                # ("model version has reached the end of its life") do not name
+                # the model, so logging it here makes the offending model
+                # explicit in the function logs for troubleshooting.
                 logger.error(
-                    f"Non-retryable Bedrock error: {error_code} - {error_message}"
+                    f"Non-retryable Bedrock error for model {model_id}: "
+                    f"{error_code} - {error_message}"
                 )
                 self._put_metric("BedrockRequestsFailed", 1)
                 self._put_metric("BedrockNonRetryableErrors", 1)
@@ -1545,7 +1552,8 @@ class BedrockClient:
                 )
             else:
                 logger.error(
-                    f"Non-retryable Bedrock error for embedding: {error_code} - {error_message}"
+                    f"Non-retryable Bedrock error for embedding model {model_id}: "
+                    f"{error_code} - {error_message}"
                 )
                 self._put_metric("BedrockEmbeddingRequestsFailed", 1)
                 self._put_metric("BedrockEmbeddingNonRetryableErrors", 1)

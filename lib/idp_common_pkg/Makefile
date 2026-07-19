@@ -17,9 +17,15 @@ test-integration:
 
 test-cicd: test-unit-cicd
 
+# SKIP_INSTALL=1 skips the editable reinstall — set it when the caller already
+# installed idp_common[test] into the active environment (the CI code_checks
+# job does, via uv in before_script). Avoids a redundant plain-pip resolve that
+# re-downloads/recompiles heavy deps (e.g. numpy from source). Local `make
+# test-cicd` leaves it unset and installs as before.
+# PYTEST_ARGS lets CI pass `-n auto` (pytest-xdist) to parallelize across cores.
 test-unit-cicd:
-	pip install -e ".[test]"
-	$(PYTHON) -m pytest -m "not integration" --ignore=idp_common/agents/testing --cov=idp_common --cov-report=xml:test-reports/coverage.xml --cov-report=term --junitxml=test-reports/test-results.xml tests/
+	@if [ -z "$(SKIP_INSTALL)" ]; then pip install -e ".[test]"; else echo "SKIP_INSTALL set — using pre-installed deps"; fi
+	$(PYTHON) -m pytest -m "not integration" --ignore=idp_common/agents/testing $(PYTEST_ARGS) --cov=idp_common --cov-report=xml:test-reports/coverage.xml --cov-report=term --junitxml=test-reports/test-results.xml tests/
 
 clean:
 	rm -rf .pytest_cache

@@ -30,7 +30,13 @@ export default defineConfig({
       sidebar: [
         {
           label: "Overview",
-          items: [{ label: "Welcome", slug: "index" }],
+          items: [
+            { label: "Welcome", slug: "index" },
+            {
+              label: "Blogs, Customer Stories & Research",
+              slug: "references",
+            },
+          ],
         },
         {
           label: "Core",

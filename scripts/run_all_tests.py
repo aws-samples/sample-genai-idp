@@ -73,6 +73,7 @@ RUN_ROOTS = [
     "samples/lambda-hook-inference/GENAIIDP-mistral-ocr-hook",
     "src/lambda/api_handler",
     "src/lambda/batch_pre_processor",
+    "src/lambda/bda_ocr_project/tests",
     "src/lambda/calculate_capacity",
     "src/lambda/chat_stream_processor/tests",
     "src/lambda/chat_with_document_processor/tests",
@@ -85,6 +86,10 @@ RUN_ROOTS = [
     "src/lambda/version_check_resolver",
     "src/lambda/workflow_tracker",
     "config_library",
+    # SDLC CodeBuild harness unit tests (deployment-variant probe framework).
+    # Run the sdlc/tests subdir specifically — the parent `scripts` root stays
+    # quarantined because a bare `pytest scripts` mis-collects test_api_rbac.py.
+    "scripts/sdlc/tests",
 ]
 
 # --- Registry 2: roots explicitly EXCLUDED, each with a reason ----------------
@@ -152,9 +157,32 @@ def classify(discovered: set[str]) -> tuple[list[str], list[str]]:
     return run, quarantined
 
 
+# Parallelize each root across cores with pytest-xdist. `auto` = one worker per
+# CPU; override with PYTEST_WORKERS (e.g. "4", or "0"/"1" to disable — handy if a
+# suite has cross-test state that misbehaves under xdist). Falls back to serial
+# automatically if pytest-xdist isn't installed.
+_PYTEST_WORKERS = os.environ.get("PYTEST_WORKERS", "auto")
+
+
+def _xdist_available() -> bool:
+    try:
+        import xdist  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 def run_gate(roots: list[str], integration: bool) -> int:
     marker = "integration" if integration else "not integration"
     python = os.environ.get("PYTHON") or sys.executable
+    # Build the -n flag once. Skip it when disabled or xdist is missing so the
+    # gate still runs (serially) in a minimal environment.
+    parallel = []
+    if _PYTEST_WORKERS not in ("0", "1", "") and _xdist_available():
+        parallel = ["-n", _PYTEST_WORKERS]
+    elif _PYTEST_WORKERS not in ("0", "1", "") and not _xdist_available():
+        print("⚠️ pytest-xdist not installed — running serially", flush=True)
     failures: list[str] = []
     for root in roots:
         print(f"\n=== pytest -m '{marker}' {root} ===", flush=True)
@@ -165,6 +193,7 @@ def run_gate(roots: list[str], integration: bool) -> int:
                 "pytest",
                 "-m",
                 marker,
+                *parallel,
                 "-q",
                 "-p",
                 "no:cacheprovider",

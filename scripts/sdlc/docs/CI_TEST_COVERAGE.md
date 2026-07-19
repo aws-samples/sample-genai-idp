@@ -4,16 +4,62 @@
 
 The CI/CD pipeline runs a comprehensive smoke test suite that validates all major IDP Accelerator features. Tests run in **parallel** with **fail-fast** behavior for rapid feedback.
 
+## Pipeline stages & triggers
+
+The GitLab pipeline has three stages, gated so cheap checks run everywhere and
+the expensive AWS deploy runs only when it's worth it:
+
+| Stage | Jobs | AWS? | Cost |
+|-------|------|------|------|
+| **fast_checks** | `code_checks` (lint, typecheck, static RBAC scan, all unit suites, UI vitest) **and** `srt_security_review` (SRT security scan) — run in **parallel** | No | ~minutes |
+| **deployment_validation** | IAM service-role permission pre-check | Yes (read-only) | seconds |
+| **integration_tests** | Full stack deploy + primary suite (Steps 1–12) + deployment-variant probes | Yes (deploys) | ~1 hour |
+
+**Trigger matrix** — what runs, when:
+
+| Event | fast_checks (code + SRT) | deployment_validation | integration_tests |
+|-------|:---:|:---:|:---:|
+| Push to any branch, **no MR** | ✅ | — | — |
+| Push to branch with a **Draft** MR → `develop` | ✅ | ✅ | ▶️ **manual** (button on MR) |
+| Push to branch with a **non-Draft** MR → `develop` | ✅ | ✅ | ✅ auto |
+| Push to **`develop`** | ✅ | ✅ | ✅ auto |
+
+Notes:
+- **Every push runs fast_checks** (code checks + SRT), so lint/typecheck/unit and
+  security feedback is immediate on any branch. GitLab emails the committer on
+  failure.
+- The **~1h integration deploy runs only** on `develop` and on **non-Draft** MRs
+  targeting `develop`. On a **Draft** MR it's a **manual play button** on the MR
+  page — run it on demand, not on every WIP push.
+- A `workflow:` rule prevents **duplicate** branch+MR pipelines (a branch with an
+  open MR runs only the MR pipeline).
+- integration_tests uses `resource_group` + `interruptible`, so rapid pushes
+  don't stack up concurrent ~1h deploys (a newer run supersedes an older queued
+  one).
+
 ## Test Execution Strategy
 
-### Parallel Execution (Steps 3-10)
-- **8 tests run concurrently** to minimize pipeline runtime
+### Parallel Execution (Steps 3-11)
+- **9 tests run concurrently** to minimize pipeline runtime
 - **Fail-fast enabled**: If any test fails, remaining tests are cancelled and cleanup begins
 - **Expected runtime**: ~25-35 minutes (vs 60+ minutes sequential)
 
-### Sequential Execution (Step 11)
-- **Step 11 (test-compare) runs after parallel tests** complete
-  - **Reason**: Requires multiple test runs to compare, runs after all other tests to avoid interference
+### Sequential Execution (Step 12)
+- **Step 12 (API RBAC) runs alone after the parallel pool drains**
+  - **Reason**: Its dynamic harness temporarily flips `ADMIN_USER_PASSWORD_AUTH`
+    on the shared UI app client (a stack-wide auth mutation) and restores it —
+    interleaving with API-hitting parallel tests would corrupt them.
+
+### Concurrent deployment-variant probes (own stacks)
+- The **deployment-variant probe framework** (below) deploys SECOND,
+  independent stacks — one per probe. Four probes run by default (GLOBAL APIGW,
+  WAF, PRIVATE APIGW, Jobs API), **concurrently with the primary suite AND with
+  each other** on their own threads, so their ~30-min deploys overlap the
+  primary deploy instead of running back-to-back. Each opts out of the primary
+  suite's fail-fast abort machinery, so a primary failure never kills a probe's
+  in-flight deploy. VPC-requiring probes share one persistent pipeline-owned
+  test VPC (so VPCs don't bound concurrency); fan-out is capped by
+  `IDP_PROBE_MAX_CONCURRENCY` (default 8) to bound simultaneous stack/IAM usage.
 
 ## Test Coverage
 
@@ -174,7 +220,7 @@ The CI/CD pipeline runs a comprehensive smoke test suite that validates all majo
 
 ---
 
-### Step 11: Test Compare 🔄 *Sequential*
+### Step 11: Test Compare ⚡ *Parallel*
 **What it tests**: Test comparison CLI command
 - Multiple test run execution
 - Test result comparison via `idp-cli test-compare`
@@ -186,7 +232,8 @@ The CI/CD pipeline runs a comprehensive smoke test suite that validates all majo
 
 **Test Set**: `fake-w2` or `realkie-fcc-verified`  
 **Duration**: ~10-12 minutes (2 test runs + comparison)  
-**Why Sequential**: Runs after all other tests to avoid interference  
+**Execution**: Runs in the parallel pool (only runs inferences, no shared-stack
+mutation — safe to interleave).  
 **Implementation**: 
 - Runs 2 test inferences (2 documents each)
 - Waits for both to complete and evaluate
@@ -194,33 +241,150 @@ The CI/CD pipeline runs a comprehensive smoke test suite that validates all majo
 
 ---
 
-## Additional Deployment Test: API Gateway Web UI Hosting (VPC / PRIVATE)
+## Additional Deployment Tests: the deployment-variant probe framework
 
-Separate from the shared-stack suite above (Steps 3–11, which run against ONE
-stack deployed with default hosting — CloudFront, no VPC), this test validates
-the **API Gateway Web UI hosting** option end-to-end **with VPC support**. It
-deploys a SECOND, throwaway IDP stack and tears it down afterward.
+Separate from the shared-stack suite above (Steps 3–12, which run against ONE
+stack deployed with default hosting — CloudFront), a **deployment-variant probe
+framework** validates alternative deployment permutations, each on its **own
+throwaway IDP stack**. The probes run **concurrently** with the shared-stack
+suite *and with each other* (overlapping the ~30-min deploys) and each tears its
+stack down afterward.
 
-**What it tests**:
-- `WebUIHosting=APIGateway` + `ApiGatewayVisibility=PRIVATE` + `DeployInVPC=true`
-- A self-contained test VPC (`scripts/sdlc/apigw-hosting-test-vpc.yaml`): 2
-  private subnets, a NAT gateway for egress, a Lambda SG, and the single
-  `execute-api` interface endpoint the private REST API requires.
-- The SPA is served as an S3 proxy on the private REST API; in-VPC Lambdas.
-- **Verification** (`validate_apigw_private_hosting`):
-  - The REST API `{stack}-api` has endpoint type **PRIVATE**.
-  - The stack's `ApplicationWebURL` output is the execute-api `/api` URL.
-  - (The endpoint itself is VPC-only, so it is validated structurally rather
-    than curled — CodeBuild is on a different network.)
+Each probe is a self-contained *deploy-a-config-variant + smoke-check-its-
+distinguishing-feature* unit. The framework is a table of
+`Probe(name, stack_suffix, deploy_params, validate_fn, requires_vpc)` rows that
+a concurrent launcher iterates — adding a new permutation is **one table row +
+a validator**, not a copy-pasted deploy/validate/cleanup function.
 
-**Lifecycle**: creates the test VPC → creates per-stack IAM/boundary → deploys →
-validates → **always** tears down the IDP stack then the VPC (in a `finally`).
+> **Scope (important):** probes are **deploy + feature-smoke only, NOT full
+> functional coverage.** A variant can deploy clean yet still have a
+> doc-processing regression that only the shared-stack suite (Steps 3–12) would
+> catch. Don't read a green probe as "this variant processes documents
+> correctly" — only as "this variant deploys and its distinguishing feature
+> responds."
 
-**Gating**: runs by default; set `IDP_TEST_APIGW_VPC_HOSTING=false` to skip.
-**Implementation**: `deploy_and_test_apigw_vpc_hosting()` in
-`scripts/sdlc/codebuild_deployment.py`, invoked from `main()` after the
-shared-stack suite.
-**Duration**: ~20–30 minutes (full nested-stack create + teardown).
+### The default probes (all four run every pipeline)
+
+| Probe | `stack_suffix` | Distinguishing params | VPC? | Validator asserts |
+|-------|----------------|-----------------------|------|-------------------|
+| **APIGateway hosting (GLOBAL)** | `apigw` | `WebUIHosting=APIGateway`, `ApiGatewayVisibility=GLOBAL` | no | REST API is **REGIONAL**, `ApplicationWebURL` is the execute-api `/api` URL, **HTTP GET → 200** (internet-reachable, so a real end-to-end UI fetch) |
+| **WAF-enabled (IP allow-list)** | `waf` | `WAFAllowedIPv4Ranges` set (+ APIGateway/GLOBAL hosting to have a stage) | no | REGIONAL WebACL `{stack}-api-acl` **exists and is associated** with an API-Gateway stage |
+| **APIGateway hosting (PRIVATE)** | `apigwpriv` | `WebUIHosting=APIGateway`, `ApiGatewayVisibility=PRIVATE` | yes | REST API endpoint type is **PRIVATE** and carries a **resource policy** (VPC-only → structural check; CodeBuild can't fetch a private endpoint) |
+| **Jobs API** | `jobsapi` | `EnableJobsApi=true` | yes | stack exposes the **`ApiGatewayEndpoint`** output and its REST API exists (private → structural check) |
+
+> **Note:** the Jobs API probe exercises the *additive* `EnableJobsApi` CFN
+> parameter on the STANDARD published template — it does **not** exercise the
+> `idp-cli deploy --headless` template transform (which removes the UI). The
+> `--headless` / `--govcloud` transforms are covered by the offline unit tests
+> in `lib/idp_sdk/tests/unit/` (region-aware `cfn-lint`); a `--headless` *deploy*
+> probe remains a follow-up.
+
+Validators live in `scripts/sdlc/codebuild_deployment.py`:
+`validate_apigw_global_hosting`, `validate_waf_enabled`,
+`validate_apigw_private_hosting`, `validate_jobs_api`.
+
+**Lifecycle** (every probe): creates per-stack IAM/boundary → (for `requires_vpc`
+probes) injects the persistent-test-VPC params → deploys with the probe's extra
+CFN params → validates → captures CF failure events before teardown →
+**always** tears down the IDP stack (in a `finally`). Each probe runs on its own
+thread and opts that thread out of the shared suite's fail-fast abort machinery
+(`_thread_local.never_abort`), so a shared-suite failure's kill sweep can never
+terminate a probe's in-flight deploy, and one probe failing never affects the
+others or the already-completed shared-suite result.
+
+### The persistent test VPC (why VPC probes are now quota-safe)
+
+VPC-requiring probes (PRIVATE hosting, Jobs API) no longer stand up a throwaway
+VPC per run. A **single persistent test VPC is owned by the pipeline
+CloudFormation stack** (`scripts/sdlc/cfn/codepipeline-s3.yml`, parameter
+`CreateTestVpc`, default `true`) and reused by every run. Its ids are handed to
+CodeBuild as env vars (`IDP_TEST_VPC_ID`, `IDP_TEST_PRIVATE_SUBNET_IDS`,
+`IDP_TEST_LAMBDA_SG_ID`, `IDP_TEST_APIGW_VPCE_ID`); `_test_vpc_params()` maps
+them to the CFN params (`DeployInVPC`, `VpcId`, `PrivateSubnetIds` /
+`LambdaSubnetIds`, `LambdaSecurityGroupId`, `ApiGatewayVpcEndpointId`) that a
+`requires_vpc` probe injects at deploy time.
+
+Because probes **reference** the VPC (never create/destroy/mutate it):
+- **No VPC quota pressure** — the account's 5-VPC limit is never approached no
+  matter how many VPC variants or concurrent pipelines run.
+- **No per-run VPC churn or ENI-leak teardown failures** — the incident that
+  removed the PRIVATE/VPC variant from CI simply can't recur.
+- **Fully parallel** — VPCs no longer bound concurrency, so all four probes run
+  at once.
+
+If the pipeline is deployed with `CreateTestVpc=false`, the VPC env vars are
+empty and each `requires_vpc` probe **skips itself** (recorded as *skipped*, not
+*failed*) — the no-VPC probes (GLOBAL, WAF) still run.
+
+The NAT gateway in the persistent VPC carries a small standing cost
+(~US$32/mo + data) — the deliberate trade for quota-safe, fully-parallel VPC
+probes. The retired per-run VPC template
+(`scripts/sdlc/apigw-hosting-test-vpc.yaml`) and the
+`delete_apigw_test_vpc` / `cleanup_stale_apigw_test_vpcs` age-gated reaper are
+retained for out-of-band/manual VPC testing.
+
+### Concurrency budget
+
+The launcher fans out to at most `IDP_PROBE_MAX_CONCURRENCY` probes at once
+(default `DEFAULT_PROBE_MAX_CONCURRENCY = 8`, clamped to `[1, num_probes]`; a
+malformed/≤0 override falls back to the default). Each probe deploys a full IDP
+stack (+ IAM role/boundary) concurrently with the shared-stack deploy and any
+other in-flight pipeline, so the cap still guards **bounded stack/IAM quota** —
+but **VPCs no longer bound it** (one shared persistent VPC). The default is set
+high enough to run the whole default table in parallel.
+
+### Gating & implementation
+
+**Gating**: the probes run by default; set `IDP_TEST_APIGW_HOSTING=false` to
+skip them all (the env name is kept for backward compatibility).
+**Implementation** in `scripts/sdlc/codebuild_deployment.py`: `PROBE_VARIANTS`
+(the table), `deploy_and_test_probe()` (one probe's lifecycle, incl. VPC-param
+injection + skip), `run_variant_probes()` (the concurrent launcher),
+`resolve_probe_concurrency()` (the budget), and `_test_vpc_params()` (env → CFN
+params). Launched from `main()` on its own supervisor thread concurrently with
+the shared-stack suite. Mock-based unit coverage:
+`scripts/sdlc/tests/test_variant_probes.py` (41 tests — quota cap, single-probe
+lifecycle, fail-fast isolation, VPC-param injection + skip, all four validators,
+consolidated summary).
+**Duration**: ~20–30 minutes per probe (full nested-stack create + teardown);
+all four run in parallel by default.
+
+### Adding a future variant
+
+Add a `Probe(...)` row to `PROBE_VARIANTS` and supply a
+`validate_fn(stack_name) -> {"success": bool, ...}`. Set `requires_vpc=True` to
+get the persistent-test-VPC params injected automatically. Keep the
+deploy+feature-smoke scope in mind (see above).
+
+**Candidate future variants**: BYO S3 VPC endpoint
+(`S3VpcEndpointIdOverride`/`…DnsNameOverride`), custom domain, `--govcloud`
+(deploy-only where the account allows — an offline transform + region-aware
+`cfn-lint` gate already exists as a fast-gate unit test; see the Gap Backlog).
+
+---
+
+## End-of-run summary (every pipeline, pass or fail)
+
+Every run produces a report in the GitLab job log, uploaded to S3 and emailed via
+SNS on failure. It has two layers:
+
+- **A deterministic status table** listing every test — the build/publish step,
+  each primary-suite step, and each deployment-variant probe — as passed / failed
+  / cancelled / skipped, with an **OVERALL: PASS/FAIL** verdict. It always
+  renders, even if the AI layer is unavailable.
+- **An AI (Bedrock) narrative** on both pass and fail — a short PASS report, or a
+  grounded root-cause analysis for an infrastructure or test failure.
+
+The summary is uploaded **progressively** as steps complete (not just at the
+end), so the result is available even when a run is long.
+
+**Watching long runs.** The CodeBuild pipeline runs ~60–70 min and is not
+time-capped. The GitLab monitor that watches it has credentials capped at 1 hour
+(a hard AWS limit on role-chained sessions), so it **refreshes them mid-run** to
+keep watching to ~110 min. If a run outlives that, the monitor hands off
+gracefully — the pipeline finishes on its own and the authoritative result still
+arrives via the S3 summary + SNS email. A failure detected at handoff fails the
+GitLab job (it isn't masked by a green handoff).
 
 ---
 
@@ -301,6 +465,16 @@ run_command("idp-cli test-result --stack-name {stack} --test-run-id {id} --wait"
 - Deletes nested stacks first (AppSync, Pattern, DocumentKB, MultiDocDiscovery)
 - Deletes main stack
 - Cleans up S3 buckets, DynamoDB tables, Lambda functions
+
+### Startup reapers (converge leaks from interrupted prior runs)
+
+Each run tears down its own stacks and buckets, but an interrupted teardown (e.g.
+credentials expiring mid-cleanup) can leak them — and leaked test resources had
+previously exhausted the account's IAM-role quota and piled up thousands of
+buckets. To stay self-healing, every run first reaps **stale** leftovers from
+prior runs: test VPCs, IDP stacks (and their IAM helper stacks), and orphaned S3
+buckets. All reapers are **age-gated and skip anything a concurrent pipeline is
+still using**, so they never touch a live run.
 
 ## Success Criteria
 
@@ -479,29 +653,48 @@ additions.
 
 ### Fast-gate additions (cheap, no live AWS account needed)
 
-- [ ] **`--govcloud` transform + cfn-lint job.** Add a `developer_tests` step that
-      runs the `GovCloudTemplateTransformer` and region-aware `cfn-lint` on the
-      transformed template (target `us-gov-west-1`). Fails the MR if a
+- [x] **`--govcloud` transform + cfn-lint gate (unit-level).** `GovCloudTemplate
+      Transformer` runs against the committed `template.yaml` and the result is
+      linted with real `cfn-lint --region us-gov-west-1`, asserting zero **E3006**
+      ("resource type does not exist in region"). Fails the gate if a
       GovCloud-unsupported resource (CloudFront, Lambda Function URL, etc.) is
-      reintroduced. `cfn-lint` is offline/no-credentials. **~30–45 min. Highest
-      value-for-effort of the cheap items.**
+      reintroduced — strictly stronger than the transformer's own hardcoded
+      resource check. Offline/no-credentials. See
+      `lib/idp_sdk/tests/unit/test_govcloud_template_transform.py::test_real_
+      template_passes_govcloud_region_cfn_lint`. *(Note: the raw repo template
+      carries SAM short-form tags, so a full lint of the **published/SAM-baked**
+      template still needs the publish pipeline — deferred to the integration
+      tier.)*
 - [ ] **`--headless` template-transform smoke.** At minimum, run the
       `HeadlessTemplateTransformer` + cfn-lint in the fast gate to catch transform
-      breakage without a deploy. (Full headless *deploy* e2e is below.)
-- [ ] **Register the `pytest.mark.unit` marker in the per-Lambda dirs.** Several
-      Lambda test dirs emit `PytestUnknownMarkWarning: Unknown pytest.mark.unit`.
-      Harmless but noisy; add a shared `pytest.ini`/marker registration.
+      breakage without a deploy. (Full headless *deploy* e2e is below.) *(A
+      real-template `HeadlessTemplateTransformer` dangling-ref test already
+      exists in `test_template_transform.py`; the remaining gap is a
+      region-aware `cfn-lint` pass over the transformed headless template like
+      the govcloud one above.)*
+- [x] **Register the `pytest.mark.unit` marker repo-wide.** A minimal repo-root
+      `pytest.ini` registers the `unit` / `integration` markers, so the ~12
+      per-Lambda/resolver dirs without their own config no longer emit
+      `PytestUnknownMarkWarning`. Suites with their own `pytest.ini` are
+      unaffected (closer config wins).
 
 ### Integration / e2e depth (need the CI account; run in the CodeBuild suite)
 
-- [ ] **`--headless` deploy e2e.** Wire the existing `scripts/e2e_test_headless.py`
-      into the CodeBuild suite (deploy headless stack → smoke → teardown). Script
-      already exists and works; just not invoked by CI.
-- [ ] **APIGW hosting: GLOBAL variant + HTTP smoke.** Step 4b currently covers
-      **PRIVATE + VPC only**, and validates the REST API is PRIVATE *structurally*
-      — it never fetches `/api/`. Add (a) a GLOBAL-visibility APIGW hosting run,
-      and (b) an actual HTTP GET of the served UI (`/api/` + a static asset) to
-      prove the S3-proxy path returns bytes.
+- [x] **Jobs API deploy e2e (deploy + feature-smoke).** A deployment-variant
+      probe (`jobsapi`): deploys the STANDARD template with `EnableJobsApi=true`
+      against the persistent test VPC and asserts the Jobs API deployed
+      (`validate_jobs_api`). *Deploy + smoke only* — the private Jobs API isn't
+      call-tested from CodeBuild (not in-VPC), and full doc-processing through
+      the Jobs API path is still not exercised, so the deeper
+      `scripts/e2e_test_headless.py` flow remains a follow-up. NOTE: this probe
+      exercises the additive `EnableJobsApi` CFN parameter, **not** the
+      `idp-cli deploy --headless` template transform — a `--headless` *deploy*
+      probe is a separate follow-up (see below).
+- [x] **APIGW hosting: GLOBAL variant + HTTP smoke.** The GLOBAL/no-VPC APIGW
+      hosting probe deploys `WebUIHosting=APIGateway` + `ApiGatewayVisibility=GLOBAL`
+      and does a real HTTP `GET` of the served UI (`validate_apigw_global_hosting`
+      asserts HTTP 200 from the execute-api `/api` URL, proving the S3-proxy path
+      returns bytes). Now the first row of the deployment-variant probe framework.
 - [ ] **Upgrade-in-place test. (HIGH VALUE.)** Deploy the previous released
       version, then update the stack to the current build, then smoke. This is the
       gap that would have caught the pricing-units rollback deadlock and the
@@ -559,6 +752,40 @@ but revisit:
       *(PR #497)*
 - [x] Stopped `idp_sdk` `test_create_config` writing a stray `config.yaml` to the
       repo root. *(PR #498)*
+- [x] Generalized the single APIGW hosting test into the **deployment-variant
+      probe framework** (`PROBE_VARIANTS` table + `run_variant_probes` launcher +
+      `resolve_probe_concurrency` quota budget), with mock-based unit tests in
+      `scripts/sdlc/tests/`. *(fix/ci-variant-probe-framework)*
+- [x] Repo-root `pytest.ini` registering the shared `unit`/`integration` markers
+      (silences `PytestUnknownMarkWarning` in ~12 per-Lambda dirs).
+      *(fix/ci-variant-probe-framework)*
+- [x] Real `cfn-lint --region us-gov-west-1` E3006 gate on the transformed
+      committed template (offline fast-gate unit test).
+      *(fix/ci-variant-probe-framework)*
+- [x] **Persistent pipeline-owned test VPC** (`codepipeline-s3.yml`,
+      `CreateTestVpc`) reused by every run → VPC-requiring probes are quota-safe
+      and fully parallel; no per-run VPC create/destroy or ENI leaks.
+      *(fix/ci-variant-probe-framework)*
+- [x] **Three new probes** — WAF-enabled (IP allow-list), PRIVATE APIGW hosting,
+      and the Jobs API (`EnableJobsApi=true`) — added to `PROBE_VARIANTS` (all default-on), plus
+      `DEFAULT_PROBE_MAX_CONCURRENCY` raised so the whole table runs in parallel.
+      *(fix/ci-variant-probe-framework)*
+- [x] **Every-run consolidated summary** (`build_consolidated_summary`) listing
+      publish + every primary step + every probe with status + OVERALL PASS/FAIL,
+      always rendered to the GitLab log and uploaded to S3/SNS; Bedrock now writes
+      a grounded report on **pass as well as fail**.
+      *(fix/ci-variant-probe-framework)*
+- [x] **Startup reapers for leaked test stacks, IAM roles, and buckets** —
+      age-gated and concurrent-run-safe, so an interrupted cleanup can't exhaust
+      the account's IAM-role quota or pile up buckets again.
+- [x] **Handoff FAIL verdict** — the monitor fails the GitLab job when the
+      summary shows OVERALL: FAIL, instead of exiting green.
+- [x] **Progressive summary upload** — a current result reaches S3 before the
+      monitor handoff even when a run is long (fixed a finished run showing "No
+      summary found").
+- [x] **Mid-run monitor credential refresh** — the monitor refreshes its
+      1h-capped credentials to watch long runs to ~110 min. *(Needs a live >1h
+      run to fully validate.)*
 
 ---
 

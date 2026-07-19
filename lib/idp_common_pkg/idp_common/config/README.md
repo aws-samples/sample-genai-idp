@@ -83,6 +83,28 @@ The same Default/Custom pattern is used for auxiliary records:
   `bedrock.model_utils.get_model_max_output_tokens()` (60s cache; falls back to
   the on-disk `config_library/` YAML when no table is configured).
 
+## Rollback-safe DynamoDB serialization
+
+A CloudFormation stack rollback reverts the config custom-resource Lambda to the
+**prior release's** code but leaves the current-shape config records in
+DynamoDB; the reverted code then re-reads them. If the current shape carries a
+value an older Pydantic model rejects, the custom resource fails *on the
+rollback path* and wedges the stack in `UPDATE_ROLLBACK_FAILED`. Two known
+breaking value classes: `None` on a field an older model coerces with a bare
+`int()` (→ `int(None)` `TypeError`), and `0` on a field an older model
+constrains with `gt=0` (→ `ValidationError`).
+
+To keep updates rollback-safe, `ConfigurationRecord.to_dynamodb_item`
+(`models.py`) calls `_omit_rollback_hostile_defaults`, which **omits any scalar
+field whose value equals its declared default AND is `None` or integer `0`**.
+Because absent == default for the current model, this is behavior-neutral on
+read here, while sparing a reverted older model from values it cannot parse.
+Booleans, float `0.0` (e.g. `temperature`), positive defaults, and any non-default
+`0` are preserved. As a second layer, the `update_configuration` custom resource
+detects a rollback (a stored `config_format_version` newer than the running
+code's) and returns SUCCESS rather than FAILED on a parse error, so the rollback
+completes instead of wedging — a genuine forward bad-config still fails loudly.
+
 ## Adding or changing a model
 
 Model defaults and inference fields live in `models.py`, and model/feature
