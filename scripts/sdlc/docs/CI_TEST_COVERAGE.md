@@ -308,15 +308,17 @@ X-Content-Type-Options), cookie flags, TLS issues, and information disclosure.
 
 It runs the official **OWASP ZAP** Docker image (`ghcr.io/zaproxy/zaproxy`)
 via `zap-api-scan.py` — which requires **`PrivilegedMode: true`** on the
-`app-sdlc` CodeBuild project (`scripts/sdlc/cfn/codepipeline-s3.yml`). That flag
-only takes effect once the **SDLC pipeline stack is (re)deployed** — an
-integration run reuses the already-deployed project, so the ZAP probe does NOT
-self-enable Docker. The probe is defensive about this: a `docker info` preflight
-runs first, and if the daemon is unavailable (or the scan otherwise produces no
-report) the probe records a **SKIP (pass)** with a message pointing at the
-`PrivilegedMode` requirement — it never fails the build on a missing-Docker
-environment (mirrors how VPC-requiring probes skip when their infra is absent).
-Because
+`app-sdlc` CodeBuild project (`scripts/sdlc/cfn/codepipeline-s3.yml`; live once
+that SDLC pipeline stack is deployed). **Docker-in-CodeBuild note:** the build
+runs inside a container and, with PrivilegedMode, the Docker daemon is a
+*sibling* — so the bind-mount source (`docker run -v {workdir}:/zap/wrk`) must
+live under **`$CODEBUILD_SRC_DIR`** (shared with the daemon), NOT the build
+container's `/tmp` (which mounts empty, hiding the seeded spec). The probe
+creates its workdir there in CodeBuild and falls back to `/tmp` locally. The
+probe is also defensive: a `docker info` preflight runs first, and if the daemon
+is genuinely unavailable (or the scan produces no report) it records a **SKIP
+(pass)** rather than failing the build — mirroring how VPC-requiring probes skip
+when their infra is absent. Because
 the UI API is a single Cognito-gated route `POST /op/{field}` with **no OpenAPI
 spec**, ZAP's spider finds nothing to crawl, so the probe **seeds** the scan
 with a minimal OpenAPI doc generated from `scripts/api_rbac_expectations.yaml`

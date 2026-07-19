@@ -1271,6 +1271,53 @@ SEQUENTIAL_TEST_STEPS = [
 ALL_TEST_STEPS = PARALLEL_TEST_STEPS + SEQUENTIAL_TEST_STEPS
 
 
+def _deploy_primary_stack_attempt(stack_name, admin_email, template_url):
+    """One deploy+health-check attempt for the primary shared stack.
+
+    Creates IAM, runs `idp-cli deploy --wait`, and verifies the stack reached a
+    COMPLETE status. On failure returns a result dict with failure_type="deploy"
+    and captured `cf_events` so the caller can classify it (e.g. the transient
+    CloudWatch Logs race via _is_transient_logs_race) and decide whether to
+    retry. Returns {"success": True} on a healthy deploy.
+    """
+    result = {"stack_name": stack_name, "success": False, "failure_type": "deploy"}
+    # Step 0: Create IAM resources
+    print("Step 0: Creating IAM resources...")
+    role_arn, permissions_boundary_arn = create_iam_resources(stack_name)
+    if not role_arn or not permissions_boundary_arn:
+        result["error"] = "Failed to create required IAM resources"
+        return result
+
+    # Step 1: Deploy using template URL
+    print("Step 1: Deploying stack...")
+    cmd = f"idp-cli deploy --stack-name {stack_name} --template-url {template_url} --admin-email {admin_email} --wait"
+    cmd += f" --role-arn {role_arn}"
+    cmd += f" --parameters PermissionsBoundaryArn={permissions_boundary_arn}"
+    # Full nested-stack creation can legitimately run long; don't let the default
+    # test-command timeout kill a healthy in-progress deploy. check=False so a
+    # rollback is captured (with cf_events) and classified rather than raising.
+    deploy = run_command(cmd, check=False, timeout=3 * 3600)
+
+    # Step 2: Verify stack status
+    print("Step 2: Verifying stack status...")
+    status = run_command(
+        f"aws cloudformation describe-stacks --stack-name {stack_name} "
+        "--query 'Stacks[0].StackStatus' --output text",
+        check=False,
+    )
+    if "COMPLETE" in status.stdout and "ROLLBACK" not in status.stdout:
+        print("✅ Deployment completed")
+        return {"stack_name": stack_name, "success": True}
+
+    # Failed/rolled-back — capture CF events so _is_transient_logs_race can see
+    # whether this was the known LogGroup create race (and thus retryable).
+    detail = status.stdout.strip() or f"idp-cli deploy exit {deploy.returncode}"
+    print(f"❌ Stack status: {detail}")
+    result["error"] = f"Stack deployment failed with status: {detail}"
+    _capture_cf_events(result, stack_name)
+    return result
+
+
 def deploy_and_test_stack(stack_name, admin_email, template_url, progress_cb=None):
     """Deploy and test the unified IDP stack.
 
@@ -1292,36 +1339,40 @@ def deploy_and_test_stack(stack_name, admin_email, template_url, progress_cb=Non
             print(f"⚠️ progress_cb failed (non-fatal): {e}")
 
     try:
-        # Step 0: Create IAM resources
-        print("Step 0: Creating IAM resources...")
-        role_arn, permissions_boundary_arn = create_iam_resources(stack_name)
-        if not role_arn or not permissions_boundary_arn:
-            raise Exception("Failed to create required IAM resources")
+        # Steps 0-2: create IAM, deploy, verify — with a one-shot retry for the
+        # known transient CloudWatch Logs create-consistency race
+        # (_is_transient_logs_race). The probes already retry this
+        # (_run_probe_attempt); the primary suite did NOT, so a race on the
+        # shared stack failed the whole pipeline. A rolled-back stack + its IAM
+        # are torn down before the retry so the redeploy is clean and reuses no
+        # partially-created resources. Any OTHER deploy failure returns
+        # immediately (no retry) so real regressions surface fast.
+        deploy_result = None
+        for attempt in range(1, PROBE_TRANSIENT_MAX_ATTEMPTS + 1):
+            deploy_result = _deploy_primary_stack_attempt(
+                stack_name, admin_email, template_url
+            )
+            if deploy_result.get("success"):
+                break
+            if attempt < PROBE_TRANSIENT_MAX_ATTEMPTS and _is_transient_logs_race(
+                deploy_result
+            ):
+                print(
+                    f"♻️ Primary stack hit the transient CloudWatch Logs "
+                    f"create-consistency race (attempt {attempt}/"
+                    f"{PROBE_TRANSIENT_MAX_ATTEMPTS}); tearing down and "
+                    "redeploying a fresh stack once..."
+                )
+                # Reclaim the rolled-back stack + IAM so the retry starts clean
+                # (same stack name; cleanup is idempotent/best-effort).
+                cleanup_stack({"stack_name": stack_name})
+                deploy_result["retried_transient_logs_race"] = True
+                continue
+            # Not the transient race (or out of attempts) — surface it.
+            return deploy_result
 
-        # Step 1: Deploy using template URL
-        print("Step 1: Deploying stack...")
-        cmd = f"idp-cli deploy --stack-name {stack_name} --template-url {template_url} --admin-email {admin_email} --wait"
-        cmd += f" --role-arn {role_arn}"
-        cmd += f" --parameters PermissionsBoundaryArn={permissions_boundary_arn}"
-
-        # Full nested-stack creation can legitimately run long; don't let the
-        # default test-command timeout kill a healthy in-progress deploy.
-        run_command(cmd, timeout=3 * 3600)
-        print("✅ Deployment completed")
-
-        # Step 2: Test stack status
-        print("Step 2: Verifying stack status...")
-        cmd = f"aws cloudformation describe-stacks --stack-name {stack_name} --query 'Stacks[0].StackStatus' --output text"
-        result = run_command(cmd)
-
-        if "COMPLETE" not in result.stdout:
-            print(f"❌ Stack status: {result.stdout.strip()}")
-            return {
-                "stack_name": stack_name,
-                "success": False,
-                "failure_type": "deploy",
-                "error": f"Stack deployment failed with status: {result.stdout.strip()}",
-            }
+        if not deploy_result.get("success"):
+            return deploy_result
 
         print("✅ Stack is healthy")
 
@@ -3008,7 +3059,16 @@ def validate_zap_dast(stack_name):
             "error": "Stack has no HttpApiEndpoint output — UI API not deployed",
         }
 
-    workdir = tempfile.mkdtemp(prefix="zap-")
+    # The workdir is bind-mounted into the ZAP container (`docker run -v
+    # {workdir}:/zap/wrk`). In CodeBuild the build runs INSIDE a container and,
+    # with PrivilegedMode, the Docker daemon is a SIBLING — so a bind-mount
+    # source under the build container's own /tmp is NOT visible to the daemon
+    # and mounts EMPTY (the seed openapi.json vanished → ZAP found nothing →
+    # "File does not exist: /zap/wrk/openapi.json"). CodeBuild shares the build's
+    # source directory ($CODEBUILD_SRC_DIR) with the daemon, so create the
+    # workdir THERE when running in CodeBuild; fall back to /tmp locally.
+    _mount_root = os.environ.get("CODEBUILD_SRC_DIR") or None
+    workdir = tempfile.mkdtemp(prefix="zap-", dir=_mount_root)
     email = "zap-dast@example.invalid"
     password = "Aa1!" + secrets.token_urlsafe(24)
     token = None

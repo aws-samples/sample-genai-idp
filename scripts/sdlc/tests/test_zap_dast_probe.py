@@ -309,3 +309,39 @@ def test_validate_zap_dast_skips_when_no_report(cbd, monkeypatch, tmp_path):
     assert "no JSON report" in result["detail"]
     assert fake.restored is True
     assert fake.deleted == "zap-dast@example.invalid"
+
+
+def test_validate_zap_dast_mounts_workdir_under_codebuild_src_dir(
+    cbd, monkeypatch, tmp_path
+):
+    # In CodeBuild the Docker daemon is a sibling; the -v mount source must live
+    # under $CODEBUILD_SRC_DIR (shared with the daemon), NOT the build
+    # container's /tmp — otherwise /zap/wrk mounts empty and the seed
+    # openapi.json is invisible (the real 725 failure).
+    src_dir = tmp_path / "codebuild_src"
+    src_dir.mkdir()
+    monkeypatch.setenv("CODEBUILD_SRC_DIR", str(src_dir))
+    fake = _FakeRbac()
+    _install_fake_rbac(cbd, monkeypatch, fake)
+
+    seen = {}
+
+    def fake_run_command(cmd, check=True, timeout=None):
+        if cmd.strip() == "docker info":
+            return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+        # Capture the docker -v mount source and write a report so we pass.
+        mount_src = cmd.split("-v ", 1)[1].split(":", 1)[0]
+        seen["mount_src"] = mount_src
+        with open(f"{mount_src}/zap-report.json", "w") as fh:
+            json.dump({"site": []}, fh)
+        return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(cbd, "run_command", fake_run_command)
+    monkeypatch.setattr(cbd, "_upload_zap_report", lambda s, w: "")
+
+    result = cbd.validate_zap_dast("idp-test-zapdast")
+    assert result["success"] is True
+    # The mount source (== workdir) must be under $CODEBUILD_SRC_DIR.
+    assert seen["mount_src"].startswith(str(src_dir)), (
+        f"workdir {seen['mount_src']} not under CODEBUILD_SRC_DIR {src_dir}"
+    )

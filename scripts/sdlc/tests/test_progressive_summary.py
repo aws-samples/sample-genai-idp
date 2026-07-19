@@ -140,3 +140,79 @@ def test_no_progress_cb_is_fine(cbd, monkeypatch):
     # Omitting the callback (default None) must work unchanged.
     result = cbd.deploy_and_test_stack("idp-x", "a@b.com", "https://t")
     assert result["success"] is True
+
+
+# --------------------------------------------------------------------------- #
+# Primary-suite deploy retry on the transient CloudWatch Logs create race
+# (mirrors the probe retry; the primary suite previously had none).
+# --------------------------------------------------------------------------- #
+def _cwl_race_events():
+    # Shape _is_transient_logs_race matches: a CREATE_FAILED on an
+    # AWS::Logs::LogGroup whose reason contains "does not exist".
+    return [
+        {
+            "resource_type": "AWS::Logs::LogGroup",
+            "logical_id": "SomeFunctionLogGroup",
+            "status": "CREATE_FAILED",
+            "reason": "The specified log group does not exist.",
+        }
+    ]
+
+
+def test_primary_deploy_retries_transient_logs_race(cbd, monkeypatch):
+    _stub_suite(cbd, monkeypatch)  # tests all pass once deploy succeeds
+    calls = {"deploy": 0, "cleanup": []}
+    monkeypatch.setattr(
+        cbd, "cleanup_stack", lambda r: calls["cleanup"].append(r["stack_name"])
+    )
+    monkeypatch.setattr(cbd, "_capture_cf_events", lambda r, *n: None)
+
+    # First deploy attempt hits the CWL race; second succeeds.
+    def fake_attempt(stack_name, admin_email, template_url):
+        calls["deploy"] += 1
+        if calls["deploy"] == 1:
+            return {
+                "stack_name": stack_name,
+                "success": False,
+                "failure_type": "deploy",
+                "error": "Stack deployment failed: log group does not exist",
+                "cf_events": _cwl_race_events(),
+            }
+        return {"stack_name": stack_name, "success": True}
+
+    monkeypatch.setattr(cbd, "_deploy_primary_stack_attempt", fake_attempt)
+
+    result = cbd.deploy_and_test_stack("idp-x", "a@b.com", "https://t")
+    assert result["success"] is True
+    assert calls["deploy"] == 2  # retried exactly once
+    assert calls["cleanup"] == ["idp-x"]  # rolled-back stack torn down before retry
+
+
+def test_primary_deploy_no_retry_on_non_transient_failure(cbd, monkeypatch):
+    _stub_suite(cbd, monkeypatch)
+    calls = {"deploy": 0}
+    monkeypatch.setattr(cbd, "cleanup_stack", lambda r: None)
+
+    # A genuine (non-race) deploy failure must NOT be retried.
+    def fake_attempt(stack_name, admin_email, template_url):
+        calls["deploy"] += 1
+        return {
+            "stack_name": stack_name,
+            "success": False,
+            "failure_type": "deploy",
+            "error": "CREATE_FAILED: IAM role policy invalid",
+            "cf_events": [
+                {
+                    "resource_type": "AWS::IAM::Role",
+                    "status": "CREATE_FAILED",
+                    "reason": "MalformedPolicyDocument",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(cbd, "_deploy_primary_stack_attempt", fake_attempt)
+
+    result = cbd.deploy_and_test_stack("idp-x", "a@b.com", "https://t")
+    assert result["success"] is False
+    assert calls["deploy"] == 1  # no retry
+    assert result["failure_type"] == "deploy"
