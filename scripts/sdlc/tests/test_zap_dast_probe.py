@@ -311,16 +311,14 @@ def test_validate_zap_dast_skips_when_no_report(cbd, monkeypatch, tmp_path):
     assert fake.deleted == "zap-dast@example.invalid"
 
 
-def test_validate_zap_dast_mounts_workdir_under_codebuild_src_dir(
-    cbd, monkeypatch, tmp_path
-):
-    # In CodeBuild the Docker daemon is a sibling; the -v mount source must live
-    # under $CODEBUILD_SRC_DIR (shared with the daemon), NOT the build
-    # container's /tmp — otherwise /zap/wrk mounts empty and the seed
-    # openapi.json is invisible (the real 725 failure).
-    src_dir = tmp_path / "codebuild_src"
-    src_dir.mkdir()
-    monkeypatch.setenv("CODEBUILD_SRC_DIR", str(src_dir))
+def test_validate_zap_dast_workdir_is_world_writable(cbd, monkeypatch):
+    # PROVEN root cause (verified in real CodeBuild): the bind-mounted workdir is
+    # root-owned, but the ZAP image runs zap-api-scan.py as the non-root `zap`
+    # user, which cannot write the report → PermissionError → no report → skip.
+    # The workdir MUST be world-writable (0o777) so the container can write it.
+    import os
+    import stat
+
     fake = _FakeRbac()
     _install_fake_rbac(cbd, monkeypatch, fake)
 
@@ -329,9 +327,10 @@ def test_validate_zap_dast_mounts_workdir_under_codebuild_src_dir(
     def fake_run_command(cmd, check=True, timeout=None):
         if cmd.strip() == "docker info":
             return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
-        # Capture the docker -v mount source and write a report so we pass.
+        # Capture the mount source (== workdir) and its perms at scan time, then
+        # write a report (as the "container" would once it can write).
         mount_src = cmd.split("-v ", 1)[1].split(":", 1)[0]
-        seen["mount_src"] = mount_src
+        seen["mode"] = stat.S_IMODE(os.stat(mount_src).st_mode)
         with open(f"{mount_src}/zap-report.json", "w") as fh:
             json.dump({"site": []}, fh)
         return type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})()
@@ -341,7 +340,5 @@ def test_validate_zap_dast_mounts_workdir_under_codebuild_src_dir(
 
     result = cbd.validate_zap_dast("idp-test-zapdast")
     assert result["success"] is True
-    # The mount source (== workdir) must be under $CODEBUILD_SRC_DIR.
-    assert seen["mount_src"].startswith(str(src_dir)), (
-        f"workdir {seen['mount_src']} not under CODEBUILD_SRC_DIR {src_dir}"
-    )
+    # World-writable so the container's non-root `zap` user can write the report.
+    assert seen["mode"] & 0o002, f"workdir mode {oct(seen['mode'])} is not world-writable"

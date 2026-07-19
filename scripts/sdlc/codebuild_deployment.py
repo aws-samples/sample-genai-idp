@@ -3068,15 +3068,18 @@ def validate_zap_dast(stack_name):
         }
 
     # The workdir is bind-mounted into the ZAP container (`docker run -v
-    # {workdir}:/zap/wrk`). In CodeBuild the build runs INSIDE a container and,
-    # with PrivilegedMode, the Docker daemon is a SIBLING — so a bind-mount
-    # source under the build container's own /tmp is NOT visible to the daemon
-    # and mounts EMPTY (the seed openapi.json vanished → ZAP found nothing →
-    # "File does not exist: /zap/wrk/openapi.json"). CodeBuild shares the build's
-    # source directory ($CODEBUILD_SRC_DIR) with the daemon, so create the
-    # workdir THERE when running in CodeBuild; fall back to /tmp locally.
-    _mount_root = os.environ.get("CODEBUILD_SRC_DIR") or None
-    workdir = tempfile.mkdtemp(prefix="zap-", dir=_mount_root)
+    # {workdir}:/zap/wrk`). The mount itself works from /tmp in CodeBuild dind
+    # (verified). The catch: CodeBuild runs the build as root, so the workdir is
+    # root-owned, but the official ZAP image runs zap-api-scan.py as the non-root
+    # `zap` user — which can READ the seeded openapi.json (world-readable) but
+    # CANNOT WRITE the report back, so ZAP dies with
+    # `PermissionError: [Errno 13] ... /zap/wrk/zap-report.html` and produces no
+    # report (previously misread as a mount failure). chmod 0o777 the workdir so
+    # the container's non-root user can write the report. (Contents are a
+    # throwaway OpenAPI seed + ZAP reports — no secrets; the token lives in a
+    # separate options file, also 0o777 here but never uploaded.)
+    workdir = tempfile.mkdtemp(prefix="zap-")
+    os.chmod(workdir, 0o777)
     email = "zap-dast@example.invalid"
     password = "Aa1!" + secrets.token_urlsafe(24)
     token = None

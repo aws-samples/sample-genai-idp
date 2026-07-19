@@ -309,15 +309,17 @@ X-Content-Type-Options), cookie flags, TLS issues, and information disclosure.
 It runs the official **OWASP ZAP** Docker image (`ghcr.io/zaproxy/zaproxy`)
 via `zap-api-scan.py` — which requires **`PrivilegedMode: true`** on the
 `app-sdlc` CodeBuild project (`scripts/sdlc/cfn/codepipeline-s3.yml`; live once
-that SDLC pipeline stack is deployed). **Docker-in-CodeBuild note:** the build
-runs inside a container and, with PrivilegedMode, the Docker daemon is a
-*sibling* — so the bind-mount source (`docker run -v {workdir}:/zap/wrk`) must
-live under **`$CODEBUILD_SRC_DIR`** (shared with the daemon), NOT the build
-container's `/tmp` (which mounts empty, hiding the seeded spec). The probe
-creates its workdir there in CodeBuild and falls back to `/tmp` locally. The
-probe is also defensive: a `docker info` preflight runs first, and if the daemon
-is genuinely unavailable (or the scan produces no report) it records a **SKIP
-(pass)** rather than failing the build — mirroring how VPC-requiring probes skip
+that SDLC pipeline stack is deployed). **Docker-in-CodeBuild note:** the bind
+mount (`docker run -v {workdir}:/zap/wrk`) works fine from `/tmp`, but CodeBuild
+runs the build as **root** while the ZAP image runs `zap-api-scan.py` as the
+non-root **`zap`** user — which can read the seeded spec but **cannot write the
+report** into a root-owned workdir (`PermissionError: /zap/wrk/zap-report.html`,
+which surfaces as no report). The probe therefore **`chmod 0o777`s the workdir**
+so the container can write its report (proven end-to-end in a real CodeBuild
+project). The probe is also defensive: a `docker info` preflight runs first, and
+if the daemon is genuinely unavailable (or the scan produces no report) it
+records a **SKIP (pass)** rather than failing the build — mirroring how
+VPC-requiring probes skip
 when their infra is absent. Because
 the UI API is a single Cognito-gated route `POST /op/{field}` with **no OpenAPI
 spec**, ZAP's spider finds nothing to crawl, so the probe **seeds** the scan
