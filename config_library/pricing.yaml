@@ -221,6 +221,29 @@ pricing:
       - name: outputTokens
         price: "1.65E-5"
 
+  # GovCloud Nova models are invoked with bare model IDs (the us. cross-region
+  # inference-profile prefix is invalid in GovCloud), so the us.-prefixed
+  # entries above never match at cost-calc time — the lookup in
+  # save_reporting_data._get_unit_cost is substring-based and neither
+  # "bedrock/amazon.nova-pro-v1:0" nor "bedrock/us.amazon.nova-pro-v1:0" is a
+  # substring of the other, so a bare GovCloud Nova call would otherwise be
+  # costed at $0.0. No separate GovCloud per-token pricing is published, so
+  # these mirror the commercial us. rates. Cache units omitted for the same
+  # reason as the us-gov Claude entry above (GovCloud caching unverified).
+  - name: bedrock/amazon.nova-pro-v1:0
+    units:
+      - name: inputTokens
+        price: "8.0E-7"
+      - name: outputTokens
+        price: "3.2E-6"
+
+  - name: bedrock/amazon.nova-lite-v1:0
+    units:
+      - name: inputTokens
+        price: "6.0E-8"
+      - name: outputTokens
+        price: "2.4E-7"
+
   - name: bedrock/us.anthropic.claude-sonnet-4-6
     units:
       - name: inputTokens
