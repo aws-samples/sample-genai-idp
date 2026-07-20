@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from textwrap import dedent
 
 import boto3
+from botocore.config import Config as _BotoConfig
 
 # Cap test/monitor commands so a hung inference run cannot consume the
 # CodeBuild job timeout and prevent stack cleanup from running (leaks ~116
@@ -288,12 +289,23 @@ def publish_templates():
         raise Exception("Failed to extract template URL from publish output")
 
 
+# boto3's default retry mode is "legacy" (max ~4 attempts, no adaptive
+# rate-limiting). When the primary suite + N probes each create their IAM stack
+# at once, the account-wide (low, non-adjustable) IAM mutating-call rate is
+# exceeded and iam:CreatePolicy fails with "Throttling: Rate exceeded (reached
+# max retries: 4)" — killing the whole probe at Step 0, BEFORE any deploy (so
+# the CFN transient-race retry can't help). "adaptive" mode adds client-side
+# rate-limiting + more attempts to ride through the throttle. Launch stagger
+# reduces the burst; this rides out what stagger doesn't fully eliminate.
+_THROTTLE_RETRY_CONFIG = _BotoConfig(retries={"max_attempts": 10, "mode": "adaptive"})
+
+
 def create_iam_resources(stack_name):
     """Create IAM role and permission boundary using CloudFormation template"""
     print(f"[{stack_name}] Creating IAM resources...")
 
     try:
-        cf_client = boto3.client("cloudformation")
+        cf_client = boto3.client("cloudformation", config=_THROTTLE_RETRY_CONFIG)
         iam_stack_name = f"{stack_name}-iam"
 
         # Deploy IAM CloudFormation stack
@@ -334,8 +346,10 @@ def create_iam_resources(stack_name):
         if not role_arn:
             raise Exception("Could not find ServiceRoleArn in stack outputs")
 
-        # Create permission boundary policy
-        iam_client = boto3.client("iam")
+        # Create permission boundary policy. Adaptive retry so a burst of
+        # concurrent iam:CreatePolicy calls (primary + probes) rides through the
+        # account-wide IAM throttle instead of failing at "reached max retries: 4".
+        iam_client = boto3.client("iam", config=_THROTTLE_RETRY_CONFIG)
         boundary_name = f"{stack_name}-PermissionsBoundary"
         boundary_policy = {
             "Version": "2012-10-17",
@@ -371,8 +385,9 @@ def cleanup_iam_resources(stack_name):
     print(f"[{stack_name}] Cleaning up IAM stack...")
 
     try:
-        # Clean up IAM CloudFormation stack
-        cf_client = boto3.client("cloudformation")
+        # Clean up IAM CloudFormation stack (adaptive retry: concurrent teardown
+        # of primary + probe IAM stacks also bursts CFN/IAM mutating calls).
+        cf_client = boto3.client("cloudformation", config=_THROTTLE_RETRY_CONFIG)
         iam_stack_name = f"{stack_name}-iam"
         try:
             cf_client.delete_stack(StackName=iam_stack_name)

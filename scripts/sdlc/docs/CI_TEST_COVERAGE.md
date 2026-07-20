@@ -85,9 +85,15 @@ Notes:
   10s) × index to flatten the burst and avoid the race up front (cheaper than a
   rollback); (2) a **one-shot fresh-stack retry** (`_is_transient_deploy_race`,
   scoped tightly to those two resource+message signatures so genuine config
-  errors still surface) backstops both the primary deploy and each probe. See
-  `scratch/aws-service-issue-cfn-eventual-consistency.md` for the AWS service-issue
-  evidence package.
+  errors still surface) backstops both the primary deploy and each probe. A
+  THIRD burst symptom is IAM throttling at Step 0 — `iam:CreatePolicy`
+  "Throttling: Rate exceeded (reached max retries: 4)" while creating each
+  stack's permissions boundary — which fails BEFORE any deploy (so the
+  fresh-stack retry can't catch it); the IAM/CFN clients in
+  `create_iam_resources`/`cleanup_iam_resources` therefore use **boto3 adaptive
+  retry** (`max_attempts: 10`) to ride through the account-wide IAM rate limit.
+  See `scratch/aws-service-issue-cfn-eventual-consistency.md` for the AWS
+  service-issue evidence package.
 
 ## Test Coverage
 

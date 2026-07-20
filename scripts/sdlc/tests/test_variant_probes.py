@@ -1082,3 +1082,65 @@ def test_consolidated_summary_publish_failure(cbd):
     out = cbd.build_consolidated_summary("idp-z", None, [], False)
     assert "OVERALL: FAIL" in out
     assert "Not run (publish failed)" in out
+
+
+# --------------------------------------------------------------------------- #
+# create_iam_resources — adaptive retry so concurrent IAM bursts ride out the
+# account-wide throttle instead of dying at "reached max retries: 4"
+# --------------------------------------------------------------------------- #
+
+
+def test_create_iam_resources_uses_adaptive_retry_clients(cbd, monkeypatch):
+    # The IAM CreatePolicy throttle killed a probe at Step 0 (before deploy).
+    # Assert every boto3 client built here gets the adaptive-retry Config so the
+    # burst backs off through the throttle.
+    seen_configs = []
+
+    class _Cfn:
+        def create_stack(self, **k):
+            return {}
+
+        def get_waiter(self, name):
+            return type("W", (), {"wait": lambda self, **k: None})()
+
+        def describe_stacks(self, StackName):
+            return {"Stacks": [{"Outputs": [{"OutputKey": "ServiceRoleArn",
+                     "OutputValue": "arn:aws:iam::1:role/r"}]}]}
+
+        exceptions = type("E", (), {"AlreadyExistsException": Exception})()
+
+    class _Iam:
+        def create_policy(self, **k):
+            return {}
+        exceptions = type("E", (), {"EntityAlreadyExistsException": Exception})()
+
+    class _Sts:
+        def get_caller_identity(self):
+            return {"Account": "123456789012"}
+
+    impls = {"cloudformation": _Cfn(), "iam": _Iam(), "sts": _Sts()}
+
+    def fake_client(name, *a, **k):
+        seen_configs.append((name, k.get("config")))
+        return impls[name]
+
+    monkeypatch.setattr(cbd.boto3, "client", fake_client)
+    # Point the template open() at any readable file (content is not parsed here).
+    import builtins
+
+    real_open = builtins.open
+    monkeypatch.setattr(
+        builtins, "open", lambda *a, **k: real_open(__file__), raising=True
+    )
+
+    role_arn, boundary_arn = cbd.create_iam_resources("idp-test")
+    assert role_arn and boundary_arn
+
+    # The cloudformation + iam clients (mutating, burst-prone) must use adaptive
+    # retry with raised max_attempts.
+    by_service = {name: cfg for name, cfg in seen_configs}
+    for svc in ("cloudformation", "iam"):
+        cfg = by_service.get(svc)
+        assert cfg is not None, f"{svc} client built without a Config"
+        assert cfg.retries["mode"] == "adaptive"
+        assert cfg.retries["max_attempts"] >= 5
