@@ -22,6 +22,17 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _no_launch_stagger(monkeypatch):
+    """Disable the probe launch stagger by default so launcher tests don't sleep.
+
+    The real default is DEFAULT_PROBE_LAUNCH_STAGGER_SECS (10s/index); with it on,
+    run_variant_probes tests would sleep index*10s. Stagger-resolver tests set
+    IDP_PROBE_LAUNCH_STAGGER_SECS explicitly, which overrides this.
+    """
+    monkeypatch.setenv("IDP_PROBE_LAUNCH_STAGGER_SECS", "0")
+
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
@@ -154,6 +165,38 @@ def test_concurrency_never_zero_even_with_zero_probes(cbd, monkeypatch):
     # but the clamp should still hold.
     monkeypatch.delenv("IDP_PROBE_MAX_CONCURRENCY", raising=False)
     assert cbd.resolve_probe_concurrency(0) == 1
+
+
+# --------------------------------------------------------------------------- #
+# _resolve_probe_launch_stagger — burst-flattening mitigation
+# --------------------------------------------------------------------------- #
+
+
+def test_launch_stagger_defaults_when_unset(cbd, monkeypatch):
+    monkeypatch.delenv("IDP_PROBE_LAUNCH_STAGGER_SECS", raising=False)
+    assert cbd._resolve_probe_launch_stagger() == float(
+        cbd.DEFAULT_PROBE_LAUNCH_STAGGER_SECS
+    )
+
+
+def test_launch_stagger_zero_disables(cbd, monkeypatch):
+    # 0 is a valid explicit value (simultaneous launch, pre-mitigation behavior)
+    # and must NOT be coerced to the default.
+    monkeypatch.setenv("IDP_PROBE_LAUNCH_STAGGER_SECS", "0")
+    assert cbd._resolve_probe_launch_stagger() == 0.0
+
+
+def test_launch_stagger_honors_override(cbd, monkeypatch):
+    monkeypatch.setenv("IDP_PROBE_LAUNCH_STAGGER_SECS", "3.5")
+    assert cbd._resolve_probe_launch_stagger() == 3.5
+
+
+def test_launch_stagger_malformed_and_negative_fall_back(cbd, monkeypatch):
+    default = float(cbd.DEFAULT_PROBE_LAUNCH_STAGGER_SECS)
+    monkeypatch.setenv("IDP_PROBE_LAUNCH_STAGGER_SECS", "abc")
+    assert cbd._resolve_probe_launch_stagger() == default
+    monkeypatch.setenv("IDP_PROBE_LAUNCH_STAGGER_SECS", "-5")
+    assert cbd._resolve_probe_launch_stagger() == default
 
 
 # --------------------------------------------------------------------------- #

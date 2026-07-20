@@ -3279,6 +3279,34 @@ Probe = namedtuple(
 # IDP_PROBE_MAX_CONCURRENCY.
 DEFAULT_PROBE_MAX_CONCURRENCY = 8
 
+# Seconds of launch stagger PER probe index (probe i waits i * this before its
+# deploy). Spreads the concurrent CreateLogGroup/CreateProject burst that drives
+# the AWS control-plane consistency races (_TRANSIENT_DEPLOY_RACES). 10s × up to
+# 5 probes = at most ~40s added to the LAST probe's start, negligible against a
+# ~30-min deploy and far cheaper than a rollback+retry. 0 disables (simultaneous).
+DEFAULT_PROBE_LAUNCH_STAGGER_SECS = 10
+
+
+def _resolve_probe_launch_stagger():
+    """Per-index probe launch stagger (secs) from IDP_PROBE_LAUNCH_STAGGER_SECS.
+
+    Non-negative float; malformed/negative → default. 0 = no stagger (all probes
+    launch at once, the pre-mitigation behavior).
+    """
+    raw = get_env_var(
+        "IDP_PROBE_LAUNCH_STAGGER_SECS", str(DEFAULT_PROBE_LAUNCH_STAGGER_SECS)
+    )
+    try:
+        secs = float(raw)
+    except (TypeError, ValueError):
+        print(
+            f"⚠️ Invalid IDP_PROBE_LAUNCH_STAGGER_SECS={raw!r}; "
+            f"using default {DEFAULT_PROBE_LAUNCH_STAGGER_SECS}"
+        )
+        return float(DEFAULT_PROBE_LAUNCH_STAGGER_SECS)
+    return secs if secs >= 0 else float(DEFAULT_PROBE_LAUNCH_STAGGER_SECS)
+
+
 # The probe table. The primary suite (Steps 3-12) still runs separately on ONE
 # default-hosting (CloudFront) stack; these are ADDITIONAL deploy+smoke probes
 # of alternative deployment permutations, each on its own throwaway stack.
@@ -3619,16 +3647,32 @@ def run_variant_probes(admin_email, template_url, probes=None):
     for p in probes:
         print(f"   • {p.name} (stack suffix -{p.stack_suffix})")
 
+    # Stagger probe launches so the primary suite + N probes don't all fire
+    # their CreateLogGroup / CreateProject bursts at the same instant. These
+    # deploys hit two AWS control-plane eventual-consistency races
+    # (_TRANSIENT_DEPLOY_RACES: CWL "log group does not exist";
+    # CodeBuild "sts:AssumeRole on service role" trust propagation) whose
+    # probability rises with concurrent-create burst load. Spreading launches by
+    # a few seconds each flattens the burst and AVOIDS the race up front — much
+    # cheaper than the rollback + teardown + retry it would otherwise trigger.
+    # Probability reducer, NOT a guarantee (a single stack can still race), so
+    # the one-shot retry stays as the backstop. Tunable/disable via
+    # IDP_PROBE_LAUNCH_STAGGER_SECS (0 = simultaneous, old behavior).
+    stagger = _resolve_probe_launch_stagger()
+
+    def _staggered_deploy(probe, launch_index):
+        if stagger and launch_index:
+            time.sleep(launch_index * stagger)
+        return deploy_and_test_probe(probe, admin_email, template_url)
+
     results = []
     # No `with`: match the primary suite's pattern — shutdown(wait=True) in a
     # finally, never an implicit join that could burn the job timeout.
     executor = ThreadPoolExecutor(max_workers=cap)
     try:
         futures = {
-            executor.submit(
-                deploy_and_test_probe, probe, admin_email, template_url
-            ): probe
-            for probe in probes
+            executor.submit(_staggered_deploy, probe, i): probe
+            for i, probe in enumerate(probes)
         }
         for future in as_completed(futures):
             probe = futures[future]

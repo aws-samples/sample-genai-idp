@@ -73,6 +73,21 @@ Notes:
   in-flight deploy. VPC-requiring probes share one persistent pipeline-owned
   test VPC (so VPCs don't bound concurrency); fan-out is capped by
   `IDP_PROBE_MAX_CONCURRENCY` (default 8) to bound simultaneous stack/IAM usage.
+- **Launch stagger + transient-race retry (AWS eventual-consistency resilience).**
+  Standing up the primary + N probe stacks at once bursts hundreds of
+  `CreateLogGroup`/`CreateProject` calls; two AWS control-plane races can then
+  surface as `CREATE_FAILED` and roll a stack back: CloudWatch Logs
+  "The specified log group does not exist" (CreateLogGroup→PutRetentionPolicy
+  consistency gap) and CodeBuild "not authorized to perform: sts:AssumeRole on
+  service role" (IAM trust-policy propagation lagging the role's `CREATE_COMPLETE`
+  — not fixable by `DependsOn`, the ordering is already correct). Two mitigations:
+  (1) probe launches are **staggered** `IDP_PROBE_LAUNCH_STAGGER_SECS` (default
+  10s) × index to flatten the burst and avoid the race up front (cheaper than a
+  rollback); (2) a **one-shot fresh-stack retry** (`_is_transient_deploy_race`,
+  scoped tightly to those two resource+message signatures so genuine config
+  errors still surface) backstops both the primary deploy and each probe. See
+  `scratch/aws-service-issue-cfn-eventual-consistency.md` for the AWS service-issue
+  evidence package.
 
 ## Test Coverage
 
