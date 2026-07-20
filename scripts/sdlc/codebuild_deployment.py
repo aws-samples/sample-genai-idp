@@ -3093,15 +3093,31 @@ def _parse_zap_alerts(report_json_path):
         for alert in site.get("alerts", []):
             label = risk_label.get(str(alert.get("riskcode", "0")), "Informational")
             counts[label] = counts.get(label, 0) + 1
+            instances = alert.get("instances", []) or []
+            # A few sample affected URLs (deduped) so the summary is actionable
+            # without needing the full HTML report.
+            sample_urls = []
+            for inst in instances:
+                uri = inst.get("uri", "")
+                if uri and uri not in sample_urls:
+                    sample_urls.append(uri)
+                if len(sample_urls) >= 3:
+                    break
             alerts.append(
                 {
                     "risk": label,
                     "name": alert.get("alert") or alert.get("name", ""),
                     "pluginid": alert.get("pluginid", ""),
-                    "count": len(alert.get("instances", []))
-                    or int(alert.get("count", 0) or 0),
+                    "count": len(instances) or int(alert.get("count", 0) or 0),
+                    # 'solution' is ZAP's remediation guidance (HTML-ish); keep a
+                    # trimmed plain-ish version for the log.
+                    "solution": (alert.get("solution", "") or "").strip(),
+                    "sample_urls": sample_urls,
                 }
             )
+    # High→Info, then most-instances first, so the log leads with what matters.
+    order = {"High": 0, "Medium": 1, "Low": 2, "Informational": 3}
+    alerts.sort(key=lambda a: (order.get(a["risk"], 9), -a["count"]))
     return counts, alerts
 
 
@@ -3281,10 +3297,31 @@ def validate_zap_dast(stack_name):
             f"High={counts.get('High', 0)} Medium={counts.get('Medium', 0)} "
             f"Low={counts.get('Low', 0)} Info={counts.get('Informational', 0)}"
         )
-        print(f"🔎 ZAP DAST alerts: {summary}")
-        for a in alerts:
-            if a["risk"] in ("High", "Medium"):
-                print(f"   • [{a['risk']}] {a['name']} (x{a['count']})")
+        # Detailed, self-contained report in the build log (so the findings are
+        # actionable without opening the HTML report). Scope line first, then
+        # EVERY alert (not just High/Medium) with its risk, instance count,
+        # sample affected URLs, and remediation hint.
+        print(f"\n{'=' * 72}")
+        print("🔎 ZAP DAST scan report")
+        print(f"{'=' * 72}")
+        print(f"  Target:      {api_base}")
+        print(f"  Operations:  {len(fields)} seeded (POST /op/<field>)")
+        print(
+            f"  Mode:        {'active scan' if ZAP_ACTIVE_SCAN else 'passive baseline'}"
+        )
+        print(f"  Alerts:      {summary}")
+        if alerts:
+            print("  Findings (most severe first):")
+            for a in alerts:
+                print(f"    • [{a['risk']}] {a['name']} — {a['count']} instance(s)")
+                for u in a.get("sample_urls", []):
+                    print(f"        {u}")
+                if a.get("solution"):
+                    fix = " ".join(a["solution"].split())[:200]
+                    print(f"        ↳ fix: {fix}")
+        else:
+            print("  No alerts raised.")
+        print(f"{'=' * 72}\n")
 
         # TODO promote: once zap-rules.conf is triaged, gate the build here, e.g.
         #   if counts.get("High", 0) > 0: return {"success": False, ...}
@@ -3293,6 +3330,9 @@ def validate_zap_dast(stack_name):
             "success": True,
             "zap_alerts": counts,
             "zap_summary": summary,
+            "zap_findings": alerts,
+            "operations_scanned": len(fields),
+            "target": api_base,
             "report_url": report_url,
             "active_scan": ZAP_ACTIVE_SCAN,
         }

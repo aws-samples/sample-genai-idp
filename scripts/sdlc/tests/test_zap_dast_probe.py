@@ -22,6 +22,14 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _no_launch_stagger(monkeypatch):
+    """Disable the probe launch stagger so the run_variant_probes tests here
+    don't sleep index*DEFAULT_PROBE_LAUNCH_STAGGER_SECS (120s) — the gating
+    tests (IDP_TEST_ZAP true/false) call the real launcher."""
+    monkeypatch.setenv("IDP_PROBE_LAUNCH_STAGGER_SECS", "0")
+
+
 # --------------------------------------------------------------------------- #
 # Registration
 # --------------------------------------------------------------------------- #

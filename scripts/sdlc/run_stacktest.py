@@ -100,12 +100,27 @@ def main():
         default="citest@suppress.welcome.email",
         help="admin email for self-deploy mode",
     )
+    ap.add_argument(
+        "--region",
+        help="AWS region of the stack (default: AWS_DEFAULT_REGION, else "
+        "us-east-1). Needed when your stack is not in us-east-1 — e.g. an "
+        "AWS_PROFILE whose configured region differs is NOT picked up by the "
+        "validators, which read AWS_DEFAULT_REGION.",
+    )
     # VPC wiring (make params, not env) for VPC-requiring stack-tests.
     ap.add_argument("--vpc-id")
     ap.add_argument("--subnet-ids", help="comma-separated private subnet ids")
     ap.add_argument("--lambda-sg-id")
     ap.add_argument("--apigw-vpce-id")
     args = ap.parse_args()
+
+    # The validators (and rbac_common.resolve_stack) resolve region from
+    # AWS_DEFAULT_REGION, NOT from the active AWS profile's configured region. So
+    # `AWS_PROFILE=default` alone would still look in us-east-1 even if that
+    # profile is configured for another region. Make --region authoritative by
+    # exporting it into the env the validators read.
+    if args.region:
+        os.environ["AWS_DEFAULT_REGION"] = args.region
 
     if args.list or not args.suffix:
         _print_list()

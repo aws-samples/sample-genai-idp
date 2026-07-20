@@ -334,7 +334,7 @@ api-test-static: ## Static RBAC/authorization scan of all API operations (no AWS
 # (falls back to IDP_TEST_* env vars; the run-stack-tests skill can
 # discover a suitable VPC and fill these in for you).
 _STACKTEST_VPC_ARGS = $(if $(VPC_ID),--vpc-id $(VPC_ID),) $(if $(SUBNET_IDS),--subnet-ids $(SUBNET_IDS),) $(if $(LAMBDA_SG_ID),--lambda-sg-id $(LAMBDA_SG_ID),) $(if $(APIGW_VPCE_ID),--apigw-vpce-id $(APIGW_VPCE_ID),)
-_STACKTEST_ARGS = $(if $(STACK_NAME),--stack-name $(STACK_NAME),) $(if $(TEMPLATE_URL),--template-url $(TEMPLATE_URL),) $(if $(ADMIN_EMAIL),--admin-email $(ADMIN_EMAIL),) $(_STACKTEST_VPC_ARGS)
+_STACKTEST_ARGS = $(if $(STACK_NAME),--stack-name $(STACK_NAME),) $(if $(REGION),--region $(REGION),) $(if $(TEMPLATE_URL),--template-url $(TEMPLATE_URL),) $(if $(ADMIN_EMAIL),--admin-email $(ADMIN_EMAIL),) $(_STACKTEST_VPC_ARGS)
 
 stacktest-list: ## List the available deploy-variant stack-tests
 	$(PYTHON) scripts/sdlc/run_stacktest.py --list
