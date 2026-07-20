@@ -335,8 +335,17 @@ Parameters:
       - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "global.anthropic.claude-sonnet-5"
+      # GovCloud: none of the us./eu./global. cross-region inference-profile
+      # prefixes above work in GovCloud regions (ValidationException: "The
+      # provided model identifier is invalid."). Bare model IDs and the
+      # us-gov. inference profile (for models that require one) are the only
+      # forms that work. Verified live against us-gov-west-1 via
+      # bedrock-runtime Converse on 2026-07-17.
+      - "amazon.nova-pro-v1:0"
+      - "amazon.nova-lite-v1:0"
+      - "us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
-    Description: Model to use for optional Document Knowledge Base. Model access MUST be enabled in Amazon Bedrock. Note - Nova Premier may not be available in all EU regions.
+    Description: Model to use for optional Document Knowledge Base. Model access MUST be enabled in Amazon Bedrock. Note - Nova Premier may not be available in all EU regions. GovCloud deployments must use one of the GovCloud-verified entries above (amazon.nova-pro-v1:0, amazon.nova-lite-v1:0, or us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0) — the commercial default is overridden automatically by the --govcloud template transform.
 
   # Optional - Post processing Lambda hook
   PostProcessingLambdaHookFunctionArn:
@@ -8962,6 +8971,21 @@ Resources:
     Properties:
       AssumeRolePolicyDocument:
         Version: 2012-10-17
+        # Cognito Identity's federated service principal (and matching OIDC
+        # condition-key namespace) differs PER REGION, not just per
+        # partition — GovCloud docs
+        # (docs.aws.amazon.com/govcloud-us/latest/UserGuide/govcloud-cog.html)
+        # give each GovCloud region its own principal. Verified against a
+        # live us-gov-west-1 deployment: the commercial principal
+        # (cognito-identity.amazonaws.com) passes CloudFormation validation
+        # silently, but IAM never lets the identity pool assume the role —
+        # the browser's IdentityPool.credsForOIDCTokens call then fails at
+        # login with InvalidIdentityPoolConfigurationException. Rather than
+        # branch on AWS::Region (which would require Conditions + Fn::If
+        # around every statement, since map/object keys can't be built with
+        # intrinsics), list one statement per known principal — only the
+        # one matching the deploy region's actual federated caller is ever
+        # exercised by STS; the others are inert.
         Statement:
           - Effect: Allow
             Principal:
@@ -8973,6 +8997,26 @@ Resources:
                 "cognito-identity.amazonaws.com:aud": !Ref IdentityPool
               "ForAnyValue:StringLike":
                 "cognito-identity.amazonaws.com:amr": authenticated
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity-us-gov.amazonaws.com
+            Action:
+              - sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "cognito-identity-us-gov.amazonaws.com:aud": !Ref IdentityPool
+              "ForAnyValue:StringLike":
+                "cognito-identity-us-gov.amazonaws.com:amr": authenticated
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.us-gov-east-1.amazonaws.com
+            Action:
+              - sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "cognito-identity.us-gov-east-1.amazonaws.com:aud": !Ref IdentityPool
+              "ForAnyValue:StringLike":
+                "cognito-identity.us-gov-east-1.amazonaws.com:amr": authenticated
       PermissionsBoundary:
         !If [
           HasPermissionsBoundary,

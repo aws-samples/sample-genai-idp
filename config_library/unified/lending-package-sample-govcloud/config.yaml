@@ -3,6 +3,14 @@
 
 # Specifies models available in GovCloud. All other settings are currently
 # inherited from system defaults.
+#
+# Model availability verified live against us-gov-west-1 via bedrock-runtime
+# Converse on 2026-07-17 (`aws bedrock list-foundation-models` alone is
+# insufficient — several listed models return AccessDeniedException because
+# GovCloud model-access agreements are managed through the paired commercial
+# account, not directly in GovCloud, and Anthropic's older Claude 3.x models
+# are ResourceNotFoundException/"Legacy" in this account). Do not add a model
+# here without confirming a real Converse call succeeds in-region first.
 
 use_bda: false
 
@@ -19,25 +27,60 @@ extraction:
   confidence:
     model: amazon.nova-lite-v1:0
     max_tokens: "10000"
+    # Self-healing escalation model (escalation_enabled defaults to true in
+    # base-confidence.yaml) — used when Nova Lite leaves rows unscored after
+    # hitting its output cap. The system default (us.anthropic.claude-sonnet-5:1m)
+    # is invalid in GovCloud.
+    escalation_model: us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
 summarization:
-  model: anthropic.claude-3-7-sonnet-20250219-v1:0
+  model: us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
 chat:
-  # GovCloud: use a GovCloud-available model. Opus 4.7 1M may not be
-  # available in GovCloud — fall back to Claude 3.7 Sonnet (which also
-  # has a large context window suitable for full-document chat).
-  model: anthropic.claude-3-7-sonnet-20250219-v1:0
+  # GovCloud: Claude Sonnet 4.5 is only invokable via the us-gov. cross-region
+  # inference profile (bare anthropic.claude-sonnet-4-5-* returns
+  # ValidationException: on-demand throughput isn't supported). Verified live
+  # against us-gov-west-1 with Converse (incl. tool use) on 2026-07-17. Note
+  # prompt caching (cachePoint) does NOT work through this inference profile
+  # (0 cache tokens on a repeated identical prompt) — treat GovCloud Claude
+  # calls as always cache-miss for cost estimation.
+  model: us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
 evaluation:
-  model: anthropic.claude-3-7-sonnet-20250219-v1:0
+  # The actual model field consumed by the LLM-based semantic comparator is
+  # evaluation.llm_method.model (see idp_common/evaluation/service.py) — a
+  # top-level evaluation.model key is NOT read anywhere and silently does
+  # nothing. Verified live: system default (us.amazon.nova-2-lite-v1:0) is
+  # invalid in GovCloud (ValidationException).
+  llm_method:
+    model: us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
 discovery:
   with_ground_truth:
     model_id: amazon.nova-pro-v1:0
   without_ground_truth:
     model_id: amazon.nova-pro-v1:0
+  # Multi-page document splitting (Claude, text-only) — verified GovCloud-safe.
+  auto_split:
+    model_id: us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
+  # Multi-Doc Discovery clustering (src/lambda/multi_doc_discovery). Only
+  # analysis_model_id (Claude, text) is fixed here — embedding_model_id has NO
+  # working substitute: neither the system default (cohere.embed-v4) nor its
+  # documented fallback (amazon.titan-embed-image-v1, a multimodal/image
+  # embedding model) exists in the us-gov-west-1 model catalog as of
+  # 2026-07-17 (only amazon.titan-embed-text-v2:0, text-only, is offered).
+  # Multi-Doc Discovery's embedding step will fail in GovCloud until AWS adds
+  # a multimodal embedding model there or this feature is reworked to use a
+  # text-only embedding path.
+  multi_document:
+    analysis_model_id: us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
+  # Rule Discovery (extracting business rules from policy documents). The
+  # system default (global.anthropic.claude-sonnet-4-6) doesn't exist as a
+  # foundation model in the GovCloud catalog at all (ValidationException,
+  # even without the global. prefix).
+  rules:
+    model: us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
 agents:
   error_analyzer:
-    model_id: anthropic.claude-3-7-sonnet-20250219-v1:0
+    model_id: us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
   chat_companion:
-    model_id: anthropic.claude-3-7-sonnet-20250219-v1:0
+    model_id: us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
 
 classes:
   - $schema: https://json-schema.org/draft/2020-12/schema

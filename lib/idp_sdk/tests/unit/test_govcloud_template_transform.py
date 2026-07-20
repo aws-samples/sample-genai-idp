@@ -463,3 +463,111 @@ def test_govcloud_transform_with_headless_jobs_api_passes_region_cfn_lint():
             f"{f.get('Location', {}).get('Path')}: {f.get('Message')}" for f in e3006
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# GovCloud-safe default overrides (vector store / KB model / config preset).
+#
+# These three transforms only change parameter Defaults (and, for the preset,
+# a Mappings entry + AllowedValues) so a GovCloud deploy that passes none of
+# these parameters still lands on GovCloud-valid values instead of the
+# commercial defaults, which fail at deploy/runtime in GovCloud. See the
+# method docstrings in template_transform.py for the ValidationExceptions each
+# one prevents.
+# ---------------------------------------------------------------------------
+
+
+def _template_with_govcloud_defaults():
+    """Minimal template carrying the params/mappings the defaults transform edits.
+
+    Uses the SAME commercial defaults as the real template.yaml so the tests
+    assert the transform actually *changes* them (not just that it tolerates a
+    value already set to the GovCloud one).
+    """
+    return {
+        "AWSTemplateFormatVersion": "2010-09-09",
+        "Description": "Test",
+        "Mappings": {
+            "ConfigurationMap": {
+                "lending-package-sample": {"ConfigPath": "lending-package-sample"},
+            },
+        },
+        "Parameters": {
+            "KnowledgeBaseVectorStore": {
+                "Type": "String",
+                "Default": "S3_VECTORS",
+                "AllowedValues": ["S3_VECTORS", "OPENSEARCH_SERVERLESS"],
+            },
+            "KnowledgeBaseModelId": {
+                "Type": "String",
+                "Default": "us.amazon.nova-pro-v1:0",
+                "AllowedValues": [
+                    "us.amazon.nova-pro-v1:0",
+                    "amazon.nova-pro-v1:0",
+                    "amazon.nova-lite-v1:0",
+                    "us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                ],
+            },
+            "ConfigurationPreset": {
+                "Type": "String",
+                "Default": "lending-package-sample",
+                "AllowedValues": ["lending-package-sample", "rvl-cdip"],
+            },
+        },
+        "Resources": {"InputBucket": {"Type": "AWS::S3::Bucket"}},
+    }
+
+
+def test_vector_store_default_forced_to_opensearch():
+    """S3 Vectors is unsupported for Bedrock KBs in GovCloud → default to OSS."""
+    t = GovCloudTemplateTransformer()
+    result = t.apply_transforms(_template_with_govcloud_defaults())
+    param = result["Parameters"]["KnowledgeBaseVectorStore"]
+    assert param["Default"] == "OPENSEARCH_SERVERLESS"
+    # Both values are KEPT (unlike WebUIHosting, which is forced to one) so a
+    # caller can still opt into S3_VECTORS if/when GovCloud supports it.
+    assert set(param["AllowedValues"]) == {"S3_VECTORS", "OPENSEARCH_SERVERLESS"}
+
+
+def test_kb_model_default_forced_to_govcloud_verified():
+    """Commercial us. inference-profile default is invalid in GovCloud."""
+    t = GovCloudTemplateTransformer()
+    result = t.apply_transforms(_template_with_govcloud_defaults())
+    param = result["Parameters"]["KnowledgeBaseModelId"]
+    assert param["Default"] == GovCloudTemplateTransformer.GOVCLOUD_KB_MODEL_DEFAULT
+    assert param["Default"] == "amazon.nova-pro-v1:0"
+    # AllowedValues untouched (the GovCloud-safe entries are already present).
+    assert "amazon.nova-pro-v1:0" in param["AllowedValues"]
+
+
+def test_configuration_preset_default_forced_to_govcloud_sample():
+    """Preset default flips to the GovCloud sample, added to map + AllowedValues."""
+    t = GovCloudTemplateTransformer()
+    result = t.apply_transforms(_template_with_govcloud_defaults())
+    preset = result["Parameters"]["ConfigurationPreset"]
+    assert preset["Default"] == "lending-package-sample-govcloud"
+    # Selectable in the dropdown, listed first.
+    assert preset["AllowedValues"][0] == "lending-package-sample-govcloud"
+    # The commercial presets are still selectable (not removed).
+    assert "lending-package-sample" in preset["AllowedValues"]
+    # And the ConfigurationMap gained the GovCloud sample's ConfigPath entry.
+    cfg_map = result["Mappings"]["ConfigurationMap"]
+    assert cfg_map["lending-package-sample-govcloud"] == {
+        "ConfigPath": "lending-package-sample-govcloud"
+    }
+
+
+def test_govcloud_default_overrides_are_idempotent():
+    """Re-running the transform on already-GovCloud values is a no-op (no dup)."""
+    t = GovCloudTemplateTransformer()
+    once = t.apply_transforms(_template_with_govcloud_defaults())
+    twice = t.apply_transforms(once)
+    preset = twice["Parameters"]["ConfigurationPreset"]
+    # 'lending-package-sample-govcloud' inserted exactly once, not twice.
+    assert preset["AllowedValues"].count("lending-package-sample-govcloud") == 1
+    assert twice["Parameters"]["KnowledgeBaseVectorStore"]["Default"] == (
+        "OPENSEARCH_SERVERLESS"
+    )
+    assert twice["Parameters"]["KnowledgeBaseModelId"]["Default"] == (
+        "amazon.nova-pro-v1:0"
+    )
