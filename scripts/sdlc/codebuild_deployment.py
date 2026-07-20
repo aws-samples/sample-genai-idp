@@ -300,8 +300,20 @@ def publish_templates():
 _THROTTLE_RETRY_CONFIG = _BotoConfig(retries={"max_attempts": 10, "mode": "adaptive"})
 
 
-def create_iam_resources(stack_name):
-    """Create IAM role and permission boundary using CloudFormation template"""
+def create_iam_resources(stack_name, create_boundary=True):
+    """Create the CFN service role, and (optionally) a permissions boundary.
+
+    create_boundary=True (primary suite): also create a no-op {Action:*,Resource:*}
+    permissions-boundary policy and return its ARN, so the deploy exercises the
+    PermissionsBoundaryArn feature (verified by validate_permission_boundaries).
+
+    create_boundary=False (manual probes): skip the boundary — the probe is an
+    infra-deploy smoke test, not a boundary test, so it deploys with an EMPTY
+    PermissionsBoundaryArn (the template's HasPermissionsBoundary gate supports
+    this). Skipping it removes an iam:CreatePolicy + iam:DeletePolicy call per
+    probe, so a `make probes-all` sweep no longer bursts the account-wide IAM
+    rate limit. Returns (role_arn, "") in this mode.
+    """
     print(f"[{stack_name}] Creating IAM resources...")
 
     try:
@@ -346,9 +358,16 @@ def create_iam_resources(stack_name):
         if not role_arn:
             raise Exception("Could not find ServiceRoleArn in stack outputs")
 
+        if not create_boundary:
+            # Probe mode: deploy with an EMPTY PermissionsBoundaryArn — no
+            # per-stack boundary policy created (removes an iam:CreatePolicy /
+            # DeletePolicy from the concurrent burst).
+            print(f"[{stack_name}] ℹ️ Skipping permissions boundary (probe mode)")
+            return role_arn, ""
+
         # Create permission boundary policy. Adaptive retry so a burst of
-        # concurrent iam:CreatePolicy calls (primary + probes) rides through the
-        # account-wide IAM throttle instead of failing at "reached max retries: 4".
+        # concurrent iam:CreatePolicy calls rides through the account-wide IAM
+        # throttle instead of failing at "reached max retries: 4".
         iam_client = boto3.client("iam", config=_THROTTLE_RETRY_CONFIG)
         boundary_name = f"{stack_name}-PermissionsBoundary"
         boundary_policy = {
@@ -1216,6 +1235,85 @@ def test_step11_test_compare(stack_name):
         return {"success": False, "error": f"test-compare test failed: {str(e)}"}
 
 
+def test_step13_permission_boundaries(stack_name):
+    """Verify the deployed IAM roles actually carry the permissions boundary.
+
+    The primary suite deploys with a non-empty PermissionsBoundaryArn, so the
+    template's HasPermissionsBoundary condition should attach that boundary to
+    every AWS::IAM::Role it creates. This is the ONLY place that boundary
+    behavior is checked end-to-end (probes now deploy WITHOUT a boundary), so it
+    closes a real gap: a template change that drops the PermissionsBoundary from
+    a role would otherwise ship silently.
+
+    Read-only IAM (list stack role resources + iam:GetRole), safe in the
+    parallel pool. Samples up to 25 roles to bound API calls. Fails if any
+    checked role is missing its boundary.
+    """
+    print("Step 13: Verifying IAM permissions boundaries are attached...")
+    try:
+        cf = boto3.client("cloudformation", config=_THROTTLE_RETRY_CONFIG)
+        iam = boto3.client("iam", config=_THROTTLE_RETRY_CONFIG)
+
+        # Collect AWS::IAM::Role physical ids from the stack + its nested stacks.
+        role_names = []
+        stacks_to_scan = [stack_name]
+        scanned = set()
+        while stacks_to_scan:
+            sn = stacks_to_scan.pop()
+            if sn in scanned:
+                continue
+            scanned.add(sn)
+            paginator = cf.get_paginator("list_stack_resources")
+            for page in paginator.paginate(StackName=sn):
+                for r in page.get("StackResourceSummaries", []):
+                    rtype = r.get("ResourceType")
+                    if rtype == "AWS::IAM::Role":
+                        pid = r.get("PhysicalResourceId")
+                        if pid:
+                            role_names.append(pid)
+                    elif rtype == "AWS::CloudFormation::Stack":
+                        nested = r.get("PhysicalResourceId")
+                        if nested:
+                            stacks_to_scan.append(nested)
+
+        if not role_names:
+            return {"success": False, "error": "No IAM roles found in stack to check"}
+
+        sample = role_names[:25]
+        missing = []
+        checked = 0
+        for rn in sample:
+            try:
+                role = iam.get_role(RoleName=rn)["Role"]
+            except Exception:  # noqa: BLE001 — role may be a path/ARN edge case
+                continue
+            checked += 1
+            if not role.get("PermissionsBoundary"):
+                missing.append(rn)
+
+        if checked == 0:
+            return {
+                "success": False,
+                "error": "Could not read any role for boundary check",
+            }
+        if missing:
+            return {
+                "success": False,
+                "error": (
+                    f"{len(missing)}/{checked} sampled roles missing a "
+                    f"PermissionsBoundary (e.g. {missing[0]})"
+                ),
+            }
+        print(
+            f"✅ All {checked} sampled IAM roles carry a permissions boundary "
+            f"(of {len(role_names)} total)"
+        )
+        return {"success": True}
+    except Exception as e:  # noqa: BLE001
+        print(f"❌ Permission-boundary check failed: {e}")
+        return {"success": False, "error": f"Permission-boundary check failed: {e}"}
+
+
 # Single source of truth for the smoke-test suite: (func, step, name,
 # description). The parallel runner, the success summary, and the AI
 # failure-analysis prompt are all derived from this list — add or remove a
@@ -1277,6 +1375,15 @@ PARALLEL_TEST_STEPS = [
         "Step 11",
         "test-compare",
         "Test comparison (idp-cli test-compare)",
+    ),
+    # Step 13: read-only IAM check that the deployed roles carry the permissions
+    # boundary (probes no longer test this, so the primary suite must). Safe in
+    # the parallel pool — no shared-stack mutation.
+    (
+        test_step13_permission_boundaries,
+        "Step 13",
+        "Permission boundaries",
+        "IAM permissions boundaries attached to deployed roles",
     ),
 ]
 # Step 12 stays sequential: its dynamic RBAC harness temporarily flips
@@ -3295,11 +3402,14 @@ Probe = namedtuple(
 DEFAULT_PROBE_MAX_CONCURRENCY = 8
 
 # Seconds of launch stagger PER probe index (probe i waits i * this before its
-# deploy). Spreads the concurrent CreateLogGroup/CreateProject burst that drives
-# the AWS control-plane consistency races (_TRANSIENT_DEPLOY_RACES). 10s × up to
-# 5 probes = at most ~40s added to the LAST probe's start, negligible against a
-# ~30-min deploy and far cheaper than a rollback+retry. 0 disables (simultaneous).
-DEFAULT_PROBE_LAUNCH_STAGGER_SECS = 10
+# deploy). Spreads the concurrent CreateLogGroup/CreateProject/CreatePolicy burst
+# that drives the AWS control-plane races (_TRANSIENT_DEPLOY_RACES + IAM rate
+# limit) so the same resource types across stacks don't overlap their create
+# windows. 120s × up to 5 probes = at most ~8min added to the LAST probe's start
+# — negligible against a ~30-min deploy, and it prevents the burst rather than
+# recovering from it. Only applies when probes actually run (off by default in
+# CI now; used by `make probes-all` / IDP_RUN_PROBES=true). 0 disables.
+DEFAULT_PROBE_LAUNCH_STAGGER_SECS = 120
 
 
 def _resolve_probe_launch_stagger():
@@ -3496,16 +3606,21 @@ def _run_probe_attempt(probe, admin_email, template_url, vpc_params):
     stack_name = f"{generate_stack_name()}-{probe.stack_suffix}"
     result = {"stack_name": stack_name, "success": False, "probe": probe.name}
     try:
-        role_arn, boundary_arn = create_iam_resources(stack_name)
-        if not role_arn or not boundary_arn:
+        # Probes don't create their own permissions boundary (only the primary
+        # suite does + tests it) — removes an iam:CreatePolicy/DeletePolicy from
+        # the burst. boundary_arn is "" here; deploy with an empty
+        # PermissionsBoundaryArn (template's HasPermissionsBoundary gate handles
+        # the empty case).
+        role_arn, boundary_arn = create_iam_resources(stack_name, create_boundary=False)
+        if not role_arn:
             raise Exception(f"Failed to create IAM resources for probe {probe.name!r}")
 
-        # idp-cli --parameters takes ONE comma-separated key=value string.
-        # PermissionsBoundaryArn is always required; the probe's extra params
-        # follow, then any injected VPC params. idp-cli's parser splits only on
-        # commas preceding a `key=`, so the comma-joined subnet list is safe.
+        # idp-cli --parameters takes ONE comma-separated key=value string. The
+        # probe's extra params, then any injected VPC params. idp-cli's parser
+        # splits only on commas preceding a `key=`, so the comma-joined subnet
+        # list is safe.
         merged = {**probe.deploy_params, **vpc_params}
-        param_pairs = [f"PermissionsBoundaryArn={boundary_arn}"]
+        param_pairs = [f"PermissionsBoundaryArn={boundary_arn}"]  # empty = feature off
         param_pairs += [f"{k}={v}" for k, v in merged.items()]
         params = ",".join(param_pairs)
         cmd = (
@@ -3899,15 +4014,26 @@ def main():
     if publish_success:
         # Step 2: Launch the deployment-variant probes on their OWN supervisor
         # thread FIRST so their ~30m stack deploys overlap the primary suite's
-        # ~30m deploy instead of running after it (~30m wall-clock saved). Each
-        # probe uses an independent throwaway stack and opts out of the fail-
-        # fast abort machinery, so probes and the primary suite are fully
-        # isolated. The supervisor internally caps concurrent probes at the
-        # quota budget (IDP_PROBE_MAX_CONCURRENCY). Gated by
-        # IDP_TEST_APIGW_HOSTING (default on) — the historical env name is kept
-        # for backward compatibility since the GLOBAL APIGW probe is the only
-        # default row.
-        probes_enabled = get_env_var("IDP_TEST_APIGW_HOSTING", "true").lower() == "true"
+        # ~30m deploy instead of running after it. Each probe uses an independent
+        # throwaway stack and opts out of the fail-fast abort machinery, so
+        # probes and the primary suite are fully isolated. The supervisor
+        # internally caps concurrent probes at the quota budget
+        # (IDP_PROBE_MAX_CONCURRENCY).
+        #
+        # DEFAULT OFF in CI. Standing up the primary + 5 probe stacks at once
+        # bursts the account-wide control planes (CWL log-group create
+        # consistency, CodeBuild role-trust propagation, IAM CreatePolicy rate
+        # limit) — a recurring source of flaky pipeline failures unrelated to the
+        # code under test. The deploy-variant probes are infra smoke tests that
+        # rarely change, so they now run MANUALLY via `make probe-*` (see
+        # scripts/sdlc/run_probe.py / .claude/skills/run-integration-probes.md),
+        # each on its own stack with no concurrent-burst. Set IDP_RUN_PROBES=true
+        # to re-enable them in a pipeline run. (IDP_TEST_APIGW_HOSTING is still
+        # honored as a legacy alias so an existing override keeps working.)
+        probes_enabled = (
+            get_env_var("IDP_RUN_PROBES", "false").lower() == "true"
+            or get_env_var("IDP_TEST_APIGW_HOSTING", "false").lower() == "true"
+        )
         probes_future = None
         probes_executor = None
         if probes_enabled:

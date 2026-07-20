@@ -26,9 +26,9 @@ pytestmark = pytest.mark.unit
 def _no_launch_stagger(monkeypatch):
     """Disable the probe launch stagger by default so launcher tests don't sleep.
 
-    The real default is DEFAULT_PROBE_LAUNCH_STAGGER_SECS (10s/index); with it on,
-    run_variant_probes tests would sleep index*10s. Stagger-resolver tests set
-    IDP_PROBE_LAUNCH_STAGGER_SECS explicitly, which overrides this.
+    The real default is DEFAULT_PROBE_LAUNCH_STAGGER_SECS (120s/index); with it
+    on, run_variant_probes tests would sleep index*120s. Stagger-resolver tests
+    set IDP_PROBE_LAUNCH_STAGGER_SECS explicitly, which overrides this.
     """
     monkeypatch.setenv("IDP_PROBE_LAUNCH_STAGGER_SECS", "0")
 
@@ -81,11 +81,14 @@ def _stub_lifecycle(cbd, monkeypatch, *, deploy_status="CREATE_COMPLETE"):
     """
     calls = {"iam": [], "commands": [], "cleanup": [], "cf_events": []}
 
+    # Probes call create_iam_resources(stack_name, create_boundary=False) and
+    # deploy with an EMPTY boundary ARN, so the stub accepts the kwarg and
+    # returns "" for the boundary.
     monkeypatch.setattr(
         cbd,
         "create_iam_resources",
-        lambda stack_name: (
-            calls["iam"].append(stack_name) or ("role-arn", "boundary-arn")
+        lambda stack_name, create_boundary=True: (
+            calls["iam"].append(stack_name) or ("role-arn", "")
         ),
     )
     monkeypatch.setattr(cbd, "generate_stack_name", lambda: "idp-0101-000000")
@@ -227,9 +230,13 @@ def test_probe_happy_path_deploys_validates_cleans_up(cbd, monkeypatch):
     assert validated == ["idp-0101-000000-apigw"]
     # cleanup ALWAYS runs (finally)
     assert calls["cleanup"] == ["idp-0101-000000-apigw"]
-    # deploy command carried the probe's extra params + the boundary
+    # deploy command carried the probe's extra params + an EMPTY boundary
+    # (probes deploy without a permissions boundary — only the primary suite
+    # creates+tests one).
     deploy_cmd = next(c for c in calls["commands"] if "idp-cli deploy" in c)
-    assert "PermissionsBoundaryArn=boundary-arn" in deploy_cmd
+    assert "PermissionsBoundaryArn=," in deploy_cmd or deploy_cmd.rstrip('"').endswith(
+        "PermissionsBoundaryArn="
+    )
     assert "WebUIHosting=APIGateway" in deploy_cmd
     assert "ApiGatewayVisibility=GLOBAL" in deploy_cmd
     assert "--stack-name idp-0101-000000-apigw" in deploy_cmd
@@ -300,7 +307,11 @@ def test_probe_exception_captures_events_and_cleans_up(cbd, monkeypatch):
 
 def test_probe_iam_failure_still_cleans_up(cbd, monkeypatch):
     calls = _stub_lifecycle(cbd, monkeypatch)
-    monkeypatch.setattr(cbd, "create_iam_resources", lambda stack_name: (None, None))
+    monkeypatch.setattr(
+        cbd,
+        "create_iam_resources",
+        lambda stack_name, create_boundary=True: (None, None),
+    )
 
     probe = _make_probe(cbd)
     result = cbd.deploy_and_test_probe(probe, "a@b.com", "https://tmpl")
@@ -1104,14 +1115,25 @@ def test_create_iam_resources_uses_adaptive_retry_clients(cbd, monkeypatch):
             return type("W", (), {"wait": lambda self, **k: None})()
 
         def describe_stacks(self, StackName):
-            return {"Stacks": [{"Outputs": [{"OutputKey": "ServiceRoleArn",
-                     "OutputValue": "arn:aws:iam::1:role/r"}]}]}
+            return {
+                "Stacks": [
+                    {
+                        "Outputs": [
+                            {
+                                "OutputKey": "ServiceRoleArn",
+                                "OutputValue": "arn:aws:iam::1:role/r",
+                            }
+                        ]
+                    }
+                ]
+            }
 
         exceptions = type("E", (), {"AlreadyExistsException": Exception})()
 
     class _Iam:
         def create_policy(self, **k):
             return {}
+
         exceptions = type("E", (), {"EntityAlreadyExistsException": Exception})()
 
     class _Sts:

@@ -322,6 +322,58 @@ endif
 	    $(if $(NO_TEARDOWN),--no-teardown,)
 	@echo -e "$(GREEN)✅ API RBAC report written to $(if $(REPORT_DIR),$(REPORT_DIR),./api-test-results)$(NC)"
 
+##@ Stack tests (stacktest-*: run against / deploy a live stack, manual)
+# One family for every test that exercises a REAL deployed stack (as opposed to
+# the offline unit suites under `make test`). These run OUTSIDE the CI pipeline
+# — on a dev box with AWS creds (AWS_PROFILE=default or idp-ci) — so heavy,
+# concurrent, or infra-variant tests don't burst the account-wide control planes
+# the way running them all at once in one pipeline did.
+#
+# The deploy-variant probes (APIGateway hosting, WAF, PRIVATE/VPC, Jobs API, ZAP
+# DAST) in particular no longer run automatically in CI; run them here on demand,
+# each on its own stack. Two modes:
+#   * STACK_NAME=<existing>  → validate that already-deployed stack (fast)
+#   * omit STACK_NAME        → self-deploy a throwaway stack + validate + teardown
+#     (needs TEMPLATE_URL from publish.py).
+# VPC probes (jobsapi, apigwpriv) take VPC wiring as make params:
+#   VPC_ID=... SUBNET_IDS=a,b LAMBDA_SG_ID=... APIGW_VPCE_ID=...
+# (falls back to IDP_TEST_* env vars; the run-integration-probes skill can
+# discover a suitable VPC and fill these in for you).
+_PROBE_VPC_ARGS = $(if $(VPC_ID),--vpc-id $(VPC_ID),) $(if $(SUBNET_IDS),--subnet-ids $(SUBNET_IDS),) $(if $(LAMBDA_SG_ID),--lambda-sg-id $(LAMBDA_SG_ID),) $(if $(APIGW_VPCE_ID),--apigw-vpce-id $(APIGW_VPCE_ID),)
+_PROBE_ARGS = $(if $(STACK_NAME),--stack-name $(STACK_NAME),) $(if $(TEMPLATE_URL),--template-url $(TEMPLATE_URL),) $(if $(ADMIN_EMAIL),--admin-email $(ADMIN_EMAIL),) $(_PROBE_VPC_ARGS)
+
+stacktest-list: ## List the available stack-test probes
+	$(PYTHON) scripts/sdlc/run_probe.py --list
+
+# RBAC/API authorization test against a live stack (alias to api-test, which
+# CLAUDE.md + the api-rbac-test skill still reference by its original name).
+stacktest-rbac: api-test ## RBAC/API authorization test (alias: api-test) — needs STACK_NAME
+
+stacktest-probe-zap: ## ZAP DAST scan probe (STACK_NAME=... or self-deploy w/ TEMPLATE_URL=...)
+	$(PYTHON) scripts/sdlc/run_probe.py zapdast $(_PROBE_ARGS)
+
+stacktest-probe-apigw-global: ## APIGateway GLOBAL hosting probe
+	$(PYTHON) scripts/sdlc/run_probe.py apigw $(_PROBE_ARGS)
+
+stacktest-probe-waf: ## WAF-enabled hosting probe
+	$(PYTHON) scripts/sdlc/run_probe.py waf $(_PROBE_ARGS)
+
+stacktest-probe-apigw-private: ## APIGateway PRIVATE (VPC) hosting probe (needs VPC_ID=...)
+	$(PYTHON) scripts/sdlc/run_probe.py apigwpriv $(_PROBE_ARGS)
+
+stacktest-probe-jobsapi: ## Jobs API (VPC) probe (needs VPC_ID=...)
+	$(PYTHON) scripts/sdlc/run_probe.py jobsapi $(_PROBE_ARGS)
+
+# Release-vs-release benchmark audit (alias to benchmark-release).
+stacktest-benchmark: benchmark-release ## Release benchmark audit (alias: benchmark-release)
+
+# In-place stack upgrade validation (X→Y). No standalone harness in-repo yet —
+# see .claude/skills/test-upgrade.md for the procedure.
+stacktest-upgrade: ## Show how to run the in-place upgrade test (see test-upgrade skill)
+	@echo "Upgrade testing is documented in .claude/skills/test-upgrade.md"
+	@echo "It deploys a FROM release, update-stacks to a TO release, and watches"
+	@echo "the UpdateDefaultConfig custom resource. Follow that skill's steps."
+
 ##@ UI Development
 # Usage: make ui-start STACK_NAME=<stack-name>
 ui-start: ## Start UI dev server (requires STACK_NAME for .env generation)

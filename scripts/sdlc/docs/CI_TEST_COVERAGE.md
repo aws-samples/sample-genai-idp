@@ -277,12 +277,26 @@ mutation — safe to interleave).
 
 ## Additional Deployment Tests: the deployment-variant probe framework
 
-Separate from the shared-stack suite above (Steps 3–12, which run against ONE
+> **⚠️ Default OFF in CI (changed 2026-07).** These probes no longer run
+> automatically in the integration pipeline. Standing up the primary + 5 probe
+> stacks *at once* burst the account-wide AWS control planes — CloudWatch Logs
+> create-consistency, CodeBuild role-trust propagation, and the IAM
+> `CreatePolicy` rate limit — producing flaky pipeline failures unrelated to the
+> code under test. Since these are infra-variant *deploy smoke tests* that rarely
+> change, they now run **manually, one stack at a time**, via
+> `make stacktest-probe-*` (see `.claude/skills/run-integration-probes.md` and
+> `scripts/sdlc/run_probe.py`). The CI pipeline runs the **primary shared stack
+> only** (Steps 3–13). Set `IDP_RUN_PROBES=true` to re-enable them in a pipeline
+> run. When they DO run (manual sweep or opt-in), launches are staggered
+> (`IDP_PROBE_LAUNCH_STAGGER_SECS`, default 120s) and each deploys **without** a
+> permissions boundary (only the primary suite creates + tests one — Step 13).
+
+Separate from the shared-stack suite above (Steps 3–13, which run against ONE
 stack deployed with default hosting — CloudFront), a **deployment-variant probe
 framework** validates alternative deployment permutations, each on its **own
-throwaway IDP stack**. The probes run **concurrently** with the shared-stack
-suite *and with each other* (overlapping the ~30-min deploys) and each tears its
-stack down afterward.
+throwaway IDP stack**. When enabled the probes run **concurrently** with the
+shared-stack suite *and with each other* (overlapping the ~30-min deploys) and
+each tears its stack down afterward.
 
 Each probe is a self-contained *deploy-a-config-variant + smoke-check-its-
 distinguishing-feature* unit. The framework is a table of
