@@ -243,6 +243,34 @@ def test_decorator_http_wraps_success():
     assert result["headers"]["Content-Type"] == "application/json"
 
 
+def test_http_response_sets_security_headers():
+    # ZAP flagged the execute-api endpoint for missing security headers; the
+    # dispatcher's own responses must now carry them (defense-in-depth for
+    # direct-API access; CloudFront already sets them for the SPA origin).
+    from idp_common.api_adapter import _http_response
+
+    h = _http_response(200, {"ok": True})["headers"]
+    assert h["X-Content-Type-Options"] == "nosniff"
+    assert "max-age=31536000" in h["Strict-Transport-Security"]
+    assert "includeSubDomains" in h["Strict-Transport-Security"]
+    assert h["X-Frame-Options"] == "DENY"
+    assert h["Referrer-Policy"] == "strict-origin-when-cross-origin"
+
+
+def test_http_response_cors_origin_defaults_star_and_is_overridable(monkeypatch):
+    from idp_common.api_adapter import _http_response
+
+    monkeypatch.delenv("CORS_ALLOW_ORIGIN", raising=False)
+    assert _http_response(200, {})["headers"]["Access-Control-Allow-Origin"] == "*"
+    # A deployment can lock the origin down without touching code (avoids the
+    # CloudFront->API CFN dependency cycle that forces the wildcard default).
+    monkeypatch.setenv("CORS_ALLOW_ORIGIN", "https://d123.cloudfront.net")
+    assert (
+        _http_response(200, {})["headers"]["Access-Control-Allow-Origin"]
+        == "https://d123.cloudfront.net"
+    )
+
+
 def test_decorator_http_permission_error_403():
     @api_resolver
     def handler(event, context):

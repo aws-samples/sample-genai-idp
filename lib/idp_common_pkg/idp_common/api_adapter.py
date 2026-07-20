@@ -33,6 +33,7 @@ the AppSync migration and is covered by unit tests.
 import base64
 import json
 import logging
+import os
 import re
 from decimal import Decimal
 from functools import wraps
@@ -196,14 +197,34 @@ def normalize_event(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _http_response(status: int, payload: Any) -> Dict[str, Any]:
-    """Build an HTTP API (proxy) response with JSON body + permissive CORS."""
+    """Build an HTTP API (proxy) response with JSON body, CORS + security headers.
+
+    CORS `Access-Control-Allow-Origin` is `*` (overridable via CORS_ALLOW_ORIGIN):
+    the UI's fetch sends NO credentials/cookies (only a Bearer JWT in the
+    Authorization header — see src/ui/src/api/rest-client.ts), so a wildcard is
+    valid and cannot be combined with credentials, and it avoids a
+    CloudFront->API-stack CloudFormation dependency cycle (CloudFront's origin IS
+    this API). ZAP flags the `*` as "Cross-Domain Misconfiguration"; it is safe
+    here for that reason, but the env var lets a deployment lock it down.
+
+    Security headers (X-Content-Type-Options, Strict-Transport-Security,
+    X-Frame-Options, Referrer-Policy) mirror the CloudFront ResponseHeadersPolicy
+    that fronts the SPA — added here too so a client hitting the execute-api
+    endpoint directly still gets them (ZAP scans that endpoint, not CloudFront).
+    """
     return {
         "statusCode": status,
         "headers": {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": os.environ.get("CORS_ALLOW_ORIGIN", "*"),
             "Access-Control-Allow-Headers": "Authorization,Content-Type",
             "Access-Control-Allow-Methods": "POST,OPTIONS",
+            # Security headers (defense-in-depth for direct execute-api access;
+            # CloudFront already sets these for the browser-facing SPA origin).
+            "X-Content-Type-Options": "nosniff",
+            "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+            "X-Frame-Options": "DENY",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
         },
         "body": json.dumps(payload, cls=_DecimalEncoder),
     }
