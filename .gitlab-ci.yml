@@ -32,6 +32,29 @@ stages:
   - deployment_validation
   - integration_tests
 
+# Paths whose change can actually affect a real stack deploy / its behavior.
+# The expensive deploy jobs (deployment_validation, integration_tests) only run
+# when a commit/MR touches one of these — so doc-only / version-bump commits
+# (VERSION, CHANGELOG.md, **/*.md, docs/**, images/**, notebooks/**, etc.) skip
+# the ~70-min deploy. Intentionally GENEROUS: a false "run" wastes CI minutes,
+# but a false "skip" could merge a broken deploy — so err toward running. Update
+# this list if a new deploy-affecting top-level dir is added.
+# NOTE: fast_checks (lint / SRT) deliberately has NO changes: filter — it is
+# cheap and SHOULD run on every commit, including docs.
+.deploy_affecting_changes: &deploy_affecting_changes
+  - template.yaml
+  - publish.py
+  - "requirements*.txt"
+  - "patterns/**/*"
+  - "nested/**/*"
+  - "src/**/*"
+  - "lib/**/*"
+  - "config_library/**/*"
+  - "feature-platform/**/*"
+  - "iam-roles/**/*"
+  - "scripts/**/*"          # includes scripts/sdlc/* (the CI harness itself)
+  - ".gitlab-ci.yml"        # a pipeline-config change must re-run to validate itself
+
 # Prevent DUPLICATE pipelines: without this, a push to a branch that has an open
 # MR triggers BOTH a branch pipeline and an MR pipeline. Run the MR pipeline when
 # an MR is open, otherwise the branch pipeline — never both.
@@ -147,8 +170,12 @@ deployment_validation:
   # is actually going to run: on develop, or on an MR targeting develop (incl.
   # Draft, so the manual integration button has a validated role when clicked).
   rules:
+    # Same deploy-affecting gate as integration_tests: skip the pre-deploy IAM
+    # check for doc/VERSION/CHANGELOG-only commits (there's no deploy to validate).
     - if: $CI_COMMIT_BRANCH == "develop"
+      changes: *deploy_affecting_changes
     - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"
+      changes: *deploy_affecting_changes
     - when: never
 
   before_script:
@@ -202,13 +229,20 @@ integration_tests:
   # Note: rules are ordered — the non-Draft rule must precede the catch-all MR
   # rule so a Draft MR falls through to the manual rule, not the auto one.
   rules:
+    # Auto-run only when deploy-affecting files changed — a doc/VERSION/CHANGELOG-
+    # only commit skips the ~70-min deploy. (Draft MRs stay a manual button
+    # regardless, so you can always force a run by clicking it.)
     - if: $CI_COMMIT_BRANCH == "develop"
+      changes: *deploy_affecting_changes
       when: on_success
     - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" && $CI_MERGE_REQUEST_TITLE !~ /^Draft:/
+      changes: *deploy_affecting_changes
       when: on_success
     - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"
       # Draft MR → optional manual button; allow_failure so it doesn't block the
-      # pipeline while it sits un-clicked (manual rules block by default).
+      # pipeline while it sits un-clicked (manual rules block by default). No
+      # changes: filter — a manual button you click deliberately should always be
+      # available, even on a doc-only Draft.
       when: manual
       allow_failure: true
     - when: never
