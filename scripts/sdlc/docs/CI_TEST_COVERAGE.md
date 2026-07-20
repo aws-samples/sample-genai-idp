@@ -16,17 +16,17 @@ its `make` target and the skill that documents how to run it.
 |---|---|---|
 | Primary functional suite (Steps 3–13) | *(runs in CI; deploy a stack then use the individual targets below)* | — |
 | API RBAC / authorization (Step 12) | `make api-test STACK_NAME=…` (alias `make stacktest-rbac`) · static-only: `make api-test-static` | `.claude/skills/api-rbac-test.md` |
-| ZAP DAST scan probe | `make stacktest-probe-zap STACK_NAME=…` | `.claude/skills/run-integration-probes.md` |
-| APIGateway GLOBAL hosting probe | `make stacktest-probe-apigw-global` | `.claude/skills/run-integration-probes.md` |
-| WAF-enabled hosting probe | `make stacktest-probe-waf` | `.claude/skills/run-integration-probes.md` |
-| APIGateway PRIVATE (VPC) probe | `make stacktest-probe-apigw-private VPC_ID=…` | `.claude/skills/run-integration-probes.md` |
-| Jobs API (VPC) probe | `make stacktest-probe-jobsapi VPC_ID=…` | `.claude/skills/run-integration-probes.md` |
-| List available probes | `make stacktest-list` | `.claude/skills/run-integration-probes.md` |
+| ZAP DAST scan | `make stacktest-zap STACK_NAME=…` | `.claude/skills/run-stack-tests.md` |
+| APIGateway GLOBAL hosting | `make stacktest-hosting-global` | `.claude/skills/run-stack-tests.md` |
+| WAF-enabled hosting | `make stacktest-waf` | `.claude/skills/run-stack-tests.md` |
+| APIGateway PRIVATE (VPC) hosting | `make stacktest-hosting-private VPC_ID=…` | `.claude/skills/run-stack-tests.md` |
+| Jobs API (VPC) | `make stacktest-jobsapi VPC_ID=…` | `.claude/skills/run-stack-tests.md` |
+| List deploy-variant stack-tests | `make stacktest-list` | `.claude/skills/run-stack-tests.md` |
 | Release-vs-release benchmark | `make benchmark-release …` (alias `make stacktest-benchmark`) | `.claude/skills/run-benchmarks.md` |
 | In-place upgrade (X→Y) test | `make stacktest-upgrade` (pointer) | `.claude/skills/test-upgrade.md` |
 | Full offline test battery (no AWS) | `make test` | `.claude/skills/full-test-battery.md` |
 
-VPC probes auto-discover a suitable VPC via the `run-integration-probes` skill
+VPC stack-tests auto-discover a suitable VPC via the `run-stack-tests` skill
 (it lists candidates, confirms with you, then passes `VPC_ID`/`SUBNET_IDS`/
 `LAMBDA_SG_ID`/`APIGW_VPCE_ID` as make params).
 
@@ -310,9 +310,9 @@ mutation — safe to interleave).
 > `CreatePolicy` rate limit — producing flaky pipeline failures unrelated to the
 > code under test. Since these are infra-variant *deploy smoke tests* that rarely
 > change, they now run **manually, one stack at a time**, via
-> `make stacktest-probe-*` (see `.claude/skills/run-integration-probes.md` and
-> `scripts/sdlc/run_probe.py`). The CI pipeline runs the **primary shared stack
-> only** (Steps 3–13). Set `IDP_RUN_PROBES=true` to re-enable them in a pipeline
+> `make stacktest-*` (see `.claude/skills/run-stack-tests.md` and
+> `scripts/sdlc/run_stacktest.py`). The CI pipeline runs the **primary shared
+> stack only** (Steps 3–13). Set `IDP_RUN_PROBES=true` to re-enable them in a pipeline
 > run. When they DO run (manual sweep or opt-in), launches are staggered
 > (`IDP_PROBE_LAUNCH_STAGGER_SECS`, default 120s) and each deploys **without** a
 > permissions boundary (only the primary suite creates + tests one — Step 13).

@@ -1,33 +1,33 @@
-# Skill: Run integration stack-tests (`stacktest-*`) manually
+# Skill: Run stack-tests (`stacktest-*`) manually
 
-Use this when the user wants to run one of the **deploy-variant probes** or other
-live-stack integration tests **outside** the CI pipeline — e.g. "run the ZAP
-scan against my stack", "test the Jobs API deploys", "check WAF hosting", "run
-the private API probe", "verify the permissions boundary". These used to run
-automatically on every integration pipeline; they were moved to on-demand
-`make stacktest-*` targets because standing up ~6 stacks at once in one pipeline
-burst the account-wide AWS control planes (CloudWatch Logs create-consistency,
-CodeBuild role-trust propagation, IAM CreatePolicy rate limit) and caused flaky
-failures unrelated to the code under test.
+Use this when the user wants to run one of the **deploy-variant stack-tests** or
+other live-stack integration tests **outside** the CI pipeline — e.g. "run the
+ZAP scan against my stack", "test the Jobs API deploys", "check WAF hosting",
+"run the private API hosting test", "verify the permissions boundary". These
+used to run automatically on every integration pipeline; they were moved to
+on-demand `make stacktest-*` targets because standing up ~6 stacks at once in one
+pipeline burst the account-wide AWS control planes (CloudWatch Logs
+create-consistency, CodeBuild role-trust propagation, IAM CreatePolicy rate
+limit) and caused flaky failures unrelated to the code under test.
 
 ## The stacktest family
 
 | Target | What it does | Needs |
 |---|---|---|
-| `make stacktest-list` | List the probes | — |
+| `make stacktest-list` | List the deploy-variant stack-tests | — |
 | `make stacktest-rbac STACK_NAME=…` | Full RBAC/authorization matrix (alias of `api-test`) | live stack |
-| `make stacktest-probe-zap` | OWASP ZAP DAST scan of the UI API | stack or self-deploy |
-| `make stacktest-probe-apigw-global` | APIGateway GLOBAL hosting variant | stack or self-deploy |
-| `make stacktest-probe-waf` | WAF IP-allow-list WebACL association | stack or self-deploy |
-| `make stacktest-probe-apigw-private` | PRIVATE (VPC) API hosting | **VPC** + stack/self-deploy |
-| `make stacktest-probe-jobsapi` | Jobs REST API (`EnableJobsApi`) | **VPC** + stack/self-deploy |
+| `make stacktest-zap` | OWASP ZAP DAST scan of the UI API | stack or self-deploy |
+| `make stacktest-hosting-global` | APIGateway GLOBAL hosting variant | stack or self-deploy |
+| `make stacktest-waf` | WAF IP-allow-list WebACL association | stack or self-deploy |
+| `make stacktest-hosting-private` | PRIVATE (VPC) API hosting | **VPC** + stack/self-deploy |
+| `make stacktest-jobsapi` | Jobs REST API (`EnableJobsApi`) | **VPC** + stack/self-deploy |
 | `make stacktest-benchmark` | Release-vs-release benchmark audit (alias) | see run-benchmarks |
 | `make stacktest-upgrade` | In-place upgrade test pointer | see test-upgrade |
 
-## Two modes for the probes
+## Two modes
 
 1. **Validate an existing stack (fast, preferred):**
-   `make stacktest-probe-zap STACK_NAME=<already-deployed-stack>` — runs only the
+   `make stacktest-zap STACK_NAME=<already-deployed-stack>` — runs only the
    validator against a stack the user already has. No deploy, no teardown.
 2. **Self-deploy a throwaway stack:** omit `STACK_NAME` and pass
    `TEMPLATE_URL=<idp-main.yaml from publish.py>`. Deploys its own stack,
@@ -35,7 +35,7 @@ failures unrelated to the code under test.
 
 Always use `AWS_PROFILE=default` (or `idp-ci`) — see CLAUDE.md.
 
-## VPC probes (`apigw-private`, `jobsapi`) — auto-discover a VPC, then CONFIRM
+## VPC tests (`hosting-private`, `jobsapi`) — auto-discover a VPC, then CONFIRM
 
 These need VPC wiring. Prefer discovering a suitable existing VPC in the account
 over creating one. Procedure:
@@ -52,14 +52,14 @@ over creating one. Procedure:
      --query 'VpcEndpoints[?ServiceName==`com.amazonaws.<region>.execute-api`].VpcEndpointId' --output json
    ```
    Prefer a VPC that already has private subnets and an `execute-api` interface
-   endpoint (the private API probe needs one). Check the pipeline's persistent
-   test VPC first — it is purpose-built for this.
+   endpoint (the private API hosting test needs one). Check the pipeline's
+   persistent test VPC first — it is purpose-built for this.
 2. **Show the user what you found and CONFIRM before running** — never auto-pick
    and deploy into a VPC silently. Present the VPC id, subnets, SG, and endpoint
    you intend to use and ask them to approve.
 3. On approval, run with make params (NOT env vars):
    ```bash
-   AWS_PROFILE=default make stacktest-probe-jobsapi \
+   AWS_PROFILE=default make stacktest-jobsapi \
      STACK_NAME=<stack> \
      VPC_ID=<vpc> SUBNET_IDS=<subnet-a,subnet-b> \
      LAMBDA_SG_ID=<sg> APIGW_VPCE_ID=<vpce>
@@ -70,10 +70,12 @@ over creating one. Procedure:
 
 ## Notes
 
-- The probes reuse the SAME deploy/validate/cleanup code as CI
-  (`scripts/sdlc/run_probe.py` imports `codebuild_deployment.py`), so results
-  match what CI would have produced — no drift.
-- To temporarily re-enable probes inside a pipeline run (rarely needed), set
-  `IDP_RUN_PROBES=true`. Default is off.
+- These reuse the SAME deploy/validate/cleanup code as CI: the runner
+  (`scripts/sdlc/run_stacktest.py`) imports `codebuild_deployment.py` and drives
+  its internal deploy-variant table, so results match what CI would have produced
+  — no drift.
+- To temporarily re-enable the deploy-variant tests inside a pipeline run (rarely
+  needed), set `IDP_RUN_PROBES=true`. Default is off.
 - Permissions boundary is now verified only by the primary suite (Step 13,
-  `test_step13_permission_boundaries`); probes deploy without one.
+  `test_step13_permission_boundaries`); the deploy-variant tests deploy without
+  one.

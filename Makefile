@@ -231,7 +231,16 @@ typecheck-pr: ## Type check only files changed vs TARGET_BRANCH (default: main)
 	@echo "Type checking changed files against $(TARGET_BRANCH)..."
 	$(PYTHON) scripts/sdlc/typecheck_pr_changes.py $(TARGET_BRANCH)
 
-##@ Testing
+##@ Tests — pytest suites (offline unless noted)
+# Three tiers of tests in this repo, split across two groups so it's obvious
+# what each needs:
+#   1. Offline pytest (no AWS)          → this group (`test`, `test-*`,
+#      `api-test-static`). Safe in CI / on any machine.
+#   2. Integration pytest (hits AWS)    → this group, marked "(requires AWS)"
+#      (`test-integration-all`). Uses live AWS but deploys NO stack.
+#   3. Stack tests (deploy/validate a   → the "Stack tests" group below
+#      full IDP stack; heavy, manual)     (`stacktest-*`, `api-test`).
+#
 # The repo's Python tests live in ~30 separate roots (packages + per-Lambda
 # dirs), each with its own conftest/mini-environment — a single `pytest` from
 # the repo root fails because the many `tests/conftest.py` files collide. So
@@ -300,6 +309,9 @@ test-circuit-breaker: ## Run only circuit breaker tests
 	    src/lambda/queue_processor/test_check_circuit_breaker.py \
 	    src/lambda/workflow_tracker/test_notify_circuit_breaker.py
 
+# api-test-static is offline (tier 1); api-test below is a STACK TEST (tier 3,
+# needs a live stack) — it also has the alias `make stacktest-rbac` and is listed
+# in the "Stack tests" group. Kept here because api-test depends on api-test-static.
 api-test-static: ## Static RBAC/authorization scan of all API operations (no AWS; CI-safe)
 	@echo "Running static API RBAC scan..."
 	$(PYTHON) scripts/sdlc/scan_api_rbac.py $(if $(STRICT),--strict,)
@@ -339,30 +351,30 @@ endif
 #   VPC_ID=... SUBNET_IDS=a,b LAMBDA_SG_ID=... APIGW_VPCE_ID=...
 # (falls back to IDP_TEST_* env vars; the run-integration-probes skill can
 # discover a suitable VPC and fill these in for you).
-_PROBE_VPC_ARGS = $(if $(VPC_ID),--vpc-id $(VPC_ID),) $(if $(SUBNET_IDS),--subnet-ids $(SUBNET_IDS),) $(if $(LAMBDA_SG_ID),--lambda-sg-id $(LAMBDA_SG_ID),) $(if $(APIGW_VPCE_ID),--apigw-vpce-id $(APIGW_VPCE_ID),)
-_PROBE_ARGS = $(if $(STACK_NAME),--stack-name $(STACK_NAME),) $(if $(TEMPLATE_URL),--template-url $(TEMPLATE_URL),) $(if $(ADMIN_EMAIL),--admin-email $(ADMIN_EMAIL),) $(_PROBE_VPC_ARGS)
+_STACKTEST_VPC_ARGS = $(if $(VPC_ID),--vpc-id $(VPC_ID),) $(if $(SUBNET_IDS),--subnet-ids $(SUBNET_IDS),) $(if $(LAMBDA_SG_ID),--lambda-sg-id $(LAMBDA_SG_ID),) $(if $(APIGW_VPCE_ID),--apigw-vpce-id $(APIGW_VPCE_ID),)
+_STACKTEST_ARGS = $(if $(STACK_NAME),--stack-name $(STACK_NAME),) $(if $(TEMPLATE_URL),--template-url $(TEMPLATE_URL),) $(if $(ADMIN_EMAIL),--admin-email $(ADMIN_EMAIL),) $(_STACKTEST_VPC_ARGS)
 
-stacktest-list: ## List the available stack-test probes
-	$(PYTHON) scripts/sdlc/run_probe.py --list
+stacktest-list: ## List the available deploy-variant stack-tests
+	$(PYTHON) scripts/sdlc/run_stacktest.py --list
 
 # RBAC/API authorization test against a live stack (alias to api-test, which
 # CLAUDE.md + the api-rbac-test skill still reference by its original name).
 stacktest-rbac: api-test ## RBAC/API authorization test (alias: api-test) — needs STACK_NAME
 
-stacktest-probe-zap: ## ZAP DAST scan probe (STACK_NAME=... or self-deploy w/ TEMPLATE_URL=...)
-	$(PYTHON) scripts/sdlc/run_probe.py zapdast $(_PROBE_ARGS)
+stacktest-zap: ## ZAP DAST scan (STACK_NAME=... or self-deploy w/ TEMPLATE_URL=...)
+	$(PYTHON) scripts/sdlc/run_stacktest.py zapdast $(_STACKTEST_ARGS)
 
-stacktest-probe-apigw-global: ## APIGateway GLOBAL hosting probe
-	$(PYTHON) scripts/sdlc/run_probe.py apigw $(_PROBE_ARGS)
+stacktest-hosting-global: ## APIGateway GLOBAL hosting variant
+	$(PYTHON) scripts/sdlc/run_stacktest.py apigw $(_STACKTEST_ARGS)
 
-stacktest-probe-waf: ## WAF-enabled hosting probe
-	$(PYTHON) scripts/sdlc/run_probe.py waf $(_PROBE_ARGS)
+stacktest-waf: ## WAF-enabled hosting variant
+	$(PYTHON) scripts/sdlc/run_stacktest.py waf $(_STACKTEST_ARGS)
 
-stacktest-probe-apigw-private: ## APIGateway PRIVATE (VPC) hosting probe (needs VPC_ID=...)
-	$(PYTHON) scripts/sdlc/run_probe.py apigwpriv $(_PROBE_ARGS)
+stacktest-hosting-private: ## APIGateway PRIVATE (VPC) hosting variant (needs VPC_ID=...)
+	$(PYTHON) scripts/sdlc/run_stacktest.py apigwpriv $(_STACKTEST_ARGS)
 
-stacktest-probe-jobsapi: ## Jobs API (VPC) probe (needs VPC_ID=...)
-	$(PYTHON) scripts/sdlc/run_probe.py jobsapi $(_PROBE_ARGS)
+stacktest-jobsapi: ## Jobs API (VPC) variant (needs VPC_ID=...)
+	$(PYTHON) scripts/sdlc/run_stacktest.py jobsapi $(_STACKTEST_ARGS)
 
 # Release-vs-release benchmark audit (alias to benchmark-release).
 stacktest-benchmark: benchmark-release ## Release benchmark audit (alias: benchmark-release)

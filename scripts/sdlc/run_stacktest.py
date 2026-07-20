@@ -1,31 +1,31 @@
 #!/usr/bin/env python3
-"""Run a single deployment-variant probe MANUALLY, outside the CI pipeline.
+"""Run a single deployment-variant stack-test MANUALLY, outside the CI pipeline.
 
-The deploy-variant probes (APIGateway hosting, WAF, PRIVATE/VPC hosting, Jobs
-API, ZAP DAST) used to run automatically on every integration pipeline —
+The deploy-variant stack-tests (APIGateway hosting, WAF, PRIVATE/VPC hosting,
+Jobs API, ZAP DAST) used to run automatically on every integration pipeline —
 concurrently with the primary suite. Standing up 6 stacks at once bursts the
 account-wide control planes (CloudWatch Logs create-consistency, CodeBuild
 role-trust propagation, IAM CreatePolicy rate limit) and caused flaky failures
 unrelated to the code under test. They are infra smoke tests that rarely change,
-so they now run ON DEMAND via this script (wrapped by `make stacktest-probe-*`),
-each on its own stack with no concurrent burst.
+so they now run ON DEMAND via this script (wrapped by `make stacktest-*`), each
+on its own stack with no concurrent burst.
 
 Two modes (choose per invocation):
-  * --stack-name EXISTING : run ONLY the probe's validator against a stack you
+  * --stack-name EXISTING : run ONLY the test's validator against a stack you
     already deployed (fast; you own the stack lifecycle). Mirrors `make api-test`.
-  * (no --stack-name)     : self-deploy a throwaway stack with the probe's params,
+  * (no --stack-name)     : self-deploy a throwaway stack with the test's params,
     validate, and ALWAYS tear it down (like CI did). Slower (~30m deploy).
 
-VPC-requiring probes (jobsapi, apigwpriv) need VPC wiring. Provide it with the
+VPC-requiring tests (jobsapi, apigwpriv) need VPC wiring. Provide it with the
 --vpc-* flags; if omitted, this falls back to the IDP_TEST_* env vars, and if
-those are absent too, it exits with a clear message (the run-integration-probes
-skill can discover a suitable VPC in the account and pass the flags for you).
+those are absent too, it exits with a clear message (the run-stack-tests skill
+can discover a suitable VPC in the account and pass the flags for you).
 
 Usage:
-  python3 scripts/sdlc/run_probe.py --list
-  python3 scripts/sdlc/run_probe.py zapdast --stack-name idp-mystack
-  python3 scripts/sdlc/run_probe.py zapdast --admin-email me@example.com   # self-deploy
-  python3 scripts/sdlc/run_probe.py jobsapi \
+  python3 scripts/sdlc/run_stacktest.py --list
+  python3 scripts/sdlc/run_stacktest.py zapdast --stack-name idp-mystack
+  python3 scripts/sdlc/run_stacktest.py zapdast --admin-email me@example.com   # self-deploy
+  python3 scripts/sdlc/run_stacktest.py jobsapi \
       --vpc-id vpc-abc --subnet-ids subnet-a,subnet-b \
       --lambda-sg-id sg-xyz --apigw-vpce-id vpce-def
 
@@ -36,24 +36,24 @@ import argparse
 import os
 import sys
 
-# codebuild_deployment.py lives beside this file; import the shared probe
-# machinery so the manual runner and CI use IDENTICAL deploy/validate/cleanup
-# logic (no drift).
+# codebuild_deployment.py lives beside this file; import the shared stack-test
+# machinery (its internal probe table) so the manual runner and CI use IDENTICAL
+# deploy/validate/cleanup logic (no drift).
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import codebuild_deployment as cbd  # noqa: E402
 
 
-def _probes_by_suffix():
+def _tests_by_suffix():
     return {p.stack_suffix: p for p in cbd.PROBE_VARIANTS}
 
 
 def _print_list():
-    print("Available deployment-variant probes (by --suffix):\n")
+    print("Available deployment-variant stack-tests (by name):\n")
     for p in cbd.PROBE_VARIANTS:
         vpc = " [requires VPC]" if p.requires_vpc else ""
         print(f"  {p.stack_suffix:12s} {p.name}{vpc}")
     print(
-        "\nRun one with:  make stacktest-probe-<name> [STACK_NAME=...] "
+        "\nRun one with:  make stacktest-<name> [STACK_NAME=...] "
         "[VPC_ID=... SUBNET_IDS=... LAMBDA_SG_ID=... APIGW_VPCE_ID=...]"
     )
 
@@ -84,8 +84,8 @@ def _resolve_vpc_params(args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("suffix", nargs="?", help="probe stack_suffix (see --list)")
-    ap.add_argument("--list", action="store_true", help="list available probes")
+    ap.add_argument("suffix", nargs="?", help="stack-test name (see --list)")
+    ap.add_argument("--list", action="store_true", help="list available stack-tests")
     ap.add_argument(
         "--stack-name",
         help="run the validator against this ALREADY-DEPLOYED stack "
@@ -100,7 +100,7 @@ def main():
         default="citest@suppress.welcome.email",
         help="admin email for self-deploy mode",
     )
-    # VPC wiring (make params, not env) for VPC-requiring probes.
+    # VPC wiring (make params, not env) for VPC-requiring stack-tests.
     ap.add_argument("--vpc-id")
     ap.add_argument("--subnet-ids", help="comma-separated private subnet ids")
     ap.add_argument("--lambda-sg-id")
@@ -111,34 +111,34 @@ def main():
         _print_list()
         return 0 if args.list else 2
 
-    probes = _probes_by_suffix()
-    probe = probes.get(args.suffix)
-    if probe is None:
-        print(f"❌ Unknown probe '{args.suffix}'. Use --list to see valid names.")
+    tests = _tests_by_suffix()
+    test = tests.get(args.suffix)
+    if test is None:
+        print(f"❌ Unknown stack-test '{args.suffix}'. Use --list to see valid names.")
         return 2
 
-    # VPC probes need wiring in BOTH modes (validate-existing still targets a
+    # VPC tests need wiring in BOTH modes (validate-existing still targets a
     # VPC-deployed stack, but self-deploy is where params are actually consumed).
     vpc_params = {}
-    if probe.requires_vpc:
+    if test.requires_vpc:
         vpc_params = _resolve_vpc_params(args)
         if vpc_params is None:
             print(
-                f"❌ Probe '{probe.name}' requires a VPC. Provide "
+                f"❌ Stack-test '{test.name}' requires a VPC. Provide "
                 "--vpc-id/--subnet-ids/--lambda-sg-id/--apigw-vpce-id (or set the "
-                "IDP_TEST_* env vars). The run-integration-probes skill can "
-                "discover a suitable VPC in the account and pass these for you."
+                "IDP_TEST_* env vars). The run-stack-tests skill can discover a "
+                "suitable VPC in the account and pass these for you."
             )
             return 2
 
     if args.stack_name:
         # Validate-only against an existing stack — no deploy, no teardown.
-        print(f"🔎 Running probe '{probe.name}' validator against {args.stack_name}...")
-        result = probe.validate_fn(args.stack_name)
+        print(f"🔎 Running stack-test '{test.name}' against {args.stack_name}...")
+        result = test.validate_fn(args.stack_name)
     else:
-        # Self-deploy + validate + teardown, reusing the CI probe path so logic
-        # can't drift. _run_probe_attempt generates its own stack name, creates/
-        # deletes its own IAM, and tears the stack down in a finally.
+        # Self-deploy + validate + teardown, reusing the CI path so logic can't
+        # drift. _run_probe_attempt generates its own stack name, creates/deletes
+        # its own IAM, and tears the stack down in a finally.
         template_url = args.template_url
         if not template_url:
             print(
@@ -147,9 +147,9 @@ def main():
                 "--stack-name to validate an already-deployed stack."
             )
             return 2
-        print(f"🚀 Self-deploying + probing '{probe.name}' (own throwaway stack)...")
+        print(f"🚀 Self-deploying + testing '{test.name}' (own throwaway stack)...")
         result = cbd._run_probe_attempt(
-            probe, args.admin_email, template_url, vpc_params
+            test, args.admin_email, template_url, vpc_params
         )
 
     ok = result.get("success")
@@ -157,12 +157,12 @@ def main():
         print(f"⏭️  SKIPPED: {result.get('detail', '')}")
         return 0
     if ok:
-        print(f"✅ Probe '{probe.name}' PASSED")
+        print(f"✅ Stack-test '{test.name}' PASSED")
         for k in ("zap_alerts", "report_key", "jobs_url", "web_acl_arn"):
             if k in result:
                 print(f"   {k}: {result[k]}")
         return 0
-    print(f"❌ Probe '{probe.name}' FAILED: {result.get('error', 'unknown')}")
+    print(f"❌ Stack-test '{test.name}' FAILED: {result.get('error', 'unknown')}")
     return 1
 
 

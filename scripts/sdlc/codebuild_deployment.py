@@ -4025,8 +4025,8 @@ def main():
         # consistency, CodeBuild role-trust propagation, IAM CreatePolicy rate
         # limit) — a recurring source of flaky pipeline failures unrelated to the
         # code under test. The deploy-variant probes are infra smoke tests that
-        # rarely change, so they now run MANUALLY via `make probe-*` (see
-        # scripts/sdlc/run_probe.py / .claude/skills/run-integration-probes.md),
+        # rarely change, so they now run MANUALLY via `make stacktest-*` (see
+        # scripts/sdlc/run_stacktest.py / .claude/skills/run-stack-tests.md),
         # each on its own stack with no concurrent-burst. Set IDP_RUN_PROBES=true
         # to re-enable them in a pipeline run. (IDP_TEST_APIGW_HOSTING is still
         # honored as a legacy alias so an existing override keeps working.)
