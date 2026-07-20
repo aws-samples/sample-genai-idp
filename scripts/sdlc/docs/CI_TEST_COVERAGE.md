@@ -4,6 +4,32 @@
 
 The CI/CD pipeline runs a comprehensive smoke test suite that validates all major IDP Accelerator features. Tests run in **parallel** with **fail-fast** behavior for rapid feedback.
 
+## Running these tests manually (make target → skill)
+
+Every test below can be run **outside** the pipeline against a live stack (dev
+box, `AWS_PROFILE=default` or `idp-ci`). The deploy-variant probes run manually
+by default (they are no longer automatic in CI — see the ⚠️ note under
+"deployment-variant probe framework"). This table is the map from each test to
+its `make` target and the skill that documents how to run it.
+
+| Test / suite | Make target | Skill |
+|---|---|---|
+| Primary functional suite (Steps 3–13) | *(runs in CI; deploy a stack then use the individual targets below)* | — |
+| API RBAC / authorization (Step 12) | `make api-test STACK_NAME=…` (alias `make stacktest-rbac`) · static-only: `make api-test-static` | `.claude/skills/api-rbac-test.md` |
+| ZAP DAST scan probe | `make stacktest-probe-zap STACK_NAME=…` | `.claude/skills/run-integration-probes.md` |
+| APIGateway GLOBAL hosting probe | `make stacktest-probe-apigw-global` | `.claude/skills/run-integration-probes.md` |
+| WAF-enabled hosting probe | `make stacktest-probe-waf` | `.claude/skills/run-integration-probes.md` |
+| APIGateway PRIVATE (VPC) probe | `make stacktest-probe-apigw-private VPC_ID=…` | `.claude/skills/run-integration-probes.md` |
+| Jobs API (VPC) probe | `make stacktest-probe-jobsapi VPC_ID=…` | `.claude/skills/run-integration-probes.md` |
+| List available probes | `make stacktest-list` | `.claude/skills/run-integration-probes.md` |
+| Release-vs-release benchmark | `make benchmark-release …` (alias `make stacktest-benchmark`) | `.claude/skills/run-benchmarks.md` |
+| In-place upgrade (X→Y) test | `make stacktest-upgrade` (pointer) | `.claude/skills/test-upgrade.md` |
+| Full offline test battery (no AWS) | `make test` | `.claude/skills/full-test-battery.md` |
+
+VPC probes auto-discover a suitable VPC via the `run-integration-probes` skill
+(it lists candidates, confirms with you, then passes `VPC_ID`/`SUBNET_IDS`/
+`LAMBDA_SG_ID`/`APIGW_VPCE_ID` as make params).
+
 ## Pipeline stages & triggers
 
 The GitLab pipeline has three stages, gated so cheap checks run everywhere and
