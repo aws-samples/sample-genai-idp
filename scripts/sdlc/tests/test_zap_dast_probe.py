@@ -172,6 +172,27 @@ def test_parse_zap_alerts_empty_report(cbd, tmp_path):
     assert alerts == []
 
 
+def test_parse_zap_rule_tally_reads_summary_line(cbd):
+    # The report should surface EVERY rule outcome (114 PASS is as meaningful as
+    # the 3 WARN), parsed from zap-api-scan's stdout tally line.
+    stdout = (
+        "some log...\n"
+        "FAIL-NEW: 0\tFAIL-INPROG: 0\tWARN-NEW: 3\tWARN-INPROG: 0\t"
+        "INFO: 0\tIGNORE: 1\tPASS: 114\n"
+        "...more log\n"
+    )
+    tally = cbd._parse_zap_rule_tally(stdout)
+    assert tally["PASS"] == 114
+    assert tally["WARN-NEW"] == 3
+    assert tally["FAIL-NEW"] == 0
+    assert tally["IGNORE"] == 1
+
+
+def test_parse_zap_rule_tally_absent_returns_empty(cbd):
+    assert cbd._parse_zap_rule_tally("no tally here") == {}
+    assert cbd._parse_zap_rule_tally("") == {}
+
+
 # --------------------------------------------------------------------------- #
 # validate_zap_dast: WARN-only + always-restore
 # --------------------------------------------------------------------------- #
@@ -349,4 +370,6 @@ def test_validate_zap_dast_workdir_is_world_writable(cbd, monkeypatch):
     result = cbd.validate_zap_dast("idp-test-zapdast")
     assert result["success"] is True
     # World-writable so the container's non-root `zap` user can write the report.
-    assert seen["mode"] & 0o002, f"workdir mode {oct(seen['mode'])} is not world-writable"
+    assert seen["mode"] & 0o002, (
+        f"workdir mode {oct(seen['mode'])} is not world-writable"
+    )

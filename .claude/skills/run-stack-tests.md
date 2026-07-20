@@ -35,6 +35,40 @@ limit) and caused flaky failures unrelated to the code under test.
 
 Always use `AWS_PROFILE=default` (or `idp-ci`) — see CLAUDE.md.
 
+**Region:** the validators read `AWS_DEFAULT_REGION` (default `us-east-1`), NOT
+the active profile's configured region. If your stack is elsewhere, pass
+`REGION=` — e.g. `make stacktest-zap STACK_NAME=IDP1 REGION=us-west-2`. Omitting
+it when the stack isn't in us-east-1 fails with "stack does not exist".
+
+## Reading the ZAP report
+
+`make stacktest-zap` prints a self-contained report block covering EVERY rule
+outcome, not just the findings:
+
+```
+🔎 ZAP DAST scan report
+  Target:      https://<id>.execute-api.<region>.amazonaws.com/api
+  Operations:  96 seeded (POST /op/<field>)
+  Mode:        passive baseline        # or "active scan" (IDP_ZAP_ACTIVE=true)
+  Rules:       114 PASS · 3 WARN · 0 FAIL · 1 IGNORE
+  Alerts:      High=0 Medium=1 Low=3 Info=2
+  Findings (most severe first):
+    • [Medium] Cross-Domain Misconfiguration — 5 instance(s)
+        https://.../op/abortWorkflow
+        ↳ fix: <ZAP remediation hint>
+```
+
+- **`Rules:`** is the full tally from `zap-api-scan` — `PASS` shows how much was
+  actually exercised (a big PASS count is the "nothing found" signal), `FAIL`/`WARN`
+  are the actionable ones, `IGNORE` are rules muted in `scripts/sdlc/zap-rules.conf`.
+- **`Findings`** lists every alert (all severities) with sample affected URLs and
+  ZAP's remediation hint — actionable without opening the HTML report.
+- The probe is **WARN-only**: it PASSES even with findings (0 High/FAIL is the
+  expected clean state). To gate on findings, promote a rule WARN→FAIL in
+  `zap-rules.conf` and flip the `# TODO promote` gate in `validate_zap_dast`.
+- To tune what's reported: edit `scripts/sdlc/zap-rules.conf` (IGNORE known-noise
+  plugin ids, or WARN/FAIL to change severity).
+
 ## VPC tests (`hosting-private`, `jobsapi`) — auto-discover a VPC, then CONFIRM
 
 These need VPC wiring. Prefer discovering a suitable existing VPC in the account

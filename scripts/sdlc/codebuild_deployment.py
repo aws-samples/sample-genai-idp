@@ -3077,6 +3077,33 @@ def generate_zap_openapi(api_base, fields):
     }
 
 
+def _parse_zap_rule_tally(scan_stdout):
+    """Parse ZAP's rule-outcome tally line from zap-api-scan.py stdout.
+
+    zap-api-scan prints a summary like:
+      "FAIL-NEW: 0  FAIL-INPROG: 0  WARN-NEW: 3  WARN-INPROG: 0  INFO: 0
+       IGNORE: 1  PASS: 114"
+    This is the count of RULES (not alerts) by outcome — the PASS count shows how
+    much was actually exercised, which the alert list alone doesn't convey.
+    Returns a dict of {label: int} for the labels present, or {} if not found.
+    """
+    labels = (
+        "FAIL-NEW",
+        "FAIL-INPROG",
+        "WARN-NEW",
+        "WARN-INPROG",
+        "INFO",
+        "IGNORE",
+        "PASS",
+    )
+    tally = {}
+    for label in labels:
+        m = re.search(rf"{re.escape(label)}:\s*(\d+)", scan_stdout)
+        if m:
+            tally[label] = int(m.group(1))
+    return tally
+
+
 def _parse_zap_alerts(report_json_path):
     """Summarize a ZAP JSON report into {risk: count} + a flat alert list.
 
@@ -3276,7 +3303,13 @@ def validate_zap_dast(stack_name):
         # zap-api-scan exits non-zero when it FINDS issues (WARN/FAIL rules) —
         # that is not a probe failure in WARN mode, so check=False and rely on
         # the parsed report. Cap runtime so a hung scan can't eat the job.
-        run_command(docker_cmd, check=False, timeout=45 * 60)
+        scan_run = run_command(docker_cmd, check=False, timeout=45 * 60)
+        # ZAP prints a one-line rule tally, e.g.
+        #   "FAIL-NEW: 0  FAIL-INPROG: 0  WARN-NEW: 3  WARN-INPROG: 0  INFO: 0
+        #    IGNORE: 1  PASS: 114"
+        # Capture it so the report shows EVERY rule outcome (not just alerts) —
+        # 114 PASS is as meaningful as the 3 WARN for "what got tested".
+        rule_tally = _parse_zap_rule_tally(getattr(scan_run, "stdout", "") or "")
 
         report_json = os.path.join(workdir, "zap-report.json")
         if not os.path.exists(report_json):
@@ -3309,6 +3342,15 @@ def validate_zap_dast(stack_name):
         print(
             f"  Mode:        {'active scan' if ZAP_ACTIVE_SCAN else 'passive baseline'}"
         )
+        if rule_tally:
+            # Full rule-outcome tally — shows EVERYTHING that ran, not just the
+            # alerts. e.g. "114 PASS · 3 WARN · 0 FAIL · 1 IGNORE".
+            fails = rule_tally.get("FAIL-NEW", 0) + rule_tally.get("FAIL-INPROG", 0)
+            warns = rule_tally.get("WARN-NEW", 0) + rule_tally.get("WARN-INPROG", 0)
+            print(
+                f"  Rules:       {rule_tally.get('PASS', 0)} PASS · {warns} WARN · "
+                f"{fails} FAIL · {rule_tally.get('IGNORE', 0)} IGNORE"
+            )
         print(f"  Alerts:      {summary}")
         if alerts:
             print("  Findings (most severe first):")
@@ -3332,6 +3374,7 @@ def validate_zap_dast(stack_name):
             "zap_summary": summary,
             "zap_findings": alerts,
             "operations_scanned": len(fields),
+            "rule_tally": rule_tally,
             "target": api_base,
             "report_url": report_url,
             "active_scan": ZAP_ACTIVE_SCAN,
