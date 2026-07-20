@@ -549,6 +549,14 @@ Resources:
   # to write under features/<id>/*. The ui-deployer custom resource in each
   # feature stack assumes a role that carries that session tag.
   ###########################################################################
+  InstalledFeaturesTableNameParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${MainStackName}/feature-platform/installed-features-table'
+      Type: String
+      Description: Name of the InstalledFeatures DynamoDB table (runtime-resolved by main-stack Lambdas).
+      Value: !Ref InstalledFeaturesTable
+
   WebUIBucketFeaturePolicyStatement:
     Type: AWS::SSM::Parameter
     Properties:

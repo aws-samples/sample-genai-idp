@@ -7118,6 +7118,7 @@ Resources:
           CHAT_SESSIONS_TABLE: !Ref ChatSessionsTable
           ID_HELPER_CHAT_MEMORY_TABLE: !Ref IdHelperChatMemoryTable
           MEMORY_METHOD: dynamodb
+          MAIN_STACK_NAME: !Ref AWS::StackName
           STREAMING_ENABLED: true
           MAX_CONVERSATION_TURNS: 20
           MAX_MESSAGE_SIZE_KB: 8.5
@@ -7173,6 +7174,13 @@ Resources:
             TableName: !Ref IdHelperChatMemoryTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ConfigurationTable
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/feature-platform/installed-features-table"
+            - Effect: Allow
+              Action: [dynamodb:Scan, dynamodb:GetItem]
+              Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AWS::StackName}-FeaturePlatformStack-*"
         # Read the samples manifest (config_library/samples-manifest.json) the
         # list_sample_documents tool surfaces to the Quick Start agent.
         - Statement:
@@ -7407,6 +7415,7 @@ Resources:
           CHAT_SESSIONS_TABLE: !Ref ChatSessionsTable
           ID_HELPER_CHAT_MEMORY_TABLE: !Ref IdHelperChatMemoryTable
           MEMORY_METHOD: dynamodb
+          MAIN_STACK_NAME: !Ref AWS::StackName
           STREAMING_ENABLED: true
           MAX_CONVERSATION_TURNS: 20
           MAX_MESSAGE_SIZE_KB: 8.5
@@ -7446,6 +7455,13 @@ Resources:
             TableName: !Ref ChatSessionsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdHelperChatMemoryTable
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/feature-platform/installed-features-table"
+            - Effect: Allow
+              Action: [dynamodb:Scan, dynamodb:GetItem]
+              Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AWS::StackName}-FeaturePlatformStack-*"
         - Statement:
             - Effect: Allow
               Action: s3:GetObject

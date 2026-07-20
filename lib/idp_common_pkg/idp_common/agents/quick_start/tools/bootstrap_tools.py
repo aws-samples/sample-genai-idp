@@ -78,13 +78,38 @@ def list_available_extensions_impl() -> str:
     return json.dumps({"available": True, "extensions": extensions})
 
 
+def _installed_features_table_name() -> Optional[str]:
+    """Resolve the InstalledFeatures table name.
+
+    Prefer the INSTALLED_FEATURES_TABLE env var; otherwise resolve it at runtime
+    from the SSM parameter FeaturePlatformStack publishes at a fixed path
+    (/<MainStackName>/feature-platform/installed-features-table). The SSM
+    indirection avoids a deploy-time cross-stack reference that would form a
+    circular dependency between the agent Lambda and FeaturePlatformStack.
+    """
+    name = os.environ.get("INSTALLED_FEATURES_TABLE")
+    if name:
+        return name
+    stack = os.environ.get("MAIN_STACK_NAME") or os.environ.get("AWS_STACK_NAME")
+    if not stack:
+        return None
+    try:
+        import boto3
+
+        param = f"/{stack}/feature-platform/installed-features-table"
+        return boto3.client("ssm").get_parameter(Name=param)["Parameter"]["Value"]
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning("Could not resolve installed features table from SSM: %s", e)
+        return None
+
+
 def _installed_features() -> Optional[list]:
     """Scan the InstalledFeatures DynamoDB table; None if unavailable.
 
     Returns None (not []) when the registry is unavailable so callers can tell
     "not enabled/unreachable" apart from "enabled but nothing installed".
     """
-    table_name = os.environ.get("INSTALLED_FEATURES_TABLE")
+    table_name = _installed_features_table_name()
     if not table_name:
         return None
     try:
