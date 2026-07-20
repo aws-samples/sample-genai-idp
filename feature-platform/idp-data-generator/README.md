@@ -50,7 +50,7 @@ feature-platform/idp-data-generator/
   bootstrap-processor/       SQS processor: authors schema, invokes the runtime
   ui-deployer/handler.py     copies UI bundle to host WebUIBucket + registerFeature
   feature-api/handler.py     POST /generate, /generate-from-config, GET /jobs/{id}
-  feature-ui/                React UMD "Data Generator" page
+  feature-ui/                React UMD landing page (points to Test Studio)
 ```
 
 ## Entry points
@@ -98,4 +98,6 @@ Install = the CloudFormation quick-create URL with `MainStackName=<your IDP stac
 - ⏳ Live install cycle: CodeBuild arm64 image build (`seed-data` +
   `idp_common[synthesis]`) → ECR → AgentCore runtime → end-to-end generate.
 - ⏳ FeatureApi request/response contract vs. the Test Studio modal + Quick Start.
-- ⚠️ `feature-ui` is a minimal stub; the primary UX is the host Test Studio modal.
+- The `feature-ui` page is a landing card that points to Test Studio → Test Sets
+  → Generate Synthetic Data (the host modal, with version/class dropdowns, is the
+  single source of truth); the feature bundle intentionally doesn't duplicate it.
