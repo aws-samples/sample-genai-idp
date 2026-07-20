@@ -997,7 +997,15 @@ def test_step12_api_rbac(stack_name):
     print("Step 12: API RBAC authorization tests (static + dynamic)...")
     report_dir = "/tmp/api-test-results"  # nosec B108
     region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+    # IDP_SECTEST_STRICT_INPUT=true: this branch deploys the central dispatcher
+    # input-shape validation, so malformed args now get a clean 400 (not a silent
+    # 200 or resolver 5xx). Enable strict input-validation so the security suite
+    # HARD-FAILS on any op that ISN'T cleanly rejected — turning the new
+    # enforcement into a regression gate (was WARN-only / GAP-SEC-INPUT before
+    # this feature existed). An env override is honored if already set.
+    strict = os.environ.get("IDP_SECTEST_STRICT_INPUT", "true")
     cmd = (
+        f"IDP_SECTEST_STRICT_INPUT={strict} "
         f"make api-test STACK_NAME={stack_name} REGION={region} REPORT_DIR={report_dir}"
     )
     result = run_command(cmd, check=False, timeout=1800)
