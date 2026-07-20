@@ -309,19 +309,42 @@ test-circuit-breaker: ## Run only circuit breaker tests
 	    src/lambda/queue_processor/test_check_circuit_breaker.py \
 	    src/lambda/workflow_tracker/test_notify_circuit_breaker.py
 
-# api-test-static is offline (tier 1); api-test below is a STACK TEST (tier 3,
-# needs a live stack) — it also has the alias `make stacktest-rbac` and is listed
-# in the "Stack tests" group. Kept here because api-test depends on api-test-static.
+# api-test-static is the OFFLINE half (tier 1, CI-safe) — it stays in this
+# pytest group. The full api-test (tier 3, needs a live stack) lives in the
+# "Stack tests" group below, alongside its `stacktest-rbac` alias.
 api-test-static: ## Static RBAC/authorization scan of all API operations (no AWS; CI-safe)
 	@echo "Running static API RBAC scan..."
 	$(PYTHON) scripts/sdlc/scan_api_rbac.py $(if $(STRICT),--strict,)
 
+##@ Stack tests (stacktest-*: run against / deploy a live stack, manual)
+# One family for every test that exercises a REAL deployed stack (as opposed to
+# the offline unit suites under `make test`). These run OUTSIDE the CI pipeline
+# — on a dev box with AWS creds (AWS_PROFILE=default or idp-ci) — so heavy,
+# concurrent, or infra-variant tests don't burst the account-wide control planes
+# the way running them all at once in one pipeline did.
+#
+# The deploy-variant stack-tests (APIGateway hosting, WAF, PRIVATE/VPC, Jobs API,
+# ZAP DAST) in particular no longer run automatically in CI; run them here on
+# demand, each on its own stack. Two modes:
+#   * STACK_NAME=<existing>  → validate that already-deployed stack (fast)
+#   * omit STACK_NAME        → self-deploy a throwaway stack + validate + teardown
+#     (needs TEMPLATE_URL from publish.py).
+# VPC stack-tests (jobsapi, apigwpriv) take VPC wiring as make params:
+#   VPC_ID=... SUBNET_IDS=a,b LAMBDA_SG_ID=... APIGW_VPCE_ID=...
+# (falls back to IDP_TEST_* env vars; the run-stack-tests skill can
+# discover a suitable VPC and fill these in for you).
+_STACKTEST_VPC_ARGS = $(if $(VPC_ID),--vpc-id $(VPC_ID),) $(if $(SUBNET_IDS),--subnet-ids $(SUBNET_IDS),) $(if $(LAMBDA_SG_ID),--lambda-sg-id $(LAMBDA_SG_ID),) $(if $(APIGW_VPCE_ID),--apigw-vpce-id $(APIGW_VPCE_ID),)
+_STACKTEST_ARGS = $(if $(STACK_NAME),--stack-name $(STACK_NAME),) $(if $(TEMPLATE_URL),--template-url $(TEMPLATE_URL),) $(if $(ADMIN_EMAIL),--admin-email $(ADMIN_EMAIL),) $(_STACKTEST_VPC_ARGS)
+
+stacktest-list: ## List the available deploy-variant stack-tests
+	$(PYTHON) scripts/sdlc/run_stacktest.py --list
+
 # Usage: make api-test STACK_NAME=<stack-name> [REGION=<region>] [REPORT_DIR=<dir>] [NO_TEARDOWN=1]
-# Runs the static scan first, then dynamic tests against the deployed stack:
-# creates temporary Cognito users (one per group + a config-version-scoped
-# Author), exercises every API op across all roles + unauthenticated + token
-# negatives, and tears the test users down afterward. Requires AWS creds for the
-# deployment account (see CLAUDE.md — use AWS_PROFILE=default).
+# Full RBAC test: runs the offline static scan (api-test-static) first, then
+# dynamic tests against the DEPLOYED stack — creates temporary Cognito users (one
+# per group + a config-version-scoped Author), exercises every API op across all
+# roles + unauthenticated + token negatives, and tears the test users down after.
+# Requires AWS creds (see CLAUDE.md — use AWS_PROFILE=default).
 api-test: api-test-static ## Full RBAC test: static scan + live API tests (requires STACK_NAME)
 ifndef STACK_NAME
 	$(error STACK_NAME is not set. Usage: make api-test STACK_NAME=<stack-name> [REGION=...])
@@ -334,31 +357,7 @@ endif
 	    $(if $(NO_TEARDOWN),--no-teardown,)
 	@echo -e "$(GREEN)✅ API RBAC report written to $(if $(REPORT_DIR),$(REPORT_DIR),./api-test-results)$(NC)"
 
-##@ Stack tests (stacktest-*: run against / deploy a live stack, manual)
-# One family for every test that exercises a REAL deployed stack (as opposed to
-# the offline unit suites under `make test`). These run OUTSIDE the CI pipeline
-# — on a dev box with AWS creds (AWS_PROFILE=default or idp-ci) — so heavy,
-# concurrent, or infra-variant tests don't burst the account-wide control planes
-# the way running them all at once in one pipeline did.
-#
-# The deploy-variant probes (APIGateway hosting, WAF, PRIVATE/VPC, Jobs API, ZAP
-# DAST) in particular no longer run automatically in CI; run them here on demand,
-# each on its own stack. Two modes:
-#   * STACK_NAME=<existing>  → validate that already-deployed stack (fast)
-#   * omit STACK_NAME        → self-deploy a throwaway stack + validate + teardown
-#     (needs TEMPLATE_URL from publish.py).
-# VPC probes (jobsapi, apigwpriv) take VPC wiring as make params:
-#   VPC_ID=... SUBNET_IDS=a,b LAMBDA_SG_ID=... APIGW_VPCE_ID=...
-# (falls back to IDP_TEST_* env vars; the run-integration-probes skill can
-# discover a suitable VPC and fill these in for you).
-_STACKTEST_VPC_ARGS = $(if $(VPC_ID),--vpc-id $(VPC_ID),) $(if $(SUBNET_IDS),--subnet-ids $(SUBNET_IDS),) $(if $(LAMBDA_SG_ID),--lambda-sg-id $(LAMBDA_SG_ID),) $(if $(APIGW_VPCE_ID),--apigw-vpce-id $(APIGW_VPCE_ID),)
-_STACKTEST_ARGS = $(if $(STACK_NAME),--stack-name $(STACK_NAME),) $(if $(TEMPLATE_URL),--template-url $(TEMPLATE_URL),) $(if $(ADMIN_EMAIL),--admin-email $(ADMIN_EMAIL),) $(_STACKTEST_VPC_ARGS)
-
-stacktest-list: ## List the available deploy-variant stack-tests
-	$(PYTHON) scripts/sdlc/run_stacktest.py --list
-
-# RBAC/API authorization test against a live stack (alias to api-test, which
-# CLAUDE.md + the api-rbac-test skill still reference by its original name).
+# Alias so the RBAC test shows up under the consistent stacktest-* name too.
 stacktest-rbac: api-test ## RBAC/API authorization test (alias: api-test) — needs STACK_NAME
 
 stacktest-zap: ## ZAP DAST scan (STACK_NAME=... or self-deploy w/ TEMPLATE_URL=...)
