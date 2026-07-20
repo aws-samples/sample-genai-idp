@@ -39,24 +39,36 @@ the expensive AWS deploy runs only when it's worth it:
 |-------|------|------|------|
 | **fast_checks** | `code_checks` (lint, typecheck, static RBAC scan, all unit suites, UI vitest) **and** `srt_security_review` (SRT security scan) — run in **parallel** | No | ~minutes |
 | **deployment_validation** | IAM service-role permission pre-check | Yes (read-only) | seconds |
-| **integration_tests** | Full stack deploy + primary suite (Steps 1–12) + deployment-variant probes | Yes (deploys) | ~1 hour |
+| **integration_tests** | Full stack deploy + primary suite (Steps 1–13) on the **primary shared stack only**. The deployment-variant probes no longer run here by default — see the ⚠️ note under "deployment-variant probe framework" (run them manually with `make stacktest-*`, or set `IDP_RUN_PROBES=true`). | Yes (deploys) | ~1 hour |
 
 **Trigger matrix** — what runs, when:
 
 | Event | fast_checks (code + SRT) | deployment_validation | integration_tests |
 |-------|:---:|:---:|:---:|
 | Push to any branch, **no MR** | ✅ | — | — |
-| Push to branch with a **Draft** MR → `develop` | ✅ | ✅ | ▶️ **manual** (button on MR) |
-| Push to branch with a **non-Draft** MR → `develop` | ✅ | ✅ | ✅ auto |
-| Push to **`develop`** | ✅ | ✅ | ✅ auto |
+| Push to branch with a **Draft** MR → `develop` | ✅ | ✅¹ | ▶️ **manual** (button on MR) |
+| Push to branch with a **non-Draft** MR → `develop` | ✅ | ✅¹ | ✅ auto¹ |
+| Push to **`develop`** | ✅ | ✅¹ | ✅ auto¹ |
+
+¹ **Doc-only commits skip the deploy stages.** `deployment_validation` and the
+auto `integration_tests` only run when the commit/MR touches a **deploy-affecting
+path** (the `.deploy_affecting_changes` allowlist in `.gitlab-ci.yml`:
+`template.yaml`, `publish.py`, `requirements*.txt`, `patterns/`, `nested/`,
+`src/`, `lib/`, `config_library/`, `feature-platform/`, `iam-roles/`, `scripts/`,
+`.gitlab-ci.yml`). A commit that changes only `VERSION`, `CHANGELOG.md`,
+`**/*.md`, `docs/`, `images/`, etc. skips the ~1h deploy entirely. The allowlist
+is deliberately generous (a false "run" wastes CI minutes; a false "skip" could
+merge a broken deploy). The **Draft-MR manual button ignores this filter** — you
+can always force a deploy by clicking it, even on a doc-only branch.
 
 Notes:
 - **Every push runs fast_checks** (code checks + SRT), so lint/typecheck/unit and
-  security feedback is immediate on any branch. GitLab emails the committer on
-  failure.
+  security feedback is immediate on any branch — **including doc-only commits**
+  (fast_checks has no changes: filter). GitLab emails the committer on failure.
 - The **~1h integration deploy runs only** on `develop` and on **non-Draft** MRs
-  targeting `develop`. On a **Draft** MR it's a **manual play button** on the MR
-  page — run it on demand, not on every WIP push.
+  targeting `develop` — **and only when deploy-affecting files changed** (see ¹).
+  On a **Draft** MR it's a **manual play button** on the MR page — run it on
+  demand, not on every WIP push.
 - A `workflow:` rule prevents **duplicate** branch+MR pipelines (a branch with an
   open MR runs only the MR pipeline).
 - integration_tests uses a **per-branch** `resource_group`
@@ -69,8 +81,9 @@ Notes:
 
 ## Test Execution Strategy
 
-### Parallel Execution (Steps 3-11)
-- **9 tests run concurrently** to minimize pipeline runtime
+### Parallel Execution (Steps 3-11, 13)
+- **10 tests run concurrently** to minimize pipeline runtime (Step 13, the
+  read-only permissions-boundary check, joins the parallel pool)
 - **Fail-fast enabled**: If any test fails, remaining tests are cancelled and cleanup begins
 - **Expected runtime**: ~25-35 minutes (vs 60+ minutes sequential)
 
@@ -301,6 +314,28 @@ mutation — safe to interleave).
 
 ---
 
+### Step 13: IAM Permissions Boundary Attachment ⚡ *Parallel*
+**What it tests**: that the deployed IAM roles actually carry the permissions
+boundary the stack was deployed with. The primary suite deploys with a non-empty
+`PermissionsBoundaryArn`, so the template's `HasPermissionsBoundary` condition
+should attach that boundary to every `AWS::IAM::Role` it creates.
+- **Why it exists**: this is the only place boundary attachment is verified
+  end-to-end. The deploy-variant stack-tests now deploy *without* a boundary
+  (to avoid a per-stack `iam:CreatePolicy`/`DeletePolicy` in any concurrent
+  burst), so if the primary suite didn't check it, a template change that dropped
+  the boundary from a role would ship silently.
+- **Verification**:
+  - Collects `AWS::IAM::Role` physical ids from the stack + its nested stacks
+  - Samples up to 25 roles and asserts each has a `PermissionsBoundary` attached
+  - Fails if any sampled role is missing its boundary
+
+**Duration**: seconds (read-only `cloudformation:ListStackResources` + `iam:GetRole`)  
+**Execution**: Runs in the parallel pool (read-only — no shared-stack mutation).  
+**Implementation**: `test_step13_permission_boundaries` in
+`scripts/sdlc/codebuild_deployment.py`.
+
+---
+
 ## Additional Deployment Tests: the deployment-variant probe framework
 
 > **⚠️ Default OFF in CI (changed 2026-07).** These probes no longer run
@@ -332,7 +367,7 @@ a validator**, not a copy-pasted deploy/validate/cleanup function.
 
 > **Scope (important):** probes are **deploy + feature-smoke only, NOT full
 > functional coverage.** A variant can deploy clean yet still have a
-> doc-processing regression that only the shared-stack suite (Steps 3–12) would
+> doc-processing regression that only the shared-stack suite (Steps 3–13) would
 > catch. Don't read a green probe as "this variant processes documents
 > correctly" — only as "this variant deploys and its distinguishing feature
 > responds."
