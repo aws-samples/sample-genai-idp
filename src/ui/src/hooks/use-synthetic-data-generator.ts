@@ -30,6 +30,15 @@ interface GenerateResponse {
   error?: string;
 }
 
+export interface JobStatus {
+  jobId: string;
+  status: string;
+  statusMessage?: string;
+  errorMessage?: string;
+  testSetId?: string;
+  configVersion?: string;
+}
+
 async function _authToken(): Promise<string> {
   const session = await fetchAuthSession();
   const jwt = session.tokens?.idToken?.toString();
@@ -83,9 +92,26 @@ const useSyntheticDataGenerator = () => {
     [endpoint],
   );
 
+  const getJobStatus = useCallback(
+    async (jobId: string): Promise<JobStatus | null> => {
+      if (!endpoint) return null;
+      try {
+        const token = await _authToken();
+        const resp = await fetch(`${endpoint.replace(/\/$/, '')}/jobs/${encodeURIComponent(jobId)}`, {
+          headers: { Authorization: token },
+        });
+        if (!resp.ok) return null;
+        const data = (await resp.json().catch(() => ({}))) as { job?: JobStatus };
+        return data.job || null;
+      } catch (err) {
+        logger.warn('Job status poll failed', err);
+        return null;
+      }
+    },
+    [endpoint],
+  );
+
   const generateFromPrompt = useCallback(
-    // Field names match the feature-api /generate contract (prompt path):
-    // prompt + className + docCount (NOT count).
     (args: GenerateFromPromptArgs): Promise<string> =>
       _post('/generate', {
         prompt: args.prompt,
@@ -97,8 +123,6 @@ const useSyntheticDataGenerator = () => {
   );
 
   const generateFromConfig = useCallback(
-    // Field names match the feature-api /generate-from-config contract:
-    // versionName + className + docCount (NOT configVersion/count).
     (args: GenerateFromConfigArgs): Promise<string> =>
       _post('/generate-from-config', {
         versionName: args.configVersion,
@@ -116,8 +140,9 @@ const useSyntheticDataGenerator = () => {
       submitting,
       generateFromPrompt,
       generateFromConfig,
+      getJobStatus,
     }),
-    [available, featuresLoading, submitting, generateFromPrompt, generateFromConfig],
+    [available, featuresLoading, submitting, generateFromPrompt, generateFromConfig, getJobStatus],
   );
 };
 

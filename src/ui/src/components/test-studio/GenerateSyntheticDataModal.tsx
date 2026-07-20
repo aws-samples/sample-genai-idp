@@ -39,7 +39,7 @@ interface GenerateSyntheticDataModalProps {
   onDismiss: () => void;
   // Called with the enqueued job id after a successful request so the caller can
   // surface a "generation started" notice and refresh the test set list later.
-  onStarted: (jobId: string) => void;
+  onStarted: (jobId: string, label: string) => void;
 }
 
 const MIN_COUNT = 1;
@@ -133,6 +133,7 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
     setError('');
     try {
       let jobId: string;
+      let label: string;
       if (activeTab === 'prompt') {
         jobId = await generateFromPrompt({
           prompt: prompt.trim(),
@@ -140,6 +141,7 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
           className: promptClassName.trim() || undefined,
           augment,
         });
+        label = promptClassName.trim() || 'Synthetic documents';
       } else {
         jobId = await generateFromConfig({
           configVersion: selectedVersion?.value as string,
@@ -147,9 +149,10 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
           count: parsedCount,
           augment,
         });
+        label = (selectedClass?.value as string) || 'Synthetic documents';
       }
       reset();
-      onStarted(jobId);
+      onStarted(jobId, label);
     } catch (err) {
       setError(getErrorMessage(err));
     }

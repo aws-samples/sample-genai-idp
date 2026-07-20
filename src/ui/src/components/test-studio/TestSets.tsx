@@ -19,6 +19,7 @@ import {
   Select,
   DatePicker,
   TimeInput,
+  StatusIndicator,
 } from '@cloudscape-design/components';
 import { generateClient } from '../../api/client-shim';
 import {
@@ -100,7 +101,8 @@ const TestSets = (): React.JSX.Element => {
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   // The synthetic-data generator is an optional extension; the button is only
   // shown when it's installed (available).
-  const { available: generatorAvailable } = useSyntheticDataGenerator();
+  const { available: generatorAvailable, getJobStatus } = useSyntheticDataGenerator();
+  const [genJobs, setGenJobs] = useState<Record<string, { name: string; status: string; message: string }>>({});
   const [warningMessage, setWarningMessage] = useState('');
   const [confirmReplacement, setConfirmReplacement] = useState(false);
   const [showFileStructure, setShowFileStructure] = useState(() => {
@@ -180,6 +182,39 @@ const TestSets = (): React.JSX.Element => {
       clearInterval(interval);
     };
   }, [testSets]);
+
+  // Poll in-flight synthetic-generation jobs until terminal.
+  React.useEffect(() => {
+    const jobIds = Object.keys(genJobs);
+    if (jobIds.length === 0) return;
+    const interval = setInterval(async () => {
+      for (const jobId of jobIds) {
+        const job = await getJobStatus(jobId);
+        if (!job) continue;
+        if (job.status === 'COMPLETED') {
+          setGenJobs((prev) => {
+            const { [jobId]: _done, ...rest } = prev;
+            return rest;
+          });
+          setSuccessMessage(`Synthetic data generation complete: "${genJobs[jobId]?.name}".`);
+          loadTestSets();
+        } else if (job.status === 'FAILED') {
+          setGenJobs((prev) => {
+            const { [jobId]: _failed, ...rest } = prev;
+            return rest;
+          });
+          setError(`Synthetic data generation failed for "${genJobs[jobId]?.name}": ${job.errorMessage || 'unknown error'}`);
+        } else {
+          setGenJobs((prev) =>
+            prev[jobId]
+              ? { ...prev, [jobId]: { ...prev[jobId], status: job.status, message: job.statusMessage || prev[jobId].message } }
+              : prev,
+          );
+        }
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [genJobs, getJobStatus]);
 
   // Separate discovery polling for new test sets (less frequent)
   React.useEffect(() => {
@@ -722,7 +757,15 @@ const TestSets = (): React.JSX.Element => {
     }
   };
 
-  const filteredTestSets = testSets
+  const generatingRows: TestSetItem[] = Object.entries(genJobs).map(([jobId, j]) => ({
+    id: `gen:${jobId}`,
+    name: j.name,
+    description: j.message,
+    status: 'GENERATING',
+    createdAt: new Date().toISOString(),
+  }));
+
+  const filteredTestSets = [...generatingRows, ...testSets]
     .filter((item) => item != null)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   console.log('Filtered testSets for Table:', filteredTestSets);
@@ -777,6 +820,10 @@ const TestSets = (): React.JSX.Element => {
       header: 'Status',
       cell: (item: TestSetItem) => {
         const status = item.status || '-';
+
+        if (status === 'GENERATING') {
+          return <StatusIndicator type="in-progress">{item.description || 'Generating…'}</StatusIndicator>;
+        }
 
         if (status === 'UPDATING') {
           return <Badge color="blue">Updating...</Badge>;
@@ -1713,11 +1760,10 @@ const TestSets = (): React.JSX.Element => {
       <GenerateSyntheticDataModal
         visible={showGenerateModal}
         onDismiss={() => setShowGenerateModal(false)}
-        onStarted={(jobId) => {
+        onStarted={(jobId, label) => {
           setShowGenerateModal(false);
-          setSuccessMessage(
-            `Synthetic data generation started (job ${jobId}). The test set will appear here when it completes; use Refresh to check.`,
-          );
+          setSuccessMessage(`Synthetic data generation started for "${label}". It will appear in the list when it completes.`);
+          setGenJobs((prev) => ({ ...prev, [jobId]: { name: label, status: 'GENERATING', message: 'Starting generation' } }));
         }}
       />
     </Container>
