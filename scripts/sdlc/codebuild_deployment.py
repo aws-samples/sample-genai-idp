@@ -3390,41 +3390,57 @@ def _test_vpc_params():
 PROBE_TRANSIENT_MAX_ATTEMPTS = 2
 
 
-def _is_transient_logs_race(result):
-    """True iff the deploy rolled back on the known CloudWatch Logs create race.
+# Known AWS eventual-consistency (control-plane propagation) races that a fresh
+# redeploy re-rolls. Each entry is (resource_type, reason_substring) matched
+# case-insensitively against a CREATE_FAILED event. These are the ONLY failures
+# retried: they are non-deterministic (a clean redeploy usually passes), whereas
+# a real config/permission/template error fails IDENTICALLY every time and must
+# surface, not be masked. Verified from real CI runs:
+#   * LogGroup: an AWS::Logs::LogGroup with RetentionInDays makes CFN issue
+#     CreateLogGroup then PutRetentionPolicy; under heavy concurrent stack
+#     creation (~250 log groups at once) CWL isn't read-your-write consistent, so
+#     the second call hits the not-yet-propagated group → "does not exist".
+#   * CodeBuild service role: a nested stack's AWS::CodeBuild::Project is created
+#     right after its service role; IAM role/trust-policy propagation is
+#     eventually consistent, so CodeBuild's CreateProject trust validation
+#     occasionally races the new role → "is not authorized to perform:
+#     sts:AssumeRole on service role ... trust policy configured".
+_TRANSIENT_DEPLOY_RACES = (
+    ("AWS::Logs::LogGroup", "does not exist"),
+    ("AWS::CodeBuild::Project", "sts:assumerole on service role"),
+)
 
-    Root cause (verified from a real run — NOT a blanket "retry any rollback"):
-    an AWS::Logs::LogGroup with RetentionInDays set makes CFN's handler issue
-    two sequential CWL calls — CreateLogGroup then PutRetentionPolicy. Under
-    heavy CONCURRENT stack creation (primary + N probes standing up ~250 log
-    groups at once) CWL's control plane isn't read-your-write consistent, so
-    PutRetentionPolicy occasionally hits the just-created group before it has
-    propagated and returns ResourceNotFoundException — surfaced as
-    CREATE_FAILED "The specified log group does not exist" / InvalidRequest.
 
-    This is the ONLY failure we retry, because it is non-deterministic (a fresh
-    deploy re-rolls the race) whereas a real config/permission/KMS error fails
-    IDENTICALLY every time and must surface, not be masked. The match is scoped
-    tightly to resource type + message so nothing else qualifies:
+def _is_transient_deploy_race(result):
+    """True iff the deploy rolled back on a KNOWN transient AWS-consistency race.
+
+    NOT a blanket "retry any rollback": matched tightly to resource type +
+    message (see _TRANSIENT_DEPLOY_RACES) so genuine config/permission/template
+    errors — which fail identically on a redeploy — still surface. Requirements:
       * failure_type must be "deploy" (never a validation failure), and
-      * some captured event is a CREATE_FAILED on an AWS::Logs::LogGroup whose
-        reason contains "does not exist" (the initiating cause — the collateral
-        rolled-back resources carry "Resource creation cancelled", which this
-        deliberately does NOT match).
+      * some captured event is a CREATE_FAILED on one of the known-racy resource
+        types whose reason contains the matching substring (the initiating
+        cause — collateral rolled-back resources carry "Resource creation
+        cancelled", which this deliberately does NOT match).
     """
     if result.get("failure_type") != "deploy":
         return False
     for ev in result.get("cf_events") or []:
         if not isinstance(ev, dict):
             continue
-        if ev.get("resource_type") != "AWS::Logs::LogGroup":
+        if ev.get("status") != "CREATE_FAILED":
             continue
-        if (
-            ev.get("status") == "CREATE_FAILED"
-            and "does not exist" in (ev.get("reason") or "").lower()
-        ):
-            return True
+        rtype = ev.get("resource_type")
+        reason = (ev.get("reason") or "").lower()
+        for race_type, race_substr in _TRANSIENT_DEPLOY_RACES:
+            if rtype == race_type and race_substr in reason:
+                return True
     return False
+
+
+# Back-compat alias: the CWL-race-only name kept so existing call sites/tests
+# that reference it continue to work while the detector now covers more races.
+_is_transient_logs_race = _is_transient_deploy_race
 
 
 def _run_probe_attempt(probe, admin_email, template_url, vpc_params):

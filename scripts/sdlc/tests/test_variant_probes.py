@@ -348,6 +348,48 @@ def test_is_transient_logs_race_handles_missing_or_malformed_events(cbd):
     )
 
 
+def _codebuild_trust_race_event():
+    # A nested-stack AWS::CodeBuild::Project created right after its service role;
+    # IAM trust-policy propagation is eventually consistent, so CreateProject's
+    # trust validation occasionally races the just-created role. Shape matches
+    # get_cloudformation_logs()'s failure-event dicts.
+    return {
+        "resource_type": "AWS::CodeBuild::Project",
+        "logical_id": "DockerBuildProject",
+        "status": "CREATE_FAILED",
+        "reason": (
+            'Resource handler returned message: "CodeBuild is not authorized to '
+            "perform: sts:AssumeRole on service role. Please verify that ... the "
+            'role has the necessary trust policy configured. (Service: AWSCodeBuild)"'
+        ),
+    }
+
+
+def test_is_transient_race_matches_the_codebuild_trust_propagation_race(cbd):
+    # The broadened detector also retries the CodeBuild service-role trust
+    # propagation race (real CI failure on the jobsapi probe).
+    result = {"failure_type": "deploy", "cf_events": [_codebuild_trust_race_event()]}
+    assert cbd._is_transient_deploy_race(result) is True
+    # Back-compat alias resolves to the same broadened detector.
+    assert cbd._is_transient_logs_race(result) is True
+
+
+def test_is_transient_race_ignores_other_codebuild_errors(cbd):
+    # A real CodeBuild misconfig (e.g. bad source location) is deterministic and
+    # must NOT be retried — only the sts:AssumeRole trust race qualifies.
+    result = {
+        "failure_type": "deploy",
+        "cf_events": [
+            {
+                "resource_type": "AWS::CodeBuild::Project",
+                "status": "CREATE_FAILED",
+                "reason": "Invalid source location: bucket does not exist",
+            }
+        ],
+    }
+    assert cbd._is_transient_deploy_race(result) is False
+
+
 def _stub_attempts(cbd, monkeypatch, results):
     """Make _run_probe_attempt return each of `results` in order; record count."""
     seq = list(results)
