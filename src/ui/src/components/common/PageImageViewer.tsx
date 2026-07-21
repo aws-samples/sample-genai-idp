@@ -284,7 +284,11 @@ const PageImageViewer = ({
         logger.debug('PageImageViewer - Successfully loaded images for', Object.keys(images).length, 'pages');
         setPageImages(images);
 
-        if (!currentPage && pageIds.length > 0) {
+        // Also reset when the page list changed and no longer contains the
+        // current page (e.g. the ground-truth editor switching to a section
+        // whose split_document.page_indices are a different page set) —
+        // otherwise the viewer waits forever on an image that will never load.
+        if (pageIds.length > 0 && (!currentPage || !pageIds.includes(currentPage))) {
           setCurrentPage(pageIds[0]);
         }
       } catch (err) {

@@ -30,10 +30,11 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from '../../api/client-shim';
 import { getTestSetDocuments } from '../../graphql/generated';
 import useAppContext from '../../contexts/app';
-import useUserRole from '../../hooks/use-user-role';
+import useSettingsContext from '../../contexts/settings';
 import Navigation from '../genaiidp-layout/navigation';
 import { appLayoutLabels } from '../common/labels';
 import { TEST_STUDIO_PATH, testSetDocumentHref } from '../../routes/constants';
+import TestDocThumbnail from './TestDocThumbnail';
 import type { TestSetDocumentSectionRef } from './GroundTruthVisualEditor';
 
 const client = generateClient();
@@ -59,7 +60,8 @@ export const formatSize = (size?: number | null): string => {
 const TestSetDetail = (): React.JSX.Element => {
   const { testSetId } = useParams<{ testSetId: string }>();
   const { navigationOpen, setNavigationOpen } = useAppContext();
-  const { canWrite } = useUserRole();
+  const { settings } = useSettingsContext();
+  const testSetBucket = (settings as Record<string, unknown>).TestSetBucket as string | undefined;
 
   const [documents, setDocuments] = useState<TestSetDocumentItem[]>([]);
   // Server pagination: pageTokens[i] is the nextToken that fetches page i+1.
@@ -157,6 +159,13 @@ const TestSetDetail = (): React.JSX.Element => {
               }
               columnDefinitions={[
                 {
+                  id: 'thumbnail',
+                  header: 'Preview',
+                  cell: (item: TestSetDocumentItem) =>
+                    testSetBucket ? <TestDocThumbnail bucket={testSetBucket} inputKey={item.inputKey} /> : null,
+                  width: 130,
+                },
+                {
                   id: 'objectKey',
                   header: 'Document',
                   cell: (item: TestSetDocumentItem) => (
@@ -178,18 +187,6 @@ const TestSetDetail = (): React.JSX.Element => {
                   id: 'sections',
                   header: 'GT sections',
                   cell: (item: TestSetDocumentItem) => item.sections.length,
-                },
-                {
-                  id: 'actions',
-                  header: 'Actions',
-                  cell: (item: TestSetDocumentItem) => (
-                    <SpaceBetween direction="horizontal" size="xs">
-                      <Link href={testSetDocumentHref(testSetId ?? '', item.objectKey, 'source')}>View Source</Link>
-                      <Link href={testSetDocumentHref(testSetId ?? '', item.objectKey, 'ground-truth')}>
-                        {canWrite ? 'Edit Ground Truth' : 'View Ground Truth'}
-                      </Link>
-                    </SpaceBetween>
-                  ),
                 },
               ]}
               items={filteredDocs}

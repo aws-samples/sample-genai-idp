@@ -3476,6 +3476,9 @@ Resources:
               - "x-amz-date"
               - "Authorization"
               - "x-amz-security-token"
+              # The test set browser's PDF thumbnails use pdfjs ranged
+              # loading (fetch only the chunks needed for page 1).
+              - "Range"
             # GET / HEAD are required so the Web UI's test set browser can
             # fetch source documents and baseline (ground truth) result.json
             # directly from S3 via presigned URLs.
@@ -3502,6 +3505,9 @@ Resources:
             ExposedHeaders:
               - "ETag"
               - "x-amz-server-side-encryption"
+              # Ranged GETs (pdfjs partial fetch for thumbnails / lazy page rendering)
+              - "Content-Range"
+              - "Accept-Ranges"
             MaxAge: 3000
       BucketEncryption:
         ServerSideEncryptionConfiguration:
