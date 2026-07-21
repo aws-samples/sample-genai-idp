@@ -1474,6 +1474,11 @@ type CatalogFeature @aws_cognito_user_pools {
   # site; may also be an absolute URL. Empty for marketplace features (the UI
   # falls back to marketplaceListingUrl).
   docsUrl: String
+  # Whether the feature gets its own Extensions side-nav entry before it's
+  # installed (installed features always appear). False for reference samples,
+  # which are discoverable via the Browse catalog page only. Defaults to true
+  # when absent.
+  showInNav: Boolean
   # "oss" (open-source bundled feature, installable directly) or
   # "marketplace" (closed-source extension requiring an AWS Marketplace
   # subscription). Defaults to "oss" when absent.

@@ -1884,6 +1884,10 @@ STDERR:
                     # Optional absolute docs URL; if omitted the UI falls back to
                     # marketplaceListingUrl for the "Learn more" link.
                     "docsUrl": item.get("docsUrl") or "",
+                    # Not-yet-installed nav visibility (default True). Set
+                    # false for entries that should only be discoverable via
+                    # the UI's Browse catalog page.
+                    "showInNav": bool(item.get("showInNav", True)),
                     "source": "marketplace",
                     "latestVersion": item.get("latestVersion") or "",
                     "productCode": item.get("productCode") or "",
@@ -2068,6 +2072,10 @@ STDERR:
             "description": manifest.description or "",
             "iconUrl": manifest.iconUrl or "",
             "docsUrl": manifest.docsUrl or "",
+            # From feature.yaml showInNav (default True): whether the feature
+            # gets its own nav entry before it's installed. The bundled
+            # samples set false so they're only in the Browse catalog page.
+            "showInNav": manifest.showInNav,
             "source": "oss",
             "latestVersion": manifest.version,
             # OSS extension artifacts live in the (same) artifacts bucket the

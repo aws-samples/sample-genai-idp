@@ -36,6 +36,11 @@
       "maxLength": 500,
       "description": "OSS features: a docs-site slug (e.g. 'extensions/sample-document-status') resolved against the published docs site for the UI 'Learn more' link. May also be an absolute https URL. Marketplace features omit this and fall back to marketplaceListingUrl."
     },
+    "showInNav": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether this feature gets its own Extensions side-nav entry in the host UI while not yet installed. Set false for reference samples that should only be discoverable via Browse catalog. Installed features always appear in the nav regardless."
+    },
     "template": {
       "type": "object",
       "required": ["path"],
