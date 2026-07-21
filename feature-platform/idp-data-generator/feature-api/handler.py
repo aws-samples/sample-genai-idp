@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-"""IDP Data Generator feature API.
+"""Test Set Generator feature API.
 
 Fronted by the host's Cognito JWT authorizer (template.yaml FeatureApi), so this
 handler only does application logic. It is the endpoint the host's Quick Start
@@ -32,13 +32,16 @@ GET /jobs
 GET /jobs/{jobId}
     Returns the BootstrapTrackingTable row for a job (status, message, etc.).
 
+POST /estimate-cost
+    Body: { docCount: int, threshold?: int }. Returns { estimate: {...} } with a
+    rough cost/time band for the run.
+
+POST /suggest-scenario
+    Body: { className?: str, versionName?: str, prompt?: str }. Returns
+    { suggestions: [str, ...] } — short scenario themes proposed via Bedrock.
+
 GET /config
     Returns lightweight UI config (featureId, version) for the feature page.
-
-NOTE (scaffold): the request/response contract here is the proposed shape and
-mirrors the SQS message body the host's quick_start bootstrap_tools enqueues
-today. Finalize alongside the host Quick Start rewire (the discovery tool then
-POSTs here instead of writing a host queue). See README.md.
 """
 
 from __future__ import annotations
@@ -59,9 +62,13 @@ _QUEUE_URL = os.environ.get("BOOTSTRAP_QUEUE_URL", "")
 _TRACKING_TABLE = os.environ.get("BOOTSTRAP_TRACKING_TABLE", "")
 _CONFIG_TABLE = os.environ.get("CONFIGURATION_TABLE_NAME", "")
 _FEATURE_VERSION = os.environ.get("FEATURE_VERSION", "")
+_SUGGEST_MODEL_ID = os.environ.get(
+    "SUGGEST_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+)
 
 _sqs = boto3.client("sqs")
 _dynamodb = boto3.resource("dynamodb")
+_bedrock = boto3.client("bedrock-runtime")
 
 
 def _resp(status: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -93,6 +100,7 @@ def _handle_generate(body: Dict[str, Any]) -> Dict[str, Any]:
         "docCount": int(body.get("docCount", 3)),
         "threshold": int(body.get("threshold", 7)),
         "augment": bool(body.get("augment", False)),
+        "scenario": (body.get("scenario") or "").strip(),
         "generateDocs": True,
     }
     if schema:
@@ -117,12 +125,81 @@ def _handle_generate_from_config(body: Dict[str, Any]) -> Dict[str, Any]:
         "docCount": int(body.get("docCount", 3)),
         "threshold": int(body.get("threshold", 7)),
         "augment": bool(body.get("augment", False)),
+        "scenario": (body.get("scenario") or "").strip(),
         "generateDocs": True,
         # The processor reads the class from this version and builds the
         # generator schema (schema_bridge.config_class_to_generator_schema).
         "fromExistingConfig": True,
     }
     return _resp(202, {"jobId": _enqueue(message)})
+
+
+def _estimate_cost(count: int, threshold: int) -> Dict[str, Any]:
+    per_doc_usd = 1.75 if threshold <= 7 else 4.0
+    per_doc_min = 7.0 if threshold <= 7 else 12.0
+    return {
+        "documents": count,
+        "estimated_usd_low": round(per_doc_usd * count, 2),
+        "estimated_usd_high": round(per_doc_usd * count * 2.5, 2),
+        "estimated_minutes_low": round(per_doc_min * count / max(1, min(count, 3)), 1),
+        "estimated_minutes_high": round(per_doc_min * count, 1),
+        "note": "Estimates; actual cost depends on document complexity and retries.",
+    }
+
+
+def _handle_estimate_cost(body: Dict[str, Any]) -> Dict[str, Any]:
+    count = int(body.get("docCount", 3))
+    threshold = int(body.get("threshold", 7))
+    return _resp(200, {"estimate": _estimate_cost(count, threshold)})
+
+
+def _handle_suggest_scenario(body: Dict[str, Any]) -> Dict[str, Any]:
+    class_name = (body.get("className") or "").strip()
+    version_name = (body.get("versionName") or "").strip()
+    prompt = (body.get("prompt") or "").strip()
+    subject = class_name or prompt or "documents"
+    ask = (
+        "You help create diverse synthetic test documents. Propose 3 short, "
+        "distinct scenario themes (each under 12 words) for generating varied "
+        f"examples of: {subject}."
+    )
+    if version_name:
+        ask += f" These belong to configuration version '{version_name}'."
+    ask += (
+        " A scenario is a high-level theme (e.g. 'small-business owners in "
+        "retail', 'travel-heavy expense reports'). Return ONLY a JSON array of "
+        "3 strings, no prose."
+    )
+    resp = _bedrock.invoke_model(
+        modelId=_SUGGEST_MODEL_ID,
+        body=json.dumps(
+            {
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 300,
+                "messages": [{"role": "user", "content": ask}],
+            }
+        ),
+    )
+    payload = json.loads(resp["body"].read())
+    text = "".join(
+        block.get("text", "")
+        for block in payload.get("content", [])
+        if isinstance(block, dict)
+    ).strip()
+    suggestions = _parse_suggestions(text)
+    return _resp(200, {"suggestions": suggestions})
+
+
+def _parse_suggestions(text: str) -> list:
+    start, end = text.find("["), text.rfind("]")
+    if start != -1 and end != -1 and end > start:
+        try:
+            arr = json.loads(text[start : end + 1])
+            return [str(s).strip() for s in arr if str(s).strip()][:3]
+        except json.JSONDecodeError:
+            pass
+    lines = [line.strip("-*• ").strip() for line in text.splitlines() if line.strip()]
+    return [line for line in lines if line][:3]
 
 
 def _handle_list_active_jobs() -> Dict[str, Any]:
@@ -167,6 +244,10 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return _handle_generate(json.loads(event.get("body") or "{}"))
         if method == "POST" and path.endswith("/generate-from-config"):
             return _handle_generate_from_config(json.loads(event.get("body") or "{}"))
+        if method == "POST" and path.endswith("/estimate-cost"):
+            return _handle_estimate_cost(json.loads(event.get("body") or "{}"))
+        if method == "POST" and path.endswith("/suggest-scenario"):
+            return _handle_suggest_scenario(json.loads(event.get("body") or "{}"))
         if method == "GET" and "/jobs/" in path:
             return _handle_get_job(path.rsplit("/jobs/", 1)[-1])
         if method == "GET" and path.endswith("/jobs"):

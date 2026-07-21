@@ -669,6 +669,7 @@ Resources:
           BOOTSTRAP_QUEUE_URL: !Ref BootstrapQueue
           BOOTSTRAP_TRACKING_TABLE: !Ref BootstrapTrackingTable
           CONFIGURATION_TABLE_NAME: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }
+          SUGGEST_MODEL_ID: !Ref GeneratorModelId
       Policies:
         - SQSSendMessagePolicy:
             QueueName: !GetAtt BootstrapQueue.QueueName
@@ -685,6 +686,14 @@ Resources:
             - Effect: Allow
               Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
               Resource: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
+            # Bedrock for the /suggest-scenario scenario-theme suggestions.
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:GetInferenceProfile
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
       Events:
         # Explicit methods (NOT ANY) so API Gateway answers OPTIONS preflight
         # itself before the JWT authorizer — same rationale as the sample.

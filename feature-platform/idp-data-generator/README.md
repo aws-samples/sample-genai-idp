@@ -1,4 +1,6 @@
-# IDP Data Generator — Feature Platform extension
+# Test Set Generator — Feature Platform extension
+
+> Display name: **Test Set Generator**. Feature id (stable key): `idp-data-generator`.
 
 Packages the SEED synthetic-document generator (the published **`seed-data`**
 PyPI package) plus the accelerator's synthesis adapter (`idp_common.synthesis`)
@@ -49,7 +51,8 @@ feature-platform/idp-data-generator/
     runtime/handler.py       AgentCore /invocations + /ping entrypoint
   bootstrap-processor/       SQS processor: authors schema, invokes the runtime
   ui-deployer/handler.py     copies UI bundle to host WebUIBucket + registerFeature
-  feature-api/handler.py     POST /generate, /generate-from-config, GET /jobs/{id}
+  feature-api/handler.py     POST /generate, /generate-from-config, /estimate-cost,
+                             /suggest-scenario; GET /jobs, /jobs/{id}, /config
   feature-ui/                React UMD landing page (points to Test Studio)
 ```
 

@@ -1,6 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import type { SelectProps } from '@cloudscape-design/components';
 import {
   Container,
@@ -20,6 +21,7 @@ import {
   DatePicker,
   TimeInput,
   StatusIndicator,
+  Link,
 } from '@cloudscape-design/components';
 import { generateClient } from '../../api/client-shim';
 import {
@@ -37,6 +39,7 @@ import type { DocumentClassType } from '../../graphql/generated/schema-types';
 import { getErrorMessage } from '../../utils/errorUtils';
 import useSyntheticDataGenerator from '../../hooks/use-synthetic-data-generator';
 import GenerateSyntheticDataModal from './GenerateSyntheticDataModal';
+import TestSetDocumentsModal from './TestSetDocumentsModal';
 
 const client = generateClient();
 
@@ -99,6 +102,10 @@ const TestSets = (): React.JSX.Element => {
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [genInitial, setGenInitial] = useState<{ tab?: 'prompt' | 'config'; version?: string; className?: string }>({});
+  const [viewDocsTestSet, setViewDocsTestSet] = useState<{ id: string; name: string } | null>(null);
+  const location = useLocation();
+  const navigate = useNavigate();
   // The synthetic-data generator is an optional extension; the button is only
   // shown when it's installed (available).
   const { available: generatorAvailable, getJobStatus, listActiveJobs } = useSyntheticDataGenerator();
@@ -245,6 +252,21 @@ const TestSets = (): React.JSX.Element => {
       clearInterval(interval);
     };
   }, [generatorAvailable, listActiveJobs]);
+
+  // Open the generate modal pre-filled when deep-linked (e.g. from the Schema
+  // Builder "Generate test set for this class" button): ?generate=1&version=&className=
+  React.useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('generate') !== '1') return;
+    const version = params.get('version') || undefined;
+    const className = params.get('className') || undefined;
+    setGenInitial({ tab: version ? 'config' : 'prompt', version, className });
+    setShowGenerateModal(true);
+    params.delete('generate');
+    params.delete('version');
+    params.delete('className');
+    navigate({ search: params.toString() }, { replace: true });
+  }, [location.search]);
 
   // Separate discovery polling for new test sets (less frequent)
   React.useEffect(() => {
@@ -804,7 +826,12 @@ const TestSets = (): React.JSX.Element => {
     {
       id: 'name',
       header: 'Test Set Name',
-      cell: (item: TestSetItem) => item.name,
+      cell: (item: TestSetItem) =>
+        item.status === 'GENERATING' ? (
+          item.name
+        ) : (
+          <Link onFollow={() => setViewDocsTestSet({ id: item.id, name: item.name })}>{item.name}</Link>
+        ),
       sortingField: 'name',
     },
     {
@@ -1789,12 +1816,26 @@ const TestSets = (): React.JSX.Element => {
 
       <GenerateSyntheticDataModal
         visible={showGenerateModal}
-        onDismiss={() => setShowGenerateModal(false)}
+        initialTab={genInitial.tab}
+        initialVersion={genInitial.version}
+        initialClassName={genInitial.className}
+        onDismiss={() => {
+          setShowGenerateModal(false);
+          setGenInitial({});
+        }}
         onStarted={(jobId, label) => {
           setShowGenerateModal(false);
+          setGenInitial({});
           setSuccessMessage(`Synthetic data generation started for "${label}". It will appear in the list when it completes.`);
           setGenJobs((prev) => ({ ...prev, [jobId]: { name: label, status: 'GENERATING', message: 'Starting generation' } }));
         }}
+      />
+
+      <TestSetDocumentsModal
+        visible={Boolean(viewDocsTestSet)}
+        testSetId={viewDocsTestSet?.id || ''}
+        testSetName={viewDocsTestSet?.name || ''}
+        onDismiss={() => setViewDocsTestSet(null)}
       />
     </Container>
   );

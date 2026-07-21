@@ -160,7 +160,7 @@ export default defineConfig({
                   slug: "extensions/auto-optimizer",
                 },
                 {
-                  label: "IDP Data Generator",
+                  label: "Test Set Generator",
                   slug: "extensions/idp-data-generator",
                 },
                 {

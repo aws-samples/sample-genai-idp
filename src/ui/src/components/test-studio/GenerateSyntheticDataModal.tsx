@@ -1,9 +1,23 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 import React, { useEffect, useMemo, useState } from 'react';
-import { Modal, Box, SpaceBetween, Button, FormField, Input, Textarea, Select, Checkbox, Alert, Tabs } from '@cloudscape-design/components';
+import {
+  Modal,
+  Box,
+  SpaceBetween,
+  Button,
+  FormField,
+  Input,
+  Textarea,
+  Select,
+  Checkbox,
+  Alert,
+  Tabs,
+  SegmentedControl,
+} from '@cloudscape-design/components';
 import type { SelectProps } from '@cloudscape-design/components';
 import useSyntheticDataGenerator from '../../hooks/use-synthetic-data-generator';
+import type { CostEstimate } from '../../hooks/use-synthetic-data-generator';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import { getErrorMessage } from '../../utils/errorUtils';
 
@@ -40,18 +54,32 @@ interface GenerateSyntheticDataModalProps {
   // Called with the enqueued job id after a successful request so the caller can
   // surface a "generation started" notice and refresh the test set list later.
   onStarted: (jobId: string, label: string) => void;
+  // Optional initial values for deep-links (e.g. Schema Builder "generate test
+  // set for this class") — pre-selects the config tab, version, and class.
+  initialTab?: 'prompt' | 'config';
+  initialVersion?: string;
+  initialClassName?: string;
 }
 
 const MIN_COUNT = 1;
 const MAX_COUNT = 50;
+const FAST_THRESHOLD = 7;
+const QUALITY_THRESHOLD = 9;
 
 /**
- * Manual entry point for the IDP Data Generator (SEED) extension. Two modes:
+ * Manual entry point for the Test Set Generator (SEED) extension. Two modes:
  * describe a document type (prompt) or generate from an existing configuration
  * version + class. Enqueues an async job via the extension's feature API.
  */
-const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateSyntheticDataModalProps): React.JSX.Element => {
-  const { submitting, generateFromPrompt, generateFromConfig } = useSyntheticDataGenerator();
+const GenerateSyntheticDataModal = ({
+  visible,
+  onDismiss,
+  onStarted,
+  initialTab,
+  initialVersion,
+  initialClassName,
+}: GenerateSyntheticDataModalProps): React.JSX.Element => {
+  const { submitting, generateFromPrompt, generateFromConfig, suggestScenario, getEstimate } = useSyntheticDataGenerator();
   const { versions, fetchVersion } = useConfigurationVersions();
 
   const [activeTab, setActiveTab] = useState<'prompt' | 'config'>('prompt');
@@ -61,6 +89,11 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
   const [promptClassName, setPromptClassName] = useState('');
   const [count, setCount] = useState('5');
   const [augment, setAugment] = useState(false);
+  const [threshold, setThreshold] = useState(FAST_THRESHOLD);
+  const [scenario, setScenario] = useState('');
+  const [suggesting, setSuggesting] = useState(false);
+  const [scenarioSuggestions, setScenarioSuggestions] = useState<string[]>([]);
+  const [estimate, setEstimate] = useState<CostEstimate | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<SelectProps.Option | null>(null);
   const [selectedClass, setSelectedClass] = useState<SelectProps.Option | null>(null);
   const [classOptions, setClassOptions] = useState<SelectProps.Option[]>([]);
@@ -71,6 +104,14 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
     () => versions.map((v) => ({ label: v.versionName, value: v.versionName })),
     [versions],
   );
+
+  // Seed initial values when the modal opens from a deep-link.
+  useEffect(() => {
+    if (!visible) return;
+    if (initialTab) setActiveTab(initialTab);
+    if (initialVersion) setSelectedVersion({ label: initialVersion, value: initialVersion });
+    // initialClassName is applied once the version's classes load (below).
+  }, [visible, initialTab, initialVersion]);
 
   // Load the selected version's document classes to populate the class Select,
   // so a user picks a valid class rather than typing (and mistyping) one.
@@ -92,6 +133,9 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
         if (cancelled) return;
         const names = extractClassNames(cfg.custom, cfg.default);
         setClassOptions(names.map((n) => ({ label: n, value: n })));
+        if (initialClassName && names.includes(initialClassName)) {
+          setSelectedClass({ label: initialClassName, value: initialClassName });
+        }
       })
       .catch((err) => {
         if (!cancelled) {
@@ -110,6 +154,25 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
   const parsedCount = Number(count);
   const countValid = Number.isInteger(parsedCount) && parsedCount >= MIN_COUNT && parsedCount <= MAX_COUNT;
 
+  // Live cost/time estimate, refreshed when count or threshold change.
+  useEffect(() => {
+    if (!visible || !countValid) {
+      setEstimate(null);
+      return;
+    }
+    let cancelled = false;
+    getEstimate(parsedCount, threshold)
+      .then((e) => {
+        if (!cancelled) setEstimate(e);
+      })
+      .catch(() => {
+        if (!cancelled) setEstimate(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, parsedCount, threshold, countValid]);
+
   const canSubmit = countValid && (activeTab === 'prompt' ? prompt.trim().length > 0 : Boolean(selectedVersion) && Boolean(selectedClass));
 
   const reset = () => {
@@ -117,6 +180,10 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
     setPromptClassName('');
     setCount('5');
     setAugment(false);
+    setThreshold(FAST_THRESHOLD);
+    setScenario('');
+    setScenarioSuggestions([]);
+    setEstimate(null);
     setSelectedVersion(null);
     setSelectedClass(null);
     setClassOptions([]);
@@ -127,6 +194,24 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
     if (submitting) return;
     reset();
     onDismiss();
+  };
+
+  const handleSuggestScenario = async () => {
+    setSuggesting(true);
+    setScenarioSuggestions([]);
+    try {
+      const suggestions = await suggestScenario({
+        className: activeTab === 'config' ? (selectedClass?.value as string) : promptClassName.trim() || undefined,
+        versionName: activeTab === 'config' ? (selectedVersion?.value as string) : undefined,
+        prompt: activeTab === 'prompt' ? prompt.trim() || undefined : undefined,
+      });
+      setScenarioSuggestions(suggestions);
+      if (suggestions.length > 0 && !scenario.trim()) {
+        setScenario(suggestions[0]);
+      }
+    } finally {
+      setSuggesting(false);
+    }
   };
 
   const handleGenerate = async () => {
@@ -140,6 +225,8 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
           count: parsedCount,
           className: promptClassName.trim() || undefined,
           augment,
+          threshold,
+          scenario: scenario.trim() || undefined,
         });
         label = promptClassName.trim() || 'Synthetic documents';
       } else {
@@ -148,6 +235,8 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
           className: selectedClass?.value as string,
           count: parsedCount,
           augment,
+          threshold,
+          scenario: scenario.trim() || undefined,
         });
         label = (selectedClass?.value as string) || 'Synthetic documents';
       }
@@ -157,6 +246,10 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
       setError(getErrorMessage(err));
     }
   };
+
+  const estimateText = estimate
+    ? `Estimated cost $${estimate.estimated_usd_low}–$${estimate.estimated_usd_high} · ~${estimate.estimated_minutes_low}–${estimate.estimated_minutes_high} min`
+    : null;
 
   return (
     <Modal
@@ -178,7 +271,7 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
     >
       <SpaceBetween size="m">
         <Box variant="p" color="text-body-secondary">
-          Generate labeled synthetic documents (PDF + ground-truth JSON) with the IDP Data Generator. This starts a background job; the
+          Generate labeled synthetic documents (PDF + ground-truth JSON) with the Test Set Generator. This starts a background job; the
           resulting test set appears here when it completes.
         </Box>
 
@@ -238,6 +331,37 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
         />
 
         <FormField
+          label="Scenario (optional)"
+          description="A high-level theme the generator diversifies into distinct documents (e.g. small-business owners in retail, or travel-heavy expense reports)."
+          secondaryControl={
+            <Button iconName="gen-ai" loading={suggesting} onClick={handleSuggestScenario}>
+              Suggest
+            </Button>
+          }
+        >
+          <Textarea
+            value={scenario}
+            onChange={({ detail }) => setScenario(detail.value)}
+            placeholder="Leave blank for a general mix, or describe a theme to focus the documents."
+            rows={2}
+          />
+        </FormField>
+        {scenarioSuggestions.length > 1 && (
+          <SpaceBetween size="xs">
+            <Box variant="small" color="text-body-secondary">
+              Suggestions (click to use):
+            </Box>
+            <SpaceBetween size="xxs">
+              {scenarioSuggestions.map((s) => (
+                <Button key={s} variant="inline-link" onClick={() => setScenario(s)}>
+                  {s}
+                </Button>
+              ))}
+            </SpaceBetween>
+          </SpaceBetween>
+        )}
+
+        <FormField
           label="Number of documents"
           description={`Between ${MIN_COUNT} and ${MAX_COUNT}.`}
           errorText={count !== '' && !countValid ? `Enter a whole number from ${MIN_COUNT} to ${MAX_COUNT}` : undefined}
@@ -245,9 +369,25 @@ const GenerateSyntheticDataModal = ({ visible, onDismiss, onStarted }: GenerateS
           <Input type="number" value={count} onChange={({ detail }) => setCount(detail.value)} />
         </FormField>
 
+        <FormField label="Quality" description="Higher quality runs more generation/critique passes — slower and more expensive.">
+          <SegmentedControl
+            selectedId={String(threshold)}
+            onChange={({ detail }) => setThreshold(Number(detail.selectedId))}
+            options={[
+              { id: String(FAST_THRESHOLD), text: 'Faster' },
+              { id: String(QUALITY_THRESHOLD), text: 'Higher quality' },
+            ]}
+          />
+        </FormField>
+
         <Checkbox checked={augment} onChange={({ detail }) => setAugment(detail.checked)}>
           Apply scan/fax-style image augmentation
         </Checkbox>
+
+        <Alert type="info">
+          Generation uses Amazon Bedrock and incurs cost proportional to the document count and quality.
+          {estimateText ? ` ${estimateText}.` : ''}
+        </Alert>
 
         {error && (
           <Alert type="error" header="Generation failed">

@@ -13,9 +13,9 @@ The invocation payload carries the SynthesisJob fields plus the bootstrap
 identifiers (jobId, testSetId). A single generation run takes minutes, so the
 work runs on a background thread tracked with ``add_async_task``: ``/ping``
 reports ``HealthyBusy`` while it runs, keeping the runtime session alive, and
-``/invocations`` returns immediately with an acknowledgement. Progress and the
-terminal result are posted to AppSync so the UI sees live updates — the same
-status contract the container-Lambda used.
+``/invocations`` returns immediately with an acknowledgement. Terminal status is
+written to the extension's BootstrapTrackingTable, and a watchdog fails the job
+if generation exceeds its time budget.
 """
 
 import logging
@@ -51,7 +51,7 @@ def _run_job(payload):
     """Generate a labeled test set from a staged schema_dir.
 
     Runs on a background thread; never raises into the caller — terminal status
-    is reported to AppSync.
+    is written to the tracking table via _post_status.
     """
     from idp_common.synthesis import engine, packet_io
 
@@ -63,7 +63,7 @@ def _run_job(payload):
     count = int(payload.get("count", 3))
     threshold = int(payload.get("threshold", 7))
     augment = bool(payload.get("augment", False))
-    extra = payload.get("extra", "")
+    extra = payload.get("scenario") or payload.get("extra", "")
     model_id = payload.get("modelId")
     allowed_field_names = set(payload.get("allowedFieldNames", []))
 
@@ -121,22 +121,48 @@ def _run_job(payload):
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
+# Absolute wall-clock ceiling for a single generation run, defaulting to just
+# under the AgentCore Runtime max session lifetime (8h). Legitimate runs — even
+# large batches — finish well within this; the watchdog exists only to catch a
+# wedged run (e.g. augraphy looping on an over-noisy render) so it fails cleanly
+# instead of the session dying at the AgentCore limit and leaving the job stuck
+# IN_PROGRESS forever. Tunable via env; not scaled by doc count (SEED generates
+# documents concurrently, so wall-clock tracks the slowest doc, not the sum).
+_GENERATION_TIMEOUT_S = int(os.environ.get("GENERATION_TIMEOUT_S", str(8 * 3600 - 300)))
+
+
 @app.entrypoint
 def invoke(payload, context=None):
     """AgentCore Runtime entrypoint.
 
     Kicks off generation on a background thread and returns immediately. The
     task is tracked so ``/ping`` reports ``HealthyBusy`` until it completes,
-    keeping the runtime session alive for the full (multi-minute) run.
+    keeping the runtime session alive for the full (up to multi-hour) run. A
+    watchdog writes FAILED and releases the task only if generation exceeds the
+    absolute ceiling (so a wedged run does not stay IN_PROGRESS forever).
     """
     job_id = payload.get("jobId")
     task_id = app.add_async_task("synthesis", {"jobId": job_id})
+    timeout_s = _GENERATION_TIMEOUT_S
 
     def _worker():
-        try:
-            _run_job(payload)
-        finally:
-            app.complete_async_task(task_id)
+        job_thread = threading.Thread(target=_run_job, args=(payload,), daemon=True)
+        job_thread.start()
+        job_thread.join(timeout_s)
+        if job_thread.is_alive():
+            logger.error(
+                "Synthesis job %s exceeded %ds; marking FAILED and abandoning "
+                "the wedged worker thread.",
+                job_id,
+                timeout_s,
+            )
+            _post_status(
+                payload,
+                job_id,
+                "FAILED",
+                f"Generation timed out after {timeout_s}s",
+            )
+        app.complete_async_task(task_id)
 
     threading.Thread(target=_worker, daemon=True).start()
 

@@ -21,6 +21,7 @@ import {
   AwaitingAdminInstall,
   ExpiredBanner,
   InstallPrompt,
+  LearnMore,
   LoadingBlock,
   SubscriptionRequired,
   UpToDateBanner,
@@ -289,6 +290,7 @@ const FeaturePage: React.FC<FeaturePageProps> = ({ featureIdOverride, groups, ma
         // subscription, so suppress the source suffix for them.
         <UpToDateBanner version={installed.installedVersion} source={isOss ? 'auto' : (entitlement?.source ?? 'marketplace')} />
       )}
+      <LearnMore docsUrl={docsUrl} />
       {featureContent}
     </SpaceBetween>
   );

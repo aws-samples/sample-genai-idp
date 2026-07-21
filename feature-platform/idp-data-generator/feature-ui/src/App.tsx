@@ -12,8 +12,11 @@ declare const __FEATURE_VERSION__: string;
 // "Generate Synthetic Data" action lives.
 const TEST_STUDIO_HASH = '#/test-studio';
 
+// Upstream SEED generator documentation.
+const SEED_DOCS_URL = 'https://awslabs.github.io/synthetically_engineered_evaluation_data';
+
 /**
- * IDP Data Generator feature page.
+ * Test Set Generator feature page.
  *
  * Generation is driven from the host's Test Studio (Test Sets → Generate
  * Synthetic Data), which offers dependent version/class dropdowns backed by the
@@ -25,7 +28,7 @@ const App: React.FC<FeatureContext> = ({ installedVersion }) => (
   <Container
     header={
       <Header variant="h1" description={`Generate labeled synthetic test sets · v${installedVersion || __FEATURE_VERSION__}`}>
-        IDP Data Generator
+        Test Set Generator
       </Header>
     }
   >
@@ -39,6 +42,9 @@ const App: React.FC<FeatureContext> = ({ installedVersion }) => (
         set appears in the Test Sets list when the background job completes.
       </Box>
       <Link href={TEST_STUDIO_HASH}>Go to Test Studio → Test Sets</Link>
+      <Link href={SEED_DOCS_URL} external externalIconAriaLabel="Opens in a new tab">
+        SEED generator documentation
+      </Link>
     </SpaceBetween>
   </Container>
 );

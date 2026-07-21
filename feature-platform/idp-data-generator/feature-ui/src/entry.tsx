@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * IDP Data Generator entry — registers with the host.
+ * Test Set Generator entry — registers with the host.
  *
  * featureId / displayName / version are injected at build time from
  * feature.yaml by vite.config.ts (see __FEATURE_*__ constants below).

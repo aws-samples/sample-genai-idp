@@ -7,7 +7,7 @@ import useInstalledFeatures from './use-installed-features';
 
 const logger = new ConsoleLogger('useSyntheticDataGenerator');
 
-// The IDP Data Generator (SEED) Feature Platform extension. When installed it
+// The Test Set Generator (SEED) Feature Platform extension. When installed it
 // registers a feature API exposing POST /generate and /generate-from-config.
 export const DATA_GENERATOR_FEATURE_ID = 'idp-data-generator';
 
@@ -16,6 +16,8 @@ export interface GenerateFromPromptArgs {
   count: number;
   className?: string;
   augment?: boolean;
+  threshold?: number;
+  scenario?: string;
 }
 
 export interface GenerateFromConfigArgs {
@@ -23,6 +25,23 @@ export interface GenerateFromConfigArgs {
   className: string;
   count: number;
   augment?: boolean;
+  threshold?: number;
+  scenario?: string;
+}
+
+export interface SuggestScenarioArgs {
+  className?: string;
+  versionName?: string;
+  prompt?: string;
+}
+
+export interface CostEstimate {
+  documents: number;
+  estimated_usd_low: number;
+  estimated_usd_high: number;
+  estimated_minutes_low: number;
+  estimated_minutes_high: number;
+  note?: string;
 }
 
 interface GenerateResponse {
@@ -47,7 +66,7 @@ async function _authToken(): Promise<string> {
 }
 
 /**
- * Discovers the IDP Data Generator extension and calls its generation API.
+ * Discovers the Test Set Generator extension and calls its generation API.
  *
  * `available` is false when the extension is not installed (or exposes no API
  * endpoint), so callers can hide/disable the entry point and degrade gracefully
@@ -64,7 +83,7 @@ const useSyntheticDataGenerator = () => {
   const _post = useCallback(
     async (path: string, body: Record<string, unknown>): Promise<string> => {
       if (!endpoint) {
-        throw new Error('The IDP Data Generator extension is not installed');
+        throw new Error('The Test Set Generator extension is not installed');
       }
       setSubmitting(true);
       try {
@@ -134,6 +153,8 @@ const useSyntheticDataGenerator = () => {
         className: args.className || undefined,
         docCount: args.count,
         augment: Boolean(args.augment),
+        threshold: args.threshold,
+        scenario: args.scenario || undefined,
       }),
     [_post],
   );
@@ -145,8 +166,52 @@ const useSyntheticDataGenerator = () => {
         className: args.className,
         docCount: args.count,
         augment: Boolean(args.augment),
+        threshold: args.threshold,
+        scenario: args.scenario || undefined,
       }),
     [_post],
+  );
+
+  const suggestScenario = useCallback(
+    async (args: SuggestScenarioArgs): Promise<string[]> => {
+      if (!endpoint) return [];
+      try {
+        const token = await _authToken();
+        const resp = await fetch(`${endpoint.replace(/\/$/, '')}/suggest-scenario`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: token },
+          body: JSON.stringify({ className: args.className, versionName: args.versionName, prompt: args.prompt }),
+        });
+        if (!resp.ok) return [];
+        const data = (await resp.json().catch(() => ({}))) as { suggestions?: string[] };
+        return data.suggestions || [];
+      } catch (err) {
+        logger.warn('Scenario suggestion failed', err);
+        return [];
+      }
+    },
+    [endpoint],
+  );
+
+  const getEstimate = useCallback(
+    async (count: number, threshold: number): Promise<CostEstimate | null> => {
+      if (!endpoint) return null;
+      try {
+        const token = await _authToken();
+        const resp = await fetch(`${endpoint.replace(/\/$/, '')}/estimate-cost`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: token },
+          body: JSON.stringify({ docCount: count, threshold }),
+        });
+        if (!resp.ok) return null;
+        const data = (await resp.json().catch(() => ({}))) as { estimate?: CostEstimate };
+        return data.estimate || null;
+      } catch (err) {
+        logger.warn('Cost estimate failed', err);
+        return null;
+      }
+    },
+    [endpoint],
   );
 
   return useMemo(
@@ -158,8 +223,20 @@ const useSyntheticDataGenerator = () => {
       generateFromConfig,
       getJobStatus,
       listActiveJobs,
+      suggestScenario,
+      getEstimate,
     }),
-    [available, featuresLoading, submitting, generateFromPrompt, generateFromConfig, getJobStatus, listActiveJobs],
+    [
+      available,
+      featuresLoading,
+      submitting,
+      generateFromPrompt,
+      generateFromConfig,
+      getJobStatus,
+      listActiveJobs,
+      suggestScenario,
+      getEstimate,
+    ],
   );
 };
 

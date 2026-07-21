@@ -1355,6 +1355,7 @@ Resources:
           CONFIGURATION_BUCKET: !Ref ConfigurationBucketName
           EVALUATION_BASELINE_BUCKET: !Ref EvaluationBaselineBucketName
           REPORTING_BUCKET: !Ref ReportingBucketName
+          TEST_SET_BUCKET: !Ref TestSetBucketName
       LoggingConfig:
         LogGroup: !Ref GetFileContentsResolverFunctionLogGroup
       Policies:
@@ -1370,6 +1371,8 @@ Resources:
             BucketName: !Ref ConfigurationBucketName
         - S3ReadPolicy:
             BucketName: !Ref OutputBucketName
+        - S3ReadPolicy:
+            BucketName: !Ref TestSetBucketName
         # Read specific object versions (document version history: fetch the
         # exact bytes of a prior run's file via its S3 VersionId).
         - Statement:

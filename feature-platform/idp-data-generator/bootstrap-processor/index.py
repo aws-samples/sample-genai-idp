@@ -108,6 +108,7 @@ def _process_job(job_id, body):
         augment=bool(body.get("augment", False)),
         model_id=body.get("modelId"),
         example_doc_keys=body.get("exampleDocKeys", []),
+        scenario=body.get("scenario") or "",
     )
 
     preauthored = body.get("preauthoredSchema")
@@ -183,7 +184,7 @@ def _process_job(job_id, body):
         "count": request.doc_count,
         "threshold": request.quality_threshold,
         "augment": request.augment,
-        "extra": request.prompt,
+        "extra": request.scenario or request.prompt,
         "modelId": request.model_id,
         "allowedFieldNames": schema_bridge.field_names(schema),
     }

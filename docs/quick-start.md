@@ -156,11 +156,11 @@ can evaluate the configuration before you have real documents.
 
 This capability is **optional and degrades gracefully**: schema authoring, config
 creation, and activation always work. Only document generation requires the
-generator, which is provided by the **IDP Data Generator** extension. When it isn't
+generator, which is provided by the **Test Set Generator** extension. When it isn't
 installed, the CLI and agent tell you so and continue without a test set — you can
 upload your own documents instead.
 
-- **In a deployed stack**, install the **IDP Data Generator** extension from the
+- **In a deployed stack**, install the **Test Set Generator** extension from the
   **Extensions** page (Feature Platform). The Quick Start agent discovers it at
   runtime and offers generation only when it's present.
 - **Locally**, install the generator alongside the library:
@@ -196,5 +196,5 @@ minutes per document at the default quality threshold, more at higher thresholds
 - **Bedrock model access.** Schema authoring and catalog matching use a Claude
   model on Amazon Bedrock; request access before use (see
   [AWS Service Requirements](../README.md)).
-- **Synthetic generation** additionally requires the IDP Data Generator extension
+- **Synthetic generation** additionally requires the Test Set Generator extension
   (deployed stack) or `idp_common[synthesis]` (local), as above.

@@ -34,7 +34,7 @@ def check_generator_availability_impl() -> str:
     if _generation_queue_url():
         return "Document generation is available."
     return (
-        "Document generation is NOT available: the IDP Data Generator extension "
+        "Document generation is NOT available: the Test Set Generator extension "
         "is not installed. Schema authoring and config creation still work, and "
         "the user can upload example documents to build a test set. The Data "
         "Generator can be installed from the Extensions page."
@@ -323,13 +323,14 @@ def request_document_generation_impl(
     doc_count: int = 3,
     threshold: int = 7,
     augment: bool = False,
+    scenario: str = "",
 ) -> str:
     queue_url = _generation_queue_url()
     if not queue_url:
         return json.dumps(
             {
                 "enqueued": False,
-                "reason": "The IDP Data Generator extension is not installed.",
+                "reason": "The Test Set Generator extension is not installed.",
                 "hint": "Install it from the Extensions page to enable generation.",
             }
         )
@@ -348,6 +349,7 @@ def request_document_generation_impl(
         "docCount": doc_count,
         "threshold": threshold,
         "augment": augment,
+        "scenario": scenario or "",
         "generateDocs": True,
         "preauthoredSchema": schema,
         "allowedFieldNames": allowed,
@@ -428,6 +430,7 @@ def generate_from_existing_config_impl(
     doc_count: int = 3,
     threshold: int = 7,
     augment: bool = False,
+    scenario: str = "",
 ) -> str:
     from idp_common.config.configuration_manager import ConfigurationManager
 
@@ -436,7 +439,7 @@ def generate_from_existing_config_impl(
         return json.dumps(
             {
                 "enqueued": False,
-                "reason": "The IDP Data Generator extension is not installed.",
+                "reason": "The Test Set Generator extension is not installed.",
                 "hint": "Install it from the Extensions page to enable generation.",
             }
         )
@@ -471,6 +474,7 @@ def generate_from_existing_config_impl(
         "docCount": doc_count,
         "threshold": threshold,
         "augment": augment,
+        "scenario": scenario or "",
         "generateDocs": True,
         "preauthoredSchema": schema,
         "allowedFieldNames": allowed,
@@ -502,7 +506,7 @@ def list_available_extensions() -> str:
 
     Use this when the user asks what add-ons/extensions are available, or before
     offering a capability an extension provides — for example, synthetic document
-    generation is provided by the "IDP Data Generator" extension
+    generation is provided by the "Test Set Generator" extension
     (featureId "idp-data-generator"), and "IDP AutoTune"/"Auto Optimizer"
     (featureId "idp-autotune") can optimize a configuration. Each returned
     extension has featureId, displayName, installedVersion, and featureApiEndpoint.
@@ -619,6 +623,7 @@ def request_document_generation(
     doc_count: int = 3,
     threshold: int = 7,
     augment: bool = False,
+    scenario: str = "",
 ) -> str:
     """Enqueue an asynchronous synthetic-document generation job for a test set.
 
@@ -632,9 +637,11 @@ def request_document_generation(
         doc_count: Number of documents to generate.
         threshold: Quality threshold (1-10).
         augment: Whether to apply scan/fax-style image augmentation.
+        scenario: Optional high-level theme the generator diversifies into
+            distinct documents (e.g. "small-business owners in retail").
     """
     return request_document_generation_impl(
-        schema_text, config_version, doc_count, threshold, augment
+        schema_text, config_version, doc_count, threshold, augment, scenario
     )
 
 
@@ -674,6 +681,7 @@ def generate_from_existing_config(
     doc_count: int = 3,
     threshold: int = 7,
     augment: bool = False,
+    scenario: str = "",
 ) -> str:
     """Enqueue synthetic-document generation for a class in an EXISTING config version.
 
@@ -688,7 +696,9 @@ def generate_from_existing_config(
         doc_count: Number of documents to generate.
         threshold: Quality threshold (1-10).
         augment: Whether to apply scan/fax-style image augmentation.
+        scenario: Optional high-level theme the generator diversifies into
+            distinct documents (e.g. "small-business owners in retail").
     """
     return generate_from_existing_config_impl(
-        version_name, class_name, doc_count, threshold, augment
+        version_name, class_name, doc_count, threshold, augment, scenario
     )
