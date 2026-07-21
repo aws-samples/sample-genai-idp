@@ -112,6 +112,27 @@ Now register a test set that references your documents and their ground truth.
 
 For details on test set management, see [Test Studio](./test-studio.md).
 
+### Browse and Edit the Test Set's Ground Truth
+
+Once a test set is `COMPLETED`, click its name in the **Test Sets** table (or
+select it and click **Browse Documents**) to open the test set browser at
+`/test-studio/sets/<test-set-id>`. For each document you can:
+
+- **View Source Document** — render the original PDF or image inline.
+- **Edit Ground Truth** — a visual editor showing the document's page images
+  beside an editable form over the baseline's `inference_result` (with a raw
+  JSON editor tab). Multi-section baselines (e.g. packet-splitting sets) get a
+  section selector, and the image pane follows the selected section's
+  `split_document.page_indices`.
+
+If the baseline was created via **Copy to Baseline** it carries
+`explainability_info` geometry, so focusing a field highlights its bounding
+box on the page image. Hand-built baselines without geometry still work —
+fields simply have no boxes. Saves write the section's `result.json` back to
+the test set's `baseline/` folder and append an `_editHistory` entry for
+provenance. Editing requires the Admin or Author role; other roles get a
+read-only view.
+
 ## Step 6: Run Test Executions and Compare
 
 With your test set created, you can now run test executions to compare different configurations.

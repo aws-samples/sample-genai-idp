@@ -412,6 +412,28 @@ components/
    - **Document Classification Type**: Optional metadata (same values as pattern-based creation)
 3. **Direct Upload**: Files uploaded directly to TestSetBucket are auto-detected
 
+### Browsing Test Set Documents and Ground Truth
+
+Click a COMPLETED test set's name in the table (or select it and click
+**Browse Documents**) to open the test set browser at
+`/test-studio/sets/<test-set-id>`. It shows a paginated table of the set's
+input documents with their size, last-modified time, and ground-truth section
+count. Selecting a document opens:
+
+- **View Source Document** — the original PDF or image rendered inline.
+- **Edit Ground Truth** (read-only for non-Admin/Author roles) — a visual
+  editor with the document's page images on the left and an editable form
+  over the baseline's `inference_result` on the right, plus a raw JSON tab.
+  Multi-section baselines get a section selector; when a baseline carries
+  `explainability_info` geometry (created via **Copy to Baseline**), focusing
+  a field highlights its bounding box on the page image. Saves write back to
+  the section's `baseline/.../result.json` and append an `_editHistory`
+  provenance entry. Use **Previous**/**Next** to step through documents.
+
+Note: page images are rendered in the browser from the source document
+(test set documents are unprocessed, so no pipeline page images exist).
+TIFF sources cannot be previewed in-browser; ground truth editing still works.
+
 ### Editing Test Sets
 
 You can edit a test set's description and document classification type after creation:
