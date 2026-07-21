@@ -199,13 +199,20 @@ def normalize_event(event: Dict[str, Any]) -> Dict[str, Any]:
 def _http_response(status: int, payload: Any) -> Dict[str, Any]:
     """Build an HTTP API (proxy) response with JSON body, CORS + security headers.
 
-    CORS `Access-Control-Allow-Origin` is `*` (overridable via CORS_ALLOW_ORIGIN):
-    the UI's fetch sends NO credentials/cookies (only a Bearer JWT in the
-    Authorization header — see src/ui/src/api/rest-client.ts), so a wildcard is
-    valid and cannot be combined with credentials, and it avoids a
-    CloudFront->API-stack CloudFormation dependency cycle (CloudFront's origin IS
-    this API). ZAP flags the `*` as "Cross-Domain Misconfiguration"; it is safe
-    here for that reason, but the env var lets a deployment lock it down.
+    CORS `Access-Control-Allow-Origin` defaults to `*`: the UI's fetch sends NO
+    credentials/cookies (only a Bearer JWT in the Authorization header — see
+    src/ui/src/api/rest-client.ts), so a wildcard is valid and cannot be combined
+    with credentials, and it avoids a CloudFront->API-stack CloudFormation
+    dependency cycle (CloudFront's origin IS this API). ZAP flags the `*` as
+    "Cross-Domain Misconfiguration"; it is safe here for that reason.
+
+    CORS_ALLOW_ORIGIN is a CODE-LEVEL HOOK, not a wired stack parameter — the
+    dispatcher template does not set this env var, so a stock deployment always
+    gets `*`. It exists for forks / manual overrides that pin the dispatcher
+    Lambda's env. NOTE: even when set, this only changes the /op POST responses;
+    the OPTIONS preflight + gateway-response CORS headers (CloudFormation-static)
+    still emit `*`. A `*` preflight still admits a locked-down origin, so this is
+    functionally fine, but it is NOT a full API-wide origin lockdown.
 
     Security headers (X-Content-Type-Options, Strict-Transport-Security,
     X-Frame-Options, Referrer-Policy) mirror the CloudFront ResponseHeadersPolicy
