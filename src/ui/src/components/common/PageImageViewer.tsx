@@ -262,6 +262,12 @@ const PageImageViewer = ({
             const page = documentPages.find((p) => p.Id === pageId);
 
             if (page?.ImageUri) {
+              // Only s3:// URIs need presigning; blob:/data:/https: URIs
+              // (e.g. pages rendered client-side from a PDF) are usable as-is.
+              if (!page.ImageUri.startsWith('s3://')) {
+                images[pageId] = page.ImageUri;
+                return;
+              }
               try {
                 logger.debug(`PageImageViewer - generating presigned URL for page ${pageId}`);
                 const url = await generateS3PresignedUrl(page.ImageUri, currentCredentials as Record<string, unknown>, {
