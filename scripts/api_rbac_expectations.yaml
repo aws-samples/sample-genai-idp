@@ -346,6 +346,11 @@ operations:
     kind: read
     enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
     args: {}
+  getTestSetDocuments:
+    groups: [Admin, Author]
+    kind: read
+    enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
+    args: { testSetId: "nonexistent-test-set" }
   addTestSet:
     groups: [Admin, Author]
     kind: mutation

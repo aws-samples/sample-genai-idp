@@ -1254,6 +1254,7 @@ export type Query = {
   getTestRun?: Maybe<TestRun>;
   getTestRunStatus?: Maybe<TestRunStatus>;
   getTestRuns?: Maybe<Array<Maybe<TestRun>>>;
+  getTestSetDocuments?: Maybe<TestSetDocumentsPage>;
   getTestSets?: Maybe<Array<Maybe<TestSet>>>;
   listAgentJobs?: Maybe<AgentJobConnection>;
   listAvailableAgents?: Maybe<Array<Maybe<Agent>>>;
@@ -1404,6 +1405,13 @@ export type QueryGetTestRunsArgs = {
   endDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
   startDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
   timePeriodHours?: InputMaybe<Scalars['Int']['input']>;
+};
+
+
+export type QueryGetTestSetDocumentsArgs = {
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
+  testSetId: Scalars['String']['input'];
 };
 
 
@@ -1707,6 +1715,24 @@ export type TestSet = {
   lastAddResult?: Maybe<Scalars['String']['output']>;
   name: Scalars['String']['output'];
   status?: Maybe<Scalars['String']['output']>;
+};
+
+export type TestSetDocument = {
+  inputKey: Scalars['String']['output'];
+  lastModified?: Maybe<Scalars['AWSDateTime']['output']>;
+  objectKey: Scalars['String']['output'];
+  sections: Array<TestSetDocumentSection>;
+  size?: Maybe<Scalars['Int']['output']>;
+};
+
+export type TestSetDocumentSection = {
+  baselineKey: Scalars['String']['output'];
+  sectionId: Scalars['String']['output'];
+};
+
+export type TestSetDocumentsPage = {
+  documents: Array<TestSetDocument>;
+  nextToken?: Maybe<Scalars['String']['output']>;
 };
 
 export type TestSetDocumentsUploadInput = {
@@ -2404,6 +2430,15 @@ export type GetTestRunsQueryVariables = Exact<{
 
 
 export type GetTestRunsQuery = { getTestRuns?: Array<{ testRunId: string, testSetId?: string | null, testSetName?: string | null, status: string, filesCount: number, createdAt?: string | null, completedAt?: string | null, context?: string | null, configVersion?: string | null } | null> | null };
+
+export type GetTestSetDocumentsQueryVariables = Exact<{
+  testSetId: Scalars['String']['input'];
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type GetTestSetDocumentsQuery = { getTestSetDocuments?: { nextToken?: string | null, documents: Array<{ objectKey: string, inputKey: string, size?: number | null, lastModified?: string | null, sections: Array<{ sectionId: string, baselineKey: string }> }> } | null };
 
 export type GetTestSetsQueryVariables = Exact<{ [key: string]: never; }>;
 

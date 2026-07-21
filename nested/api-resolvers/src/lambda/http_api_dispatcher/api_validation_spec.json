@@ -733,6 +733,31 @@
         }
       ]
     },
+    "getTestSetDocuments": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "testSetId",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "limit",
+          "non_null": false,
+          "type": "Int"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "nextToken",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
     "getTestSets": {
       "args": []
     },

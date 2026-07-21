@@ -699,6 +699,24 @@ type TestSet @aws_cognito_user_pools @aws_iam {
   documentClassType: DocumentClassType
 }
 
+type TestSetDocumentSection @aws_cognito_user_pools @aws_iam {
+  sectionId: String!
+  baselineKey: String!
+}
+
+type TestSetDocument @aws_cognito_user_pools @aws_iam {
+  objectKey: String!
+  inputKey: String!
+  size: Int
+  lastModified: AWSDateTime
+  sections: [TestSetDocumentSection!]!
+}
+
+type TestSetDocumentsPage @aws_cognito_user_pools @aws_iam {
+  documents: [TestSetDocument!]!
+  nextToken: String
+}
+
 input TestSetUploadInput {
   fileName: String!
   fileSize: Int!
@@ -1245,6 +1263,8 @@ type Query @aws_cognito_user_pools @aws_iam {
   compareTestRuns(testRunIds: [String!]!): TestRunComparison
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   getTestSets: [TestSet]
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  getTestSetDocuments(testSetId: String!, limit: Int, nextToken: String): TestSetDocumentsPage
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   listBucketFiles(bucketType: String!, filePattern: String!, modifiedAfter: String): [String]
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])

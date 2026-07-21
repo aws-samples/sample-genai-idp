@@ -1,0 +1,15 @@
+query GetTestSetDocuments($testSetId: String!, $limit: Int, $nextToken: String) {
+  getTestSetDocuments(testSetId: $testSetId, limit: $limit, nextToken: $nextToken) {
+    documents {
+      objectKey
+      inputKey
+      size
+      lastModified
+      sections {
+        sectionId
+        baselineKey
+      }
+    }
+    nextToken
+  }
+}
