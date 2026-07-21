@@ -81,7 +81,42 @@ In the **hub account**, create a role (for example `IDPBedrockHubRole`) whose tr
 }
 ```
 
-Tighten the `Principal` to a specific role ARN (e.g. the IDP function role) once you know it, instead of using the account root.
+The `:root` principal above trusts the **entire** workload account — any principal in it can assume the hub role. This is fine for an initial smoke test, but for production you should scope the trust down. Security scanners (and most org policies) will flag an unscoped account-wide trust.
+
+### Recommended production trust policy: scope by principal
+
+The obvious tightening is to pin `Principal` to the specific IDP Lambda execution-role ARN. In practice that rarely works for this stack: a single IDP deployment creates **many** Lambda execution roles (extraction, classification, assessment, discovery, chat, agent, …), each with a CloudFormation-generated random suffix that **changes on every deploy**, and a real environment often runs several IDP stacks at once. Hardcoding exact ARNs means editing the trust policy on every deploy.
+
+Instead, keep the workload account as the `Principal` but add an `aws:PrincipalArn` condition that allow-lists your IDP execution-role **name patterns**. This scopes the trust to just the IDP roles, survives CloudFormation suffix churn, and requires no trust-policy changes when you redeploy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowIDPWorkloadLambdaRolesOnly",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::WORKLOAD_ACCOUNT_ID:root"
+      },
+      "Action": "sts:AssumeRole",
+      "Condition": {
+        "StringLike": {
+          "aws:PrincipalArn": [
+            "arn:aws:iam::WORKLOAD_ACCOUNT_ID:role/<your-stack-name-prefix>-*"
+          ]
+        }
+      }
+    }
+  ]
+}
+```
+
+Set the `aws:PrincipalArn` patterns to match the stack names you deploy (the CloudFormation stack name becomes the prefix of every Lambda execution role it creates). List one entry per prefix if you use several, e.g. `.../role/IDP-*` and `.../role/idp-*`. Note that `aws:PrincipalArn` matching is **case-sensitive**, so include each casing you actually use — this also lets you deliberately exclude unrelated roles (e.g. an admin role) that happen to share a stem.
+
+Combine this with `sts:ExternalId` (see [`BedrockHubRoleExternalId`](#required-deployment-parameters)) for defense in depth when you need it.
+
+> **Note on prod/non-prod separation:** some security frameworks (e.g. AWS-internal Palisade `ProdIAMRoleMustNotTrustNonProdPrincipal`) forbid a **production** hub role from trusting **any** principal in a **non-production** workload account — regardless of how tightly the trust is scoped. `aws:PrincipalArn` scoping reduces blast radius but does **not** satisfy that class of control, because the scanner evaluates the trusted account's prod/non-prod status, not the condition. If your hub account is production and your workload account is not, you will need a policy exemption, or to align the two accounts' environment classification. Keep the hub and workload accounts at the same production tier where such controls apply.
 
 ## Hub-account role: example permission policy
 
