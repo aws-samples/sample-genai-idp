@@ -20,6 +20,10 @@ export const WELCOME_PATH = '/welcome';
 /** localStorage key: set when the user dismisses the welcome landing page. */
 export const WELCOME_DISMISSED_KEY = 'idp-welcome-dismissed';
 export const CAPACITY_PLANNING_PATH = `${DOCUMENTS_PATH}/capacity-planning`;
+/** Route pattern base: /test-studio/sets/:testSetId */
+export const TEST_SET_DETAIL_PATH = `${TEST_STUDIO_PATH}/sets`;
+/** Hash-link helper: href for a test set's document browser. */
+export const testSetDetailHref = (testSetId: string): string => `#${TEST_SET_DETAIL_PATH}/${encodeURIComponent(testSetId)}`;
 export const CUSTOM_MODELS_PATH = `${DOCUMENTS_PATH}/custom-models`;
 
 // --- Feature Platform ---

@@ -4,11 +4,21 @@ import React from 'react';
 import { Routes, Route } from 'react-router-dom';
 
 import TestStudioLayout from '../components/test-studio/TestStudioLayout';
+import TestSetDetail from '../components/test-studio/TestSetDetail';
 import GenAIIDPTopNavigation from '../components/genai-idp-top-navigation';
 
 const TestStudioRoutes = (): React.JSX.Element => {
   return (
     <Routes>
+      <Route
+        path="sets/:testSetId"
+        element={
+          <div>
+            <GenAIIDPTopNavigation />
+            <TestSetDetail />
+          </div>
+        }
+      />
       <Route
         path="*"
         element={
