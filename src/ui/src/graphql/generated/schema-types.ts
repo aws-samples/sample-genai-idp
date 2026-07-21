@@ -1255,6 +1255,7 @@ export type Query = {
   getTestRun?: Maybe<TestRun>;
   getTestRunStatus?: Maybe<TestRunStatus>;
   getTestRuns?: Maybe<Array<Maybe<TestRun>>>;
+  getTestSetDocuments?: Maybe<TestSetDocumentsPage>;
   getTestSets?: Maybe<Array<Maybe<TestSet>>>;
   listAgentJobs?: Maybe<AgentJobConnection>;
   listAvailableAgents?: Maybe<Array<Maybe<Agent>>>;
@@ -1405,6 +1406,14 @@ export type QueryGetTestRunsArgs = {
   endDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
   startDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
   timePeriodHours?: InputMaybe<Scalars['Int']['input']>;
+};
+
+
+export type QueryGetTestSetDocumentsArgs = {
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
+  objectKey?: InputMaybe<Scalars['String']['input']>;
+  testSetId: Scalars['String']['input'];
 };
 
 
@@ -1708,6 +1717,24 @@ export type TestSet = {
   lastAddResult?: Maybe<Scalars['String']['output']>;
   name: Scalars['String']['output'];
   status?: Maybe<Scalars['String']['output']>;
+};
+
+export type TestSetDocument = {
+  inputKey: Scalars['String']['output'];
+  lastModified?: Maybe<Scalars['AWSDateTime']['output']>;
+  objectKey: Scalars['String']['output'];
+  sections: Array<TestSetDocumentSection>;
+  size?: Maybe<Scalars['Int']['output']>;
+};
+
+export type TestSetDocumentSection = {
+  baselineKey: Scalars['String']['output'];
+  sectionId: Scalars['String']['output'];
+};
+
+export type TestSetDocumentsPage = {
+  documents: Array<TestSetDocument>;
+  nextToken?: Maybe<Scalars['String']['output']>;
 };
 
 export type TestSetDocumentsUploadInput = {

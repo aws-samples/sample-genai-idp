@@ -19,6 +19,7 @@ import {
   Select,
   DatePicker,
   TimeInput,
+  Link,
 } from '@cloudscape-design/components';
 import { generateClient } from '../../api/client-shim';
 import {
@@ -34,6 +35,7 @@ import {
 } from '../../graphql/generated';
 import type { DocumentClassType } from '../../graphql/generated/schema-types';
 import { getErrorMessage } from '../../utils/errorUtils';
+import { testSetDetailHref } from '../../routes/constants';
 
 const client = generateClient();
 
@@ -725,7 +727,7 @@ const TestSets = (): React.JSX.Element => {
     {
       id: 'name',
       header: 'Test Set Name',
-      cell: (item: TestSetItem) => item.name,
+      cell: (item: TestSetItem) => (item.status === 'COMPLETED' ? <Link href={testSetDetailHref(item.id)}>{item.name}</Link> : item.name),
       sortingField: 'name',
     },
     {
@@ -822,6 +824,17 @@ const TestSets = (): React.JSX.Element => {
             <SpaceBetween direction="horizontal" size="xs">
               <Button iconName="refresh" loading={refreshing} onClick={handleRefresh}>
                 Refresh
+              </Button>
+              <Button
+                disabled={selectedItems.length !== 1 || selectedItems[0]?.status !== 'COMPLETED' || loading}
+                onClick={() => {
+                  const selected = selectedItems[0];
+                  if (selected) {
+                    window.location.hash = testSetDetailHref(selected.id).substring(1);
+                  }
+                }}
+              >
+                Browse Documents
               </Button>
               <Button
                 iconName="edit"

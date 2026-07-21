@@ -262,6 +262,12 @@ const PageImageViewer = ({
             const page = documentPages.find((p) => p.Id === pageId);
 
             if (page?.ImageUri) {
+              // Only s3:// URIs need presigning; blob:/data:/https: URIs
+              // (e.g. pages rendered client-side from a PDF) are usable as-is.
+              if (!page.ImageUri.startsWith('s3://')) {
+                images[pageId] = page.ImageUri;
+                return;
+              }
               try {
                 logger.debug(`PageImageViewer - generating presigned URL for page ${pageId}`);
                 const url = await generateS3PresignedUrl(page.ImageUri, currentCredentials as Record<string, unknown>, {
@@ -278,7 +284,11 @@ const PageImageViewer = ({
         logger.debug('PageImageViewer - Successfully loaded images for', Object.keys(images).length, 'pages');
         setPageImages(images);
 
-        if (!currentPage && pageIds.length > 0) {
+        // Also reset when the page list changed and no longer contains the
+        // current page (e.g. the ground-truth editor switching to a section
+        // whose split_document.page_indices are a different page set) —
+        // otherwise the viewer waits forever on an image that will never load.
+        if (pageIds.length > 0 && (!currentPage || !pageIds.includes(currentPage))) {
           setCurrentPage(pageIds[0]);
         }
       } catch (err) {
