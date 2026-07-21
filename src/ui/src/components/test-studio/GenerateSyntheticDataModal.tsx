@@ -23,8 +23,11 @@ import { getErrorMessage } from '../../utils/errorUtils';
 
 // Extract the document-class names from a fetched config version. The config
 // dicts arrive as AWSJSON strings; classes live under `.classes[]`, keyed by
-// `$id` / `x-aws-idp-document-type` (same identity the backend uses). The custom
-// (version) config is preferred; fall back to default.
+// `$id` / `x-aws-idp-document-type` (same identity the backend uses). The
+// version's own (custom) classes are authoritative; the default config is only
+// used when the version defines no classes of its own (inherits the default
+// wholesale) — otherwise the default's classes would leak into a version that
+// scopes down to a subset (e.g. a W2-only version showing Bank-Statement).
 const _parse = (v: unknown): Record<string, unknown> => {
   if (typeof v === 'string' && v) {
     try {
@@ -36,16 +39,20 @@ const _parse = (v: unknown): Record<string, unknown> => {
   return (v as Record<string, unknown>) || {};
 };
 
-const extractClassNames = (custom: unknown, def: unknown): string[] => {
-  const names = new Set<string>();
-  for (const cfg of [_parse(custom), _parse(def)]) {
-    const classes = (cfg.classes as Array<Record<string, unknown>> | undefined) || [];
-    for (const c of classes) {
-      const id = (c['x-aws-idp-document-type'] || c.$id || c.title || c.name) as string | undefined;
-      if (id) names.add(id);
-    }
+const _classNamesOf = (cfg: Record<string, unknown>): string[] => {
+  const classes = (cfg.classes as Array<Record<string, unknown>> | undefined) || [];
+  const names: string[] = [];
+  for (const c of classes) {
+    const id = (c['x-aws-idp-document-type'] || c.$id || c.title || c.name) as string | undefined;
+    if (id) names.push(id);
   }
-  return Array.from(names).sort();
+  return names;
+};
+
+const extractClassNames = (custom: unknown, def: unknown): string[] => {
+  const customNames = _classNamesOf(_parse(custom));
+  const names = customNames.length > 0 ? customNames : _classNamesOf(_parse(def));
+  return Array.from(new Set(names)).sort();
 };
 
 interface GenerateSyntheticDataModalProps {
