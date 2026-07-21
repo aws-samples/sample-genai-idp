@@ -78,9 +78,10 @@ It exercises the full host contract:
 
 ## Installing
 
-Claims Review is bundled with the accelerator and listed in the catalog, so it
-appears under **Extensions** in the nav once the Feature Platform is enabled
-(the default). Install it from its feature page with one click.
+Claims Review is bundled with the accelerator and listed in the catalog. Open
+**Extensions → Browse catalog** in the nav, select **Sample: Health Insurance
+Review**, and install it from its feature page with one click. Once installed
+it gets its own entry in the **Extensions** nav.
 
 After installing:
 

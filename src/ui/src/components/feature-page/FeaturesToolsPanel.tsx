@@ -127,7 +127,10 @@ const FeaturesToolsPanel = (): React.JSX.Element => {
             <b>Subscribe</b> <i>(future)</i> — start an AWS Marketplace subscription before installing a paid extension.
           </li>
         </ul>
-        <p>Select an extension in the navigation to view its page, where an admin can install it or open its documentation.</p>
+        <p>
+          Installed extensions appear in the navigation; open <b>Browse catalog</b> to discover extensions that are available but not yet
+          installed. From an extension&apos;s page an admin can install or update it, or open its documentation.
+        </p>
       </div>
     </HelpPanel>
   );

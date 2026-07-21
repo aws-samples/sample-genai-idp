@@ -73,7 +73,9 @@ and seller buckets permit `GetObject` only, not `ListObjectsV2`).
 - To add a marketplace extension: add an entry to
   `config_library/extensions-marketplace.yaml`, re-publish, and run a stack update
   (the catalog is refreshed into ConfigurationBucket on create/update). The
-  feature then appears in the "Extensions" nav with a Subscribe CTA.
+  feature then becomes available under **Extensions → Browse catalog** with a
+  Subscribe CTA. (The "Extensions" side nav lists **installed** features only —
+  catalog-only features don't get their own nav entry until deployed.)
 
 The seller bucket is the one inherent post-deploy runtime dependency for
 marketplace features: `getFeatureLaunchUrl` must presign a `GetObject` against
@@ -262,7 +264,8 @@ The default brings up:
 - the `FeatureBucket` pre-loaded with the bundled sample feature.
 
 To turn the feature platform off entirely, set `EnableFeaturePlatform=false` —
-no platform resources are created, and the nav shows no feature entries.
+no platform resources are created, and the Extensions nav section is empty
+(apart from the Browse catalog link, whose page reports no extensions).
 
 ### Tear-down
 
@@ -306,9 +309,10 @@ idp-feature-cli publish ./my-feature \        # upload artifacts + print Launch 
     --region us-east-1
 ```
 
-Once published, the new feature appears in the IDP nav automatically (the UI
-fetches the catalog from the feature bucket via `listCatalogFeatures` — no
-main-stack rebuild needed).
+Once published, the new feature appears under **Extensions → Browse catalog**
+automatically (the UI fetches the catalog via `listCatalogFeatures` — no
+main-stack rebuild needed). It gets its own side-nav entry once it's installed
+in the stack.
 
 The host contract a feature must satisfy:
 
