@@ -68,6 +68,7 @@ RUN_ROOTS = [
     "nested/api-resolvers/src/lambda/get_stepfunction_execution_resolver",
     "nested/api-resolvers/src/lambda/list_agent_chat_sessions_resolver/tests",
     "nested/api-resolvers/src/lambda/send_chat_document_message_resolver/tests",
+    "nested/api-resolvers/src/lambda/test_set_resolver",
     "nested/api-resolvers/src/lambda/upload_resolver",
     "nested/bedrockkb/src/start_ingestion_job_custom_resource",
     "samples/lambda-hook-inference/GENAIIDP-mistral-ocr-hook",
