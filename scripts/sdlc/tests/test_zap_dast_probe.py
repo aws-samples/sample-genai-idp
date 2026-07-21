@@ -212,6 +212,30 @@ def test_zap_ignored_plugin_ids_reads_rules_conf(cbd):
     assert {"10049", "100000", "10096"} <= ids
 
 
+def test_persist_zap_report_copies_to_report_dir(cbd, tmp_path, monkeypatch):
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    (workdir / "zap-report.html").write_text("<html>")
+    (workdir / "zap-report.json").write_text("{}")
+    dest = tmp_path / "out"
+    monkeypatch.setenv("IDP_ZAP_REPORT_DIR", str(dest))
+    out = cbd._persist_zap_report(str(workdir))
+    assert out["zap-report.html"] == str((dest / "zap-report.html").resolve())
+    assert (dest / "zap-report.html").exists()
+    assert (dest / "zap-report.json").exists()
+
+
+def test_persist_zap_report_falls_back_to_workdir(cbd, tmp_path, monkeypatch):
+    # No IDP_ZAP_REPORT_DIR → returns the workdir paths (not deleted) so the
+    # report can still be pointed at.
+    monkeypatch.delenv("IDP_ZAP_REPORT_DIR", raising=False)
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    (workdir / "zap-report.html").write_text("<html>")
+    out = cbd._persist_zap_report(str(workdir))
+    assert out["zap-report.html"] == str((workdir / "zap-report.html").resolve())
+
+
 def test_parse_zap_rule_tally_reads_summary_line(cbd):
     # The report should surface EVERY rule outcome (114 PASS is as meaningful as
     # the 3 WARN), parsed from zap-api-scan's stdout tally line.

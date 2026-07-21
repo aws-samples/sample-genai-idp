@@ -360,8 +360,8 @@ endif
 # Alias so the RBAC test shows up under the consistent stacktest-* name too.
 stacktest-rbac: api-test ## RBAC/API authorization test (alias: api-test) — needs STACK_NAME
 
-stacktest-zap: ## ZAP DAST scan (STACK_NAME=... or self-deploy w/ TEMPLATE_URL=...)
-	$(PYTHON) scripts/sdlc/run_stacktest.py zapdast $(_STACKTEST_ARGS)
+stacktest-zap: ## ZAP DAST scan (STACK_NAME=... [REPORT_DIR=./dir] or self-deploy w/ TEMPLATE_URL=...)
+	$(if $(REPORT_DIR),IDP_ZAP_REPORT_DIR=$(REPORT_DIR)) $(PYTHON) scripts/sdlc/run_stacktest.py zapdast $(_STACKTEST_ARGS)
 
 stacktest-hosting-global: ## APIGateway GLOBAL hosting variant
 	$(PYTHON) scripts/sdlc/run_stacktest.py apigw $(_STACKTEST_ARGS)

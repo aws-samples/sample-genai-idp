@@ -108,3 +108,6 @@ config_library/samples-manifest.json
 
 # API RBAC live-harness reports (make api-test default REPORT_DIR)
 api-test-results/
+
+# ZAP DAST stack-test reports (make stacktest-zap REPORT_DIR)
+zap-reports/

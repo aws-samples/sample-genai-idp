@@ -173,9 +173,15 @@ def main():
         return 0
     if ok:
         print(f"✅ Stack-test '{test.name}' PASSED")
-        for k in ("zap_alerts", "report_key", "jobs_url", "web_acl_arn"):
+        for k in ("zap_alerts", "jobs_url", "web_acl_arn"):
             if k in result:
                 print(f"   {k}: {result[k]}")
+        # Point at the full report file(s) so they're easy to open (the detailed
+        # scan report was already printed above by the validator).
+        for name, path in (result.get("report_files") or {}).items():
+            print(f"   report: {path}")
+        if result.get("report_url"):
+            print(f"   report (S3): {result['report_url']}")
         return 0
     print(f"❌ Stack-test '{test.name}' FAILED: {result.get('error', 'unknown')}")
     return 1

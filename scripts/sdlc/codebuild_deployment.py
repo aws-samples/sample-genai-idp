@@ -9,6 +9,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import signal
 import subprocess
 import sys
@@ -3210,6 +3211,40 @@ def _upload_zap_report(stack_name, workdir):
     return html_url
 
 
+def _persist_zap_report(workdir):
+    """Copy the ZAP report files to a stable local dir and return {name: path}.
+
+    The scan writes reports into a random /tmp/zap-XXXX workdir; a manual run
+    (no SOURCE_BUCKET/S3 upload) otherwise has no obvious path to open. Copy them
+    to IDP_ZAP_REPORT_DIR if set, else leave them in the workdir (which is NOT
+    deleted) and just return the paths so the report can print them. Best effort.
+    """
+    names = ("zap-report.html", "zap-report.json", "zap-report.md")
+    dest_dir = os.environ.get("IDP_ZAP_REPORT_DIR", "").strip()
+    out = {}
+    if dest_dir:
+        try:
+            os.makedirs(dest_dir, exist_ok=True)
+        except OSError as e:
+            print(f"⚠️ Could not create IDP_ZAP_REPORT_DIR {dest_dir!r}: {e}")
+            dest_dir = ""
+    for name in names:
+        src = os.path.join(workdir, name)
+        if not os.path.exists(src):
+            continue
+        if dest_dir:
+            dst = os.path.join(dest_dir, name)
+            try:
+                shutil.copy(src, dst)
+                out[name] = os.path.abspath(dst)
+            except OSError as e:  # noqa: BLE001
+                print(f"⚠️ Could not copy ZAP report {name} to {dest_dir}: {e}")
+                out[name] = os.path.abspath(src)
+        else:
+            out[name] = os.path.abspath(src)
+    return out
+
+
 def validate_zap_dast(stack_name):
     """Run an authenticated OWASP ZAP DAST scan against the deployed UI API.
 
@@ -3356,6 +3391,10 @@ def validate_zap_dast(stack_name):
             report_json, ignore_ids=_zap_ignored_plugin_ids(ZAP_RULES_CONF)
         )
         report_url = _upload_zap_report(stack_name, workdir)
+        # Copy the HTML/JSON/MD reports to a stable local dir so a manual run
+        # (no SOURCE_BUCKET) can still open them — the workdir is a random
+        # /tmp/zap-XXXX. IDP_ZAP_REPORT_DIR overrides the destination.
+        local_reports = _persist_zap_report(workdir)
 
         summary = (
             f"High={counts.get('High', 0)} Medium={counts.get('Medium', 0)} "
@@ -3394,6 +3433,15 @@ def validate_zap_dast(stack_name):
                     print(f"        ↳ fix: {fix}")
         else:
             print("  No alerts raised.")
+        # Where to read the full report.
+        html_local = local_reports.get("zap-report.html")
+        if html_local:
+            print(f"  Report:      {html_local}")
+            print("               (open in a browser for the full findings view)")
+        if local_reports.get("zap-report.json"):
+            print(f"               {local_reports['zap-report.json']}")
+        if report_url:
+            print(f"  Report (S3): {report_url}")
         print(f"{'=' * 72}\n")
 
         # TODO promote: once zap-rules.conf is triaged, gate the build here, e.g.
@@ -3408,6 +3456,7 @@ def validate_zap_dast(stack_name):
             "rule_tally": rule_tally,
             "target": api_base,
             "report_url": report_url,
+            "report_files": local_reports,
             "active_scan": ZAP_ACTIVE_SCAN,
         }
     except Exception as e:  # noqa: BLE001
