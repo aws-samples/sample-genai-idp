@@ -92,6 +92,22 @@ const useSyntheticDataGenerator = () => {
     [endpoint],
   );
 
+  const listActiveJobs = useCallback(async (): Promise<JobStatus[]> => {
+    if (!endpoint) return [];
+    try {
+      const token = await _authToken();
+      const resp = await fetch(`${endpoint.replace(/\/$/, '')}/jobs`, {
+        headers: { Authorization: token },
+      });
+      if (!resp.ok) return [];
+      const data = (await resp.json().catch(() => ({}))) as { jobs?: JobStatus[] };
+      return data.jobs || [];
+    } catch (err) {
+      logger.warn('Active jobs poll failed', err);
+      return [];
+    }
+  }, [endpoint]);
+
   const getJobStatus = useCallback(
     async (jobId: string): Promise<JobStatus | null> => {
       if (!endpoint) return null;
@@ -141,8 +157,9 @@ const useSyntheticDataGenerator = () => {
       generateFromPrompt,
       generateFromConfig,
       getJobStatus,
+      listActiveJobs,
     }),
-    [available, featuresLoading, submitting, generateFromPrompt, generateFromConfig, getJobStatus],
+    [available, featuresLoading, submitting, generateFromPrompt, generateFromConfig, getJobStatus, listActiveJobs],
   );
 };
 

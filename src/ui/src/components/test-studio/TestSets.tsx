@@ -101,7 +101,7 @@ const TestSets = (): React.JSX.Element => {
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   // The synthetic-data generator is an optional extension; the button is only
   // shown when it's installed (available).
-  const { available: generatorAvailable, getJobStatus } = useSyntheticDataGenerator();
+  const { available: generatorAvailable, getJobStatus, listActiveJobs } = useSyntheticDataGenerator();
   const [genJobs, setGenJobs] = useState<Record<string, { name: string; status: string; message: string }>>({});
   const [warningMessage, setWarningMessage] = useState('');
   const [confirmReplacement, setConfirmReplacement] = useState(false);
@@ -215,6 +215,36 @@ const TestSets = (): React.JSX.Element => {
     }, 5000);
     return () => clearInterval(interval);
   }, [genJobs, getJobStatus]);
+
+  // Adopt in-flight generation jobs the page did not itself start (e.g. started
+  // from Quick Start) so they show as GENERATING rows here too.
+  React.useEffect(() => {
+    if (!generatorAvailable) return;
+    let cancelled = false;
+    const adopt = async () => {
+      const jobs = await listActiveJobs();
+      if (cancelled || jobs.length === 0) return;
+      setGenJobs((prev) => {
+        const next = { ...prev };
+        for (const job of jobs) {
+          if (!next[job.jobId]) {
+            next[job.jobId] = {
+              name: job.configVersion || job.testSetId || 'Synthetic documents',
+              status: job.status,
+              message: job.statusMessage || 'Generating…',
+            };
+          }
+        }
+        return next;
+      });
+    };
+    adopt();
+    const interval = setInterval(adopt, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [generatorAvailable, listActiveJobs]);
 
   // Separate discovery polling for new test sets (less frequent)
   React.useEffect(() => {

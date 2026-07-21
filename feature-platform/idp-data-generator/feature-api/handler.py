@@ -25,6 +25,10 @@ POST /generate-from-config
     { jobId }. (The processor resolves the class -> generator schema; see
     bootstrap-processor.)
 
+GET /jobs
+    Returns in-flight jobs (PENDING/IN_PROGRESS) so the UI can surface jobs it
+    did not itself start (e.g. started from Quick Start).
+
 GET /jobs/{jobId}
     Returns the BootstrapTrackingTable row for a job (status, message, etc.).
 
@@ -46,6 +50,7 @@ import uuid
 from typing import Any, Dict
 
 import boto3
+from boto3.dynamodb.conditions import Attr
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -120,6 +125,22 @@ def _handle_generate_from_config(body: Dict[str, Any]) -> Dict[str, Any]:
     return _resp(202, {"jobId": _enqueue(message)})
 
 
+def _handle_list_active_jobs() -> Dict[str, Any]:
+    if not _TRACKING_TABLE:
+        return _resp(500, {"error": "tracking table not configured"})
+    table = _dynamodb.Table(_TRACKING_TABLE)
+    jobs = []
+    kwargs = {"FilterExpression": Attr("status").is_in(["PENDING", "IN_PROGRESS"])}
+    while True:
+        page = table.scan(**kwargs)
+        jobs.extend(page.get("Items", []))
+        key = page.get("LastEvaluatedKey")
+        if not key:
+            break
+        kwargs["ExclusiveStartKey"] = key
+    return _resp(200, {"jobs": jobs})
+
+
 def _handle_get_job(job_id: str) -> Dict[str, Any]:
     if not _TRACKING_TABLE:
         return _resp(500, {"error": "tracking table not configured"})
@@ -148,6 +169,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return _handle_generate_from_config(json.loads(event.get("body") or "{}"))
         if method == "GET" and "/jobs/" in path:
             return _handle_get_job(path.rsplit("/jobs/", 1)[-1])
+        if method == "GET" and path.endswith("/jobs"):
+            return _handle_list_active_jobs()
         if method == "GET" and path.endswith("/config"):
             return _resp(
                 200, {"featureId": "idp-data-generator", "version": _FEATURE_VERSION}
