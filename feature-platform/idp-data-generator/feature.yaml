@@ -1,4 +1,4 @@
-# IDP Data Generator — Feature Platform extension.
+# Test Set Generator — Feature Platform extension.
 #
 # Packages the SEED synthetic-document generator (the published `seed-data` PyPI
 # package) plus the accelerator's synthesis adapter (idp_common.synthesis) as a

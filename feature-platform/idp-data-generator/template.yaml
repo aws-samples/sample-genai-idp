@@ -32,7 +32,7 @@ Parameters:
 
   FeatureDisplayName:
     Type: String
-    Default: "IDP Data Generator"
+    Default: "Test Set Generator"
 
   FeatureBucket:
     Type: String
@@ -170,7 +170,7 @@ Resources:
   DockerBuildProject:
     Type: AWS::CodeBuild::Project
     Properties:
-      Description: Build the ARM64 AgentCore Runtime image for the IDP Data Generator
+      Description: Build the ARM64 AgentCore Runtime image for the Test Set Generator
       ServiceRole: !GetAtt CodeBuildRole.Arn
       Artifacts:
         Type: NO_ARTIFACTS
