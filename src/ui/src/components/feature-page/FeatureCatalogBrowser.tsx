@@ -59,9 +59,9 @@ function statusBadge(entry: BrowserEntry): React.ReactNode {
 /**
  * The `/features` (no featureId) page: lists every extension — installed and
  * available — with a link to each feature's own page, where an admin can
- * install / update / subscribe. This is the discovery surface for catalog
- * features, which intentionally do NOT appear in the side navigation until
- * they are installed.
+ * install / update / subscribe. Unlike the side nav, this page ignores
+ * `showInNav`, so it's the discovery surface for reference samples and other
+ * catalog features that keep themselves off the nav until installed.
  */
 const FeatureCatalogBrowser = (): React.JSX.Element => {
   const { features: catalog, loading: catalogLoading } = useCatalogFeatures();

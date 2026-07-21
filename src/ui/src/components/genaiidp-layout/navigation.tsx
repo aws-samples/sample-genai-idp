@@ -320,11 +320,11 @@ const Navigation = ({
   const { features: installedFeatures } = useInstalledFeatures();
   const { features: catalogFeatures } = useCatalogFeatures();
 
-  // Dynamic "Extensions" section listing installed features only (catalog
-  // data enriches entries with a description), plus a "Browse catalog" link.
-  // Always visible per the feature platform plan. Catalog-only entries
-  // (published but not yet installed) are reachable from the catalog browser
-  // at /features, not from their own nav links.
+  // Dynamic "Extensions" section: installed features plus catalog features
+  // with showInNav !== false, ending with a "Browse catalog" link. Always
+  // visible per the feature platform plan. Catalog entries with
+  // showInNav: false (the bundled reference samples) are reachable from the
+  // catalog browser at /features, not from their own nav links.
   const featuresSection = useMemo(() => buildFeaturesNavSection(installedFeatures, catalogFeatures), [installedFeatures, catalogFeatures]);
 
   // Version-check for the "Update available" indicator. Returns

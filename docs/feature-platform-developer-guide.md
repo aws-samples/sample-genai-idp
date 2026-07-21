@@ -245,6 +245,17 @@ The host's seller-bucket access also requires:
 > installed — no catalog entry needed. Use this for private/internal features
 > you don't want surfaced as installable to every admin.
 
+### Nav visibility before install (`showInNav`)
+
+A catalog feature that is **not yet installed** gets its own entry in the
+**Extensions** side nav (with an Install or Subscribe badge) by default. Set
+`showInNav: false` — in `feature.yaml` for OSS features, or on the entry in
+`extensions-marketplace.yaml` for marketplace features — to keep it off the
+nav until it's installed; it stays discoverable on the **Browse catalog** page
+(`/features`). The two bundled reference samples set `showInNav: false` so
+fresh deployments don't advertise them in the nav. Installed features always
+get a nav entry regardless of this flag.
+
 ### Feature documentation (the "Learn more" link)
 
 Each feature can expose a **Learn more** link, shown in its nav hover tooltip

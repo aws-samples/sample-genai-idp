@@ -149,6 +149,45 @@ features:
     assert [f["featureId"] for f in catalog["features"]] == ["good"]
 
 
+def test_show_in_nav_passthrough_and_default(publisher_in_tmp):
+    pub, tmp_path = publisher_in_tmp
+    _write_marketplace(
+        tmp_path,
+        """
+features:
+  - featureId: hidden-mp
+    displayName: "Hidden Marketplace"
+    productCode: "p"
+    sellerBucket: "b"
+    latestVersion: "1.0.0"
+    templateKey: "k"
+    showInNav: false
+  - featureId: visible-mp
+    displayName: "Visible Marketplace"
+    productCode: "p2"
+    sellerBucket: "b"
+    latestVersion: "1.0.0"
+    templateKey: "k2"
+""",
+    )
+    oss = [
+        {
+            "featureId": "hidden-oss",
+            "displayName": "Hidden OSS Sample",
+            "description": "",
+            "iconUrl": "",
+            "source": "oss",
+            "latestVersion": "0.1.0",
+            "showInNav": False,
+        }
+    ]
+    catalog = pub.write_catalog_file(oss)
+    by_id = {f["featureId"]: f for f in catalog["features"]}
+    assert by_id["hidden-mp"]["showInNav"] is False
+    assert by_id["visible-mp"]["showInNav"] is True  # absent → default True
+    assert by_id["hidden-oss"]["showInNav"] is False
+
+
 def test_empty_marketplace_list(publisher_in_tmp):
     pub, tmp_path = publisher_in_tmp
     _write_marketplace(tmp_path, 'schemaVersion: "1.0"\nfeatures: []\n')

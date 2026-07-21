@@ -22,6 +22,8 @@ features: []
   #   displayName: "My Paid Extension"
   #   description: "One-line description shown in the nav and on the feature page."
   #   iconUrl: ""                                  # optional https URL
+  #   showInNav: true                              # optional (default true): own nav entry
+  #                                                # before install; false = Browse catalog only
   #   productCode: "REPLACE_WITH_MARKETPLACE_PRODUCT_CODE"
   #   marketplaceListingUrl: "https://aws.amazon.com/marketplace/pp/REPLACE"
   #   sellerBucket: "REPLACE_WITH_SELLER_BUCKET"   # private; GetObject-only

@@ -78,10 +78,12 @@ It exercises the full host contract:
 
 ## Installing
 
-Claims Review is bundled with the accelerator and listed in the catalog. Open
-**Extensions → Browse catalog** in the nav, select **Sample: Health Insurance
-Review**, and install it from its feature page with one click. Once installed
-it gets its own entry in the **Extensions** nav.
+Claims Review is bundled with the accelerator and listed in the catalog, but —
+as a reference sample — it sets `showInNav: false`, so it has no nav entry of
+its own until installed. Open **Extensions → Browse catalog** in the nav,
+select **Sample: Health Insurance Review**, and install it from its feature
+page with one click. Once installed it gets its own entry in the
+**Extensions** nav.
 
 After installing:
 

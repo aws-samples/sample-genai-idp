@@ -73,9 +73,10 @@ and seller buckets permit `GetObject` only, not `ListObjectsV2`).
 - To add a marketplace extension: add an entry to
   `config_library/extensions-marketplace.yaml`, re-publish, and run a stack update
   (the catalog is refreshed into ConfigurationBucket on create/update). The
-  feature then becomes available under **Extensions → Browse catalog** with a
-  Subscribe CTA. (The "Extensions" side nav lists **installed** features only —
-  catalog-only features don't get their own nav entry until deployed.)
+  feature then appears in the "Extensions" nav with a Subscribe CTA (unless
+  its entry sets `showInNav: false`, in which case it's discoverable under
+  **Extensions → Browse catalog** only until installed — the bundled reference
+  samples do this).
 
 The seller bucket is the one inherent post-deploy runtime dependency for
 marketplace features: `getFeatureLaunchUrl` must presign a `GetObject` against
@@ -234,10 +235,11 @@ UI and hooks. See the
 ## Two reference samples
 
 Both bundled extensions are **samples** — reference implementations for feature
-authors, not production products. They're labelled accordingly in the nav (each
-display name starts with `Sample:`). In particular, *Sample: Health Insurance
-Review* is a minimal demo of a use-case extension; it is **not** the planned
-Claims Processing marketplace product.
+authors, not production products. They're labelled accordingly (each display
+name starts with `Sample:`) and set `showInNav: false`, so they appear on the
+**Browse catalog** page rather than as nav entries until installed. In
+particular, *Sample: Health Insurance Review* is a minimal demo of a use-case
+extension; it is **not** the planned Claims Processing marketplace product.
 
 | Sample (nav label) | featureId | Kind | Demonstrates |
 | ------------------ | --------- | ---- | ------------ |
@@ -309,10 +311,11 @@ idp-feature-cli publish ./my-feature \        # upload artifacts + print Launch 
     --region us-east-1
 ```
 
-Once published, the new feature appears under **Extensions → Browse catalog**
-automatically (the UI fetches the catalog via `listCatalogFeatures` — no
-main-stack rebuild needed). It gets its own side-nav entry once it's installed
-in the stack.
+Once published, the new feature appears in the IDP nav automatically (the UI
+fetches the catalog via `listCatalogFeatures` — no main-stack rebuild needed).
+Set `showInNav: false` in `feature.yaml` to keep it off the nav until
+installed (discoverable via **Extensions → Browse catalog** instead), as the
+bundled reference samples do.
 
 The host contract a feature must satisfy:
 

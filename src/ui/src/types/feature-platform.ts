@@ -32,6 +32,10 @@ export interface CatalogFeature {
   /** "Learn more" link. OSS: a docs-site slug (e.g. "extensions/sample-document-status")
    * or absolute URL. Empty for marketplace (falls back to marketplaceListingUrl). */
   docsUrl: string | null;
+  /** Whether the feature gets its own Extensions nav entry before it's installed
+   * (installed features always appear). Null/absent means true; false for
+   * reference samples, discoverable via Browse catalog only. */
+  showInNav: boolean | null;
   /** "oss" or "marketplace"; defaults to "oss" when absent. */
   source: CatalogFeatureSource | null;
   /** Marketplace-only: product code GetEntitlements is queried against. */

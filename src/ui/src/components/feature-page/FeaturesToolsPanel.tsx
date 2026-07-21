@@ -128,8 +128,9 @@ const FeaturesToolsPanel = (): React.JSX.Element => {
           </li>
         </ul>
         <p>
-          Installed extensions appear in the navigation; open <b>Browse catalog</b> to discover extensions that are available but not yet
-          installed. From an extension&apos;s page an admin can install or update it, or open its documentation.
+          Most extensions appear in the navigation; open <b>Browse catalog</b> to see the full catalog, including reference samples that
+          don&apos;t get a navigation entry until installed. From an extension&apos;s page an admin can install or update it, or open its
+          documentation.
         </p>
       </div>
     </HelpPanel>
