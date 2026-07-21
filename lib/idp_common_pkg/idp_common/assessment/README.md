@@ -262,6 +262,27 @@ reduce per-row output, e.g. switch `extraction.geometry.mode` from `llm` to
 `ocr_only` (the default), which derives boxes from OCR value-matching instead of
 the model.
 
+**Schema-mismatch guard.** Some "unscored" rows are not a truncation problem at
+all: if extraction returns a **list** for an attribute the class schema does *not*
+declare as `type: array` (an off-schema/hallucinated field, or one typed as a
+scalar), the confidence enhancer collapses it to a single default `{"confidence":
+0.5}` leaf, and reconciliation pads the data rows with null placeholders that no
+model can fill — escalating them just burns a slow large-model call to re-collapse
+the same list. When a `class_schema` is threaded into `assess_results_batched`
+(both the standalone and in-shard paths pass it), the ladder detects this via
+`_schema_field_mismatch_reason`, **skips both retry and escalation** for the
+offending field, records it in `split_stats["schema_mismatch_fields"]`, and emits
+an `assessment_schema_mismatch` **error** naming the field and the real fix:
+correct the class schema or the extraction prompt so the attribute is defined (as
+an array where it should be). A validly array-typed field is never blocked.
+
+> This is an **extraction/schema** defect surfaced at assessment time — note that
+> traditional (non-agentic) extraction has no schema-validation step, and even the
+> agentic `validation` gate won't catch *extra* attributes unless the class schema
+> sets `additionalProperties: false` (unknown properties pass JSON-Schema
+> validation by default). So an off-schema attribute can reach assessment
+> unflagged; this guard is where it becomes visible.
+
 ### Structured processing issues + completeness gate
 
 The ladder's `split_stats` are translated into user-surfacing
@@ -271,9 +292,13 @@ without reading raw metadata. Severity ladder:
 
 | Condition | code | severity |
 |-----------|------|----------|
+| List extracted for a non-array/off-schema attribute (retry+escalation skipped) | `assessment_schema_mismatch` | **error** |
 | Rows still unscored after the full ladder | `assessment_incomplete` | **error** |
 | Wall-clock guard cut escalation short | `assessment_deadline_reached` | **warning** |
 | Healed, but needed shrinking/escalation | `assessment_recovered_with_retries` | **info** |
+
+`assessment_schema_mismatch` takes precedence over `assessment_incomplete`: when
+both fire, the schema mismatch is the true root cause and is emitted alone.
 
 A **completeness gate** (`audit_explainability`) runs after the ladder on both
 the standalone and in-shard paths: it confirms every extracted value has a real

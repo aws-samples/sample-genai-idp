@@ -55,8 +55,11 @@ be called.
 
 | Model | Availability |
 |-------|--------------|
-| `openai.gpt-5.4` | `us-east-2`, `us-west-2`, `us-gov-west-1` |
-| `openai.gpt-5.5` | `us-east-2` |
+| `openai.gpt-5.4` | `us-east-1`, `us-east-2`, `us-west-2`, `us-gov-west-1` |
+| `openai.gpt-5.5` | `us-east-1`, `us-east-2` |
+| `openai.gpt-5.6-sol` | `us-east-1`, `us-east-2` |
+| `openai.gpt-5.6-terra` | `us-east-1`, `us-east-2`, `us-west-2` |
+| `openai.gpt-5.6-luna` | `us-east-1`, `us-east-2`, `us-west-2` |
 
 See [OpenAI GPT-5.x model support](#openai-gpt-5x-models-bedrock-mantle) below.
 
@@ -169,8 +172,9 @@ Other regions (Asia-Pacific, etc.) will use the original model IDs without mappi
 > full support matrix and caveats.** This section summarizes how they differ
 > and why they are US-only (and therefore hidden in EU-region deployments).
 
-OpenAI's frontier models (`openai.gpt-5.4`, `openai.gpt-5.5`) are integrated
-differently from every other supported model.
+OpenAI's frontier models (`openai.gpt-5.4`, `openai.gpt-5.5`, and the GPT-5.6
+family `openai.gpt-5.6-sol` / `-terra` / `-luna`) are integrated differently
+from every other supported model.
 
 ### How they differ
 
@@ -180,7 +184,7 @@ differently from every other supported model.
 | Endpoint | boto3 `converse()` | `https://bedrock-mantle.{region}.api.aws/openai/v1/responses` |
 | Auth | IAM (boto3) | IAM via **SigV4-signed HTTP** (signing name `bedrock-mantle`) |
 | Inference params | temperature / top_p / top_k | reasoning models — sampling params omitted; `reasoning.effort` |
-| Prompt caching | cachePoint supported | **not supported** (`<<CACHEPOINT>>` stripped) |
+| Prompt caching | cachePoint supported | 5.4/5.5 automatic; 5.6 explicit breakpoints (`<<CACHEPOINT>>` → `prompt_cache_breakpoint`) |
 | Agentic extraction | supported | **not supported** (rejected by config-validate; raises at runtime) |
 | Service tiers | priority / flex / standard | **standard only** |
 | Region prefix / `:1m` | yes | none |
@@ -198,8 +202,11 @@ token deltas to the UI exactly like the Converse streaming path.
 
 | Model | In-Region availability | Context window |
 |-------|------------------------|----------------|
-| `openai.gpt-5.5` | `us-east-2` | 272K |
-| `openai.gpt-5.4` | `us-east-2`, `us-west-2`, `us-gov-west-1` | 272K |
+| `openai.gpt-5.5` | `us-east-1`, `us-east-2` | 272K |
+| `openai.gpt-5.4` | `us-east-1`, `us-east-2`, `us-west-2`, `us-gov-west-1` | 272K |
+| `openai.gpt-5.6-sol` | `us-east-1`, `us-east-2` | 272K |
+| `openai.gpt-5.6-terra` | `us-east-1`, `us-east-2`, `us-west-2` | 272K |
+| `openai.gpt-5.6-luna` | `us-east-1`, `us-east-2`, `us-west-2` | 272K |
 
 There is **no EU availability and no geo/global cross-region inference**. When
 the IDP stack is deployed in a region where the model is not available, the

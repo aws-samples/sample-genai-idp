@@ -159,7 +159,8 @@ operations:
     groups: [Admin, Author]
     kind: mutation
     enforced_in: nested/api-resolvers/src/lambda/copy_to_baseline_resolver/index.py
-    args: { objectKeys: ["__nope__"] }
+    # schema: copyToBaseline(objectKey: String!) — single key, not a list
+    args: { objectKey: "__nope__" }
   uploadDocument:
     groups: [Admin, Author]
     kind: mutation
@@ -198,7 +199,8 @@ operations:
     kind: mutation
     scope_checked: true
     enforced_in: *cfg
-    args: { configuration: "{}" }
+    # schema: updateConfiguration(versionName: String!, customConfig: AWSJSON!, description: String)
+    args: { versionName: "__nope__", customConfig: "{}" }
     note: saveAsVersion/saveAsDefault flags are additionally Admin-only in-code
   setActiveVersion:
     groups: [Admin, Author]
@@ -221,7 +223,8 @@ operations:
     groups: [Admin]
     kind: mutation
     enforced_in: *cfg
-    args: { pricing: "{}" }
+    # schema: updatePricing(pricingConfig: AWSJSON!)
+    args: { pricingConfig: "{}" }
   restoreDefaultPricing:
     groups: [Admin]
     kind: mutation
@@ -305,7 +308,8 @@ operations:
     groups: [Admin, Author]
     kind: mutation
     enforced_in: nested/api-resolvers/src/lambda/test_runner/index.py
-    args: {}
+    # schema: startTestRun(input: TestRunInput!) — wrapped input object
+    args: { input: {} }
   getTestRun:
     groups: [Admin, Author]
     kind: read
@@ -330,7 +334,8 @@ operations:
     groups: [Admin, Author]
     kind: mutation
     enforced_in: nested/api-resolvers/src/lambda/delete_tests/index.py
-    args: { testIds: ["__x__"] }
+    # schema: deleteTests(testRunIds: [String!]!) — arg is testRunIds, not testIds
+    args: { testRunIds: ["__x__"] }
   abortTestRuns:
     groups: [Admin, Author]
     kind: mutation
@@ -350,7 +355,8 @@ operations:
     groups: [Admin, Author]
     kind: mutation
     enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
-    args: {}
+    # schema: addTestSetFromUpload(input: TestSetUploadInput!)
+    args: { input: {} }
   addDocumentsToTestSet:
     groups: [Admin, Author]
     kind: mutation
@@ -360,12 +366,14 @@ operations:
     groups: [Admin, Author]
     kind: mutation
     enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
-    args: {}
+    # schema: addDocumentsToTestSetFromUpload(input: TestSetDocumentsUploadInput!)
+    args: { input: {} }
   updateTestSet:
     groups: [Admin, Author]
     kind: mutation
     enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
-    args: {}
+    # schema: updateTestSet(input: UpdateTestSetInput!)
+    args: { input: {} }
   deleteTestSets:
     groups: [Admin, Author]
     kind: mutation
@@ -509,23 +517,27 @@ operations:
     groups: [Admin]
     kind: mutation
     enforced_in: src/lambda/user_management/index.py
-    args: { email: "__no@no.invalid", group: "Viewer" }
+    # schema: createUser(email: String!, persona: String!, allowedConfigVersions: [String])
+    args: { email: "__no@no.invalid", persona: "Viewer" }
   updateUser:
     groups: [Admin]
     kind: mutation
     enforced_in: src/lambda/user_management/index.py
-    args: { email: "__no@no.invalid", group: "Viewer" }
+    # schema: updateUser(userId: ID!, allowedConfigVersions: [String]) — keyed by userId
+    args: { userId: "__nope__" }
   deleteUser:
     groups: [Admin]
     kind: mutation
     enforced_in: src/lambda/user_management/index.py
-    args: { email: "__no@no.invalid" }
+    # schema: deleteUser(userId: ID!) — keyed by userId, not email
+    args: { userId: "__nope__" }
   listUsers:
-    groups: ANY
+    groups: [Admin]
     kind: read
     enforced_in: src/lambda/user_management/index.py
     args: {}
-    known_gap: GAP-04
+    note: Admin-only server-side (listUsers exposes all user emails/roles); the
+      handler adds listUsers to its Admin-gated set. Formerly GAP-04.
   getMyProfile:
     groups: ANY
     kind: read
@@ -539,7 +551,8 @@ operations:
     groups: [Admin, Author]
     kind: mutation
     enforced_in: nested/api-resolvers/src/lambda/finetuning_jobs_resolver/index.py
-    args: {}
+    # schema: createFinetuningJob(input: CreateFinetuningJobInput!)
+    args: { input: {} }
   deleteFinetuningJob:
     groups: [Admin, Author]
     kind: mutation
@@ -560,13 +573,12 @@ operations:
   # Capacity / version metadata / knowledge
   # ==========================================================================
   calculateCapacity:
-    groups: ANY
-    schema_groups: [Admin, Author, Viewer]
+    groups: [Admin, Author, Viewer]
     kind: read
     enforced_in: src/lambda/calculate_capacity_resolver/index.py
     args: { input: "{}" }
-    known_gap: GAP-05
-    note: schema restricts to Admin/Author/Viewer but no server-side check exists
+    note: server-side _caller_in_groups check now matches the schema directive
+      (Reviewer excluded). Formerly GAP-05.
   getLatestPublishedVersion:
     groups: ANY
     kind: read
@@ -636,28 +648,28 @@ operations:
     args: { featureId: "__nope__" }
   getFeatureLaunchUrl:
     groups: [Admin]
-    schema_groups: ANY
     kind: read
     conditional: feature_platform
     enforced_in: feature-platform/main-stack-extensions/lambdas/get_feature_launch_url/index.py
     args: { featureId: "__nope__" }
-    known_gap: GAP-06
+    note: schema directive now @aws_cognito_user_pools(cognito_groups:[Admin]),
+      matching the resolver's Admin enforcement. Formerly GAP-06.
   subscribeFeature:
     groups: [Admin]
-    schema_groups: AWS_AUTH_IGNORED
     kind: mutation
     conditional: feature_platform
     enforced_in: feature-platform/main-stack-extensions/lambdas/subscribe_feature/index.py
     args: { featureId: "__nope__" }
-    known_gap: GAP-06
+    note: schema directive switched from the silently-ignored @aws_auth to
+      @aws_cognito_user_pools(cognito_groups:[Admin]). Formerly GAP-06.
   unsubscribeFeature:
     groups: [Admin]
-    schema_groups: AWS_AUTH_IGNORED
     kind: mutation
     conditional: feature_platform
     enforced_in: feature-platform/main-stack-extensions/lambdas/unsubscribe_feature/index.py
     args: { featureId: "__nope__" }
-    known_gap: GAP-06
+    note: schema directive switched from the silently-ignored @aws_auth to
+      @aws_cognito_user_pools(cognito_groups:[Admin]). Formerly GAP-06.
 
 # ============================================================================
 # Known gaps register — tracked deviations between the ideal authorization
@@ -688,25 +700,12 @@ known_gaps:
       exclusion is enforced only by UI navigation. Carried over from the
       AppSync design where cognito_groups could not be combined with @aws_iam
       on the same field.
-  GAP-04:
-    summary: listUsers is readable by any authenticated user
-    detail: >
-      Exposes user emails/roles to Viewers and Reviewers. Schema permits it;
-      arguably should be Admin-only.
-  GAP-05:
-    summary: calculateCapacity has no server-side group check
-    detail: >
-      schema.graphql restricts it to Admin/Author/Viewer but
-      src/lambda/calculate_capacity_resolver/index.py performs no group check,
-      so a Reviewer calling /op/calculateCapacity directly succeeds.
-  GAP-06:
-    summary: Feature-platform ops rely on weaker/ignored schema directives
-    detail: >
-      subscribeFeature / unsubscribeFeature use @aws_auth(cognito_groups) which
-      is silently ignored on this multi-auth API, and getFeatureLaunchUrl uses
-      @aws_cognito_user_pools with no group arg. All three ENFORCE Admin
-      correctly in their resolver Lambdas (the real gate), so they are not
-      exploitable, but the schema declaration layer of defense-in-depth is
-      weaker than intended. Fix: switch to
-      @aws_cognito_user_pools(cognito_groups: ["Admin"]). These ops are only
-      routable when EnableFeaturePlatform=true.
+# GAP-04, GAP-05 and GAP-06 were RESOLVED (no longer accepted risks — a
+# regression now hard-FAILS the gate):
+#   GAP-04 listUsers is now Admin-only (server-side check in user_management).
+#   GAP-05 calculateCapacity now has a server-side group check matching its
+#          schema directive (Admin/Author/Viewer; Reviewer excluded).
+#   GAP-06 the three feature-platform ops now declare
+#          @aws_cognito_user_pools(cognito_groups:["Admin"]) instead of the
+#          silently-ignored @aws_auth / group-less directive.
+# Their ids are retired; the ops' entries above carry a "Formerly GAP-0x" note.

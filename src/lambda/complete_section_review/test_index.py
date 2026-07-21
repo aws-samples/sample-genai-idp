@@ -148,3 +148,66 @@ def test_no_raise_when_no_edited_data_even_if_uri_missing(mod):
     save_mock.assert_not_called()
     service.update_document.assert_called_once()
     assert result == {"ObjectStatus": "ok"}
+
+
+@pytest.mark.unit
+def test_skip_all_triggers_reprocessing(mod):
+    """Skipping all reviews must trigger the same downstream reprocessing as
+    completing the final section, so both "finish review" paths behave
+    identically and the post-processing Lambda hook fires in both cases."""
+    service = MagicMock()
+    service.get_document.return_value = _document(
+        sections=[
+            _section("sec-1", "s3://bucket/sec1.json"),
+            _section("sec-2", "s3://bucket/sec2.json"),
+        ],
+        completed=[],
+    )
+    fake_table = MagicMock()
+    fake_table.get_item.return_value = {"Item": {}}
+    fake_ddb = MagicMock()
+    fake_ddb.Table.return_value = fake_table
+
+    with patch.object(mod, "create_document_service", return_value=service), patch.object(
+        mod, "dynamodb", fake_ddb
+    ), patch.object(mod, "trigger_reprocessing") as reproc_mock, patch.object(
+        mod, "build_document_response", return_value={"ObjectStatus": "ok"}
+    ):
+        result = mod.skip_all_sections_review(
+            "doc/key.pdf", username="admin", user_email="admin@example.com"
+        )
+
+    # The document is finalized in DynamoDB (status set, pending cleared) ...
+    fake_table.update_item.assert_called_once()
+    # ... and downstream reprocessing/post-processing is triggered — parity with
+    # the section-by-section completion path.
+    reproc_mock.assert_called_once_with("doc/key.pdf")
+    assert result == {"ObjectStatus": "ok"}
+
+
+@pytest.mark.unit
+def test_skip_all_finalizes_status_review_skipped(mod):
+    """Skip-all sets HITLStatus='Review Skipped' and HITLCompleted=True even
+    while (now) also triggering reprocessing."""
+    service = MagicMock()
+    service.get_document.return_value = _document(
+        sections=[_section("sec-1", "s3://bucket/sec1.json")],
+        completed=[],
+    )
+    fake_table = MagicMock()
+    fake_table.get_item.return_value = {"Item": {}}
+    fake_ddb = MagicMock()
+    fake_ddb.Table.return_value = fake_table
+
+    with patch.object(mod, "create_document_service", return_value=service), patch.object(
+        mod, "dynamodb", fake_ddb
+    ), patch.object(mod, "trigger_reprocessing"), patch.object(
+        mod, "build_document_response", return_value={"ObjectStatus": "ok"}
+    ):
+        mod.skip_all_sections_review("doc/key.pdf", username="admin")
+
+    _, kwargs = fake_table.update_item.call_args
+    values = kwargs["ExpressionAttributeValues"]
+    assert values[":status"] == "Review Skipped"
+    assert values[":hitlCompleted"] is True
+    assert values[":pending"] == []

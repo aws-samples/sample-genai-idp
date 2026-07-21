@@ -106,5 +106,8 @@ config_library/samples-manifest.json
 
 .claude/worktrees/
 
-# API RBAC live-harness reports (make api-test default REPORT_DIR)
+# Stack-test reports now default under ./scratch (already gitignored above);
+# these root paths are kept ignored in case someone passes an explicit
+# REPORT_DIR=./api-test-results or ./zap-reports.
 api-test-results/
+zap-reports/

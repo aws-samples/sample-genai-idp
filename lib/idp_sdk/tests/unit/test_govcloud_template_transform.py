@@ -321,3 +321,253 @@ def test_real_template_has_no_cloudfront_after_transform():
     assert result["Parameters"]["WebUIHosting"]["AllowedValues"] == ["APIGateway"]
     assert "UseApiGatewayHosting" in result["Conditions"]
     assert "WebUIProxyRole" in result["Resources"]
+
+
+def test_real_template_passes_govcloud_region_cfn_lint():
+    """Transform the ACTUAL template.yaml and run REAL cfn-lint for a GovCloud region.
+
+    This is the offline "GovCloud transform + region-aware cfn-lint" fast-gate
+    probe (see scripts/sdlc/docs/CI_TEST_COVERAGE.md). It is strictly stronger
+    than ``validate_no_cloudfront`` / ``test_real_template_has_no_cloudfront_
+    after_transform``: those only check the transformer's own hardcoded
+    resource lists, whereas cfn-lint ``--region us-gov-west-1`` flags E3006 for
+    *any* GovCloud-unsupported resource type — so a NEWLY introduced one (a
+    future ``AWS::CloudFront::*``, ``AWS::Lambda::Url``, etc.) fails here even
+    though the transformer doesn't know to strip it.
+
+    No AWS credentials needed (cfn-lint's region check is offline). Skips
+    cleanly if cfn-lint or its decoder isn't installed.
+    """
+    import json
+    import shutil
+    import subprocess  # nosec B404 - fixed args, no user input
+    import tempfile
+
+    import yaml
+
+    cfnlint_decode = pytest.importorskip("cfnlint.decode.cfn_yaml")
+    if shutil.which("cfn-lint") is None:
+        pytest.skip("cfn-lint not installed")
+
+    def _plain(node):
+        if isinstance(node, dict):
+            return {str(k): _plain(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [_plain(x) for x in node]
+        if isinstance(node, str):
+            return str(node)
+        return node
+
+    loaded = cfnlint_decode.load(str(_repo_root() / "template.yaml"))
+    # cfn_yaml.load may return the template or a (template, matches) tuple.
+    template = _plain(loaded[0] if isinstance(loaded, tuple) else loaded)
+
+    result = GovCloudTemplateTransformer().apply_transforms(template)
+
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as fh:
+        yaml.safe_dump(result, fh)
+        out_path = fh.name
+
+    proc = subprocess.run(  # nosec B603 - fixed executable + args
+        ["cfn-lint", out_path, "--region", "us-gov-west-1", "--format", "json"],
+        capture_output=True,
+        text=True,
+    )
+    try:
+        findings = json.loads(proc.stdout) if proc.stdout.strip() else []
+    except json.JSONDecodeError:
+        findings = []
+    # Only E3006 ("Resource type ... does not exist in <region>") is the
+    # GovCloud-support signal we gate on. Other cfn-lint findings (W-codes,
+    # unrelated E-codes from the round-tripped/plain-dumped template) are not in
+    # scope for THIS probe and would make it flaky.
+    e3006 = [f for f in findings if f.get("Rule", {}).get("Id") == "E3006"]
+    assert e3006 == [], (
+        "GovCloud-unsupported resource type(s) survived the transform "
+        "(cfn-lint E3006). Add them to a strip set in template_transform.py: "
+        + "; ".join(
+            f"{f.get('Location', {}).get('Path')}: {f.get('Message')}" for f in e3006
+        )
+    )
+
+
+def test_govcloud_transform_with_headless_jobs_api_passes_region_cfn_lint():
+    """GovCloud transform + EnableJobsApi=true is the intended GovCloud combo.
+
+    The GovCloud transform keeps the full UI but makes it CloudFront-free; the
+    real GovCloud deployment also sets the ``EnableJobsApi=true`` CFN parameter
+    to stand up the Jobs REST API (a Private API Gateway + /jobs Lambdas — see
+    docs/govcloud-batch-api.md). Those Jobs-API resources are gated on
+    ``DeployApiGateway`` (= EnableJobsApi), so the base region-lint test (which
+    lints with the parameter at its 'false' default) never exercises them.
+
+    Flip ``EnableJobsApi`` to default 'true' BEFORE the transform so cfn-lint
+    evaluates the Jobs-API resources too, then assert the transformed template is
+    still free of GovCloud-unsupported types (E3006). Catches a GovCloud-illegal
+    resource type introduced specifically on the Jobs-API path.
+
+    Offline (cfn-lint region check needs no credentials). Skips if cfn-lint is
+    absent.
+    """
+    import json
+    import shutil
+    import subprocess  # nosec B404 - fixed args, no user input
+    import tempfile
+
+    import yaml
+
+    cfnlint_decode = pytest.importorskip("cfnlint.decode.cfn_yaml")
+    if shutil.which("cfn-lint") is None:
+        pytest.skip("cfn-lint not installed")
+
+    def _plain(node):
+        if isinstance(node, dict):
+            return {str(k): _plain(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [_plain(x) for x in node]
+        if isinstance(node, str):
+            return str(node)
+        return node
+
+    loaded = cfnlint_decode.load(str(_repo_root() / "template.yaml"))
+    template = _plain(loaded[0] if isinstance(loaded, tuple) else loaded)
+
+    # Turn the Jobs API ON so its DeployApiGateway-gated resources are linted.
+    enable_jobs_api = template.get("Parameters", {}).get("EnableJobsApi")
+    assert enable_jobs_api is not None, (
+        "EnableJobsApi parameter missing from template.yaml — the Jobs-API "
+        "gate this test relies on has moved or been renamed."
+    )
+    enable_jobs_api["Default"] = "true"
+
+    result = GovCloudTemplateTransformer().apply_transforms(template)
+
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as fh:
+        yaml.safe_dump(result, fh)
+        out_path = fh.name
+
+    proc = subprocess.run(  # nosec B603 - fixed executable + args
+        ["cfn-lint", out_path, "--region", "us-gov-west-1", "--format", "json"],
+        capture_output=True,
+        text=True,
+    )
+    try:
+        findings = json.loads(proc.stdout) if proc.stdout.strip() else []
+    except json.JSONDecodeError:
+        findings = []
+    e3006 = [f for f in findings if f.get("Rule", {}).get("Id") == "E3006"]
+    assert e3006 == [], (
+        "GovCloud-unsupported resource type(s) survived the transform on the "
+        "EnableJobsApi=true (Jobs API) path (cfn-lint E3006): "
+        + "; ".join(
+            f"{f.get('Location', {}).get('Path')}: {f.get('Message')}" for f in e3006
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# GovCloud-safe default overrides (vector store / KB model / config preset).
+#
+# These three transforms only change parameter Defaults (and, for the preset,
+# a Mappings entry + AllowedValues) so a GovCloud deploy that passes none of
+# these parameters still lands on GovCloud-valid values instead of the
+# commercial defaults, which fail at deploy/runtime in GovCloud. See the
+# method docstrings in template_transform.py for the ValidationExceptions each
+# one prevents.
+# ---------------------------------------------------------------------------
+
+
+def _template_with_govcloud_defaults():
+    """Minimal template carrying the params/mappings the defaults transform edits.
+
+    Uses the SAME commercial defaults as the real template.yaml so the tests
+    assert the transform actually *changes* them (not just that it tolerates a
+    value already set to the GovCloud one).
+    """
+    return {
+        "AWSTemplateFormatVersion": "2010-09-09",
+        "Description": "Test",
+        "Mappings": {
+            "ConfigurationMap": {
+                "lending-package-sample": {"ConfigPath": "lending-package-sample"},
+            },
+        },
+        "Parameters": {
+            "KnowledgeBaseVectorStore": {
+                "Type": "String",
+                "Default": "S3_VECTORS",
+                "AllowedValues": ["S3_VECTORS", "OPENSEARCH_SERVERLESS"],
+            },
+            "KnowledgeBaseModelId": {
+                "Type": "String",
+                "Default": "us.amazon.nova-pro-v1:0",
+                "AllowedValues": [
+                    "us.amazon.nova-pro-v1:0",
+                    "amazon.nova-pro-v1:0",
+                    "amazon.nova-lite-v1:0",
+                    "us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                ],
+            },
+            "ConfigurationPreset": {
+                "Type": "String",
+                "Default": "lending-package-sample",
+                "AllowedValues": ["lending-package-sample", "rvl-cdip"],
+            },
+        },
+        "Resources": {"InputBucket": {"Type": "AWS::S3::Bucket"}},
+    }
+
+
+def test_vector_store_default_forced_to_opensearch():
+    """S3 Vectors is unsupported for Bedrock KBs in GovCloud → default to OSS."""
+    t = GovCloudTemplateTransformer()
+    result = t.apply_transforms(_template_with_govcloud_defaults())
+    param = result["Parameters"]["KnowledgeBaseVectorStore"]
+    assert param["Default"] == "OPENSEARCH_SERVERLESS"
+    # Both values are KEPT (unlike WebUIHosting, which is forced to one) so a
+    # caller can still opt into S3_VECTORS if/when GovCloud supports it.
+    assert set(param["AllowedValues"]) == {"S3_VECTORS", "OPENSEARCH_SERVERLESS"}
+
+
+def test_kb_model_default_forced_to_govcloud_verified():
+    """Commercial us. inference-profile default is invalid in GovCloud."""
+    t = GovCloudTemplateTransformer()
+    result = t.apply_transforms(_template_with_govcloud_defaults())
+    param = result["Parameters"]["KnowledgeBaseModelId"]
+    assert param["Default"] == GovCloudTemplateTransformer.GOVCLOUD_KB_MODEL_DEFAULT
+    assert param["Default"] == "amazon.nova-pro-v1:0"
+    # AllowedValues untouched (the GovCloud-safe entries are already present).
+    assert "amazon.nova-pro-v1:0" in param["AllowedValues"]
+
+
+def test_configuration_preset_default_forced_to_govcloud_sample():
+    """Preset default flips to the GovCloud sample, added to map + AllowedValues."""
+    t = GovCloudTemplateTransformer()
+    result = t.apply_transforms(_template_with_govcloud_defaults())
+    preset = result["Parameters"]["ConfigurationPreset"]
+    assert preset["Default"] == "lending-package-sample-govcloud"
+    # Selectable in the dropdown, listed first.
+    assert preset["AllowedValues"][0] == "lending-package-sample-govcloud"
+    # The commercial presets are still selectable (not removed).
+    assert "lending-package-sample" in preset["AllowedValues"]
+    # And the ConfigurationMap gained the GovCloud sample's ConfigPath entry.
+    cfg_map = result["Mappings"]["ConfigurationMap"]
+    assert cfg_map["lending-package-sample-govcloud"] == {
+        "ConfigPath": "lending-package-sample-govcloud"
+    }
+
+
+def test_govcloud_default_overrides_are_idempotent():
+    """Re-running the transform on already-GovCloud values is a no-op (no dup)."""
+    t = GovCloudTemplateTransformer()
+    once = t.apply_transforms(_template_with_govcloud_defaults())
+    twice = t.apply_transforms(once)
+    preset = twice["Parameters"]["ConfigurationPreset"]
+    # 'lending-package-sample-govcloud' inserted exactly once, not twice.
+    assert preset["AllowedValues"].count("lending-package-sample-govcloud") == 1
+    assert twice["Parameters"]["KnowledgeBaseVectorStore"]["Default"] == (
+        "OPENSEARCH_SERVERLESS"
+    )
+    assert twice["Parameters"]["KnowledgeBaseModelId"]["Default"] == (
+        "amazon.nova-pro-v1:0"
+    )

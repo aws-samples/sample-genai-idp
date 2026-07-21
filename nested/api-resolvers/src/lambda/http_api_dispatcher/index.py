@@ -34,6 +34,7 @@ from typing import Any, Dict
 import boto3
 import ddb_direct
 from idp_common.api_adapter import _http_response, normalize_event
+from validation import validate_arguments
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -65,20 +66,69 @@ FIELD_FUNCTION_MAP: Dict[str, str] = _load_field_function_map()
 
 # Field aliases: fields served by the SAME resolver Lambda as another field.
 # Kept out of FIELD_FUNCTION_MAP (the SSM parameter that carries it) because
-# that parameter is at the 8 KB Advanced-tier ceiling — adding a full duplicate
-# ARN entry would overflow it. The alias's resolver branches on the GraphQL
-# `fieldName`, which the normalized event carries regardless.
-#   getFilePresignedUrl -> handled by the getFileContents resolver Lambda
-#     (returns a presigned S3 GET URL instead of inlining file bytes; used for
-#     files larger than Lambda's 6 MB synchronous response cap).
-#   listSampleDocuments / uploadSampleDocument -> handled by the uploadDocument
-#     resolver Lambda (UploadResolverFunction), which branches on the GraphQL
-#     fieldName. Aliased rather than mapped so their duplicate ARN entries stay
-#     out of the 8 KB SSM parameter.
+# that parameter is at the 8 KB Advanced-tier ceiling — one map entry per
+# GraphQL field (rather than per unique resolver Lambda) would duplicate the
+# same ARN/name dozens of times and overflow it (worse in GovCloud, where
+# arn:aws-us-gov:... is longer than arn:aws:...). Each alias's resolver
+# branches on the GraphQL `fieldName`, which the normalized event carries
+# regardless of which field name routed to it.
 FIELD_ALIASES: Dict[str, str] = {
     "getFilePresignedUrl": "getFileContents",
     "listSampleDocuments": "uploadDocument",
     "uploadSampleDocument": "uploadDocument",
+    # addDocumentsToTestSet (TestSetResolverFunction)
+    "addDocumentsToTestSetFromUpload": "addDocumentsToTestSet",
+    "addTestSet": "addDocumentsToTestSet",
+    "addTestSetFromUpload": "addDocumentsToTestSet",
+    "deleteTestSets": "addDocumentsToTestSet",
+    "getTestSets": "addDocumentsToTestSet",
+    "listBucketFiles": "addDocumentsToTestSet",
+    "updateTestSet": "addDocumentsToTestSet",
+    "validateTestFileName": "addDocumentsToTestSet",
+    # compareDocumentVersions (DocumentVersionsResolverFunction)
+    "deleteDocumentVersion": "compareDocumentVersions",
+    "getDocumentVersion": "compareDocumentVersions",
+    "listDocumentVersions": "compareDocumentVersions",
+    # deleteConfigVersion (ConfigurationResolverFunction)
+    "getConfigVersion": "deleteConfigVersion",
+    "getConfigVersions": "deleteConfigVersion",
+    "getConfigurationLibraryFile": "deleteConfigVersion",
+    "getModelConfigLimits": "deleteConfigVersion",
+    "getPricing": "deleteConfigVersion",
+    "listConfigurationLibrary": "deleteConfigVersion",
+    "restoreDefaultModelConfigLimits": "deleteConfigVersion",
+    "restoreDefaultPricing": "deleteConfigVersion",
+    "setActiveVersion": "deleteConfigVersion",
+    "updateConfiguration": "deleteConfigVersion",
+    "updateModelConfigLimits": "deleteConfigVersion",
+    "updatePricing": "deleteConfigVersion",
+    # compareTestRuns (TestResultsResolverFunction)
+    "getTestRun": "compareTestRuns",
+    "getTestRunStatus": "compareTestRuns",
+    "getTestRuns": "compareTestRuns",
+    # getDocumentCount (ListDocumentsGSIResolverFunction)
+    "listDocuments": "getDocumentCount",
+    # getCircuitBreakerStatus (CircuitBreakerResolverFunctionArn)
+    "pauseCircuitBreaker": "getCircuitBreakerStatus",
+    "probeCircuitBreaker": "getCircuitBreakerStatus",
+    "resumeCircuitBreaker": "getCircuitBreakerStatus",
+    # autoDetectSections (DiscoveryUploadResolverFunction)
+    "startMultiDocDiscovery": "autoDetectSections",
+    "uploadDiscoveryDocument": "autoDetectSections",
+    "uploadMultiDocDiscoveryZip": "autoDetectSections",
+    # claimReview (CompleteSectionReviewFunctionArn)
+    "completeSectionReview": "claimReview",
+    "releaseReview": "claimReview",
+    "skipAllSectionsReview": "claimReview",
+    # createUser (UserManagementFunctionArn)
+    "updateUser": "createUser",
+    "deleteUser": "createUser",
+    "listUsers": "createUser",
+    "getMyProfile": "createUser",
+    # createFinetuningJob (FinetuningJobsResolverFunctionArn)
+    "deleteFinetuningJob": "createFinetuningJob",
+    "getFinetuningJob": "createFinetuningJob",
+    "listFinetuningJobs": "createFinetuningJob",
 }
 
 
@@ -138,6 +188,14 @@ def handler(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         )
 
     try:
+        # Central schema-shape validation (restores what AppSync did for free).
+        # Validate under the ORIGINAL field name — aliases (getFilePresignedUrl,
+        # etc.) resolve to a target only for ROUTING; their own name is what the
+        # UI sends and, when present in schema.graphql, what we validate against.
+        # Fields not in the spec (unknown / non-schema) are a no-op here and get
+        # rejected/served downstream. Raises ValueError → 400/BadRequest below.
+        validate_arguments(field, appsync_event.get("arguments") or {})
+
         # A mapped-but-empty ARN means the resolver is feature-flagged off (its
         # Lambda is conditional and absent), e.g. the circuit-breaker fields when
         # CircuitBreakerEnabled=false. Treat empty as unroutable so it falls

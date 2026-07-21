@@ -149,8 +149,9 @@ Agentic extraction requires models with tool-use support:
 - **Amazon Nova Pro** (AWS native alternative)
 - **Amazon Nova Premier** (for complex multi-modal extraction)
 
-> **⚠️ OpenAI GPT-5.x cannot be used with agentic extraction.** `openai.gpt-5.4`
-> / `openai.gpt-5.5` run on the `bedrock-mantle` Responses API and do not support
+> **⚠️ OpenAI GPT-5.x cannot be used with agentic extraction.** All
+> `openai.gpt-5.*` models (`openai.gpt-5.4`, `openai.gpt-5.5`, and GPT-5.6
+> Sol/Terra/Luna) run on the `bedrock-mantle` Responses API and do not support
 > the Converse-based Strands agent loop. Pairing an OpenAI model with
 > `extraction.agentic.enabled: true` is a **hard error** in
 > `idp-cli config-validate` and raises at runtime. OpenAI models are fully

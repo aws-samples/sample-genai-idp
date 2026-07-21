@@ -1256,6 +1256,7 @@ class AssessmentService:
                 max_escalation_rounds=confidence_cfg.max_escalation_rounds,
                 deadline_epoch=deadline_epoch,
                 max_concurrent_batches=self.config.extraction.agentic.max_concurrent_batches,
+                class_schema=self._get_class_schema(class_label),
             )
             enhanced_assessment_data = batched["assessment"]
             confidence_threshold_alerts = batched["alerts"]

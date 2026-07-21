@@ -55,13 +55,244 @@ Parameters:
       manually.
     Default: ''
 
+  CreateTestVpc:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+    Description: >-
+      Create a PERSISTENT test VPC (2 private subnets, NAT egress, a Lambda
+      security group, and an execute-api interface endpoint) owned by this
+      pipeline stack and reused by every CI run. The deployment-variant probes
+      that require a VPC (headless Jobs API, PRIVATE API Gateway hosting)
+      reference it instead of standing up a throwaway VPC per run — so no probe
+      creates/destroys VPCs, they all run in parallel, and the account's 5-VPC
+      quota is never exhausted. Its ids are handed to CodeBuild as
+      IDP_TEST_VPC_ID / IDP_TEST_PRIVATE_SUBNET_IDS / IDP_TEST_LAMBDA_SG_ID /
+      IDP_TEST_APIGW_VPCE_ID. Set 'false' to skip it (VPC-requiring probes then
+      skip themselves with a logged note). NOTE: a NAT gateway carries a small
+      standing cost (~US$32/mo + data) — this is the deliberate trade for
+      quota-safe, fully-parallel VPC probes.
+
+  TestVpcCidr:
+    Type: String
+    Default: 10.30.0.0/16
+    Description: CIDR for the persistent CI test VPC (must not overlap other VPCs).
+
 Conditions:
   CreateKMSKey: !Equals [!Ref KMSKeyArn, '']
   CreateCodeBuildRole: !Equals [!Ref CodeBuildRoleArn, '']
   DeployInVPC: !Not [!Equals [!Ref VpcId, '']]
   HasNotificationEmail: !Not [!Equals [!Ref FailureNotificationEmail, '']]
+  MakeTestVpc: !Equals [!Ref CreateTestVpc, 'true']
 
 Resources:
+  # ==========================================================================
+  # Persistent CI test VPC (gated by CreateTestVpc, default true)
+  #
+  # Owned by THIS pipeline stack and reused by every CI run — the harness never
+  # creates or destroys a VPC. Deployment-variant probes that require a VPC
+  # (headless Jobs API, PRIVATE API Gateway hosting) reference these ids, passed
+  # to CodeBuild as env vars below. This is the same topology as the retired
+  # per-run scripts/sdlc/apigw-hosting-test-vpc.yaml (2 private subnets across
+  # AZs, NAT egress, a Lambda SG, one execute-api interface endpoint), but
+  # standing rather than throwaway, so:
+  #   * no VPC create/destroy churn or ENI-leak teardown failures per run,
+  #   * VPC probes run fully in parallel with everything else (no quota gating),
+  #   * concurrent pipelines share it read-only (probes reference, never mutate).
+  # Test fixture: no flow logs, permissive egress.
+  # ==========================================================================
+  TestVpc:
+    Type: AWS::EC2::VPC
+    Condition: MakeTestVpc
+    # checkov:skip=CKV_AWS_178: "VPC flow logs not required for a persistent CI test VPC."
+    Properties:
+      CidrBlock: !Ref TestVpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-test-vpc"
+
+  TestVpcPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Condition: MakeTestVpc
+    Properties:
+      VpcId: !Ref TestVpc
+      CidrBlock: !Select [0, !Cidr [!Ref TestVpcCidr, 4, 8]]
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-test-private-1"
+
+  TestVpcPrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Condition: MakeTestVpc
+    Properties:
+      VpcId: !Ref TestVpc
+      CidrBlock: !Select [1, !Cidr [!Ref TestVpcCidr, 4, 8]]
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-test-private-2"
+
+  # Public subnet hosting the NAT gateway.
+  TestVpcPublicSubnet:
+    Type: AWS::EC2::Subnet
+    Condition: MakeTestVpc
+    Properties:
+      VpcId: !Ref TestVpc
+      CidrBlock: !Select [2, !Cidr [!Ref TestVpcCidr, 4, 8]]
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-test-public"
+
+  TestVpcInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Condition: MakeTestVpc
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-test-igw"
+
+  TestVpcIGWAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Condition: MakeTestVpc
+    Properties:
+      VpcId: !Ref TestVpc
+      InternetGatewayId: !Ref TestVpcInternetGateway
+
+  TestVpcPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: MakeTestVpc
+    Properties:
+      VpcId: !Ref TestVpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-test-public-rt"
+
+  TestVpcPublicDefaultRoute:
+    Type: AWS::EC2::Route
+    Condition: MakeTestVpc
+    DependsOn: TestVpcIGWAttachment
+    Properties:
+      RouteTableId: !Ref TestVpcPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref TestVpcInternetGateway
+
+  TestVpcPublicSubnetRTA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: MakeTestVpc
+    Properties:
+      SubnetId: !Ref TestVpcPublicSubnet
+      RouteTableId: !Ref TestVpcPublicRouteTable
+
+  TestVpcNATGatewayEIP:
+    Type: AWS::EC2::EIP
+    Condition: MakeTestVpc
+    Properties:
+      Domain: vpc
+
+  TestVpcNATGateway:
+    Type: AWS::EC2::NatGateway
+    Condition: MakeTestVpc
+    Properties:
+      AllocationId: !GetAtt TestVpcNATGatewayEIP.AllocationId
+      SubnetId: !Ref TestVpcPublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-test-nat"
+
+  TestVpcPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: MakeTestVpc
+    Properties:
+      VpcId: !Ref TestVpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-test-private-rt"
+
+  TestVpcPrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Condition: MakeTestVpc
+    Properties:
+      RouteTableId: !Ref TestVpcPrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref TestVpcNATGateway
+
+  TestVpcPrivateSubnet1RTA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: MakeTestVpc
+    Properties:
+      SubnetId: !Ref TestVpcPrivateSubnet1
+      RouteTableId: !Ref TestVpcPrivateRouteTable
+
+  TestVpcPrivateSubnet2RTA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: MakeTestVpc
+    Properties:
+      SubnetId: !Ref TestVpcPrivateSubnet2
+      RouteTableId: !Ref TestVpcPrivateRouteTable
+
+  # Security group for in-VPC IDP Lambdas. Allows all outbound (reaches AWS
+  # services via NAT); passed as the IDP stack's LambdaSecurityGroupId.
+  TestVpcLambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: MakeTestVpc
+    # checkov:skip=CKV_AWS_382: "Test VPC — permissive egress so Lambdas reach AWS services via NAT."
+    Properties:
+      GroupDescription: !Sub "${AWS::StackName} IDP Lambda SG (CI test VPC)"
+      VpcId: !Ref TestVpc
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: "Allow all outbound (AWS services via NAT)"
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-test-lambda-sg"
+
+  # Security group for the execute-api interface endpoint: allow 443 from the
+  # VPC CIDR so in-VPC clients (and the private REST API's callers) reach it.
+  TestVpcEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: MakeTestVpc
+    Properties:
+      GroupDescription: !Sub "${AWS::StackName} execute-api VPCE SG (CI test VPC)"
+      VpcId: !Ref TestVpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref TestVpcCidr
+          Description: "HTTPS from within the VPC"
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: "Allow all outbound"
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-test-vpce-sg"
+
+  # The single interface endpoint the PRIVATE REST API / headless Jobs API
+  # require. Private DNS makes "<api-id>.execute-api.<region>.amazonaws.com"
+  # resolve to this VPCE inside the VPC.
+  TestVpcExecuteApiEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: MakeTestVpc
+    Properties:
+      VpcId: !Ref TestVpc
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.execute-api"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !Ref TestVpcPrivateSubnet1
+        - !Ref TestVpcPrivateSubnet2
+      SecurityGroupIds:
+        - !Ref TestVpcEndpointSecurityGroup
+
   PipelineKMSKey:
     Type: AWS::KMS::Key
     Condition: CreateKMSKey
@@ -173,10 +404,17 @@ Resources:
                 Resource: 
                   - !Sub 'arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/idp-*'
                   - !Sub 'arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/idp-*/*'
-              # ValidateTemplate doesn't support resource-level permissions
+              # ValidateTemplate and ListStacks don't support resource-level
+              # permissions (list/global ops), so they need Resource '*'.
+              # ListStacks is used by the startup reapers
+              # (cleanup_stale_idp_stacks / _buckets / _apigw_test_vpcs) to find
+              # leaked stacks from interrupted prior runs; without it those
+              # reapers fail with AccessDenied (best-effort, but noisy) and can't
+              # converge leaked resources.
               - Effect: Allow
                 Action:
                   - cloudformation:ValidateTemplate
+                  - cloudformation:ListStacks
                 Resource: '*'
         - PolicyName: LimitedIAMAccess
           PolicyDocument:
@@ -281,6 +519,26 @@ Resources:
                   - cloudfront:ListResponseHeadersPolicies
                   - cloudfront:GetResponseHeadersPolicy
                   - cloudfront:DeleteResponseHeadersPolicy
+                Resource: '*'
+        - PolicyName: DeploymentVariantProbeReadAccess
+          # Read-only APIs the deployment-variant probe validators call to
+          # assert a variant's distinguishing feature deployed correctly:
+          #   * apigateway GET  — GLOBAL/PRIVATE endpoint type + headless Jobs API
+          #   * wafv2  Get/List — WAF-enabled probe (WebACL exists + associated)
+          # None support resource-level scoping for these read ops.
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - apigateway:GET
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - wafv2:GetWebACL
+                  - wafv2:GetWebACLForResource
+                  - wafv2:ListWebACLs
+                  - wafv2:ListResourcesForWebACL
                 Resource: '*'
         - PolicyName: STSAccess
           PolicyDocument:
@@ -541,11 +799,30 @@ Resources:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_LARGE
         Image: aws/codebuild/standard:7.0
+        # Required so the ZAP DAST probe can `docker run` the official OWASP ZAP
+        # image (ghcr.io/zaproxy/zaproxy) against its own throwaway stack. The
+        # publish/SAM container builds already assume a Docker daemon; this makes
+        # it explicit. See validate_zap_dast in scripts/sdlc/codebuild_deployment.py.
+        PrivilegedMode: true
         EnvironmentVariables:
           - Name: SOURCE_BUCKET
             Value: !Sub '${BucketNamePrefix}-${AWS::AccountId}-${AWS::Region}'
           - Name: IDP_FAILURE_SNS_TOPIC
             Value: !Ref FailureNotificationTopic
+          # Persistent CI test VPC ids consumed by the VPC-requiring probes
+          # (headless, PRIVATE APIGW). Empty when CreateTestVpc=false — the
+          # harness then skips those probes with a logged note.
+          - Name: IDP_TEST_VPC_ID
+            Value: !If [MakeTestVpc, !Ref TestVpc, '']
+          - Name: IDP_TEST_PRIVATE_SUBNET_IDS
+            Value: !If
+              - MakeTestVpc
+              - !Sub "${TestVpcPrivateSubnet1},${TestVpcPrivateSubnet2}"
+              - ''
+          - Name: IDP_TEST_LAMBDA_SG_ID
+            Value: !If [MakeTestVpc, !Ref TestVpcLambdaSecurityGroup, '']
+          - Name: IDP_TEST_APIGW_VPCE_ID
+            Value: !If [MakeTestVpc, !Ref TestVpcExecuteApiEndpoint, '']
       Source:
         Type: CODEPIPELINE
         BuildSpec: |

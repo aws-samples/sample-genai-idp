@@ -133,6 +133,10 @@ Resources:
   FeatureApiFunction:
     Type: AWS::Serverless::Function
     Properties:
+      # SAM auto-generates this function's execution role. Set the boundary on
+      # the function so it flows onto that generated role — otherwise install
+      # fails in accounts whose SCP requires a boundary on every IAM role.
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref 'AWS::NoValue']
       CodeUri: feature-api/
       Handler: handler.lambda_handler
       Environment:

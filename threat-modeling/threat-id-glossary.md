@@ -4,10 +4,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 2.0 |
-| **Last Updated** | 2025-03-19 |
+| **Document Version** | 2.1 |
+| **Last Updated** | 2026-07-17 |
 | **Classification** | Internal |
-| **Total Threat IDs** | 64 |
+| **Total Threat IDs** | 68 |
 
 ## 1. Threat ID Naming Convention
 
@@ -91,7 +91,7 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | KB.T03 | OpenSearch Serverless data exposure | ID | 2 (Low) |
 | KB.T04 | Excessive RAG retrieval | ID, DoS | 2 (Low) |
 
-### AUTH — Authentication & RBAC (8 threats)
+### AUTH — Authentication & RBAC (12 threats)
 
 | ID | Short Name | STRIDE | Risk |
 |----|-----------|--------|------|
@@ -103,6 +103,10 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | AUTH.T06 | Cross-tenant data access (multi-stack) | ID | 2 (Low) |
 | AUTH.T07 | Config-version scope bypass (fail-open scope lookup) | EoP, ID | 6 (High) |
 | AUTH.T08 | Silently-ignored schema authorization directives | EoP | 6 (High) |
+| AUTH.T09 | Insecure direct object reference (IDOR / BOLA) | ID, EoP | 6 (High) |
+| AUTH.T10 | Token lifecycle — post-logout token reuse (stateless JWT) | Spoofing, EoP | 3 (Medium) |
+| AUTH.T11 | Weak transport security (TLS downgrade / cleartext) | ID, Tampering | 3 (Medium) |
+| AUTH.T12 | Missing input-shape validation (type confusion via lost schema validation) | Tampering, DoS | 3 (Medium) |
 
 ### SDK — SDK/CLI (4 threats)
 
