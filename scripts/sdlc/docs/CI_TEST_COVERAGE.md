@@ -4,6 +4,32 @@
 
 The CI/CD pipeline runs a comprehensive smoke test suite that validates all major IDP Accelerator features. Tests run in **parallel** with **fail-fast** behavior for rapid feedback.
 
+## Running these tests manually (make target → skill)
+
+Every test below can be run **outside** the pipeline against a live stack (dev
+box, `AWS_PROFILE=default` or `idp-ci`). The deploy-variant probes run manually
+by default (they are no longer automatic in CI — see the ⚠️ note under
+"deployment-variant probe framework"). This table is the map from each test to
+its `make` target and the skill that documents how to run it.
+
+| Test / suite | Make target | Skill |
+|---|---|---|
+| Primary functional suite (Steps 3–13) | *(runs in CI; deploy a stack then use the individual targets below)* | — |
+| API RBAC / authorization (Step 12) | `make api-test STACK_NAME=…` (alias `make stacktest-rbac`) · static-only: `make api-test-static` | `.claude/skills/api-rbac-test.md` |
+| ZAP DAST scan | `make stacktest-zap STACK_NAME=…` | `.claude/skills/run-stack-tests.md` |
+| APIGateway GLOBAL hosting | `make stacktest-hosting-global` | `.claude/skills/run-stack-tests.md` |
+| WAF-enabled hosting | `make stacktest-waf` | `.claude/skills/run-stack-tests.md` |
+| APIGateway PRIVATE (VPC) hosting | `make stacktest-hosting-private VPC_ID=…` | `.claude/skills/run-stack-tests.md` |
+| Jobs API (VPC) | `make stacktest-jobsapi VPC_ID=…` | `.claude/skills/run-stack-tests.md` |
+| List deploy-variant stack-tests | `make stacktest-list` | `.claude/skills/run-stack-tests.md` |
+| Release-vs-release benchmark | `make benchmark-release …` (alias `make stacktest-benchmark`) | `.claude/skills/run-benchmarks.md` |
+| In-place upgrade (X→Y) test | `make stacktest-upgrade` (pointer) | `.claude/skills/test-upgrade.md` |
+| Full offline test battery (no AWS) | `make test` | `.claude/skills/full-test-battery.md` |
+
+VPC stack-tests auto-discover a suitable VPC via the `run-stack-tests` skill
+(it lists candidates, confirms with you, then passes `VPC_ID`/`SUBNET_IDS`/
+`LAMBDA_SG_ID`/`APIGW_VPCE_ID` as make params).
+
 ## Pipeline stages & triggers
 
 The GitLab pipeline has three stages, gated so cheap checks run everywhere and
@@ -13,53 +39,100 @@ the expensive AWS deploy runs only when it's worth it:
 |-------|------|------|------|
 | **fast_checks** | `code_checks` (lint, typecheck, static RBAC scan, all unit suites, UI vitest) **and** `srt_security_review` (SRT security scan) — run in **parallel** | No | ~minutes |
 | **deployment_validation** | IAM service-role permission pre-check | Yes (read-only) | seconds |
-| **integration_tests** | Full stack deploy + primary suite (Steps 1–12) + deployment-variant probes | Yes (deploys) | ~1 hour |
+| **integration_tests** | Full stack deploy + primary suite (Steps 1–13) on the **primary shared stack only**. The deployment-variant probes no longer run here by default — see the ⚠️ note under "deployment-variant probe framework" (run them manually with `make stacktest-*`, or set `IDP_RUN_PROBES=true`). | Yes (deploys) | ~1 hour |
 
 **Trigger matrix** — what runs, when:
 
 | Event | fast_checks (code + SRT) | deployment_validation | integration_tests |
 |-------|:---:|:---:|:---:|
 | Push to any branch, **no MR** | ✅ | — | — |
-| Push to branch with a **Draft** MR → `develop` | ✅ | ✅ | ▶️ **manual** (button on MR) |
-| Push to branch with a **non-Draft** MR → `develop` | ✅ | ✅ | ✅ auto |
-| Push to **`develop`** | ✅ | ✅ | ✅ auto |
+| Push to branch with a **Draft** MR → `develop` | ✅ | ✅¹ | ▶️ **manual** (button on MR) |
+| Push to branch with a **non-Draft** MR → `develop` | ✅ | ✅¹ | ✅ auto¹ |
+| Push to **`develop`** | ✅ | ✅¹ | ✅ auto¹ |
+
+¹ **Doc-only commits skip the deploy stages.** `deployment_validation` and the
+auto `integration_tests` only run when the commit/MR touches a **deploy-affecting
+path** (the `.deploy_affecting_changes` allowlist in `.gitlab-ci.yml`:
+`template.yaml`, `publish.py`, `requirements*.txt`, `patterns/`, `nested/`,
+`src/`, `lib/`, `config_library/`, `feature-platform/`, `iam-roles/`, `scripts/`,
+`.gitlab-ci.yml`). A commit that changes only `VERSION`, `CHANGELOG.md`,
+`**/*.md`, `docs/`, `images/`, etc. skips the ~1h deploy entirely. The allowlist
+is deliberately generous (a false "run" wastes CI minutes; a false "skip" could
+merge a broken deploy). The **Draft-MR manual button ignores this filter** — you
+can always force a deploy by clicking it, even on a doc-only branch.
 
 Notes:
 - **Every push runs fast_checks** (code checks + SRT), so lint/typecheck/unit and
-  security feedback is immediate on any branch. GitLab emails the committer on
-  failure.
+  security feedback is immediate on any branch — **including doc-only commits**
+  (fast_checks has no changes: filter). GitLab emails the committer on failure.
 - The **~1h integration deploy runs only** on `develop` and on **non-Draft** MRs
-  targeting `develop`. On a **Draft** MR it's a **manual play button** on the MR
-  page — run it on demand, not on every WIP push.
+  targeting `develop` — **and only when deploy-affecting files changed** (see ¹).
+  On a **Draft** MR it's a **manual play button** on the MR page — run it on
+  demand, not on every WIP push.
 - A `workflow:` rule prevents **duplicate** branch+MR pipelines (a branch with an
   open MR runs only the MR pipeline).
-- integration_tests uses `resource_group` + `interruptible`, so rapid pushes
-  don't stack up concurrent ~1h deploys (a newer run supersedes an older queued
-  one).
+- integration_tests uses a **per-branch** `resource_group`
+  (`integration_deploy_$CI_COMMIT_REF_SLUG`) + `interruptible`, so rapid pushes
+  to the *same* MR still serialize (a newer run supersedes an older queued one),
+  while *different* MRs deploy concurrently. Concurrency is bounded by the number
+  of active MRs (typically ≤5) — not a hard cap. If concurrent deploys ever
+  exhaust account quotas, revert to a single shared `resource_group:
+  integration_deploy`.
 
 ## Test Execution Strategy
 
-### Parallel Execution (Steps 3-11)
-- **9 tests run concurrently** to minimize pipeline runtime
+### Parallel Execution (Steps 3-11, 13)
+- **10 tests run concurrently** to minimize pipeline runtime (Step 13, the
+  read-only permissions-boundary check, joins the parallel pool)
 - **Fail-fast enabled**: If any test fails, remaining tests are cancelled and cleanup begins
 - **Expected runtime**: ~25-35 minutes (vs 60+ minutes sequential)
 
 ### Sequential Execution (Step 12)
-- **Step 12 (API RBAC) runs alone after the parallel pool drains**
+- **Step 12 (API RBAC + security-focused suites) runs alone after the parallel
+  pool drains**
   - **Reason**: Its dynamic harness temporarily flips `ADMIN_USER_PASSWORD_AUTH`
-    on the shared UI app client (a stack-wide auth mutation) and restores it —
-    interleaving with API-hitting parallel tests would corrupt them.
+    on the shared UI app client (a stack-wide auth mutation) and restores it, and
+    its logout suite performs a global sign-out — interleaving with API-hitting
+    parallel tests would corrupt them.
+  - **Coverage**: beyond the role permission matrix, Step 12 runs the mandatory
+    AppSec API security checklist — IDOR (2.1), token expiry/logout (2.3/2.4),
+    deleted-resource (2.5), input validation (3), and TLS (4). See the mapping
+    table in `.claude/skills/api-rbac-test.md`. Input validation runs in
+    **tolerant** mode here (a 5xx on malformed input is WARNed, not failed) until
+    central schema validation lands; set `IDP_SECTEST_STRICT_INPUT=true` to gate
+    on a clean 4xx.
 
 ### Concurrent deployment-variant probes (own stacks)
 - The **deployment-variant probe framework** (below) deploys SECOND,
-  independent stacks — one per probe. Four probes run by default (GLOBAL APIGW,
-  WAF, PRIVATE APIGW, Jobs API), **concurrently with the primary suite AND with
-  each other** on their own threads, so their ~30-min deploys overlap the
+  independent stacks — one per probe. Five probes run by default (GLOBAL APIGW,
+  WAF, PRIVATE APIGW, Jobs API, ZAP DAST), **concurrently with the primary suite
+  AND with each other** on their own threads, so their ~30-min deploys overlap the
   primary deploy instead of running back-to-back. Each opts out of the primary
   suite's fail-fast abort machinery, so a primary failure never kills a probe's
   in-flight deploy. VPC-requiring probes share one persistent pipeline-owned
   test VPC (so VPCs don't bound concurrency); fan-out is capped by
   `IDP_PROBE_MAX_CONCURRENCY` (default 8) to bound simultaneous stack/IAM usage.
+- **Launch stagger + transient-race retry (AWS eventual-consistency resilience).**
+  Standing up the primary + N probe stacks at once bursts hundreds of
+  `CreateLogGroup`/`CreateProject` calls; two AWS control-plane races can then
+  surface as `CREATE_FAILED` and roll a stack back: CloudWatch Logs
+  "The specified log group does not exist" (CreateLogGroup→PutRetentionPolicy
+  consistency gap) and CodeBuild "not authorized to perform: sts:AssumeRole on
+  service role" (IAM trust-policy propagation lagging the role's `CREATE_COMPLETE`
+  — not fixable by `DependsOn`, the ordering is already correct). Two mitigations:
+  (1) probe launches are **staggered** `IDP_PROBE_LAUNCH_STAGGER_SECS` (default
+  10s) × index to flatten the burst and avoid the race up front (cheaper than a
+  rollback); (2) a **one-shot fresh-stack retry** (`_is_transient_deploy_race`,
+  scoped tightly to those two resource+message signatures so genuine config
+  errors still surface) backstops both the primary deploy and each probe. A
+  THIRD burst symptom is IAM throttling at Step 0 — `iam:CreatePolicy`
+  "Throttling: Rate exceeded (reached max retries: 4)" while creating each
+  stack's permissions boundary — which fails BEFORE any deploy (so the
+  fresh-stack retry can't catch it); the IAM/CFN clients in
+  `create_iam_resources`/`cleanup_iam_resources` therefore use **boto3 adaptive
+  retry** (`max_attempts: 10`) to ride through the account-wide IAM rate limit.
+  See `scratch/aws-service-issue-cfn-eventual-consistency.md` for the AWS
+  service-issue evidence package.
 
 ## Test Coverage
 
@@ -241,14 +314,50 @@ mutation — safe to interleave).
 
 ---
 
+### Step 13: IAM Permissions Boundary Attachment ⚡ *Parallel*
+**What it tests**: that the deployed IAM roles actually carry the permissions
+boundary the stack was deployed with. The primary suite deploys with a non-empty
+`PermissionsBoundaryArn`, so the template's `HasPermissionsBoundary` condition
+should attach that boundary to every `AWS::IAM::Role` it creates.
+- **Why it exists**: this is the only place boundary attachment is verified
+  end-to-end. The deploy-variant stack-tests now deploy *without* a boundary
+  (to avoid a per-stack `iam:CreatePolicy`/`DeletePolicy` in any concurrent
+  burst), so if the primary suite didn't check it, a template change that dropped
+  the boundary from a role would ship silently.
+- **Verification**:
+  - Collects `AWS::IAM::Role` physical ids from the stack + its nested stacks
+  - Samples up to 25 roles and asserts each has a `PermissionsBoundary` attached
+  - Fails if any sampled role is missing its boundary
+
+**Duration**: seconds (read-only `cloudformation:ListStackResources` + `iam:GetRole`)  
+**Execution**: Runs in the parallel pool (read-only — no shared-stack mutation).  
+**Implementation**: `test_step13_permission_boundaries` in
+`scripts/sdlc/codebuild_deployment.py`.
+
+---
+
 ## Additional Deployment Tests: the deployment-variant probe framework
 
-Separate from the shared-stack suite above (Steps 3–12, which run against ONE
+> **⚠️ Default OFF in CI (changed 2026-07).** These probes no longer run
+> automatically in the integration pipeline. Standing up the primary + 5 probe
+> stacks *at once* burst the account-wide AWS control planes — CloudWatch Logs
+> create-consistency, CodeBuild role-trust propagation, and the IAM
+> `CreatePolicy` rate limit — producing flaky pipeline failures unrelated to the
+> code under test. Since these are infra-variant *deploy smoke tests* that rarely
+> change, they now run **manually, one stack at a time**, via
+> `make stacktest-*` (see `.claude/skills/run-stack-tests.md` and
+> `scripts/sdlc/run_stacktest.py`). The CI pipeline runs the **primary shared
+> stack only** (Steps 3–13). Set `IDP_RUN_PROBES=true` to re-enable them in a pipeline
+> run. When they DO run (manual sweep or opt-in), launches are staggered
+> (`IDP_PROBE_LAUNCH_STAGGER_SECS`, default 120s) and each deploys **without** a
+> permissions boundary (only the primary suite creates + tests one — Step 13).
+
+Separate from the shared-stack suite above (Steps 3–13, which run against ONE
 stack deployed with default hosting — CloudFront), a **deployment-variant probe
 framework** validates alternative deployment permutations, each on its **own
-throwaway IDP stack**. The probes run **concurrently** with the shared-stack
-suite *and with each other* (overlapping the ~30-min deploys) and each tears its
-stack down afterward.
+throwaway IDP stack**. When enabled the probes run **concurrently** with the
+shared-stack suite *and with each other* (overlapping the ~30-min deploys) and
+each tears its stack down afterward.
 
 Each probe is a self-contained *deploy-a-config-variant + smoke-check-its-
 distinguishing-feature* unit. The framework is a table of
@@ -258,12 +367,12 @@ a validator**, not a copy-pasted deploy/validate/cleanup function.
 
 > **Scope (important):** probes are **deploy + feature-smoke only, NOT full
 > functional coverage.** A variant can deploy clean yet still have a
-> doc-processing regression that only the shared-stack suite (Steps 3–12) would
+> doc-processing regression that only the shared-stack suite (Steps 3–13) would
 > catch. Don't read a green probe as "this variant processes documents
 > correctly" — only as "this variant deploys and its distinguishing feature
 > responds."
 
-### The default probes (all four run every pipeline)
+### The default probes (all run every pipeline)
 
 | Probe | `stack_suffix` | Distinguishing params | VPC? | Validator asserts |
 |-------|----------------|-----------------------|------|-------------------|
@@ -271,6 +380,7 @@ a validator**, not a copy-pasted deploy/validate/cleanup function.
 | **WAF-enabled (IP allow-list)** | `waf` | `WAFAllowedIPv4Ranges` set (+ APIGateway/GLOBAL hosting to have a stage) | no | REGIONAL WebACL `{stack}-api-acl` **exists and is associated** with an API-Gateway stage |
 | **APIGateway hosting (PRIVATE)** | `apigwpriv` | `WebUIHosting=APIGateway`, `ApiGatewayVisibility=PRIVATE` | yes | REST API endpoint type is **PRIVATE** and carries a **resource policy** (VPC-only → structural check; CodeBuild can't fetch a private endpoint) |
 | **Jobs API** | `jobsapi` | `EnableJobsApi=true` | yes | stack exposes the **`ApiGatewayEndpoint`** output and its REST API exists (private → structural check) |
+| **ZAP DAST scan** | `zapdast` | *(default hosting)* | no | authenticated **OWASP ZAP** dynamic scan of the deployed UI API — injection/headers/TLS/info-leak classes; **WARN-only** (reports, does not gate yet) |
 
 > **Note:** the Jobs API probe exercises the *additive* `EnableJobsApi` CFN
 > parameter on the STANDARD published template — it does **not** exercise the
@@ -281,7 +391,55 @@ a validator**, not a copy-pasted deploy/validate/cleanup function.
 
 Validators live in `scripts/sdlc/codebuild_deployment.py`:
 `validate_apigw_global_hosting`, `validate_waf_enabled`,
-`validate_apigw_private_hosting`, `validate_jobs_api`.
+`validate_apigw_private_hosting`, `validate_jobs_api`,
+`validate_zap_dast`.
+
+#### ZAP DAST probe (dynamic security testing)
+
+The `zapdast` probe adds the one class of coverage neither SRT (static code) nor
+the RBAC harness (authorization semantics) provides: **dynamic** application
+security testing of the *running* UI REST API — reflected/persistent XSS, SQL/OS/
+code injection, missing security headers (CSP, HSTS, X-Frame-Options,
+X-Content-Type-Options), cookie flags, TLS issues, and information disclosure.
+
+It runs the official **OWASP ZAP** Docker image (`ghcr.io/zaproxy/zaproxy`)
+via `zap-api-scan.py` — which requires **`PrivilegedMode: true`** on the
+`app-sdlc` CodeBuild project (`scripts/sdlc/cfn/codepipeline-s3.yml`; live once
+that SDLC pipeline stack is deployed). **Docker-in-CodeBuild note:** the bind
+mount (`docker run -v {workdir}:/zap/wrk`) works fine from `/tmp`, but CodeBuild
+runs the build as **root** while the ZAP image runs `zap-api-scan.py` as the
+non-root **`zap`** user — which can read the seeded spec but **cannot write the
+report** into a root-owned workdir (`PermissionError: /zap/wrk/zap-report.html`,
+which surfaces as no report). The probe therefore **`chmod 0o777`s the workdir**
+so the container can write its report (proven end-to-end in a real CodeBuild
+project). The probe is also defensive: a `docker info` preflight runs first, and
+if the daemon is genuinely unavailable (or the scan produces no report) it
+records a **SKIP (pass)** rather than failing the build — mirroring how
+VPC-requiring probes skip
+when their infra is absent. Because
+the UI API is a single Cognito-gated route `POST /op/{field}` with **no OpenAPI
+spec**, ZAP's spider finds nothing to crawl, so the probe **seeds** the scan
+with a minimal OpenAPI doc generated from `scripts/api_rbac_expectations.yaml`
+(the same op source-of-truth the RBAC tests use — one authenticated request per
+operation). Authentication reuses `scripts/rbac_common.py` (shared with
+`test_api_rbac.py`): it mints a Cognito **ID token** and injects it on every
+request via ZAP's `replacer`; the temporary `ADMIN_USER_PASSWORD_AUTH` app-client
+flip is safe here because it happens on the probe's **own** throwaway stack, and
+is always restored.
+
+- **Passive baseline** (spider + passive rules, no attack payloads) runs every
+  time. The **active scan** (real injection payloads) is opt-in via
+  **`IDP_ZAP_ACTIVE=true`** — run it on demand/nightly, not on every MR, and only
+  ever against these throwaway probe stacks.
+- **WARN-only today:** `validate_zap_dast` reports alert counts (in the
+  consolidated summary) and uploads the full HTML/JSON report to
+  `s3://<sourcecode-bucket>/deploy/zap/…`, but never fails the build. Rule
+  actions live in `scripts/sdlc/zap-rules.conf` (IGNORE/WARN/FAIL). Promote
+  high-confidence rules to FAIL and flip the `# TODO promote` gate in
+  `validate_zap_dast` once the baseline is triaged — the same maturity path SRT
+  took.
+- **Gating flag:** set **`IDP_TEST_ZAP=false`** to skip only this probe (the
+  other probes still run).
 
 **Lifecycle** (every probe): creates per-stack IAM/boundary → (for `requires_vpc`
 probes) injects the persistent-test-VPC params → deploys with the probe's extra
@@ -309,7 +467,7 @@ Because probes **reference** the VPC (never create/destroy/mutate it):
   matter how many VPC variants or concurrent pipelines run.
 - **No per-run VPC churn or ENI-leak teardown failures** — the incident that
   removed the PRIVATE/VPC variant from CI simply can't recur.
-- **Fully parallel** — VPCs no longer bound concurrency, so all four probes run
+- **Fully parallel** — VPCs no longer bound concurrency, so all probes run
   at once.
 
 If the pipeline is deployed with `CreateTestVpc=false`, the VPC env vars are
@@ -343,11 +501,13 @@ injection + skip), `run_variant_probes()` (the concurrent launcher),
 `resolve_probe_concurrency()` (the budget), and `_test_vpc_params()` (env → CFN
 params). Launched from `main()` on its own supervisor thread concurrently with
 the shared-stack suite. Mock-based unit coverage:
-`scripts/sdlc/tests/test_variant_probes.py` (41 tests — quota cap, single-probe
-lifecycle, fail-fast isolation, VPC-param injection + skip, all four validators,
-consolidated summary).
+`scripts/sdlc/tests/test_variant_probes.py` (quota cap, single-probe
+lifecycle, fail-fast isolation, VPC-param injection + skip, the hosting-variant
+validators, consolidated summary) and `scripts/sdlc/tests/test_zap_dast_probe.py`
+(ZAP probe registration, IDP_TEST_ZAP gate, OpenAPI seed, alert parsing,
+WARN-only + always-restore).
 **Duration**: ~20–30 minutes per probe (full nested-stack create + teardown);
-all four run in parallel by default.
+all run in parallel by default.
 
 ### Adding a future variant
 
@@ -732,6 +892,19 @@ but revisit:
 
 ### Done (this cycle — no longer gaps)
 
+- [x] **Dynamic security testing (DAST).** OWASP ZAP scan of the deployed UI API
+      added as the `zapdast` deployment-variant probe — authenticated scan seeded
+      from `api_rbac_expectations.yaml`, WARN-only, report to
+      `s3://…/deploy/zap/…`. Requires `PrivilegedMode: true` on `app-sdlc`.
+      Complements SRT (static) + RBAC (authorization) with injection/headers/TLS
+      coverage. *(feature/zap-dast-ci-probe)*
+- [x] **Mandatory AppSec API security test cases.** Extended the live API harness
+      (`make api-test`, CodeBuild Step 12) with the AppSec checklist suites:
+      IDOR/BOLA (2.1), token expiry + logout revocation (2.3/2.4), deleted-resource
+      inaccessibility (2.5), input validation (3, tolerant→strict), and TLS
+      downgrade/cleartext (4). Implemented in `scripts/api_security_cases.py` with
+      unit tests; threat entries AUTH.T09–T11. The stateless-JWT post-logout reuse
+      is surfaced as a documented gap (GAP-SEC-LOGOUT). *(feature/zap-dast-ci-probe)*
 - [x] `idp_common` `-m "unit"` filter → `-m "not integration"` (recovered ~810
       silently-skipped tests; fixed 28 rotted tests). *(PR #493)*
 - [x] Missing package/Lambda suites added to `developer_tests` via

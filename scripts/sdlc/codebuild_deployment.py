@@ -8,6 +8,7 @@ Handles IDP stack deployment and testing in AWS CodeBuild environment.
 import json
 import os
 import re
+import secrets
 import signal
 import subprocess
 import sys
@@ -20,6 +21,7 @@ from datetime import datetime, timezone
 from textwrap import dedent
 
 import boto3
+from botocore.config import Config as _BotoConfig
 
 # Cap test/monitor commands so a hung inference run cannot consume the
 # CodeBuild job timeout and prevent stack cleanup from running (leaks ~116
@@ -287,12 +289,35 @@ def publish_templates():
         raise Exception("Failed to extract template URL from publish output")
 
 
-def create_iam_resources(stack_name):
-    """Create IAM role and permission boundary using CloudFormation template"""
+# boto3's default retry mode is "legacy" (max ~4 attempts, no adaptive
+# rate-limiting). When the primary suite + N probes each create their IAM stack
+# at once, the account-wide (low, non-adjustable) IAM mutating-call rate is
+# exceeded and iam:CreatePolicy fails with "Throttling: Rate exceeded (reached
+# max retries: 4)" — killing the whole probe at Step 0, BEFORE any deploy (so
+# the CFN transient-race retry can't help). "adaptive" mode adds client-side
+# rate-limiting + more attempts to ride through the throttle. Launch stagger
+# reduces the burst; this rides out what stagger doesn't fully eliminate.
+_THROTTLE_RETRY_CONFIG = _BotoConfig(retries={"max_attempts": 10, "mode": "adaptive"})
+
+
+def create_iam_resources(stack_name, create_boundary=True):
+    """Create the CFN service role, and (optionally) a permissions boundary.
+
+    create_boundary=True (primary suite): also create a no-op {Action:*,Resource:*}
+    permissions-boundary policy and return its ARN, so the deploy exercises the
+    PermissionsBoundaryArn feature (verified by validate_permission_boundaries).
+
+    create_boundary=False (manual probes): skip the boundary — the probe is an
+    infra-deploy smoke test, not a boundary test, so it deploys with an EMPTY
+    PermissionsBoundaryArn (the template's HasPermissionsBoundary gate supports
+    this). Skipping it removes an iam:CreatePolicy + iam:DeletePolicy call per
+    probe, so a `make probes-all` sweep no longer bursts the account-wide IAM
+    rate limit. Returns (role_arn, "") in this mode.
+    """
     print(f"[{stack_name}] Creating IAM resources...")
 
     try:
-        cf_client = boto3.client("cloudformation")
+        cf_client = boto3.client("cloudformation", config=_THROTTLE_RETRY_CONFIG)
         iam_stack_name = f"{stack_name}-iam"
 
         # Deploy IAM CloudFormation stack
@@ -333,8 +358,17 @@ def create_iam_resources(stack_name):
         if not role_arn:
             raise Exception("Could not find ServiceRoleArn in stack outputs")
 
-        # Create permission boundary policy
-        iam_client = boto3.client("iam")
+        if not create_boundary:
+            # Probe mode: deploy with an EMPTY PermissionsBoundaryArn — no
+            # per-stack boundary policy created (removes an iam:CreatePolicy /
+            # DeletePolicy from the concurrent burst).
+            print(f"[{stack_name}] ℹ️ Skipping permissions boundary (probe mode)")
+            return role_arn, ""
+
+        # Create permission boundary policy. Adaptive retry so a burst of
+        # concurrent iam:CreatePolicy calls rides through the account-wide IAM
+        # throttle instead of failing at "reached max retries: 4".
+        iam_client = boto3.client("iam", config=_THROTTLE_RETRY_CONFIG)
         boundary_name = f"{stack_name}-PermissionsBoundary"
         boundary_policy = {
             "Version": "2012-10-17",
@@ -370,8 +404,9 @@ def cleanup_iam_resources(stack_name):
     print(f"[{stack_name}] Cleaning up IAM stack...")
 
     try:
-        # Clean up IAM CloudFormation stack
-        cf_client = boto3.client("cloudformation")
+        # Clean up IAM CloudFormation stack (adaptive retry: concurrent teardown
+        # of primary + probe IAM stacks also bursts CFN/IAM mutating calls).
+        cf_client = boto3.client("cloudformation", config=_THROTTLE_RETRY_CONFIG)
         iam_stack_name = f"{stack_name}-iam"
         try:
             cf_client.delete_stack(StackName=iam_stack_name)
@@ -1200,6 +1235,85 @@ def test_step11_test_compare(stack_name):
         return {"success": False, "error": f"test-compare test failed: {str(e)}"}
 
 
+def test_step13_permission_boundaries(stack_name):
+    """Verify the deployed IAM roles actually carry the permissions boundary.
+
+    The primary suite deploys with a non-empty PermissionsBoundaryArn, so the
+    template's HasPermissionsBoundary condition should attach that boundary to
+    every AWS::IAM::Role it creates. This is the ONLY place that boundary
+    behavior is checked end-to-end (probes now deploy WITHOUT a boundary), so it
+    closes a real gap: a template change that drops the PermissionsBoundary from
+    a role would otherwise ship silently.
+
+    Read-only IAM (list stack role resources + iam:GetRole), safe in the
+    parallel pool. Samples up to 25 roles to bound API calls. Fails if any
+    checked role is missing its boundary.
+    """
+    print("Step 13: Verifying IAM permissions boundaries are attached...")
+    try:
+        cf = boto3.client("cloudformation", config=_THROTTLE_RETRY_CONFIG)
+        iam = boto3.client("iam", config=_THROTTLE_RETRY_CONFIG)
+
+        # Collect AWS::IAM::Role physical ids from the stack + its nested stacks.
+        role_names = []
+        stacks_to_scan = [stack_name]
+        scanned = set()
+        while stacks_to_scan:
+            sn = stacks_to_scan.pop()
+            if sn in scanned:
+                continue
+            scanned.add(sn)
+            paginator = cf.get_paginator("list_stack_resources")
+            for page in paginator.paginate(StackName=sn):
+                for r in page.get("StackResourceSummaries", []):
+                    rtype = r.get("ResourceType")
+                    if rtype == "AWS::IAM::Role":
+                        pid = r.get("PhysicalResourceId")
+                        if pid:
+                            role_names.append(pid)
+                    elif rtype == "AWS::CloudFormation::Stack":
+                        nested = r.get("PhysicalResourceId")
+                        if nested:
+                            stacks_to_scan.append(nested)
+
+        if not role_names:
+            return {"success": False, "error": "No IAM roles found in stack to check"}
+
+        sample = role_names[:25]
+        missing = []
+        checked = 0
+        for rn in sample:
+            try:
+                role = iam.get_role(RoleName=rn)["Role"]
+            except Exception:  # noqa: BLE001 — role may be a path/ARN edge case
+                continue
+            checked += 1
+            if not role.get("PermissionsBoundary"):
+                missing.append(rn)
+
+        if checked == 0:
+            return {
+                "success": False,
+                "error": "Could not read any role for boundary check",
+            }
+        if missing:
+            return {
+                "success": False,
+                "error": (
+                    f"{len(missing)}/{checked} sampled roles missing a "
+                    f"PermissionsBoundary (e.g. {missing[0]})"
+                ),
+            }
+        print(
+            f"✅ All {checked} sampled IAM roles carry a permissions boundary "
+            f"(of {len(role_names)} total)"
+        )
+        return {"success": True}
+    except Exception as e:  # noqa: BLE001
+        print(f"❌ Permission-boundary check failed: {e}")
+        return {"success": False, "error": f"Permission-boundary check failed: {e}"}
+
+
 # Single source of truth for the smoke-test suite: (func, step, name,
 # description). The parallel runner, the success summary, and the AI
 # failure-analysis prompt are all derived from this list — add or remove a
@@ -1262,6 +1376,15 @@ PARALLEL_TEST_STEPS = [
         "test-compare",
         "Test comparison (idp-cli test-compare)",
     ),
+    # Step 13: read-only IAM check that the deployed roles carry the permissions
+    # boundary (probes no longer test this, so the primary suite must). Safe in
+    # the parallel pool — no shared-stack mutation.
+    (
+        test_step13_permission_boundaries,
+        "Step 13",
+        "Permission boundaries",
+        "IAM permissions boundaries attached to deployed roles",
+    ),
 ]
 # Step 12 stays sequential: its dynamic RBAC harness temporarily flips
 # ADMIN_USER_PASSWORD_AUTH on the shared UI app client (a stack-wide auth
@@ -1276,6 +1399,53 @@ SEQUENTIAL_TEST_STEPS = [
     ),
 ]
 ALL_TEST_STEPS = PARALLEL_TEST_STEPS + SEQUENTIAL_TEST_STEPS
+
+
+def _deploy_primary_stack_attempt(stack_name, admin_email, template_url):
+    """One deploy+health-check attempt for the primary shared stack.
+
+    Creates IAM, runs `idp-cli deploy --wait`, and verifies the stack reached a
+    COMPLETE status. On failure returns a result dict with failure_type="deploy"
+    and captured `cf_events` so the caller can classify it (e.g. the transient
+    CloudWatch Logs race via _is_transient_logs_race) and decide whether to
+    retry. Returns {"success": True} on a healthy deploy.
+    """
+    result = {"stack_name": stack_name, "success": False, "failure_type": "deploy"}
+    # Step 0: Create IAM resources
+    print("Step 0: Creating IAM resources...")
+    role_arn, permissions_boundary_arn = create_iam_resources(stack_name)
+    if not role_arn or not permissions_boundary_arn:
+        result["error"] = "Failed to create required IAM resources"
+        return result
+
+    # Step 1: Deploy using template URL
+    print("Step 1: Deploying stack...")
+    cmd = f"idp-cli deploy --stack-name {stack_name} --template-url {template_url} --admin-email {admin_email} --wait"
+    cmd += f" --role-arn {role_arn}"
+    cmd += f" --parameters PermissionsBoundaryArn={permissions_boundary_arn}"
+    # Full nested-stack creation can legitimately run long; don't let the default
+    # test-command timeout kill a healthy in-progress deploy. check=False so a
+    # rollback is captured (with cf_events) and classified rather than raising.
+    deploy = run_command(cmd, check=False, timeout=3 * 3600)
+
+    # Step 2: Verify stack status
+    print("Step 2: Verifying stack status...")
+    status = run_command(
+        f"aws cloudformation describe-stacks --stack-name {stack_name} "
+        "--query 'Stacks[0].StackStatus' --output text",
+        check=False,
+    )
+    if "COMPLETE" in status.stdout and "ROLLBACK" not in status.stdout:
+        print("✅ Deployment completed")
+        return {"stack_name": stack_name, "success": True}
+
+    # Failed/rolled-back — capture CF events so _is_transient_logs_race can see
+    # whether this was the known LogGroup create race (and thus retryable).
+    detail = status.stdout.strip() or f"idp-cli deploy exit {deploy.returncode}"
+    print(f"❌ Stack status: {detail}")
+    result["error"] = f"Stack deployment failed with status: {detail}"
+    _capture_cf_events(result, stack_name)
+    return result
 
 
 def deploy_and_test_stack(stack_name, admin_email, template_url, progress_cb=None):
@@ -1299,36 +1469,40 @@ def deploy_and_test_stack(stack_name, admin_email, template_url, progress_cb=Non
             print(f"⚠️ progress_cb failed (non-fatal): {e}")
 
     try:
-        # Step 0: Create IAM resources
-        print("Step 0: Creating IAM resources...")
-        role_arn, permissions_boundary_arn = create_iam_resources(stack_name)
-        if not role_arn or not permissions_boundary_arn:
-            raise Exception("Failed to create required IAM resources")
+        # Steps 0-2: create IAM, deploy, verify — with a one-shot retry for the
+        # known transient CloudWatch Logs create-consistency race
+        # (_is_transient_logs_race). The probes already retry this
+        # (_run_probe_attempt); the primary suite did NOT, so a race on the
+        # shared stack failed the whole pipeline. A rolled-back stack + its IAM
+        # are torn down before the retry so the redeploy is clean and reuses no
+        # partially-created resources. Any OTHER deploy failure returns
+        # immediately (no retry) so real regressions surface fast.
+        deploy_result = None
+        for attempt in range(1, PROBE_TRANSIENT_MAX_ATTEMPTS + 1):
+            deploy_result = _deploy_primary_stack_attempt(
+                stack_name, admin_email, template_url
+            )
+            if deploy_result.get("success"):
+                break
+            if attempt < PROBE_TRANSIENT_MAX_ATTEMPTS and _is_transient_logs_race(
+                deploy_result
+            ):
+                print(
+                    f"♻️ Primary stack hit the transient CloudWatch Logs "
+                    f"create-consistency race (attempt {attempt}/"
+                    f"{PROBE_TRANSIENT_MAX_ATTEMPTS}); tearing down and "
+                    "redeploying a fresh stack once..."
+                )
+                # Reclaim the rolled-back stack + IAM so the retry starts clean
+                # (same stack name; cleanup is idempotent/best-effort).
+                cleanup_stack({"stack_name": stack_name})
+                deploy_result["retried_transient_logs_race"] = True
+                continue
+            # Not the transient race (or out of attempts) — surface it.
+            return deploy_result
 
-        # Step 1: Deploy using template URL
-        print("Step 1: Deploying stack...")
-        cmd = f"idp-cli deploy --stack-name {stack_name} --template-url {template_url} --admin-email {admin_email} --wait"
-        cmd += f" --role-arn {role_arn}"
-        cmd += f" --parameters PermissionsBoundaryArn={permissions_boundary_arn}"
-
-        # Full nested-stack creation can legitimately run long; don't let the
-        # default test-command timeout kill a healthy in-progress deploy.
-        run_command(cmd, timeout=3 * 3600)
-        print("✅ Deployment completed")
-
-        # Step 2: Test stack status
-        print("Step 2: Verifying stack status...")
-        cmd = f"aws cloudformation describe-stacks --stack-name {stack_name} --query 'Stacks[0].StackStatus' --output text"
-        result = run_command(cmd)
-
-        if "COMPLETE" not in result.stdout:
-            print(f"❌ Stack status: {result.stdout.strip()}")
-            return {
-                "stack_name": stack_name,
-                "success": False,
-                "failure_type": "deploy",
-                "error": f"Stack deployment failed with status: {result.stdout.strip()}",
-            }
+        if not deploy_result.get("success"):
+            return deploy_result
 
         print("✅ Stack is healthy")
 
@@ -2332,7 +2506,9 @@ def delete_apigw_test_vpc(vpc_stack_name):
         print(f"[{vpc_stack_name}] ✅ Test VPC deleted")
         return
     except Exception as e:  # noqa: BLE001
-        print(f"[{vpc_stack_name}] ⚠️ First delete failed ({e}); sweeping ENIs and retrying")
+        print(
+            f"[{vpc_stack_name}] ⚠️ First delete failed ({e}); sweeping ENIs and retrying"
+        )
 
     # Retry path: orphaned Lambda ENIs are the usual culprit. Give them a
     # moment to detach, sweep, then delete again.
@@ -2723,7 +2899,9 @@ def validate_apigw_private_hosting(stack_name):
             "success": False,
             "error": f"PRIVATE REST API {api_name} has no resource policy (VPCE binding)",
         }
-    print(f"✅ PRIVATE REST API present with resource policy: {api_name} (types={types})")
+    print(
+        f"✅ PRIVATE REST API present with resource policy: {api_name} (types={types})"
+    )
     return {"success": True, "api_name": api_name, "endpoint_types": types}
 
 
@@ -2796,6 +2974,424 @@ def validate_waf_enabled(stack_name):
         }
     print(f"✅ WAF WebACL {acl_name} associated with {len(resources)} resource(s)")
     return {"success": True, "web_acl_arn": acl_arn, "associated": resources}
+
+
+# ---------------------------------------------------------------------------
+# ZAP DAST probe
+#
+# Dynamic Application Security Testing of the deployed UI REST API using the
+# official OWASP ZAP Docker image. Complements the RBAC probe (authorization
+# semantics) and SRT (static code) with the class of bugs neither can see:
+# injection (XSS/SQLi/…), missing security headers, TLS/cookie flags, and info
+# leaks against the RUNNING API.
+#
+# Why a probe (own throwaway stack) and not a primary-suite step: the scan needs
+# a Cognito token, which means temporarily enabling ADMIN_USER_PASSWORD_AUTH on
+# the app client — the exact stack-wide mutation that forces Step 12 (RBAC) to
+# run sequentially. On the probe's OWN stack that flip is safe and the whole
+# thing runs fully concurrently with everything else (zero added wall-clock).
+#
+# The UI API is a single Cognito-gated route POST /op/{field} with NO OpenAPI
+# spec, so ZAP's spider finds nothing to crawl. We SEED the scan by generating a
+# minimal OpenAPI 3 doc from scripts/api_rbac_expectations.yaml (the same op
+# source-of-truth the RBAC tests use), giving ZAP one authenticated request per
+# operation to attack.
+#
+# WARN-only for now: findings are reported (build log + S3 report) but do not
+# fail the build. Promote high-confidence rules to FAIL in scripts/sdlc/
+# zap-rules.conf once the baseline is triaged (the path SRT took).
+# ---------------------------------------------------------------------------
+
+ZAP_DOCKER_IMAGE = os.environ.get("ZAP_DOCKER_IMAGE", "ghcr.io/zaproxy/zaproxy:stable")
+# Passive baseline (spider + passive rules, no attack payloads) every run.
+# Active scan (real injection/XSS payloads) is opt-in via IDP_ZAP_ACTIVE so the
+# intrusive traffic runs on demand/nightly, not on every MR — and wall-clock
+# stays flat. Only ever run against these throwaway probe stacks.
+ZAP_ACTIVE_SCAN = os.environ.get("IDP_ZAP_ACTIVE", "false").lower() == "true"
+ZAP_RULES_CONF = os.path.join(os.path.dirname(__file__), "zap-rules.conf")
+
+
+def _zap_op_fields():
+    """The set of UI API operation names, from the RBAC expectations file.
+
+    This is the shared op source-of-truth (also consumed by scan_api_rbac.py and
+    test_api_rbac.py). Returns a sorted list of field names; raises if the file
+    is missing/empty so a silently-empty scan can't look like a pass.
+    """
+    import yaml
+
+    expectations = os.path.join(
+        os.path.dirname(__file__), os.pardir, "api_rbac_expectations.yaml"
+    )
+    with open(expectations) as fh:
+        spec = yaml.safe_load(fh)
+    ops = sorted((spec.get("operations") or {}).keys())
+    if not ops:
+        raise RuntimeError(
+            f"No operations found in {expectations}; refusing an empty ZAP scan"
+        )
+    return ops
+
+
+def generate_zap_openapi(api_base, fields):
+    """Build a minimal OpenAPI 3 doc describing the UI API for ZAP.
+
+    Every operation is the same shape — POST {api_base}/op/{field} with a JSON
+    body {"arguments": {}} — so we emit one path per field. ZAP imports this as
+    its scan surface (a spider would find nothing on this single-route API).
+
+    Returns the spec as a dict (the caller writes it as JSON).
+    """
+    # api_base is like https://<id>.execute-api.<region>.amazonaws.com/api
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(api_base)
+    server_url = f"{parts.scheme}://{parts.netloc}"
+    base_path = parts.path.rstrip("/")  # e.g. "/api"
+
+    paths = {}
+    for field in fields:
+        paths[f"{base_path}/op/{field}"] = {
+            "post": {
+                "operationId": field,
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {"arguments": {"type": "object"}},
+                            },
+                            "example": {"arguments": {}},
+                        }
+                    },
+                },
+                "responses": {"200": {"description": "op result"}},
+            }
+        }
+    return {
+        "openapi": "3.0.0",
+        "info": {"title": "IDP UI API (ZAP DAST seed)", "version": "1.0"},
+        "servers": [{"url": server_url}],
+        "paths": paths,
+    }
+
+
+def _parse_zap_rule_tally(scan_stdout):
+    """Parse ZAP's rule-outcome tally line from zap-api-scan.py stdout.
+
+    zap-api-scan prints a summary like:
+      "FAIL-NEW: 0  FAIL-INPROG: 0  WARN-NEW: 3  WARN-INPROG: 0  INFO: 0
+       IGNORE: 1  PASS: 114"
+    This is the count of RULES (not alerts) by outcome — the PASS count shows how
+    much was actually exercised, which the alert list alone doesn't convey.
+    Returns a dict of {label: int} for the labels present, or {} if not found.
+    """
+    labels = (
+        "FAIL-NEW",
+        "FAIL-INPROG",
+        "WARN-NEW",
+        "WARN-INPROG",
+        "INFO",
+        "IGNORE",
+        "PASS",
+    )
+    tally = {}
+    for label in labels:
+        m = re.search(rf"{re.escape(label)}:\s*(\d+)", scan_stdout)
+        if m:
+            tally[label] = int(m.group(1))
+    return tally
+
+
+def _parse_zap_alerts(report_json_path):
+    """Summarize a ZAP JSON report into {risk: count} + a flat alert list.
+
+    ZAP's JSON report nests alerts under site[].alerts[]; each alert has a
+    'riskcode' ("0"=Info, "1"=Low, "2"=Medium, "3"=High) and 'riskdesc'.
+    Returns (counts_by_risk, alerts) — counts keyed by the human risk label.
+    """
+    with open(report_json_path) as fh:
+        report = json.load(fh)
+    risk_label = {"0": "Informational", "1": "Low", "2": "Medium", "3": "High"}
+    counts = {"High": 0, "Medium": 0, "Low": 0, "Informational": 0}
+    alerts = []
+    for site in report.get("site", []):
+        for alert in site.get("alerts", []):
+            label = risk_label.get(str(alert.get("riskcode", "0")), "Informational")
+            counts[label] = counts.get(label, 0) + 1
+            instances = alert.get("instances", []) or []
+            # A few sample affected URLs (deduped) so the summary is actionable
+            # without needing the full HTML report.
+            sample_urls = []
+            for inst in instances:
+                uri = inst.get("uri", "")
+                if uri and uri not in sample_urls:
+                    sample_urls.append(uri)
+                if len(sample_urls) >= 3:
+                    break
+            alerts.append(
+                {
+                    "risk": label,
+                    "name": alert.get("alert") or alert.get("name", ""),
+                    "pluginid": alert.get("pluginid", ""),
+                    "count": len(instances) or int(alert.get("count", 0) or 0),
+                    # 'solution' is ZAP's remediation guidance (HTML-ish); keep a
+                    # trimmed plain-ish version for the log.
+                    "solution": (alert.get("solution", "") or "").strip(),
+                    "sample_urls": sample_urls,
+                }
+            )
+    # High→Info, then most-instances first, so the log leads with what matters.
+    order = {"High": 0, "Medium": 1, "Low": 2, "Informational": 3}
+    alerts.sort(key=lambda a: (order.get(a["risk"], 9), -a["count"]))
+    return counts, alerts
+
+
+def _upload_zap_report(stack_name, workdir):
+    """Upload the ZAP HTML/JSON reports to the SDLC source bucket. Best effort.
+
+    Returns the s3:// URL of the HTML report (or "" if not uploaded), so the
+    build log and the GitLab after_script can point at it.
+    """
+    bucket = os.environ.get("SOURCE_BUCKET", "")
+    build_id = os.environ.get("CODEBUILD_BUILD_ID", "")
+    if not bucket:
+        print("ℹ️ Skipping ZAP report upload (no SOURCE_BUCKET)")
+        return ""
+    tag = build_id.split(":")[-1] if build_id else stack_name
+    s3 = boto3.client("s3")
+    html_url = ""
+    for name, ctype in (
+        ("zap-report.html", "text/html"),
+        ("zap-report.json", "application/json"),
+    ):
+        path = os.path.join(workdir, name)
+        if not os.path.exists(path):
+            continue
+        key = f"deploy/zap/{stack_name}-{tag}-{name}"
+        try:
+            with open(path, "rb") as fh:
+                s3.put_object(Bucket=bucket, Key=key, Body=fh.read(), ContentType=ctype)
+            print(f"📁 ZAP report uploaded to s3://{bucket}/{key}")
+            if name.endswith(".html"):
+                html_url = f"s3://{bucket}/{key}"
+        except Exception as e:  # noqa: BLE001
+            print(f"⚠️ Failed to upload ZAP report {name}: {e}")
+    return html_url
+
+
+def validate_zap_dast(stack_name):
+    """Run an authenticated OWASP ZAP DAST scan against the deployed UI API.
+
+    Resolves the API base + Cognito ids from the stack, mints an ID token
+    (temporarily enabling ADMIN_USER_PASSWORD_AUTH on this probe's OWN app
+    client and always restoring it), seeds a minimal OpenAPI doc from the op
+    source-of-truth, and runs zap-api-scan.py in the official ZAP Docker image
+    with the token injected on every request via ZAP's `replacer`.
+
+    WARN-only: returns success=True even with findings, carrying the alert
+    counts + report URL for the consolidated summary. The `# TODO promote`
+    marks where to gate the build once zap-rules.conf is triaged.
+    """
+    # rbac_common lives in scripts/; add it to the path (this file is in
+    # scripts/sdlc/). Shared with test_api_rbac.py so stack resolution + the
+    # auth-flow capture/restore can't drift.
+    sys.path.insert(
+        0, os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    )
+    import rbac_common
+
+    # Preflight: the scan needs a working Docker daemon (to `docker run` the ZAP
+    # image). That requires PrivilegedMode:true on the app-sdlc CodeBuild project
+    # (scripts/sdlc/cfn/codepipeline-s3.yml) — which only takes effect once that
+    # SDLC pipeline stack is (re)deployed. If Docker isn't usable, SKIP (not
+    # fail): a scan that can't run is an ENVIRONMENT gap, not a security finding,
+    # and this is a WARN-only probe. Mirrors how VPC-requiring probes skip when
+    # their infra is absent. `docker info` is a cheap daemon-reachability check.
+    probe_check = run_command("docker info", check=False, timeout=60)
+    if probe_check.returncode != 0:
+        msg = (
+            "Docker daemon unavailable — skipping ZAP DAST scan. Enable it by "
+            "deploying the SDLC pipeline stack with PrivilegedMode:true on the "
+            "app-sdlc CodeBuild project (scripts/sdlc/cfn/codepipeline-s3.yml)."
+        )
+        print(f"⏭️  {msg}")
+        return {"success": True, "skipped": True, "detail": msg}
+
+    region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
+    try:
+        ctx = rbac_common.resolve_stack(stack_name, region)
+    except Exception as e:  # noqa: BLE001
+        return {"success": False, "error": f"Could not resolve UI API: {e}"}
+
+    api_base = ctx["api_base"]
+    if not api_base:
+        return {
+            "success": False,
+            "error": "Stack has no HttpApiEndpoint output — UI API not deployed",
+        }
+
+    # The workdir is bind-mounted into the ZAP container (`docker run -v
+    # {workdir}:/zap/wrk`). The mount itself works from /tmp in CodeBuild dind
+    # (verified). The catch: CodeBuild runs the build as root, so the workdir is
+    # root-owned, but the official ZAP image runs zap-api-scan.py as the non-root
+    # `zap` user — which can READ the seeded openapi.json (world-readable) but
+    # CANNOT WRITE the report back, so ZAP dies with
+    # `PermissionError: [Errno 13] ... /zap/wrk/zap-report.html` and produces no
+    # report (previously misread as a mount failure). chmod 0o777 the workdir so
+    # the container's non-root user can write the report. (Contents are a
+    # throwaway OpenAPI seed + ZAP reports — no secrets; the token lives in a
+    # separate options file, also 0o777 here but never uploaded.)
+    workdir = tempfile.mkdtemp(prefix="zap-")
+    os.chmod(workdir, 0o777)
+    email = "zap-dast@example.invalid"
+    password = "Aa1!" + secrets.token_urlsafe(24)
+    token = None
+    try:
+        # Own stack → this app-client auth-flow flip is safe (nothing else uses
+        # it). Always restored in finally.
+        rbac_common.enable_admin_auth(ctx)
+        rbac_common.create_cognito_user(ctx, email, "Admin", password)
+        token = rbac_common.get_id_token(ctx, email, password)
+        if not token or token == "None":
+            return {"success": False, "error": "Failed to mint Cognito ID token"}
+
+        fields = _zap_op_fields()
+        spec = generate_zap_openapi(api_base, fields)
+        spec_path = os.path.join(workdir, "openapi.json")
+        with open(spec_path, "w") as fh:
+            json.dump(spec, fh)
+        print(
+            f"🕷️  ZAP DAST: {len(fields)} operations seeded, target {api_base} "
+            f"(active_scan={ZAP_ACTIVE_SCAN})"
+        )
+
+        # ZAP `replacer` injects the raw ID token into the Authorization header
+        # on every request (the API Gateway authorizer expects the raw token,
+        # no "Bearer " prefix). Write the replacer settings — including the token
+        # — to a ZAP config-file loaded via `-configfile`, NOT onto the command
+        # line: run_command prints every cmd it runs, so a token on argv would
+        # leak into the CodeBuild/CloudWatch log. The options file lives only in
+        # the mounted workdir and is never uploaded (only zap-report.* are).
+        options_prop = os.path.join(workdir, "zap-options.prop")
+        with open(options_prop, "w") as fh:
+            fh.write(
+                "replacer.full_list(0).description=auth\n"
+                "replacer.full_list(0).enabled=true\n"
+                "replacer.full_list(0).matchtype=REQ_HEADER\n"
+                "replacer.full_list(0).matchstr=Authorization\n"
+                "replacer.full_list(0).regex=false\n"
+                f"replacer.full_list(0).replacement={token}\n"
+            )
+        rules_flag = ""
+        if os.path.exists(ZAP_RULES_CONF):
+            import shutil
+
+            shutil.copy(ZAP_RULES_CONF, os.path.join(workdir, "zap-rules.conf"))
+            rules_flag = "-c zap-rules.conf"
+        # zap-api-scan runs passive by default; active scan is its default too,
+        # so DISABLE active unless opted in (-S = safe mode, no active attacks).
+        active_flag = "" if ZAP_ACTIVE_SCAN else "-S"
+        docker_cmd = (
+            f"docker run --rm -v {workdir}:/zap/wrk:rw {ZAP_DOCKER_IMAGE} "
+            f"zap-api-scan.py -t /zap/wrk/openapi.json -f openapi {active_flag} "
+            f"{rules_flag} "
+            '-z "-configfile /zap/wrk/zap-options.prop" '
+            "-J zap-report.json -r zap-report.html -w zap-report.md"
+        )
+        # zap-api-scan exits non-zero when it FINDS issues (WARN/FAIL rules) —
+        # that is not a probe failure in WARN mode, so check=False and rely on
+        # the parsed report. Cap runtime so a hung scan can't eat the job.
+        scan_run = run_command(docker_cmd, check=False, timeout=45 * 60)
+        # ZAP prints a one-line rule tally, e.g.
+        #   "FAIL-NEW: 0  FAIL-INPROG: 0  WARN-NEW: 3  WARN-INPROG: 0  INFO: 0
+        #    IGNORE: 1  PASS: 114"
+        # Capture it so the report shows EVERY rule outcome (not just alerts) —
+        # 114 PASS is as meaningful as the 3 WARN for "what got tested".
+        rule_tally = _parse_zap_rule_tally(getattr(scan_run, "stdout", "") or "")
+
+        report_json = os.path.join(workdir, "zap-report.json")
+        if not os.path.exists(report_json):
+            # The daemon was up (preflight passed) but the scan still produced no
+            # report — e.g. the ZAP image failed to pull, or zap-api-scan errored
+            # before writing output. That's a tooling/environment problem, not a
+            # security finding, so SKIP rather than fail this WARN-only probe.
+            msg = (
+                "ZAP produced no JSON report (image pull or scan startup failed) "
+                "— skipping DAST for this run."
+            )
+            print(f"⏭️  {msg}")
+            return {"success": True, "skipped": True, "detail": msg}
+        counts, alerts = _parse_zap_alerts(report_json)
+        report_url = _upload_zap_report(stack_name, workdir)
+
+        summary = (
+            f"High={counts.get('High', 0)} Medium={counts.get('Medium', 0)} "
+            f"Low={counts.get('Low', 0)} Info={counts.get('Informational', 0)}"
+        )
+        # Detailed, self-contained report in the build log (so the findings are
+        # actionable without opening the HTML report). Scope line first, then
+        # EVERY alert (not just High/Medium) with its risk, instance count,
+        # sample affected URLs, and remediation hint.
+        print(f"\n{'=' * 72}")
+        print("🔎 ZAP DAST scan report")
+        print(f"{'=' * 72}")
+        print(f"  Target:      {api_base}")
+        print(f"  Operations:  {len(fields)} seeded (POST /op/<field>)")
+        print(
+            f"  Mode:        {'active scan' if ZAP_ACTIVE_SCAN else 'passive baseline'}"
+        )
+        if rule_tally:
+            # Full rule-outcome tally — shows EVERYTHING that ran, not just the
+            # alerts. e.g. "114 PASS · 3 WARN · 0 FAIL · 1 IGNORE".
+            fails = rule_tally.get("FAIL-NEW", 0) + rule_tally.get("FAIL-INPROG", 0)
+            warns = rule_tally.get("WARN-NEW", 0) + rule_tally.get("WARN-INPROG", 0)
+            print(
+                f"  Rules:       {rule_tally.get('PASS', 0)} PASS · {warns} WARN · "
+                f"{fails} FAIL · {rule_tally.get('IGNORE', 0)} IGNORE"
+            )
+        print(f"  Alerts:      {summary}")
+        if alerts:
+            print("  Findings (most severe first):")
+            for a in alerts:
+                print(f"    • [{a['risk']}] {a['name']} — {a['count']} instance(s)")
+                for u in a.get("sample_urls", []):
+                    print(f"        {u}")
+                if a.get("solution"):
+                    fix = " ".join(a["solution"].split())[:200]
+                    print(f"        ↳ fix: {fix}")
+        else:
+            print("  No alerts raised.")
+        print(f"{'=' * 72}\n")
+
+        # TODO promote: once zap-rules.conf is triaged, gate the build here, e.g.
+        #   if counts.get("High", 0) > 0: return {"success": False, ...}
+        # For now WARN-only: always succeed, carry the findings in the result.
+        return {
+            "success": True,
+            "zap_alerts": counts,
+            "zap_summary": summary,
+            "zap_findings": alerts,
+            "operations_scanned": len(fields),
+            "rule_tally": rule_tally,
+            "target": api_base,
+            "report_url": report_url,
+            "active_scan": ZAP_ACTIVE_SCAN,
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"success": False, "error": f"ZAP DAST scan error: {e}"}
+    finally:
+        # Always clean up the test user + the app-client auth-flow flip, even on
+        # error (mirrors the RBAC harness's finally).
+        try:
+            rbac_common.delete_cognito_user(ctx, email)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            rbac_common.restore_auth_flows(ctx)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _capture_cf_events(result, *stack_names):
@@ -2888,6 +3484,37 @@ Probe = namedtuple(
 # IDP_PROBE_MAX_CONCURRENCY.
 DEFAULT_PROBE_MAX_CONCURRENCY = 8
 
+# Seconds of launch stagger PER probe index (probe i waits i * this before its
+# deploy). Spreads the concurrent CreateLogGroup/CreateProject/CreatePolicy burst
+# that drives the AWS control-plane races (_TRANSIENT_DEPLOY_RACES + IAM rate
+# limit) so the same resource types across stacks don't overlap their create
+# windows. 120s × up to 5 probes = at most ~8min added to the LAST probe's start
+# — negligible against a ~30-min deploy, and it prevents the burst rather than
+# recovering from it. Only applies when probes actually run (off by default in
+# CI now; used by `make probes-all` / IDP_RUN_PROBES=true). 0 disables.
+DEFAULT_PROBE_LAUNCH_STAGGER_SECS = 120
+
+
+def _resolve_probe_launch_stagger():
+    """Per-index probe launch stagger (secs) from IDP_PROBE_LAUNCH_STAGGER_SECS.
+
+    Non-negative float; malformed/negative → default. 0 = no stagger (all probes
+    launch at once, the pre-mitigation behavior).
+    """
+    raw = get_env_var(
+        "IDP_PROBE_LAUNCH_STAGGER_SECS", str(DEFAULT_PROBE_LAUNCH_STAGGER_SECS)
+    )
+    try:
+        secs = float(raw)
+    except (TypeError, ValueError):
+        print(
+            f"⚠️ Invalid IDP_PROBE_LAUNCH_STAGGER_SECS={raw!r}; "
+            f"using default {DEFAULT_PROBE_LAUNCH_STAGGER_SECS}"
+        )
+        return float(DEFAULT_PROBE_LAUNCH_STAGGER_SECS)
+    return secs if secs >= 0 else float(DEFAULT_PROBE_LAUNCH_STAGGER_SECS)
+
+
 # The probe table. The primary suite (Steps 3-12) still runs separately on ONE
 # default-hosting (CloudFront) stack; these are ADDITIONAL deploy+smoke probes
 # of alternative deployment permutations, each on its own throwaway stack.
@@ -2944,6 +3571,19 @@ PROBE_VARIANTS = [
         validate_fn=validate_jobs_api,
         requires_vpc=True,
     ),
+    # OWASP ZAP DAST scan of the deployed UI REST API. Default hosting
+    # (CloudFront) → the REST API is REGIONAL/internet-reachable so CodeBuild can
+    # scan it (NOT requires_vpc — a PRIVATE API would be unreachable). Its own
+    # stack means the Cognito auth-flow flip needed to mint a token is isolated,
+    # so it runs fully concurrently. WARN-only (see validate_zap_dast). Gated by
+    # IDP_TEST_ZAP (see run_variant_probes filtering in main()).
+    Probe(
+        name="ZAP DAST scan",
+        stack_suffix="zapdast",
+        deploy_params={},
+        validate_fn=validate_zap_dast,
+        requires_vpc=False,
+    ),
     # --- Adding a future variant: one row + a validator ----------------------
     # deploy_params are extra CFN params; validate_fn is a new
     # callable(stack_name) -> {"success": bool, ...}. Set requires_vpc=True to
@@ -2986,40 +3626,57 @@ def _test_vpc_params():
 PROBE_TRANSIENT_MAX_ATTEMPTS = 2
 
 
-def _is_transient_logs_race(result):
-    """True iff the deploy rolled back on the known CloudWatch Logs create race.
+# Known AWS eventual-consistency (control-plane propagation) races that a fresh
+# redeploy re-rolls. Each entry is (resource_type, reason_substring) matched
+# case-insensitively against a CREATE_FAILED event. These are the ONLY failures
+# retried: they are non-deterministic (a clean redeploy usually passes), whereas
+# a real config/permission/template error fails IDENTICALLY every time and must
+# surface, not be masked. Verified from real CI runs:
+#   * LogGroup: an AWS::Logs::LogGroup with RetentionInDays makes CFN issue
+#     CreateLogGroup then PutRetentionPolicy; under heavy concurrent stack
+#     creation (~250 log groups at once) CWL isn't read-your-write consistent, so
+#     the second call hits the not-yet-propagated group → "does not exist".
+#   * CodeBuild service role: a nested stack's AWS::CodeBuild::Project is created
+#     right after its service role; IAM role/trust-policy propagation is
+#     eventually consistent, so CodeBuild's CreateProject trust validation
+#     occasionally races the new role → "is not authorized to perform:
+#     sts:AssumeRole on service role ... trust policy configured".
+_TRANSIENT_DEPLOY_RACES = (
+    ("AWS::Logs::LogGroup", "does not exist"),
+    ("AWS::CodeBuild::Project", "sts:assumerole on service role"),
+)
 
-    Root cause (verified from a real run — NOT a blanket "retry any rollback"):
-    an AWS::Logs::LogGroup with RetentionInDays set makes CFN's handler issue
-    two sequential CWL calls — CreateLogGroup then PutRetentionPolicy. Under
-    heavy CONCURRENT stack creation (primary + N probes standing up ~250 log
-    groups at once) CWL's control plane isn't read-your-write consistent, so
-    PutRetentionPolicy occasionally hits the just-created group before it has
-    propagated and returns ResourceNotFoundException — surfaced as
-    CREATE_FAILED "The specified log group does not exist" / InvalidRequest.
 
-    This is the ONLY failure we retry, because it is non-deterministic (a fresh
-    deploy re-rolls the race) whereas a real config/permission/KMS error fails
-    IDENTICALLY every time and must surface, not be masked. The match is scoped
-    tightly to resource type + message so nothing else qualifies:
+def _is_transient_deploy_race(result):
+    """True iff the deploy rolled back on a KNOWN transient AWS-consistency race.
+
+    NOT a blanket "retry any rollback": matched tightly to resource type +
+    message (see _TRANSIENT_DEPLOY_RACES) so genuine config/permission/template
+    errors — which fail identically on a redeploy — still surface. Requirements:
       * failure_type must be "deploy" (never a validation failure), and
-      * some captured event is a CREATE_FAILED on an AWS::Logs::LogGroup whose
-        reason contains "does not exist" (the initiating cause — the collateral
-        rolled-back resources carry "Resource creation cancelled", which this
-        deliberately does NOT match).
+      * some captured event is a CREATE_FAILED on one of the known-racy resource
+        types whose reason contains the matching substring (the initiating
+        cause — collateral rolled-back resources carry "Resource creation
+        cancelled", which this deliberately does NOT match).
     """
     if result.get("failure_type") != "deploy":
         return False
     for ev in result.get("cf_events") or []:
         if not isinstance(ev, dict):
             continue
-        if ev.get("resource_type") != "AWS::Logs::LogGroup":
+        if ev.get("status") != "CREATE_FAILED":
             continue
-        if ev.get("status") == "CREATE_FAILED" and "does not exist" in (
-            ev.get("reason") or ""
-        ).lower():
-            return True
+        rtype = ev.get("resource_type")
+        reason = (ev.get("reason") or "").lower()
+        for race_type, race_substr in _TRANSIENT_DEPLOY_RACES:
+            if rtype == race_type and race_substr in reason:
+                return True
     return False
+
+
+# Back-compat alias: the CWL-race-only name kept so existing call sites/tests
+# that reference it continue to work while the detector now covers more races.
+_is_transient_logs_race = _is_transient_deploy_race
 
 
 def _run_probe_attempt(probe, admin_email, template_url, vpc_params):
@@ -3032,18 +3689,21 @@ def _run_probe_attempt(probe, admin_email, template_url, vpc_params):
     stack_name = f"{generate_stack_name()}-{probe.stack_suffix}"
     result = {"stack_name": stack_name, "success": False, "probe": probe.name}
     try:
-        role_arn, boundary_arn = create_iam_resources(stack_name)
-        if not role_arn or not boundary_arn:
-            raise Exception(
-                f"Failed to create IAM resources for probe {probe.name!r}"
-            )
+        # Probes don't create their own permissions boundary (only the primary
+        # suite does + tests it) — removes an iam:CreatePolicy/DeletePolicy from
+        # the burst. boundary_arn is "" here; deploy with an empty
+        # PermissionsBoundaryArn (template's HasPermissionsBoundary gate handles
+        # the empty case).
+        role_arn, boundary_arn = create_iam_resources(stack_name, create_boundary=False)
+        if not role_arn:
+            raise Exception(f"Failed to create IAM resources for probe {probe.name!r}")
 
-        # idp-cli --parameters takes ONE comma-separated key=value string.
-        # PermissionsBoundaryArn is always required; the probe's extra params
-        # follow, then any injected VPC params. idp-cli's parser splits only on
-        # commas preceding a `key=`, so the comma-joined subnet list is safe.
+        # idp-cli --parameters takes ONE comma-separated key=value string. The
+        # probe's extra params, then any injected VPC params. idp-cli's parser
+        # splits only on commas preceding a `key=`, so the comma-joined subnet
+        # list is safe.
         merged = {**probe.deploy_params, **vpc_params}
-        param_pairs = [f"PermissionsBoundaryArn={boundary_arn}"]
+        param_pairs = [f"PermissionsBoundaryArn={boundary_arn}"]  # empty = feature off
         param_pairs += [f"{k}={v}" for k, v in merged.items()]
         params = ",".join(param_pairs)
         cmd = (
@@ -3130,10 +3790,7 @@ def deploy_and_test_probe(probe, admin_email, template_url):
         # Retry ONLY the tightly-scoped CWL create race, and only if attempts
         # remain. The prior attempt's stack + IAM are already torn down (its
         # finally), so the retry is a clean, independent redeploy.
-        if (
-            attempt < PROBE_TRANSIENT_MAX_ATTEMPTS
-            and _is_transient_logs_race(result)
-        ):
+        if attempt < PROBE_TRANSIENT_MAX_ATTEMPTS and _is_transient_logs_race(result):
             print(
                 f"♻️ Probe [{probe.name}] hit the transient CloudWatch Logs "
                 f"create-consistency race (attempt {attempt}/"
@@ -3152,9 +3809,7 @@ def resolve_probe_concurrency(num_probes):
     probes, and a malformed/<=0 override falls back to the conservative
     default rather than deploying an unbounded number of concurrent stacks.
     """
-    raw = get_env_var(
-        "IDP_PROBE_MAX_CONCURRENCY", str(DEFAULT_PROBE_MAX_CONCURRENCY)
-    )
+    raw = get_env_var("IDP_PROBE_MAX_CONCURRENCY", str(DEFAULT_PROBE_MAX_CONCURRENCY))
     try:
         cap = int(raw)
     except (TypeError, ValueError):
@@ -3185,6 +3840,14 @@ def run_variant_probes(admin_email, template_url, probes=None):
     probes with no test VPC configured come back skipped=True).
     """
     probes = PROBE_VARIANTS if probes is None else probes
+    # The ZAP DAST probe is individually gateable (it needs Docker/PrivilegedMode
+    # and pulls the ZAP image); default on, set IDP_TEST_ZAP=false to skip it
+    # without disabling the other probes.
+    if get_env_var("IDP_TEST_ZAP", "true").lower() != "true":
+        skipped = [p.name for p in probes if p.stack_suffix == "zapdast"]
+        probes = [p for p in probes if p.stack_suffix != "zapdast"]
+        for name in skipped:
+            print(f"⏭️  Skipping probe [{name}] (IDP_TEST_ZAP=false)")
     if not probes:
         print("ℹ️ No deployment-variant probes configured")
         return []
@@ -3197,16 +3860,32 @@ def run_variant_probes(admin_email, template_url, probes=None):
     for p in probes:
         print(f"   • {p.name} (stack suffix -{p.stack_suffix})")
 
+    # Stagger probe launches so the primary suite + N probes don't all fire
+    # their CreateLogGroup / CreateProject bursts at the same instant. These
+    # deploys hit two AWS control-plane eventual-consistency races
+    # (_TRANSIENT_DEPLOY_RACES: CWL "log group does not exist";
+    # CodeBuild "sts:AssumeRole on service role" trust propagation) whose
+    # probability rises with concurrent-create burst load. Spreading launches by
+    # a few seconds each flattens the burst and AVOIDS the race up front — much
+    # cheaper than the rollback + teardown + retry it would otherwise trigger.
+    # Probability reducer, NOT a guarantee (a single stack can still race), so
+    # the one-shot retry stays as the backstop. Tunable/disable via
+    # IDP_PROBE_LAUNCH_STAGGER_SECS (0 = simultaneous, old behavior).
+    stagger = _resolve_probe_launch_stagger()
+
+    def _staggered_deploy(probe, launch_index):
+        if stagger and launch_index:
+            time.sleep(launch_index * stagger)
+        return deploy_and_test_probe(probe, admin_email, template_url)
+
     results = []
     # No `with`: match the primary suite's pattern — shutdown(wait=True) in a
     # finally, never an implicit join that could burn the job timeout.
     executor = ThreadPoolExecutor(max_workers=cap)
     try:
         futures = {
-            executor.submit(
-                deploy_and_test_probe, probe, admin_email, template_url
-            ): probe
-            for probe in probes
+            executor.submit(_staggered_deploy, probe, i): probe
+            for i, probe in enumerate(probes)
         }
         for future in as_completed(futures):
             probe = futures[future]
@@ -3418,16 +4097,25 @@ def main():
     if publish_success:
         # Step 2: Launch the deployment-variant probes on their OWN supervisor
         # thread FIRST so their ~30m stack deploys overlap the primary suite's
-        # ~30m deploy instead of running after it (~30m wall-clock saved). Each
-        # probe uses an independent throwaway stack and opts out of the fail-
-        # fast abort machinery, so probes and the primary suite are fully
-        # isolated. The supervisor internally caps concurrent probes at the
-        # quota budget (IDP_PROBE_MAX_CONCURRENCY). Gated by
-        # IDP_TEST_APIGW_HOSTING (default on) — the historical env name is kept
-        # for backward compatibility since the GLOBAL APIGW probe is the only
-        # default row.
+        # ~30m deploy instead of running after it. Each probe uses an independent
+        # throwaway stack and opts out of the fail-fast abort machinery, so
+        # probes and the primary suite are fully isolated. The supervisor
+        # internally caps concurrent probes at the quota budget
+        # (IDP_PROBE_MAX_CONCURRENCY).
+        #
+        # DEFAULT OFF in CI. Standing up the primary + 5 probe stacks at once
+        # bursts the account-wide control planes (CWL log-group create
+        # consistency, CodeBuild role-trust propagation, IAM CreatePolicy rate
+        # limit) — a recurring source of flaky pipeline failures unrelated to the
+        # code under test. The deploy-variant probes are infra smoke tests that
+        # rarely change, so they now run MANUALLY via `make stacktest-*` (see
+        # scripts/sdlc/run_stacktest.py / .claude/skills/run-stack-tests.md),
+        # each on its own stack with no concurrent-burst. Set IDP_RUN_PROBES=true
+        # to re-enable them in a pipeline run. (IDP_TEST_APIGW_HOSTING is still
+        # honored as a legacy alias so an existing override keeps working.)
         probes_enabled = (
-            get_env_var("IDP_TEST_APIGW_HOSTING", "true").lower() == "true"
+            get_env_var("IDP_RUN_PROBES", "false").lower() == "true"
+            or get_env_var("IDP_TEST_APIGW_HOSTING", "false").lower() == "true"
         )
         probes_future = None
         probes_executor = None
@@ -3548,7 +4236,9 @@ def main():
             for probe_result in probe_results:
                 probe_name = probe_result.get("probe", "deployment-variant probe")
                 if probe_result.get("skipped"):
-                    print(f"⏭️  Probe [{probe_name}] skipped: {probe_result.get('detail', '')}")
+                    print(
+                        f"⏭️  Probe [{probe_name}] skipped: {probe_result.get('detail', '')}"
+                    )
                     continue
                 if probe_result.get("success"):
                     print(f"✅ Probe [{probe_name}] passed")

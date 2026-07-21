@@ -32,6 +32,29 @@ stages:
   - deployment_validation
   - integration_tests
 
+# Paths whose change can actually affect a real stack deploy / its behavior.
+# The expensive deploy jobs (deployment_validation, integration_tests) only run
+# when a commit/MR touches one of these — so doc-only / version-bump commits
+# (VERSION, CHANGELOG.md, **/*.md, docs/**, images/**, notebooks/**, etc.) skip
+# the ~70-min deploy. Intentionally GENEROUS: a false "run" wastes CI minutes,
+# but a false "skip" could merge a broken deploy — so err toward running. Update
+# this list if a new deploy-affecting top-level dir is added.
+# NOTE: fast_checks (lint / SRT) deliberately has NO changes: filter — it is
+# cheap and SHOULD run on every commit, including docs.
+.deploy_affecting_changes: &deploy_affecting_changes
+  - template.yaml
+  - publish.py
+  - "requirements*.txt"
+  - "patterns/**/*"
+  - "nested/**/*"
+  - "src/**/*"
+  - "lib/**/*"
+  - "config_library/**/*"
+  - "feature-platform/**/*"
+  - "iam-roles/**/*"
+  - "scripts/**/*"          # includes scripts/sdlc/* (the CI harness itself)
+  - ".gitlab-ci.yml"        # a pipeline-config change must re-run to validate itself
+
 # Prevent DUPLICATE pipelines: without this, a push to a branch that has an open
 # MR triggers BOTH a branch pipeline and an MR pipeline. Run the MR pipeline when
 # an MR is open, otherwise the branch pipeline — never both.
@@ -147,8 +170,12 @@ deployment_validation:
   # is actually going to run: on develop, or on an MR targeting develop (incl.
   # Draft, so the manual integration button has a validated role when clicked).
   rules:
+    # Same deploy-affecting gate as integration_tests: skip the pre-deploy IAM
+    # check for doc/VERSION/CHANGELOG-only commits (there's no deploy to validate).
     - if: $CI_COMMIT_BRANCH == "develop"
+      changes: *deploy_affecting_changes
     - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"
+      changes: *deploy_affecting_changes
     - when: never
 
   before_script:
@@ -176,10 +203,15 @@ integration_tests:
   timeout: 2h30m
   # Serialize + auto-cancel superseded deploys: rapid pushes to a ready MR won't
   # stack up N concurrent ~1h stack deploys (which previously exhausted account
-  # quotas). resource_group ensures one integration deploy at a time; a newer
-  # pipeline supersedes an older queued one.
+  # quotas). The resource_group is a size-1 mutex, so scoping it PER-BRANCH
+  # (CI_COMMIT_REF_SLUG) still serializes rapid pushes to the SAME MR (a newer
+  # pipeline supersedes an older queued one via interruptible) while letting
+  # DIFFERENT MRs deploy concurrently. Concurrency is therefore bounded by the
+  # number of active MRs (typically <=5); this is NOT a hard cap of 5. If
+  # concurrent deploys ever exhaust account quotas again, revert to a single
+  # shared group (`resource_group: integration_deploy`).
   interruptible: true
-  resource_group: integration_deploy
+  resource_group: integration_deploy_$CI_COMMIT_REF_SLUG
   variables:
     IDP_ADMIN_EMAIL: ${GITLAB_USER_EMAIL}
   # variables:
@@ -197,13 +229,20 @@ integration_tests:
   # Note: rules are ordered — the non-Draft rule must precede the catch-all MR
   # rule so a Draft MR falls through to the manual rule, not the auto one.
   rules:
+    # Auto-run only when deploy-affecting files changed — a doc/VERSION/CHANGELOG-
+    # only commit skips the ~70-min deploy. (Draft MRs stay a manual button
+    # regardless, so you can always force a run by clicking it.)
     - if: $CI_COMMIT_BRANCH == "develop"
+      changes: *deploy_affecting_changes
       when: on_success
     - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" && $CI_MERGE_REQUEST_TITLE !~ /^Draft:/
+      changes: *deploy_affecting_changes
       when: on_success
     - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"
       # Draft MR → optional manual button; allow_failure so it doesn't block the
-      # pipeline while it sits un-clicked (manual rules block by default).
+      # pipeline while it sits un-clicked (manual rules block by default). No
+      # changes: filter — a manual button you click deliberately should always be
+      # available, even on a doc-only Draft.
       when: manual
       allow_failure: true
     - when: never
@@ -294,6 +333,19 @@ integration_tests:
           else
             echo "⚠️ No deployment summary found - check codebuild_logs.txt for details"
           fi
+          # Pull this run's ZAP DAST report (if the probe ran) into a GitLab
+          # artifact. The probe uploads to deploy/zap/<stack>-<LOG_STREAM_NAME>-*
+          # so filter by the build's log-stream tag. Best effort — absent when
+          # IDP_TEST_ZAP=false or the probe didn't run.
+          aws s3 cp "s3://${SOURCE_BUCKET}/deploy/zap/" ./ --recursive \
+            --exclude "*" --include "*${LOG_STREAM_NAME}-zap-report.html" 2>/dev/null || true
+          ZAP_HTML=$(ls -1 *${LOG_STREAM_NAME}-zap-report.html 2>/dev/null | head -1 || true)
+          if [ -n "$ZAP_HTML" ]; then
+            cp "$ZAP_HTML" zap-report.html
+            echo -e "\033[1;34m🔗 ZAP DAST report: ${CI_JOB_URL}/artifacts/external_file/zap-report.html\033[0m"
+          else
+            echo "ℹ️ No ZAP DAST report for this run (probe skipped or not yet uploaded)"
+          fi
         else
           echo "Could not find CodeBuild execution"
         fi
@@ -307,6 +359,9 @@ integration_tests:
       - pipeline_execution_id.txt
       - codebuild_logs.txt
       - deployment_summary.txt
+      # ZAP DAST HTML report, if the zapdast probe ran (best effort — the
+      # after_script copies it out of S3; absent runs just have no file).
+      - zap-report.html
     expire_in: 1 week
 
 srt_security_review:

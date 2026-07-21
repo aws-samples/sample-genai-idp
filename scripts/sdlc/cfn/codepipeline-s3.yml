@@ -404,10 +404,17 @@ Resources:
                 Resource: 
                   - !Sub 'arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/idp-*'
                   - !Sub 'arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/idp-*/*'
-              # ValidateTemplate doesn't support resource-level permissions
+              # ValidateTemplate and ListStacks don't support resource-level
+              # permissions (list/global ops), so they need Resource '*'.
+              # ListStacks is used by the startup reapers
+              # (cleanup_stale_idp_stacks / _buckets / _apigw_test_vpcs) to find
+              # leaked stacks from interrupted prior runs; without it those
+              # reapers fail with AccessDenied (best-effort, but noisy) and can't
+              # converge leaked resources.
               - Effect: Allow
                 Action:
                   - cloudformation:ValidateTemplate
+                  - cloudformation:ListStacks
                 Resource: '*'
         - PolicyName: LimitedIAMAccess
           PolicyDocument:
@@ -792,6 +799,11 @@ Resources:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_LARGE
         Image: aws/codebuild/standard:7.0
+        # Required so the ZAP DAST probe can `docker run` the official OWASP ZAP
+        # image (ghcr.io/zaproxy/zaproxy) against its own throwaway stack. The
+        # publish/SAM container builds already assume a Docker daemon; this makes
+        # it explicit. See validate_zap_dast in scripts/sdlc/codebuild_deployment.py.
+        PrivilegedMode: true
         EnvironmentVariables:
           - Name: SOURCE_BUCKET
             Value: !Sub '${BucketNamePrefix}-${AWS::AccountId}-${AWS::Region}'

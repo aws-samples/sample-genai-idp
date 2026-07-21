@@ -190,16 +190,60 @@ flowchart TD
 | **Affected Components** | `http_api_dispatcher` (index.py), all resolver Lambdas, `ddb_direct` |
 | **Mitigations** | **Central schema-shape validation in the dispatcher** (`validation.py` + build-time `api_validation_spec.json` generated from `schema.graphql`) rejects unknown args, missing non-null args, wrong scalar types, and bad enum values with HTTP 400 before routing — restoring AppSync's input gate for all operations at once. The validator is conservative (type-only, shallow input-objects) and fails open on its own errors so it can't 500 the API. A drift guard (`generate_api_validation_spec.py --check` + unit test) keeps the spec in sync with the schema. The **input-validation suite in `make api-test`** exercises malformed payloads per op (strict mode asserts a clean 4xx). |
 
+### AUTH.T09: Insecure Direct Object Reference (IDOR / BOLA)
+
+| Attribute | Value |
+|-----------|-------|
+| **Threat ID** | AUTH.T09 |
+| **Category** | STRIDE: Information Disclosure, Elevation of Privilege |
+| **Description** | User-owned resources (chat sessions, agent jobs) are addressed by an id supplied in the request. If a resolver keys the record by the supplied id alone — without also constraining to the caller's own identity — one authenticated user (User B) can read or modify another user's (User A's) data by guessing/replaying the id. This is the "broken object-level authorization" class the RBAC group matrix does NOT catch (both users are the same *role*). |
+| **Attack Vector** | User B calls `getChatMessages`/`deleteChatSession`/`getAgentJobStatus`/`deleteAgentJob` with User A's `sessionId`/`jobId`. |
+| **Impact** | Cross-user disclosure or destruction of chat history / job data within the same deployment. |
+| **Likelihood** | Medium |
+| **Severity** | High |
+| **Affected Components** | `get_agent_chat_messages_resolver`, `delete_agent_chat_session_resolver`, `ddb_direct` agent-job ops, ChatSessions/ChatMessages/Agent tables |
+| **Mitigations** | Ownership is enforced by construction (agent-job ops derive the DynamoDB partition key from the caller identity, so a foreign id resolves under the caller's own empty partition) and by explicit `ownerSub`-vs-caller-`sub` checks in the document-chat message resolver (feature-flagged on by default). The **live IDOR suite in `make api-test`** seeds a session owned by User A and asserts User B is denied/empty for that id while the owner retains access — catching a regression that dropped the ownership check. |
+
+### AUTH.T10: Token Lifecycle — Post-Logout Token Reuse (Stateless JWT)
+
+| Attribute | Value |
+|-----------|-------|
+| **Threat ID** | AUTH.T10 |
+| **Category** | STRIDE: Spoofing, Elevation of Privilege |
+| **Description** | Cognito ID/access tokens are stateless JWTs validated by the API Gateway authorizer against signature + `exp`. A global sign-out (`admin-user-global-sign-out`) revokes **refresh** tokens, but a still-valid **access/ID** token continues to be accepted until it expires unless the API additionally checks token revocation. So a token captured before logout remains usable for the remainder of its lifetime. |
+| **Attack Vector** | An attacker who captured a valid token continues calling `POST /op/{field}` after the user logs out, until the token's `exp`. |
+| **Impact** | Session does not truly end at logout; a leaked token is usable for up to its (short) TTL after sign-out. |
+| **Likelihood** | Low (requires an already-captured token; TTL-bounded) |
+| **Severity** | Medium |
+| **Affected Components** | Cognito User Pool app client, API Gateway Cognito authorizer |
+| **Mitigations** | Keep token TTL short (IDP1 uses 1h ID/access token validity) so the post-logout window is bounded; expired tokens ARE rejected (verified by the token-negative + expiry suites in `make api-test`). The **logout suite in `make api-test`** performs a global sign-out and re-tests the token, surfacing continued acceptance as a documented gap (**GAP-SEC-LOGOUT**, WARN) so the accepted-risk is visible. Full revocation would require an authorizer-side revocation check (Cognito token revocation / a deny-list) — tracked as a follow-up, not yet implemented. |
+
+### AUTH.T11: Weak Transport Security (TLS downgrade / cleartext)
+
+| Attribute | Value |
+|-----------|-------|
+| **Threat ID** | AUTH.T11 |
+| **Category** | STRIDE: Information Disclosure, Tampering |
+| **Description** | If the API endpoint negotiates obsolete TLS (1.0/1.1) or answers over plaintext HTTP, tokens and document data in transit are exposed to downgrade/interception attacks. |
+| **Attack Vector** | A man-in-the-middle forces a TLS 1.0/1.1 handshake or intercepts a cleartext request. |
+| **Impact** | Disclosure/tampering of bearer tokens and document content in transit. |
+| **Likelihood** | Low |
+| **Severity** | Medium |
+| **Affected Components** | API Gateway (execute-api) domain / CloudFront distribution TLS policy |
+| **Mitigations** | API Gateway `execute-api` enforces TLS 1.2+ and does not serve on port 80; CloudFront uses a TLS 1.2+ minimum-protocol security policy. The **TLS suite in `make api-test`** actively attempts TLS 1.0/1.1 handshakes and a plaintext HTTP request against the live endpoint and asserts they are refused while TLS 1.2 succeeds. |
+
 ## 4. Security Controls Summary
 
 | Control | Implementation | Threats Mitigated |
 |---------|---------------|-------------------|
 | **IAM protection** | Restrict Cognito admin API access | AUTH.T01 |
-| **Token management** | Short-lived tokens, secure storage | AUTH.T02, AUTH.T05 |
+| **Token management** | Short-lived tokens, secure storage | AUTH.T02, AUTH.T05, AUTH.T10 |
 | **Resolver auth** | Per-operation `cognito:groups` checks inside every resolver Lambda (the API Gateway authorizer only authenticates) | AUTH.T03, AUTH.T08 |
+| **Object-level authorization** | Owner-scoped keys / `ownerSub`-vs-caller checks on user-owned resources (chat sessions, agent jobs) | AUTH.T09 |
 | **Central input-shape validation** | Dispatcher validates `arguments` against a schema-derived spec (`validation.py`); rejects unknown/missing/wrong-typed args with 400 | AUTH.T12 |
 | **Config-version scope** | `allowedConfigVersions` enforced in scope-aware resolvers; resolver IAM roles granted UsersTable GSI Query | AUTH.T07 |
-| **Automated authorization testing** | `make api-test-static` (static scan of op↔schema↔expectations drift + missing checks) and `make api-test` (live multi-role + scoped-user + token-negative harness with an auditable report); known gaps tracked as WARN so real regressions fail the gate | AUTH.T03, AUTH.T07, AUTH.T08, AUTH.T12 |
+| **Automated authorization testing** | `make api-test-static` (static scan of op↔schema↔expectations drift + missing checks) and `make api-test` (live multi-role + scoped-user + token-negative + **IDOR + token-lifecycle + deleted-resource + input-validation + TLS** suites, with an auditable report); known gaps tracked as WARN so real regressions fail the gate | AUTH.T03, AUTH.T07, AUTH.T08, AUTH.T09, AUTH.T10, AUTH.T11, AUTH.T12 |
+| **Transport security** | API Gateway/CloudFront TLS 1.2+ minimum, no cleartext HTTP | AUTH.T11 |
 | **Cognito config** | No self-signup, strong passwords, email verification | AUTH.T04 |
 | **Defense-in-depth** | `@aws_cognito_user_pools` schema directives in addition to resolver checks | AUTH.T03, AUTH.T08 |
 | **Audit logging** | CloudTrail for Cognito, CloudWatch for API Gateway + resolver Lambdas | All |
