@@ -417,10 +417,11 @@ components/
 Click a COMPLETED test set's name in the table (or select it and click
 **Browse Documents**) to open the test set browser at
 `/test-studio/sets/<test-set-id>`. It shows a paginated table of the set's
-input documents with their size, last-modified time, and ground-truth section
-count. Each row's document name links to a per-document detail page
-(`/test-studio/sets/<id>/doc/<file>`), and per-row **View Source** /
-**Edit Ground Truth** actions deep-link straight to the corresponding view —
+input documents with a first-page thumbnail preview, size, last-modified
+time, and ground-truth section count. Thumbnails are rendered lazily in the
+browser as rows scroll into view (for PDFs only the byte ranges needed for
+page 1 are fetched, so large packets stay cheap). Each document name links
+to a per-document detail page (`/test-studio/sets/<id>/doc/<file>`) —
 mirroring the app's Document List → Document Details structure.
 
 The document detail page offers two views:

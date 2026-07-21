@@ -116,7 +116,8 @@ For details on test set management, see [Test Studio](./test-studio.md).
 
 Once a test set is `COMPLETED`, click its name in the **Test Sets** table (or
 select it and click **Browse Documents**) to open the test set browser at
-`/test-studio/sets/<test-set-id>`. For each document you can:
+`/test-studio/sets/<test-set-id>` — a paginated document list with first-page
+thumbnails. Click a document's name to open its detail page, where you can:
 
 - **View Source Document** — render the original PDF or image inline.
 - **Edit Ground Truth** — a visual editor showing the document's page images
