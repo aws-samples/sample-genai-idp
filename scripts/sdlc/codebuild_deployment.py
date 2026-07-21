@@ -3104,13 +3104,40 @@ def _parse_zap_rule_tally(scan_stdout):
     return tally
 
 
-def _parse_zap_alerts(report_json_path):
+def _zap_ignored_plugin_ids(rules_conf_path):
+    """Plugin ids marked IGNORE in zap-rules.conf (format: '<id>\\t<action>\\t..').
+
+    zap-api-scan's `-c` file only controls the WARN/FAIL/PASS gating tier;
+    purely INFORMATIONAL alerts still land in the JSON report regardless. So the
+    report parser applies the IGNORE list itself, keeping the printed findings
+    consistent with the rules-conf intent (an IGNORE'd id shows nowhere).
+    """
+    ids = set()
+    try:
+        with open(rules_conf_path) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split()
+                if len(parts) >= 2 and parts[1].upper() == "IGNORE":
+                    ids.add(parts[0])
+    except OSError:
+        pass
+    return ids
+
+
+def _parse_zap_alerts(report_json_path, ignore_ids=None):
     """Summarize a ZAP JSON report into {risk: count} + a flat alert list.
 
     ZAP's JSON report nests alerts under site[].alerts[]; each alert has a
     'riskcode' ("0"=Info, "1"=Low, "2"=Medium, "3"=High) and 'riskdesc'.
     Returns (counts_by_risk, alerts) — counts keyed by the human risk label.
+    Alerts whose pluginid is in ignore_ids (from zap-rules.conf IGNORE lines) are
+    dropped from BOTH the counts and the list, so the report matches the
+    rules-conf intent for informational alerts too.
     """
+    ignore_ids = ignore_ids or set()
     with open(report_json_path) as fh:
         report = json.load(fh)
     risk_label = {"0": "Informational", "1": "Low", "2": "Medium", "3": "High"}
@@ -3118,6 +3145,8 @@ def _parse_zap_alerts(report_json_path):
     alerts = []
     for site in report.get("site", []):
         for alert in site.get("alerts", []):
+            if str(alert.get("pluginid", "")) in ignore_ids:
+                continue  # muted in zap-rules.conf (applies to Info alerts too)
             label = risk_label.get(str(alert.get("riskcode", "0")), "Informational")
             counts[label] = counts.get(label, 0) + 1
             instances = alert.get("instances", []) or []
@@ -3323,7 +3352,9 @@ def validate_zap_dast(stack_name):
             )
             print(f"⏭️  {msg}")
             return {"success": True, "skipped": True, "detail": msg}
-        counts, alerts = _parse_zap_alerts(report_json)
+        counts, alerts = _parse_zap_alerts(
+            report_json, ignore_ids=_zap_ignored_plugin_ids(ZAP_RULES_CONF)
+        )
         report_url = _upload_zap_report(stack_name, workdir)
 
         summary = (
