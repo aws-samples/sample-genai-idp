@@ -353,15 +353,17 @@ endif
 	$(PYTHON) scripts/test_api_rbac.py \
 	    --stack-name $(STACK_NAME) \
 	    $(if $(REGION),--region $(REGION),) \
-	    --report-dir $(if $(REPORT_DIR),$(REPORT_DIR),./api-test-results) \
+	    --report-dir $(if $(REPORT_DIR),$(REPORT_DIR),./scratch/api-test-results) \
 	    $(if $(NO_TEARDOWN),--no-teardown,)
-	@echo -e "$(GREEN)✅ API RBAC report written to $(if $(REPORT_DIR),$(REPORT_DIR),./api-test-results)$(NC)"
+	@echo -e "$(GREEN)✅ API RBAC report written to $(if $(REPORT_DIR),$(REPORT_DIR),./scratch/api-test-results)$(NC)"
 
 # Alias so the RBAC test shows up under the consistent stacktest-* name too.
 stacktest-rbac: api-test ## RBAC/API authorization test (alias: api-test) — needs STACK_NAME
 
+# Reports default under ./scratch (gitignored) so a manual run never litters the
+# working tree; override the location with REPORT_DIR=.
 stacktest-zap: ## ZAP DAST scan (STACK_NAME=... [REPORT_DIR=./dir] or self-deploy w/ TEMPLATE_URL=...)
-	$(if $(REPORT_DIR),IDP_ZAP_REPORT_DIR=$(REPORT_DIR)) $(PYTHON) scripts/sdlc/run_stacktest.py zapdast $(_STACKTEST_ARGS)
+	IDP_ZAP_REPORT_DIR=$(if $(REPORT_DIR),$(REPORT_DIR),./scratch/zap-reports) $(PYTHON) scripts/sdlc/run_stacktest.py zapdast $(_STACKTEST_ARGS)
 
 stacktest-hosting-global: ## APIGateway GLOBAL hosting variant
 	$(PYTHON) scripts/sdlc/run_stacktest.py apigw $(_STACKTEST_ARGS)
