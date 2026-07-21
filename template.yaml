@@ -3476,9 +3476,14 @@ Resources:
               - "x-amz-date"
               - "Authorization"
               - "x-amz-security-token"
+            # GET / HEAD are required so the Web UI's test set browser can
+            # fetch source documents and baseline (ground truth) result.json
+            # directly from S3 via presigned URLs.
             AllowedMethods:
               - PUT
               - POST
+              - GET
+              - HEAD
             AllowedOrigins:
               - !If
                 - UseCloudFrontHosting

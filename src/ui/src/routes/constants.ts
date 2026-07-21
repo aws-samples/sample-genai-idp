@@ -24,6 +24,16 @@ export const CAPACITY_PLANNING_PATH = `${DOCUMENTS_PATH}/capacity-planning`;
 export const TEST_SET_DETAIL_PATH = `${TEST_STUDIO_PATH}/sets`;
 /** Hash-link helper: href for a test set's document browser. */
 export const testSetDetailHref = (testSetId: string): string => `#${TEST_SET_DETAIL_PATH}/${encodeURIComponent(testSetId)}`;
+/**
+ * Hash-link helper: href for one test set document's detail page
+ * (/test-studio/sets/:testSetId/doc/<objectKey>, objectKey may contain slashes).
+ * Optional view preselects the source-document or ground-truth view.
+ */
+export const testSetDocumentHref = (testSetId: string, objectKey: string, view?: 'source' | 'ground-truth'): string =>
+  `#${TEST_SET_DETAIL_PATH}/${encodeURIComponent(testSetId)}/doc/${objectKey
+    .split('/')
+    .map(encodeURIComponent)
+    .join('/')}${view ? `?view=${view}` : ''}`;
 export const CUSTOM_MODELS_PATH = `${DOCUMENTS_PATH}/custom-models`;
 
 // --- Feature Platform ---

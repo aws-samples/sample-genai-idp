@@ -706,12 +706,18 @@ def get_test_set_documents(args):
     test_set_id = args['testSetId']
     limit = args.get('limit') or 100
     next_token = args.get('nextToken')
+    # Optional exact-match filter: return just this document (used by the UI's
+    # document detail page when deep-linked, so it doesn't page through the
+    # whole set to find one doc).
+    object_key = args.get('objectKey')
 
     # The id is derived from a validated name (validate_test_set_name), so it
     # must match the same charset (with '-' for spaces). Rejects '/' and '..'
     # so it can't traverse outside the test set's S3 prefix.
     if not validate_test_set_name(test_set_id):
         raise Exception("Invalid test set id")
+    if object_key and '..' in object_key:
+        raise Exception("Invalid object key")
     limit = max(1, min(int(limit), 1000))
 
     item = db_client.get_item({
@@ -726,7 +732,9 @@ def get_test_set_documents(args):
 
     list_kwargs = {
         'Bucket': test_set_bucket,
-        'Prefix': input_prefix,
+        # Exact-name prefix narrows the listing to (at most) the one document;
+        # the objectKey equality check below drops same-prefix siblings.
+        'Prefix': f"{input_prefix}{object_key}" if object_key else input_prefix,
         'MaxKeys': limit,
     }
     if next_token:
@@ -739,6 +747,8 @@ def get_test_set_documents(args):
         if key.endswith('/'):
             continue  # skip folder placeholder objects
         relative_name = key[len(input_prefix):]
+        if object_key and relative_name != object_key:
+            continue
         documents.append({
             'objectKey': relative_name,
             'inputKey': key,

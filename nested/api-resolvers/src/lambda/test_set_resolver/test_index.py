@@ -155,6 +155,38 @@ def test_pagination_round_trip(resolver):
 
 
 @pytest.mark.unit
+def test_object_key_filter_returns_single_document(resolver):
+    index, s3 = resolver
+    _seed_document(s3, "doc-a.pdf", sections=(1, 2))
+    _seed_document(s3, "doc-a.pdf.bak")  # same-prefix sibling must be excluded
+    _seed_document(s3, "doc-b.pdf")
+
+    result = index.handler(
+        _event(
+            "getTestSetDocuments",
+            {"testSetId": TEST_SET_ID, "objectKey": "doc-a.pdf"},
+        ),
+        None,
+    )
+    (doc,) = result["documents"]
+    assert doc["objectKey"] == "doc-a.pdf"
+    assert [s["sectionId"] for s in doc["sections"]] == ["1", "2"]
+
+
+@pytest.mark.unit
+def test_object_key_traversal_rejected(resolver):
+    index, _ = resolver
+    with pytest.raises(Exception, match="Invalid object key"):
+        index.handler(
+            _event(
+                "getTestSetDocuments",
+                {"testSetId": TEST_SET_ID, "objectKey": "../other/secret.pdf"},
+            ),
+            None,
+        )
+
+
+@pytest.mark.unit
 def test_missing_baseline_yields_empty_sections(resolver):
     index, s3 = resolver
     s3.put_object(
