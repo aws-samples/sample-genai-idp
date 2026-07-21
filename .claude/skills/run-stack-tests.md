@@ -56,6 +56,7 @@ outcome, not just the findings:
     • [Medium] Cross-Domain Misconfiguration — 5 instance(s)
         https://.../op/abortWorkflow
         ↳ fix: <ZAP remediation hint>
+  Report:      /path/to/zap-report.html   (+ .json)
 ```
 
 - **`Rules:`** is the full tally from `zap-api-scan` — `PASS` shows how much was
@@ -63,6 +64,12 @@ outcome, not just the findings:
   are the actionable ones, `IGNORE` are rules muted in `scripts/sdlc/zap-rules.conf`.
 - **`Findings`** lists every alert (all severities) with sample affected URLs and
   ZAP's remediation hint — actionable without opening the HTML report.
+- **`Report:`** is the full HTML/JSON/MD report on disk. By default it stays in
+  the scan workdir (`/tmp/zap-XXXX`, not deleted); pass `REPORT_DIR=./zap-reports`
+  to copy it somewhere stable, e.g.
+  `make stacktest-zap STACK_NAME=… REGION=… REPORT_DIR=./zap-reports`, then open
+  `zap-reports/zap-report.html` in a browser for the full findings view. In CI
+  (SOURCE_BUCKET set) the report is also uploaded to S3 and shown as `Report (S3):`.
 - The probe is **WARN-only**: it PASSES even with findings (0 High/FAIL is the
   expected clean state). To gate on findings, promote a rule WARN→FAIL in
   `zap-rules.conf` and flip the `# TODO promote` gate in `validate_zap_dast`.

@@ -172,6 +172,70 @@ def test_parse_zap_alerts_empty_report(cbd, tmp_path):
     assert alerts == []
 
 
+def test_parse_zap_alerts_drops_ignored_plugin_ids(cbd, tmp_path):
+    # Informational alerts still appear in the JSON even when IGNORE'd in
+    # zap-rules.conf (the -c file only gates WARN/FAIL/PASS). The parser must
+    # apply the IGNORE list so the report matches intent.
+    report = {
+        "site": [
+            {
+                "alerts": [
+                    {"alert": "CSP", "riskcode": "2", "pluginid": "10038", "count": 1},
+                    {
+                        "alert": "Non-Storable Content",
+                        "riskcode": "0",
+                        "pluginid": "10049",
+                        "count": 5,
+                    },
+                    {
+                        "alert": "Client Error",
+                        "riskcode": "0",
+                        "pluginid": "100000",
+                        "count": 72,
+                    },
+                ]
+            }
+        ]
+    }
+    path = tmp_path / "zap-report.json"
+    path.write_text(json.dumps(report))
+    counts, alerts = cbd._parse_zap_alerts(str(path), ignore_ids={"10049", "100000"})
+    # The two IGNORE'd info alerts are gone from both counts and the list.
+    assert counts["Informational"] == 0
+    assert counts["Medium"] == 1
+    assert [a["name"] for a in alerts] == ["CSP"]
+
+
+def test_zap_ignored_plugin_ids_reads_rules_conf(cbd):
+    # Reads the real repo zap-rules.conf; must include the ids we IGNORE.
+    ids = cbd._zap_ignored_plugin_ids(cbd.ZAP_RULES_CONF)
+    assert {"10049", "100000", "10096"} <= ids
+
+
+def test_persist_zap_report_copies_to_report_dir(cbd, tmp_path, monkeypatch):
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    (workdir / "zap-report.html").write_text("<html>")
+    (workdir / "zap-report.json").write_text("{}")
+    dest = tmp_path / "out"
+    monkeypatch.setenv("IDP_ZAP_REPORT_DIR", str(dest))
+    out = cbd._persist_zap_report(str(workdir))
+    assert out["zap-report.html"] == str((dest / "zap-report.html").resolve())
+    assert (dest / "zap-report.html").exists()
+    assert (dest / "zap-report.json").exists()
+
+
+def test_persist_zap_report_falls_back_to_workdir(cbd, tmp_path, monkeypatch):
+    # No IDP_ZAP_REPORT_DIR → returns the workdir paths (not deleted) so the
+    # report can still be pointed at.
+    monkeypatch.delenv("IDP_ZAP_REPORT_DIR", raising=False)
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    (workdir / "zap-report.html").write_text("<html>")
+    out = cbd._persist_zap_report(str(workdir))
+    assert out["zap-report.html"] == str((workdir / "zap-report.html").resolve())
+
+
 def test_parse_zap_rule_tally_reads_summary_line(cbd):
     # The report should surface EVERY rule outcome (114 PASS is as meaningful as
     # the 3 WARN), parsed from zap-api-scan's stdout tally line.
