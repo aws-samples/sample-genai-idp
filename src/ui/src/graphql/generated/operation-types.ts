@@ -126,6 +126,7 @@ export type CatalogFeature = {
   latestVersion: Scalars['String']['output'];
   marketplaceListingUrl?: Maybe<Scalars['String']['output']>;
   productCode?: Maybe<Scalars['String']['output']>;
+  showInNav?: Maybe<Scalars['Boolean']['output']>;
   source?: Maybe<Scalars['String']['output']>;
 };
 

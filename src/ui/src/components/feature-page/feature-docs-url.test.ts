@@ -13,6 +13,7 @@ const base = (over: Partial<CatalogFeature>): CatalogFeature => ({
   iconUrl: null,
   description: null,
   docsUrl: null,
+  showInNav: true,
   source: 'oss',
   productCode: null,
   marketplaceListingUrl: null,

@@ -84,6 +84,7 @@ def test_lists_features_sorted_by_display_name(
         "iconUrl": "https://example.com/a.png",
         "description": None,
         "docsUrl": None,
+        "showInNav": True,
         "source": "oss",
         "productCode": None,
         "marketplaceListingUrl": None,
@@ -145,6 +146,33 @@ def test_falls_back_to_feature_id_and_defaults_source_oss(
     assert result[0]["displayName"] == "widgetz"
     assert result[0]["source"] == "oss"
     assert result[0]["latestVersion"] == ""
+
+
+def test_show_in_nav_false_is_surfaced_and_absent_defaults_true(
+    monkeypatch, configuration_bucket, load_lambda
+):
+    _put_catalog(
+        configuration_bucket,
+        [
+            {
+                "featureId": "hidden-sample",
+                "displayName": "Hidden Sample",
+                "latestVersion": "0.1.0",
+                "showInNav": False,
+            },
+            {
+                "featureId": "visible-feature",
+                "displayName": "Visible Feature",
+                "latestVersion": "1.0.0",
+                # showInNav absent → True
+            },
+        ],
+    )
+    mod = _preload(monkeypatch, load_lambda, configuration_bucket=configuration_bucket)
+    result = mod.handler(make_appsync_event("listCatalogFeatures"), None)
+    by_id = {f["featureId"]: f for f in result}
+    assert by_id["hidden-sample"]["showInNav"] is False
+    assert by_id["visible-feature"]["showInNav"] is True
 
 
 def test_malformed_catalog_does_not_crash(
