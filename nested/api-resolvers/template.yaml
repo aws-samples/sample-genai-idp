@@ -1355,6 +1355,9 @@ Resources:
           CONFIGURATION_BUCKET: !Ref ConfigurationBucketName
           EVALUATION_BASELINE_BUCKET: !Ref EvaluationBaselineBucketName
           REPORTING_BUCKET: !Ref ReportingBucketName
+          # Test Studio's test set browser reads source docs + ground truth
+          # (baseline result.json) from the TestSetBucket via this resolver.
+          TEST_SET_BUCKET: !Ref TestSetBucketName
       LoggingConfig:
         LogGroup: !Ref GetFileContentsResolverFunctionLogGroup
       Policies:
@@ -1370,6 +1373,8 @@ Resources:
             BucketName: !Ref ConfigurationBucketName
         - S3ReadPolicy:
             BucketName: !Ref OutputBucketName
+        - S3ReadPolicy:
+            BucketName: !Ref TestSetBucketName
         # Read specific object versions (document version history: fetch the
         # exact bytes of a prior run's file via its S3 VersionId).
         - Statement:
@@ -2425,6 +2430,10 @@ Resources:
               - ShouldCreateEvaluationBaselineBucket
               - !Ref EvaluationBaselineBucketName
               - !Ref EvaluationBaselineBucketName
+        # Test Studio's ground-truth editor saves edited baseline result.json
+        # back to the TestSetBucket via uploadDocument's presigned POST.
+        - S3WritePolicy:
+            BucketName: !Ref TestSetBucketName
         - Statement:
             - Effect: Allow
               Action:
