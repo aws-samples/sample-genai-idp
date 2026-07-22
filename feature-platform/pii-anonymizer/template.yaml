@@ -1,34 +1,29 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  sample-health-insurance-review v<FEATURE_VERSION_TOKEN> — advanced sample of the IDP
-  Accelerator Feature Platform contract. Healthcare claims review vertical:
-  ships a prior-auth config preset (applied at install as a non-active config
-  version), a postRuleValidation pipeline hook deriving a deterministic claim
-  status, and a two-tab UI (Rules Discovery + Claims Dashboard).
+  pii-anonymizer v<FEATURE_VERSION_TOKEN> — PII Anonymization extension for the
+  IDP Accelerator. Adds a `preprocessing` pipeline hook that detects and redacts
+  PII from source documents BEFORE the classification/extraction models see them,
+  writing a de-identified copy that is re-processed under a companion config
+  version. Reuses the vendored AWS Labs pii-anonymizer document closure
+  (Apache-2.0). Ships a minimal preprocessing config preset and a two-tab UI
+  (Config Pairing wizard + Redaction Report).
 
 Parameters:
 
   MainStackName:
     Type: String
 
-  # NOTE: There is intentionally no FeatureVersion parameter. The version is
-  # baked into this template at publish time by `idp-feature-cli publish`,
-  # which substitutes the literal string `<FEATURE_VERSION_TOKEN>` (see below)
-  # with the value from feature.yaml -> version. Why bake it in instead of
-  # using a CFN Parameter? CloudFormation Console's "Update stack" wizard
-  # ignores `param_*` query-string overrides — admins clicking "Update" from
-  # the IDP nav would otherwise stay on the old version. By making the new
-  # template literally contain the new version string, CFN sees a real
-  # template change and the update applies cleanly without UI gymnastics.
+  # Version is baked in at publish time (see sample-health-insurance-review
+  # template for the rationale — CFN Console "Update" drops param overrides).
 
   FeatureId:
     Type: String
-    Default: sample-health-insurance-review
+    Default: pii-anonymizer
 
   FeatureDisplayName:
     Type: String
-    Default: "Sample: Health Insurance Review"
+    Default: "PII Anonymization"
 
   FeatureBucket:
     Type: String
@@ -36,18 +31,17 @@ Parameters:
       for OSS). The ui-deployer copies the UI bundle and config preset from here.
       Pre-filled by the host's getFeatureLaunchUrl.
 
-  # NOTE: the version-free artifact base (<prefix>/extensions/<id>) is NOT a CFN
-  # parameter. Like FEATURE_VERSION, it is baked into this template at publish
-  # time (the publisher substitutes <FEATURE_ARTIFACT_PREFIX_TOKEN>). A CFN
-  # parameter would be dropped/blanked by the console "Update stack" wizard on a
-  # template change, which produced an empty prefix and a `//<version>/` bad S3
-  # key. The ui-deployer reads <baked-prefix>/<FEATURE_VERSION>/...; both halves
-  # are template literals, so a stack Update can never carry a stale value.
-
   LogLevel:
     Type: String
     Default: INFO
     AllowedValues: [DEBUG, INFO, WARNING, ERROR]
+
+  RedactedPrefix:
+    Type: String
+    Default: "_pii_redacted/"
+    Description: Reserved key prefix under the Input bucket for redacted copies.
+      The hook refuses to run on any object under this prefix (infinite-loop
+      guard). Must end with a slash.
 
   PermissionsBoundaryArn:
     Type: String
@@ -58,7 +52,6 @@ Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, '']]
 
 Globals:
-
   Function:
     Runtime: python3.12
     Timeout: 60
@@ -69,30 +62,49 @@ Globals:
 Resources:
 
   ###########################################################################
-  # ClaimsStatus table — OWNED by this feature. Populated by the
-  # postRuleValidation hook; read by the feature API. One row per document,
-  # GSI ByStatus for the dashboard's status filter.
+  # Lambda layer — vendored pii-anonymizer document closure dependencies
+  # (pypdf, pypdfium2, pillow, python-docx, openpyxl, faker, defusedxml,
+  # PyYAML). Built by SAM from hook/requirements.txt.
   ###########################################################################
-  ClaimsStatusTable:
+  PiiDepsLayer:
+    Type: AWS::Serverless::LayerVersion
+    Metadata:
+      BuildMethod: python3.12
+      BuildArchitecture: arm64
+    Properties:
+      LayerName: !Sub '${MainStackName}-pii-anonymizer-deps'
+      Description: Vendored pii-anonymizer document-closure dependencies.
+      ContentUri: hook/
+      CompatibleRuntimes: [python3.12]
+      CompatibleArchitectures: [arm64]
+      RetentionPolicy: Delete
+
+  ###########################################################################
+  # Redaction audit table — OWNED by this feature. One row per redacted
+  # document (metadata only, NO PII): pii_count, mode, redacted key, companion
+  # version. Populated by the hook; read by the feature API for the Redaction
+  # Report tab. GSI ByCreatedAt for the report list.
+  ###########################################################################
+  RedactionAuditTable:
     Type: AWS::DynamoDB::Table
     Properties:
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: documentId
           AttributeType: S
-        - AttributeName: status
+        - AttributeName: gsiPk
           AttributeType: S
-        - AttributeName: updatedAt
+        - AttributeName: createdAt
           AttributeType: S
       KeySchema:
         - AttributeName: documentId
           KeyType: HASH
       GlobalSecondaryIndexes:
-        - IndexName: ByStatus
+        - IndexName: ByCreatedAt
           KeySchema:
-            - AttributeName: status
+            - AttributeName: gsiPk
               KeyType: HASH
-            - AttributeName: updatedAt
+            - AttributeName: createdAt
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
@@ -105,91 +117,103 @@ Resources:
           Value: !Ref FeatureId
 
   ###########################################################################
-  # Pipeline hook: invoked by the host's pipeline-hooks dispatcher at
-  # postRuleValidation. The dispatcher's IAM policy only allows invoking
-  # Lambdas tagged `idp:feature-id` — the Tags below are REQUIRED, not
-  # decorative. Registered with the host by the ui-deployer custom resource
-  # (registerFeatureHooks mutation).
+  # Preprocessing hook — invoked FIRST by the host's pipeline-hooks dispatcher
+  # (before BDA/pipeline routing). The dispatcher only invokes Lambdas tagged
+  # `idp:feature-id` — the Tags below are REQUIRED. Heavy timeout/memory:
+  # vision/LLM detection over a multi-page document is expensive.
   ###########################################################################
-  ClaimStatusHookFunction:
+  PiiAnonymizerHookFunction:
     Type: AWS::Serverless::Function
     Properties:
-      # SAM auto-generates this function's execution role. Set the boundary on
-      # the function so it flows onto that generated role — otherwise install
-      # fails in accounts whose SCP requires a boundary on every IAM role.
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref 'AWS::NoValue']
       CodeUri: hook/
       Handler: handler.lambda_handler
+      Timeout: 900
+      MemorySize: 3008
+      Layers:
+        - !Ref PiiDepsLayer
       Tags:
         'idp:feature-id': !Ref FeatureId
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
-          CLAIMS_TABLE_NAME: !Ref ClaimsStatusTable
-          # Hook payloads carry the document as a compressed reference into
-          # the host's Working bucket (Document.serialize_document); the
-          # consolidated rule-validation summary lives in the Output bucket.
+          REDACTED_PREFIX: !Ref RedactedPrefix
+          AUDIT_TABLE_NAME: !Ref RedactionAuditTable
+          INPUT_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-InputBucketName' }
           WORKING_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
-          OUTPUT_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
+          CONFIGURATION_TABLE_NAME: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }
       Policies:
         - Statement:
+            # Read the config version's preprocessing block.
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableArn' }
+            # Record the redaction audit row (metadata only).
             - Effect: Allow
               Action: dynamodb:PutItem
-              Resource: !GetAtt ClaimsStatusTable.Arn
-            # Compressed document state (Working) + consolidated summary
-            # (Output). GetObject only — never list.
+              Resource: !GetAtt RedactionAuditTable.Arn
+            # Read the source document from Input; read compressed document
+            # state + write the redaction scratch output in Working.
             - Effect: Allow
               Action: s3:GetObject
               Resource:
                 - !Sub
                   - 'arn:${AWS::Partition}:s3:::${Bucket}/*'
-                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
+                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-InputBucketName' }
                 - !Sub
                   - 'arn:${AWS::Partition}:s3:::${Bucket}/*'
-                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
-            # Both buckets are encrypted with the main stack's customer-managed
-            # KMS key; S3 transparently requires kms:Decrypt for every read.
+                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+              Resource: !Sub
+                - 'arn:${AWS::Partition}:s3:::${Bucket}/pii_scratch/*'
+                - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
+            # Write the redacted copy ONLY under the reserved prefix in Input.
+            - Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub
+                - 'arn:${AWS::Partition}:s3:::${Bucket}/${RedactedPrefix}*'
+                - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-InputBucketName' }
+                  RedactedPrefix: !Ref RedactedPrefix
+            # Bedrock Converse for PII detection + synthetic generation.
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:bedrock:*::foundation-model/*'
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*'
+                - !Sub 'arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*'
+            # Textract for the scanned/image redaction path.
+            - Effect: Allow
+              Action:
+                - textract:DetectDocumentText
+                - textract:AnalyzeDocument
+              Resource: '*'
+            # Both buckets + config table are encrypted with the main stack's
+            # customer-managed KMS key; S3/DDB require kms:Decrypt (and Encrypt
+            # for the PutObject) transparently.
             - Effect: Allow
               Action:
                 - kms:Decrypt
+                - kms:GenerateDataKey
                 - kms:DescribeKey
               Resource:
                 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn'
 
   ###########################################################################
-  # Feature API: HttpApi + Lambda, authorised by main stack's Cognito User Pool.
+  # Feature API: HttpApi + Lambda, authorized by main stack's Cognito User
+  # Pool. Serves the Redaction Report tab (reads the audit table).
   ###########################################################################
   FeatureApi:
     Type: AWS::Serverless::HttpApi
     Properties:
-      # CORS is served by API Gateway's built-in preflight handler. Without
-      # this block, OPTIONS preflight requests hit the default JWT authorizer,
-      # which rejects them (no Authorization header on preflight) and the
-      # browser shows "Failed to fetch" before it can ever send the GET.
-      # API Gateway HTTP APIs handle OPTIONS entirely inside the gateway when
-      # CorsConfiguration is set — preflight never reaches the authorizer or
-      # the backend Lambda.
-      #
-      # AllowOrigins='*' is safe here because the API uses Bearer JWT
-      # authentication (Authorization header), NOT cookies. The browser's
-      # same-origin policy only restricts credentialed requests; with
-      # AllowCredentials unset (default false), wildcard origin is fine and
-      # CORS-compliant. Switching to a specific origin would require the host
-      # to export its CloudFront domain name, which it currently does not.
       CorsConfiguration:
-        AllowOrigins:
-          - '*'
-        AllowMethods:
-          - GET
-          - POST
-          - PUT
-          - DELETE
-          - OPTIONS
-        AllowHeaders:
-          - authorization
-          - content-type
-          - x-amz-date
-          - x-amz-security-token
+        AllowOrigins: ['*']
+        AllowMethods: [GET, POST, OPTIONS]
+        AllowHeaders: [authorization, content-type, x-amz-date, x-amz-security-token]
         MaxAge: 600
       Auth:
         DefaultAuthorizer: CognitoJwt
@@ -208,9 +232,6 @@ Resources:
   FeatureApiFunction:
     Type: AWS::Serverless::Function
     Properties:
-      # SAM auto-generates this function's execution role. Set the boundary on
-      # the function so it flows onto that generated role — otherwise install
-      # fails in accounts whose SCP requires a boundary on every IAM role.
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref 'AWS::NoValue']
       CodeUri: feature-api/
       Handler: handler.lambda_handler
@@ -218,10 +239,7 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           MAIN_STACK_NAME: !Ref MainStackName
-          CLAIMS_TABLE_NAME: !Ref ClaimsStatusTable
-          # Surfaced to the feature UI via GET /config so it can pass the
-          # correct bucket to the host's uploadDiscoveryDocument mutation.
-          DISCOVERY_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-DiscoveryBucketName' }
+          AUDIT_TABLE_NAME: !Ref RedactionAuditTable
       Policies:
         - Statement:
             - Effect: Allow
@@ -230,31 +248,9 @@ Resources:
                 - dynamodb:Query
                 - dynamodb:Scan
               Resource:
-                - !GetAtt ClaimsStatusTable.Arn
-                - !Sub '${ClaimsStatusTable.Arn}/index/*'
-            # Claim detail merges the consolidated rule-validation summary
-            # (JSON + markdown) from the host's Output bucket.
-            - Effect: Allow
-              Action: s3:GetObject
-              Resource: !Sub
-                - 'arn:${AWS::Partition}:s3:::${Bucket}/*'
-                - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
-            # The Output bucket is encrypted with the main stack's customer-
-            # managed KMS key; S3 transparently requires kms:Decrypt on reads.
-            - Effect: Allow
-              Action:
-                - kms:Decrypt
-                - kms:DescribeKey
-              Resource:
-                'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn'
+                - !GetAtt RedactionAuditTable.Arn
+                - !Sub '${RedactionAuditTable.Arn}/index/*'
       Events:
-        # NOTE: Method must NOT be ANY. When the route is `ANY /{proxy+}`, it
-        # matches OPTIONS too, so API Gateway's built-in CORS preflight
-        # handler (enabled via CorsConfiguration above) is bypassed — the
-        # OPTIONS preflight ends up at the JWT authorizer, which rejects it
-        # with 401 and the browser reports "Failed to fetch". Listing only the
-        # methods the handler actually serves lets the gateway answer OPTIONS
-        # itself with a 204 + CORS headers before any auth check runs.
         Root:
           Type: HttpApi
           Properties:
@@ -263,18 +259,18 @@ Resources:
             Method: GET
 
   ###########################################################################
-  # CloudWatch Log Groups — explicit retention to avoid never-expire default
+  # CloudWatch Log Groups — explicit retention.
   ###########################################################################
+  PiiAnonymizerHookFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${PiiAnonymizerHookFunction}'
+      RetentionInDays: 30
+
   FeatureApiFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/aws/lambda/${FeatureApiFunction}'
-      RetentionInDays: 30
-
-  ClaimStatusHookFunctionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub '/aws/lambda/${ClaimStatusHookFunction}'
       RetentionInDays: 30
 
   UiDeployerFunctionLogGroup:
@@ -285,7 +281,8 @@ Resources:
 
   ###########################################################################
   # UI deployer: copies the UMD bundle, registers the feature, and applies the
-  # bundled config preset by directly invoking the host's resolver Lambdas.
+  # bundled preprocessing config preset (injecting this feature's preprocessing
+  # hook into the preset's preprocessing.preHook).
   ###########################################################################
   UiDeployerRole:
     Type: AWS::IAM::Role
@@ -307,12 +304,6 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              # GetObject only — the FeatureBucket (the host's artifacts bucket
-              # for OSS) is GetObject-only by contract; we never list it. Scoped
-              # to this extension's version-free base (baked at publish time);
-              # the ui-deployer reads <version>/ui-bundle.js and
-              # <version>/config-preset/claims-config.yaml under it (a missing
-              # key surfaces as NoSuchKey, which the handler logs).
               - Effect: Allow
                 Action: s3:GetObject
                 Resource: !Sub 'arn:${AWS::Partition}:s3:::${FeatureBucket}/<FEATURE_ARTIFACT_PREFIX_TOKEN>/*'
@@ -332,12 +323,6 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              # Direct Lambda invoke of the host's resolver functions (the
-              # AppSync transport was removed). The ui-deployer invokes each with
-              # the resolver event shape {info, arguments, identity}:
-              #   RegisterFeatureFunction        -> registerFeature / unregisterFeature
-              #   RegisterFeatureHooksFunction   -> unregisterFeatureHooks (delete-time cleanup)
-              #   ApplyFeatureConfigPresetFunction -> applyFeatureConfigPreset / removeFeatureConfigPreset
               - Effect: Allow
                 Action: lambda:InvokeFunction
                 Resource:
@@ -355,41 +340,32 @@ Resources:
         Variables:
           FEATURE_ID: !Ref FeatureId
           FEATURE_DISPLAY_NAME: !Ref FeatureDisplayName
-          # Version is substituted at publish time — see top-of-file note
-          # on why this is not a CFN parameter.
           FEATURE_VERSION: '<FEATURE_VERSION_TOKEN>'
           MAIN_STACK_NAME: !Ref MainStackName
           WEBUI_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WebUIBucketName' }
           FEATURE_BUCKET: !Ref FeatureBucket
-          # Baked at publish time (see top-of-file note) — NOT a CFN param.
           FEATURE_ARTIFACT_PREFIX: '<FEATURE_ARTIFACT_PREFIX_TOKEN>'
           REGISTER_FEATURE_FUNCTION_ARN: { 'Fn::ImportValue': !Sub '${MainStackName}-RegisterFeatureFunctionArn' }
           REGISTER_FEATURE_HOOKS_FUNCTION_ARN: { 'Fn::ImportValue': !Sub '${MainStackName}-RegisterFeatureHooksFunctionArn' }
           APPLY_FEATURE_CONFIG_PRESET_FUNCTION_ARN: { 'Fn::ImportValue': !Sub '${MainStackName}-ApplyFeatureConfigPresetFunctionArn' }
           FEATURE_API_ENDPOINT: !GetAtt FeatureApi.ApiEndpoint
-          HOOK_FUNCTION_ARN: !GetAtt ClaimStatusHookFunction.Arn
-          # Relative key of the preset under <FeatureArtifactPrefix>/<version>/;
-          # must match feature.yaml -> configPreset.path.
-          CONFIG_PRESET_RELATIVE_KEY: config-preset/claims-config.yaml
+          HOOK_FUNCTION_ARN: !GetAtt PiiAnonymizerHookFunction.Arn
+          CONFIG_PRESET_RELATIVE_KEY: config-preset/pii-preprocessing.yaml
           LOG_LEVEL: !Ref LogLevel
 
   RegisterFeatureResource:
     Type: AWS::CloudFormation::CustomResource
     Properties:
       ServiceToken: !GetAtt UiDeployerFunction.Arn
-      # FeatureVersion changes between releases — including it as a property
-      # on the custom resource ensures CFN re-runs the resource on update
-      # (custom resources are only re-invoked when at least one property
-      # changes). Substituted at publish time.
       FeatureVersion: '<FEATURE_VERSION_TOKEN>'
       FeatureDisplayName: !Ref FeatureDisplayName
 
 Outputs:
   FeatureApiEndpoint:
     Value: !GetAtt FeatureApi.ApiEndpoint
-  ClaimsStatusTableName:
-    Value: !Ref ClaimsStatusTable
-  ClaimStatusHookFunctionArn:
-    Value: !GetAtt ClaimStatusHookFunction.Arn
+  RedactionAuditTableName:
+    Value: !Ref RedactionAuditTable
+  PiiAnonymizerHookFunctionArn:
+    Value: !GetAtt PiiAnonymizerHookFunction.Arn
   InstalledVersion:
     Value: '<FEATURE_VERSION_TOKEN>'

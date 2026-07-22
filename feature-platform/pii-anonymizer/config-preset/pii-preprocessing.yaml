@@ -1,0 +1,53 @@
+# PII Anonymization — minimal quick-start config preset.
+#
+# Installed by the ui-deployer as a NON-ACTIVE config version
+# `pii-anonymizer-v<version>`. It carries ONLY the `preprocessing` section; the
+# ui-deployer injects this feature's preprocessing hook into
+# `preprocessing.preHook` at install time (the hook ARN isn't known until the
+# feature stack deploys).
+#
+# This standalone preset is a reference/quick-start. The PRIMARY path is the
+# feature UI's Config Pairing wizard, which clones an admin's EXISTING working
+# config version into a matched pair:
+#   <base>__pii_redacted   (initiating; has this preprocessing block + hook)
+#   <base>__standard       (companion; same as base, NO preprocessing hook)
+# so redaction layers on top of the customer's real extraction settings rather
+# than forking a whole config.
+#
+# NOTE: activating THIS preset alone only makes sense if `default` (the
+# companion) is a viable processing config — the redacted copy is stamped with
+# `companion_config_version` and re-submitted under that version.
+
+preprocessing:
+  # Master switch. Set false to disable redaction without removing the hook.
+  enabled: true
+
+  # Mode:
+  #   redacted_only          -> process ONLY the de-identified copy; the
+  #                             original is marked REDACTED_SUPERSEDED and not
+  #                             processed further (hook returns halt=true).
+  #   redacted_and_unredacted-> process the original AND the redacted copy as
+  #                             separate documents (hook returns halt=false).
+  mode: redacted_only
+
+  # The config version the redacted copy is processed under. It must NOT carry
+  # a preprocessing hook (else the copy would be redacted again — the hook's
+  # reserved-prefix guard still blocks the loop, but a clean companion avoids
+  # the wasted invocation). The wizard sets this to "<base>__standard".
+  companion_config_version: default
+
+  # Detection/redaction model. Nova Lite is the cost-sensitive default for the
+  # per-page detection pass (see docs). Any Bedrock text/vision model works.
+  model:
+    id: us.amazon.nova-lite-v1:0
+    provider: amazon
+
+  redaction:
+    # synthetic -> structure-preserving fake values (default; keeps downstream
+    #              extraction accuracy). blackout -> solid boxes / [REDACTED].
+    mode: synthetic
+
+  # Optional tuning (all have built-in defaults in the vendored library):
+  # detection:  { temperature: 0.0, max_tokens: 4096 }
+  # synthetic:  { temperature: 0.7 }
+  # concurrency: { max_workers: 4 }

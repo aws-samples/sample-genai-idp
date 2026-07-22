@@ -1,4 +1,7 @@
-"""Unit tests for the sample-health-insurance-review feature API handler."""
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+"""Unit tests for the PII Anonymization feature API (Redaction Report)."""
 
 from __future__ import annotations
 
@@ -13,197 +16,105 @@ import pytest
 from moto import mock_aws
 
 _HANDLER_DIR = Path(__file__).resolve().parents[1]
-
-_CLAIMS_TABLE = "TestClaimsStatus"
-_OUTPUT_BUCKET = "test-output-bucket"
-_DOC_ID = "claims/Prior-Auth-12345678.pdf"
-_SUMMARY_KEY = f"{_DOC_ID}/rule_validation/consolidated/consolidated_summary.json"
-_SUMMARY_URI = f"s3://{_OUTPUT_BUCKET}/{_SUMMARY_KEY}"
-_MD_URI = _SUMMARY_URI[: -len(".json")] + ".md"
+_AUDIT_TABLE = "TestRedactionAudit"
 
 
-@pytest.fixture
-def aws_credentials(monkeypatch):
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
-    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
-    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
-
-
-def _claim_row(doc_id: str, status: str, updated_at: str) -> dict:
-    return {
-        "documentId": doc_id,
-        "status": status,
-        "passCount": 4,
-        "failCount": 1 if status == "REVIEW_REQUIRED" else 0,
-        "notFoundCount": 0,
-        "totalRules": 5,
-        "recommendationCounts": {"Pass": 4, "Fail": 1},  # nosec B105 - rule counter fixture
-        "policyTypes": ["global_periods"],
-        "summaryJsonUri": _SUMMARY_URI,
-        "summaryMdUri": _MD_URI,
-        "executionArn": "arn:aws:states:us-east-1:111:execution:wf:run-1",
-        "updatedAt": updated_at,
-    }
+def _make_table():
+    ddb = boto3.resource("dynamodb", region_name="us-west-2")
+    ddb.create_table(
+        TableName=_AUDIT_TABLE,
+        BillingMode="PAY_PER_REQUEST",
+        AttributeDefinitions=[
+            {"AttributeName": "documentId", "AttributeType": "S"},
+            {"AttributeName": "gsiPk", "AttributeType": "S"},
+            {"AttributeName": "createdAt", "AttributeType": "S"},
+        ],
+        KeySchema=[{"AttributeName": "documentId", "KeyType": "HASH"}],
+        GlobalSecondaryIndexes=[
+            {
+                "IndexName": "ByCreatedAt",
+                "KeySchema": [
+                    {"AttributeName": "gsiPk", "KeyType": "HASH"},
+                    {"AttributeName": "createdAt", "KeyType": "RANGE"},
+                ],
+                "Projection": {"ProjectionType": "ALL"},
+            }
+        ],
+    )
+    return ddb.Table(_AUDIT_TABLE)
 
 
 @pytest.fixture
-def stack(aws_credentials, monkeypatch):
-    with mock_aws():
-        ddb = boto3.resource("dynamodb", region_name="us-east-1")
-        # Mirror template.yaml: PK documentId, GSI ByStatus (status, updatedAt).
-        ddb.create_table(
-            TableName=_CLAIMS_TABLE,
-            KeySchema=[{"AttributeName": "documentId", "KeyType": "HASH"}],
-            AttributeDefinitions=[
-                {"AttributeName": "documentId", "AttributeType": "S"},
-                {"AttributeName": "status", "AttributeType": "S"},
-                {"AttributeName": "updatedAt", "AttributeType": "S"},
-            ],
-            GlobalSecondaryIndexes=[
-                {
-                    "IndexName": "ByStatus",
-                    "KeySchema": [
-                        {"AttributeName": "status", "KeyType": "HASH"},
-                        {"AttributeName": "updatedAt", "KeyType": "RANGE"},
-                    ],
-                    "Projection": {"ProjectionType": "ALL"},
-                }
-            ],
-            BillingMode="PAY_PER_REQUEST",
-        ).wait_until_exists()
-        table = ddb.Table(_CLAIMS_TABLE)
-        table.put_item(
-            Item=_claim_row(_DOC_ID, "REVIEW_REQUIRED", "2026-06-10T10:00:00Z")
-        )
-        table.put_item(
-            Item=_claim_row(
-                "claims/other-claim.pdf", "CLEAN_CLAIM", "2026-06-01T10:00:00Z"
-            )
-        )
-
-        s3 = boto3.client("s3", region_name="us-east-1")
-        s3.create_bucket(Bucket=_OUTPUT_BUCKET)
-        s3.put_object(
-            Bucket=_OUTPUT_BUCKET,
-            Key=_SUMMARY_KEY,
-            Body=json.dumps(
-                {
-                    "rule_summary": {"global_periods": {"Pass": 4, "Fail": 1}},  # nosec B105 - rule counter fixture
-                    "rule_details": {
-                        "global_periods": {
-                            "rules": [
-                                {
-                                    "rule": "Rule 1",
-                                    "recommendation": "Fail",
-                                    "supporting_pages": ["2"],
-                                    "reasoning": "Modifier missing",
-                                }
-                            ]
-                        }
-                    },
-                    "supporting_pages": ["1", "2"],
-                    "overall_statistics": {
-                        "total_rules": 5,
-                        "recommendation_counts": {"Pass": 4, "Fail": 1},  # nosec B105 - rule counter fixture
-                    },
-                }
-            ).encode("utf-8"),
-        )
-        s3.put_object(
-            Bucket=_OUTPUT_BUCKET,
-            Key=_SUMMARY_KEY[: -len(".json")] + ".md",
-            Body=b"# Rule Validation Summary\n\nDetails here.",
-        )
-
-        monkeypatch.setenv("CLAIMS_TABLE_NAME", _CLAIMS_TABLE)
-        monkeypatch.setenv("DISCOVERY_BUCKET", "test-discovery-bucket")
-        sys.path.insert(0, str(_HANDLER_DIR))
-        sys.modules.pop("handler", None)
-        mod = importlib.import_module("handler")
-        sys.path.remove(str(_HANDLER_DIR))
-        yield mod
+def mod(monkeypatch):
+    monkeypatch.setenv("AUDIT_TABLE_NAME", _AUDIT_TABLE)
+    monkeypatch.setenv("MAIN_STACK_NAME", "IDP")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-west-2")
+    sys.path.insert(0, str(_HANDLER_DIR))
+    sys.modules.pop("handler", None)
+    m = importlib.import_module("handler")
+    sys.path.remove(str(_HANDLER_DIR))
+    return m
 
 
-def _event(path: str, qs: dict | None = None) -> dict:
-    return {
+def _get(mod, path, qs=None):
+    event = {
         "rawPath": path,
-        "queryStringParameters": qs,
+        "queryStringParameters": qs or {},
         "requestContext": {"http": {"method": "GET"}},
     }
+    return mod.lambda_handler(event, None)
 
 
-def _body(resp: dict) -> dict:
-    return json.loads(resp["body"])
-
-
-def test_config_returns_discovery_bucket(stack):
-    resp = stack.lambda_handler(_event("/config"), None)
+@mock_aws
+def test_config_route(mod):
+    resp = _get(mod, "/config")
     assert resp["statusCode"] == 200
-    assert _body(resp)["discoveryBucket"] == "test-discovery-bucket"
+    assert json.loads(resp["body"])["feature"] == "pii-anonymizer"
 
 
-def test_list_claims_sorted_newest_first(stack):
-    resp = stack.lambda_handler(_event("/claims"), None)
+@mock_aws
+def test_report_list_and_aggregate(mod):
+    table = _make_table()
+    table.put_item(Item={"documentId": "a.pdf", "gsiPk": "ALL",
+                         "createdAt": "2026-07-22T10:00:00Z", "piiCount": 3,
+                         "mode": "redacted_only"})
+    table.put_item(Item={"documentId": "b.pdf", "gsiPk": "ALL",
+                         "createdAt": "2026-07-22T11:00:00Z", "piiCount": 5,
+                         "mode": "redacted_and_unredacted"})
+    resp = _get(mod, "/report")
     assert resp["statusCode"] == 200
-    body = _body(resp)
+    body = json.loads(resp["body"])
     assert body["total"] == 2
-    assert body["claims"][0]["documentId"] == _DOC_ID  # 2026-06-10 > 2026-06-01
-    assert body["claims"][0]["passCount"] == 4  # Decimal -> int
+    assert body["totalPiiRedacted"] == 8
+    # newest first (ScanIndexForward=False)
+    assert body["rows"][0]["documentId"] == "b.pdf"
 
 
-def test_list_claims_status_filter_uses_gsi(stack):
-    resp = stack.lambda_handler(_event("/claims", {"status": "CLEAN_CLAIM"}), None)
-    body = _body(resp)
-    assert body["total"] == 1
-    assert body["claims"][0]["documentId"] == "claims/other-claim.pdf"
-
-
-def test_list_claims_rejects_unknown_status(stack):
-    resp = stack.lambda_handler(_event("/claims", {"status": "BOGUS"}), None)
-    assert resp["statusCode"] == 400
-
-
-def test_list_claims_rejects_bad_window(stack):
-    resp = stack.lambda_handler(_event("/claims", {"window": "soon"}), None)
-    assert resp["statusCode"] == 400
-
-
-def test_claim_detail_merges_summary(stack):
-    resp = stack.lambda_handler(_event(f"/claims/{quote(_DOC_ID, safe='')}"), None)
+@mock_aws
+def test_report_detail(mod):
+    table = _make_table()
+    table.put_item(Item={"documentId": "sub/dir/doc.pdf", "gsiPk": "ALL",
+                         "createdAt": "2026-07-22T10:00:00Z", "piiCount": 2,
+                         "redactedKey": "_pii_redacted/sub/dir/doc.pdf"})
+    resp = _get(mod, f"/report/{quote('sub/dir/doc.pdf', safe='')}")
     assert resp["statusCode"] == 200
-    detail = _body(resp)
-    assert detail["status"] == "REVIEW_REQUIRED"
-    assert detail["ruleDetails"]["global_periods"]["rules"][0]["rule"] == "Rule 1"
-    assert detail["supportingPages"] == ["1", "2"]
-    assert detail["overallStatistics"]["total_rules"] == 5
+    assert json.loads(resp["body"])["redactedKey"] == "_pii_redacted/sub/dir/doc.pdf"
 
 
-def test_claim_detail_survives_missing_summary(stack):
-    """Row exists but S3 object is gone — return the row without rule details."""
-    boto3.client("s3", region_name="us-east-1").delete_object(
-        Bucket=_OUTPUT_BUCKET, Key=_SUMMARY_KEY
-    )
-    resp = stack.lambda_handler(_event(f"/claims/{quote(_DOC_ID, safe='')}"), None)
-    assert resp["statusCode"] == 200
-    detail = _body(resp)
-    assert detail["status"] == "REVIEW_REQUIRED"
-    assert "ruleDetails" not in detail
-
-
-def test_markdown_proxy(stack):
-    resp = stack.lambda_handler(
-        _event(f"/claims/{quote(_DOC_ID, safe='')}/summary.md"), None
-    )
-    assert resp["statusCode"] == 200
-    assert resp["headers"]["Content-Type"] == "text/markdown"
-    assert resp["body"].startswith("# Rule Validation Summary")
-
-
-def test_unknown_claim_returns_404(stack):
-    resp = stack.lambda_handler(_event("/claims/nope.pdf"), None)
+@mock_aws
+def test_report_detail_404(mod):
+    _make_table()
+    resp = _get(mod, "/report/missing.pdf")
     assert resp["statusCode"] == 404
 
 
-def test_unknown_path_returns_404(stack):
-    resp = stack.lambda_handler(_event("/other"), None)
+@mock_aws
+def test_bad_window(mod):
+    _make_table()
+    resp = _get(mod, "/report", {"window": "banana"})
+    assert resp["statusCode"] == 400
+
+
+def test_unknown_path(mod):
+    resp = _get(mod, "/nope")
     assert resp["statusCode"] == 404

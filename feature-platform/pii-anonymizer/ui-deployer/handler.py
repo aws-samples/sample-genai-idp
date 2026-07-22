@@ -3,22 +3,21 @@
 
 """CloudFormation custom-resource Lambda — runs on Create / Update / Delete.
 
-Extends the minimal docs-by-status ui-deployer with the two "vertical pack"
-registrations the Claims Review sample demonstrates:
-
 On Create or Update:
   1. Copies s3://<FEATURE_BUCKET>/<FEATURE_ARTIFACT_PREFIX>/<FEATURE_VERSION>/ui-bundle.js
      into s3://<WEBUI_BUCKET>/features/<FEATURE_ID>/v<FEATURE_VERSION>/ui-bundle.js
   2. Directly invokes the host's `registerFeature` resolver Lambda to add a
      row to InstalledFeatures.
-  3. Downloads the bundled config preset (config-preset/claims-config.yaml,
+  3. Downloads the bundled config preset (config-preset/pii-preprocessing.yaml,
      uploaded by the publisher under <FEATURE_ARTIFACT_PREFIX>/<FEATURE_VERSION>),
-     INJECTS the postRuleValidation hook into its rule_validation.postHook, and
+     INJECTS the preprocessing hook into its preprocessing.preHook, and
      invokes the host's `applyFeatureConfigPreset` resolver — creating a
-     NON-ACTIVE config version
-     `sample-health-insurance-review-v<FEATURE_VERSION>` for an admin to activate.
-     (The hook travels inside the preset, not via a separate registerFeatureHooks
-     call, so activating that version brings the rules and hook together.)
+     NON-ACTIVE config version `pii-anonymizer-v<FEATURE_VERSION>` for an admin
+     to activate. (The hook travels inside the preset, not via a separate
+     registerFeatureHooks call, so activating that version brings the redaction
+     settings and hook together.) This standalone preset is a quick-start
+     reference; the feature UI's Config Pairing wizard is the primary path for
+     wiring redaction onto an admin's existing working config version.
 
 On Delete:
   1. Deletes the copied UI bundle.
@@ -71,13 +70,13 @@ _APPLY_FEATURE_CONFIG_PRESET_FUNCTION_ARN = os.environ[
     "APPLY_FEATURE_CONFIG_PRESET_FUNCTION_ARN"
 ]
 _FEATURE_API_ENDPOINT = os.environ.get("FEATURE_API_ENDPOINT", "")
-# ARN of this feature's postRuleValidation hook Lambda (template.yaml).
+# ARN of this feature's preprocessing hook Lambda (template.yaml).
 _HOOK_FUNCTION_ARN = os.environ.get("HOOK_FUNCTION_ARN", "")
 # Key of the bundled config preset, relative to the versioned artifact prefix.
 # Matches feature.yaml -> configPreset.path (the publisher uploads it under
 # "<base>/<version>/<configPreset.path>").
 _CONFIG_PRESET_RELATIVE_KEY = os.environ.get(
-    "CONFIG_PRESET_RELATIVE_KEY", "config-preset/claims-config.yaml"
+    "CONFIG_PRESET_RELATIVE_KEY", "config-preset/pii-preprocessing.yaml"
 )
 
 # Fail fast (with a clear message in CloudWatch) when the publisher's
@@ -226,41 +225,40 @@ def _unregister_hooks() -> None:
     )
 
 
-def _inject_post_rule_validation_hook(preset: Dict[str, Any]) -> None:
-    """Add this feature's postRuleValidation hook INTO the preset's config,
-    under `rule_validation.postHook`, so the hook travels WITH the preset
-    version.
+def _inject_preprocessing_hook(preset: Dict[str, Any]) -> None:
+    """Add this feature's preprocessing hook INTO the preset's config, under
+    `preprocessing.preHook`, so the hook travels WITH the preset version.
 
-    This is the crux of the fix: the host's pipeline-hooks dispatcher reads
-    hooks from the *active* config version. If we instead registered the hook
-    via registerFeatureHooks (which targets whatever version is active at
-    install — typically `default`), then the moment an admin activates THIS
-    preset version the hook would be orphaned in the old version and never
-    fire. By baking the hook into the preset payload, activating the preset
-    brings the rules and the hook together atomically.
+    The host's pipeline-hooks dispatcher reads hooks from the *active* config
+    version. Registering via registerFeatureHooks would target whatever version
+    is active at install (typically `default`), so activating THIS preset would
+    orphan the hook. Baking it into the preset payload keeps the redaction
+    settings and the hook together atomically.
 
-    The hook ARN isn't known until the feature stack deploys, so it can't live
-    in the committed claims-config.yaml — it's injected here at install time
-    from the HOOK_FUNCTION_ARN env var (set via !GetAtt in template.yaml).
+    onError posture: redacted_only MUST fail closed (better to stop than to leak
+    PII downstream). We read the preset's preprocessing.mode to decide: `fail`
+    for redacted_only, else `continue`.
 
-    Merges (does not clobber) any existing rule_validation block / postHook
-    list, and is idempotent on stack Update: an existing entry for this
-    featureId is replaced rather than duplicated.
+    The hook ARN isn't known until the feature stack deploys, so it's injected
+    here at install time from HOOK_FUNCTION_ARN (set via !GetAtt in
+    template.yaml). Idempotent on Update: an existing entry for this featureId
+    is replaced, not duplicated.
     """
     if not _HOOK_FUNCTION_ARN:
         logger.warning(
-            "HOOK_FUNCTION_ARN not set — preset will carry no postRuleValidation "
-            "hook; the Claims Dashboard will not populate."
+            "HOOK_FUNCTION_ARN not set — preset will carry no preprocessing "
+            "hook; PII redaction will not run for this version."
         )
         return
-    rv = preset.get("rule_validation")
-    if not isinstance(rv, dict):
-        rv = {}
-        preset["rule_validation"] = rv
-    existing = rv.get("postHook")
+    pp = preset.get("preprocessing")
+    if not isinstance(pp, dict):
+        pp = {}
+        preset["preprocessing"] = pp
+    mode = pp.get("mode") or "redacted_only"
+    on_error = "fail" if mode == "redacted_only" else "continue"
+    existing = pp.get("preHook")
     if not isinstance(existing, list):
         existing = []
-    # Drop any prior entry for this feature (idempotent re-apply on Update).
     kept = [
         h
         for h in existing
@@ -271,14 +269,17 @@ def _inject_post_rule_validation_hook(preset: Dict[str, Any]) -> None:
             "featureId": _FEATURE_ID,
             "arn": _HOOK_FUNCTION_ARN,
             "order": 100,
-            "onError": "continue",
+            "onError": on_error,
             "enabled": True,
         }
     )
-    rv["postHook"] = kept
+    pp["preHook"] = kept
     logger.info(
-        "Injected postRuleValidation hook %s into preset rule_validation.postHook",
+        "Injected preprocessing hook %s into preset preprocessing.preHook "
+        "(mode=%s, onError=%s)",
         _HOOK_FUNCTION_ARN,
+        mode,
+        on_error,
     )
 
 
@@ -292,10 +293,10 @@ def _apply_config_preset() -> None:
     activates it from the Configuration UI; installing never silently changes
     the active configuration.
 
-    Before sending, we inject the postRuleValidation hook into the preset's
-    own `rule_validation.postHook` (see _inject_post_rule_validation_hook) so
-    the hook is part of the very version the admin activates — no separate
-    registerFeatureHooks call, no orphaned hook.
+    Before sending, we inject the preprocessing hook into the preset's own
+    `preprocessing.preHook` (see _inject_preprocessing_hook) so the hook is part
+    of the very version the admin activates — no separate registerFeatureHooks
+    call, no orphaned hook.
     """
     # Read from the versioned prefix (<base>/<FEATURE_VERSION>/...); the version
     # comes from the baked FEATURE_VERSION, not a stale-able CFN parameter.
@@ -305,7 +306,7 @@ def _apply_config_preset() -> None:
     preset = yaml.safe_load(resp["Body"].read().decode("utf-8"))
     if not isinstance(preset, dict):
         raise RuntimeError(f"Config preset at {preset_key} did not parse to a mapping")
-    _inject_post_rule_validation_hook(preset)
+    _inject_preprocessing_hook(preset)
     result = _invoke_resolver(
         _APPLY_FEATURE_CONFIG_PRESET_FUNCTION_ARN,
         "applyFeatureConfigPreset",
@@ -315,8 +316,8 @@ def _apply_config_preset() -> None:
                 "version": _FEATURE_VERSION,
                 "config": json.dumps(preset),
                 "description": (
-                    f"{_FEATURE_DISPLAY_NAME} preset — health insurance prior-auth "
-                    f"rule validation + claim-status hook "
+                    f"{_FEATURE_DISPLAY_NAME} preset — preprocessing PII "
+                    f"redaction hook + defaults "
                     f"(installed by feature v{_FEATURE_VERSION})"
                 ),
             }
@@ -372,7 +373,7 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> None:
             # install time (typically `default`); when the admin then activates
             # this feature's preset version, the hook would be orphaned in the
             # old version and never fire. Instead, _apply_config_preset injects
-            # the hook directly into the preset's rule_validation.postHook, so
+            # the hook directly into the preset's preprocessing.preHook, so
             # the hook travels with the version that gets activated.
             _apply_config_preset()
         elif request_type == "Delete":
