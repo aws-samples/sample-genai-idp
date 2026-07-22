@@ -6,10 +6,9 @@
  *
  * The feature platform menu is **always visible** (per the locked plan) even
  * when no features are installed — the section always starts with a "Browse
- * catalog" link to /features (no id), which renders the catalog browser,
- * separated from the extension links below it by a divider so it reads as
- * the catalog entry point rather than another extension. Each feature adds
- * a sub-link below the divider.
+ * catalog" link to /features (no id), which renders the catalog browser. It's
+ * styled (italic + search icon) so it reads as the catalog entry point rather
+ * than another extension. Each feature adds a sub-link below it.
  *
  * Which features get nav links:
  *   - every **installed** feature (always, even if removed from the catalog —
@@ -22,7 +21,6 @@
 
 import React from 'react';
 import Badge from '@cloudscape-design/components/badge';
-import Icon from '@cloudscape-design/components/icon';
 import Popover from '@cloudscape-design/components/popover';
 import Box from '@cloudscape-design/components/box';
 import type { SideNavigationProps } from '@cloudscape-design/components';
@@ -214,20 +212,14 @@ export function buildFeaturesNavSection(installed: InstalledFeature[], catalog: 
 
   // The catalog entry point always comes first: /features (no id) renders the
   // catalog browser, which lists every extension — including reference samples
-  // with showInNav: false that have no nav links of their own. Rendered with a
-  // search icon and a divider below it so it reads as the catalog browser,
-  // not just another extension in the list. The italic treatment is applied
-  // in navigation.css via an `a[href='#/features']` selector (Cloudscape nav
-  // links expose no per-item className hook).
+  // with showInNav: false that have no nav links of their own. The italic
+  // treatment (so it reads as the catalog browser, not just another extension
+  // in the list) is applied in navigation.css via an `a[href='#/features']`
+  // selector (Cloudscape nav links expose no per-item className hook).
   const browseCatalog: SideNavigationProps.Link = {
     type: 'link',
     text: 'Browse catalog',
     href: `#${FEATURES_PATH_PREFIX}`,
-    info: React.createElement(
-      'span',
-      { className: 'browse-catalog-info', 'aria-hidden': true },
-      React.createElement(Icon, { name: 'search', size: 'inherit' }),
-    ),
   };
 
   const extensionItems = [...items, ...comingSoonItems(installed)];
@@ -237,6 +229,6 @@ export function buildFeaturesNavSection(installed: InstalledFeature[], catalog: 
     // "(Preview)" signals that the extension framework is still being built out —
     // there are no production extensions to install yet beyond the bundled demo.
     text: 'Extensions (Preview)',
-    items: extensionItems.length > 0 ? [browseCatalog, { type: 'divider' }, ...extensionItems] : [browseCatalog],
+    items: extensionItems.length > 0 ? [browseCatalog, ...extensionItems] : [browseCatalog],
   };
 }
