@@ -255,7 +255,7 @@ const GenerateSyntheticDataModal = ({
   };
 
   const estimateText = estimate
-    ? `Estimated cost $${estimate.estimated_usd_low}–$${estimate.estimated_usd_high} · ~${estimate.estimated_minutes_low}–${estimate.estimated_minutes_high} min`
+    ? `Estimated cost $${Math.round(estimate.estimated_usd_low)}–$${Math.round(estimate.estimated_usd_high)} · ~${Math.round(estimate.estimated_minutes_low)}–${Math.round(estimate.estimated_minutes_high)} min`
     : null;
 
   return (
