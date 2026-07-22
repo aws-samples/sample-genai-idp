@@ -2908,6 +2908,10 @@ Resources:
         # host's Rules Discovery flow (sample-health-insurance-review) know where
         # uploadDiscoveryDocument presigns uploads.
         DiscoveryBucketName: !Ref DiscoveryBucket
+        # Input bucket name re-exported so a preprocessing feature (e.g. PII
+        # anonymization) can read source documents and write a redacted copy
+        # back under a reserved prefix to spawn a new de-identified execution.
+        InputBucketName: !Ref InputBucket
         # Reporting bucket name re-exported (as name + ARN) so feature stacks
         # that read reporting/analytics data or write Athena query results
         # (e.g. idp-monitor) can grant themselves scoped s3 access. Mirrors the

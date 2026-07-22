@@ -4,16 +4,21 @@
 """Pipeline-hooks dispatcher Lambda.
 
 Invoked by the host's Step Functions workflow at each pipeline extension
-point (postOcr, postClassification, postExtraction, postRuleValidation,
-postSummarization). Reads the active configuration
+point (preprocessing, postOcr, postClassification, postExtraction,
+postRuleValidation, postSummarization). Reads the active configuration
 version from the host's ConfigurationTable and dispatches to the hook
-Lambdas listed under that step's `postHook` field.
+Lambdas listed under that section's hook-list field. The field is chosen
+by the hook point prefix: `pre*` points read `preHook`, `post*` points
+read `postHook`.
 
 Hooks are stored *inline in the active config version* — under each
-processing step's section — so that activating a different config
-version atomically swaps the hook set:
+section — so that activating a different config version atomically swaps
+the hook set:
 
     Config#<version>
+      preprocessing:            # standalone section — runs FIRST, before
+        preHook:                # the BDA/pipeline routing, in both modes
+          - { featureId, arn, order, onError, enabled }
       ocr:
         postHook:
           - { featureId, arn, order, onError, enabled }
@@ -21,12 +26,14 @@ version atomically swaps the hook set:
         postHook: [ ... ]
       extraction:
         postHook: [ ... ]
-      assessment:
-        postHook: [ ... ]
       rule_validation:
         postHook: [ ... ]
       summarization:
         postHook: [ ... ]
+
+The dispatcher's return value includes a top-level `halt` flag (true if any
+successful hook returned result.halt == true) so the workflow's post-hook
+Choice can short-circuit the execution via a stable JSONPath.
 
 Resolution rules:
   1. If the SFN input has `document.config_version`, use it.
@@ -53,9 +60,20 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 _CONFIG_TABLE = os.environ.get("CONFIGURATION_TABLE_NAME", "")
 
-# Map hook point -> config path under the active config version.
-# Each entry's value is the dotted path `<step>.postHook` we look up.
+# Map hook point -> config section under the active config version.
+#
+# The hook LIST field within that section is chosen by the hook point's
+# prefix: `pre*` points read `<section>.preHook`, `post*` points read
+# `<section>.postHook` (see _hook_list_field). This lets a `pre*` and a
+# `post*` hook coexist in the same section without colliding.
+#
+# `preprocessing` is a standalone top-level section (NOT nested under `ocr`):
+# its hook runs FIRST in the workflow, before the BDA/pipeline routing
+# decision, so it fires in both processing modes and even when OCR is
+# disabled. Semantically it operates on the source document, not on OCR
+# output, which is why it gets its own section.
 _HOOK_TO_STEP = {
+    "preprocessing": "preprocessing",
     "postOcr": "ocr",
     "postClassification": "classification",
     "postExtraction": "extraction",
@@ -64,6 +82,12 @@ _HOOK_TO_STEP = {
     "postRuleValidation": "rule_validation",
     "postSummarization": "summarization",
 }
+
+
+def _hook_list_field(point: str) -> str:
+    """The hook-list field name for a hook point: preHook for pre* points,
+    postHook otherwise. Keeps pre/post hooks in the same section distinct."""
+    return "preHook" if point.startswith("pre") else "postHook"
 
 _CONFIG_METADATA_FIELDS = {
     "Configuration",
@@ -138,11 +162,13 @@ def _resolve_active_version(table: Any, pinned: Optional[str]) -> Optional[str]:
 def _read_hooks_from_config(
     table: Any, version: str, point: str
 ) -> List[Dict[str, Any]]:
-    """Read <step>.postHook from Config#<version>, returning enabled entries."""
+    """Read <section>.<preHook|postHook> from Config#<version>, returning
+    enabled entries. The list field is chosen by the hook point prefix."""
     step = _HOOK_TO_STEP.get(point)
     if not step:
         logger.warning("Unknown hook point %s", point)
         return []
+    field = _hook_list_field(point)
     try:
         resp = table.get_item(Key={"Configuration": f"Config#{version}"})
     except Exception as exc:  # noqa: BLE001
@@ -155,7 +181,7 @@ def _read_hooks_from_config(
     step_block = payload.get(step) or {}
     if not isinstance(step_block, dict):
         return []
-    raw = step_block.get("postHook") or []
+    raw = step_block.get(field) or []
     if not isinstance(raw, list):
         return []
     valid: List[Dict[str, Any]] = []
@@ -222,12 +248,14 @@ def _invoke_hook(hook: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any
 
 def lambda_handler(event: Dict[str, Any], _ctx: Any) -> Dict[str, Any]:
     point = event.get("hookPoint")
+    # Every early return carries halt=false so the state machine Choice can
+    # rely on $.HookResults.<point>.Payload.halt existing unconditionally.
     if point not in _HOOK_TO_STEP:
         logger.warning("Unknown hookPoint=%s — returning empty result", point)
-        return {"hookPoint": point, "invoked": 0, "results": []}
+        return {"hookPoint": point, "invoked": 0, "halt": False, "results": []}
     if not _CONFIG_TABLE:
         logger.info("CONFIGURATION_TABLE_NAME not set — no hooks dispatched")
-        return {"hookPoint": point, "invoked": 0, "results": []}
+        return {"hookPoint": point, "invoked": 0, "halt": False, "results": []}
 
     table = _dynamodb.Table(_CONFIG_TABLE)
     document = event.get("document") or {}
@@ -235,12 +263,12 @@ def lambda_handler(event: Dict[str, Any], _ctx: Any) -> Dict[str, Any]:
     version = _resolve_active_version(table, pinned)
     if not version:
         logger.info("No config version resolvable; returning no-hooks")
-        return {"hookPoint": point, "invoked": 0, "results": []}
+        return {"hookPoint": point, "invoked": 0, "halt": False, "results": []}
 
     hooks = _read_hooks_from_config(table, version, point)
     if not hooks:
         logger.info("No hooks registered for %s in Config#%s", point, version)
-        return {"hookPoint": point, "invoked": 0, "results": []}
+        return {"hookPoint": point, "invoked": 0, "halt": False, "results": []}
 
     results: List[Dict[str, Any]] = []
     for h in hooks:
@@ -263,9 +291,23 @@ def lambda_handler(event: Dict[str, Any], _ctx: Any) -> Dict[str, Any]:
                 h["featureId"],
             )
             break
+
+    # Aggregate a top-level `halt` flag so the state machine's post-hook
+    # Choice can read a STABLE path ($.HookResults.<point>.Payload.halt)
+    # without indexing into a possibly-empty results array (JSONPath can't
+    # do that safely). Any successful hook returning result.halt == true
+    # halts the workflow. Used by the preprocessing hook to short-circuit a
+    # document whose only purpose was to spawn a redacted copy.
+    halt = any(
+        r.get("ok")
+        and isinstance(r.get("result"), dict)
+        and r["result"].get("halt") is True
+        for r in results
+    )
     return {
         "hookPoint": point,
         "configVersion": version,
         "invoked": len(results),
+        "halt": halt,
         "results": results,
     }

@@ -91,6 +91,17 @@ Parameters:
       host's Rules Discovery flow (e.g. sample-health-insurance-review) can learn the bucket
       to pass to uploadDiscoveryDocument. Leave blank to skip the export.
 
+  InputBucketName:
+    Type: String
+    Default: ''
+    Description: Name of the main stack's Input bucket (where source documents
+      are uploaded to trigger processing). Re-exported as
+      `<MainStackName>-InputBucketName` so a preprocessing feature (e.g. PII
+      anonymization) can read the source document AND write a redacted copy
+      back under a reserved prefix to spawn a new, de-identified execution.
+      Grant write access scoped to that reserved prefix only. Leave blank to
+      skip the export.
+
   WebUIBucketArn:
     Type: String
     Description: ARN of the WebUIBucket.
@@ -212,6 +223,7 @@ Conditions:
   HasReportingBucket: !Not [!Equals [!Ref ReportingBucketName, '']]
   HasOutputBucket: !Not [!Equals [!Ref OutputBucketName, '']]
   HasWorkingBucket: !Not [!Equals [!Ref WorkingBucketName, '']]
+  HasInputBucket: !Not [!Equals [!Ref InputBucketName, '']]
   HasDiscoveryBucket: !Not [!Equals [!Ref DiscoveryBucketName, '']]
   HasCustomerManagedEncryptionKey: !Not [!Equals [!Ref CustomerManagedEncryptionKeyArn, '']]
   HasSellerBuckets: !Not [!Equals [!Join ['', !Ref SellerBucketObjectArns], '']]
@@ -745,6 +757,18 @@ Outputs:
     Value: !Ref DiscoveryBucketName
     Export:
       Name: !Sub '${MainStackName}-DiscoveryBucketName'
+
+  InputBucketName:
+    Condition: HasInputBucket
+    Description: >-
+      Re-export of the main stack's Input bucket name. A preprocessing feature
+      (e.g. PII anonymization) imports this to read the source document and to
+      write a redacted copy back under a reserved prefix, which spawns a new
+      de-identified execution. Write access must be scoped to that reserved
+      prefix only.
+    Value: !Ref InputBucketName
+    Export:
+      Name: !Sub '${MainStackName}-InputBucketName'
 
   TrackingTableArn:
     Description: >-

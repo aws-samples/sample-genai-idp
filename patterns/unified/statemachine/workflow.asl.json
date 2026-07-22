@@ -1,7 +1,55 @@
 {
     "Comment": "Unified IDP Document Processing Workflow - routes between BDA and step-by-step pipeline based on use_bda config flag",
-    "StartAt": "RouteByProcessingMode",
+    "StartAt": "PreprocessingHook",
     "States": {
+        "PreprocessingHook": {
+            "Type": "Task",
+            "Comment": "Standalone preprocessing extension point — runs FIRST, before the BDA/pipeline routing, so it fires in both processing modes and even when OCR is disabled. Dispatches to any feature hook registered under the config's preprocessing.preHook (e.g. PII anonymization). A hook may return halt=true to short-circuit this execution (e.g. when it has spawned a redacted copy that will be processed as a separate document).",
+            "Resource": "arn:${Partition}:states:::lambda:invoke",
+            "Parameters": {
+                "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
+                "Payload": {
+                    "hookPoint": "preprocessing",
+                    "executionArn.$": "$$.Execution.Id",
+                    "document.$": "$.document"
+                }
+            },
+            "ResultPath": "$.HookResults.preprocessing",
+            "Retry": [
+                { "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2 }
+            ],
+            "Catch": [
+                { "ErrorEquals": ["States.ALL"], "ResultPath": "$.HookResults.preprocessing.error", "Next": "RouteByProcessingMode" }
+            ],
+            "Next": "CheckPreprocessingHalt"
+        },
+        "CheckPreprocessingHalt": {
+            "Type": "Choice",
+            "Comment": "If a preprocessing hook requested halt (e.g. redacted-only mode), end this execution as REDACTED_SUPERSEDED. Otherwise route to normal processing. The dispatcher always returns a top-level halt flag, so this path is safe even when no hook is registered (halt=false).",
+            "Choices": [
+                {
+                    "Variable": "$.HookResults.preprocessing.Payload.halt",
+                    "BooleanEquals": true,
+                    "Next": "MarkSupersededByRedacted"
+                }
+            ],
+            "Default": "RouteByProcessingMode"
+        },
+        "MarkSupersededByRedacted": {
+            "Type": "Pass",
+            "Comment": "Terminal state for a document intentionally not processed further because a preprocessing hook produced a redacted copy (processed as its own document). Sets status REDACTED_SUPERSEDED, which the workflow tracker preserves rather than forcing COMPLETED.",
+            "Parameters": {
+                "document.$": "$.document"
+            },
+            "ResultPath": "$",
+            "Next": "SetSupersededStatus"
+        },
+        "SetSupersededStatus": {
+            "Type": "Pass",
+            "Result": "REDACTED_SUPERSEDED",
+            "ResultPath": "$.document.status",
+            "Next": "WorkflowComplete"
+        },
         "RouteByProcessingMode": {
             "Type": "Choice",
             "Comment": "Route to BDA or step-by-step pipeline based on use_bda flag in document config",

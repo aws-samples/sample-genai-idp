@@ -36,6 +36,9 @@ class Status(Enum):
     COMPLETED = "COMPLETED"  # All processing completed
     FAILED = "FAILED"  # Processing failedy
     ABORTED = "ABORTED"  # User cancelled workflow
+    REDACTED_SUPERSEDED = "REDACTED_SUPERSEDED"  # A preprocessing hook (e.g. PII
+    # anonymization) produced a redacted copy that is processed as a separate
+    # document; this original was intentionally not processed further.
 
 
 @dataclass

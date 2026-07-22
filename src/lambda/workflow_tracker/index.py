@@ -133,9 +133,23 @@ def update_document_completion(
 
             # Use the processed document directly and update status
             # This is safer than copying fields and ensures we don't miss any data
-            processed_doc.status = (
-                Status.COMPLETED if workflow_status == "SUCCEEDED" else Status.FAILED
-            )
+            #
+            # Preserve a terminal status the workflow deliberately set on the
+            # document (e.g. REDACTED_SUPERSEDED from the preprocessing halt
+            # path): a SUCCEEDED execution that ended early must NOT be forced
+            # to COMPLETED, or the "this original was superseded by a redacted
+            # copy" signal is lost in the UI/tracking.
+            if (
+                workflow_status == "SUCCEEDED"
+                and processed_doc.status == Status.REDACTED_SUPERSEDED
+            ):
+                pass  # keep the status the workflow set
+            else:
+                processed_doc.status = (
+                    Status.COMPLETED
+                    if workflow_status == "SUCCEEDED"
+                    else Status.FAILED
+                )
             processed_doc.completion_time = datetime.now(timezone.utc).isoformat()
             document = processed_doc
 

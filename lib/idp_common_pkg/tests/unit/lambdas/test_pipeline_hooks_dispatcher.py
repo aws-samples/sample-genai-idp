@@ -49,7 +49,12 @@ def test_unknown_hook_point_is_noop(monkeypatch):
     monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
     mod = _reload()
     out = mod.lambda_handler({"hookPoint": "postBananas"}, None)
-    assert out == {"hookPoint": "postBananas", "invoked": 0, "results": []}
+    assert out == {
+        "hookPoint": "postBananas",
+        "invoked": 0,
+        "halt": False,
+        "results": [],
+    }
 
 
 def test_missing_config_table_is_noop(monkeypatch):
@@ -180,3 +185,96 @@ def test_onerror_skip_remaining_stops_after_failure(monkeypatch):
     # only the first hook ran before skip-remaining halted the loop
     assert out["invoked"] == 1
     assert out["results"][0]["featureId"] == "f1"
+
+
+def test_hook_list_field_by_prefix(monkeypatch):
+    """pre* hook points read preHook; post* read postHook."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    assert mod._hook_list_field("preprocessing") == "preHook"
+    assert mod._hook_list_field("postOcr") == "postHook"
+
+
+def test_preprocessing_reads_prehook_from_own_section(monkeypatch):
+    """The preprocessing point reads preprocessing.preHook (its own top-level
+    section), not any *.postHook."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+
+    class _Table:
+        def get_item(self, Key):
+            return {
+                "Item": {
+                    "Configuration": "Config#default",
+                    "preprocessing": {
+                        "preHook": [
+                            {"featureId": "pii", "arn": "arn:pii", "order": 10},
+                        ],
+                        # a postHook in the same section must be ignored for a
+                        # pre* point
+                        "postHook": [
+                            {"featureId": "nope", "arn": "arn:nope"},
+                        ],
+                    },
+                }
+            }
+
+    hooks = mod._read_hooks_from_config(_Table(), "default", "preprocessing")
+    assert [h["featureId"] for h in hooks] == ["pii"]
+
+
+def test_halt_aggregated_from_hook_result(monkeypatch):
+    """A successful hook returning result.halt=true surfaces top-level halt."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    hook = {"featureId": "pii", "arn": "arn:pii", "order": 1, "onError": "continue"}
+    monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: [hook])
+    monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "default")
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: object())
+    monkeypatch.setattr(
+        mod,
+        "_invoke_hook",
+        lambda h, p: {
+            "featureId": "pii",
+            "arn": "arn:pii",
+            "ok": True,
+            "result": {"halt": True, "redactedKey": "_pii_redacted/x.pdf"},
+        },
+    )
+    out = mod.lambda_handler({"hookPoint": "preprocessing", "document": {}}, None)
+    assert out["halt"] is True
+    assert out["invoked"] == 1
+
+
+def test_halt_false_when_no_hook_requests_it(monkeypatch):
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    hook = {"featureId": "pii", "arn": "arn:pii", "order": 1, "onError": "continue"}
+    monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: [hook])
+    monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "default")
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: object())
+    monkeypatch.setattr(
+        mod,
+        "_invoke_hook",
+        lambda h, p: {
+            "featureId": "pii",
+            "arn": "arn:pii",
+            "ok": True,
+            "result": {"halt": False, "redactedKey": "_pii_redacted/x.pdf"},
+        },
+    )
+    out = mod.lambda_handler({"hookPoint": "preprocessing", "document": {}}, None)
+    assert out["halt"] is False
+
+
+def test_no_hooks_registered_returns_halt_false(monkeypatch):
+    """Backward-compat: no preprocessing hook registered ⇒ halt=false so the
+    workflow Choice defaults to normal routing."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: [])
+    monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "default")
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: object())
+    out = mod.lambda_handler({"hookPoint": "preprocessing", "document": {}}, None)
+    assert out["invoked"] == 0
+    assert out["halt"] is False
