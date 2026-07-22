@@ -540,7 +540,7 @@ const Navigation = ({
   }
 
   return (
-    <>
+    <div className="idp-side-nav">
       {isQuickStartWidgetEnabled() && (
         <div className="nav-quick-start">
           <Hotspot hotspotId="nav-quick-start" side="right">
@@ -556,7 +556,7 @@ const Navigation = ({
         activeHref={activeHref}
         onFollow={onFollowHandler}
       />
-    </>
+    </div>
   );
 };
 

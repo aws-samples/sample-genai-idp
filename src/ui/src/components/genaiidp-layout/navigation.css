@@ -6,3 +6,20 @@
 .nav-quick-start [class*='awsui_hotspot'] {
   display: inline-flex;
 }
+
+/* "Browse catalog" (the /features catalog browser) sits at the top of the
+   Extensions section. Italicize it so it reads as the catalog entry point
+   rather than just another extension link. (Italic, not bold: Cloudscape
+   renders the *active* nav link bold, so a permanently-bold link would look
+   permanently active.) Scoped by exact href — only the catalog link uses the
+   bare #/features route (feature pages are #/features/<id>). */
+.idp-side-nav a[href='#/features'] {
+  font-style: italic;
+}
+
+/* Search icon rendered via the link's `info` slot (see
+   feature-platform-nav-items.ts). Align it with the link text. */
+.browse-catalog-info {
+  display: inline-flex;
+  vertical-align: middle;
+}

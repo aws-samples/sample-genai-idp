@@ -95,7 +95,10 @@ DEPLOYED_TEMPLATES = [
 def _load(rel_path: str) -> dict:
     path = _repo_root() / rel_path
     with open(path, "r", encoding="utf-8") as f:
-        return yaml.load(f, Loader=_CFNLoader) or {}
+        # Safe: _CFNLoader subclasses yaml.SafeLoader (see above); the multi-
+        # constructor only builds plain scalars/sequences/mappings for CFN
+        # intrinsic tags -- no Python-object construction is possible.
+        return yaml.load(f, Loader=_CFNLoader) or {}  # nosec B506
 
 
 def _resources(template: dict) -> dict:
