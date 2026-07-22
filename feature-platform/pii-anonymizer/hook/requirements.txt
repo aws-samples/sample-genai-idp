@@ -7,7 +7,9 @@
 # Audio deps (ffmpeg) are intentionally excluded — documents only in v1.
 pypdf>=5.1.0
 pypdfium2>=4.30.0
-pillow>=12.1.1        # CVE-2026-25990 fix (keep this floor or higher)
+pillow>=12.1.1,<12.3  # CVE-2026-25990 fix floor; cap because 12.3.0 has no
+                     # manylinux2014_aarch64 wheel yet (SAM arm64 build fails).
+                     # Raise the cap once an aarch64 12.3+ wheel is published.
 python-docx>=0.8.11
 openpyxl>=3.0.10
 faker>=30.0.0

@@ -62,24 +62,6 @@ Globals:
 Resources:
 
   ###########################################################################
-  # Lambda layer — vendored pii-anonymizer document closure dependencies
-  # (pypdf, pypdfium2, pillow, python-docx, openpyxl, faker, defusedxml,
-  # PyYAML). Built by SAM from hook/requirements.txt.
-  ###########################################################################
-  PiiDepsLayer:
-    Type: AWS::Serverless::LayerVersion
-    Metadata:
-      BuildMethod: python3.12
-      BuildArchitecture: arm64
-    Properties:
-      LayerName: !Sub '${MainStackName}-pii-anonymizer-deps'
-      Description: Vendored pii-anonymizer document-closure dependencies.
-      ContentUri: hook/
-      CompatibleRuntimes: [python3.12]
-      CompatibleArchitectures: [arm64]
-      RetentionPolicy: Delete
-
-  ###########################################################################
   # Redaction audit table — OWNED by this feature. One row per redacted
   # document (metadata only, NO PII): pii_count, mode, redacted key, companion
   # version. Populated by the hook; read by the feature API for the Redaction
@@ -130,8 +112,6 @@ Resources:
       Handler: handler.lambda_handler
       Timeout: 900
       MemorySize: 3008
-      Layers:
-        - !Ref PiiDepsLayer
       Tags:
         'idp:feature-id': !Ref FeatureId
       Environment:
