@@ -5,9 +5,11 @@
  * Snippets to splice into `src/ui/src/components/genaiidp-layout/navigation.tsx`.
  *
  * The feature platform menu is **always visible** (per the locked plan) even
- * when no features are installed — the section always ends with a "Browse
- * catalog" link to /features (no id), which renders the catalog browser, and
- * each feature adds a sub-link.
+ * when no features are installed — the section always starts with a "Browse
+ * catalog" link to /features (no id), which renders the catalog browser,
+ * separated from the extension links below it by a divider so it reads as
+ * the catalog entry point rather than another extension. Each feature adds
+ * a sub-link below the divider.
  *
  * Which features get nav links:
  *   - every **installed** feature (always, even if removed from the catalog —
@@ -20,6 +22,7 @@
 
 import React from 'react';
 import Badge from '@cloudscape-design/components/badge';
+import Icon from '@cloudscape-design/components/icon';
 import Popover from '@cloudscape-design/components/popover';
 import Box from '@cloudscape-design/components/box';
 import type { SideNavigationProps } from '@cloudscape-design/components';
@@ -152,11 +155,11 @@ function buildStatusInfo(entry: NavEntry): React.ReactNode {
 }
 
 /**
- * Returns a SideNavigation section listing installed features plus
- * nav-visible (showInNav !== false) catalog features, ending with a
- * "Browse catalog" link to /features that lists everything. Always returns a
- * non-empty section (even when both lists are empty) so the menu entry is
- * visible to all roles.
+ * Returns a SideNavigation section starting with a "Browse catalog" link to
+ * /features (the catalog browser that lists everything), then — separated by
+ * a divider — installed features plus nav-visible (showInNav !== false)
+ * catalog features. Always returns a non-empty section (even when both lists
+ * are empty) so the menu entry is visible to all roles.
  *
  * Use in navigation.tsx like:
  *
@@ -209,20 +212,31 @@ export function buildFeaturesNavSection(installed: InstalledFeature[], catalog: 
       }) as SideNavigationProps.Link,
   );
 
-  // Always end with a catalog link: /features (no id) renders the catalog
-  // browser, which lists every extension — including reference samples with
-  // showInNav: false that have no nav links of their own.
+  // The catalog entry point always comes first: /features (no id) renders the
+  // catalog browser, which lists every extension — including reference samples
+  // with showInNav: false that have no nav links of their own. Rendered with a
+  // search icon and a divider below it so it reads as the catalog browser,
+  // not just another extension in the list. The italic treatment is applied
+  // in navigation.css via an `a[href='#/features']` selector (Cloudscape nav
+  // links expose no per-item className hook).
   const browseCatalog: SideNavigationProps.Link = {
     type: 'link',
     text: 'Browse catalog',
     href: `#${FEATURES_PATH_PREFIX}`,
+    info: React.createElement(
+      'span',
+      { className: 'browse-catalog-info', 'aria-hidden': true },
+      React.createElement(Icon, { name: 'search', size: 'inherit' }),
+    ),
   };
+
+  const extensionItems = [...items, ...comingSoonItems(installed)];
 
   return {
     type: 'section',
     // "(Preview)" signals that the extension framework is still being built out —
     // there are no production extensions to install yet beyond the bundled demo.
     text: 'Extensions (Preview)',
-    items: [...items, ...comingSoonItems(installed), browseCatalog],
+    items: extensionItems.length > 0 ? [browseCatalog, { type: 'divider' }, ...extensionItems] : [browseCatalog],
   };
 }
