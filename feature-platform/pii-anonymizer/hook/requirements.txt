@@ -1,0 +1,15 @@
+# Runtime dependencies for the PII Anonymization preprocessing hook Lambda.
+# These back the vendored pii-anonymizer document closure (see
+# vendor/PROVENANCE.md). boto3 is provided by the Lambda runtime.
+#
+# NOTE: python-Levenshtein / fuzzywuzzy / termcolor / aws-xray-sdk / matplotlib
+# are NOT needed by the document closure (textract_helper uses stdlib difflib).
+# Audio deps (ffmpeg) are intentionally excluded — documents only in v1.
+pypdf>=5.1.0
+pypdfium2>=4.30.0
+pillow>=12.1.1        # CVE-2026-25990 fix (keep this floor or higher)
+python-docx>=0.8.11
+openpyxl>=3.0.10
+faker>=30.0.0
+defusedxml>=0.7.1
+PyYAML>=6.0
