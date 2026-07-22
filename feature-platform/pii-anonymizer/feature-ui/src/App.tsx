@@ -10,23 +10,16 @@ import {
   Tabs,
 } from '@cloudscape-design/components';
 
-import type { FeatureContext } from './types';
 import { createApiClient } from './api';
-import ClaimsDashboardView from './ClaimsDashboardView';
-import RulesDiscoveryView from './RulesDiscoveryView';
-
-// Compile-time constant injected by Vite from feature.yaml -> version. The
-// config preset the feature installs is named `sample-health-insurance-review-v<version>`
-// (see apply_feature_config_preset on the host), so the Rules Discovery view
-// writes discovered rules into that same version.
-declare const __FEATURE_VERSION__: string;
+import ConfigPairingView from './ConfigPairingView';
+import RedactionReportView from './RedactionReportView';
+import type { FeatureContext } from './types';
 
 /**
- * Sample: Health Insurance Review. Two tabs:
- *   1. Claims Dashboard — lists processed claims with deterministic status
- *      and per-rule results (its own HTTP API over the ClaimsStatus table).
- *   2. Rules Discovery — drives the host's Rules Discovery flow to extract
- *      validation rules from a payer policy document (host AppSync mutations).
+ * PII Anonymization. Two tabs:
+ *   1. Config Pairing — clone an existing config version into a redaction pair
+ *      (initiating + companion) and optionally activate it. Uses host GraphQL.
+ *   2. Redaction Report — metadata-only audit of redacted documents (feature API).
  */
 const App: React.FC<FeatureContext> = ({
   featureApiEndpoint,
@@ -38,18 +31,15 @@ const App: React.FC<FeatureContext> = ({
     () => createApiClient(featureApiEndpoint, getAuthToken),
     [featureApiEndpoint, getAuthToken],
   );
-  const [discoveryBucket, setDiscoveryBucket] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState('claims');
-
-  // Config version the bundled preset was installed as.
-  const configVersion = `sample-health-insurance-review-v${installedVersion || __FEATURE_VERSION__}`;
+  const [activeTab, setActiveTab] = useState('pairing');
+  const [hookArn, setHookArn] = useState<string | null>(null);
 
   useEffect(() => {
     if (!subscriptionActive) return;
     api
       .getConfig()
-      .then((c) => setDiscoveryBucket(c.discoveryBucket))
-      .catch(() => setDiscoveryBucket(null));
+      .then((c) => setHookArn(c.hookFunctionArn))
+      .catch(() => setHookArn(null));
   }, [api, subscriptionActive]);
 
   return (
@@ -57,9 +47,9 @@ const App: React.FC<FeatureContext> = ({
       header={
         <Header
           variant="h1"
-          description={`Sample use-case add-on · v${installedVersion} — health insurance claims review on the IDP rule-validation pipeline`}
+          description={`v${installedVersion} — redact PII from documents before the classification/extraction models see them`}
         >
-          Sample: Health Insurance Review
+          PII Anonymization
         </Header>
       }
     >
@@ -75,22 +65,19 @@ const App: React.FC<FeatureContext> = ({
           onChange={({ detail }) => setActiveTab(detail.activeTabId)}
           tabs={[
             {
-              id: 'claims',
-              label: 'Claims Dashboard',
+              id: 'pairing',
+              label: 'Config Pairing',
               content: (
-                <ClaimsDashboardView api={api} enabled={subscriptionActive} />
+                <ConfigPairingView
+                  enabled={subscriptionActive}
+                  hookFunctionArn={hookArn}
+                />
               ),
             },
             {
-              id: 'discovery',
-              label: 'Rules Discovery',
-              content: (
-                <RulesDiscoveryView
-                  discoveryBucket={discoveryBucket}
-                  configVersion={configVersion}
-                  enabled={subscriptionActive}
-                />
-              ),
+              id: 'report',
+              label: 'Redaction Report',
+              content: <RedactionReportView api={api} enabled={subscriptionActive} />,
             },
           ]}
         />

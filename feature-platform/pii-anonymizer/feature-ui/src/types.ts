@@ -2,10 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Local mirror of the host's FeatureContext type. Keep this file in sync with
+ * Local mirror of the host's FeatureContext type. Keep in sync with
  *   src/ui/src/types/feature-platform.ts (in the main IDP UI).
- * The host passes an object matching this shape to the feature's Component
- * as its sole prop.
  */
 export interface FeatureContext {
   featureId: string;
@@ -30,59 +28,45 @@ declare global {
   }
 }
 
-// ---- Claims domain types ----------------------------------------------------
+// ---- Redaction report types (feature API) ----------------------------------
 
-export type ClaimStatus =
-  | 'CLEAN_CLAIM'
-  | 'REVIEW_REQUIRED'
-  | 'INSUFFICIENT_DOCUMENTATION';
-
-export interface ClaimRow {
+export interface RedactionRow {
   documentId: string;
-  status: ClaimStatus;
-  passCount: number;
-  failCount: number;
-  notFoundCount: number;
-  totalRules: number;
-  recommendationCounts: Record<string, number>;
-  policyTypes: string[];
-  summaryJsonUri: string;
-  summaryMdUri: string;
-  executionArn: string;
-  updatedAt: string;
+  createdAt: string;
+  sourceKey?: string;
+  redactedKey?: string;
+  mode?: string;
+  companionConfigVersion?: string;
+  configVersion?: string;
+  piiCount?: number;
+  replacements?: number;
+  halted?: boolean;
+  executionArn?: string;
 }
 
-export interface ClaimsListResponse {
-  claims: ClaimRow[];
+export interface RedactionReportResponse {
+  rows: RedactionRow[];
   total: number;
-  status: string;
+  totalPiiRedacted: number;
   window: string;
   asOf: string;
 }
 
-export interface RuleResult {
-  rule: string;
-  recommendation: string;
-  supporting_pages: string[];
-  reasoning: string;
+// ---- Config-pairing wizard types -------------------------------------------
+
+export type RedactionMode = 'redacted_only' | 'redacted_and_unredacted';
+
+export interface ConfigVersionSummary {
+  versionName: string;
+  isActive?: boolean;
+  description?: string;
 }
 
-export interface RuleDetail {
-  total_rules: number;
-  pass_count: number;
-  fail_count: number;
-  information_not_found_count: number;
-  pass_percentage: number;
-  rules: RuleResult[];
-}
-
-export interface ClaimDetailResponse extends ClaimRow {
-  ruleSummary?: Record<string, Record<string, unknown>>;
-  ruleDetails?: Record<string, RuleDetail>;
-  supportingPages?: string[];
-  overallStatistics?: Record<string, unknown>;
-}
-
-export interface FeatureConfigResponse {
-  discoveryBucket: string | null;
+export interface PairPlan {
+  baseVersion: string;
+  initiatingVersion: string; // <base>__pii_redacted_only | <base>__pii_both
+  companionVersion: string; // <base>__standard
+  mode: RedactionMode;
+  detectionModelId: string;
+  redactionMode: 'synthetic' | 'blackout';
 }

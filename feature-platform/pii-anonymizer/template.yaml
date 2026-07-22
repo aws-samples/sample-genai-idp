@@ -240,6 +240,10 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           MAIN_STACK_NAME: !Ref MainStackName
           AUDIT_TABLE_NAME: !Ref RedactionAuditTable
+          # Surfaced to the Config Pairing wizard via GET /config so the
+          # wizard can write the real hook ARN into the preprocessing.preHook
+          # entry of the config versions it creates.
+          HOOK_FUNCTION_ARN: !GetAtt PiiAnonymizerHookFunction.Arn
       Policies:
         - Statement:
             - Effect: Allow

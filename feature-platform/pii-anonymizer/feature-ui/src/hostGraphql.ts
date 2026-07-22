@@ -2,31 +2,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Calls the HOST's AppSync GraphQL API directly from the feature UI.
+ * Calls the HOST's GraphQL API directly from the feature UI, reusing the host's
+ * configured, signed-in Amplify instance (window.awsAmplify), so requests carry
+ * the user's Cognito JWT and group memberships. Same pattern as the
+ * sample-health-insurance-review feature.
  *
- * This works because the host installs `window.awsAmplify` (see
- * src/ui/src/components/feature-page/feature-host-globals.ts) — the SAME
- * configured, signed-in Amplify instance the host UI uses. `generateClient()`
- * therefore inherits the user's Cognito session and talks to the host's
- * GraphQL endpoint with the user's own JWT and group memberships. No extra
- * configuration is needed in the feature.
+ * The Config Pairing wizard uses four host operations:
+ *   getConfigVersions                      — list existing config versions
+ *   getConfigVersion(versionName)          — fetch a version's config JSON
+ *   updateConfiguration(versionName, ...)  — create/update a version
+ *                                            (saveAsVersion:true creates a new one)
+ *   setActiveVersion(versionName)          — activate a version
  *
- * We use this for the Rules Discovery flow, which is built entirely on host
- * mutations/queries (uploadDiscoveryDocument, listDiscoveryJobs,
- * getConfigVersion). The feature contributes the UI; the host owns the
- * discovery pipeline and the config it writes to.
- *
- * NOTE on auth: uploadDiscoveryDocument is restricted to the Admin/Author
- * Cognito groups (see schema.graphql). A Reviewer-role user will get an
- * authorization error — the RulesDiscoveryView surfaces that as a friendly
- * "needs Admin or Author" message rather than a raw GraphQL error.
+ * updateConfiguration + saveAsVersion require the Admin role (enforced
+ * server-side in configuration_resolver.py). A non-Admin sees a friendly error.
  */
 
 import { generateClient } from 'aws-amplify/api';
 
-// Minimal structural type for the bits of the Amplify client we use. We avoid
-// `ReturnType<typeof generateClient>` because that generic recurses deeply on
-// the schema-less form and trips TS2321 "Excessive stack depth" at build time.
 interface GraphqlClient {
   graphql: (operation: {
     query: string;
@@ -34,67 +27,22 @@ interface GraphqlClient {
   }) => Promise<unknown>;
 }
 
-/**
- * Lazily create the GraphQL client on first use — NOT at module-eval time.
- *
- * This UMD bundle is injected via a <script> tag; its top-level code can run
- * before the host has finished `Amplify.configure()`. Calling
- * `generateClient()` at module scope then throws "Amplify has not been
- * configured. Please call Amplify.configure() before using this service."
- * — which Amplify rejects as a plain object, surfacing in the UI as
- * `[object Object]`. By deferring to first call (always inside a user-driven
- * handler or a mounted-component effect), the host's Amplify instance is
- * guaranteed to be configured. The client is memoised after the first call.
- */
 let _client: GraphqlClient | null = null;
 function getClient(): GraphqlClient {
+  // Lazily created on first use (NOT at module eval) — the UMD bundle can load
+  // before the host finishes Amplify.configure().
   if (!_client) {
     _client = generateClient() as unknown as GraphqlClient;
   }
   return _client;
 }
 
-const UPLOAD_DISCOVERY_DOCUMENT = /* GraphQL */ `
-  mutation UploadDiscoveryDocument(
-    $fileName: String!
-    $contentType: String
-    $bucket: String
-    $version: String
-    $discoveryType: String
-  ) {
-    uploadDiscoveryDocument(
-      fileName: $fileName
-      contentType: $contentType
-      bucket: $bucket
-      version: $version
-      discoveryType: $discoveryType
-    ) {
-      presignedUrl
-      objectKey
-      usePostMethod
-    }
-  }
-`;
-
-// NOTE: select only fields that exist on DiscoveryJobListItem in the host
-// schema. There is NO `discoveryType` field on that type — rules jobs are
-// distinguished by `jobType == 'rules'` (the host's discovery_upload_resolver
-// sets jobType='rules' for discoveryType='rules'). Selecting a non-existent
-// field makes AppSync reject the whole query with a validation error.
-const LIST_DISCOVERY_JOBS = /* GraphQL */ `
-  query ListDiscoveryJobs {
-    listDiscoveryJobs {
-      DiscoveryJobs {
-        jobId
-        documentKey
-        status
-        statusMessage
-        createdAt
-        updatedAt
-        errorMessage
-        version
-        jobType
-      }
+const GET_CONFIG_VERSIONS = /* GraphQL */ `
+  query GetConfigVersions {
+    getConfigVersions {
+      success
+      versions { versionName isActive description }
+      error { message }
     }
   }
 `;
@@ -105,38 +53,42 @@ const GET_CONFIG_VERSION = /* GraphQL */ `
       success
       Custom
       Default
+      error { message }
     }
   }
 `;
 
-export interface DiscoveryJob {
-  jobId: string;
-  documentKey?: string;
-  status: string;
-  statusMessage?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  errorMessage?: string;
-  version?: string;
-  jobType?: string;
-}
+const UPDATE_CONFIGURATION = /* GraphQL */ `
+  mutation UpdateConfiguration(
+    $versionName: String!
+    $customConfig: AWSJSON!
+    $description: String
+  ) {
+    updateConfiguration(
+      versionName: $versionName
+      customConfig: $customConfig
+      description: $description
+    ) {
+      success
+      message
+      error { message }
+    }
+  }
+`;
 
-export interface PresignedUpload {
-  presignedUrl: string;
-  objectKey: string;
-  usePostMethod: string;
-}
+const SET_ACTIVE_VERSION = /* GraphQL */ `
+  mutation SetActiveVersion($versionName: String!) {
+    setActiveVersion(versionName: $versionName) {
+      success
+      message
+      error { message }
+    }
+  }
+`;
 
 type GraphQLResult<T> = { data?: T; errors?: Array<{ message: string }> };
 
-/**
- * Turn anything thrown by `client.graphql(...)` into a readable message.
- *
- * Amplify does NOT reject with an `Error` — it rejects with a plain object
- * `{ data, errors: [{ message }] }`. A naive `String(e)` on that yields the
- * useless `[object Object]`. Call this in every catch so the UI shows the
- * real GraphQL error text instead.
- */
+/** Turn an Amplify rejection (a plain {errors:[{message}]} object) into text. */
 export function graphqlErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (err && typeof err === 'object') {
@@ -156,124 +108,98 @@ export function graphqlErrorMessage(err: unknown): string {
 
 function unwrap<T>(result: unknown): T {
   const r = result as GraphQLResult<T>;
-  if (r.errors?.length) {
-    throw new Error(r.errors.map((e) => e.message).join('; '));
-  }
+  if (r.errors?.length) throw new Error(r.errors.map((e) => e.message).join('; '));
   if (!r.data) throw new Error('Empty GraphQL response');
   return r.data;
 }
 
-/**
- * Request a presigned upload for a policy document, creating a `rules`
- * discovery job. `version` is the config version the discovered policy
- * classes are written into (the claims preset version).
- */
-export async function uploadDiscoveryDocument(args: {
-  fileName: string;
-  contentType: string;
-  bucket: string;
-  version: string;
-}): Promise<PresignedUpload> {
-  const result = await getClient().graphql({
-    query: UPLOAD_DISCOVERY_DOCUMENT,
-    variables: { ...args, discoveryType: 'rules' },
-  });
-  const data = unwrap<{ uploadDiscoveryDocument: PresignedUpload }>(result);
-  return data.uploadDiscoveryDocument;
-}
-
-/** PUT/POST the file to S3 using the presigned POST data the host returned. */
-export async function uploadToS3(
-  file: File,
-  presignedUrl: string,
-): Promise<void> {
-  const presignedPostData = JSON.parse(presignedUrl) as {
-    url: string;
-    fields: Record<string, string>;
-  };
-  const formData = new FormData();
-  Object.entries(presignedPostData.fields).forEach(([key, value]) => {
-    formData.append(key, value);
-  });
-  formData.append('file', file);
-  const resp = await fetch(presignedPostData.url, {
-    method: 'POST',
-    body: formData,
-  });
-  if (!resp.ok) {
-    throw new Error(`S3 upload failed: HTTP ${resp.status}`);
-  }
-}
-
-/** List discovery jobs, filtered to `rules` jobs (the ones this view drives). */
-export async function listRulesDiscoveryJobs(): Promise<DiscoveryJob[]> {
-  const result = await getClient().graphql({ query: LIST_DISCOVERY_JOBS });
-  const data = unwrap<{ listDiscoveryJobs?: { DiscoveryJobs?: DiscoveryJob[] } }>(
-    result,
-  );
-  const jobs = data.listDiscoveryJobs?.DiscoveryJobs ?? [];
-  return jobs.filter((j) => j.jobType === 'rules');
-}
-
-export interface PolicyRule {
-  name: string;
+export interface ConfigVersion {
+  versionName: string;
+  isActive?: boolean;
   description?: string;
 }
 
-export interface PolicyClass {
-  policyType: string;
-  description?: string;
-  rules: PolicyRule[];
+export async function listConfigVersions(): Promise<ConfigVersion[]> {
+  const result = await getClient().graphql({ query: GET_CONFIG_VERSIONS });
+  const data = unwrap<{
+    getConfigVersions?: {
+      success: boolean;
+      versions?: ConfigVersion[];
+      error?: { message?: string };
+    };
+  }>(result);
+  const r = data.getConfigVersions;
+  if (!r?.success) throw new Error(r?.error?.message || 'Could not list config versions');
+  return (r.versions || []).filter((v) => !!v.versionName);
 }
 
 /**
- * Read the config version the discovery job wrote into and pull out the
- * `policy_classes`. Each class carries `x-aws-idp-policy-type` plus a
- * `rule_properties` map (ruleName -> { description }). The configuration
- * resolver returns Custom/Default as JSON-encoded strings.
+ * Fetch a version's *effective* config as a plain object. The resolver returns
+ * Custom (overrides) and Default (built-in) as JSON strings; we merge shallowly
+ * with Custom winning, matching how the host presents an "effective" config.
  */
-export async function getPolicyClasses(versionName: string): Promise<PolicyClass[]> {
+export async function getConfig(versionName: string): Promise<Record<string, unknown>> {
   const result = await getClient().graphql({
     query: GET_CONFIG_VERSION,
     variables: { versionName },
   });
   const data = unwrap<{
-    getConfigVersion?: { success: boolean; Custom?: string; Default?: string };
-  }>(result);
-  const raw = data.getConfigVersion?.Custom || data.getConfigVersion?.Default;
-  if (!raw) return [];
-  let config: Record<string, unknown>;
-  try {
-    config = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return [];
-  }
-  const policyClasses = config.policy_classes;
-  if (!Array.isArray(policyClasses)) return [];
-  return policyClasses.map((pc) => {
-    const entry = pc as Record<string, unknown>;
-    const policyType =
-      (entry['x-aws-idp-policy-type'] as string) ||
-      (entry.$id as string) ||
-      'unknown';
-    const ruleProps = entry.rule_properties;
-    const rules: PolicyRule[] =
-      ruleProps && typeof ruleProps === 'object'
-        ? Object.entries(ruleProps as Record<string, unknown>).map(
-            ([name, def]) => ({
-              name,
-              description:
-                def && typeof def === 'object'
-                  ? ((def as Record<string, unknown>).description as string)
-                  : undefined,
-            }),
-          )
-        : [];
-    return {
-      policyType,
-      description:
-        typeof entry.description === 'string' ? entry.description : undefined,
-      rules,
+    getConfigVersion?: {
+      success: boolean;
+      Custom?: string;
+      Default?: string;
+      error?: { message?: string };
     };
+  }>(result);
+  const r = data.getConfigVersion;
+  if (!r?.success) throw new Error(r?.error?.message || `Could not read ${versionName}`);
+  const parse = (s?: string): Record<string, unknown> => {
+    if (!s) return {};
+    try {
+      const v = JSON.parse(s) as unknown;
+      return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  };
+  return { ...parse(r.Default), ...parse(r.Custom) };
+}
+
+/**
+ * Create (or overwrite) a config version with the given full config object.
+ * Sets saveAsVersion:true so the host writes it as a NEW non-active version.
+ */
+export async function saveConfigVersion(
+  versionName: string,
+  config: Record<string, unknown>,
+  description: string,
+): Promise<void> {
+  const customConfig = JSON.stringify({ ...config, saveAsVersion: true });
+  const result = await getClient().graphql({
+    query: UPDATE_CONFIGURATION,
+    variables: { versionName, customConfig, description },
   });
+  const data = unwrap<{
+    updateConfiguration?: { success: boolean; error?: { message?: string } };
+  }>(result);
+  if (!data.updateConfiguration?.success) {
+    throw new Error(
+      data.updateConfiguration?.error?.message || `Could not save ${versionName}`,
+    );
+  }
+}
+
+export async function activateVersion(versionName: string): Promise<void> {
+  const result = await getClient().graphql({
+    query: SET_ACTIVE_VERSION,
+    variables: { versionName },
+  });
+  const data = unwrap<{
+    setActiveVersion?: { success: boolean; error?: { message?: string } };
+  }>(result);
+  if (!data.setActiveVersion?.success) {
+    throw new Error(
+      data.setActiveVersion?.error?.message || `Could not activate ${versionName}`,
+    );
+  }
 }

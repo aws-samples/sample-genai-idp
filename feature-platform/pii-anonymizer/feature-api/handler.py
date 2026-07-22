@@ -35,6 +35,7 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 _AUDIT_TABLE = os.environ.get("AUDIT_TABLE_NAME", "")
+_HOOK_FUNCTION_ARN = os.environ.get("HOOK_FUNCTION_ARN", "")
 _WINDOW_RE = re.compile(r"^(\d+)([hdw])$")
 
 _dynamodb = boto3.resource("dynamodb")
@@ -115,7 +116,10 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     )
 
     if path.rstrip("/") == "/config":
-        return _response(200, {"feature": "pii-anonymizer"})
+        return _response(
+            200,
+            {"feature": "pii-anonymizer", "hookFunctionArn": _HOOK_FUNCTION_ARN or None},
+        )
 
     if path.rstrip("/") == "/report":
         try:
