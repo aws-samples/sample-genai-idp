@@ -88,6 +88,8 @@ def handler(event, context):
         return delete_test_sets(event['arguments'])
     elif field_name == 'getTestSets':
         return get_test_sets()
+    elif field_name == 'getTestSetDocuments':
+        return get_test_set_documents(event['arguments'])
     elif field_name == 'listBucketFiles':
         return list_bucket_files(event['arguments'])
     elif field_name == 'validateTestFileName':
@@ -691,6 +693,109 @@ def get_test_sets():
     
     logger.info(f"Returning {len(result)} test sets")
     return result
+
+def get_test_set_documents(args):
+    """List the documents in a test set with their baseline (ground truth) sections.
+
+    Paginated over the set's `input/` prefix; the S3 continuation token is
+    passed through opaquely as `nextToken`. For each page of input files, the
+    whole `baseline/` prefix is listed once (bulk) and section result.json
+    keys are matched to their document in memory — one extra LIST per page
+    regardless of page size, and it handles nested input file names.
+    """
+    test_set_id = args['testSetId']
+    limit = args.get('limit') or 100
+    next_token = args.get('nextToken')
+    # Optional exact-match filter: return just this document (used by the UI's
+    # document detail page when deep-linked, so it doesn't page through the
+    # whole set to find one doc).
+    object_key = args.get('objectKey')
+
+    # The id is derived from a validated name (validate_test_set_name), so it
+    # must match the same charset (with '-' for spaces). Rejects '/' and '..'
+    # so it can't traverse outside the test set's S3 prefix.
+    if not validate_test_set_name(test_set_id):
+        raise Exception("Invalid test set id")
+    if object_key and '..' in object_key:
+        raise Exception("Invalid object key")
+    limit = max(1, min(int(limit), 1000))
+
+    item = db_client.get_item({
+        'PK': f'testset#{test_set_id}',
+        'SK': 'metadata'
+    })
+    if not item:
+        raise Exception(f"Test set '{test_set_id}' not found")
+
+    test_set_bucket = os.environ['TEST_SET_BUCKET']
+    input_prefix = f"{test_set_id}/input/"
+
+    list_kwargs = {
+        'Bucket': test_set_bucket,
+        # Exact-name prefix narrows the listing to (at most) the one document;
+        # the objectKey equality check below drops same-prefix siblings.
+        'Prefix': f"{input_prefix}{object_key}" if object_key else input_prefix,
+        'MaxKeys': limit,
+    }
+    if next_token:
+        list_kwargs['ContinuationToken'] = next_token
+    response = s3_client.list_objects_v2(**list_kwargs)
+
+    documents = []
+    for obj in response.get('Contents', []):
+        key = obj['Key']
+        if key.endswith('/'):
+            continue  # skip folder placeholder objects
+        relative_name = key[len(input_prefix):]
+        if object_key and relative_name != object_key:
+            continue
+        documents.append({
+            'objectKey': relative_name,
+            'inputKey': key,
+            'size': obj.get('Size'),
+            'lastModified': obj['LastModified'].isoformat(),
+            'sections': [],
+        })
+
+    if documents:
+        # Bulk-list baseline section files once and match to this page's docs.
+        # Baseline layout: <id>/baseline/<relative_name>/sections/<n>/result.json
+        baseline_prefix = f"{test_set_id}/baseline/"
+        sections_by_doc = {d['objectKey']: d['sections'] for d in documents}
+        section_re = re.compile(r'^(.+)/sections/([^/]+)/result\.json$')
+        paginator = s3_client.get_paginator('list_objects_v2')
+        for page in paginator.paginate(Bucket=test_set_bucket, Prefix=baseline_prefix):
+            for obj in page.get('Contents', []):
+                rel = obj['Key'][len(baseline_prefix):]
+                match = section_re.match(rel)
+                if not match:
+                    continue
+                doc_name, section_id = match.groups()
+                sections = sections_by_doc.get(doc_name)
+                if sections is not None:
+                    sections.append({
+                        'sectionId': section_id,
+                        'baselineKey': obj['Key'],
+                    })
+
+        # Sort sections numerically where possible so "10" doesn't precede "2"
+        for doc in documents:
+            doc['sections'].sort(
+                key=lambda s: (0, int(s['sectionId']))
+                if s['sectionId'].isdigit()
+                else (1, s['sectionId'])
+            )
+
+    result = {
+        'documents': documents,
+        'nextToken': response.get('NextContinuationToken'),
+    }
+    logger.info(
+        f"getTestSetDocuments({test_set_id}): {len(documents)} documents"
+        f"{' (more available)' if result['nextToken'] else ''}"
+    )
+    return result
+
 
 def _is_valid_test_set_structure(s3_client, bucket, prefix):
     """Check if prefix contains input/ and baseline/ folders.

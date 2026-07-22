@@ -23,6 +23,7 @@ export const LIST_CATALOG_FEATURES = /* GraphQL */ `
       iconUrl
       description
       docsUrl
+      showInNav
       source
       productCode
       marketplaceListingUrl
