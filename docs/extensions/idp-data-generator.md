@@ -39,7 +39,8 @@ labels for evaluating OCR, classification, and extraction:
   `baseline/<doc>.pdf/sections/<n>/result.json` (document class + inference
   result), the standard IDP test-set layout Test Studio reads.
 - **Optional image augmentation** — scan/fax-style aging effects for
-  robustness testing.
+  robustness testing (currently CLI-only via `--augment`; the Test Studio toggle
+  is hidden pending an upstream SEED stability fix).
 - **Cost estimate** — the modal shows an estimated cost/time band before you
   start a run.
 
