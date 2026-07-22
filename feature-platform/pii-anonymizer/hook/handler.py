@@ -196,7 +196,9 @@ def _build_pii_config(pp: Dict[str, Any]) -> Dict[str, Any]:
     feature's `preprocessing` block. Sensible defaults keep it working with a
     minimal block."""
     model = pp.get("model") or {}
-    model_id = model.get("id") or pp.get("detection_model") or "us.amazon.nova-lite-v1:0"
+    model_id = (
+        model.get("id") or pp.get("detection_model") or "us.amazon.nova-lite-v1:0"
+    )
     provider = model.get("provider") or (
         "amazon" if ("nova" in model_id or "titan" in model_id) else "anthropic"
     )
@@ -254,8 +256,15 @@ def _redact_to_scratch(
         proc = process_pdf_text_based if use_text else process_pdf_image_based
         logger.info("PDF path: %s", "text" if use_text else "image")
         result = proc(
-            input_bucket, input_key, _WORKING_BUCKET, base, pii_config,
-            _bedrock, None, _s3, scratch_folder,
+            input_bucket,
+            input_key,
+            _WORKING_BUCKET,
+            base,
+            pii_config,
+            _bedrock,
+            None,
+            _s3,
+            scratch_folder,
         )
         out_ext = "pdf"
     elif ext in ("txt", "csv"):
@@ -266,32 +275,60 @@ def _redact_to_scratch(
         from processors.txt_processor import process_txt_file
 
         result = process_txt_file(
-            input_bucket, input_key, _WORKING_BUCKET, base, pii_config,
-            _bedrock, None, _s3, scratch_folder,
+            input_bucket,
+            input_key,
+            _WORKING_BUCKET,
+            base,
+            pii_config,
+            _bedrock,
+            None,
+            _s3,
+            scratch_folder,
         )
         out_ext = ext
     elif ext in ("xlsx", "xls"):
         from processors.tabular_processor import process_excel_file
 
         result = process_excel_file(
-            input_bucket, input_key, _WORKING_BUCKET, base, pii_config,
-            _bedrock, None, _s3, scratch_folder,
+            input_bucket,
+            input_key,
+            _WORKING_BUCKET,
+            base,
+            pii_config,
+            _bedrock,
+            None,
+            _s3,
+            scratch_folder,
         )
         out_ext = "xlsx"
     elif ext in ("docx", "doc"):
         from processors.word_processor import process_word_file
 
         result = process_word_file(
-            input_bucket, input_key, _WORKING_BUCKET, base, pii_config,
-            _bedrock, None, _s3, scratch_folder,
+            input_bucket,
+            input_key,
+            _WORKING_BUCKET,
+            base,
+            pii_config,
+            _bedrock,
+            None,
+            _s3,
+            scratch_folder,
         )
         out_ext = "docx"
     elif ext in _IMAGE_EXTS:
         from processors.image_processor import process_image_file
 
         result = process_image_file(
-            input_bucket, input_key, _WORKING_BUCKET, base, pii_config,
-            _bedrock, None, _s3, scratch_folder,
+            input_bucket,
+            input_key,
+            _WORKING_BUCKET,
+            base,
+            pii_config,
+            _bedrock,
+            None,
+            _s3,
+            scratch_folder,
         )
         out_ext = ext
     else:

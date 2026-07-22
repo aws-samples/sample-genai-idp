@@ -62,31 +62,47 @@ def test_reentrancy_guard_skips_redacted_input():
 
 def test_missing_input_key_skips():
     mod = _load()
-    out = mod.lambda_handler({"hookPoint": "preprocessing", "document": {"id": "x"}}, None)
+    out = mod.lambda_handler(
+        {"hookPoint": "preprocessing", "document": {"id": "x"}}, None
+    )
     assert out["halt"] is False and out["skipped"] is True
 
 
 def test_redacted_only_mode_halts_and_writes_copy(monkeypatch):
     mod = _load()
     monkeypatch.setattr(
-        mod, "_read_preprocessing_config",
-        lambda v: {"mode": "redacted_only", "companion_config_version": "base__standard"},
+        mod,
+        "_read_preprocessing_config",
+        lambda v: {
+            "mode": "redacted_only",
+            "companion_config_version": "base__standard",
+        },
     )
     monkeypatch.setattr(
-        mod, "_redact_to_scratch",
-        lambda doc, cfg, did: {"scratch_key": "pii_scratch/x/redacted_foo.txt",
-                               "out_ext": "pdf", "pii_count": 3, "replacements": 3},
+        mod,
+        "_redact_to_scratch",
+        lambda doc, cfg, did: {
+            "scratch_key": "pii_scratch/x/redacted_foo.txt",
+            "out_ext": "pdf",
+            "pii_count": 3,
+            "replacements": 3,
+        },
     )
     copies = {}
     monkeypatch.setattr(
-        mod._s3, "copy_object",
+        mod._s3,
+        "copy_object",
         lambda **kw: copies.update(kw) or {},
     )
     out = mod.lambda_handler(
         {
             "hookPoint": "preprocessing",
-            "document": {"input_key": "foo.pdf", "id": "foo.pdf",
-                         "input_bucket": "input-bkt", "config_version": "base__pii_only"},
+            "document": {
+                "input_key": "foo.pdf",
+                "id": "foo.pdf",
+                "input_bucket": "input-bkt",
+                "config_version": "base__pii_only",
+            },
         },
         None,
     )
@@ -98,24 +114,42 @@ def test_redacted_only_mode_halts_and_writes_copy(monkeypatch):
     assert copies["Bucket"] == "input-bkt"
     assert copies["Key"] == "_pii_redacted/foo.pdf"
     assert copies["Metadata"] == {"config-version": "base__standard"}
-    assert copies["CopySource"] == {"Bucket": "working-bkt", "Key": "pii_scratch/x/redacted_foo.txt"}
+    assert copies["CopySource"] == {
+        "Bucket": "working-bkt",
+        "Key": "pii_scratch/x/redacted_foo.txt",
+    }
 
 
 def test_process_both_mode_does_not_halt(monkeypatch):
     mod = _load()
     monkeypatch.setattr(
-        mod, "_read_preprocessing_config",
-        lambda v: {"mode": "redacted_and_unredacted", "companion_config_version": "base__standard"},
+        mod,
+        "_read_preprocessing_config",
+        lambda v: {
+            "mode": "redacted_and_unredacted",
+            "companion_config_version": "base__standard",
+        },
     )
     monkeypatch.setattr(
-        mod, "_redact_to_scratch",
-        lambda doc, cfg, did: {"scratch_key": "s/k.pdf", "out_ext": "pdf",
-                               "pii_count": 1, "replacements": 1},
+        mod,
+        "_redact_to_scratch",
+        lambda doc, cfg, did: {
+            "scratch_key": "s/k.pdf",
+            "out_ext": "pdf",
+            "pii_count": 1,
+            "replacements": 1,
+        },
     )
     monkeypatch.setattr(mod._s3, "copy_object", lambda **kw: {})
     out = mod.lambda_handler(
-        {"hookPoint": "preprocessing",
-         "document": {"input_key": "a.pdf", "id": "a.pdf", "config_version": "base__both"}},
+        {
+            "hookPoint": "preprocessing",
+            "document": {
+                "input_key": "a.pdf",
+                "id": "a.pdf",
+                "config_version": "base__both",
+            },
+        },
         None,
     )
     assert out["halt"] is False
@@ -125,11 +159,16 @@ def test_process_both_mode_does_not_halt(monkeypatch):
 
 def test_unsupported_format_passes_through(monkeypatch):
     mod = _load()
-    monkeypatch.setattr(mod, "_read_preprocessing_config", lambda v: {"mode": "redacted_only"})
+    monkeypatch.setattr(
+        mod, "_read_preprocessing_config", lambda v: {"mode": "redacted_only"}
+    )
     # _redact_to_scratch returns None for unsupported formats
     monkeypatch.setattr(mod, "_redact_to_scratch", lambda doc, cfg, did: None)
     out = mod.lambda_handler(
-        {"hookPoint": "preprocessing", "document": {"input_key": "movie.mp3", "id": "m"}},
+        {
+            "hookPoint": "preprocessing",
+            "document": {"input_key": "movie.mp3", "id": "m"},
+        },
         None,
     )
     assert out["halt"] is False
@@ -153,7 +192,9 @@ def test_build_pii_config_defaults():
     assert cfg["model"]["provider"] == "amazon"  # nova default
     assert cfg["redaction"]["mode"] == "synthetic"
     # anthropic inferred for a claude id
-    cfg2 = mod._build_pii_config({"model": {"id": "us.anthropic.claude-haiku-4-5-20251001"}})
+    cfg2 = mod._build_pii_config(
+        {"model": {"id": "us.anthropic.claude-haiku-4-5-20251001"}}
+    )
     assert cfg2["model"]["provider"] == "anthropic"
 
 

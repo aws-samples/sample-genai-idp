@@ -75,12 +75,24 @@ def test_config_route(mod):
 @mock_aws
 def test_report_list_and_aggregate(mod):
     table = _make_table()
-    table.put_item(Item={"documentId": "a.pdf", "gsiPk": "ALL",
-                         "createdAt": "2026-07-22T10:00:00Z", "piiCount": 3,
-                         "mode": "redacted_only"})
-    table.put_item(Item={"documentId": "b.pdf", "gsiPk": "ALL",
-                         "createdAt": "2026-07-22T11:00:00Z", "piiCount": 5,
-                         "mode": "redacted_and_unredacted"})
+    table.put_item(
+        Item={
+            "documentId": "a.pdf",
+            "gsiPk": "ALL",
+            "createdAt": "2026-07-22T10:00:00Z",
+            "piiCount": 3,
+            "mode": "redacted_only",
+        }
+    )
+    table.put_item(
+        Item={
+            "documentId": "b.pdf",
+            "gsiPk": "ALL",
+            "createdAt": "2026-07-22T11:00:00Z",
+            "piiCount": 5,
+            "mode": "redacted_and_unredacted",
+        }
+    )
     resp = _get(mod, "/report")
     assert resp["statusCode"] == 200
     body = json.loads(resp["body"])
@@ -93,9 +105,15 @@ def test_report_list_and_aggregate(mod):
 @mock_aws
 def test_report_detail(mod):
     table = _make_table()
-    table.put_item(Item={"documentId": "sub/dir/doc.pdf", "gsiPk": "ALL",
-                         "createdAt": "2026-07-22T10:00:00Z", "piiCount": 2,
-                         "redactedKey": "_pii_redacted/sub/dir/doc.pdf"})
+    table.put_item(
+        Item={
+            "documentId": "sub/dir/doc.pdf",
+            "gsiPk": "ALL",
+            "createdAt": "2026-07-22T10:00:00Z",
+            "piiCount": 2,
+            "redactedKey": "_pii_redacted/sub/dir/doc.pdf",
+        }
+    )
     resp = _get(mod, f"/report/{quote('sub/dir/doc.pdf', safe='')}")
     assert resp["statusCode"] == 200
     assert json.loads(resp["body"])["redactedKey"] == "_pii_redacted/sub/dir/doc.pdf"

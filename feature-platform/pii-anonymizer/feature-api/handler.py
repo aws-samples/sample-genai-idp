@@ -118,7 +118,10 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     if path.rstrip("/") == "/config":
         return _response(
             200,
-            {"feature": "pii-anonymizer", "hookFunctionArn": _HOOK_FUNCTION_ARN or None},
+            {
+                "feature": "pii-anonymizer",
+                "hookFunctionArn": _HOOK_FUNCTION_ARN or None,
+            },
         )
 
     if path.rstrip("/") == "/report":
