@@ -368,6 +368,47 @@ class TestPipelineHookPreservation:
         assert cfg.rule_validation.postHook == []
         assert cfg.classification.postHook == []
 
+    def test_preprocessing_prehook_and_settings_survive_round_trip(self):
+        """The standalone `preprocessing` section (preHook + feature settings)
+        must survive the IDPConfig round-trip — otherwise the PII Anonymization
+        wizard/preset would lose the hook and its config (mode/model/companion)
+        on Save-as-Version / applyFeatureConfigPreset, and the dispatcher would
+        find no preprocessing hook to invoke."""
+        cfg_dict = {
+            "preprocessing": {
+                "enabled": True,
+                "mode": "redacted_only",
+                "companion_config_version": "base__standard",
+                "model": {"id": "us.amazon.nova-lite-v1:0", "provider": "amazon"},
+                "redaction": {"mode": "synthetic"},
+                "preHook": [
+                    {
+                        "featureId": "pii-anonymizer",
+                        "arn": "arn:aws:lambda:us-west-2:111122223333:function:PiiHook",
+                        "order": 100,
+                        "onError": "fail",
+                        "enabled": True,
+                    }
+                ],
+            }
+        }
+        dumped = IDPConfig.model_validate(cfg_dict).model_dump(mode="python")
+        pp = dumped["preprocessing"]
+        # declared field
+        assert len(pp["preHook"]) == 1
+        assert pp["preHook"][0]["arn"].endswith(":PiiHook")
+        assert pp["preHook"][0]["onError"] == "fail"
+        # extra="allow" feature settings preserved
+        assert pp["mode"] == "redacted_only"
+        assert pp["companion_config_version"] == "base__standard"
+        assert pp["model"]["id"] == "us.amazon.nova-lite-v1:0"
+        assert pp["redaction"]["mode"] == "synthetic"
+
+    def test_preprocessing_prehook_defaults_to_empty_list(self):
+        cfg = IDPConfig.model_validate({})
+        assert cfg.preprocessing.preHook == []
+        assert cfg.preprocessing.enabled is True
+
     def test_sparse_rule_validation_overlay_keeps_hook_and_merges_defaults(self):
         """The real failure mode: a sparse preset overlay carrying only
         rule_validation.postHook must keep the hook AND inherit classification

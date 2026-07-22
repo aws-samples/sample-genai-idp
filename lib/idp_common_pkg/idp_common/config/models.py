@@ -464,6 +464,41 @@ class PipelineHook(BaseModel):
     enabled: bool = Field(default=True, description="Whether this hook is active")
 
 
+class PreprocessingConfig(BaseModel):
+    """Top-level `preprocessing` section (v0.6).
+
+    Home of the `preHook` list for the standalone `preprocessing` pipeline hook
+    point — the only PRE-step extension point, which runs FIRST (before the
+    BDA/pipeline routing) and may halt the execution. Unlike the post-step hooks
+    (which live inside each step's config under `postHook`), preprocessing is its
+    own section because it is not tied to any single step.
+
+    Like the step configs, this MUST be a declared field on IDPConfig with
+    extra="allow" — otherwise IDPConfig's extra="ignore" would silently drop the
+    whole `preprocessing` block (and its `preHook`) whenever a config round-trips
+    through IDPConfig (Save-as-Version, updateConfiguration, applyFeatureConfigPreset,
+    sparse-config auto-migration), leaving the dispatcher with no hook to call.
+
+    Feature-specific settings (mode, model, redaction, companion_config_version,
+    ...) are carried as extra fields (extra="allow"); the PII Anonymization
+    feature reads them from here. Only `preHook` and `enabled` are declared.
+    """
+
+    # extra="allow" so a feature's own settings (mode, model, redaction,
+    # companion_config_version, ...) survive the IDPConfig round-trip.
+    model_config = ConfigDict(extra="allow")
+
+    preHook: List[PipelineHook] = Field(  # noqa: N815 — matches stored config key
+        default_factory=list,
+        description="Pipeline hooks invoked before any processing step "
+        "(Feature Platform preprocessing extension point).",
+    )
+    enabled: bool = Field(
+        default=True,
+        description="Master switch for preprocessing hooks in this config version.",
+    )
+
+
 class ConfidenceConfig(BaseModel):
     """Per-field confidence configuration (v0.6).
 
@@ -2477,6 +2512,12 @@ class IDPConfig(BaseModel):
     )
 
     notes: Optional[str] = Field(default=None, description="Configuration notes")
+    preprocessing: PreprocessingConfig = Field(
+        default_factory=PreprocessingConfig,
+        description="Preprocessing configuration — home of the standalone "
+        "`preprocessing` pipeline-hook point (runs first, before BDA/pipeline "
+        "routing). Used by the PII Anonymization extension.",
+    )
     ocr: OCRConfig = Field(default_factory=OCRConfig, description="OCR configuration")
     classification: ClassificationConfig = Field(
         default_factory=lambda: ClassificationConfig(model="us.amazon.nova-pro-v1:0"),
