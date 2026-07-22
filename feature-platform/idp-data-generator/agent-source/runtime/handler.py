@@ -64,7 +64,7 @@ def _run_job(payload):
     threshold = int(payload.get("threshold", 7))
     augment = bool(payload.get("augment", False))
     extra = payload.get("scenario") or payload.get("extra", "")
-    model_id = payload.get("modelId")
+    model_id = payload.get("modelId") or os.environ.get("GENERATOR_MODEL_ID")
     allowed_field_names = set(payload.get("allowedFieldNames", []))
 
     work_dir = tempfile.mkdtemp(prefix="synthesis-runtime-")
@@ -181,13 +181,22 @@ def _post_status(payload, job_id, status, message):
         attrs["statusMessage"] = message
     if status == "FAILED" and message:
         attrs["errorMessage"] = message
-    try:
-        boto3.resource("dynamodb").Table(table_name).update_item(
-            Key={"jobId": job_id},
-            UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in attrs),
-            ExpressionAttributeNames={f"#{k}": k for k in attrs},
-            ExpressionAttributeValues={f":{k}": v for k, v in attrs.items()},
+    kwargs = {
+        "Key": {"jobId": job_id},
+        "UpdateExpression": "SET " + ", ".join(f"#{k} = :{k}" for k in attrs),
+        "ExpressionAttributeNames": {f"#{k}": k for k in attrs},
+        "ExpressionAttributeValues": {f":{k}": v for k, v in attrs.items()},
+    }
+    if status != "FAILED":
+        kwargs["ConditionExpression"] = (
+            "attribute_not_exists(#status) OR #status <> :failed"
         )
+        kwargs["ExpressionAttributeNames"]["#status"] = "status"
+        kwargs["ExpressionAttributeValues"][":failed"] = "FAILED"
+    try:
+        boto3.resource("dynamodb").Table(table_name).update_item(**kwargs)
+    except boto3.client("dynamodb").exceptions.ConditionalCheckFailedException:
+        logger.info("job %s already FAILED (timed out); not overwriting", job_id)
     except Exception:  # noqa: BLE001 — status is best-effort
         logger.warning("Failed to write job status for %s", job_id, exc_info=True)
 

@@ -7,7 +7,7 @@ Consumes bootstrap jobs, authors/resolves a document-class schema (cheap, in
 this Lambda), creates a config version, then — when document generation is
 requested and available — stages the schema_dir to the working bucket and
 invokes the Synthesis AgentCore Runtime to generate a labeled test set. Status
-is posted to AppSync to drive the UI subscription.
+is recorded in the feature-owned BootstrapTrackingTable (read via the FeatureApi).
 """
 
 import json
@@ -31,6 +31,15 @@ CONFIGURATION_TABLE_NAME = os.environ.get("CONFIGURATION_TABLE_NAME")
 BOOTSTRAP_TRACKING_TABLE = os.environ.get("BOOTSTRAP_TRACKING_TABLE")
 
 _ddb = boto3.resource("dynamodb")
+
+
+def _class_id(class_dict: dict) -> str:
+    return (
+        class_dict.get("x-aws-idp-document-type")
+        or class_dict.get("$id")
+        or class_dict.get("title")
+        or ""
+    )
 
 
 def _status(
@@ -112,8 +121,23 @@ def _process_job(job_id, body):
     )
 
     preauthored = body.get("preauthoredSchema")
+    from_existing = body.get("fromExistingConfig")
     if preauthored:
         schema, tier = preauthored, "preauthored"
+    elif from_existing and request.config_version and request.class_name:
+        raw = config_manager.get_raw_configuration("Config", request.config_version)
+        classes = (raw or {}).get("classes", [])
+        target = next((c for c in classes if _class_id(c) == request.class_name), None)
+        if target is None:
+            _status(
+                job_id,
+                "FAILED",
+                error=f"Class '{request.class_name}' not found in version "
+                f"'{request.config_version}'",
+            )
+            return
+        schema = schema_bridge.config_class_to_generator_schema(target)
+        tier = "existing-config"
     else:
         config_classes = []
         if request.config_version:
@@ -188,9 +212,7 @@ def _process_job(job_id, body):
         "modelId": request.model_id,
         "allowedFieldNames": schema_bridge.field_names(schema),
     }
-    # AgentCore Runtime sessions must be 33-256 chars. The handler kicks off
-    # generation on a background thread and returns immediately; terminal
-    # status flows back through AppSync, so this call does not block on the run.
+    # AgentCore Runtime sessions must be 33-256 chars.
     session_id = f"bootstrap-{job_id}-{uuid.uuid4().hex}"
     boto3.client("bedrock-agentcore").invoke_agent_runtime(
         agentRuntimeArn=SYNTHESIS_RUNTIME_ARN,
