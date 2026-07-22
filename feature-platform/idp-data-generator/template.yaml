@@ -410,7 +410,7 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W11
-            reason: "bedrock-agentcore create/list runtime APIs do not support resource-level permissions; CloudWatch Logs require wildcard"
+            reason: "Actions scoped to the 5 AgentRuntime APIs the manager calls; Resource stays '*' because bedrock-agentcore create/list runtime APIs do not support resource-level permissions and the runtime ARN does not exist at create time. CloudWatch Logs require wildcard."
     Properties:
       Path: /
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
@@ -427,7 +427,12 @@ Resources:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
-                Action: bedrock-agentcore:*
+                Action:
+                  - bedrock-agentcore:CreateAgentRuntime
+                  - bedrock-agentcore:UpdateAgentRuntime
+                  - bedrock-agentcore:DeleteAgentRuntime
+                  - bedrock-agentcore:GetAgentRuntime
+                  - bedrock-agentcore:ListAgentRuntimes
                 Resource: "*"
               - Effect: Allow
                 Action: iam:PassRole
