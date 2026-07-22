@@ -360,6 +360,8 @@ Resources:
                   - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "us.anthropic.claude-sonnet-4-6"
                   - "us.anthropic.claude-sonnet-4-6:1m"
+                  - "us.anthropic.claude-sonnet-5"
+                  - "us.anthropic.claude-sonnet-5:1m"
                   - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "us.anthropic.claude-opus-4-6-v1"
                   - "us.anthropic.claude-opus-4-6-v1:1m"
@@ -381,6 +383,8 @@ Resources:
                   - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "eu.anthropic.claude-sonnet-4-6"
                   - "eu.anthropic.claude-sonnet-4-6:1m"
+                  - "eu.anthropic.claude-sonnet-5"
+                  - "eu.anthropic.claude-sonnet-5:1m"
                   - "eu.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "eu.anthropic.claude-opus-4-6-v1"
                   - "eu.anthropic.claude-opus-4-6-v1:1m"
@@ -397,6 +401,8 @@ Resources:
                   - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
                   - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "global.anthropic.claude-sonnet-4-6:1m"
+                  - "global.anthropic.claude-sonnet-5"
+                  - "global.anthropic.claude-sonnet-5:1m"
                   - "global.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "global.anthropic.claude-opus-4-6-v1"
                   - "global.anthropic.claude-opus-4-6-v1:1m"
@@ -557,6 +563,8 @@ Resources:
                     - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                     - "us.anthropic.claude-sonnet-4-6"
                     - "us.anthropic.claude-sonnet-4-6:1m"
+                    - "us.anthropic.claude-sonnet-5"
+                    - "us.anthropic.claude-sonnet-5:1m"
                     - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                     - "us.anthropic.claude-opus-4-6-v1"
                     - "us.anthropic.claude-opus-4-6-v1:1m"
@@ -576,6 +584,8 @@ Resources:
                     - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
                     - "eu.anthropic.claude-sonnet-4-6"
                     - "eu.anthropic.claude-sonnet-4-6:1m"
+                    - "eu.anthropic.claude-sonnet-5"
+                    - "eu.anthropic.claude-sonnet-5:1m"
                     - "eu.anthropic.claude-opus-4-5-20251101-v1:0"
                     - "eu.anthropic.claude-opus-4-6-v1"
                     - "eu.anthropic.claude-opus-4-6-v1:1m"
@@ -588,6 +598,8 @@ Resources:
                     - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                     - "global.anthropic.claude-sonnet-4-6"
                     - "global.anthropic.claude-sonnet-4-6:1m"
+                    - "global.anthropic.claude-sonnet-5"
+                    - "global.anthropic.claude-sonnet-5:1m"
                     - "global.anthropic.claude-opus-4-5-20251101-v1:0"
                     - "global.anthropic.claude-opus-4-6-v1"
                     - "global.anthropic.claude-opus-4-6-v1:1m"
@@ -855,6 +867,8 @@ Resources:
                   - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "us.anthropic.claude-sonnet-4-6"
                   - "us.anthropic.claude-sonnet-4-6:1m"
+                  - "us.anthropic.claude-sonnet-5"
+                  - "us.anthropic.claude-sonnet-5:1m"
                   - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "us.anthropic.claude-opus-4-6-v1"
                   - "us.anthropic.claude-opus-4-6-v1:1m"
@@ -876,6 +890,8 @@ Resources:
                   - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "eu.anthropic.claude-sonnet-4-6"
                   - "eu.anthropic.claude-sonnet-4-6:1m"
+                  - "eu.anthropic.claude-sonnet-5"
+                  - "eu.anthropic.claude-sonnet-5:1m"
                   - "eu.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "eu.anthropic.claude-opus-4-6-v1"
                   - "eu.anthropic.claude-opus-4-6-v1:1m"
@@ -893,6 +909,8 @@ Resources:
                   - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "global.anthropic.claude-sonnet-4-6"
                   - "global.anthropic.claude-sonnet-4-6:1m"
+                  - "global.anthropic.claude-sonnet-5"
+                  - "global.anthropic.claude-sonnet-5:1m"
                   - "global.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "global.anthropic.claude-opus-4-6-v1"
                   - "global.anthropic.claude-opus-4-6-v1:1m"
@@ -1215,6 +1233,8 @@ Resources:
                           - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                           - "us.anthropic.claude-sonnet-4-6"
                           - "us.anthropic.claude-sonnet-4-6:1m"
+                          - "us.anthropic.claude-sonnet-5"
+                          - "us.anthropic.claude-sonnet-5:1m"
                           - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                           - "us.anthropic.claude-opus-4-6-v1"
                           - "us.anthropic.claude-opus-4-6-v1:1m"
@@ -1236,6 +1256,8 @@ Resources:
                           - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
                           - "eu.anthropic.claude-sonnet-4-6"
                           - "eu.anthropic.claude-sonnet-4-6:1m"
+                          - "eu.anthropic.claude-sonnet-5"
+                          - "eu.anthropic.claude-sonnet-5:1m"
                           - "eu.anthropic.claude-opus-4-5-20251101-v1:0"
                           - "eu.anthropic.claude-opus-4-6-v1"
                           - "eu.anthropic.claude-opus-4-6-v1:1m"
@@ -1252,6 +1274,8 @@ Resources:
                           - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                           - "global.anthropic.claude-sonnet-4-6"
                           - "global.anthropic.claude-sonnet-4-6:1m"
+                          - "global.anthropic.claude-sonnet-5"
+                          - "global.anthropic.claude-sonnet-5:1m"
                           - "global.anthropic.claude-opus-4-5-20251101-v1:0"
                           - "global.anthropic.claude-opus-4-6-v1"
                           - "global.anthropic.claude-opus-4-6-v1:1m"
@@ -1335,6 +1359,8 @@ Resources:
                   - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "us.anthropic.claude-sonnet-4-6"
                   - "us.anthropic.claude-sonnet-4-6:1m"
+                  - "us.anthropic.claude-sonnet-5"
+                  - "us.anthropic.claude-sonnet-5:1m"
                   - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "us.anthropic.claude-opus-4-6-v1"
                   - "us.anthropic.claude-opus-4-6-v1:1m"
@@ -1356,6 +1382,8 @@ Resources:
                   - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "eu.anthropic.claude-sonnet-4-6"
                   - "eu.anthropic.claude-sonnet-4-6:1m"
+                  - "eu.anthropic.claude-sonnet-5"
+                  - "eu.anthropic.claude-sonnet-5:1m"
                   - "eu.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "eu.anthropic.claude-opus-4-6-v1"
                   - "eu.anthropic.claude-opus-4-6-v1:1m"
@@ -1373,6 +1401,8 @@ Resources:
                   - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "global.anthropic.claude-sonnet-4-6"
                   - "global.anthropic.claude-sonnet-4-6:1m"
+                  - "global.anthropic.claude-sonnet-5"
+                  - "global.anthropic.claude-sonnet-5:1m"
                   - "global.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "global.anthropic.claude-opus-4-6-v1"
                   - "global.anthropic.claude-opus-4-6-v1:1m"
@@ -1518,6 +1548,8 @@ Resources:
                         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "us.anthropic.claude-sonnet-4-6",
                         "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-sonnet-5",
+                        "us.anthropic.claude-sonnet-5:1m",
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
@@ -1537,6 +1569,8 @@ Resources:
                         "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "eu.anthropic.claude-sonnet-4-6",
                         "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-sonnet-5",
+                        "eu.anthropic.claude-sonnet-5:1m",
                         "eu.anthropic.claude-opus-4-5-20251101-v1:0",
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
@@ -1554,6 +1588,8 @@ Resources:
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "global.anthropic.claude-sonnet-4-6",
                         "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-sonnet-5",
+                        "global.anthropic.claude-sonnet-5:1m",
                         "global.anthropic.claude-opus-4-5-20251101-v1:0",
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
@@ -1760,6 +1796,8 @@ Resources:
                     "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                     "us.anthropic.claude-sonnet-4-6",
                     "us.anthropic.claude-sonnet-4-6:1m",
+                    "us.anthropic.claude-sonnet-5",
+                    "us.anthropic.claude-sonnet-5:1m",
                     "us.anthropic.claude-opus-4-5-20251101-v1:0",
                     "us.anthropic.claude-opus-4-6-v1",
                     "us.anthropic.claude-opus-4-6-v1:1m",
@@ -1779,6 +1817,8 @@ Resources:
                     "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                     "eu.anthropic.claude-sonnet-4-6",
                     "eu.anthropic.claude-sonnet-4-6:1m",
+                    "eu.anthropic.claude-sonnet-5",
+                    "eu.anthropic.claude-sonnet-5:1m",
                     "eu.anthropic.claude-opus-4-5-20251101-v1:0",
                     "eu.anthropic.claude-opus-4-6-v1",
                     "eu.anthropic.claude-opus-4-6-v1:1m",
@@ -1796,6 +1836,8 @@ Resources:
                     "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                     "global.anthropic.claude-sonnet-4-6",
                     "global.anthropic.claude-sonnet-4-6:1m",
+                    "global.anthropic.claude-sonnet-5",
+                    "global.anthropic.claude-sonnet-5:1m",
                     "global.anthropic.claude-opus-4-5-20251101-v1:0",
                     "global.anthropic.claude-opus-4-6-v1",
                     "global.anthropic.claude-opus-4-6-v1:1m",
@@ -1960,6 +2002,8 @@ Resources:
                         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "us.anthropic.claude-sonnet-4-6",
                         "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-sonnet-5",
+                        "us.anthropic.claude-sonnet-5:1m",
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
@@ -1979,6 +2023,8 @@ Resources:
                         "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "eu.anthropic.claude-sonnet-4-6",
                         "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-sonnet-5",
+                        "eu.anthropic.claude-sonnet-5:1m",
                         "eu.anthropic.claude-opus-4-5-20251101-v1:0",
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
@@ -1996,6 +2042,8 @@ Resources:
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "global.anthropic.claude-sonnet-4-6",
                         "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-sonnet-5",
+                        "global.anthropic.claude-sonnet-5:1m",
                         "global.anthropic.claude-opus-4-5-20251101-v1:0",
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
@@ -2086,6 +2134,8 @@ Resources:
                         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "us.anthropic.claude-sonnet-4-6",
                         "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-sonnet-5",
+                        "us.anthropic.claude-sonnet-5:1m",
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
@@ -2100,6 +2150,8 @@ Resources:
                         "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "eu.anthropic.claude-sonnet-4-6",
                         "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-sonnet-5",
+                        "eu.anthropic.claude-sonnet-5:1m",
                         "eu.anthropic.claude-opus-4-5-20251101-v1:0",
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
@@ -2117,6 +2169,8 @@ Resources:
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "global.anthropic.claude-sonnet-4-6",
                         "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-sonnet-5",
+                        "global.anthropic.claude-sonnet-5:1m",
                         "global.anthropic.claude-opus-4-5-20251101-v1:0",
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
@@ -2176,6 +2230,8 @@ Resources:
                         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "us.anthropic.claude-sonnet-4-6",
                         "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-sonnet-5",
+                        "us.anthropic.claude-sonnet-5:1m",
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
@@ -2190,6 +2246,8 @@ Resources:
                         "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "eu.anthropic.claude-sonnet-4-6",
                         "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-sonnet-5",
+                        "eu.anthropic.claude-sonnet-5:1m",
                         "eu.anthropic.claude-opus-4-5-20251101-v1:0",
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
@@ -2207,6 +2265,8 @@ Resources:
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "global.anthropic.claude-sonnet-4-6",
                         "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-sonnet-5",
+                        "global.anthropic.claude-sonnet-5:1m",
                         "global.anthropic.claude-opus-4-5-20251101-v1:0",
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
@@ -2266,6 +2326,8 @@ Resources:
                         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "us.anthropic.claude-sonnet-4-6",
                         "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-sonnet-5",
+                        "us.anthropic.claude-sonnet-5:1m",
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
@@ -2280,6 +2342,8 @@ Resources:
                         "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "eu.anthropic.claude-sonnet-4-6",
                         "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-sonnet-5",
+                        "eu.anthropic.claude-sonnet-5:1m",
                         "eu.anthropic.claude-opus-4-5-20251101-v1:0",
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
@@ -2297,6 +2361,8 @@ Resources:
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "global.anthropic.claude-sonnet-4-6",
                         "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-sonnet-5",
+                        "global.anthropic.claude-sonnet-5:1m",
                         "global.anthropic.claude-opus-4-5-20251101-v1:0",
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
@@ -2372,6 +2438,8 @@ Resources:
                       - "us.anthropic.claude-3-5-haiku-20241022-v1:0"
                       - "us.anthropic.claude-sonnet-4-20250514-v1:0"
                       - "us.anthropic.claude-sonnet-4-6"
+                      - "us.anthropic.claude-sonnet-5"
+                      - "us.anthropic.claude-sonnet-5:1m"
                       - "us.anthropic.claude-opus-4-20250514-v1:0"
                       - "us.anthropic.claude-opus-4-6-v1:1m"
                       - "us.anthropic.claude-opus-4-7"
@@ -2439,6 +2507,8 @@ Resources:
                       [
                         "us.anthropic.claude-sonnet-4-6",
                         "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-sonnet-5",
+                        "us.anthropic.claude-sonnet-5:1m",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
                         "us.anthropic.claude-opus-4-7",
@@ -2447,6 +2517,8 @@ Resources:
                         "us.anthropic.claude-opus-4-8:1m",
                         "eu.anthropic.claude-sonnet-4-6",
                         "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-sonnet-5",
+                        "eu.anthropic.claude-sonnet-5:1m",
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "eu.anthropic.claude-opus-4-7",
@@ -2455,6 +2527,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-8:1m",
                         "global.anthropic.claude-sonnet-4-6",
                         "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-sonnet-5",
+                        "global.anthropic.claude-sonnet-5:1m",
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
@@ -2529,6 +2603,8 @@ Resources:
                       - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "us.anthropic.claude-sonnet-4-6"
                       - "us.anthropic.claude-sonnet-4-6:1m"
+                      - "us.anthropic.claude-sonnet-5"
+                      - "us.anthropic.claude-sonnet-5:1m"
                       - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                       - "us.anthropic.claude-opus-4-6-v1"
                       - "us.anthropic.claude-opus-4-6-v1:1m"
@@ -2540,6 +2616,8 @@ Resources:
                       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "global.anthropic.claude-sonnet-4-6"
                       - "global.anthropic.claude-sonnet-4-6:1m"
+                      - "global.anthropic.claude-sonnet-5"
+                      - "global.anthropic.claude-sonnet-5:1m"
                       - "global.anthropic.claude-opus-4-5-20251101-v1:0"
                       - "global.anthropic.claude-opus-4-6-v1"
                       - "global.anthropic.claude-opus-4-6-v1:1m"
@@ -2556,6 +2634,8 @@ Resources:
                       - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "eu.anthropic.claude-sonnet-4-6"
                       - "eu.anthropic.claude-sonnet-4-6:1m"
+                      - "eu.anthropic.claude-sonnet-5"
+                      - "eu.anthropic.claude-sonnet-5:1m"
                       - "eu.anthropic.claude-opus-4-5-20251101-v1:0"
                       - "eu.anthropic.claude-opus-4-6-v1"
                       - "eu.anthropic.claude-opus-4-6-v1:1m"
@@ -2584,6 +2664,8 @@ Resources:
                       - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "us.anthropic.claude-sonnet-4-6"
                       - "us.anthropic.claude-sonnet-4-6:1m"
+                      - "us.anthropic.claude-sonnet-5"
+                      - "us.anthropic.claude-sonnet-5:1m"
                       - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                       - "us.anthropic.claude-opus-4-6-v1"
                       - "us.anthropic.claude-opus-4-6-v1:1m"
@@ -2595,6 +2677,8 @@ Resources:
                       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "global.anthropic.claude-sonnet-4-6"
                       - "global.anthropic.claude-sonnet-4-6:1m"
+                      - "global.anthropic.claude-sonnet-5"
+                      - "global.anthropic.claude-sonnet-5:1m"
                       - "global.anthropic.claude-opus-4-5-20251101-v1:0"
                       - "global.anthropic.claude-opus-4-6-v1"
                       - "global.anthropic.claude-opus-4-6-v1:1m"
@@ -2606,6 +2690,8 @@ Resources:
                       - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "eu.anthropic.claude-sonnet-4-6"
                       - "eu.anthropic.claude-sonnet-4-6:1m"
+                      - "eu.anthropic.claude-sonnet-5"
+                      - "eu.anthropic.claude-sonnet-5:1m"
                       - "eu.anthropic.claude-opus-4-5-20251101-v1:0"
                       - "eu.anthropic.claude-opus-4-6-v1"
                       - "eu.anthropic.claude-opus-4-6-v1:1m"
@@ -2657,6 +2743,8 @@ Resources:
                     "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                     "us.anthropic.claude-sonnet-4-6",
                     "us.anthropic.claude-sonnet-4-6:1m",
+                    "us.anthropic.claude-sonnet-5",
+                    "us.anthropic.claude-sonnet-5:1m",
                     "us.anthropic.claude-opus-4-5-20251101-v1:0",
                     "us.anthropic.claude-opus-4-6-v1",
                     "us.anthropic.claude-opus-4-6-v1:1m",
@@ -2676,6 +2764,8 @@ Resources:
                     "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                     "eu.anthropic.claude-sonnet-4-6",
                     "eu.anthropic.claude-sonnet-4-6:1m",
+                    "eu.anthropic.claude-sonnet-5",
+                    "eu.anthropic.claude-sonnet-5:1m",
                     "eu.anthropic.claude-opus-4-5-20251101-v1:0",
                     "eu.anthropic.claude-opus-4-6-v1",
                     "eu.anthropic.claude-opus-4-6-v1:1m",
@@ -2687,6 +2777,8 @@ Resources:
                     "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                     "global.anthropic.claude-sonnet-4-6",
                     "global.anthropic.claude-sonnet-4-6:1m",
+                    "global.anthropic.claude-sonnet-5",
+                    "global.anthropic.claude-sonnet-5:1m",
                     "global.anthropic.claude-opus-4-5-20251101-v1:0",
                     "global.anthropic.claude-opus-4-6-v1",
                     "global.anthropic.claude-opus-4-6-v1:1m",
@@ -2814,6 +2906,8 @@ Resources:
                         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "us.anthropic.claude-sonnet-4-6",
                         "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-sonnet-5",
+                        "us.anthropic.claude-sonnet-5:1m",
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
@@ -2828,6 +2922,8 @@ Resources:
                         "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "eu.anthropic.claude-sonnet-4-6",
                         "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-sonnet-5",
+                        "eu.anthropic.claude-sonnet-5:1m",
                         "eu.anthropic.claude-opus-4-5-20251101-v1:0",
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
@@ -2845,6 +2941,8 @@ Resources:
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "global.anthropic.claude-sonnet-4-6",
                         "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-sonnet-5",
+                        "global.anthropic.claude-sonnet-5:1m",
                         "global.anthropic.claude-opus-4-5-20251101-v1:0",
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
@@ -2907,6 +3005,8 @@ Resources:
                         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "us.anthropic.claude-sonnet-4-6",
                         "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-sonnet-5",
+                        "us.anthropic.claude-sonnet-5:1m",
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
@@ -2921,6 +3021,8 @@ Resources:
                         "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "eu.anthropic.claude-sonnet-4-6",
                         "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-sonnet-5",
+                        "eu.anthropic.claude-sonnet-5:1m",
                         "eu.anthropic.claude-opus-4-5-20251101-v1:0",
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
@@ -2938,6 +3040,8 @@ Resources:
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "global.anthropic.claude-sonnet-4-6",
                         "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-sonnet-5",
+                        "global.anthropic.claude-sonnet-5:1m",
                         "global.anthropic.claude-opus-4-5-20251101-v1:0",
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
