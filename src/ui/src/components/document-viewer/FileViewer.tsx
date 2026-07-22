@@ -15,9 +15,6 @@ import { useDocumentVersion } from '../../contexts/document-version';
 
 interface FileViewerProps {
   objectKey: string;
-  // Optional bucket override; defaults to the host InputBucket. Used e.g. to
-  // preview generated documents that live in the test-set bucket.
-  bucket?: string;
 }
 
 const client = generateClient();
@@ -70,7 +67,7 @@ const detectFileType = (objectKey: string, contentType: string | null): string =
   return 'unknown';
 };
 
-const FileViewer = ({ objectKey, bucket }: FileViewerProps): React.JSX.Element => {
+const FileViewer = ({ objectKey }: FileViewerProps): React.JSX.Element => {
   // Fetch pinned bytes when viewing a past document version.
   const { versionIdForUri } = useDocumentVersion();
   const [presignedUrl, setPresignedUrl] = useState<string | null>(null);
@@ -147,8 +144,7 @@ const FileViewer = ({ objectKey, bucket }: FileViewerProps): React.JSX.Element =
     setIsLoading(true);
     setError(null);
     try {
-      const effectiveBucket = bucket || ((settings as Record<string, unknown>).InputBucket as string | undefined);
-      if (!effectiveBucket) {
+      if (!(settings as Record<string, unknown>).InputBucket) {
         throw new Error('Input bucket not configured');
       }
 
@@ -156,7 +152,7 @@ const FileViewer = ({ objectKey, bucket }: FileViewerProps): React.JSX.Element =
       // Avoids dependence on the VITE_AWS_REGION build-time env var (which, if missing,
       // produces an invalid URL like https://<bucket>.s3.undefined.amazonaws.com/<key>),
       // and sidesteps S3 HTTPS URL encoding issues for keys with special characters.
-      const s3Url = `s3://${effectiveBucket}/${objectKey}`;
+      const s3Url = `s3://${(settings as Record<string, unknown>).InputBucket}/${objectKey}`;
 
       // First fetch the content via GraphQL to determine content type
       const result = await fetchFileContents(s3Url);
@@ -199,7 +195,7 @@ const FileViewer = ({ objectKey, bucket }: FileViewerProps): React.JSX.Element =
 
   React.useEffect(() => {
     generateUrl();
-  }, [objectKey, bucket]);
+  }, [objectKey]);
 
   if (error) {
     return (

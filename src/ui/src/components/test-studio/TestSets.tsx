@@ -21,7 +21,6 @@ import {
   DatePicker,
   TimeInput,
   StatusIndicator,
-  Link,
 } from '@cloudscape-design/components';
 import { generateClient } from '../../api/client-shim';
 import {
@@ -39,7 +38,6 @@ import type { DocumentClassType } from '../../graphql/generated/schema-types';
 import { getErrorMessage } from '../../utils/errorUtils';
 import useSyntheticDataGenerator from '../../hooks/use-synthetic-data-generator';
 import GenerateSyntheticDataModal from './GenerateSyntheticDataModal';
-import TestSetDocumentsModal from './TestSetDocumentsModal';
 
 const client = generateClient();
 
@@ -103,7 +101,6 @@ const TestSets = (): React.JSX.Element => {
   const [successMessage, setSuccessMessage] = useState('');
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [genInitial, setGenInitial] = useState<{ tab?: 'prompt' | 'config'; version?: string; className?: string }>({});
-  const [viewDocsTestSet, setViewDocsTestSet] = useState<{ id: string; name: string } | null>(null);
   const location = useLocation();
   const navigate = useNavigate();
   // The synthetic-data generator is an optional extension; the button is only
@@ -826,12 +823,7 @@ const TestSets = (): React.JSX.Element => {
     {
       id: 'name',
       header: 'Test Set Name',
-      cell: (item: TestSetItem) =>
-        item.status === 'GENERATING' ? (
-          item.name
-        ) : (
-          <Link onFollow={() => setViewDocsTestSet({ id: item.id, name: item.name })}>{item.name}</Link>
-        ),
+      cell: (item: TestSetItem) => item.name,
       sortingField: 'name',
     },
     {
@@ -1829,13 +1821,6 @@ const TestSets = (): React.JSX.Element => {
           setSuccessMessage(`Synthetic data generation started for "${label}". It will appear in the list when it completes.`);
           setGenJobs((prev) => ({ ...prev, [jobId]: { name: label, status: 'GENERATING', message: 'Starting generation' } }));
         }}
-      />
-
-      <TestSetDocumentsModal
-        visible={Boolean(viewDocsTestSet)}
-        testSetId={viewDocsTestSet?.id || ''}
-        testSetName={viewDocsTestSet?.name || ''}
-        onDismiss={() => setViewDocsTestSet(null)}
       />
     </Container>
   );
