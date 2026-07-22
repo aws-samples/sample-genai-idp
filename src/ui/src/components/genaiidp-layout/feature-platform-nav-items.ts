@@ -228,7 +228,7 @@ export function buildFeaturesNavSection(installed: InstalledFeature[], catalog: 
     type: 'section',
     // "(Preview)" signals that the extension framework is still being built out —
     // there are no production extensions to install yet beyond the bundled demo.
-    text: 'Extensions (Preview)',
+    text: 'Extensions',
     items: extensionItems.length > 0 ? [browseCatalog, ...extensionItems] : [browseCatalog],
   };
 }
