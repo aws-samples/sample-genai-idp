@@ -24,9 +24,9 @@ description: |
       documents, so privileged users (via allowedConfigVersions RBAC) can see the
       original while others see only the redacted results.
 
-  Redaction uses structure-preserving synthetic replacement (realistic fake
-  values) by default, so downstream extraction accuracy is retained; a blackout
-  mode is also available. Documents only (PDF, images, TXT, CSV) in v1.
+  Redaction uses structure-preserving synthetic replacement by default, so
+  downstream extraction accuracy is retained; blackout is also available.
+  Documents only (PDF, images, TXT, CSV) in v1.
 docsUrl: extensions/pii-anonymizer
 showInNav: false
 template:
