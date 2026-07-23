@@ -438,7 +438,8 @@ def curate_rbac_dynamic(report_dir: Path | None) -> tuple[str, dict]:
     for r in results:
         name, item = suite_of(r.get("principal", ""))
         s = suites.setdefault(
-            name, {"item": item, "total": 0, "pass": 0, "hard_fail": 0, "warn": 0}
+            name,
+            {"item": item, "total": 0, "pass": 0, "hard_fail": 0, "warn": 0},  # nosec B105 - "pass" is a passing-test counter, not a credential; Bandit's hardcoded-password heuristic fires on the dict-key substring.
         )
         s["total"] += 1
         if r["passed"]:
@@ -913,7 +914,7 @@ def write_manifest(out_dir: Path, version: str, date: str, per_test: dict) -> No
         if m.get("status") == "not-run":
             return "not run"
         g = m.get("gate", "?")
-        return {"pass": "PASS ✅", "fail": "FAIL ❌"}.get(g, str(g))
+        return {"pass": "PASS ✅", "fail": "FAIL ❌"}.get(g, str(g))  # nosec B105 - "pass"/"fail" are gate-status labels, not credentials; Bandit's hardcoded-password heuristic fires on the dict-key substring.
 
     lines = [
         f"# Security Test Snapshot — {version}",
