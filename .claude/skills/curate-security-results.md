@@ -1,16 +1,41 @@
-# Curate Security Test Results — Public-Safe Snapshots
+# Run Security Tests & Curate Results — Public-Safe Snapshots
 
-Use this skill when the user wants to **publish an auditable snapshot** of the
-security tests for a release — e.g. "capture the security results for 0.6.1",
-"update the security test-results", "curate the SRT/ZAP/RBAC output". It
-produces redacted, public-safe markdown under `security/test-results/<version>/`
-from the tools' raw (gitignored) reports.
+Use this skill when the user wants to **run the security tests and update the
+published results** — e.g. "run security tests and update results", "capture
+the security results for 0.6.1", "update the security test-results", "curate
+the SRT/ZAP/RBAC output". It runs the tests and produces redacted, public-safe
+markdown under `security/test-results/<version>/`.
 
-Do NOT use this to *run* or *triage* the tests themselves — those have their own
-skills: [`srt-security-scan.md`](./srt-security-scan.md),
-[`api-rbac-test.md`](./api-rbac-test.md),
-[`run-stack-tests.md`](./run-stack-tests.md). This skill is the last step:
-turning their raw output into a committed, reviewable record.
+## Fast path — one command
+
+For "run security tests and update results", just run:
+
+```bash
+# Full (offline tests + live ZAP + RBAC-dynamic against a stack):
+make security-results STACK_NAME=<stack> REGION=<region>
+
+# Offline-only (SRT + RBAC static; ZAP + RBAC-dynamic stubbed "not run"):
+make security-results
+```
+
+This wraps `scripts/security/run_security_tests.sh`: it runs each test, tees the
+outputs the curator needs (incl. the ZAP scan stdout), and writes the snapshot.
+Then **review the redactions** (step 3) and, if the user asked, commit
+`security/test-results/<version>/`.
+
+- Use `AWS_PROFILE=default` for the live tests (see CLAUDE.md). If the user
+  didn't name a stack, ask which one, or run offline-only.
+- Env knobs: `VERSION=` (default repo `VERSION`), `DATE=` (default today),
+  `SKIP_SRT=1` (skip the slow SRT scan, curate from existing `.srt/issues.json`).
+- The live RBAC-dynamic setup can hit a Cognito eventual-consistency race on
+  first run (`UserNotFoundException`); it tears its users down cleanly, so just
+  re-run `make security-results` if that happens.
+
+The rest of this doc is the **manual breakdown** — reach for it when you need to
+run only part of the flow, re-curate existing reports, or debug the curator. The
+per-test triage skills remain [`srt-security-scan.md`](./srt-security-scan.md),
+[`api-rbac-test.md`](./api-rbac-test.md), and
+[`run-stack-tests.md`](./run-stack-tests.md).
 
 ## The layout it maintains
 

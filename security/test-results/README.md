@@ -34,7 +34,35 @@ justifications — running every emitted string through a redaction filter. The
 result is **public-safe by construction**: identifiers are stripped even if a
 raw field slips through.
 
-## Process: producing a snapshot for a release
+## Quick start: one command
+
+To run the tests **and** regenerate the snapshot in one step:
+
+```bash
+# Full snapshot (offline tests + live ZAP & RBAC-dynamic against a stack):
+make security-results STACK_NAME=<stack> REGION=<region>
+
+# Offline-only (SRT + RBAC-static; ZAP & RBAC-dynamic stubbed as "not run"):
+make security-results
+```
+
+This wraps [`scripts/security/run_security_tests.sh`](../../scripts/security/run_security_tests.sh):
+it runs each test, tees the outputs the curator needs (including the ZAP scan
+stdout), and writes the snapshot to `security/test-results/<version>/`. Options
+via env: `VERSION=` (default: repo `VERSION`), `DATE=` (default: today),
+`SKIP_SRT=1` (skip the slow ~5-15 min SRT scan and curate from the existing
+`.srt/issues.json`). **Review the output before committing** (see step 3 below).
+
+**Or just ask Claude Code:** *"run security tests and update results"* (add
+*"against stack `<name>`"* for the live tests) — it follows the
+[`curate-security-results`](../../.claude/skills/curate-security-results.md)
+skill, which runs `make security-results` and reviews the redactions for you.
+
+## Process: producing a snapshot for a release (manual, step by step)
+
+> The one command above does all of this. These steps are the underlying
+> recipe — useful when you want to run only part of it or re-curate existing
+> reports.
 
 1. **Run the tests** (see the run commands in [`../README.md`](../README.md)):
    - `make srt-scan` — updates `.srt/issues.json` (live results; the curator

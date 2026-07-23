@@ -25,7 +25,7 @@ its `make` target and the skill that documents how to run it.
 | Release-vs-release benchmark | `make benchmark-release …` (alias `make stacktest-benchmark`) | `.claude/skills/run-benchmarks.md` |
 | In-place upgrade (X→Y) test | `make stacktest-upgrade` (pointer) | `.claude/skills/test-upgrade.md` |
 | Full offline test battery (no AWS) | `make test` | `.claude/skills/full-test-battery.md` |
-| Curate security results into a public-safe snapshot | `python3 scripts/security/curate_results.py --date <YYYY-MM-DD> [--version <label>]` | `.claude/skills/curate-security-results.md` |
+| Run security tests + curate a public-safe snapshot | `make security-results [STACK_NAME=… REGION=…]` (offline-only if no stack) | `.claude/skills/curate-security-results.md` |
 
 VPC stack-tests auto-discover a suitable VPC via the `run-stack-tests` skill
 (it lists candidates, confirms with you, then passes `VPC_ID`/`SUBNET_IDS`/
@@ -36,14 +36,19 @@ VPC stack-tests auto-discover a suitable VPC via the `run-stack-tests` skill
 The four security tests — **SRT** (SAST/deps), **ZAP DAST** (dynamic API scan),
 and **RBAC static + dynamic** (authorization) — are documented as a set, with
 their goals and threat-model cross-references, in
-[`security/README.md`](../../../security/README.md). After running them for a
-release, curate a **public-safe, redacted** snapshot into
-`security/test-results/<version>/` (one file per test + a `MANIFEST.md` tying
-the results to a version, git SHA, and date):
+[`security/README.md`](../../../security/README.md). For a release, run them and
+curate a **public-safe, redacted** snapshot into `security/test-results/<version>/`
+(one file per test + a `MANIFEST.md` tying the results to a version, git SHA,
+and date) with a single command:
 
 ```bash
-python3 scripts/security/curate_results.py --date <YYYY-MM-DD> [--version <label>]
+make security-results STACK_NAME=<stack> REGION=<region>   # full (incl. live ZAP + RBAC)
+make security-results                                      # offline-only (SRT + RBAC static)
 ```
+
+(Or ask Claude Code: *"run security tests and update results"*. To curate from
+already-run reports without re-running:
+`python3 scripts/security/curate_results.py --date <YYYY-MM-DD> [--version <label>]`.)
 
 Raw reports carry environment-specific identifiers (account IDs, Cognito pool
 IDs, API hostnames) and stay in gitignored `scratch/`/`.srt/` — only the curated

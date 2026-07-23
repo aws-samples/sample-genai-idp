@@ -48,12 +48,23 @@ analysis. The full threat register is in
 
 ## Publishing a result snapshot
 
-After running the tests for a release, curate a public-safe snapshot:
+**One command** runs the tests and curates a public-safe snapshot into
+`security/test-results/<version>/`:
+
+```bash
+make security-results STACK_NAME=<stack> REGION=<region>   # full (incl. live ZAP + RBAC)
+make security-results                                      # offline-only (SRT + RBAC static)
+```
+
+**Or ask Claude Code:** *"run security tests and update results"* — it follows
+the [`curate-security-results`](../.claude/skills/curate-security-results.md)
+skill.
+
+To curate from already-run reports (no re-run):
 
 ```bash
 python3 scripts/security/curate_results.py --date <YYYY-MM-DD> [--version <label>]
 ```
 
-See [`test-results/README.md`](./test-results/README.md) and the
-[`curate-security-results`](../.claude/skills/curate-security-results.md) skill
-for the full runbook.
+See [`test-results/README.md`](./test-results/README.md) for the full runbook
+(and the step-by-step breakdown of what the one command does).

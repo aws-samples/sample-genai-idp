@@ -13,8 +13,12 @@ the sensitive bits, and writes curated summaries into
     security/test-results/<version>/
 
 one file per test plus a MANIFEST.md tying the snapshot to a release version,
-git SHA, date, and (for live tests) a redacted stack descriptor. See
-`security/test-results/README.md` for the process and
+git SHA, date, and (for live tests) a redacted stack descriptor.
+
+Normally invoked via `make security-results` (which runs the tests first, then
+calls this) — see `scripts/security/run_security_tests.sh`. Run this script
+directly to (re-)curate from reports already in scratch/ without re-running the
+tests. See `security/test-results/README.md` for the process and
 `.claude/skills/curate-security-results.md` for the operator runbook.
 
 Design notes:
