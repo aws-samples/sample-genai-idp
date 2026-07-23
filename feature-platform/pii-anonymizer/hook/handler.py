@@ -203,7 +203,7 @@ def _build_pii_config(pp: Dict[str, Any]) -> Dict[str, Any]:
     model_id = (
         model.get("id")
         or pp.get("detection_model")
-        or "us.anthropic.claude-haiku-4-5-20251001"
+        or "us.anthropic.claude-haiku-4-5-20251001-v1:0"
     )
     provider = model.get("provider") or (
         "amazon" if ("nova" in model_id or "titan" in model_id) else "anthropic"

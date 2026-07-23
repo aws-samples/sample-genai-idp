@@ -60,7 +60,7 @@ const MODE_OPTIONS = [
 ];
 
 const MODEL_OPTIONS = [
-  { value: 'us.anthropic.claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 (recommended — large output, strong recall)' },
+  { value: 'us.anthropic.claude-haiku-4-5-20251001-v1:0', label: 'Claude Haiku 4.5 (recommended — large output, strong recall)' },
   { value: 'us.anthropic.claude-sonnet-5', label: 'Claude Sonnet 5 (best quality, highest cost)' },
   { value: 'us.amazon.nova-lite-v1:0', label: 'Amazon Nova Lite (cheapest — may truncate on dense docs)' },
 ];
