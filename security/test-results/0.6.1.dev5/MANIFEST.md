@@ -7,7 +7,7 @@ Auditable, public-safe summary of this release's security tests. Environment-spe
 | Field | Value |
 |-------|-------|
 | Release version | `0.6.1.dev5` |
-| Git SHA | `eb7651e54` |
+| Git SHA | `a23d2a2c0` |
 | Snapshot date | 2026-07-23 |
 | Curated by | `scripts/security/curate_results.py` |
 

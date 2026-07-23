@@ -67,6 +67,23 @@ _REDACTIONS = [
     ),
     # Generic ARNs.
     (re.compile(r"arn:aws[a-z-]*:[^\s`\"']+"), "<ARN>"),
+    # AWS access-key IDs (AKIA/ASIA/AIDA/AROA + 16 upper-alnum). These are only
+    # 20 chars, so the generic token patterns below (24+ / base64) miss them —
+    # match explicitly. Defense-in-depth: no report should carry a key, but the
+    # curator's contract is public-safe by construction.
+    (
+        re.compile(r"\b(?:AKIA|ASIA|AIDA|AROA|AGPA|ANPA|ANVA)[A-Z0-9]{16}\b"),
+        "<AWS_KEY>",
+    ),
+    # AWS secret access keys (40-char base64). Require the mixed-case / +/
+    # entropy of a real secret so a 40-char lowercase-hex git SHA (SHA-1) is
+    # NOT eaten: at least one uppercase AND (a lowercase or +/) must be present.
+    (
+        re.compile(
+            r"\b(?=[A-Za-z0-9/+]*[A-Z])(?=[A-Za-z0-9/+]*[a-z/+])[A-Za-z0-9/+]{40}\b"
+        ),
+        "<AWS_SECRET>",
+    ),
     # Bare UUIDs (request ids that aren't already covered, agent ids, etc.).
     (
         re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"),
@@ -153,7 +170,8 @@ def _stub(title: str, source_hint: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# SRT — reads the committed baseline scripts/srt/issues.json.
+# SRT — reads the live scan results (.srt/issues.json) when present, else the
+# committed disposition register (scripts/srt/issues.json). See main().
 # ---------------------------------------------------------------------------
 
 
