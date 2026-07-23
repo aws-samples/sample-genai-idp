@@ -688,11 +688,31 @@ type TestSet @aws_cognito_user_pools @aws_iam {
   filePattern: String
   fileCount: Int
   source: String
+  latestVersion: Int
+  activeReference: Int
   status: String
   createdAt: AWSDateTime!
   error: String
   lastAddResult: String
   documentClassType: DocumentClassType
+}
+
+type TestSetVersion @aws_cognito_user_pools @aws_iam {
+  testSetId: String!
+  version: Int!
+  label: String
+  notes: String
+  fileCount: Int
+  activeReference: Int
+  createdAt: AWSDateTime
+  createdBy: String
+}
+
+input PublishTestSetVersionInput {
+  testSetId: String!
+  label: String
+  notes: String
+  setAsActiveReference: Boolean
 }
 
 input TestSetUploadInput {
@@ -983,6 +1003,8 @@ type Mutation {
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   deleteTestSets(testSetIds: [String!]!): Boolean!
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  publishTestSetVersion(input: PublishTestSetVersionInput!): TestSetVersion
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   # Fine-Tuning (Admin + Author)
   createFinetuningJob(input: CreateFinetuningJobInput!): FinetuningJob
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
@@ -1237,6 +1259,8 @@ type Query @aws_cognito_user_pools @aws_iam {
   compareTestRuns(testRunIds: [String!]!): TestRunComparison
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   getTestSets: [TestSet]
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  getTestSetVersions(testSetId: String!): [TestSetVersion]
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   listBucketFiles(bucketType: String!, filePattern: String!, modifiedAfter: String): [String]
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])

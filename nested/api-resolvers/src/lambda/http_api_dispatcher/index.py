@@ -72,6 +72,12 @@ FIELD_FUNCTION_MAP: Dict[str, str] = _load_field_function_map()
 #     files larger than Lambda's 6 MB synchronous response cap).
 FIELD_ALIASES: Dict[str, str] = {
     "getFilePresignedUrl": "getFileContents",
+    # Test-set versioning fields share the TestSetResolverFunction (which
+    # branches on the GraphQL fieldName). Aliased to an existing mapped field
+    # rather than adding new entries, to keep the field-function-map SSM
+    # parameter under its 8 KB Advanced-tier ceiling.
+    "publishTestSetVersion": "getTestSets",
+    "getTestSetVersions": "getTestSets",
 }
 
 

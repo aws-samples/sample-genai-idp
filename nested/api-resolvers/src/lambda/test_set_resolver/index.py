@@ -88,6 +88,10 @@ def handler(event, context):
         return delete_test_sets(event['arguments'])
     elif field_name == 'getTestSets':
         return get_test_sets()
+    elif field_name == 'publishTestSetVersion':
+        return publish_test_set_version(event['arguments'], event)
+    elif field_name == 'getTestSetVersions':
+        return get_test_set_versions(event['arguments'])
     elif field_name == 'listBucketFiles':
         return list_bucket_files(event['arguments'])
     elif field_name == 'validateTestFileName':
@@ -380,6 +384,127 @@ def add_documents_to_test_set_from_upload(args):
     }
 
 
+# ---------------------------------------------------------------------------
+# Versioning: a test set has a mutable working draft (the SK='metadata' item)
+# plus zero or more immutable published versions (SK='version#<n>'). Publishing
+# freezes the current document + label state into a numbered version and, by
+# default, marks it the "active reference" that scoring runs compare against.
+#
+# The design is additive: existing test sets have no version items and read as
+# latestVersion=0 / activeReference=None, so nothing breaks and no backfill is
+# needed. See docs/proposals/ground-truth-hitl/implementation/.
+# ---------------------------------------------------------------------------
+
+def _version_sk(n):
+    return f"version#{int(n):06d}"
+
+
+def _list_version_items(test_set_id):
+    """Return all version items for a test set, ascending by version number."""
+    from boto3.dynamodb.conditions import Key as DDBKey
+    tracking_table = boto3.resource('dynamodb').Table(os.environ['TRACKING_TABLE'])
+    items = []
+    query_kwargs = {
+        'KeyConditionExpression': (
+            DDBKey('PK').eq(f'testset#{test_set_id}')
+            & DDBKey('SK').begins_with('version#')
+        ),
+    }
+    while True:
+        resp = tracking_table.query(**query_kwargs)
+        items.extend(resp.get('Items', []))
+        if 'LastEvaluatedKey' not in resp:
+            break
+        query_kwargs['ExclusiveStartKey'] = resp['LastEvaluatedKey']
+    items.sort(key=lambda it: it.get('versionNumber', 0))
+    return items
+
+
+def _version_to_result(item):
+    return {
+        'testSetId': item.get('testSetId'),
+        'version': item.get('versionNumber'),
+        'label': item.get('label'),
+        'notes': item.get('notes'),
+        'fileCount': item.get('fileCount'),
+        'createdAt': item.get('createdAt'),
+        'createdBy': item.get('createdBy'),
+    }
+
+
+def get_test_set_versions(args):
+    """List the immutable published versions of a test set (ascending)."""
+    test_set_id = args['testSetId']
+    return [_version_to_result(it) for it in _list_version_items(test_set_id)]
+
+
+def publish_test_set_version(args, event=None):
+    """Freeze the current test-set state into a new immutable version.
+
+    Optionally (default true) set the new version as the active reference. The
+    metadata pointer tracks latestVersion / publishedVersion / activeReference.
+    """
+    input_data = args.get('input', args)
+    test_set_id = input_data['testSetId']
+    label = input_data.get('label')
+    notes = input_data.get('notes')
+    set_active = input_data.get('setAsActiveReference', True)
+
+    meta = db_client.get_item({'PK': f'testset#{test_set_id}', 'SK': 'metadata'})
+    if not meta:
+        raise Exception(f"Test set '{test_set_id}' not found")
+
+    next_version = int(meta.get('latestVersion', 0)) + 1
+    now = datetime.utcnow().isoformat() + 'Z'
+    created_by = None
+    if event:
+        try:
+            created_by = (
+                event.get('identity', {})
+                .get('claims', {})
+                .get('email')
+            )
+        except Exception:
+            created_by = None
+
+    # Immutable version item: snapshot the fields that describe this frozen set.
+    version_item = {
+        'PK': f'testset#{test_set_id}',
+        'SK': _version_sk(next_version),
+        'ItemType': 'testset_version',
+        'testSetId': test_set_id,
+        'versionNumber': next_version,
+        'label': label or f'v{next_version}',
+        'notes': notes or '',
+        'source': meta.get('source'),
+        'fileCount': meta.get('fileCount'),
+        'configVersion': meta.get('boundConfigVersion'),
+        'createdAt': now,
+        'createdBy': created_by,
+    }
+    db_client.put_item(version_item)
+
+    # Update the mutable pointer.
+    tracking_table = boto3.resource('dynamodb').Table(os.environ['TRACKING_TABLE'])
+    update_expr = 'SET latestVersion = :v, publishedVersion = :v'
+    expr_values = {':v': next_version}
+    if set_active:
+        update_expr += ', activeReference = :v'
+    tracking_table.update_item(
+        Key={'PK': f'testset#{test_set_id}', 'SK': 'metadata'},
+        UpdateExpression=update_expr,
+        ExpressionAttributeValues=expr_values,
+    )
+
+    logger.info(
+        f"Published test set '{test_set_id}' version {next_version} "
+        f"(active={set_active})"
+    )
+    result = _version_to_result(version_item)
+    result['activeReference'] = next_version if set_active else meta.get('activeReference')
+    return result
+
+
 def update_test_set(args):
     logger.info(f"Updating test set: {args}")
 
@@ -580,6 +705,8 @@ def get_test_sets():
             'filePattern': item.get('filePattern', ''),
             'fileCount': item.get('fileCount'),  # Returns None if attribute doesn't exist
             'source': item.get('source'),  # 'uploaded' | 'synthetic'; None for pre-existing records
+            'latestVersion': item.get('latestVersion'),  # highest published version (None if never published)
+            'activeReference': item.get('activeReference'),  # version scoring runs compare against
             'status': item.get('status'),
             'createdAt': item['createdAt'],
             'error': item.get('error'),  # Include error message for failed test sets

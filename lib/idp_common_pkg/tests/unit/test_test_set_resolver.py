@@ -592,3 +592,98 @@ class TestTestSetResolver:
 
             with pytest.raises(Exception, match="Test set 'nonexistent-id' not found"):
                 test_set_index.update_test_set(args)
+
+    # -- Versioning -------------------------------------------------------
+
+    @patch.dict(os.environ, {"TRACKING_TABLE": "test-table"})
+    def test_publish_first_version_sets_active_reference(self):
+        """Publishing with no prior versions creates v1 and makes it active."""
+        with patch.object(test_set_index.db_client, "get_item") as mock_get, patch.object(
+            test_set_index.db_client, "put_item"
+        ) as mock_put, patch.object(test_set_index, "boto3") as mock_boto3:
+            mock_get.return_value = {
+                "id": "ts1",
+                "name": "TS One",
+                "source": "uploaded",
+                "fileCount": 10,
+            }
+            mock_table = MagicMock()
+            mock_boto3.resource.return_value.Table.return_value = mock_table
+
+            result = test_set_index.publish_test_set_version(
+                {"input": {"testSetId": "ts1", "label": "first"}}
+            )
+
+            assert result["version"] == 1
+            assert result["label"] == "first"
+            assert result["activeReference"] == 1
+            # An immutable version item was written under SK=version#000001
+            written = mock_put.call_args[0][0]
+            assert written["SK"] == "version#000001"
+            assert written["ItemType"] == "testset_version"
+            assert written["versionNumber"] == 1
+            # The metadata pointer was advanced and active reference set
+            update_kwargs = mock_table.update_item.call_args.kwargs
+            assert update_kwargs["ExpressionAttributeValues"][":v"] == 1
+            assert "activeReference" in update_kwargs["UpdateExpression"]
+
+    @patch.dict(os.environ, {"TRACKING_TABLE": "test-table"})
+    def test_publish_increments_and_can_skip_active(self):
+        """Second publish is v2; setAsActiveReference=false leaves active alone."""
+        with patch.object(test_set_index.db_client, "get_item") as mock_get, patch.object(
+            test_set_index.db_client, "put_item"
+        ), patch.object(test_set_index, "boto3") as mock_boto3:
+            mock_get.return_value = {
+                "id": "ts1",
+                "name": "TS One",
+                "latestVersion": 1,
+                "activeReference": 1,
+            }
+            mock_table = MagicMock()
+            mock_boto3.resource.return_value.Table.return_value = mock_table
+
+            result = test_set_index.publish_test_set_version(
+                {"input": {"testSetId": "ts1", "setAsActiveReference": False}}
+            )
+
+            assert result["version"] == 2
+            # active reference unchanged (still 1)
+            assert result["activeReference"] == 1
+            update_kwargs = mock_table.update_item.call_args.kwargs
+            assert "activeReference" not in update_kwargs["UpdateExpression"]
+
+    def test_publish_nonexistent_test_set_raises(self):
+        with patch.object(test_set_index.db_client, "get_item") as mock_get:
+            mock_get.return_value = None
+            with pytest.raises(Exception, match="Test set 'ghost' not found"):
+                test_set_index.publish_test_set_version({"input": {"testSetId": "ghost"}})
+
+    @patch.dict(os.environ, {"TRACKING_TABLE": "test-table"})
+    def test_get_test_set_versions_maps_and_sorts(self):
+        with patch.object(test_set_index, "boto3") as mock_boto3:
+            mock_table = MagicMock()
+            mock_table.query.return_value = {
+                "Items": [
+                    {
+                        "testSetId": "ts1",
+                        "versionNumber": 2,
+                        "label": "v2",
+                        "fileCount": 12,
+                        "createdAt": "2026-01-02T00:00:00Z",
+                    },
+                    {
+                        "testSetId": "ts1",
+                        "versionNumber": 1,
+                        "label": "v1",
+                        "fileCount": 10,
+                        "createdAt": "2026-01-01T00:00:00Z",
+                    },
+                ]
+            }
+            mock_boto3.resource.return_value.Table.return_value = mock_table
+
+            result = test_set_index.get_test_set_versions({"testSetId": "ts1"})
+
+            assert [r["version"] for r in result] == [1, 2]  # ascending
+            assert result[0]["label"] == "v1"
+            assert result[1]["fileCount"] == 12
