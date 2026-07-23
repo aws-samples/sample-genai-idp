@@ -84,6 +84,8 @@ def handler(event, context):
         return add_documents_to_test_set_from_upload(event['arguments'])
     elif field_name == 'updateTestSet':
         return update_test_set(event['arguments'])
+    elif field_name == 'removeDocumentsFromTestSet':
+        return remove_documents_from_test_set(event['arguments'])
     elif field_name == 'deleteTestSets':
         return delete_test_sets(event['arguments'])
     elif field_name == 'getTestSets':
@@ -503,6 +505,74 @@ def publish_test_set_version(args, event=None):
     result = _version_to_result(version_item)
     result['activeReference'] = next_version if set_active else meta.get('activeReference')
     return result
+
+
+def remove_documents_from_test_set(args):
+    """Remove named documents from a test set (delete input + baseline objects).
+
+    Deletes, for each requested file name, the ``{id}/input/<file>`` object and
+    the whole ``{id}/baseline/<file>/`` folder, then recounts and updates
+    fileCount. Editing membership targets the mutable working draft; a later
+    publish cuts the next immutable version. Additive — no existing path changes.
+    """
+    test_set_id = args['testSetId']
+    file_names = args['fileNames']
+    logger.info(f"Removing {len(file_names)} document(s) from test set {test_set_id}")
+
+    meta = db_client.get_item({'PK': f'testset#{test_set_id}', 'SK': 'metadata'})
+    if not meta:
+        raise Exception(f"Test set '{test_set_id}' not found")
+
+    test_set_bucket = os.environ['TEST_SET_BUCKET']
+    s3_client = boto3.client('s3')
+
+    removed = 0
+    for file_name in file_names:
+        keys_to_delete = []
+        # The single input object.
+        keys_to_delete.append(f"{test_set_id}/input/{file_name}")
+        # The baseline folder for this file (may contain nested section results).
+        paginator = s3_client.get_paginator('list_objects_v2')
+        for page in paginator.paginate(
+            Bucket=test_set_bucket, Prefix=f"{test_set_id}/baseline/{file_name}/"
+        ):
+            for obj in page.get('Contents', []):
+                keys_to_delete.append(obj['Key'])
+
+        if keys_to_delete:
+            # delete_objects caps at 1000 keys/request; batch to be safe.
+            for i in range(0, len(keys_to_delete), 1000):
+                s3_client.delete_objects(
+                    Bucket=test_set_bucket,
+                    Delete={'Objects': [{'Key': k} for k in keys_to_delete[i:i + 1000]]},
+                )
+            removed += 1
+
+    # Recount remaining inputs and update the metadata pointer.
+    validation = _validate_test_set_files(s3_client, test_set_bucket, test_set_id)
+    new_count = validation.get('input_count', 0)
+    tracking_table = boto3.resource('dynamodb').Table(os.environ['TRACKING_TABLE'])
+    tracking_table.update_item(
+        Key={'PK': f'testset#{test_set_id}', 'SK': 'metadata'},
+        UpdateExpression='SET fileCount = :c, lastAddResult = :r',
+        ExpressionAttributeValues={
+            ':c': new_count,
+            ':r': f'Removed {removed} document(s)',
+        },
+    )
+
+    logger.info(
+        f"Removed {removed} document(s) from test set {test_set_id}; "
+        f"{new_count} remaining"
+    )
+    return {
+        'id': test_set_id,
+        'name': meta.get('name'),
+        'fileCount': new_count,
+        'status': meta.get('status'),
+        'createdAt': meta.get('createdAt'),
+        'lastAddResult': f'Removed {removed} document(s)',
+    }
 
 
 def update_test_set(args):

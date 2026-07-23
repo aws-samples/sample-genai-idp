@@ -1006,6 +1006,8 @@ type Mutation {
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   publishTestSetVersion(input: PublishTestSetVersionInput!): TestSetVersion
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  removeDocumentsFromTestSet(testSetId: String!, fileNames: [String!]!): TestSet
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   # Fine-Tuning (Admin + Author)
   createFinetuningJob(input: CreateFinetuningJobInput!): FinetuningJob
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])

@@ -687,3 +687,58 @@ class TestTestSetResolver:
             assert [r["version"] for r in result] == [1, 2]  # ascending
             assert result[0]["label"] == "v1"
             assert result[1]["fileCount"] == 12
+
+    # -- Membership editing: remove ---------------------------------------
+
+    @patch.dict(os.environ, {"TRACKING_TABLE": "test-table", "TEST_SET_BUCKET": "ts-bucket"})
+    def test_remove_documents_deletes_input_and_baseline_and_recounts(self):
+        with patch.object(test_set_index.db_client, "get_item") as mock_get, patch.object(
+            test_set_index, "boto3"
+        ) as mock_boto3, patch.object(
+            test_set_index, "_validate_test_set_files"
+        ) as mock_validate:
+            mock_get.return_value = {
+                "id": "ts1",
+                "name": "TS One",
+                "status": "COMPLETED",
+                "createdAt": "2026-01-01T00:00:00Z",
+            }
+            s3 = MagicMock()
+            # baseline folder for doc.pdf has one nested result.json
+            paginator = MagicMock()
+            paginator.paginate.return_value = [
+                {"Contents": [{"Key": "ts1/baseline/doc.pdf/sections/1/result.json"}]}
+            ]
+            s3.get_paginator.return_value = paginator
+            mock_table = MagicMock()
+
+            def _resource(name):
+                return MagicMock(Table=MagicMock(return_value=mock_table))
+
+            mock_boto3.client.return_value = s3
+            mock_boto3.resource.side_effect = _resource
+            mock_validate.return_value = {"valid": True, "input_count": 4}
+
+            result = test_set_index.remove_documents_from_test_set(
+                {"testSetId": "ts1", "fileNames": ["doc.pdf"]}
+            )
+
+            # Deleted both the input object and the baseline result
+            deleted_keys = set()
+            for call in s3.delete_objects.call_args_list:
+                for obj in call.kwargs["Delete"]["Objects"]:
+                    deleted_keys.add(obj["Key"])
+            assert "ts1/input/doc.pdf" in deleted_keys
+            assert "ts1/baseline/doc.pdf/sections/1/result.json" in deleted_keys
+            # fileCount updated to the recounted value
+            assert result["fileCount"] == 4
+            update_kwargs = mock_table.update_item.call_args.kwargs
+            assert update_kwargs["ExpressionAttributeValues"][":c"] == 4
+
+    def test_remove_documents_nonexistent_test_set_raises(self):
+        with patch.object(test_set_index.db_client, "get_item") as mock_get:
+            mock_get.return_value = None
+            with pytest.raises(Exception, match="Test set 'ghost' not found"):
+                test_set_index.remove_documents_from_test_set(
+                    {"testSetId": "ghost", "fileNames": ["a.pdf"]}
+                )

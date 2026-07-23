@@ -690,6 +690,7 @@ export type Mutation = {
    */
   registerFeatureHooks: FeatureHooksRegistration;
   releaseReview?: Maybe<Document>;
+  removeDocumentsFromTestSet?: Maybe<TestSet>;
   /**
    * Delete all of a feature's preset config versions on uninstall. A
    * version that is currently ACTIVE is preserved (never yank the running
@@ -931,6 +932,12 @@ export type MutationRegisterFeatureHooksArgs = {
 
 export type MutationReleaseReviewArgs = {
   objectKey: Scalars['String']['input'];
+};
+
+
+export type MutationRemoveDocumentsFromTestSetArgs = {
+  fileNames: Array<Scalars['String']['input']>;
+  testSetId: Scalars['String']['input'];
 };
 
 

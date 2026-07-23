@@ -78,6 +78,7 @@ FIELD_ALIASES: Dict[str, str] = {
     # parameter under its 8 KB Advanced-tier ceiling.
     "publishTestSetVersion": "getTestSets",
     "getTestSetVersions": "getTestSets",
+    "removeDocumentsFromTestSet": "getTestSets",
 }
 
 

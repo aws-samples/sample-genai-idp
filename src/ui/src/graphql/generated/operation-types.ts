@@ -690,6 +690,7 @@ export type Mutation = {
    */
   registerFeatureHooks: FeatureHooksRegistration;
   releaseReview?: Maybe<Document>;
+  removeDocumentsFromTestSet?: Maybe<TestSet>;
   /**
    * Delete all of a feature's preset config versions on uninstall. A
    * version that is currently ACTIVE is preserved (never yank the running
@@ -931,6 +932,12 @@ export type MutationRegisterFeatureHooksArgs = {
 
 export type MutationReleaseReviewArgs = {
   objectKey: Scalars['String']['input'];
+};
+
+
+export type MutationRemoveDocumentsFromTestSetArgs = {
+  fileNames: Array<Scalars['String']['input']>;
+  testSetId: Scalars['String']['input'];
 };
 
 
@@ -2078,6 +2085,14 @@ export type ReleaseReviewMutationVariables = Exact<{
 
 
 export type ReleaseReviewMutation = { releaseReview?: { ObjectKey?: string | null, ObjectStatus?: string | null, HITLStatus?: string | null, HITLReviewOwner?: string | null, HITLReviewOwnerEmail?: string | null } | null };
+
+export type RemoveDocumentsFromTestSetMutationVariables = Exact<{
+  testSetId: Scalars['String']['input'];
+  fileNames: Array<Scalars['String']['input']> | Scalars['String']['input'];
+}>;
+
+
+export type RemoveDocumentsFromTestSetMutation = { removeDocumentsFromTestSet?: { id: string, name: string, fileCount?: number | null, status?: string | null, createdAt: string, lastAddResult?: string | null } | null };
 
 export type ReprocessDocumentMutationVariables = Exact<{
   objectKeys: Array<Scalars['String']['input']> | Scalars['String']['input'];
