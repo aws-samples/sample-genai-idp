@@ -111,8 +111,16 @@ def update_document_completion(
                 logger.info("Using entire output_data as document (fallback)")
 
             # Log compression status for debugging
+            wrapper_status = None
             if isinstance(document_data, dict):
                 is_compressed = document_data.get("compressed", False)
+                # A terminal status the state machine set on the compressed
+                # WRAPPER (e.g. REDACTED_SUPERSEDED from the preprocessing halt
+                # path) lives on the wrapper, NOT inside the compressed snapshot
+                # — that snapshot was serialized earlier in the run (status
+                # RUNNING). Capture it here before load_document decompresses and
+                # overwrites the in-memory status from the older snapshot.
+                wrapper_status = document_data.get("status")
                 logger.info(f"Document data is compressed: {is_compressed}")
                 if is_compressed:
                     logger.info(
@@ -139,11 +147,13 @@ def update_document_completion(
             # path): a SUCCEEDED execution that ended early must NOT be forced
             # to COMPLETED, or the "this original was superseded by a redacted
             # copy" signal is lost in the UI/tracking.
-            if (
-                workflow_status == "SUCCEEDED"
-                and processed_doc.status == Status.REDACTED_SUPERSEDED
+            if workflow_status == "SUCCEEDED" and (
+                processed_doc.status == Status.REDACTED_SUPERSEDED
+                or wrapper_status == Status.REDACTED_SUPERSEDED.value
             ):
-                pass  # keep the status the workflow set
+                # Keep the terminal status the workflow set (from the wrapper
+                # when the document is a compressed reference).
+                processed_doc.status = Status.REDACTED_SUPERSEDED
             else:
                 processed_doc.status = (
                     Status.COMPLETED
