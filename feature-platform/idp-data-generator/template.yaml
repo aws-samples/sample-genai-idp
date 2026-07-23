@@ -1,0 +1,824 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  idp-data-generator v<FEATURE_VERSION_TOKEN> — IDP Accelerator Feature Platform
+  extension. Hosts the SEED synthetic-document generator on an Amazon Bedrock
+  AgentCore Runtime (built at install via CodeBuild → ECR), with a bootstrap
+  SQS queue + tracking table + processor and a Cognito-authorized FeatureApi.
+  Generates labeled test sets into the host's TestSet bucket, which the host's
+  Test Studio auto-discovers. Modeled on sample-health-insurance-review (the
+  UI/registration contract) and the host's nested/synthesis-runtime stack (the
+  AgentCore build-at-install pattern, identical to IDP AutoTune).
+
+  SCAFFOLD: non-destructive draft. The vendored SEED source under agent-source/
+  is a placeholder until SEED open-sources; the host still owns the live infra.
+  See README.md.
+
+Parameters:
+
+  MainStackName:
+    Type: String
+    Description: Name of the deployed IDP Accelerator host stack to attach to.
+
+  # No FeatureVersion / artifact-prefix CFN parameters — both are baked into
+  # this template at publish time (<FEATURE_VERSION_TOKEN> /
+  # <FEATURE_ARTIFACT_PREFIX_TOKEN>) because the CFN console "Update stack"
+  # wizard drops param overrides on a template change. Same rationale as
+  # sample-health-insurance-review/template.yaml.
+
+  FeatureId:
+    Type: String
+    Default: idp-data-generator
+
+  FeatureDisplayName:
+    Type: String
+    Default: "Test Set Generator"
+
+  FeatureBucket:
+    Type: String
+    Description: >
+      S3 bucket holding this version's artifacts (the host artifacts bucket for
+      OSS). The ui-deployer copies the UI bundle from here; CodeBuild reads the
+      agent-source.zip from here. Pre-filled by the host's getFeatureLaunchUrl.
+
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues: [DEBUG, INFO, WARNING, ERROR]
+
+  LogRetentionDays:
+    Type: Number
+    Default: 365
+
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ''
+    Description: Optional IAM permissions boundary ARN applied to created roles.
+
+  GeneratorModelId:
+    Type: String
+    Default: us.anthropic.claude-sonnet-4-6
+    Description: Bedrock model ID the generator uses for synthesis.
+
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, '']]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 60
+    MemorySize: 256
+    Tracing: Active
+    Architectures: [arm64]
+
+Resources:
+
+  ###########################################################################
+  # ECR repository — holds the linux/arm64 generator image built at install.
+  ###########################################################################
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    # checkov:skip=CKV_AWS_51: "Mutable tags allowed for workflow flexibility"
+    # checkov:skip=CKV_AWS_163: "ECR scanning optional per deployment requirements"
+    Properties:
+      EmptyOnDelete: true
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 10 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+      EncryptionConfiguration:
+        EncryptionType: KMS
+        KmsKey: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
+
+  ###########################################################################
+  # CodeBuild — builds the ARM64 image from the published agent-source.zip and
+  # pushes it to ECR. Source.Location points at this version's agent-source.zip
+  # (the publisher uploads it; the artifact prefix is baked at publish time).
+  ###########################################################################
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Wildcard permissions required for CloudWatch Logs creation and ECR auth"
+    Properties:
+      Path: /
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "codebuild.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CodeBuildPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                Resource: !GetAtt ECRRepository.Arn
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${FeatureBucket}"
+                  - !Sub "arn:${AWS::Partition}:s3:::${FeatureBucket}/*"
+              - Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:ReEncrypt*
+                  - kms:GenerateDataKey*
+                  - kms:DescribeKey
+                Resource: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
+
+  DockerBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Description: Build the ARM64 AgentCore Runtime image for the Test Set Generator
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts:
+        Type: NO_ARTIFACTS
+      Environment:
+        ComputeType: BUILD_GENERAL1_LARGE
+        Image: aws/codebuild/amazonlinux2-aarch64-standard:3.0
+        Type: ARM_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: AWS_ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: ECR_REPO_URI
+            Value: !GetAtt ECRRepository.RepositoryUri
+          - Name: IMAGE_TAG
+            Value: latest
+      Source:
+        Type: S3
+        # The publisher uploads agent-source.zip under this version's prefix.
+        # Both halves are baked at publish time (no stale-able CFN param).
+        Location: !Sub "${FeatureBucket}/<FEATURE_ARTIFACT_PREFIX_TOKEN>/<FEATURE_VERSION_TOKEN>/agent-source.zip"
+        BuildSpec: buildspec.yml
+      TimeoutInMinutes: 45
+      EncryptionKey: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
+
+  ###########################################################################
+  # CodeBuild trigger custom resource — starts the build at install/update and
+  # waits for completion before the AgentCore runtime is created.
+  ###########################################################################
+  DockerBuildRunFunctionRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "CloudWatch Logs require wildcard for log group creation"
+    Properties:
+      Path: /
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DockerBuildRunPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuilds
+                Resource: !GetAtt DockerBuildProject.Arn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+
+  DockerBuildRunFunction:
+    Type: AWS::Serverless::Function
+    # checkov:skip=CKV_AWS_116: "DLQ not needed for custom resource Lambda"
+    # checkov:skip=CKV_AWS_117: "No VPC needed"
+    # checkov:skip=CKV_AWS_115: "No reserved concurrency needed"
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Handler: index.handler
+      CodeUri: docker_build_lambda/
+      Description: Custom resource handler - triggers CodeBuild for the generator image
+      MemorySize: 128
+      Timeout: 900
+      Role: !GetAtt DockerBuildRunFunctionRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref DockerBuildRunFunctionLogGroup
+
+  DockerBuildRunFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${MainStackName}-${FeatureId}-docker-build-run'
+      RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
+
+  DockerBuildRun:
+    Type: Custom::DockerBuild
+    # ProjectName: !Ref DockerBuildProject already enforces the project
+    # dependency; only the ECR repo needs an explicit DependsOn.
+    DependsOn:
+      - ECRRepository
+    Properties:
+      ServiceToken: !GetAtt DockerBuildRunFunction.Arn
+      ProjectName: !Ref DockerBuildProject
+      # Re-runs the build on every version bump (a property change forces the
+      # custom resource to re-invoke). Baked at publish time.
+      BuildVersion: '<FEATURE_VERSION_TOKEN>'
+
+  ###########################################################################
+  # AgentCore Runtime execution role — assumed by the runtime to run the agent.
+  # Host buckets/table referenced via Fn::ImportValue (extension installs after
+  # the host; it imports host exports, never the reverse).
+  ###########################################################################
+  AgentCoreRuntimeExecutionRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "ECR auth token, X-Ray and CloudWatch metrics do not support resource-level permissions"
+    Properties:
+      Path: /
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "bedrock-agentcore.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:*"
+      Policies:
+        - PolicyName: AgentCoreRuntimeExecutionPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ECRImageAccess
+                Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchCheckLayerAvailability
+                Resource: !GetAtt ECRRepository.Arn
+              - Sid: ECRTokenAccess
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Sid: RuntimeLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/runtimes/*"
+              - Sid: RuntimeLogsDescribe
+                Effect: Allow
+                Action: logs:DescribeLogGroups
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*"
+              - Sid: XRay
+                Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: "*"
+              - Sid: CloudWatchMetrics
+                Effect: Allow
+                Action: cloudwatch:PutMetricData
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    # bedrock-agentcore: the runtime's own metrics; GENAIDP:
+                    # idp_common's Bedrock client token/latency metrics.
+                    cloudwatch:namespace: [bedrock-agentcore, GENAIDP]
+              - Sid: WorkloadIdentity
+                Effect: Allow
+                Action:
+                  - bedrock-agentcore:GetWorkloadAccessToken
+                  - bedrock-agentcore:GetWorkloadAccessTokenForJWT
+                  - bedrock-agentcore:GetWorkloadAccessTokenForUserId
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default"
+                  - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:workload-identity-directory/default/workload-identity/*"
+              - Sid: BedrockModelInvocation
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                  - bedrock:GetInferenceProfile
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+              - Sid: TestSetBucketAccess
+                Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:ListBucket, s3:DeleteObject]
+                Resource:
+                  - !Sub
+                    - "arn:${AWS::Partition}:s3:::${B}"
+                    - B: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
+                  - !Sub
+                    - "arn:${AWS::Partition}:s3:::${B}/*"
+                    - B: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
+              - Sid: WorkingBucketAccess
+                Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:ListBucket]
+                Resource:
+                  - !Sub
+                    - "arn:${AWS::Partition}:s3:::${B}"
+                    - B: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
+                  - !Sub
+                    - "arn:${AWS::Partition}:s3:::${B}/*"
+                    - B: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
+              - Sid: ConfigTableRead
+                Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:Query, dynamodb:Scan]
+                Resource:
+                  - !Sub
+                    - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}"
+                    - T: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }
+                  - !Sub
+                    - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}/index/*"
+                    - T: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }
+              - Sid: KMSAccess
+                Effect: Allow
+                Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
+                Resource: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
+              - Sid: TrackingTableWrite
+                Effect: Allow
+                Action: [dynamodb:UpdateItem, dynamodb:PutItem]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${BootstrapTrackingTable}"
+                  - !Sub
+                    - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}"
+                    - T: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
+
+  ###########################################################################
+  # AgentCore Runtime control-plane custom resource (create/update/delete).
+  ###########################################################################
+  AgentCoreRuntimeManagerRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "bedrock-agentcore:* is required: CreateAgentRuntime transitively provisions/deletes endpoints and other sub-resources (CreateAgentRuntimeEndpoint etc.), so an action allow-list is brittle; these control-plane APIs do not support resource-level permissions and the runtime ARN does not exist at create time. CloudWatch Logs require wildcard."
+    Properties:
+      Path: /
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AgentCoreRuntimeManagerPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: bedrock-agentcore:*
+                Resource: "*"
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt AgentCoreRuntimeExecutionRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: !Sub "bedrock-agentcore.${AWS::URLSuffix}"
+              - Effect: Allow
+                Action: iam:CreateServiceLinkedRole
+                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/*bedrock-agentcore.${AWS::URLSuffix}/*"
+                Condition:
+                  StringLike:
+                    iam:AWSServiceName: !Sub "*bedrock-agentcore.${AWS::URLSuffix}"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+
+  AgentCoreRuntimeManagerFunction:
+    Type: AWS::Serverless::Function
+    # checkov:skip=CKV_AWS_116: "DLQ not needed for custom resource Lambda"
+    # checkov:skip=CKV_AWS_117: "No VPC needed"
+    # checkov:skip=CKV_AWS_115: "No reserved concurrency needed"
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Handler: index.handler
+      CodeUri: agentcore_runtime_lambda/
+      Description: Custom resource handler - manages the AgentCore Runtime for the generator
+      MemorySize: 256
+      Timeout: 900
+      Role: !GetAtt AgentCoreRuntimeManagerRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref AgentCoreRuntimeManagerFunctionLogGroup
+
+  AgentCoreRuntimeManagerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${MainStackName}-${FeatureId}-runtime-manager'
+      RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
+
+  GeneratorAgentRuntime:
+    Type: Custom::AgentCoreRuntime
+    DependsOn:
+      - DockerBuildRun
+    Properties:
+      ServiceToken: !GetAtt AgentCoreRuntimeManagerFunction.Arn
+      # AgentCore Runtime names must match [a-zA-Z][a-zA-Z0-9_]{0,47} (no hyphens).
+      AgentRuntimeName: !Sub
+        - "idp_datagen_${SafeName}"
+        - SafeName: !Join ["_", !Split ["-", !Ref MainStackName]]
+      ContainerUri: !Sub "${ECRRepository.RepositoryUri}:latest"
+      ExecutionRoleArn: !GetAtt AgentCoreRuntimeExecutionRole.Arn
+      BuildVersion: '<FEATURE_VERSION_TOKEN>'
+      EnvironmentVariables:
+        LOG_LEVEL: !Ref LogLevel
+        TEST_SET_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
+        WORKING_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
+        CONFIGURATION_TABLE_NAME: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }
+        BOOTSTRAP_TRACKING_TABLE: !Ref BootstrapTrackingTable
+        HOST_TRACKING_TABLE: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
+        GENERATOR_MODEL_ID: !Ref GeneratorModelId
+        # Strands file_write/editor tools prompt for interactive confirmation
+        # otherwise, which auto-cancels in the headless runtime.
+        BYPASS_TOOL_CONSENT: "true"
+
+  ###########################################################################
+  # Bootstrap job plumbing — OWNED by this extension. The FeatureApi enqueues
+  # jobs; the processor authors/stages the schema and invokes the AgentCore
+  # runtime, which writes the test set into the host TestSet bucket. Job status
+  # lives in BootstrapTrackingTable, read back via the FeatureApi (GET /jobs/{id}).
+  ###########################################################################
+  BootstrapTrackingTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: jobId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: jobId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ExpiresAfter
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: 'idp:feature-id'
+          Value: !Ref FeatureId
+
+  BootstrapDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 900
+      MessageRetentionPeriod: 345600
+      KmsMasterKeyId: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
+
+  BootstrapQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 900
+      MessageRetentionPeriod: 86400
+      KmsMasterKeyId: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt BootstrapDLQ.Arn
+        maxReceiveCount: 1000
+      Tags:
+        - Key: 'idp:feature-id'
+          Value: !Ref FeatureId
+
+  BootstrapProcessorFunction:
+    Type: AWS::Serverless::Function
+    # checkov:skip=CKV_AWS_116: "DLQ handled at the SQS source mapping"
+    # requirements.txt installs ./idp_common_pkg[synthesis] — a copy staged into
+    # this CodeUri by package_agent_source.sh at publish time (the sibling
+    # lib/idp_common_pkg can't be referenced by relative path once SAM copies the
+    # CodeUri to a scratch dir). The staged dir is git-ignored.
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Handler: index.handler
+      CodeUri: bootstrap-processor/
+      Description: Processes config-bootstrap jobs and invokes the generator runtime
+      MemorySize: 1024
+      Timeout: 900
+      Tags:
+        'idp:feature-id': !Ref FeatureId
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          BOOTSTRAP_TRACKING_TABLE: !Ref BootstrapTrackingTable
+          HOST_TRACKING_TABLE: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
+          CONFIGURATION_TABLE_NAME: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }
+          TEST_SET_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
+          WORKING_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
+          SYNTHESIS_RUNTIME_ARN: !GetAtt GeneratorAgentRuntime.AgentRuntimeArn
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt BootstrapQueue.Arn
+            BatchSize: 1
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BootstrapTrackingTable
+        - Statement:
+            - Effect: Allow
+              Action: [s3:GetObject, s3:PutObject, s3:ListBucket, s3:DeleteObject]
+              Resource:
+                - !Sub
+                  - "arn:${AWS::Partition}:s3:::${B}"
+                  - B: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
+                - !Sub
+                  - "arn:${AWS::Partition}:s3:::${B}/*"
+                  - B: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
+                - !Sub
+                  - "arn:${AWS::Partition}:s3:::${B}"
+                  - B: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
+                - !Sub
+                  - "arn:${AWS::Partition}:s3:::${B}/*"
+                  - B: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:Query, dynamodb:Scan, dynamodb:PutItem, dynamodb:UpdateItem]
+              Resource:
+                - !Sub
+                  - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}"
+                  - T: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }
+            - Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:UpdateItem]
+              Resource:
+                - !Sub
+                  - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}"
+                  - T: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
+            - Effect: Allow
+              Action: bedrock-agentcore:InvokeAgentRuntime
+              Resource:
+                - !GetAtt GeneratorAgentRuntime.AgentRuntimeArn
+                - !Sub "${GeneratorAgentRuntime.AgentRuntimeArn}/*"
+            - Effect: Allow
+              Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
+              Resource: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+                - bedrock:GetInferenceProfile
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+            # idp_common's Bedrock client publishes token/latency metrics.
+            - Effect: Allow
+              Action: cloudwatch:PutMetricData
+              Resource: '*'
+              Condition:
+                StringEquals:
+                  cloudwatch:namespace: GENAIDP
+
+  BootstrapProcessorFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${BootstrapProcessorFunction}'
+      RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
+
+  ###########################################################################
+  # Feature API — HttpApi + Lambda, Cognito-authorized against the host User
+  # Pool. The endpoint the host's Quick Start tools POST generation jobs to
+  # (discovered via listInstalledFeatures.featureApiEndpoint). Enqueues to
+  # BootstrapQueue.
+  ###########################################################################
+  FeatureApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: ['*']
+        AllowMethods: [GET, POST, PUT, DELETE, OPTIONS]
+        AllowHeaders: [authorization, content-type, x-amz-date, x-amz-security-token]
+        MaxAge: 600
+      Auth:
+        DefaultAuthorizer: CognitoJwt
+        Authorizers:
+          CognitoJwt:
+            JwtConfiguration:
+              issuer: !Sub
+                - 'https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${UserPoolId}'
+                - UserPoolId: { 'Fn::ImportValue': !Sub '${MainStackName}-UserPoolId' }
+              audience:
+                - !Sub
+                  - '${ClientId}'
+                  - ClientId: { 'Fn::ImportValue': !Sub '${MainStackName}-UserPoolClientId' }
+            IdentitySource: '$request.header.Authorization'
+
+  FeatureApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      CodeUri: feature-api/
+      Handler: handler.lambda_handler
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          MAIN_STACK_NAME: !Ref MainStackName
+          BOOTSTRAP_QUEUE_URL: !Ref BootstrapQueue
+          BOOTSTRAP_TRACKING_TABLE: !Ref BootstrapTrackingTable
+          CONFIGURATION_TABLE_NAME: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }
+          SUGGEST_MODEL_ID: !Ref GeneratorModelId
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt BootstrapQueue.QueueName
+        - DynamoDBReadPolicy:
+            TableName: !Ref BootstrapTrackingTable
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:Query, dynamodb:Scan]
+              Resource:
+                - !Sub
+                  - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}"
+                  - T: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }
+            # KMS grant for the CMK-encrypted BootstrapQueue + tables.
+            - Effect: Allow
+              Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
+              Resource: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
+            # Bedrock for the /suggest-scenario scenario-theme suggestions.
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:GetInferenceProfile
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+      Events:
+        # Explicit methods (NOT ANY) so API Gateway answers OPTIONS preflight
+        # itself before the JWT authorizer — same rationale as the sample.
+        Post:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FeatureApi
+            Path: /{proxy+}
+            Method: POST
+        Get:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FeatureApi
+            Path: /{proxy+}
+            Method: GET
+
+  FeatureApiFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FeatureApiFunction}'
+      RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
+
+  ###########################################################################
+  # UI deployer — copies the UMD bundle to the host WebUIBucket and registers
+  # the feature (registerFeature) with its featureApiEndpoint.
+  ###########################################################################
+  UiDeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: !Sub "lambda.${AWS::URLSuffix}" }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Tags:
+        - Key: 'idp:feature-id'
+          Value: !Ref FeatureId
+      Policies:
+        - PolicyName: ReadFeatureBucket
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${FeatureBucket}/<FEATURE_ARTIFACT_PREFIX_TOKEN>/*'
+        - PolicyName: WriteWebUIBucketPrefix
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [s3:PutObject, s3:PutObjectAcl, s3:DeleteObject]
+                Resource: !Sub
+                  - 'arn:${AWS::Partition}:s3:::${Bucket}/features/${FeatureId}/*'
+                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-WebUIBucketName' }
+        - PolicyName: InvokeRegisterFeature
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # AppSync transport was removed — register/unregister by invoking
+              # the host's registerFeature resolver Lambda directly.
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - { 'Fn::ImportValue': !Sub '${MainStackName}-RegisterFeatureFunctionArn' }
+
+  UiDeployerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      CodeUri: ui-deployer/
+      Handler: handler.lambda_handler
+      Role: !GetAtt UiDeployerRole.Arn
+      Environment:
+        Variables:
+          FEATURE_ID: !Ref FeatureId
+          FEATURE_DISPLAY_NAME: !Ref FeatureDisplayName
+          FEATURE_VERSION: '<FEATURE_VERSION_TOKEN>'
+          MAIN_STACK_NAME: !Ref MainStackName
+          WEBUI_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WebUIBucketName' }
+          FEATURE_BUCKET: !Ref FeatureBucket
+          FEATURE_ARTIFACT_PREFIX: '<FEATURE_ARTIFACT_PREFIX_TOKEN>'
+          REGISTER_FEATURE_FUNCTION_ARN: { 'Fn::ImportValue': !Sub '${MainStackName}-RegisterFeatureFunctionArn' }
+          FEATURE_API_ENDPOINT: !GetAtt FeatureApi.ApiEndpoint
+          GENERATION_QUEUE_ARN: !GetAtt BootstrapQueue.Arn
+          LOG_LEVEL: !Ref LogLevel
+
+  UiDeployerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${UiDeployerFunction}'
+      RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
+
+  RegisterFeatureResource:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt UiDeployerFunction.Arn
+      FeatureVersion: '<FEATURE_VERSION_TOKEN>'
+      FeatureDisplayName: !Ref FeatureDisplayName
+
+Outputs:
+  FeatureApiEndpoint:
+    Value: !GetAtt FeatureApi.ApiEndpoint
+  GeneratorRuntimeArn:
+    Value: !GetAtt GeneratorAgentRuntime.AgentRuntimeArn
+  ECRRepositoryUri:
+    Value: !GetAtt ECRRepository.RepositoryUri
+  InstalledVersion:
+    Value: '<FEATURE_VERSION_TOKEN>'

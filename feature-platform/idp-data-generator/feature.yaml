@@ -1,0 +1,58 @@
+# Test Set Generator — Feature Platform extension.
+#
+# Packages the SEED synthetic-document generator (the published `seed-data` PyPI
+# package) plus the accelerator's synthesis adapter (idp_common.synthesis) as a
+# standalone, installable extension that attaches to a deployed IDP Accelerator
+# host stack by MainStackName — the AutoTune / sample-health-insurance-review
+# pattern. Built at install via CodeBuild -> ECR -> Custom::AgentCoreRuntime.
+#
+# Published with the accelerator's Feature Platform SDK:
+#   pip install idp-feature-sdk
+#   idp-feature-cli publish --feature-bucket <bucket>   # (run from this dir)
+#
+# STAGED DRAFT — not yet deploy-verified end-to-end on this branch. The image
+# build (seed-data + idp_common[synthesis]) and AgentCore runtime need a live
+# CodeBuild/ECR/AgentCore cycle to validate. See README.md.
+featureId: idp-data-generator
+displayName: "Test Set Generator"
+version: 0.1.0
+description: |
+  Generate labeled synthetic document test sets from a document-class schema or
+  an existing configuration version, using the SEED generator on an Amazon
+  Bedrock AgentCore Runtime. Provides the synthetic-data-generation capability
+  the Quick Start onboarding agent discovers and delegates to.
+docsUrl: extensions/idp-data-generator
+template:
+  path: template.yaml
+  requiresMainStackName: true
+ui:
+  bundlePath: feature-ui/dist/ui-bundle.js
+  # Structured build steps (each argv runs without a shell), matching the
+  # sample-health-insurance-review pattern.
+  build:
+    - cwd: feature-ui
+      argv: ["npm", "ci"]
+    - cwd: feature-ui
+      argv: ["npm", "run", "build"]
+
+# agentSource — packaged by the publisher (idp-feature-cli runs packageCommand
+# from this dir) and uploaded to
+# <FeatureBucket>/<artifactPrefix>/<version>/agent-source.zip. The template's
+# CodeBuild Source reads that zip and builds the linux/arm64 image at install.
+# package_agent_source.sh stages lib/idp_common_pkg into the build context and
+# zips it with the runtime bits; the SEED generator is pip-installed (seed-data).
+agentSource:
+  packageCommand: "bash package_agent_source.sh"
+  artifactPath: agent-source.zip
+
+defaultParameters:
+  LogLevel: INFO
+
+capabilities:
+  # writes-documents = the generator writes synthetic test-set documents into
+  # the host TestSet bucket. (The SDK enum is fixed: reads-documents,
+  # writes-documents, custom-api, client-only, applies-config-preset,
+  # registers-pipeline-hooks.) Quick Start discovery v1 matches on featureId,
+  # not a capability tag, so no generator-specific capability is needed.
+  - custom-api
+  - writes-documents

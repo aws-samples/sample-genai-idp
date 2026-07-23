@@ -1,0 +1,286 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+"""Test Set Generator feature API.
+
+Fronted by the host's Cognito JWT authorizer (template.yaml FeatureApi), so this
+handler only does application logic. It is the endpoint the host's Quick Start
+tools discover (via listInstalledFeatures.featureApiEndpoint) and POST jobs to,
+and the surface the feature UI page calls.
+
+Routes
+------
+POST /generate
+    Body (one of):
+      - { prompt: str, className?: str, docCount?: int, threshold?: int,
+          augment?: bool } — the processor authors a schema from the prompt.
+      - { schema: <json-schema obj>, configVersion: str, docCount?: int,
+          threshold?: int, augment?: bool } — preauthored schema.
+    Enqueues a generation job. Returns { jobId }.
+
+POST /generate-from-config
+    Body: { versionName: str, className: str, docCount?: int, threshold?: int,
+            augment?: bool }
+    Reads the class schema from an existing config version and enqueues. Returns
+    { jobId }. (The processor resolves the class -> generator schema; see
+    bootstrap-processor.)
+
+GET /jobs
+    Returns in-flight jobs (PENDING/IN_PROGRESS) so the UI can surface jobs it
+    did not itself start (e.g. started from Quick Start).
+
+GET /jobs/{jobId}
+    Returns the BootstrapTrackingTable row for a job (status, message, etc.).
+
+POST /estimate-cost
+    Body: { docCount: int, threshold?: int }. Returns { estimate: {...} } with a
+    rough cost/time band for the run.
+
+POST /suggest-scenario
+    Body: { className?: str, versionName?: str, prompt?: str }. Returns
+    { suggestions: [str, ...] } — short scenario themes proposed via Bedrock.
+
+GET /config
+    Returns lightweight UI config (featureId, version) for the feature page.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import uuid
+from typing import Any, Dict
+
+import boto3
+from boto3.dynamodb.conditions import Attr
+
+logger = logging.getLogger()
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+
+_QUEUE_URL = os.environ.get("BOOTSTRAP_QUEUE_URL", "")
+_TRACKING_TABLE = os.environ.get("BOOTSTRAP_TRACKING_TABLE", "")
+_CONFIG_TABLE = os.environ.get("CONFIGURATION_TABLE_NAME", "")
+_FEATURE_VERSION = os.environ.get("FEATURE_VERSION", "")
+_SUGGEST_MODEL_ID = os.environ.get(
+    "SUGGEST_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+)
+
+_sqs = boto3.client("sqs")
+_dynamodb = boto3.resource("dynamodb")
+_bedrock = boto3.client("bedrock-runtime")
+
+
+def _resp(status: int, body: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "statusCode": status,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(body, default=str),
+    }
+
+
+def _enqueue(message: Dict[str, Any]) -> str:
+    job_id = message["jobId"]
+    _sqs.send_message(QueueUrl=_QUEUE_URL, MessageBody=json.dumps(message))
+    return job_id
+
+
+MAX_DOC_COUNT = 100
+MIN_THRESHOLD = 1
+MAX_THRESHOLD = 10
+
+
+class _BadRequest(Exception):
+    """Raised for invalid request fields; surfaced as a 400."""
+
+
+def _int_field(body: Dict[str, Any], name: str, default: int, lo: int, hi: int) -> int:
+    raw = body.get(name, default)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise _BadRequest(f"{name} must be an integer")
+    if value < lo or value > hi:
+        raise _BadRequest(f"{name} must be between {lo} and {hi}")
+    return value
+
+
+def _handle_generate(body: Dict[str, Any]) -> Dict[str, Any]:
+    # Two shapes: a natural-language prompt (the processor authors a schema), or
+    # a preauthored schema + target version. Require one or the other.
+    prompt = (body.get("prompt") or "").strip()
+    schema = body.get("schema")
+    if not prompt and not schema:
+        return _resp(400, {"error": "either prompt or schema is required"})
+
+    message = {
+        "jobId": uuid.uuid4().hex,
+        "prompt": prompt,
+        "className": body.get("className"),
+        "docCount": _int_field(body, "docCount", 3, 1, MAX_DOC_COUNT),
+        "threshold": _int_field(body, "threshold", 7, MIN_THRESHOLD, MAX_THRESHOLD),
+        "augment": bool(body.get("augment", False)),
+        "scenario": (body.get("scenario") or "").strip(),
+        "generateDocs": True,
+    }
+    if schema:
+        # Preauthored path — the processor uses the schema as-is and writes it
+        # into targetVersion (defaults to a bootstrap-<class> version otherwise).
+        message["preauthoredSchema"] = schema
+        message["targetVersion"] = body.get("configVersion")
+    return _resp(202, {"jobId": _enqueue(message)})
+
+
+def _handle_generate_from_config(body: Dict[str, Any]) -> Dict[str, Any]:
+    version_name = body.get("versionName")
+    class_name = body.get("className")
+    if not version_name or not class_name:
+        return _resp(400, {"error": "versionName and className are required"})
+    message = {
+        "jobId": uuid.uuid4().hex,
+        "prompt": "",
+        "targetVersion": version_name,
+        "className": class_name,
+        "configVersion": version_name,
+        "docCount": _int_field(body, "docCount", 3, 1, MAX_DOC_COUNT),
+        "threshold": _int_field(body, "threshold", 7, MIN_THRESHOLD, MAX_THRESHOLD),
+        "augment": bool(body.get("augment", False)),
+        "scenario": (body.get("scenario") or "").strip(),
+        "generateDocs": True,
+        # The processor reads the class from this version and builds the
+        # generator schema (schema_bridge.config_class_to_generator_schema).
+        "fromExistingConfig": True,
+    }
+    return _resp(202, {"jobId": _enqueue(message)})
+
+
+def _estimate_cost(count: int, threshold: int) -> Dict[str, Any]:
+    per_doc_usd = 1.75 if threshold <= 7 else 4.0
+    per_doc_min = 7.0 if threshold <= 7 else 12.0
+    return {
+        "documents": count,
+        "estimated_usd_low": round(per_doc_usd * count, 2),
+        "estimated_usd_high": round(per_doc_usd * count * 2.5, 2),
+        "estimated_minutes_low": round(per_doc_min * count / max(1, min(count, 3)), 1),
+        "estimated_minutes_high": round(per_doc_min * count, 1),
+        "note": "Estimates; actual cost depends on document complexity and retries.",
+    }
+
+
+def _handle_estimate_cost(body: Dict[str, Any]) -> Dict[str, Any]:
+    count = _int_field(body, "docCount", 3, 1, MAX_DOC_COUNT)
+    threshold = _int_field(body, "threshold", 7, MIN_THRESHOLD, MAX_THRESHOLD)
+    return _resp(200, {"estimate": _estimate_cost(count, threshold)})
+
+
+def _handle_suggest_scenario(body: Dict[str, Any]) -> Dict[str, Any]:
+    class_name = (body.get("className") or "").strip()
+    version_name = (body.get("versionName") or "").strip()
+    prompt = (body.get("prompt") or "").strip()
+    subject = class_name or prompt or "documents"
+    ask = (
+        "You help create diverse synthetic test documents. Propose 3 short, "
+        "distinct scenario themes (each under 12 words) for generating varied "
+        f"examples of: {subject}."
+    )
+    if version_name:
+        ask += f" These belong to configuration version '{version_name}'."
+    ask += (
+        " A scenario is a high-level theme (e.g. 'small-business owners in "
+        "retail', 'travel-heavy expense reports'). Return ONLY a JSON array of "
+        "3 strings, no prose."
+    )
+    resp = _bedrock.invoke_model(
+        modelId=_SUGGEST_MODEL_ID,
+        body=json.dumps(
+            {
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 300,
+                "messages": [{"role": "user", "content": ask}],
+            }
+        ),
+    )
+    payload = json.loads(resp["body"].read())
+    text = "".join(
+        block.get("text", "")
+        for block in payload.get("content", [])
+        if isinstance(block, dict)
+    ).strip()
+    suggestions = _parse_suggestions(text)
+    return _resp(200, {"suggestions": suggestions})
+
+
+def _parse_suggestions(text: str) -> list:
+    start, end = text.find("["), text.rfind("]")
+    if start != -1 and end != -1 and end > start:
+        try:
+            arr = json.loads(text[start : end + 1])
+            return [str(s).strip() for s in arr if str(s).strip()][:3]
+        except json.JSONDecodeError:
+            pass
+    lines = [line.strip("-*• ").strip() for line in text.splitlines() if line.strip()]
+    return [line for line in lines if line][:3]
+
+
+def _handle_list_active_jobs() -> Dict[str, Any]:
+    if not _TRACKING_TABLE:
+        return _resp(500, {"error": "tracking table not configured"})
+    table = _dynamodb.Table(_TRACKING_TABLE)
+    jobs = []
+    kwargs = {"FilterExpression": Attr("status").is_in(["PENDING", "IN_PROGRESS"])}
+    while True:
+        page = table.scan(**kwargs)
+        jobs.extend(page.get("Items", []))
+        key = page.get("LastEvaluatedKey")
+        if not key:
+            break
+        kwargs["ExclusiveStartKey"] = key
+    return _resp(200, {"jobs": jobs})
+
+
+def _handle_get_job(job_id: str) -> Dict[str, Any]:
+    if not _TRACKING_TABLE:
+        return _resp(500, {"error": "tracking table not configured"})
+    table = _dynamodb.Table(_TRACKING_TABLE)
+    item = table.get_item(Key={"jobId": job_id}).get("Item")
+    if not item:
+        return _resp(404, {"error": "job not found", "jobId": job_id})
+    return _resp(200, {"job": item})
+
+
+def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
+    method = (
+        event.get("requestContext", {}).get("http", {}).get("method")
+        or event.get("httpMethod")
+        or "GET"
+    )
+    raw_path = event.get("rawPath") or event.get("path") or "/"
+    # Strip the API Gateway stage prefix if present.
+    path = raw_path.rstrip("/") or "/"
+    logger.info("%s %s", method, path)
+
+    try:
+        if method == "POST" and path.endswith("/generate"):
+            return _handle_generate(json.loads(event.get("body") or "{}"))
+        if method == "POST" and path.endswith("/generate-from-config"):
+            return _handle_generate_from_config(json.loads(event.get("body") or "{}"))
+        if method == "POST" and path.endswith("/estimate-cost"):
+            return _handle_estimate_cost(json.loads(event.get("body") or "{}"))
+        if method == "POST" and path.endswith("/suggest-scenario"):
+            return _handle_suggest_scenario(json.loads(event.get("body") or "{}"))
+        if method == "GET" and "/jobs/" in path:
+            return _handle_get_job(path.rsplit("/jobs/", 1)[-1])
+        if method == "GET" and path.endswith("/jobs"):
+            return _handle_list_active_jobs()
+        if method == "GET" and path.endswith("/config"):
+            return _resp(
+                200, {"featureId": "idp-data-generator", "version": _FEATURE_VERSION}
+            )
+        return _resp(404, {"error": f"no route for {method} {path}"})
+    except json.JSONDecodeError:
+        return _resp(400, {"error": "invalid JSON body"})
+    except _BadRequest as exc:
+        return _resp(400, {"error": str(exc)})
+    except Exception:  # noqa: BLE001
+        logger.exception("feature-api error")
+        return _resp(500, {"error": "internal error"})
