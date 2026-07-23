@@ -808,13 +808,18 @@ const TestSets = (): React.JSX.Element => {
     }
   };
 
-  const generatingRows: TestSetItem[] = Object.entries(genJobs).map(([jobId, j]) => ({
-    id: `gen:${jobId}`,
-    name: j.name,
-    description: j.message,
-    status: 'GENERATING',
-    createdAt: new Date().toISOString(),
-  }));
+  // Suppress an optimistic gen: row once the real registered test set (same
+  // id/name) shows up from getTestSets, to avoid a duplicate row.
+  const realTestSetIds = new Set(testSets.map((ts) => ts.id));
+  const generatingRows: TestSetItem[] = Object.entries(genJobs)
+    .filter(([, j]) => !realTestSetIds.has(j.name))
+    .map(([jobId, j]) => ({
+      id: `gen:${jobId}`,
+      name: j.name,
+      description: j.message,
+      status: 'GENERATING',
+      createdAt: new Date().toISOString(),
+    }));
 
   const filteredTestSets = [...generatingRows, ...testSets]
     .filter((item) => item != null)

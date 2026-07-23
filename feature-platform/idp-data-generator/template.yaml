@@ -401,6 +401,9 @@ Resources:
                 Action: [dynamodb:UpdateItem, dynamodb:PutItem]
                 Resource:
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${BootstrapTrackingTable}"
+                  - !Sub
+                    - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}"
+                    - T: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
 
   ###########################################################################
   # AgentCore Runtime control-plane custom resource (create/update/delete).
@@ -491,6 +494,7 @@ Resources:
         WORKING_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
         CONFIGURATION_TABLE_NAME: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }
         BOOTSTRAP_TRACKING_TABLE: !Ref BootstrapTrackingTable
+        HOST_TRACKING_TABLE: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
         GENERATOR_MODEL_ID: !Ref GeneratorModelId
         # Strands file_write/editor tools prompt for interactive confirmation
         # otherwise, which auto-cancels in the headless runtime.
@@ -563,6 +567,7 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           BOOTSTRAP_TRACKING_TABLE: !Ref BootstrapTrackingTable
+          HOST_TRACKING_TABLE: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
           CONFIGURATION_TABLE_NAME: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }
           TEST_SET_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
           WORKING_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
@@ -600,6 +605,12 @@ Resources:
                 - !Sub
                   - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}"
                   - T: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }
+            - Effect: Allow
+              Action: [dynamodb:PutItem, dynamodb:UpdateItem]
+              Resource:
+                - !Sub
+                  - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}"
+                  - T: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
             - Effect: Allow
               Action: bedrock-agentcore:InvokeAgentRuntime
               Resource:

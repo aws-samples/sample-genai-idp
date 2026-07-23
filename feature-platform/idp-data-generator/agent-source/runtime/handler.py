@@ -114,9 +114,11 @@ def _run_job(payload):
             "COMPLETED",
             f"{uploaded} document(s) in test set {test_set_id}",
         )
+        _update_test_set(test_set_id, "COMPLETED", file_count=uploaded)
     except Exception as e:
         logger.exception("Synthesis job %s failed", job_id)
         _post_status(payload, job_id, "FAILED", str(e))
+        _update_test_set(test_set_id, "FAILED")
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -167,6 +169,26 @@ def invoke(payload, context=None):
     threading.Thread(target=_worker, daemon=True).start()
 
     return {"accepted": True, "jobId": job_id, "testSetId": payload.get("testSetId")}
+
+
+def _update_test_set(test_set_id, status, file_count=None):
+    # Flip the host test-set registration record (written QUEUED by the
+    # processor) so it shows correctly in the Test Studio list. Best-effort.
+    table_name = os.environ.get("HOST_TRACKING_TABLE")
+    if not (table_name and test_set_id):
+        return
+    attrs = {"status": status}
+    if file_count is not None:
+        attrs["fileCount"] = file_count
+    try:
+        boto3.resource("dynamodb").Table(table_name).update_item(
+            Key={"PK": f"testset#{test_set_id}", "SK": "metadata"},
+            UpdateExpression="SET " + ", ".join(f"#{k} = :{k}" for k in attrs),
+            ExpressionAttributeNames={f"#{k}": k for k in attrs},
+            ExpressionAttributeValues={f":{k}": v for k, v in attrs.items()},
+        )
+    except Exception:  # noqa: BLE001 — best-effort
+        logger.warning("Failed to update test set %s", test_set_id, exc_info=True)
 
 
 def _post_status(payload, job_id, status, message):
