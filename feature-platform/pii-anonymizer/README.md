@@ -16,12 +16,12 @@ the re-sync procedure.
 1. A document is uploaded under a config version that carries a `preprocessing`
    block + hook (created by the Config Pairing wizard).
 2. The `preprocessing` hook (`hook/handler.py`) runs first. It detects + redacts
-   PII and writes a **de-identified copy** into the Input bucket under the
-   reserved `_pii_redacted/` prefix, stamped with S3 metadata
-   `config-version=<companion>`.
+   PII and writes a **de-identified copy** into the Input bucket beside the
+   original with a `(REDACTED)` marker in its name (e.g. `report(REDACTED).pdf`),
+   stamped with S3 metadata `config-version=<companion>`.
 3. That upload re-triggers processing — the redacted copy is processed under the
    **companion** config version (which has **no** preprocessing hook, so it is
-   not redacted again; a reserved-prefix guard is the belt-and-suspenders).
+   not redacted again; a `(REDACTED)`-marker guard is the belt-and-suspenders).
 4. Depending on **mode**, the hook either halts the original execution
    (`redacted_only` → the original is marked `REDACTED_SUPERSEDED`) or lets it
    run too (`redacted_and_unredacted` → original + redacted processed separately).
@@ -66,8 +66,9 @@ pipeline. Nova Lite is the cost-sensitive default detection model.
 
 ## Formats (v1)
 
-PDF (text + scanned/image), images (JPG/PNG/TIFF/BMP/WEBP), TXT, CSV. Office
-formats (DOCX/XLSX) work via the vendored processors but are lower-fidelity;
+PDF (redacted PDF out — always via the image path so the copy is a real,
+flattened PDF with no leaked text layer), images (JPG/PNG/TIFF/BMP/WEBP), TXT,
+CSV. Office formats (DOCX/XLSX) work via the vendored processors but are lower-fidelity;
 audio is out of scope.
 
 ## Not a sole compliance control

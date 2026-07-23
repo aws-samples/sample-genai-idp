@@ -36,12 +36,12 @@ vendored into the feature so the accelerator owns and security-scans the code.
 1. A document is uploaded under a config version that carries a `preprocessing`
    block and hook (created by the **Config Pairing** wizard).
 2. The preprocessing hook runs first. It detects and redacts PII, then writes a
-   **de-identified copy** into the Input bucket under the reserved
-   `_pii_redacted/` prefix, tagged with S3 metadata pointing at a **companion**
-   config version.
+   **de-identified copy** into the Input bucket beside the original with a
+   `(REDACTED)` marker in its name (e.g. `report(REDACTED).pdf`), tagged with S3
+   metadata pointing at a **companion** config version.
 3. That upload re-triggers processing: the redacted copy is processed under the
    companion version (which has no preprocessing hook, so it is not redacted
-   again — a reserved-prefix guard prevents any loop).
+   again — a `(REDACTED)`-marker guard prevents any loop).
 4. Depending on the **mode**, the original execution either halts or continues.
 
 ### Modes
@@ -103,9 +103,10 @@ on dense multi-field pages.
 
 ## Supported formats (v1)
 
-PDF (text and scanned/image), images (JPG/PNG/TIFF/BMP/WEBP), TXT, and CSV.
-Office formats (DOCX/XLSX) are processed but lower-fidelity; audio is out of
-scope.
+PDF (redacted **PDF** out — PDFs always go through the image path so the copy is
+a real, flattened PDF with no leaked text layer), images (JPG/PNG/TIFF/BMP/WEBP),
+TXT, and CSV. Office formats (DOCX/XLSX) are processed but lower-fidelity; audio
+is out of scope.
 
 ## See also
 

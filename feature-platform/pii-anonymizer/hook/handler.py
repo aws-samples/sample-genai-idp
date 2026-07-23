@@ -15,21 +15,22 @@ extension point — FIRST in the workflow, before the BDA/pipeline routing — w
 
 What it does, per document:
   1. Resolve the document (compressed reference -> Working bucket JSON).
-  2. RE-ENTRANCY GUARD: if the document's input_key is already under the
-     reserved redacted prefix, do nothing (halt=false). This is the hard stop
-     against an infinite redaction loop — the redacted copy we write lands back
-     in the Input bucket and re-triggers processing, and MUST NOT be redacted
-     again. Belt-and-suspenders on top of the companion config version having no
-     preprocessing hook.
+  2. RE-ENTRANCY GUARD: if the document's name already carries the REDACTED
+     marker (stem ends with e.g. "(REDACTED)"), do nothing (halt=false). This is
+     the hard stop against an infinite redaction loop — the redacted copy we
+     write lands back in the Input bucket and re-triggers processing, and MUST
+     NOT be redacted again. Belt-and-suspenders on top of the companion config
+     version having no preprocessing hook.
   3. Read this feature's settings from the `preprocessing` block of the config
      version the document is running under (mode, redaction options, detection
      model, companion config version name).
   4. Run the vendored pii-anonymizer detector+redactor over the source document
-     (text path for text-native formats, image path for scanned/images) writing
-     a redacted copy to a Working-bucket scratch key.
-  5. Copy the redacted copy into the Input bucket under the reserved prefix,
-     stamping S3 metadata `config-version=<companion version>` so the spawned
-     execution processes it normally (no preprocessing hook).
+     (PDFs go through the image path -> redacted PDF; text/office paths keep
+     their native type) writing a redacted copy to a Working-bucket scratch key.
+  5. Copy the redacted copy into the Input bucket beside the original with the
+     REDACTED marker in its name (e.g. report(REDACTED).pdf), stamping S3
+     metadata `config-version=<companion version>` so the spawned execution
+     processes it normally (no preprocessing hook).
   6. Return a halt decision:
        mode == "redacted_only"           -> halt=true  (original superseded)
        mode == "redacted_and_unredacted" -> halt=false (original also processed)
@@ -53,7 +54,6 @@ import json
 import logging
 import os
 import sys
-import tempfile
 from typing import Any, Dict, Optional
 from urllib.parse import urlparse
 
@@ -74,9 +74,11 @@ _INPUT_BUCKET = os.environ.get("INPUT_BUCKET", "")
 _WORKING_BUCKET = os.environ.get("WORKING_BUCKET", "")
 _CONFIG_TABLE = os.environ.get("CONFIGURATION_TABLE_NAME", "")
 _AUDIT_TABLE = os.environ.get("AUDIT_TABLE_NAME", "")
-# Reserved key prefix under the Input bucket for redacted copies. The
-# re-entrancy guard refuses to run on any key under this prefix.
-_REDACTED_PREFIX = os.environ.get("REDACTED_PREFIX", "_pii_redacted/").lstrip("/")
+# Marker suffix appended to the redacted copy's document id / key stem, e.g.
+# `report.pdf` -> `report(REDACTED).pdf`. The re-entrancy guard refuses to run
+# on any key whose stem already ends with this marker (prevents an infinite
+# redaction loop, since the copy re-enters the Input bucket).
+_REDACTED_SUFFIX = os.environ.get("REDACTED_SUFFIX", "(REDACTED)")
 # Fallback companion version name if the config's preprocessing block omits one.
 _DEFAULT_COMPANION_VERSION = os.environ.get(
     "DEFAULT_COMPANION_CONFIG_VERSION", "default"
@@ -238,27 +240,6 @@ def _build_pii_config(pp: Dict[str, Any]) -> Dict[str, Any]:
     return cfg
 
 
-def _safe_text_pages(bucket: str, key: str) -> bool:
-    """Best-effort: does this PDF have an extractable text layer? Returns True
-    to prefer the (cheaper) text path, False to use the image path. On any
-    error, default to the image path (safest — vision detection works on any
-    rendering)."""
-    try:
-        from helpers.page_type_checker import get_text_based_pages
-
-        fd, tmp = tempfile.mkstemp(suffix=".pdf", dir=tempfile.gettempdir())
-        os.close(fd)
-        _s3.download_file(bucket, key, tmp)
-        pages = get_text_based_pages(tmp)
-        os.remove(tmp)
-        # get_text_based_pages returns the page indexes with an extractable
-        # text layer; a non-empty result means we can use the cheaper text path.
-        return bool(pages)
-    except Exception as exc:  # noqa: BLE001
-        logger.info("Text-layer probe failed (%s); using image path", exc)
-        return False
-
-
 def _redact_to_scratch(
     document: Dict[str, Any], pii_config: Dict[str, Any], doc_id: str
 ) -> Optional[Dict[str, Any]]:
@@ -272,13 +253,17 @@ def _redact_to_scratch(
     scratch_folder = f"pii_scratch/{doc_id}/"
 
     if ext == "pdf":
+        # ALWAYS use the image path for PDFs so the redacted copy is a real
+        # PDF (pages rasterized, PII white-boxed/synthesized, flattened to image
+        # — no leaked text layer). The text path (process_pdf_text_based) only
+        # emits a .txt of the extracted text, discarding layout, which is not a
+        # usable "redacted PDF". The image path OCRs even text-native PDFs via
+        # Textract, so it covers both scanned and digital PDFs. Trade-off:
+        # Textract+vision cost on every PDF — acceptable for PDF-in/PDF-out.
         from processors.pdf_image_processor import process_pdf_image_based
-        from processors.pdf_text_processor import process_pdf_text_based
 
-        use_text = _safe_text_pages(input_bucket, input_key)
-        proc = process_pdf_text_based if use_text else process_pdf_image_based
-        logger.info("PDF path: %s", "text" if use_text else "image")
-        result = proc(
+        logger.info("PDF path: image (PDF-in/PDF-out)")
+        result = process_pdf_image_based(
             input_bucket,
             input_key,
             _WORKING_BUCKET,
@@ -381,17 +366,32 @@ def _redact_to_scratch(
     }
 
 
+def _stem_ext(key: str) -> tuple[str, str]:
+    """Split a key into (stem, ext) where ext excludes the dot; ext='' if none."""
+    if "." in os.path.basename(key):
+        stem, ext = key.rsplit(".", 1)
+        return stem, ext
+    return key, ""
+
+
+def _is_redacted_key(input_key: str) -> bool:
+    """True if this key is already a redacted copy (stem ends with the marker)."""
+    stem, _ = _stem_ext(input_key.lstrip("/"))
+    return stem.endswith(_REDACTED_SUFFIX)
+
+
 def _redacted_input_key(input_key: str, out_ext: Optional[str] = None) -> str:
-    """Deterministic reserved-prefix key for the redacted copy (idempotent).
+    """Deterministic key for the redacted copy (idempotent): append the marker
+    suffix to the stem, keeping it beside the original in the Input bucket.
+    e.g. `sub/report.pdf` -> `sub/report(REDACTED).pdf`.
 
     When the redaction output format differs from the input (e.g. a text-native
-    PDF is redacted to .txt), the key's extension is rewritten to out_ext so the
-    host ingests the redacted copy as the correct type."""
-    key = f"{_REDACTED_PREFIX}{input_key.lstrip('/')}"
-    if out_ext:
-        stem = key.rsplit(".", 1)[0] if "." in key else key
-        key = f"{stem}.{out_ext}"
-    return key
+    PDF is redacted to .txt), the extension is rewritten to out_ext so the host
+    ingests the redacted copy as the correct type."""
+    stem, ext = _stem_ext(input_key.lstrip("/"))
+    ext = (out_ext or ext or "").lstrip(".")
+    stem = f"{stem}{_REDACTED_SUFFIX}"
+    return f"{stem}.{ext}" if ext else stem
 
 
 def _now_iso() -> str:
@@ -431,8 +431,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         return _skip(document_id, "document has no input_key")
 
     # (2) RE-ENTRANCY GUARD — never redact a redacted copy. Fail closed.
-    if input_key.lstrip("/").startswith(_REDACTED_PREFIX):
-        return _skip(document_id, "input is already a redacted copy (reserved prefix)")
+    if _is_redacted_key(input_key):
+        return _skip(document_id, "input is already a redacted copy (REDACTED marker)")
 
     # (3) settings from the config version this document runs under
     version = document.get("config_version") or _DEFAULT_COMPANION_VERSION

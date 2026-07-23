@@ -36,12 +36,12 @@ Parameters:
     Default: INFO
     AllowedValues: [DEBUG, INFO, WARNING, ERROR]
 
-  RedactedPrefix:
+  RedactedSuffix:
     Type: String
-    Default: "_pii_redacted/"
-    Description: Reserved key prefix under the Input bucket for redacted copies.
-      The hook refuses to run on any object under this prefix (infinite-loop
-      guard). Must end with a slash.
+    Default: "(REDACTED)"
+    Description: Marker appended to the redacted copy's document-id stem, e.g.
+      report.pdf -> report(REDACTED).pdf. The hook refuses to run on any object
+      whose stem already ends with this marker (infinite-loop guard).
 
   PermissionsBoundaryArn:
     Type: String
@@ -117,7 +117,7 @@ Resources:
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
-          REDACTED_PREFIX: !Ref RedactedPrefix
+          REDACTED_SUFFIX: !Ref RedactedSuffix
           AUDIT_TABLE_NAME: !Ref RedactionAuditTable
           INPUT_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-InputBucketName' }
           WORKING_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
@@ -150,13 +150,15 @@ Resources:
               Resource: !Sub
                 - 'arn:${AWS::Partition}:s3:::${Bucket}/pii_scratch/*'
                 - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
-            # Write the redacted copy ONLY under the reserved prefix in Input.
+            # Write ONLY redacted copies into Input — keys whose name contains
+            # the REDACTED marker. Scoped by an S3 ARN wildcard so the hook can
+            # never overwrite an arbitrary source document.
             - Effect: Allow
               Action: s3:PutObject
               Resource: !Sub
-                - 'arn:${AWS::Partition}:s3:::${Bucket}/${RedactedPrefix}*'
+                - 'arn:${AWS::Partition}:s3:::${Bucket}/*${RedactedSuffix}*'
                 - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-InputBucketName' }
-                  RedactedPrefix: !Ref RedactedPrefix
+                  RedactedSuffix: !Ref RedactedSuffix
             # Bedrock Converse for PII detection + synthetic generation.
             - Effect: Allow
               Action:

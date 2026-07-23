@@ -28,7 +28,7 @@ def _env(monkeypatch):
     monkeypatch.setenv("INPUT_BUCKET", "input-bkt")
     monkeypatch.setenv("WORKING_BUCKET", "working-bkt")
     monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
-    monkeypatch.setenv("REDACTED_PREFIX", "_pii_redacted/")
+    monkeypatch.setenv("REDACTED_SUFFIX", "(REDACTED)")
     sys.path.insert(0, HOOK_DIR)
     yield
     sys.path.remove(HOOK_DIR)
@@ -43,14 +43,14 @@ def _load():
 
 def test_reentrancy_guard_skips_redacted_input():
     mod = _load()
-    # A document whose input_key is already under the reserved prefix must be
-    # skipped with halt=false and MUST NOT trigger any redaction.
+    # A document whose name already carries the REDACTED marker must be skipped
+    # with halt=false and MUST NOT trigger any redaction.
     called = {"redact": False}
     mod._redact_to_scratch = lambda *a, **k: called.__setitem__("redact", True)  # type: ignore
     out = mod.lambda_handler(
         {
             "hookPoint": "preprocessing",
-            "document": {"input_key": "_pii_redacted/foo.pdf", "id": "x"},
+            "document": {"input_key": "foo(REDACTED).pdf", "id": "x"},
         },
         None,
     )
@@ -107,12 +107,12 @@ def test_redacted_only_mode_halts_and_writes_copy(monkeypatch):
         None,
     )
     assert out["halt"] is True
-    assert out["redactedKey"] == "_pii_redacted/foo.pdf"
+    assert out["redactedKey"] == "foo(REDACTED).pdf"
     assert out["companionConfigVersion"] == "base__standard"
-    # copied into the Input bucket under the reserved prefix, with companion
-    # config-version stamped as metadata
+    # copied into the Input bucket beside the original with the REDACTED marker,
+    # with companion config-version stamped as metadata
     assert copies["Bucket"] == "input-bkt"
-    assert copies["Key"] == "_pii_redacted/foo.pdf"
+    assert copies["Key"] == "foo(REDACTED).pdf"
     assert copies["Metadata"] == {"config-version": "base__standard"}
     assert copies["CopySource"] == {
         "Bucket": "working-bkt",
@@ -154,7 +154,7 @@ def test_process_both_mode_does_not_halt(monkeypatch):
     )
     assert out["halt"] is False
     assert out.get("skipped") is not True  # it DID redact, just doesn't halt
-    assert out["redactedKey"] == "_pii_redacted/a.pdf"
+    assert out["redactedKey"] == "a(REDACTED).pdf"
 
 
 def test_unsupported_format_passes_through(monkeypatch):
@@ -207,15 +207,23 @@ def test_build_pii_config_defaults():
 
 def test_redacted_input_key_deterministic():
     mod = _load()
-    assert mod._redacted_input_key("sub/dir/doc.pdf") == "_pii_redacted/sub/dir/doc.pdf"
-    assert mod._redacted_input_key("/leading.pdf") == "_pii_redacted/leading.pdf"
+    # Marker appended to the stem, beside the original (same folder).
+    assert mod._redacted_input_key("sub/dir/doc.pdf") == "sub/dir/doc(REDACTED).pdf"
+    assert mod._redacted_input_key("/leading.pdf") == "leading(REDACTED).pdf"
 
 
 def test_redacted_input_key_rewrites_extension():
-    """A text-native PDF is redacted to .txt — the copy key must carry the real
-    output extension so the host ingests it as text, not a broken PDF."""
+    """When the redaction output format differs, the copy key carries the real
+    output extension so the host ingests it as the right type."""
     mod = _load()
-    assert mod._redacted_input_key("w2.pdf", "txt") == "_pii_redacted/w2.txt"
-    assert (
-        mod._redacted_input_key("a/b/scan.png", "png") == "_pii_redacted/a/b/scan.png"
-    )
+    assert mod._redacted_input_key("w2.pdf", "txt") == "w2(REDACTED).txt"
+    assert mod._redacted_input_key("a/b/scan.png", "png") == "a/b/scan(REDACTED).png"
+
+
+def test_is_redacted_key_guard():
+    mod = _load()
+    assert mod._is_redacted_key("foo(REDACTED).pdf") is True
+    assert mod._is_redacted_key("dir/bar(REDACTED).txt") is True
+    assert mod._is_redacted_key("foo.pdf") is False
+    # marker only counts when it's the stem suffix, not anywhere in the name
+    assert mod._is_redacted_key("foo(REDACTED)extra.pdf") is False
