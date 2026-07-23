@@ -119,6 +119,25 @@ def generator_available() -> Tuple[bool, str]:
         return False, str(e)
 
 
+def _seed_model_key(model_id: str) -> str:
+    """Map a raw Bedrock model ID back to its SEED registry key when known.
+
+    SEED's registry keys carry a high per-model max_tokens (e.g. 63999); a raw
+    model ID that isn't a key falls back to SEED's 8192 default, which truncates
+    large documents (bank statements, long tables). Return the matching key so
+    the model keeps its real output budget; pass unknown IDs through unchanged.
+    """
+    try:
+        from seed_data.utils import MODELS
+
+        for key, entry in MODELS.items():
+            if entry.get("model_id") == model_id:
+                return key
+    except Exception:  # pragma: no cover - defensive
+        pass
+    return model_id
+
+
 def synthesize(
     job: SynthesisJob, *, status_cb: Optional[StatusCallback] = None
 ) -> SynthesisResult:
@@ -151,9 +170,8 @@ def synthesize(
     from seed_data import Generator, ModelConfig
 
     batch_out = os.path.join(job.out_dir, "_batch")
-    # A single model_id override applies to the data + doc agents; the critic and
-    # augmentor keep SEED's defaults. Omitted fields fall back to ModelConfig defaults.
-    model_kwargs = {"data": job.model_id, "doc": job.model_id} if job.model_id else {}
+    model_key = _seed_model_key(job.model_id) if job.model_id else None
+    model_kwargs = {"data": model_key, "doc": model_key} if model_key else {}
 
     generator = Generator(
         models=ModelConfig(**model_kwargs),
