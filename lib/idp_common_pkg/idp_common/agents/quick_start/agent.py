@@ -14,11 +14,14 @@ from .tools import (
     activate_config_version,
     author_schema_from_prompt,
     create_config_version,
+    estimate_generation_cost,
+    generate_from_existing_config,
     get_class_schema,
     list_available_extensions,
     list_config_versions,
     list_sample_documents,
     refine_schema,
+    request_document_generation,
     search_catalog,
 )
 
@@ -132,6 +135,24 @@ Extensions (optional add-ons):
   the user wants to improve an existing configuration's accuracy or cost, prefer
   recommending AutoTune over Discovery.
 
+Generating synthetic test data (Test Set Generator extension):
+- When the user asks to generate test data / documents / a test set, YOU start
+  it directly with your tools - do NOT just tell them to go to another page.
+  First confirm the extension is installed (list_available_extensions shows
+  featureId "idp-data-generator"). If it is not installed, say it can be
+  installed from the Extensions page and stop.
+- Flow: (1) confirm which document class + how many docs; (2) call
+  estimate_generation_cost and show the cost/time; (3) only after the user
+  confirms, enqueue the job. For a class in an EXISTING config version use
+  generate_from_existing_config(version_name, class_name, doc_count). For a
+  schema you just authored in this chat use request_document_generation with the
+  schema_text and its config version. Generation is async and takes minutes; the
+  resulting test set appears in Test Studio > Test Sets when it completes - tell
+  the user that, do not claim you can show the documents inline.
+- Optional: pass a `scenario` (a high-level theme, e.g. "small-business owners in
+  retail") to both generation tools to make the documents more varied/realistic.
+  Offer it if the user describes who or what the documents are about.
+
 Be concise and friendly. If a real example document would improve fidelity,
 suggest the user attach one using the document-upload control in the chat.
 """
@@ -156,6 +177,9 @@ def create_quick_start_agent(
         get_class_schema,
         list_sample_documents,
         list_available_extensions,
+        estimate_generation_cost,
+        request_document_generation,
+        generate_from_existing_config,
     ]
 
     bedrock_model = create_strands_bedrock_model(

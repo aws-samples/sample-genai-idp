@@ -1,0 +1,28 @@
+# CodeBuild buildspec for the IDP Data Generator AgentCore image.
+#
+# Source = the published agent-source.zip (see feature.yaml -> agentSource),
+# whose root is this extension's build context: Dockerfile + agent-source/runtime
+# + agent-source/requirements.txt + idp_common_pkg/ (staged by
+# package_agent_source.sh). The SEED generator itself is pip-installed from PyPI
+# (seed-data) inside the Dockerfile — no generator source in the context.
+#
+# Builds linux/arm64 (AgentCore Runtime requires arm64) and pushes :latest to
+# the extension's ECR repo. Referenced by template.yaml DockerBuildProject.
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      # Registry host is the ECR_REPO_URI up to the first '/', so the partition
+      # suffix (amazonaws.com / amazonaws.com.cn) is correct in every partition.
+      - REGISTRY_HOST="${ECR_REPO_URI%%/*}"
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin "$REGISTRY_HOST"
+  build:
+    commands:
+      - echo "Building IDP Data Generator image (linux/arm64)..."
+      - docker build --platform linux/arm64 -f Dockerfile -t $ECR_REPO_URI:$IMAGE_TAG .
+  post_build:
+    commands:
+      - echo Pushing Docker image to ECR...
+      - docker push $ECR_REPO_URI:$IMAGE_TAG
+      - echo Build completed on `date`

@@ -1,0 +1,16 @@
+# Extra AgentCore-image deps installed on top of the seed-data (SEED generator)
+# package. The Dockerfile installs seed-data first (which brings strands,
+# weasyprint, augraphy, opencv, reportlab, etc. via its own deps), then these:
+#   - idp_common[synthesis]: the accelerator's synthesis adapter glue
+#     (idp_common.synthesis.engine drives seed_data.Generator; plus bootstrap,
+#     schema_bridge, packet_io, appsync_status). The [synthesis] extra is
+#     deliberately light (jsonschema only) — NOT [ocr|evaluation|all], whose
+#     numpy==1.26.4 pin conflicts with seed-data's numpy 2.x.
+#   - AgentCore HTTP service contract + AppSync SigV4 status posting.
+# idp_common_pkg is provided in the build context by package_agent_source.sh.
+./idp_common_pkg[synthesis]
+bedrock-agentcore>=1.0.0
+uvicorn>=0.30.0
+aws-requests-auth>=0.4.3
+requests>=2.32.0
+jsonschema>=4.0.0

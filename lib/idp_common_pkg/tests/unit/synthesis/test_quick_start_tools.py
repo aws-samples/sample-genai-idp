@@ -230,7 +230,7 @@ class TestListAvailableExtensions:
         rows = [
             {
                 "featureId": "idp-data-generator",
-                "displayName": "IDP Data Generator",
+                "displayName": "Test Set Generator",
                 "installedVersion": "0.1.0",
                 "featureApiEndpoint": "https://gen.example.com",
             },
@@ -245,7 +245,7 @@ class TestListAvailableExtensions:
             out = json.loads(bt.list_available_extensions_impl())
 
         assert out["available"] is True
-        # sorted by displayName: "Auto Optimizer" < "IDP Data Generator"
+        # sorted by displayName: "Auto Optimizer" < "Test Set Generator"
         assert [e["featureId"] for e in out["extensions"]] == [
             "idp-autotune",
             "idp-data-generator",

@@ -2908,6 +2908,9 @@ Resources:
         # host's Rules Discovery flow (sample-health-insurance-review) know where
         # uploadDiscoveryDocument presigns uploads.
         DiscoveryBucketName: !Ref DiscoveryBucket
+        # Test Set bucket name re-exported so feature stacks that generate test
+        # sets (idp-data-generator) can write documents Test Studio discovers.
+        TestSetBucketName: !Ref TestSetBucket
         # Reporting bucket name re-exported (as name + ARN) so feature stacks
         # that read reporting/analytics data or write Athena query results
         # (e.g. idp-monitor) can grant themselves scoped s3 access. Mirrors the
@@ -7168,6 +7171,7 @@ Resources:
           CHAT_SESSIONS_TABLE: !Ref ChatSessionsTable
           ID_HELPER_CHAT_MEMORY_TABLE: !Ref IdHelperChatMemoryTable
           MEMORY_METHOD: dynamodb
+          MAIN_STACK_NAME: !Ref AWS::StackName
           STREAMING_ENABLED: true
           MAX_CONVERSATION_TURNS: 20
           MAX_MESSAGE_SIZE_KB: 8.5
@@ -7223,6 +7227,13 @@ Resources:
             TableName: !Ref IdHelperChatMemoryTable
         - DynamoDBCrudPolicy:
             TableName: !Ref ConfigurationTable
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/feature-platform/installed-features-table"
+            - Effect: Allow
+              Action: [dynamodb:Scan, dynamodb:GetItem]
+              Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AWS::StackName}-FeaturePlatformStack-*"
         # Read the samples manifest (config_library/samples-manifest.json) the
         # list_sample_documents tool surfaces to the Quick Start agent.
         - Statement:
@@ -7457,6 +7468,7 @@ Resources:
           CHAT_SESSIONS_TABLE: !Ref ChatSessionsTable
           ID_HELPER_CHAT_MEMORY_TABLE: !Ref IdHelperChatMemoryTable
           MEMORY_METHOD: dynamodb
+          MAIN_STACK_NAME: !Ref AWS::StackName
           STREAMING_ENABLED: true
           MAX_CONVERSATION_TURNS: 20
           MAX_MESSAGE_SIZE_KB: 8.5
@@ -7496,6 +7508,13 @@ Resources:
             TableName: !Ref ChatSessionsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref IdHelperChatMemoryTable
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/feature-platform/installed-features-table"
+            - Effect: Allow
+              Action: [dynamodb:Scan, dynamodb:GetItem]
+              Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AWS::StackName}-FeaturePlatformStack-*"
         - Statement:
             - Effect: Allow
               Action: s3:GetObject

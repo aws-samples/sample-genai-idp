@@ -730,7 +730,7 @@ idp-cli bootstrap --prompt "Bank statements with account holder and transactions
 **Note:** The created version is **not** activated automatically (unlike the web UI
 Quick Start). Activate it from **Configuration › View/Edit Configuration** in the UI
 when you're ready to process documents with it. Synthetic generation is optional and
-requires the IDP Data Generator extension (deployed stack) or
+requires the Test Set Generator extension (deployed stack) or
 `pip install "idp_common[synthesis]"` (local); without it, the config is still
 created and you can upload your own documents to build a test set. See the
 [Quick Start guide](./quick-start.md) for the full workflow.
