@@ -389,9 +389,14 @@ const GenerateSyntheticDataModal = ({
           />
         </FormField>
 
-        <Checkbox checked={augment} onChange={({ detail }) => setAugment(detail.checked)}>
-          Apply scan/fax-style image augmentation
-        </Checkbox>
+        <FormField
+          label="Image augmentation"
+          description="Ages documents with scan/fax/photocopy artifacts (noise, skew, ink bleed) to test how your pipeline handles low-quality inputs. Leave off for clean, digital-native documents; adds time and cost."
+        >
+          <Checkbox checked={augment} onChange={({ detail }) => setAugment(detail.checked)}>
+            Apply scan/fax-style effects
+          </Checkbox>
+        </FormField>
 
         <Alert type="info">
           Generation uses Amazon Bedrock and incurs cost proportional to the document count and quality.
