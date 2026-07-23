@@ -7,7 +7,6 @@ import json
 import logging
 import os
 from decimal import Decimal
-from urllib.parse import urlparse
 
 import boto3
 import pypdfium2 as pdfium
@@ -17,7 +16,7 @@ from idp_common.config import get_config
 from idp_common.docs_service import create_document_service
 from idp_common.models import Document, HitlMetadata, Page, Section, Status
 from idp_common.s3 import get_s3_client, write_content
-from idp_common.utils import build_s3_uri
+from idp_common.utils import build_s3_uri, parse_s3_uri
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -73,10 +72,11 @@ def create_metadata_file(file_uri, class_type, file_type=None):
         file_type (str, optional): Type of file ('section' or 'page')
     """
     try:
-        # Parse the S3 URI to get bucket and key
-        parsed_uri = urlparse(file_uri)
-        bucket = parsed_uri.netloc
-        key = parsed_uri.path.lstrip("/")
+        # Parse the S3 URI to get bucket and key. Use parse_s3_uri (plain
+        # string split) rather than urllib.parse.urlparse: object keys may
+        # contain '#', which urlparse treats as a URL fragment delimiter and
+        # silently truncates, producing a wrong metadata key.
+        bucket, key = parse_s3_uri(file_uri)
 
         # Create the metadata key by adding '.metadata.json' to the original key
         metadata_key = f"{key}.metadata.json"
@@ -805,9 +805,12 @@ def process_bda_pages(
 
 
 def parse_s3_path(s3_uri: str) -> (str, str):
-    """Extract bucket and key from s3:// URI."""
-    parsed = urlparse(s3_uri)
-    return parsed.netloc, parsed.path.lstrip("/")
+    """Extract bucket and key from s3:// URI.
+
+    Delegates to idp_common.utils.parse_s3_uri, which splits on '/' instead of
+    urlparse so keys containing '#' are not truncated at the fragment marker.
+    """
+    return parse_s3_uri(s3_uri)
 
 
 def download_json(bucket: str, key: str) -> dict:
