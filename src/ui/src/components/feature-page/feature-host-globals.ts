@@ -35,6 +35,12 @@ import * as awsAmplifyApi from 'aws-amplify/api';
 import * as CloudscapeComponents from '@cloudscape-design/components';
 import * as Recharts from 'recharts';
 import SafeMarkdown from '../common/SafeMarkdown';
+// The host's REST-backed, GraphQL-shaped client factory. AppSync was removed,
+// so a feature calling the Amplify `aws-amplify/api` generateClient().graphql()
+// hits "No GraphQL endpoint configured". Expose the host's shim (which POSTs to
+// the REST dispatcher /op/<field> with the user's Cognito token) so features
+// call host operations through the SAME transport the host UI uses.
+import { generateClient as hostGenerateClient } from '../../api/client-shim';
 
 // `@cloudscape-design/design-tokens` is a feature-template external but is NOT
 // a direct dependency of the host UI. We intentionally do not import it here.
@@ -51,7 +57,7 @@ interface FeatureHostWindow {
   awsAmplifyApi?: unknown;
   CloudscapeComponents?: unknown;
   Recharts?: unknown;
-  IdpFeatureHost?: { SafeMarkdown?: unknown };
+  IdpFeatureHost?: { SafeMarkdown?: unknown; generateClient?: unknown };
   __idpFeatureGlobalsInstalled?: boolean;
 }
 
@@ -85,7 +91,13 @@ export function installFeatureHostGlobals(): void {
   // (rehype-raw + rehype-sanitize allow-list) so features can safely render
   // backend markdown without bundling — or having to security-review — their
   // own renderer.
-  w.IdpFeatureHost = { ...(w.IdpFeatureHost ?? {}), SafeMarkdown };
+  w.IdpFeatureHost = {
+    ...(w.IdpFeatureHost ?? {}),
+    SafeMarkdown,
+    // REST-backed GraphQL-shaped client factory (AppSync removed). Features
+    // call host ops via `window.IdpFeatureHost.generateClient().graphql({query,variables})`.
+    generateClient: hostGenerateClient,
+  };
 
   w.__idpFeatureGlobalsInstalled = true;
 }

@@ -2,10 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Calls the HOST's GraphQL API directly from the feature UI, reusing the host's
- * configured, signed-in Amplify instance (window.awsAmplify), so requests carry
- * the user's Cognito JWT and group memberships. Same pattern as the
- * sample-health-insurance-review feature.
+ * Calls the HOST's API directly from the feature UI through the host's
+ * REST-backed, GraphQL-shaped client (`window.IdpFeatureHost.generateClient`).
+ *
+ * AppSync was removed from the accelerator — the host UI now POSTs operations to
+ * a REST dispatcher (`/op/<field>`). The host exposes its shim client as a
+ * window global (see src/ui/src/components/feature-page/feature-host-globals.ts)
+ * so features use the SAME transport, carrying the user's Cognito token and
+ * group memberships. (Calling `aws-amplify/api`'s generateClient().graphql()
+ * here instead throws "No GraphQL endpoint configured in Amplify.configure()".)
  *
  * The Config Pairing wizard uses four host operations:
  *   getConfigVersions                      — list existing config versions
@@ -18,8 +23,6 @@
  * server-side in configuration_resolver.py). A non-Admin sees a friendly error.
  */
 
-import { generateClient } from 'aws-amplify/api';
-
 interface GraphqlClient {
   graphql: (operation: {
     query: string;
@@ -27,12 +30,23 @@ interface GraphqlClient {
   }) => Promise<unknown>;
 }
 
+interface FeatureHostWindow {
+  IdpFeatureHost?: { generateClient?: () => GraphqlClient };
+}
+
 let _client: GraphqlClient | null = null;
 function getClient(): GraphqlClient {
   // Lazily created on first use (NOT at module eval) — the UMD bundle can load
-  // before the host finishes Amplify.configure().
+  // before the host installs its globals.
   if (!_client) {
-    _client = generateClient() as unknown as GraphqlClient;
+    const host = (window as unknown as FeatureHostWindow).IdpFeatureHost;
+    if (!host?.generateClient) {
+      throw new Error(
+        'Host API client not available (window.IdpFeatureHost.generateClient). ' +
+          'The host UI may be older than the version that exposes it.',
+      );
+    }
+    _client = host.generateClient();
   }
   return _client;
 }
