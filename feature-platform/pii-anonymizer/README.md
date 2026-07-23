@@ -36,11 +36,12 @@ the re-sync procedure.
 
 ## Generic preprocessing hook
 
-The `preprocessing` step is **generic**: each `preHook` entry is a Lambda ARN
-plus a list of key/value **args** the hook reads its own config from. This
-feature's PII settings all live in those args (`mode`, `companion_config_version`,
-`model_id`, `model_provider`, `redaction_mode`, `store_mapping`) — so the
-preprocessing step is reusable for any preprocessing job, not just PII.
+The `preprocessing` step is **generic** and **flat**: the `preprocessing`
+section holds a single hook — `arn`, `onError`, and a list of key/value **args**
+directly on the section (no nested list). The hook reads its own config from
+`args`. This feature's PII settings all live in those args (`mode`,
+`companion_config_version`, `model_id`, `model_provider`, `redaction_mode`,
+`store_mapping`) — so the preprocessing step is reusable for any job, not just PII.
 
 ## Config Pairing wizard (primary UX)
 
@@ -48,7 +49,7 @@ The feature UI's **Config Pairing** tab clones an admin's **existing** working
 config version into a matched pair (base truncated to keep names ≤ 50 chars):
 
 - `<base>__pii_stop` / `<base>__pii_go` — *initiating* version: base + the
-  generic `preprocessing.preHook` entry (ARN + PII args).
+  generic `preprocessing` hook (ARN + PII args, flat on the section).
 - `<base>__pii_target` — *companion* version: base with **no** preprocessing
   hook; the redacted copy is processed under it.
 

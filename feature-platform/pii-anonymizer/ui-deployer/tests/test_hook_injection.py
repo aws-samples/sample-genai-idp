@@ -54,77 +54,53 @@ def mod(monkeypatch):
 
 
 def test_fills_arn_preserving_args(mod):
-    """The bundled preset ships a full preHook entry with args (minus the ARN);
-    injection fills the ARN and preserves the args."""
+    """The bundled preset ships a flat preprocessing section with args (minus the
+    ARN); injection fills the ARN directly on the section and preserves args."""
     preset: dict[str, Any] = {
         "preprocessing": {
-            "preHook": [
-                {
-                    "featureId": "pii-anonymizer",
-                    "order": 100,
-                    "onError": "fail",
-                    "enabled": True,
-                    "args": [
-                        {"key": "mode", "value": "redactcopy_and_stop"},
-                        {"key": "store_mapping", "value": "false"},
-                    ],
-                }
-            ]
-        }
-    }
-    mod._inject_preprocessing_hook(preset)
-    hooks = preset["preprocessing"]["preHook"]
-    assert len(hooks) == 1
-    h = hooks[0]
-    assert h["arn"] == _HOOK_ARN
-    # args preserved
-    assert {"key": "mode", "value": "redactcopy_and_stop"} in h["args"]
-    assert {"key": "store_mapping", "value": "false"} in h["args"]
-
-
-def test_adds_minimal_entry_when_missing(mod):
-    preset: dict[str, Any] = {"classes": []}
-    mod._inject_preprocessing_hook(preset)
-    h = preset["preprocessing"]["preHook"][0]
-    assert h["arn"] == _HOOK_ARN
-    assert h["onError"] == "fail"
-    assert h["args"] == []
-
-
-def test_is_idempotent_on_reapply(mod):
-    """Stack Update re-runs the deployer; the same featureId must not duplicate."""
-    preset: dict[str, Any] = {
-        "preprocessing": {
-            "preHook": [
-                {"featureId": "pii-anonymizer", "args": [{"key": "mode", "value": "x"}]}
-            ]
-        }
-    }
-    mod._inject_preprocessing_hook(preset)
-    mod._inject_preprocessing_hook(preset)
-    hooks = preset["preprocessing"]["preHook"]
-    assert len(hooks) == 1
-    assert hooks[0]["arn"] == _HOOK_ARN
-    # args still preserved after re-apply
-    assert hooks[0]["args"] == [{"key": "mode", "value": "x"}]
-
-
-def test_preserves_other_features_hooks(mod):
-    preset: dict[str, Any] = {
-        "preprocessing": {
-            "preHook": [
-                {"featureId": "some-other-feature", "arn": "arn:other", "order": 50}
+            "enabled": True,
+            "featureId": "pii-anonymizer",
+            "onError": "fail",
+            "args": [
+                {"key": "mode", "value": "redactcopy_and_stop"},
+                {"key": "store_mapping", "value": "false"},
             ],
         }
     }
     mod._inject_preprocessing_hook(preset)
-    ids = {h["featureId"] for h in preset["preprocessing"]["preHook"]}
-    assert ids == {"some-other-feature", "pii-anonymizer"}
+    pp = preset["preprocessing"]
+    # ARN filled directly on the section (no preHook list)
+    assert pp["arn"] == _HOOK_ARN
+    assert "preHook" not in pp
+    assert {"key": "mode", "value": "redactcopy_and_stop"} in pp["args"]
+    assert {"key": "store_mapping", "value": "false"} in pp["args"]
+
+
+def test_creates_section_when_missing(mod):
+    preset: dict[str, Any] = {"classes": []}
+    mod._inject_preprocessing_hook(preset)
+    pp = preset["preprocessing"]
+    assert pp["arn"] == _HOOK_ARN
+    assert pp["onError"] == "fail"
+    assert pp["enabled"] is True
+    assert pp["args"] == []
+
+
+def test_is_idempotent_on_reapply(mod):
+    """Stack Update re-runs the deployer; args must be preserved, arn just re-set."""
+    preset: dict[str, Any] = {
+        "preprocessing": {"args": [{"key": "mode", "value": "x"}]}
+    }
+    mod._inject_preprocessing_hook(preset)
+    mod._inject_preprocessing_hook(preset)
+    pp = preset["preprocessing"]
+    assert pp["arn"] == _HOOK_ARN
+    assert pp["args"] == [{"key": "mode", "value": "x"}]
 
 
 def test_no_arn_skips_injection(mod, monkeypatch):
-    """Without the hook ARN we must not write a half-formed entry."""
+    """Without the hook ARN we must not write a half-formed section."""
     monkeypatch.setattr(mod, "_HOOK_FUNCTION_ARN", "")
     preset: dict[str, Any] = {"preprocessing": {}}
     mod._inject_preprocessing_hook(preset)
-    assert "preHook" not in preset["preprocessing"]
+    assert "arn" not in preset["preprocessing"]

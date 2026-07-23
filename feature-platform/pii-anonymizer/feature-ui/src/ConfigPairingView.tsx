@@ -142,10 +142,11 @@ const ConfigPairingView: React.FC<{ enabled: boolean; hookFunctionArn: string | 
         `PII companion of ${base.value} — processes the redacted copy (no preprocessing hook).`,
       );
 
-      // Initiating: base + a GENERIC preprocessing preHook. The hook reads all
-      // its PII settings from `args` (keeping the preprocessing step reusable
-      // for any job). onError=fail for stop mode (fail closed — never leak PII),
-      // else continue. The hook ARN comes from the feature API's /config (GET).
+      // Initiating: base + a GENERIC preprocessing hook (single, flat: arn/args
+      // live directly on the preprocessing section). The hook reads all its PII
+      // settings from `args` (keeping the step reusable for any job). onError=fail
+      // for stop mode (fail closed — never leak PII), else continue. The hook ARN
+      // comes from the feature API's /config (GET).
       const args = [
         { key: 'mode', value: mode.value },
         { key: 'companion_config_version', value: companionName },
@@ -161,16 +162,10 @@ const ConfigPairingView: React.FC<{ enabled: boolean; hookFunctionArn: string | 
         ...baseConfig,
         preprocessing: {
           enabled: true,
-          preHook: [
-            {
-              featureId: HOOK_FEATURE_ID,
-              arn: hookFunctionArn,
-              enabled: true,
-              order: 100,
-              onError: mode.value === 'redactcopy_and_stop' ? 'fail' : 'continue',
-              args,
-            },
-          ],
+          featureId: HOOK_FEATURE_ID,
+          arn: hookFunctionArn,
+          onError: mode.value === 'redactcopy_and_stop' ? 'fail' : 'continue',
+          args,
         },
       };
       await saveConfigVersion(

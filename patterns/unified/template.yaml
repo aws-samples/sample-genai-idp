@@ -290,86 +290,61 @@ Resources:
             collapsible: true
             defaultExpanded: false
             sectionLabel: Preprocessing
-            description: Standalone preprocessing step that runs FIRST, before OCR/BDA routing, in both processing modes.
+            description: >-
+              A single generic preprocessing hook that runs FIRST, before OCR/BDA
+              routing, in both processing modes. When enabled, the Lambda at
+              `arn` is invoked on each source document and reads its own
+              configuration from `args` (key/value strings) — so this step is
+              reusable for any preprocessing job (e.g. the PII Anonymization
+              extension). The hook may return halt=true to end the execution. The
+              ARN must EITHER be tagged `idp:feature-id=<anything>` OR have a name
+              starting with `GENAIIDP-`; others are rejected at invoke time.
             properties:
               enabled:
                 type: boolean
-                description: Master switch for preprocessing hooks in this config version.
-                default: true
+                description: Run the preprocessing hook for this config version.
+                default: false
                 order: 0
-              preHook:
-                type: array
-                collapsible: true
-                defaultExpanded: false
-                sectionLabel: Preprocessing pipeline hooks
+              arn:
+                type: string
                 description: >-
-                  Lambda functions invoked on the source document BEFORE any
-                  processing step (the only pre-step extension point). Generic:
-                  each hook is a Lambda ARN plus a list of key/value args the
-                  hook reads its own configuration from (e.g. the PII
-                  Anonymization extension reads mode/model/redaction here). A
-                  hook may return halt=true to end the execution. The Lambda ARN
-                  must EITHER be tagged `idp:feature-id=<anything>` OR have a
-                  name starting with `GENAIIDP-`; other functions are rejected by
-                  the dispatcher's IAM policy at invoke time.
-                listLabel: Preprocessing pipeline hooks
-                itemLabel: Hook
-                order: 99
+                  Lambda function ARN to invoke on the source document. Must
+                  either be tagged `idp:feature-id=<anything>` OR have a function
+                  name beginning with `GENAIIDP-`.
+                order: 1
+              onError:
+                type: string
+                enum: ["continue", "fail", "skip-remaining"]
+                default: continue
+                description: Behavior when the hook errors.
+                order: 2
+              args:
+                type: array
+                sectionLabel: Hook arguments
+                description: >-
+                  Key/value arguments passed to the hook (as strings). The hook
+                  reads its own configuration from these — keeping the step
+                  generic (e.g. PII Anonymization reads mode/model/redaction here).
+                listLabel: Arguments
+                itemLabel: Argument
+                order: 3
                 items:
                   type: object
                   required:
-                    - arn
+                    - key
                   properties:
-                    featureId:
+                    key:
                       type: string
-                      description: Feature/owner that provides this hook (label only)
+                      description: Argument name
                       order: 0
-                    arn:
+                    value:
                       type: string
-                      description: >-
-                        Lambda function ARN to invoke. Must either be tagged
-                        `idp:feature-id=<anything>` OR have a function name
-                        beginning with `GENAIIDP-`.
+                      description: Argument value (string)
                       order: 1
-                    args:
-                      type: array
-                      sectionLabel: Hook arguments
-                      description: >-
-                        Key/value arguments passed to the hook (as strings). The
-                        hook reads its own configuration from these — this keeps
-                        the preprocessing step generic and reusable for any job.
-                      listLabel: Arguments
-                      itemLabel: Argument
-                      order: 2
-                      items:
-                        type: object
-                        required:
-                          - key
-                        properties:
-                          key:
-                            type: string
-                            description: Argument name
-                            order: 0
-                          value:
-                            type: string
-                            description: Argument value (string)
-                            order: 1
-                    order:
-                      type: number
-                      description: Execution order (lower = earlier)
-                      default: 100
-                      order: 3
-                    onError:
-                      type: string
-                      enum: ["continue", "fail", "skip-remaining"]
-                      default: continue
-                      description: Behavior when this hook errors
-                      order: 4
-                    enabled:
-                      type: boolean
-                      description: Disable without removing
-                      default: true
-                      order: 5
+              featureId:
+                type: string
+                description: Feature/owner that provides this hook (label only).
+                order: 4
           ocr:
             order: 3
             type: object

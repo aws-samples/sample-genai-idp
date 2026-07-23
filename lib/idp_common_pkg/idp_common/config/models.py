@@ -473,35 +473,45 @@ class PipelineHook(BaseModel):
 class PreprocessingConfig(BaseModel):
     """Top-level `preprocessing` section (v0.6).
 
-    Home of the `preHook` list for the standalone `preprocessing` pipeline hook
-    point — the only PRE-step extension point, which runs FIRST (before the
-    BDA/pipeline routing) and may halt the execution. Unlike the post-step hooks
-    (which live inside each step's config under `postHook`), preprocessing is its
-    own section because it is not tied to any single step.
+    The standalone `preprocessing` pipeline-hook point — the only PRE-step
+    extension point, which runs FIRST (before the BDA/pipeline routing) and may
+    halt the execution. It carries a SINGLE inline hook: `arn`/`args`/`onError`
+    live directly on this section (not a list), unlike the post-step hooks which
+    live under each step's `postHook` list. Keeping it flat makes the config UI
+    read cleanly (ARN + args right under Preprocessing).
 
-    Like the step configs, this MUST be a declared field on IDPConfig with
-    extra="allow" — otherwise IDPConfig's extra="ignore" would silently drop the
-    whole `preprocessing` block (and its `preHook`) whenever a config round-trips
-    through IDPConfig (Save-as-Version, updateConfiguration, applyFeatureConfigPreset,
-    sparse-config auto-migration), leaving the dispatcher with no hook to call.
-
-    Feature-specific settings (mode, model, redaction, companion_config_version,
-    ...) are carried as extra fields (extra="allow"); the PII Anonymization
-    feature reads them from here. Only `preHook` and `enabled` are declared.
+    This MUST be a declared field on IDPConfig with extra="allow" — otherwise
+    IDPConfig's extra="ignore" would silently drop the whole block (and its
+    `args`) whenever a config round-trips through IDPConfig (Save-as-Version,
+    updateConfiguration, applyFeatureConfigPreset, sparse-config auto-migration),
+    leaving the dispatcher with no hook to call.
     """
 
-    # extra="allow" so a feature's own settings (mode, model, redaction,
-    # companion_config_version, ...) survive the IDPConfig round-trip.
+    # extra="allow" is harmless (the args list carries feature config, not extra
+    # top-level fields), but kept for forward-compat with new declared knobs.
     model_config = ConfigDict(extra="allow")
 
-    preHook: List[PipelineHook] = Field(  # noqa: N815 — matches stored config key
-        default_factory=list,
-        description="Pipeline hooks invoked before any processing step "
-        "(Feature Platform preprocessing extension point).",
-    )
     enabled: bool = Field(
-        default=True,
-        description="Master switch for preprocessing hooks in this config version.",
+        default=False,
+        description="Run the preprocessing hook for this config version.",
+    )
+    arn: Optional[str] = Field(
+        default=None,
+        description="Lambda ARN invoked on the source document before any "
+        "processing step. Must be tagged idp:feature-id or named GENAIIDP-*.",
+    )
+    onError: str = Field(  # noqa: N815 — matches stored config key
+        default="continue",
+        description="Behavior when the hook errors: continue | skip-remaining | fail",
+    )
+    args: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Generic key/value args (list of {key, value}) the hook reads "
+        "its own config from — keeps the step reusable for any preprocessing job.",
+    )
+    featureId: str = Field(  # noqa: N815 — matches stored config key
+        default="",
+        description="Feature/owner that provides this hook (label only).",
     )
 
 

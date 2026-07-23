@@ -16,12 +16,14 @@ section — so that activating a different config version atomically swaps
 the hook set:
 
     Config#<version>
-      preprocessing:            # standalone section — runs FIRST, before
-        preHook:                # the BDA/pipeline routing, in both modes
-          - { featureId, arn, order, onError, enabled }
+      preprocessing:            # standalone section — runs FIRST, before the
+        enabled: true           # BDA/pipeline routing. A SINGLE inline hook:
+        arn: <lambda-arn>       # arn/args/onError live directly on the section
+        onError: fail           # (no list), so it reads cleanly in the config UI.
+        args: [ { key, value }, ... ]   # generic key/value config for the hook
       ocr:
-        postHook:
-          - { featureId, arn, order, onError, enabled }
+        postHook:               # post-step points keep a LIST of hooks
+          - { featureId, arn, order, onError, enabled, args }
       classification:
         postHook: [ ... ]
       extraction:
@@ -159,16 +161,45 @@ def _resolve_active_version(table: Any, pinned: Optional[str]) -> Optional[str]:
     return "default"
 
 
+def _normalize_hook(h: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Validate + normalize one hook entry. Returns None if disabled or arn-less.
+    Generic `args` is an optional list of {key, value} string pairs the hook
+    reads its own settings from (keeps the platform hook-agnostic)."""
+    if not isinstance(h, dict) or h.get("enabled") is False:
+        return None
+    arn = h.get("arn")
+    if not arn:
+        return None
+    raw_args = h.get("args")
+    args = (
+        [a for a in raw_args if isinstance(a, dict) and "key" in a]
+        if isinstance(raw_args, list)
+        else []
+    )
+    return {
+        "featureId": h.get("featureId") or "unknown",
+        "arn": arn,
+        "order": int(h.get("order", 100)) if h.get("order") is not None else 100,
+        "onError": h.get("onError") or "continue",
+        "args": args,
+    }
+
+
 def _read_hooks_from_config(
     table: Any, version: str, point: str
 ) -> List[Dict[str, Any]]:
-    """Read <section>.<preHook|postHook> from Config#<version>, returning
-    enabled entries. The list field is chosen by the hook point prefix."""
+    """Read the hooks for a point from Config#<version>, returning enabled,
+    normalized entries.
+
+    Two shapes:
+      - `preprocessing` (pre* points): a SINGLE inline hook — arn/args/onError/
+        enabled live directly on the `preprocessing` section (not a list).
+      - post-step points: a `<section>.postHook` LIST.
+    """
     step = _HOOK_TO_STEP.get(point)
     if not step:
         logger.warning("Unknown hook point %s", point)
         return []
-    field = _hook_list_field(point)
     try:
         resp = table.get_item(Key={"Configuration": f"Config#{version}"})
     except Exception as exc:  # noqa: BLE001
@@ -181,40 +212,17 @@ def _read_hooks_from_config(
     step_block = payload.get(step) or {}
     if not isinstance(step_block, dict):
         return []
-    raw = step_block.get(field) or []
+
+    # Pre* points: the section IS the single hook (flattened arn/args/...).
+    if point.startswith("pre"):
+        h = _normalize_hook(step_block)
+        return [h] if h else []
+
+    # Post* points: a list under <section>.postHook.
+    raw = step_block.get(_hook_list_field(point)) or []
     if not isinstance(raw, list):
         return []
-    valid: List[Dict[str, Any]] = []
-    for h in raw:
-        if not isinstance(h, dict):
-            continue
-        # Defaults: enabled=true, order=100, onError=continue
-        enabled = h.get("enabled")
-        if enabled is False:
-            continue
-        arn = h.get("arn")
-        if not arn:
-            continue
-        # Generic hook args: an optional list of {key, value} string pairs the
-        # hook reads its settings from (keeps the platform hook-agnostic — the
-        # PII feature, or any preprocessing job, carries its own config here).
-        raw_args = h.get("args")
-        args: List[Dict[str, Any]] = (
-            [a for a in raw_args if isinstance(a, dict) and "key" in a]
-            if isinstance(raw_args, list)
-            else []
-        )
-        valid.append(
-            {
-                "featureId": h.get("featureId") or "unknown",
-                "arn": arn,
-                "order": int(h.get("order", 100))
-                if h.get("order") is not None
-                else 100,
-                "onError": h.get("onError") or "continue",
-                "args": args,
-            }
-        )
+    valid = [n for n in (_normalize_hook(h) for h in raw) if n]
     valid.sort(key=lambda h: (h["order"], h["featureId"]))
     return valid
 

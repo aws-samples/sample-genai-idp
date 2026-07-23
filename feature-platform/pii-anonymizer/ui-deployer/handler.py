@@ -226,25 +226,20 @@ def _unregister_hooks() -> None:
 
 
 def _inject_preprocessing_hook(preset: Dict[str, Any]) -> None:
-    """Add this feature's preprocessing hook INTO the preset's config, under
-    `preprocessing.preHook`, so the hook travels WITH the preset version.
+    """Fill this feature's hook ARN into the preset's `preprocessing` section so
+    the hook travels WITH the preset version.
 
-    The host's pipeline-hooks dispatcher reads hooks from the *active* config
-    version. Registering via registerFeatureHooks would target whatever version
-    is active at install (typically `default`), so activating THIS preset would
-    orphan the hook. Baking it into the preset payload keeps the redaction
-    settings and the hook together atomically.
+    The host's pipeline-hooks dispatcher reads the hook from the *active* config
+    version. Registering separately would target whatever version is active at
+    install, orphaning the hook when THIS preset is activated. Baking the ARN
+    into the preset keeps the hook + its args together atomically.
 
-    The preprocessing step is GENERIC: the preHook entry carries the Lambda ARN
-    plus a list of key/value `args` the hook reads its own settings from (mode,
-    model, redaction, companion, store_mapping). The bundled preset already
-    ships that full entry (minus the ARN, unknown until this stack deploys); we
-    just FILL IN the ARN here from HOOK_FUNCTION_ARN, preserving the entry's args.
-    If the preset has no matching entry, we add a minimal one (ARN only) so the
-    hook still fires with its defaults.
+    The `preprocessing` section is a SINGLE flat hook: `arn`/`args`/`onError`/
+    `enabled` live directly on it (no list). The bundled preset ships that
+    section with its args (mode/model/redaction/...) minus the ARN (unknown until
+    this stack deploys); we FILL IN the ARN here, preserving everything else.
 
-    Idempotent on Update: the entry for this featureId keeps its args; only the
-    arn is (re)set.
+    Idempotent on Update: only `arn` is (re)set.
     """
     if not _HOOK_FUNCTION_ARN:
         logger.warning(
@@ -256,27 +251,11 @@ def _inject_preprocessing_hook(preset: Dict[str, Any]) -> None:
     if not isinstance(pp, dict):
         pp = {}
         preset["preprocessing"] = pp
-    existing = pp.get("preHook")
-    if not isinstance(existing, list):
-        existing = []
-    found = False
-    for h in existing:
-        if isinstance(h, dict) and h.get("featureId") == _FEATURE_ID:
-            # Preserve the entry's args (mode/model/redaction/...); set the ARN.
-            h["arn"] = _HOOK_FUNCTION_ARN
-            found = True
-    if not found:
-        existing.append(
-            {
-                "featureId": _FEATURE_ID,
-                "arn": _HOOK_FUNCTION_ARN,
-                "order": 100,
-                "onError": "fail",
-                "enabled": True,
-                "args": [],
-            }
-        )
-    pp["preHook"] = existing
+    pp["arn"] = _HOOK_FUNCTION_ARN
+    pp.setdefault("enabled", True)
+    pp.setdefault("featureId", _FEATURE_ID)
+    pp.setdefault("onError", "fail")
+    pp.setdefault("args", [])
     logger.info("Filled preprocessing hook ARN %s into the preset", _HOOK_FUNCTION_ARN)
 
 

@@ -187,17 +187,9 @@ def test_onerror_skip_remaining_stops_after_failure(monkeypatch):
     assert out["results"][0]["featureId"] == "f1"
 
 
-def test_hook_list_field_by_prefix(monkeypatch):
-    """pre* hook points read preHook; post* read postHook."""
-    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
-    mod = _reload()
-    assert mod._hook_list_field("preprocessing") == "preHook"
-    assert mod._hook_list_field("postOcr") == "postHook"
-
-
-def test_preprocessing_reads_prehook_from_own_section(monkeypatch):
-    """The preprocessing point reads preprocessing.preHook (its own top-level
-    section), not any *.postHook."""
+def test_preprocessing_reads_single_flat_hook(monkeypatch):
+    """The preprocessing point reads a SINGLE inline hook — arn/args live
+    directly on the `preprocessing` section (no preHook list)."""
     monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
     mod = _reload()
 
@@ -207,25 +199,50 @@ def test_preprocessing_reads_prehook_from_own_section(monkeypatch):
                 "Item": {
                     "Configuration": "Config#default",
                     "preprocessing": {
-                        "preHook": [
-                            {"featureId": "pii", "arn": "arn:pii", "order": 10},
-                        ],
-                        # a postHook in the same section must be ignored for a
-                        # pre* point
-                        "postHook": [
-                            {"featureId": "nope", "arn": "arn:nope"},
-                        ],
+                        "enabled": True,
+                        "featureId": "pii",
+                        "arn": "arn:pii",
+                        "onError": "fail",
                     },
                 }
             }
 
     hooks = mod._read_hooks_from_config(_Table(), "default", "preprocessing")
-    assert [h["featureId"] for h in hooks] == ["pii"]
+    assert len(hooks) == 1
+    assert hooks[0]["featureId"] == "pii"
+    assert hooks[0]["arn"] == "arn:pii"
+    assert hooks[0]["onError"] == "fail"
+
+
+def test_preprocessing_disabled_or_arnless_yields_no_hook(monkeypatch):
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+
+    class _Disabled:
+        def get_item(self, Key):
+            return {
+                "Item": {
+                    "Configuration": "Config#d",
+                    "preprocessing": {"enabled": False, "arn": "arn:x"},
+                }
+            }
+
+    class _NoArn:
+        def get_item(self, Key):
+            return {
+                "Item": {
+                    "Configuration": "Config#d",
+                    "preprocessing": {"enabled": True},
+                }
+            }
+
+    assert mod._read_hooks_from_config(_Disabled(), "d", "preprocessing") == []
+    assert mod._read_hooks_from_config(_NoArn(), "d", "preprocessing") == []
 
 
 def test_hook_args_parsed_and_passed_in_payload(monkeypatch):
-    """Generic hook args (list of {key,value}) are parsed from config and
-    delivered to the hook as both `args` and a flattened `argsMap`."""
+    """Generic hook args (list of {key,value}) are parsed from the flat
+    preprocessing section and delivered as both `args` and `argsMap`."""
     monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
     mod = _reload()
 
@@ -235,16 +252,13 @@ def test_hook_args_parsed_and_passed_in_payload(monkeypatch):
                 "Item": {
                     "Configuration": "Config#default",
                     "preprocessing": {
-                        "preHook": [
-                            {
-                                "featureId": "pii",
-                                "arn": "arn:pii",
-                                "args": [
-                                    {"key": "mode", "value": "redactcopy_and_stop"},
-                                    {"key": "store_mapping", "value": "true"},
-                                    {"not_a_key": "x"},  # dropped: no key
-                                ],
-                            }
+                        "enabled": True,
+                        "featureId": "pii",
+                        "arn": "arn:pii",
+                        "args": [
+                            {"key": "mode", "value": "redactcopy_and_stop"},
+                            {"key": "store_mapping", "value": "true"},
+                            {"not_a_key": "x"},  # dropped: no key
                         ],
                     },
                 }
