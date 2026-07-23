@@ -26,6 +26,8 @@ SPDX-License-Identifier: MIT-0
 
 ### Fixed
 
+- **Documents with `#` in their name no longer break View Data / View Page Text and results metadata.** `urllib.parse.urlparse` treats `#` in an S3 URI as a URL-fragment delimiter, so keys like `Report_#2.pdf/pages/1/result.json` were silently truncated at the `#`, causing `NoSuchKey` errors ("No response from getFileContents" in the UI) and wrongly-named `.metadata.json` files. The `getFileContents`/`getFilePresignedUrl` resolver and the two processresults functions now parse S3 URIs with a plain string split (matching `idp_common.utils.parse_s3_uri`), preserving `#` in keys.
+
 - **Claude Sonnet 5 now appears in the UI model picker.** Sonnet 5 (`claude-sonnet-5` and the `:1m` extended-context variant) was present in pricing, model limits, and the Bedrock client routing — and is the system default extraction model — but was missing from the CloudFormation model enums in `patterns/unified/template.yaml` that feed the config schema, so it never showed in the config UI's model dropdown. Both variants are now registered across all three inference-profile prefixes (`us.`/`eu.`/`global.`). (#544)
 
 - **Addressed package vulnerabilities flagged by recent dependency scans.** Upgraded affected direct and transitive dependencies across the web UI (`src/ui`), the docs site, and the multi-doc-discovery and OCR-benchmark Lambdas to their patched versions.

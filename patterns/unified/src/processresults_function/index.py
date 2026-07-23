@@ -5,7 +5,6 @@ import datetime
 import json
 import logging
 import os
-from urllib.parse import urlparse
 
 import boto3
 from idp_common import s3, utils
@@ -219,10 +218,11 @@ def create_metadata_file(file_uri, class_type, file_type=None):
     Creates a metadata file alongside the given URI file with the same name plus '.metadata.json'
     """
     try:
-        # Parse the S3 URI to get bucket and key
-        parsed_uri = urlparse(file_uri)
-        bucket = parsed_uri.netloc
-        key = parsed_uri.path.lstrip("/")
+        # Parse the S3 URI to get bucket and key. Use parse_s3_uri (plain
+        # string split) rather than urllib.parse.urlparse: object keys may
+        # contain '#', which urlparse treats as a URL fragment delimiter and
+        # silently truncates, producing a wrong metadata key.
+        bucket, key = utils.parse_s3_uri(file_uri)
 
         # Create the metadata key by adding '.metadata.json' to the original key
         metadata_key = f"{key}.metadata.json"
