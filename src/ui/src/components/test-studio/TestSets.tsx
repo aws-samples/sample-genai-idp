@@ -31,6 +31,7 @@ import {
   listBucketFiles,
   validateTestFileName,
   updateTestSet,
+  publishTestSetVersion,
 } from '../../graphql/generated';
 import type { DocumentClassType } from '../../graphql/generated/schema-types';
 import { getErrorMessage } from '../../utils/errorUtils';
@@ -69,6 +70,8 @@ interface TestSetItem {
   filePattern?: string | null;
   fileCount?: number | null;
   source?: string | null;
+  latestVersion?: number | null;
+  activeReference?: number | null;
   status?: string | null;
   createdAt: string;
   error?: string | null;
@@ -590,6 +593,29 @@ const TestSets = (): React.JSX.Element => {
     }
   };
 
+  const handlePublishVersion = async () => {
+    const target = selectedItems[0];
+    if (!target) return;
+
+    setLoading(true);
+    try {
+      const result = await client.graphql({
+        query: publishTestSetVersion,
+        variables: { input: { testSetId: target.id, setAsActiveReference: true } },
+      });
+      const published = result.data.publishTestSetVersion;
+      setSuccessMessage(`Published ${target.name} version ${published?.version ?? ''} as the active reference`);
+      setError('');
+      // Refresh so the new version + active reference are reflected in the table
+      loadTestSets();
+    } catch (err) {
+      console.error('Error publishing test set version:', err);
+      setError(`Failed to publish version: ${getErrorMessage(err)}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleAddDocuments = async () => {
     if (!filePattern.trim()) {
       setError('File pattern is required');
@@ -769,6 +795,27 @@ const TestSets = (): React.JSX.Element => {
       sortingField: 'source',
     },
     {
+      id: 'version',
+      header: 'Version',
+      cell: (item: TestSetItem) => {
+        if (!item.latestVersion) {
+          return <span style={{ color: '#5f6b7a' }}>draft</span>;
+        }
+        // Show the active reference (what runs score against); note if the
+        // latest published version is ahead of it.
+        const active = item.activeReference;
+        const label = active ? `v${active}` : `v${item.latestVersion} (no ref)`;
+        const behind = active && item.latestVersion > active ? ` · latest v${item.latestVersion}` : '';
+        return (
+          <span>
+            <Badge color="blue">{label}</Badge>
+            {behind && <span style={{ color: '#5f6b7a', fontSize: '0.85em' }}>{behind}</span>}
+          </span>
+        );
+      },
+      sortingField: 'activeReference',
+    },
+    {
       id: 'documentClassType',
       header: 'Classification Type',
       cell: (item: TestSetItem) => {
@@ -857,6 +904,12 @@ const TestSets = (): React.JSX.Element => {
                 Edit
               </Button>
               <Button iconName="remove" disabled={selectedItems.length === 0 || loading} onClick={() => setShowDeleteModal(true)} />
+              <Button
+                disabled={selectedItems.length !== 1 || selectedItems[0]?.status !== 'COMPLETED' || loading}
+                onClick={handlePublishVersion}
+              >
+                Publish version
+              </Button>
               <ButtonDropdown
                 items={[
                   { id: 'docs-pattern', text: 'From Existing Files' },

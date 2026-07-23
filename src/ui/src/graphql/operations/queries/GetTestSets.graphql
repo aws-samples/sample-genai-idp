@@ -6,6 +6,8 @@ query GetTestSets {
     filePattern
     fileCount
     source
+    latestVersion
+    activeReference
     status
     createdAt
     error
