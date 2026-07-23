@@ -366,17 +366,32 @@ def _redact_to_scratch(
     scratch_key = result.get("s3_output_file")
     if not scratch_key:
         raise RuntimeError(f"Redaction produced no output key for {input_key}")
+    # The redacted copy's extension MUST match what the processor actually wrote,
+    # not the input's extension. The text-PDF path (process_pdf_text_based)
+    # redacts extracted TEXT and writes `redacted_<name>.txt` — copying that body
+    # to a `.pdf` key produces an invalid PDF that fails downstream OCR. Trust the
+    # scratch key's real extension so the redacted copy is ingested as the right
+    # type (a text-native PDF becomes a redacted .txt — the host handles it).
+    actual_ext = _ext_of(scratch_key) or out_ext
     return {
         "scratch_key": scratch_key,
-        "out_ext": out_ext,
+        "out_ext": actual_ext,
         "pii_count": result.get("pii_count", 0),
         "replacements": result.get("replacements"),
     }
 
 
-def _redacted_input_key(input_key: str) -> str:
-    """Deterministic reserved-prefix key for the redacted copy (idempotent)."""
-    return f"{_REDACTED_PREFIX}{input_key.lstrip('/')}"
+def _redacted_input_key(input_key: str, out_ext: Optional[str] = None) -> str:
+    """Deterministic reserved-prefix key for the redacted copy (idempotent).
+
+    When the redaction output format differs from the input (e.g. a text-native
+    PDF is redacted to .txt), the key's extension is rewritten to out_ext so the
+    host ingests the redacted copy as the correct type."""
+    key = f"{_REDACTED_PREFIX}{input_key.lstrip('/')}"
+    if out_ext:
+        stem = key.rsplit(".", 1)[0] if "." in key else key
+        key = f"{stem}.{out_ext}"
+    return key
 
 
 def _now_iso() -> str:
@@ -445,7 +460,7 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     # (5) copy the redacted copy into the Input bucket under the reserved prefix,
     # stamping the companion config-version as S3 metadata so the spawned
     # execution processes it normally (no preprocessing hook on that version).
-    redacted_key = _redacted_input_key(input_key)
+    redacted_key = _redacted_input_key(input_key, redaction.get("out_ext"))
     _s3.copy_object(
         CopySource={"Bucket": _WORKING_BUCKET, "Key": redaction["scratch_key"]},
         Bucket=_INPUT_BUCKET,

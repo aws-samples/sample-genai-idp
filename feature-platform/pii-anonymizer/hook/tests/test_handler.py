@@ -209,3 +209,13 @@ def test_redacted_input_key_deterministic():
     mod = _load()
     assert mod._redacted_input_key("sub/dir/doc.pdf") == "_pii_redacted/sub/dir/doc.pdf"
     assert mod._redacted_input_key("/leading.pdf") == "_pii_redacted/leading.pdf"
+
+
+def test_redacted_input_key_rewrites_extension():
+    """A text-native PDF is redacted to .txt — the copy key must carry the real
+    output extension so the host ingests it as text, not a broken PDF."""
+    mod = _load()
+    assert mod._redacted_input_key("w2.pdf", "txt") == "_pii_redacted/w2.txt"
+    assert (
+        mod._redacted_input_key("a/b/scan.png", "png") == "_pii_redacted/a/b/scan.png"
+    )
