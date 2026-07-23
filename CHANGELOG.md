@@ -26,6 +26,8 @@ SPDX-License-Identifier: MIT-0
 
 ### Fixed
 
+- **Pinned `ruff` in CI to keep the format gate reproducible.** Both CI lint jobs installed `ruff` unpinned (`uv pip install ruff`), so a newer release (0.16.0, which began reformatting Python code blocks embedded in Markdown) started failing `ruff format --check` on ~49 unchanged `.md` files repo-wide — unrelated to any PR's diff. `ruff` is now pinned to `0.15.13` (the version the repo is formatted against) in `.github/workflows/developer-tests.yml` and `.gitlab-ci.yml`.
+
 - **S3 console folder creation no longer triggers spurious processing or pollutes Test Studio pattern matching.** Creating a "folder" in the input bucket via the S3 console writes a zero-byte pseudo-object whose key ends in `/` (e.g. `testfolder/`). The Queue Sender Lambda treated it as a document — creating a tracking entry and starting a Step Functions execution for empty content — and Test Studio's "Add Test Set from File Pattern" (`find_matching_files`) could pull such placeholders into a test set. Both paths now skip `/`-terminated keys (the trailing-slash guard already used elsewhere in the codebase). (#552)
 
 - **Documents with `#` in their name no longer break View Data / View Page Text and results metadata.** `urllib.parse.urlparse` treats `#` in an S3 URI as a URL-fragment delimiter, so keys like `Report_#2.pdf/pages/1/result.json` were silently truncated at the `#`, causing `NoSuchKey` errors ("No response from getFileContents" in the UI) and wrongly-named `.metadata.json` files. The `getFileContents`/`getFilePresignedUrl` resolver and the two processresults functions now parse S3 URIs with a plain string split (matching `idp_common.utils.parse_s3_uri`), preserving `#` in keys.
