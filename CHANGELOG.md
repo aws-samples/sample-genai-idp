@@ -26,6 +26,8 @@ SPDX-License-Identifier: MIT-0
 
 ### Fixed
 
+- **Multi-doc discovery zip upload now works end-to-end.** The flow was broken two ways: `uploadMultiDocDiscoveryZip` returned a presigned **POST** form while the UI uploads with a raw HTTP **PUT** (so the zip never landed in S3), and the upload and start mutations each minted their own random job-id S3 path (so even a successful upload was looked up at a different key and the pipeline's Prepare step failed with a 404). The upload mutation now returns a plain presigned PUT URL, and both mutations derive the same deterministic key (`multi-doc-discovery/uploads/<fileName>`); callers that pass the returned `objectKey` back as `s3Prefix` are still honored verbatim.
+
 - **Claude Sonnet 5 now appears in the UI model picker.** Sonnet 5 (`claude-sonnet-5` and the `:1m` extended-context variant) was present in pricing, model limits, and the Bedrock client routing — and is the system default extraction model — but was missing from the CloudFormation model enums in `patterns/unified/template.yaml` that feed the config schema, so it never showed in the config UI's model dropdown. Both variants are now registered across all three inference-profile prefixes (`us.`/`eu.`/`global.`). (#544)
 
 - **Addressed package vulnerabilities flagged by recent dependency scans.** Upgraded affected direct and transitive dependencies across the web UI (`src/ui`), the docs site, and the multi-doc-discovery and OCR-benchmark Lambdas to their patched versions.
