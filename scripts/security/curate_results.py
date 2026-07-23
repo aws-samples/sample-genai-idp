@@ -219,6 +219,24 @@ def curate_srt(issues_path: Path) -> tuple[str, dict]:
     open_high = [i for i in issues if prio(i) == "HIGH" and i.get("status") == "Open"]
     gate = "PASS ✅" if not open_high else f"FAIL ❌ ({len(open_high)} open HIGH)"
 
+    # Which analyzers actually ran, and how much each contributed — the
+    # "what was tested" record for a static-analysis aggregate.
+    scanner_desc = {
+        "Bandit": "Python SAST",
+        "Semgrep": "multi-language SAST",
+        "Checkov": "IaC / CloudFormation misconfig",
+        "security-matrix": "AWS security-control review (SRT rules)",
+        "anchore_syft": "dependency / SBOM inventory",
+        "Syft": "dependency / SBOM inventory",
+    }
+    by_source: dict[str, dict[str, int]] = {}
+    for i in issues:
+        src = i.get("source", "unknown")
+        b = by_source.setdefault(src, {"total": 0, "high": 0})
+        b["total"] += 1
+        if prio(i) == "HIGH":
+            b["high"] += 1
+
     lines = [
         "# SRT — SAST & Dependency Scan",
         "",
@@ -228,6 +246,8 @@ def curate_srt(issues_path: Path) -> tuple[str, dict]:
         "The gate is **open HIGH** findings only; lower tiers are reported as "
         "counts (they are dominated by tracked third-party/vendored code).",
         "",
+        "## Summary",
+        "",
         f"- **Gate (open HIGH findings):** {gate}",
         f"- **CI-visible findings:** {len(issues)}",
         f"- **Source:** {source_desc}"
@@ -236,6 +256,20 @@ def curate_srt(issues_path: Path) -> tuple[str, dict]:
             if dropped
             else ""
         ),
+        "",
+        "## Analyzers executed",
+        "",
+        "Each analyzer SRT ran, what it covers, and its contribution to the "
+        "CI-visible findings.",
+        "",
+        "| Analyzer | Coverage | Findings | HIGH |",
+        "|----------|----------|---------:|-----:|",
+    ]
+    for src in sorted(by_source):
+        b = by_source[src]
+        desc = scanner_desc.get(src, "—")
+        lines.append(f"| {redact(src)} | {desc} | {b['total']} | {b['high']} |")
+    lines += [
         "",
         "## Findings by priority × status",
         "",
@@ -250,6 +284,32 @@ def curate_srt(issues_path: Path) -> tuple[str, dict]:
         cells = " | ".join(str(row.get(s, 0)) for s in statuses)
         lines.append(f"| {p} | {cells} | {total} |")
     lines.append("")
+
+    # HIGH-tier check-ID enumeration — WHAT kinds of HIGH issues the scanners
+    # flagged and their disposition (all resolved/suppressed when the gate is
+    # green). This is the audit-relevant "what was found and what we did".
+    high = [i for i in issues if prio(i) == "HIGH"]
+    if high:
+        by_check: dict[tuple[str, str], dict[str, int]] = {}
+        for i in high:
+            key = (i.get("source", ""), i.get("check_id", ""))
+            c = by_check.setdefault(key, {})
+            st = i.get("status", "unknown")
+            c[st] = c.get(st, 0) + 1
+        lines += [
+            "## HIGH findings by check (disposition)",
+            "",
+            "Every HIGH check-ID flagged, with how many are in each status. "
+            "A green gate means all are resolved or suppressed (0 Open).",
+            "",
+            "| Source | Check | " + " | ".join(statuses) + " |",
+            "|--------|-------|" + "|".join(["--:"] * len(statuses)) + "|",
+        ]
+        for src, cid in sorted(by_check):
+            c = by_check[(src, cid)]
+            cells = " | ".join(str(c.get(s, 0)) for s in statuses)
+            lines.append(f"| {redact(src)} | `{redact(cid)}` | {cells} |")
+        lines.append("")
 
     if open_high:
         lines += [
@@ -327,6 +387,45 @@ def curate_rbac_dynamic(report_dir: Path | None) -> tuple[str, dict]:
     hard = totals.get("hard_fail", 0)
     gate = "PASS ✅" if hard == 0 else f"FAIL ❌ ({hard} hard failures)"
 
+    # Classify every check into a named suite (mapped to the AppSec mandatory
+    # API test-case checklist), so the doc enumerates WHAT was tested.
+    def suite_of(principal: str) -> tuple[str, str]:
+        p = principal or ""
+        roles = {"Admin", "Author", "Viewer", "Reviewer"}
+        if p in roles:
+            return ("Authorization matrix (positive: role allowed)", "2/2.2")
+        if p == "unauth":
+            return ("Unauthenticated access denied", "1")
+        if p.startswith("token:"):
+            if p in ("token:expired", "token:post-logout"):
+                return ("Token lifecycle (expiry + logout revocation)", "2.3/2.4")
+            return ("Token negatives (missing/garbage/tampered/empty)", "1")
+        if p.startswith("malformed:"):
+            return ("Input validation (malformed arguments)", "3")
+        if p.startswith("TLS") or p == "plaintext-http":
+            return ("TLS protocol (1.0/1.1/cleartext refused, 1.2+ accepted)", "4")
+        if "reads" in p or "job" in p:
+            return ("IDOR / BOLA (cross-user resource access)", "2.1")
+        if p == "after-delete":
+            return ("Deleted-resource inaccessibility", "2.5")
+        if "scope" in p or p in ("*", "admin(unrestricted)"):
+            return ("Config-version scope enforcement", "2/2.2")
+        return ("Other", "—")
+
+    suites: dict[str, dict] = {}
+    for r in results:
+        name, item = suite_of(r.get("principal", ""))
+        s = suites.setdefault(
+            name, {"item": item, "total": 0, "pass": 0, "hard_fail": 0, "warn": 0}
+        )
+        s["total"] += 1
+        if r["passed"]:
+            s["pass"] += 1
+        elif r.get("known_gap"):
+            s["warn"] += 1
+        else:
+            s["hard_fail"] += 1
+
     lines = [
         "# RBAC — Dynamic API Authorization Tests",
         "",
@@ -335,6 +434,8 @@ def curate_rbac_dynamic(report_dir: Path | None) -> tuple[str, dict]:
         "exercise every API op across all roles, unauthenticated, and with "
         "malformed/expired tokens, plus the AppSec mandatory-cases checklist "
         "(IDOR, token lifecycle, TLS, input validation, deleted-resource).",
+        "",
+        "## Summary",
         "",
         f"- **Gate (hard failures):** {gate}",
         f"- **Checks:** {totals.get('checks', len(results))} "
@@ -346,6 +447,26 @@ def curate_rbac_dynamic(report_dir: Path | None) -> tuple[str, dict]:
         f"- **Source git SHA:** `{redact(meta.get('git_sha', 'unknown'))}`",
         "",
     ]
+
+    # Suite enumeration — the "what was tested" record, mapped to the checklist.
+    lines += [
+        "## Test suites executed",
+        "",
+        'Each suite maps to the AppSec "Minimum Mandatory Security Focused Test '
+        'Cases for APIs" checklist item (see the '
+        "[api-rbac-test skill](../../../.claude/skills/api-rbac-test.md)).",
+        "",
+        "| Suite | Checklist | Checks | Pass | Hard fail | Known-gap |",
+        "|-------|:---------:|-------:|-----:|----------:|----------:|",
+    ]
+    for name in sorted(suites, key=lambda n: (suites[n]["item"], n)):
+        s = suites[name]
+        mark = "✅" if s["hard_fail"] == 0 else "❌"
+        lines.append(
+            f"| {name} | {s['item']} | {s['total']} | {s['pass']} "
+            f"| {s['hard_fail']} {mark} | {s['warn']} |"
+        )
+    lines.append("")
 
     hard_fails = [r for r in results if not r["passed"] and not r.get("known_gap")]
     gap_fails = [r for r in results if not r["passed"] and r.get("known_gap")]
@@ -379,20 +500,42 @@ def curate_rbac_dynamic(report_dir: Path | None) -> tuple[str, dict]:
             )
         lines.append("")
 
-    # Coverage summary: distinct ops and principals exercised (counts only —
-    # the per-request-id full matrix stays in the gitignored raw report).
-    ops = sorted({r.get("op", "") for r in results if r.get("op")})
-    principals = sorted({r.get("principal", "") for r in results if r.get("principal")})
+    # Full per-op × role authorization matrix (the core suite), collapsed. HTTP
+    # status codes and pass marks are safe to publish; request IDs are not (and
+    # aren't included here).
+    roles = ["Admin", "Author", "Viewer", "Reviewer", "unauth"]
+    by_op: dict[str, dict[str, dict]] = {}
+    for r in results:
+        if r.get("principal") in roles:
+            by_op.setdefault(r["op"], {})[r["principal"]] = r
+    if by_op:
+        lines += [
+            f"## Authorization matrix — {len(by_op)} operations × {len(roles)} roles",
+            "",
+            "<details><summary>Full op × role matrix "
+            f"({sum(len(v) for v in by_op.values())} checks) — HTTP status, "
+            "✅ pass / ❌ fail</summary>",
+            "",
+            "| Operation | " + " | ".join(roles) + " |",
+            "|-----------|" + "|".join(["---"] * len(roles)) + "|",
+        ]
+        for op in sorted(by_op):
+            cells = []
+            for role in roles:
+                r = by_op[op].get(role)
+                if r is None:
+                    cells.append("—")
+                else:
+                    mark = "✅" if r["passed"] else "❌"
+                    cells.append(f"{r.get('http_status', '?')} {mark}")
+            lines.append(f"| `{redact(op)}` | " + " | ".join(cells) + " |")
+        lines += ["", "</details>", ""]
+
     lines += [
-        "## Coverage",
-        "",
-        f"- **Distinct operations exercised:** {len(ops)}",
-        f"- **Distinct principals (roles + negatives):** {len(principals)}",
-        "",
-        "> The full per-check matrix with request IDs stays in the gitignored "
-        "raw report (`report.md`); it is environment-specific and not "
-        "published. This snapshot publishes the gate outcome, failures, and "
-        "coverage counts.",
+        "> The per-check **request IDs** stay in the gitignored raw report "
+        "(`report.md`); they are environment-specific and not published. "
+        "Everything above (gate, suites, failures, and the status matrix) is "
+        "the auditable record.",
     ]
 
     return "\n".join(lines), {
@@ -400,6 +543,7 @@ def curate_rbac_dynamic(report_dir: Path | None) -> tuple[str, dict]:
         "checks": totals.get("checks", len(results)),
         "hard_fail": hard,
         "gap_warn": totals.get("gap_warn", 0),
+        "suites": len(suites),
         "gate": "pass" if hard == 0 else "fail",
     }
 
@@ -435,6 +579,55 @@ def curate_rbac_static(stdout_path: Path | None) -> tuple[str, dict]:
     else:
         gate_key = "unknown"
         gate = "SEE OUTPUT"
+    # The scan runs a fixed battery of checks (S1–S5); enumerate them so the
+    # doc records WHAT was verified, not only the gap warnings.
+    checks = [
+        (
+            "S1",
+            "Manifest completeness",
+            "every routable op has an expectations "
+            "entry and every entry maps to a real op (no stale rows)",
+        ),
+        (
+            "S2",
+            "Schema ↔ expectations consistency",
+            "schema.graphql "
+            "`@aws_cognito_user_pools` groups match expected groups (documented "
+            "drift allowed via `schema_groups`/`known_gap`)",
+        ),
+        (
+            "S3",
+            "Resolver enforcement",
+            "each op's `enforced_in` source contains "
+            "a recognized enforcement pattern (group check, ownership, or IAM-only "
+            "rejection); ANY-auth ops without one must carry a known_gap",
+        ),
+        (
+            "S4",
+            "Scope enforcement",
+            "ops flagged `scope_checked`/`scope_filtered` "
+            "reference allowedConfigVersions in their `enforced_in` file",
+        ),
+        (
+            "S5",
+            "Template method auth",
+            "every API Gateway method is "
+            "COGNITO_USER_POOLS except the allowlisted CORS (OPTIONS) and "
+            "static-SPA (GET) routes",
+        ),
+    ]
+    # Op universe covered (from the shared expectations file).
+    n_ops = None
+    try:
+        import yaml  # optional; degrade to no count if unavailable
+
+        spec = yaml.safe_load(
+            (REPO_ROOT / "scripts" / "api_rbac_expectations.yaml").read_text()
+        )
+        n_ops = len(spec.get("operations", {}))
+    except Exception:
+        n_ops = None
+
     lines = [
         "# RBAC — Static Authorization Scan",
         "",
@@ -444,9 +637,34 @@ def curate_rbac_static(stdout_path: Path | None) -> tuple[str, dict]:
         "server-side checks. WARN entries are known/accepted authorization "
         "gaps (documented in the expectations file), not failures.",
         "",
-        f"- **Gate:** {gate}",
+        "## Summary",
         "",
-        "## Captured output",
+        f"- **Gate:** {gate}",
+    ]
+    if n_ops is not None:
+        lines.append(f"- **API operations covered:** {n_ops}")
+    if m:
+        lines.append(f"- **Result:** {n_fail} FAIL · {n_warn} WARN (known gaps)")
+    lines += [
+        "",
+        "## Checks executed",
+        "",
+        "The scan runs this fixed battery against every operation; the gate "
+        "fails on any FAIL finding.",
+        "",
+        "| Check | What it verifies | Outcome |",
+        "|-------|------------------|---------|",
+    ]
+    # With 0 FAIL, every structural check passed; individual WARNs are the
+    # accepted gaps enumerated in the captured output below.
+    check_outcome = (
+        "PASS ✅" if gate_key == "pass" else ("FAIL ❌" if gate_key == "fail" else "—")
+    )
+    for cid, title, desc in checks:
+        lines.append(f"| **{cid}** {title} | {desc} | {check_outcome} |")
+    lines += [
+        "",
+        "## Captured output (known gaps + result)",
         "",
         "```",
         body,
@@ -457,6 +675,7 @@ def curate_rbac_static(stdout_path: Path | None) -> tuple[str, dict]:
         "gate": gate_key,
         "fail": n_fail,
         "warn": n_warn,
+        "ops": n_ops,
     }
 
 
@@ -483,6 +702,42 @@ def _zap_ignored_plugin_ids(rules_conf_path: Path) -> set[str]:
     except OSError:
         pass
     return ids
+
+
+def _parse_zap_stdout(stdout_path: Path) -> tuple[list[dict], int | None]:
+    """Parse the per-rule outcome list + URL count from a persisted ZAP stdout.
+
+    zap-api-scan prints one line per rule exercised:
+      "PASS: Directory Browsing [0]"
+      "WARN-NEW: Cross-Domain Misconfiguration [10098] x 12"
+      "IGNORE-NEW: Timestamp Disclosure - Unix [10096] x 26"
+    and a "Total of N URLs" line. The JSON report only carries *findings*, so
+    this stdout is the ONLY source for the full "which rules ran" enumeration.
+    Returns (rules, url_count) — rules is [] if the file is absent.
+    """
+    if not stdout_path.exists():
+        return [], None
+    rule_re = re.compile(
+        r"^(PASS|WARN-NEW|WARN-INPROG|FAIL-NEW|FAIL-INPROG|IGNORE-NEW|INFO-NEW):"
+        r"\s+(.*?)\s*\[(\d+)\](?:\s*x\s*(\d+))?\s*$"
+    )
+    rules, url_count = [], None
+    for ln in stdout_path.read_text().splitlines():
+        mu = re.match(r"^Total of (\d+) URLs", ln)
+        if mu:
+            url_count = int(mu.group(1))
+            continue
+        m = rule_re.match(ln)
+        if m:
+            rules.append(
+                {
+                    "outcome": m.group(1),
+                    "name": m.group(2),
+                    "id": m.group(3),
+                    "instances": int(m.group(4)) if m.group(4) else 0,
+                }
+            )
+    return rules, url_count
 
 
 def curate_zap(report_dir: Path | None) -> tuple[str, dict]:
@@ -522,18 +777,39 @@ def curate_zap(report_dir: Path | None) -> tuple[str, dict]:
     alerts.sort(key=lambda a: (order.get(a["risk"], 9), -a["count"]))
     gate = "PASS ✅" if counts["High"] == 0 else f"FAIL ❌ ({counts['High']} High)"
 
+    # Full per-rule outcome enumeration (the "which tests ran" record) comes
+    # from the persisted scan stdout, if present.
+    rules, url_count = _parse_zap_stdout(report_dir / "zap-scan-stdout.txt")
+    tally: dict[str, int] = {}
+    for r in rules:
+        key = "PASS" if r["outcome"] == "PASS" else r["outcome"].split("-")[0]
+        tally[key] = tally.get(key, 0) + 1
+
     lines = [
         "# ZAP DAST — Dynamic API Scan",
         "",
         "OWASP ZAP baseline/active scan of the deployed UI API "
         "(`POST /op/{field}`), seeded from a generated OpenAPI spec of every "
-        "operation. Rules muted in `scripts/sdlc/zap-rules.conf` are excluded.",
+        "operation. Rules muted in `scripts/sdlc/zap-rules.conf` are excluded "
+        "from the alert counts.",
+        "",
+        "## Summary",
         "",
         f"- **Gate (High alerts):** {gate}",
         f"- **Alerts:** High={counts['High']} Medium={counts['Medium']} "
         f"Low={counts['Low']} Info={counts['Informational']}",
+    ]
+    if rules:
+        lines.append(
+            f"- **Rules exercised:** {len(rules)} "
+            f"({tally.get('PASS', 0)} PASS · {tally.get('WARN', 0)} WARN · "
+            f"{tally.get('FAIL', 0)} FAIL · {tally.get('IGNORE', 0)} IGNORE)"
+        )
+    if url_count is not None:
+        lines.append(f"- **URLs scanned:** {url_count}")
+    lines += [
         "",
-        "## Alerts (most severe first)",
+        "## Alerts (findings, most severe first)",
         "",
         "| Risk | Alert | Instances | Remediation |",
         "|------|-------|----------:|-------------|",
@@ -549,9 +825,57 @@ def curate_zap(report_dir: Path | None) -> tuple[str, dict]:
         lines.append("| — | _No alerts_ | — | — |")
     lines.append("")
 
+    # Full rule enumeration — every rule ZAP ran, with its outcome. This is the
+    # auditable "what was tested" record; a big PASS list is the assurance that
+    # a clean gate means broad coverage, not a skipped scan.
+    if rules:
+        non_pass = [r for r in rules if r["outcome"] != "PASS"]
+        lines += [
+            "## Rules exercised (full outcome list)",
+            "",
+            "Every ZAP rule run against the seeded API, with its outcome. "
+            "`WARN`/`FAIL` are actionable; `IGNORE` is muted in "
+            "`scripts/sdlc/zap-rules.conf`; `PASS` means the rule ran and found "
+            "nothing.",
+            "",
+        ]
+        if non_pass:
+            lines += [
+                "### Non-PASS outcomes",
+                "",
+                "| Outcome | Rule | Plugin ID | Instances |",
+                "|---------|------|-----------|----------:|",
+            ]
+            for r in non_pass:
+                lines.append(
+                    f"| {r['outcome']} | {redact(r['name'])} | `{r['id']}` "
+                    f"| {r['instances'] or '—'} |"
+                )
+            lines.append("")
+        lines += [
+            f"<details><summary>All PASS rules ({tally.get('PASS', 0)})</summary>",
+            "",
+            "| Rule | Plugin ID |",
+            "|------|-----------|",
+        ]
+        for r in rules:
+            if r["outcome"] == "PASS":
+                lines.append(f"| {redact(r['name'])} | `{r['id']}` |")
+        lines += ["", "</details>", ""]
+    else:
+        lines += [
+            "> ℹ️ Per-rule outcome enumeration unavailable — no "
+            "`zap-scan-stdout.txt` beside the JSON report. The ZAP JSON carries "
+            "findings only; to publish the full rule list, tee the "
+            "`make stacktest-zap` output to `zap-scan-stdout.txt` in the report "
+            "dir. Alert counts above are complete.",
+            "",
+        ]
+
     return "\n".join(lines), {
         "status": "run",
         "alerts": counts,
+        "rules": len(rules),
         "gate": "pass" if counts["High"] == 0 else "fail",
     }
 

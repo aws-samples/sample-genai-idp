@@ -2,9 +2,22 @@
 
 Static analysis (Bandit, Semgrep, Checkov), dependency inventory (Syft), and the security-matrix review, aggregated by the [Sample Security Review Tool](https://github.com/aws-samples/sample-security-review-tool). The gate is **open HIGH** findings only; lower tiers are reported as counts (they are dominated by tracked third-party/vendored code).
 
+## Summary
+
 - **Gate (open HIGH findings):** PASS ✅
 - **CI-visible findings:** 8363
 - **Source:** live scan results (`.srt/issues.json`) — 272 git-ignored finding(s) excluded to match the CI view
+
+## Analyzers executed
+
+Each analyzer SRT ran, what it covers, and its contribution to the CI-visible findings.
+
+| Analyzer | Coverage | Findings | HIGH |
+|----------|----------|---------:|-----:|
+| Bandit | Python SAST | 8214 | 54 |
+| Checkov | IaC / CloudFormation misconfig | 103 | 2 |
+| Semgrep | multi-language SAST | 1 | 1 |
+| security-matrix | AWS security-control review (SRT rules) | 45 | 39 |
 
 ## Findings by priority × status
 
@@ -14,6 +27,33 @@ Static analysis (Bandit, Semgrep, Checkov), dependency inventory (Syft), and the
 | MEDIUM | 6 | 0 | 51 | 0 | 57 |
 | LOW | 87 | 0 | 8121 | 0 | 8208 |
 | INFO | 2 | 0 | 0 | 0 | 2 |
+
+## HIGH findings by check (disposition)
+
+Every HIGH check-ID flagged, with how many are in each status. A green gate means all are resolved or suppressed (0 Open).
+
+| Source | Check | Open | reopened | resolved | suppressed |
+|--------|-------|--:|--:|--:|--:|
+| Bandit | `B105` | 0 | 0 | 44 | 0 |
+| Bandit | `B106` | 0 | 0 | 5 | 0 |
+| Bandit | `B602` | 0 | 0 | 3 | 0 |
+| Bandit | `B701` | 0 | 0 | 2 | 0 |
+| Checkov | `CKV_AWS_192` | 0 | 0 | 2 | 0 |
+| Semgrep | `package_managers.npm.npm-missing-minimum-release-age.npm-missing-minimum-release-age` | 0 | 0 | 1 | 0 |
+| security-matrix | `API-GW-001` | 0 | 0 | 0 | 1 |
+| security-matrix | `API-GW-002` | 0 | 0 | 0 | 1 |
+| security-matrix | `API-GW-004` | 0 | 0 | 0 | 2 |
+| security-matrix | `API-GW-006` | 0 | 0 | 0 | 1 |
+| security-matrix | `DDB-002` | 0 | 0 | 1 | 14 |
+| security-matrix | `EC2-002` | 0 | 0 | 0 | 3 |
+| security-matrix | `IAM-009` | 0 | 0 | 0 | 1 |
+| security-matrix | `KMS-007` | 0 | 0 | 0 | 4 |
+| security-matrix | `LAMBDA-004` | 0 | 0 | 0 | 1 |
+| security-matrix | `LAMBDA-011` | 0 | 0 | 0 | 1 |
+| security-matrix | `LAMBDA-012` | 0 | 1 | 1 | 0 |
+| security-matrix | `S3-001` | 0 | 0 | 0 | 2 |
+| security-matrix | `S3-005` | 0 | 0 | 0 | 1 |
+| security-matrix | `S3-008` | 0 | 0 | 0 | 4 |
 
 ## Suppressed HIGH findings (accepted risk / scanner limitation)
 

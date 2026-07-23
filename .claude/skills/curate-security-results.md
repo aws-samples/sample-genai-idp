@@ -43,14 +43,20 @@ construction** — but still eyeball the output before committing.
 
    | Test | Command | Raw output the curator reads |
    |------|---------|------------------------------|
-   | SRT | `make srt-scan` | `scripts/srt/issues.json` (committed baseline — always readable) |
-   | RBAC static | `make api-test-static 2>&1 \| tee /tmp/rbac-static.txt` | the captured stdout file |
-   | RBAC dynamic | `make api-test STACK_NAME=<stack>` | newest `scratch/api-test-results/<stack>-<ts>/` |
-   | ZAP DAST | `make stacktest-zap STACK_NAME=<stack>` | newest `scratch/zap-reports/` |
+   | SRT | `make srt-scan` | `.srt/issues.json` (live results) if present, else committed `scripts/srt/issues.json` |
+   | RBAC static | `make api-test-static 2>&1 \| tee /tmp/rbac-static.txt` | the captured stdout file (S1–S5 check enumeration) |
+   | RBAC dynamic | `make api-test STACK_NAME=<stack>` | newest `scratch/api-test-results/<stack>-<ts>/` (`report.json` → op × role matrix) |
+   | ZAP DAST | `make stacktest-zap STACK_NAME=<stack> 2>&1 \| tee scratch/zap-reports/zap-scan-stdout.txt` | newest `scratch/zap-reports/` |
 
    Use `AWS_PROFILE=default` for the live ones (see CLAUDE.md). A test you skip
    gets a visible **"not run" stub**, not a silent omission — so a partial
    snapshot is fine and honest.
+
+   **ZAP stdout matters:** the ZAP JSON report carries *findings only*. The
+   per-rule PASS/WARN/IGNORE enumeration (the auditable "which rules ran"
+   record) lives **only in the scan stdout**, so tee it into the report dir as
+   `zap-scan-stdout.txt`. Without it the curated ZAP doc still reports alert
+   counts, but falls back to a note instead of the full rule list.
 
 2. **Curate.** The tool auto-discovers the newest `scratch/` report dirs; it
    does **not** read the wall clock, so `--date` is required:

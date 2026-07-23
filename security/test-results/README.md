@@ -37,10 +37,18 @@ raw field slips through.
 ## Process: producing a snapshot for a release
 
 1. **Run the tests** (see the run commands in [`../README.md`](../README.md)):
-   - `make srt-scan` — updates `scripts/srt/issues.json` (read directly, always available)
+   - `make srt-scan` — updates `.srt/issues.json` (live results; the curator
+     reads it if present, else the committed `scripts/srt/issues.json`)
    - `make api-test-static 2>&1 | tee /tmp/rbac-static.txt` — capture stdout
+     (the curator enumerates the S1–S5 checks from this)
    - `make api-test STACK_NAME=<stack>` — writes `scratch/api-test-results/<stack>-<ts>/`
-   - `make stacktest-zap STACK_NAME=<stack>` — writes `scratch/zap-reports/`
+     (`report.json` drives the full op × role matrix)
+   - `make stacktest-zap STACK_NAME=<stack> 2>&1 | tee scratch/zap-reports/zap-scan-stdout.txt`
+     — writes `scratch/zap-reports/` **and** captures the scan stdout. The ZAP
+     JSON report carries *findings only*; the per-rule PASS/WARN/IGNORE
+     enumeration (the "which rules ran" record) exists **only in the stdout**,
+     so tee it into the report dir as `zap-scan-stdout.txt` or the curated doc
+     falls back to alert-counts-only.
 
 2. **Curate** (the tool auto-discovers the newest report dirs under `scratch/`;
    it does not read the wall clock, so pass `--date`):
