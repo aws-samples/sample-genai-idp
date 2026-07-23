@@ -36,11 +36,13 @@ preprocessing:
   # the wasted invocation). The wizard sets this to "<base>__standard".
   companion_config_version: default
 
-  # Detection/redaction model. Nova Lite is the cost-sensitive default for the
-  # per-page detection pass (see docs). Any Bedrock text/vision model works.
+  # Detection/redaction model. Claude Haiku is the default: PII detection over
+  # dense forms (W2, lending) needs a large output-token budget — Nova Lite's
+  # smaller cap truncates the detection JSON and the detector fails closed. Nova
+  # Lite is still selectable for cheaper, lighter documents.
   model:
-    id: us.amazon.nova-lite-v1:0
-    provider: amazon
+    id: us.anthropic.claude-haiku-4-5-20251001
+    provider: anthropic
 
   redaction:
     # synthetic -> structure-preserving fake values (default; keeps downstream

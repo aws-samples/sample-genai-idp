@@ -196,8 +196,14 @@ def _build_pii_config(pp: Dict[str, Any]) -> Dict[str, Any]:
     feature's `preprocessing` block. Sensible defaults keep it working with a
     minimal block."""
     model = pp.get("model") or {}
+    # Default to Claude Haiku: PII detection over dense forms (W2, lending) needs
+    # a large output-token budget — Nova Lite's smaller cap truncates the
+    # detection JSON, and the vendored detector fails loudly (by design, to never
+    # silently drop PII). Haiku balances recall/cost; Nova Lite stays selectable.
     model_id = (
-        model.get("id") or pp.get("detection_model") or "us.amazon.nova-lite-v1:0"
+        model.get("id")
+        or pp.get("detection_model")
+        or "us.anthropic.claude-haiku-4-5-20251001"
     )
     provider = model.get("provider") or (
         "amazon" if ("nova" in model_id or "titan" in model_id) else "anthropic"
@@ -207,11 +213,28 @@ def _build_pii_config(pp: Dict[str, Any]) -> Dict[str, Any]:
     cfg: Dict[str, Any] = {
         "model": {"id": model_id, "provider": provider},
         "redaction": {"mode": mode},
+        # Defaults for blocks the vendored processors access with a hard
+        # `config[...]` (NOT .get) — omitting them KeyErrors the image path:
+        #   pdf_image_processor: config["performance"]["dpi"],
+        #                        config["processing"]["process_embedded_images"]
+        "performance": {"dpi": 300, "max_retries": 3, "timeout_seconds": 300},
+        "processing": {"approach": "image", "process_embedded_images": False},
     }
-    # Pass through optional tuning blocks verbatim if present.
-    for k in ("detection", "synthetic", "concurrency", "validation", "clustering"):
-        if isinstance(pp.get(k), dict):
-            cfg[k] = pp[k]
+    # Pass through / override with any tuning blocks the config carries.
+    for k in (
+        "detection",
+        "synthetic",
+        "concurrency",
+        "validation",
+        "clustering",
+        "performance",
+        "processing",
+    ):
+        v = pp.get(k)
+        if isinstance(v, dict):
+            # Merge onto the defaults so partial overrides don't drop required keys.
+            base = cfg.get(k)
+            cfg[k] = {**base, **v} if isinstance(base, dict) else v
     return cfg
 
 

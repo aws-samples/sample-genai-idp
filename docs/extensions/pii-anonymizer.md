@@ -58,8 +58,10 @@ page. The **Config Pairing** tab is the primary way to turn redaction on:
 
 1. Pick one of your **existing** config versions as the base (your real
    extraction settings are preserved).
-2. Choose a mode, a PII-detection model (Nova Lite is the cost-sensitive
-   default), and a redaction style (synthetic or blackout).
+2. Choose a mode, a PII-detection model (Claude Haiku is the default — dense
+   forms like W2s need a large output-token budget, and Nova Lite's smaller cap
+   truncates the detection JSON, which the detector fails closed on), and a
+   redaction style (synthetic or blackout).
 3. Click **Create config pair**. The wizard creates two **non-active** versions:
    - `<base>__pii_redacted_only` (or `__pii_both`) — the *initiating* version,
      with the redaction hook.
@@ -95,7 +97,9 @@ Redaction adds a detection pass per page **before** processing:
   pass, so **Redacted only** on scanned docs runs OCR twice, and **Process both**
   runs roughly twice the whole pipeline. Budget accordingly.
 
-Choose a cheaper detection model (Nova Lite) to minimize the added cost.
+Claude Haiku is the default detection model (reliable on dense forms). Nova Lite
+is cheaper and fine for lighter documents, but may truncate — and fail closed —
+on dense multi-field pages.
 
 ## Supported formats (v1)
 

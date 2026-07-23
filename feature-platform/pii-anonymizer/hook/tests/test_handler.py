@@ -189,13 +189,20 @@ def test_disabled_preprocessing_skips(monkeypatch):
 def test_build_pii_config_defaults():
     mod = _load()
     cfg = mod._build_pii_config({})
-    assert cfg["model"]["provider"] == "amazon"  # nova default
+    # Default is Claude Haiku (large output budget for dense forms).
+    assert cfg["model"]["provider"] == "anthropic"
+    assert "haiku" in cfg["model"]["id"]
     assert cfg["redaction"]["mode"] == "synthetic"
-    # anthropic inferred for a claude id
-    cfg2 = mod._build_pii_config(
-        {"model": {"id": "us.anthropic.claude-haiku-4-5-20251001"}}
-    )
-    assert cfg2["model"]["provider"] == "anthropic"
+    # Required hard-accessed blocks for the image path are always present.
+    assert cfg["performance"]["dpi"] == 300
+    assert "process_embedded_images" in cfg["processing"]
+    # amazon inferred for a nova id
+    cfg2 = mod._build_pii_config({"model": {"id": "us.amazon.nova-lite-v1:0"}})
+    assert cfg2["model"]["provider"] == "amazon"
+    # partial performance override merges onto defaults (keeps dpi)
+    cfg3 = mod._build_pii_config({"performance": {"max_retries": 5}})
+    assert cfg3["performance"]["dpi"] == 300
+    assert cfg3["performance"]["max_retries"] == 5
 
 
 def test_redacted_input_key_deterministic():
