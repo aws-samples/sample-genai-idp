@@ -15,8 +15,7 @@ openpyxl>=3.0.10
 faker>=30.0.0
 defusedxml>=0.7.1
 PyYAML>=6.0
-# NOTE: no idp_common dependency. A feature is built with a plain `sam build`
-# that copies only hook/ to a temp dir, so a repo-relative path dep
-# (../../../lib/idp_common_pkg) cannot resolve. The small amount of
-# original-deletion logic we need is vendored in delete_helper.py instead
-# (keeps the feature self-contained / copyable).
+# NOTE: no idp_common dependency and no delete logic here. In
+# redactcopy_and_stop mode the HOST workflow_tracker deletes the original
+# (race-free, since it is the last writer for the execution) — the hook only
+# writes the redacted copy and returns halt=true.

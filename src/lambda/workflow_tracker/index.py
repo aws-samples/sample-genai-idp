@@ -51,6 +51,39 @@ CIRCUIT_BREAKER_ENABLED = (
 )
 CIRCUIT_BREAKER_MANAGER_ARN = os.environ.get("CIRCUIT_BREAKER_MANAGER_ARN", "")
 ALERTS_TOPIC_ARN = os.environ.get("ALERTS_TOPIC_ARN", "")
+INPUT_BUCKET = os.environ.get("INPUT_BUCKET", "")
+TRACKING_TABLE = os.environ.get("TRACKING_TABLE", "")
+
+
+def _delete_superseded_original(object_key: str) -> None:
+    """Fully delete an original that a preprocessing hook replaced with a
+    redacted copy (REDACTED_SUPERSEDED). The tracker is the LAST writer for the
+    execution, so it owns the delete — doing it in the hook mid-execution races
+    with this final write. Best-effort: never raise (the redacted copy already
+    exists and is processing independently)."""
+    try:
+        from idp_common.delete_documents import delete_single_document
+
+        if not TRACKING_TABLE or not INPUT_BUCKET:
+            logger.warning(
+                "Cannot delete superseded original %s: TRACKING_TABLE/INPUT_BUCKET unset",
+                object_key,
+            )
+            return
+        result = delete_single_document(
+            object_key=object_key,
+            tracking_table=dynamodb.Table(TRACKING_TABLE),
+            s3_client=s3,
+            input_bucket=INPUT_BUCKET,
+            output_bucket=OUTPUT_BUCKET or "",
+        )
+        logger.info(
+            "Deleted REDACTED_SUPERSEDED original %s: %s",
+            object_key,
+            result.get("deleted"),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error("Failed to delete superseded original %s: %s", object_key, e)
 
 
 def update_document_completion(
@@ -139,27 +172,25 @@ def update_document_completion(
                 f"{len(processed_doc.metering)} metering entries"
             )
 
-            # Use the processed document directly and update status
-            # This is safer than copying fields and ensures we don't miss any data
-            #
-            # Preserve a terminal status the workflow deliberately set on the
-            # document (e.g. REDACTED_SUPERSEDED from the preprocessing halt
-            # path): a SUCCEEDED execution that ended early must NOT be forced
-            # to COMPLETED, or the "this original was superseded by a redacted
-            # copy" signal is lost in the UI/tracking.
+            # A preprocessing hook (e.g. PII anonymization "redact copy and
+            # stop") sets REDACTED_SUPERSEDED on the wrapper to signal that this
+            # original was replaced by a redacted copy and should NOT remain.
+            # The tracker is the LAST writer for the execution, so it owns the
+            # delete — doing it in the hook mid-execution races with this write
+            # (the tracker would re-create the row). Delete the whole document
+            # (input S3 + tracking rows) here and return; nothing to persist.
             if workflow_status == "SUCCEEDED" and (
                 processed_doc.status == Status.REDACTED_SUPERSEDED
                 or wrapper_status == Status.REDACTED_SUPERSEDED.value
             ):
-                # Keep the terminal status the workflow set (from the wrapper
-                # when the document is a compressed reference).
-                processed_doc.status = Status.REDACTED_SUPERSEDED
-            else:
-                processed_doc.status = (
-                    Status.COMPLETED
-                    if workflow_status == "SUCCEEDED"
-                    else Status.FAILED
-                )
+                _delete_superseded_original(object_key)
+                return
+
+            # Use the processed document directly and update status. This is
+            # safer than copying fields and ensures we don't miss any data.
+            processed_doc.status = (
+                Status.COMPLETED if workflow_status == "SUCCEEDED" else Status.FAILED
+            )
             processed_doc.completion_time = datetime.now(timezone.utc).isoformat()
             document = processed_doc
 

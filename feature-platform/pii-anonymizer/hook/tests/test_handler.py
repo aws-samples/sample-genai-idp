@@ -80,20 +80,13 @@ def _redaction_stub(**over):
     return base
 
 
-def test_stop_mode_halts_writes_copy_and_deletes_original(monkeypatch):
+def test_stop_mode_halts_and_writes_copy(monkeypatch):
     mod = _load()
     monkeypatch.setattr(
         mod, "_redact_to_scratch", lambda doc, cfg, did: _redaction_stub()
     )
     copies = {}
     monkeypatch.setattr(mod._s3, "copy_object", lambda **kw: copies.update(kw) or {})
-    deleted = {}
-
-    def _fake_delete(k):
-        deleted["k"] = k
-        return True
-
-    monkeypatch.setattr(mod, "_delete_original", _fake_delete)
     out = mod.lambda_handler(
         {
             "hookPoint": "preprocessing",
@@ -110,27 +103,22 @@ def test_stop_mode_halts_writes_copy_and_deletes_original(monkeypatch):
         },
         None,
     )
+    # halt=true signals the workflow's terminal path; the HOST tracker deletes
+    # the original (race-free) — the hook does NOT delete.
     assert out["halt"] is True
     assert out["redactedKey"] == "foo(REDACTED).pdf"
     assert out["companionConfigVersion"] == "base__pii_target"
-    assert out["deletedOriginal"] is True
     assert copies["Bucket"] == "input-bkt"
     assert copies["Key"] == "foo(REDACTED).pdf"
     assert copies["Metadata"] == {"config-version": "base__pii_target"}
-    # the ORIGINAL (not the redacted copy) is deleted
-    assert deleted["k"] == "foo.pdf"
 
 
-def test_continue_mode_does_not_halt_or_delete(monkeypatch):
+def test_continue_mode_does_not_halt(monkeypatch):
     mod = _load()
     monkeypatch.setattr(
         mod, "_redact_to_scratch", lambda doc, cfg, did: _redaction_stub()
     )
     monkeypatch.setattr(mod._s3, "copy_object", lambda **kw: {})
-    called = {"delete": False}
-    monkeypatch.setattr(
-        mod, "_delete_original", lambda k: called.__setitem__("delete", True)
-    )
     out = mod.lambda_handler(
         {
             "hookPoint": "preprocessing",
@@ -148,8 +136,6 @@ def test_continue_mode_does_not_halt_or_delete(monkeypatch):
     )
     assert out["halt"] is False
     assert out["redactedKey"] == "a(REDACTED).pdf"
-    assert out["deletedOriginal"] is False
-    assert called["delete"] is False
 
 
 def test_store_mapping_opt_in(monkeypatch):
@@ -160,7 +146,6 @@ def test_store_mapping_opt_in(monkeypatch):
         lambda doc, cfg, did: _redaction_stub(mapping={"John Smith": "Jane Doe"}),
     )
     monkeypatch.setattr(mod._s3, "copy_object", lambda **kw: {})
-    monkeypatch.setattr(mod, "_delete_original", lambda k: True)
     stored = {}
     monkeypatch.setattr(
         mod,
@@ -214,7 +199,6 @@ def test_unknown_mode_defaults_to_stop(monkeypatch):
         mod, "_redact_to_scratch", lambda doc, cfg, did: _redaction_stub()
     )
     monkeypatch.setattr(mod._s3, "copy_object", lambda **kw: {})
-    monkeypatch.setattr(mod, "_delete_original", lambda k: True)
     out = mod.lambda_handler(
         {
             "hookPoint": "preprocessing",

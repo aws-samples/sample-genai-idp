@@ -122,28 +122,16 @@ Resources:
           INPUT_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-InputBucketName' }
           WORKING_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
           OUTPUT_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
-          # Only used to DELETE the original in redactcopy_and_stop mode.
-          TRACKING_TABLE_NAME: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
       Policies:
         - Statement:
             # Record the redaction audit row (metadata only).
             - Effect: Allow
               Action: dynamodb:PutItem
               Resource: !GetAtt RedactionAuditTable.Arn
-            # Delete the ORIGINAL in redactcopy_and_stop mode: read metadata +
-            # delete the doc/list/run rows via delete_single_document.
-            - Effect: Allow
-              Action:
-                - dynamodb:GetItem
-                - dynamodb:Query
-                - dynamodb:DeleteItem
-              Resource:
-                - { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableArn' }
-                - !Sub
-                  - '${Arn}/index/*'
-                  - Arn: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableArn' }
-            # Read source from Input + Working; write scratch + mapping; delete
-            # original on stop mode.
+            # Read the source document from Input + compressed state from Working.
+            # NOTE: the original is deleted by the HOST workflow_tracker in
+            # redactcopy_and_stop mode (race-free), so the hook needs no delete
+            # or tracking-table permissions.
             - Effect: Allow
               Action: s3:GetObject
               Resource:
@@ -169,25 +157,6 @@ Resources:
                 - 'arn:${AWS::Partition}:s3:::${Bucket}/*${RedactedSuffix}*'
                 - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-InputBucketName' }
                   RedactedSuffix: !Ref RedactedSuffix
-            # redactcopy_and_stop: delete the original from Input + its Output
-            # artifacts (delete_single_document). List needed to enumerate output.
-            - Effect: Allow
-              Action:
-                - s3:DeleteObject
-                - s3:ListBucket
-              Resource:
-                - !Sub
-                  - 'arn:${AWS::Partition}:s3:::${Bucket}'
-                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-InputBucketName' }
-                - !Sub
-                  - 'arn:${AWS::Partition}:s3:::${Bucket}/*'
-                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-InputBucketName' }
-                - !Sub
-                  - 'arn:${AWS::Partition}:s3:::${Bucket}'
-                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
-                - !Sub
-                  - 'arn:${AWS::Partition}:s3:::${Bucket}/*'
-                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
             # Store the optional PII mapping (opt-in) in the Output bucket.
             - Effect: Allow
               Action: s3:PutObject

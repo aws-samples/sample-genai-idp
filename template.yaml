@@ -5789,6 +5789,9 @@ Resources:
           DOCUMENT_TRACKING_MODE: "dynamodb"
           TRACKING_TABLE: !Ref TrackingTable
           OUTPUT_BUCKET: !Ref OutputBucket
+          # Needed to fully delete an original superseded by a redacted copy
+          # (REDACTED_SUPERSEDED terminal status from a preprocessing hook).
+          INPUT_BUCKET: !Ref InputBucket
           REPORTING_BUCKET:
             !If [
               ShouldCreateReportingBucket,
@@ -5815,17 +5818,32 @@ Resources:
         - S3CrudPolicy:
             BucketName: !Ref WorkingBucket
         # Document version manifests: enumerate output object versions and
-        # write runs/<run_id>/manifest.json to the output bucket.
+        # write runs/<run_id>/manifest.json to the output bucket. Also delete
+        # output objects when fully deleting a REDACTED_SUPERSEDED original.
         - Statement:
             - Effect: Allow
               Action:
                 - s3:ListBucketVersions
+                - s3:ListBucket
               Resource: !GetAtt OutputBucket.Arn
             - Effect: Allow
               Action:
                 - s3:GetObject
                 - s3:PutObject
+                - s3:DeleteObject
               Resource: !Sub "${OutputBucket.Arn}/*"
+        # Delete the input object of a REDACTED_SUPERSEDED original (the
+        # redacted copy replaces it). Input bucket read/list/delete.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:ListBucket
+              Resource: !GetAtt InputBucket.Arn
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:DeleteObject
+              Resource: !Sub "${InputBucket.Arn}/*"
         - Statement:
             - Effect: Allow
               Action:

@@ -75,9 +75,6 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 _INPUT_BUCKET = os.environ.get("INPUT_BUCKET", "")
 _WORKING_BUCKET = os.environ.get("WORKING_BUCKET", "")
 _AUDIT_TABLE = os.environ.get("AUDIT_TABLE_NAME", "")
-# Host TrackingTable — used only to DELETE the original in redactcopy_and_stop
-# mode (via idp_common.delete_documents.delete_single_document).
-_TRACKING_TABLE = os.environ.get("TRACKING_TABLE_NAME", "")
 # Marker suffix appended to the redacted copy's document id / key stem, e.g.
 # `report.pdf` -> `report(REDACTED).pdf`. The re-entrancy guard refuses to run
 # on any key whose stem already ends with this marker (prevents an infinite
@@ -394,36 +391,6 @@ def _store_mapping(
         return None
 
 
-def _delete_original(input_key: str) -> bool:
-    """Delete the original document entirely (S3 input/output + tracking rows)
-    via the host's tested helper, so a redactcopy_and_stop original does not
-    linger as a REDACTED_SUPERSEDED stub. Best-effort: a failure is logged and
-    never blocks the pipeline (the redacted copy is already written)."""
-    if not _TRACKING_TABLE or not _INPUT_BUCKET:
-        logger.warning("TRACKING_TABLE/INPUT_BUCKET not set; cannot delete original")
-        return False
-    try:
-        # Vendored copy of idp_common.delete_documents (boto3/stdlib only) — a
-        # feature builds with plain `sam build` (copies only hook/), so a
-        # repo-relative idp_common dependency can't resolve. See delete_documents.py.
-        from delete_documents import delete_single_document
-
-        table = _dynamodb.Table(_TRACKING_TABLE)
-        result = delete_single_document(
-            object_key=input_key,
-            tracking_table=table,
-            s3_client=_s3,
-            input_bucket=_INPUT_BUCKET,
-            output_bucket=_OUTPUT_BUCKET,
-        )
-        ok = bool(result.get("success"))
-        logger.info("Deleted original %s: %s", input_key, result.get("deleted"))
-        return ok
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Delete original failed (ignored): %s", exc)
-        return False
-
-
 # ---------------------------------------------------------------------------
 # Handler
 # ---------------------------------------------------------------------------
@@ -524,14 +491,11 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         }
     )
 
-    # (7) redacted-only: DELETE the original entirely (S3 + tracking) so it no
-    # longer appears anywhere — instead of leaving a REDACTED_SUPERSEDED stub.
-    # Uses the host's tested delete helper. Guarded so a delete failure never
-    # blocks the pipeline.
-    deleted_original = False
-    if halt:
-        deleted_original = _delete_original(input_key)
-
+    # (7) In redactcopy_and_stop mode the hook returns halt=true; the workflow's
+    # terminal state sets REDACTED_SUPERSEDED and the HOST workflow_tracker then
+    # deletes the original entirely (S3 + tracking). The delete is done there —
+    # NOT here — because the tracker is the last writer for the execution;
+    # deleting mid-execution would race with the tracker re-creating the row.
     return {
         "halt": halt,
         "documentId": document_id,
@@ -540,6 +504,5 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         "companionConfigVersion": companion_version,
         "piiCount": redaction["pii_count"],
         "replacements": redaction.get("replacements"),
-        "deletedOriginal": deleted_original,
         "mappingStored": bool(mapping_uri),
     }
