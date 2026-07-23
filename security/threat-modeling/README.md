@@ -32,7 +32,7 @@ This directory contains the comprehensive threat model for the GenAI IDP Acceler
 ## Directory Structure
 
 ```
-threat-modeling/
+security/threat-modeling/
 ├── README.md                                    ← You are here
 ├── threat-id-glossary.md                        ← All 62 threat IDs with cross-references
 │

@@ -25,10 +25,32 @@ its `make` target and the skill that documents how to run it.
 | Release-vs-release benchmark | `make benchmark-release …` (alias `make stacktest-benchmark`) | `.claude/skills/run-benchmarks.md` |
 | In-place upgrade (X→Y) test | `make stacktest-upgrade` (pointer) | `.claude/skills/test-upgrade.md` |
 | Full offline test battery (no AWS) | `make test` | `.claude/skills/full-test-battery.md` |
+| Curate security results into a public-safe snapshot | `python3 scripts/security/curate_results.py --date <YYYY-MM-DD> [--version <label>]` | `.claude/skills/curate-security-results.md` |
 
 VPC stack-tests auto-discover a suitable VPC via the `run-stack-tests` skill
 (it lists candidates, confirms with you, then passes `VPC_ID`/`SUBNET_IDS`/
 `LAMBDA_SG_ID`/`APIGW_VPCE_ID` as make params).
+
+## Security tests: coverage & auditable results
+
+The four security tests — **SRT** (SAST/deps), **ZAP DAST** (dynamic API scan),
+and **RBAC static + dynamic** (authorization) — are documented as a set, with
+their goals and threat-model cross-references, in
+[`security/README.md`](../../../security/README.md). After running them for a
+release, curate a **public-safe, redacted** snapshot into
+`security/test-results/<version>/` (one file per test + a `MANIFEST.md` tying
+the results to a version, git SHA, and date):
+
+```bash
+python3 scripts/security/curate_results.py --date <YYYY-MM-DD> [--version <label>]
+```
+
+Raw reports carry environment-specific identifiers (account IDs, Cognito pool
+IDs, API hostnames) and stay in gitignored `scratch/`/`.srt/` — only the curated
+summaries are committed. See
+[`.claude/skills/curate-security-results.md`](../../../.claude/skills/curate-security-results.md)
+for the runbook and [`security/test-results/README.md`](../../../security/test-results/README.md)
+for the process.
 
 ## Pipeline stages & triggers
 
