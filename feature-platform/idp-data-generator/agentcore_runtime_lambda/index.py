@@ -117,10 +117,13 @@ def _create_with_slr_retry(client, name, kwargs):
     raise last_err
 
 
+_SENTINEL_IDS = {"pending", "synthesis-agentcore-runtime"}
+
+
 def _delete(props, runtime_id):
     client = _control_client()
     name = props.get("AgentRuntimeName")
-    target = runtime_id if runtime_id and runtime_id != "pending" else None
+    target = runtime_id if runtime_id and runtime_id not in _SENTINEL_IDS else None
     if not target and name:
         target = _find_runtime_id(client, name)
     if not target:

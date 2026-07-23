@@ -253,8 +253,10 @@ const GenerateSyntheticDataModal = ({
     }
   };
 
+  const _usd = (n: number): string => (Number.isFinite(n) ? `$${Math.max(1, Math.round(n))}` : '—');
+  const _min = (n: number): number => (Number.isFinite(n) ? Math.max(1, Math.ceil(n)) : 1);
   const estimateText = estimate
-    ? `Estimated cost $${Math.round(estimate.estimated_usd_low)}–$${Math.round(estimate.estimated_usd_high)} · ~${Math.round(estimate.estimated_minutes_low)}–${Math.round(estimate.estimated_minutes_high)} min`
+    ? `Estimated cost ${_usd(estimate.estimated_usd_low)}–${_usd(estimate.estimated_usd_high)} · ~${_min(estimate.estimated_minutes_low)}–${_min(estimate.estimated_minutes_high)} min`
     : null;
 
   return (

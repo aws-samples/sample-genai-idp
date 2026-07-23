@@ -13,7 +13,10 @@ phases:
   pre_build:
     commands:
       - echo Logging in to Amazon ECR...
-      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      # Registry host is the ECR_REPO_URI up to the first '/', so the partition
+      # suffix (amazonaws.com / amazonaws.com.cn) is correct in every partition.
+      - REGISTRY_HOST="${ECR_REPO_URI%%/*}"
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin "$REGISTRY_HOST"
   build:
     commands:
       - echo "Building IDP Data Generator image (linux/arm64)..."

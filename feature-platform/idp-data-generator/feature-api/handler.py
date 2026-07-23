@@ -85,6 +85,26 @@ def _enqueue(message: Dict[str, Any]) -> str:
     return job_id
 
 
+MAX_DOC_COUNT = 100
+MIN_THRESHOLD = 1
+MAX_THRESHOLD = 10
+
+
+class _BadRequest(Exception):
+    """Raised for invalid request fields; surfaced as a 400."""
+
+
+def _int_field(body: Dict[str, Any], name: str, default: int, lo: int, hi: int) -> int:
+    raw = body.get(name, default)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise _BadRequest(f"{name} must be an integer")
+    if value < lo or value > hi:
+        raise _BadRequest(f"{name} must be between {lo} and {hi}")
+    return value
+
+
 def _handle_generate(body: Dict[str, Any]) -> Dict[str, Any]:
     # Two shapes: a natural-language prompt (the processor authors a schema), or
     # a preauthored schema + target version. Require one or the other.
@@ -97,8 +117,8 @@ def _handle_generate(body: Dict[str, Any]) -> Dict[str, Any]:
         "jobId": uuid.uuid4().hex,
         "prompt": prompt,
         "className": body.get("className"),
-        "docCount": int(body.get("docCount", 3)),
-        "threshold": int(body.get("threshold", 7)),
+        "docCount": _int_field(body, "docCount", 3, 1, MAX_DOC_COUNT),
+        "threshold": _int_field(body, "threshold", 7, MIN_THRESHOLD, MAX_THRESHOLD),
         "augment": bool(body.get("augment", False)),
         "scenario": (body.get("scenario") or "").strip(),
         "generateDocs": True,
@@ -122,8 +142,8 @@ def _handle_generate_from_config(body: Dict[str, Any]) -> Dict[str, Any]:
         "targetVersion": version_name,
         "className": class_name,
         "configVersion": version_name,
-        "docCount": int(body.get("docCount", 3)),
-        "threshold": int(body.get("threshold", 7)),
+        "docCount": _int_field(body, "docCount", 3, 1, MAX_DOC_COUNT),
+        "threshold": _int_field(body, "threshold", 7, MIN_THRESHOLD, MAX_THRESHOLD),
         "augment": bool(body.get("augment", False)),
         "scenario": (body.get("scenario") or "").strip(),
         "generateDocs": True,
@@ -148,8 +168,8 @@ def _estimate_cost(count: int, threshold: int) -> Dict[str, Any]:
 
 
 def _handle_estimate_cost(body: Dict[str, Any]) -> Dict[str, Any]:
-    count = int(body.get("docCount", 3))
-    threshold = int(body.get("threshold", 7))
+    count = _int_field(body, "docCount", 3, 1, MAX_DOC_COUNT)
+    threshold = _int_field(body, "threshold", 7, MIN_THRESHOLD, MAX_THRESHOLD)
     return _resp(200, {"estimate": _estimate_cost(count, threshold)})
 
 
@@ -259,6 +279,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         return _resp(404, {"error": f"no route for {method} {path}"})
     except json.JSONDecodeError:
         return _resp(400, {"error": "invalid JSON body"})
-    except Exception as exc:  # noqa: BLE001
+    except _BadRequest as exc:
+        return _resp(400, {"error": str(exc)})
+    except Exception:  # noqa: BLE001
         logger.exception("feature-api error")
-        return _resp(500, {"error": str(exc)})
+        return _resp(500, {"error": "internal error"})

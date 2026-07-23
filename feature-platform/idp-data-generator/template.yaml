@@ -256,6 +256,7 @@ Resources:
     Properties:
       LogGroupName: !Sub '/aws/lambda/${MainStackName}-${FeatureId}-docker-build-run'
       RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
 
   DockerBuildRun:
     Type: Custom::DockerBuild
@@ -469,6 +470,7 @@ Resources:
     Properties:
       LogGroupName: !Sub '/aws/lambda/${MainStackName}-${FeatureId}-runtime-manager'
       RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
 
   GeneratorAgentRuntime:
     Type: Custom::AgentCoreRuntime
@@ -627,6 +629,7 @@ Resources:
     Properties:
       LogGroupName: !Sub '/aws/lambda/${BootstrapProcessorFunction}'
       RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
 
   ###########################################################################
   # Feature API — HttpApi + Lambda, Cognito-authorized against the host User
@@ -715,6 +718,7 @@ Resources:
     Properties:
       LogGroupName: !Sub '/aws/lambda/${FeatureApiFunction}'
       RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
 
   ###########################################################################
   # UI deployer — copies the UMD bundle to the host WebUIBucket and registers
@@ -789,6 +793,7 @@ Resources:
     Properties:
       LogGroupName: !Sub '/aws/lambda/${UiDeployerFunction}'
       RetentionInDays: !Ref LogRetentionDays
+      KmsKeyId: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
 
   RegisterFeatureResource:
     Type: AWS::CloudFormation::CustomResource

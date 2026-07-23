@@ -43,6 +43,16 @@ def check_generator_availability_impl() -> str:
 
 DATA_GENERATOR_FEATURE_ID = "idp-data-generator"
 
+MAX_DOC_COUNT = 100
+
+
+def _clamp_doc_count(doc_count: int) -> int:
+    return max(1, min(int(doc_count), MAX_DOC_COUNT))
+
+
+def _clamp_threshold(threshold: int) -> int:
+    return max(1, min(int(threshold), 10))
+
 
 def list_available_extensions_impl() -> str:
     """List Feature Platform extensions installed on this IDP stack.
@@ -346,8 +356,8 @@ def request_document_generation_impl(
         "jobId": job_id,
         "prompt": "",
         "targetVersion": config_version,
-        "docCount": doc_count,
-        "threshold": threshold,
+        "docCount": _clamp_doc_count(doc_count),
+        "threshold": _clamp_threshold(threshold),
         "augment": augment,
         "scenario": scenario or "",
         "generateDocs": True,
@@ -471,8 +481,8 @@ def generate_from_existing_config_impl(
         "jobId": job_id,
         "prompt": "",
         "targetVersion": version_name,
-        "docCount": doc_count,
-        "threshold": threshold,
+        "docCount": _clamp_doc_count(doc_count),
+        "threshold": _clamp_threshold(threshold),
         "augment": augment,
         "scenario": scenario or "",
         "generateDocs": True,
