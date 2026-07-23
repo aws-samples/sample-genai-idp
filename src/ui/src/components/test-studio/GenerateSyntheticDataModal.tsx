@@ -10,6 +10,7 @@ import {
   Input,
   Textarea,
   Select,
+  Checkbox,
   Alert,
   Tabs,
   SegmentedControl,
@@ -388,8 +389,9 @@ const GenerateSyntheticDataModal = ({
           />
         </FormField>
 
-        {/* Scan/fax-style augmentation is hidden pending an upstream SEED fix
-            (augraphy can wedge the run); augment stays false. */}
+        <Checkbox checked={augment} onChange={({ detail }) => setAugment(detail.checked)}>
+          Apply scan/fax-style image augmentation
+        </Checkbox>
 
         <Alert type="info">
           Generation uses Amazon Bedrock and incurs cost proportional to the document count and quality.

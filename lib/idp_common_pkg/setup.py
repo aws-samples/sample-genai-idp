@@ -105,7 +105,7 @@ extras_require = {
     # Install this in an isolated environment (the generator's own container /
     # AgentCore runtime), NOT alongside idp_common[ocr|evaluation|all].
     "synthesis-generator": [
-        "seed-data>=0.0.5",
+        "seed-data>=0.0.6",
     ],
     # Full package with all dependencies
     "all": [

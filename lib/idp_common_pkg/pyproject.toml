@@ -141,7 +141,7 @@ synthesis = [
 # isolated environment (the generator's own container / AgentCore runtime), NOT
 # alongside idp_common[ocr|evaluation|all].
 synthesis-generator = [
-  "seed-data>=0.0.5",
+  "seed-data>=0.0.6",
 ]
 
 # Code intelligence module dependencies
