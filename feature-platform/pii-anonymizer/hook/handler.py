@@ -403,7 +403,10 @@ def _delete_original(input_key: str) -> bool:
         logger.warning("TRACKING_TABLE/INPUT_BUCKET not set; cannot delete original")
         return False
     try:
-        from idp_common.delete_documents import delete_single_document
+        # Vendored copy of idp_common.delete_documents (boto3/stdlib only) — a
+        # feature builds with plain `sam build` (copies only hook/), so a
+        # repo-relative idp_common dependency can't resolve. See delete_documents.py.
+        from delete_documents import delete_single_document
 
         table = _dynamodb.Table(_TRACKING_TABLE)
         result = delete_single_document(
