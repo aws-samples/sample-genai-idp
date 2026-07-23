@@ -14,6 +14,7 @@ import {
   Button,
   Container,
   Header,
+  Modal,
   Select,
   SpaceBetween,
   Spinner,
@@ -40,6 +41,29 @@ const RedactionReportView: React.FC<{ api: ApiClient; enabled: boolean }> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [window, setWindow] = useState(WINDOW_OPTIONS[0]);
+  // Mapping modal state
+  const [mapDoc, setMapDoc] = useState<string | null>(null);
+  const [mapRows, setMapRows] = useState<Array<{ original: string; synthetic: string }>>([]);
+  const [mapLoading, setMapLoading] = useState(false);
+  const [mapError, setMapError] = useState<string | null>(null);
+
+  function viewMapping(docId: string) {
+    setMapDoc(docId);
+    setMapRows([]);
+    setMapError(null);
+    setMapLoading(true);
+    api
+      .getMapping(docId)
+      .then((m) => {
+        const entries = Object.entries(m.mapping || {}).map(([original, synthetic]) => ({
+          original,
+          synthetic: String(synthetic),
+        }));
+        setMapRows(entries);
+      })
+      .catch((e: unknown) => setMapError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setMapLoading(false));
+  }
 
   const load = React.useCallback(() => {
     if (!enabled) return;
@@ -143,9 +167,56 @@ const RedactionReportView: React.FC<{ api: ApiClient; enabled: boolean }> = ({
               cell: (r) => r.createdAt,
               sortingField: 'createdAt',
             },
+            {
+              id: 'mapping',
+              header: 'PII mapping',
+              cell: (r) =>
+                r.mappingStored ? (
+                  <Button variant="inline-link" onClick={() => viewMapping(r.documentId)}>
+                    View mapping
+                  </Button>
+                ) : (
+                  <Box color="text-status-inactive">not stored</Box>
+                ),
+            },
           ]}
         />
       )}
+
+      <Modal
+        visible={mapDoc !== null}
+        onDismiss={() => setMapDoc(null)}
+        header="PII mapping (sensitive)"
+        footer={
+          <Box float="right">
+            <Button variant="primary" onClick={() => setMapDoc(null)}>
+              Close
+            </Button>
+          </Box>
+        }
+      >
+        <SpaceBetween size="s">
+          <Alert type="warning">
+            This is the original→synthetic mapping — it contains the real PII. You
+            can see it because you have access to the config version that processed
+            the original document.
+          </Alert>
+          {mapError && <Alert type="error">{mapError}</Alert>}
+          {mapLoading ? (
+            <Spinner />
+          ) : (
+            <Table
+              variant="embedded"
+              items={mapRows}
+              empty={<Box textAlign="center">No mapping entries.</Box>}
+              columnDefinitions={[
+                { id: 'original', header: 'Original', cell: (m) => m.original },
+                { id: 'synthetic', header: 'Synthetic replacement', cell: (m) => m.synthetic },
+              ]}
+            />
+          )}
+        </SpaceBetween>
+      </Modal>
     </Container>
   );
 };

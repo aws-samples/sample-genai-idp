@@ -21,9 +21,10 @@ What it does, per document:
      write lands back in the Input bucket and re-triggers processing, and MUST
      NOT be redacted again. Belt-and-suspenders on top of the companion config
      version having no preprocessing hook.
-  3. Read this feature's settings from the `preprocessing` block of the config
-     version the document is running under (mode, redaction options, detection
-     model, companion config version name).
+  3. Read this hook's settings from the dispatcher-flattened `argsMap` (generic
+     key/value args on the preHook entry): mode, companion_config_version,
+     model_id/model_provider, redaction_mode, detection_dpi, store_mapping. This
+     keeps the preprocessing step hook-agnostic — no PII-specific config fields.
   4. Run the vendored pii-anonymizer detector+redactor over the source document
      (PDFs go through the image path -> redacted PDF; text/office paths keep
      their native type) writing a redacted copy to a Working-bucket scratch key.
@@ -31,25 +32,26 @@ What it does, per document:
      REDACTED marker in its name (e.g. report(REDACTED).pdf), stamping S3
      metadata `config-version=<companion version>` so the spawned execution
      processes it normally (no preprocessing hook).
-  6. Return a halt decision:
-       mode == "redacted_only"           -> halt=true  (original superseded)
-       mode == "redacted_and_unredacted" -> halt=false (original also processed)
+  5b. OPTIONAL (store_mapping=true): persist the original->synthetic mapping,
+     CMK-encrypted, in the Output bucket for the RBAC-gated Redaction Report view.
+  6. Halt decision + original handling:
+       redactcopy_and_stop     -> halt=true; DELETE the original entirely
+                                  (S3 + tracking) so only the redacted copy remains.
+       redactcopy_and_continue -> halt=false; the original is also processed.
 
 Idempotency: the redacted key is derived deterministically from the source key,
 so a Step Functions retry overwrites the same object instead of spawning
 duplicates.
 
-Error posture: onError is set at registration time. For redacted_only the
+Error posture: onError is set at registration time. For redactcopy_and_stop the
 feature registers the hook with onError=fail (better to stop than to leak PII
-downstream); for redacted_and_unredacted, onError=continue is acceptable since
+downstream); for redactcopy_and_continue, onError=continue is acceptable since
 the original is expected to carry PII anyway. The handler still returns a
 structured error dict on failure so the dispatcher can apply that policy.
 """
 
 from __future__ import annotations
 
-import base64
-import gzip
 import json
 import logging
 import os
@@ -72,39 +74,37 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 _INPUT_BUCKET = os.environ.get("INPUT_BUCKET", "")
 _WORKING_BUCKET = os.environ.get("WORKING_BUCKET", "")
-_CONFIG_TABLE = os.environ.get("CONFIGURATION_TABLE_NAME", "")
 _AUDIT_TABLE = os.environ.get("AUDIT_TABLE_NAME", "")
+# Host TrackingTable — used only to DELETE the original in redactcopy_and_stop
+# mode (via idp_common.delete_documents.delete_single_document).
+_TRACKING_TABLE = os.environ.get("TRACKING_TABLE_NAME", "")
 # Marker suffix appended to the redacted copy's document id / key stem, e.g.
 # `report.pdf` -> `report(REDACTED).pdf`. The re-entrancy guard refuses to run
 # on any key whose stem already ends with this marker (prevents an infinite
 # redaction loop, since the copy re-enters the Input bucket).
 _REDACTED_SUFFIX = os.environ.get("REDACTED_SUFFIX", "(REDACTED)")
-# Fallback companion version name if the config's preprocessing block omits one.
+# Fallback companion version name if the hook args omit one.
 _DEFAULT_COMPANION_VERSION = os.environ.get(
     "DEFAULT_COMPANION_CONFIG_VERSION", "default"
 )
+_OUTPUT_BUCKET = os.environ.get("OUTPUT_BUCKET", "")
+
+# Redaction modes (the `mode` hook arg). Names mirror the wizard-generated
+# config-version suffixes so operators can reason about them consistently:
+#   redactcopy_and_stop     -> write redacted copy, DELETE the original
+#   redactcopy_and_continue -> write redacted copy, also process the original
+_MODE_STOP = "redactcopy_and_stop"
+_MODE_CONTINUE = "redactcopy_and_continue"
+_VALID_MODES = {_MODE_STOP, _MODE_CONTINUE}
 
 _s3 = boto3.client("s3")
 _dynamodb = boto3.resource("dynamodb")
 # Bedrock client the vendored processors expect to be handed in (Converse API).
 _bedrock = boto3.client("bedrock-runtime")
 
-_CONFIG_METADATA_FIELDS = {
-    "Configuration",
-    "CreatedAt",
-    "UpdatedAt",
-    "IsActive",
-    "Description",
-    "Managed",
-    "BdaProjectArn",
-    "BdaSyncStatus",
-    "BdaLastSyncedAt",
-}
-
 
 # ---------------------------------------------------------------------------
-# Small inline helpers (kept dependency-free of idp_common so the feature stays
-# copyable — mirrors the sample-health-insurance-review hook).
+# Small inline helpers
 # ---------------------------------------------------------------------------
 def _read_s3_json(uri: str) -> Optional[Dict[str, Any]]:
     parsed = urlparse(uri)
@@ -134,49 +134,6 @@ def _load_document(raw: Any) -> Optional[Dict[str, Any]]:
     return raw
 
 
-def _decompress_config_item(item: Dict[str, Any]) -> Dict[str, Any]:
-    """Return a config row's payload as a plain dict, handling the compressed
-    (gzip+base64) storage variant. Mirrors the dispatcher's _decompress_item."""
-    storage = item.get("_config_storage")
-    compressed = item.get("_compressed_config")
-    if storage == "compressed" and compressed is not None:
-        try:
-            raw = compressed.value if hasattr(compressed, "value") else compressed
-            if isinstance(raw, str):
-                raw = base64.b64decode(raw)
-            text = gzip.decompress(raw).decode("utf-8")
-            parsed = json.loads(text)
-            if isinstance(parsed, dict):
-                return parsed
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Config decompress failed: %s", exc)
-            return {}
-    return {
-        k: v
-        for k, v in item.items()
-        if k not in _CONFIG_METADATA_FIELDS and not k.startswith("_")
-    }
-
-
-def _read_preprocessing_config(version: str) -> Dict[str, Any]:
-    """Read the `preprocessing` block from Config#<version>. Returns {} if the
-    version, row, or block is absent."""
-    if not _CONFIG_TABLE or not version:
-        return {}
-    try:
-        table = _dynamodb.Table(_CONFIG_TABLE)
-        resp = table.get_item(Key={"Configuration": f"Config#{version}"})
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Config read failed for version=%s: %s", version, exc)
-        return {}
-    item = resp.get("Item") or {}
-    if not item:
-        return {}
-    payload = _decompress_config_item(item)
-    block = payload.get("preprocessing")
-    return block if isinstance(block, dict) else {}
-
-
 def _skip(document_id: Optional[str], reason: str) -> Dict[str, Any]:
     logger.info("PII preprocessing skipped for %s: %s", document_id, reason)
     return {"halt": False, "skipped": True, "documentId": document_id, "reason": reason}
@@ -193,51 +150,38 @@ def _ext_of(key: str) -> str:
     return key.rsplit(".", 1)[-1].lower() if "." in key else ""
 
 
-def _build_pii_config(pp: Dict[str, Any]) -> Dict[str, Any]:
-    """Build the plain-dict config the vendored processors expect from this
-    feature's `preprocessing` block. Sensible defaults keep it working with a
-    minimal block."""
-    model = pp.get("model") or {}
+def _build_pii_config(args: Dict[str, str]) -> Dict[str, Any]:
+    """Build the plain-dict config the vendored processors expect from the
+    hook's generic key/value args (the `argsMap` the dispatcher passes). All
+    values are strings. Sensible defaults keep it working with no args at all.
+
+    Recognized args:
+      model_id, model_provider, redaction_mode ("synthetic"|"blackout"),
+      detection_dpi.
+    """
     # Default to Claude Haiku: PII detection over dense forms (W2, lending) needs
     # a large output-token budget — Nova Lite's smaller cap truncates the
     # detection JSON, and the vendored detector fails loudly (by design, to never
     # silently drop PII). Haiku balances recall/cost; Nova Lite stays selectable.
-    model_id = (
-        model.get("id")
-        or pp.get("detection_model")
-        or "us.anthropic.claude-haiku-4-5-20251001-v1:0"
-    )
-    provider = model.get("provider") or (
+    model_id = args.get("model_id") or "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+    provider = args.get("model_provider") or (
         "amazon" if ("nova" in model_id or "titan" in model_id) else "anthropic"
     )
-    redaction = pp.get("redaction") or {}
-    mode = redaction.get("mode") or pp.get("redaction_mode") or "synthetic"
-    cfg: Dict[str, Any] = {
+    redaction_mode = args.get("redaction_mode") or "synthetic"
+    try:
+        dpi = int(args.get("detection_dpi") or 300)
+    except (TypeError, ValueError):
+        dpi = 300
+    return {
         "model": {"id": model_id, "provider": provider},
-        "redaction": {"mode": mode},
-        # Defaults for blocks the vendored processors access with a hard
-        # `config[...]` (NOT .get) — omitting them KeyErrors the image path:
+        "redaction": {"mode": redaction_mode},
+        # Blocks the vendored processors access with a hard `config[...]` (NOT
+        # .get) — omitting them KeyErrors the image path:
         #   pdf_image_processor: config["performance"]["dpi"],
         #                        config["processing"]["process_embedded_images"]
-        "performance": {"dpi": 300, "max_retries": 3, "timeout_seconds": 300},
+        "performance": {"dpi": dpi, "max_retries": 3, "timeout_seconds": 300},
         "processing": {"approach": "image", "process_embedded_images": False},
     }
-    # Pass through / override with any tuning blocks the config carries.
-    for k in (
-        "detection",
-        "synthetic",
-        "concurrency",
-        "validation",
-        "clustering",
-        "performance",
-        "processing",
-    ):
-        v = pp.get(k)
-        if isinstance(v, dict):
-            # Merge onto the defaults so partial overrides don't drop required keys.
-            base = cfg.get(k)
-            cfg[k] = {**base, **v} if isinstance(base, dict) else v
-    return cfg
 
 
 def _redact_to_scratch(
@@ -363,6 +307,9 @@ def _redact_to_scratch(
         "out_ext": actual_ext,
         "pii_count": result.get("pii_count", 0),
         "replacements": result.get("replacements"),
+        # original -> synthetic value map (synthetic mode). Contains real PII;
+        # only persisted when store_mapping is enabled. Absent for blackout.
+        "mapping": result.get("pii_mapping"),
     }
 
 
@@ -412,6 +359,68 @@ def _write_audit(row: Dict[str, Any]) -> None:
         logger.warning("Audit write failed (ignored): %s", exc)
 
 
+def _store_mapping(
+    document_id: str, original_config_version: str, mapping: Dict[str, Any]
+) -> Optional[str]:
+    """Persist the original->synthetic mapping as JSON in the Output bucket
+    (CMK-encrypted by the bucket default). Returns the s3:// URI, or None on
+    failure. This object CONTAINS REAL PII — the Redaction Report reveals it
+    only to users whose allowedConfigVersions include original_config_version
+    (enforced in the feature API, feature-api/handler.py)."""
+    if not _OUTPUT_BUCKET:
+        logger.warning("OUTPUT_BUCKET not set; cannot store mapping")
+        return None
+    key = f"pii_mappings/{document_id}/mapping.json"
+    body = json.dumps(
+        {
+            "documentId": document_id,
+            "originalConfigVersion": original_config_version,
+            "createdAt": _now_iso(),
+            # {original PII value: synthetic replacement}
+            "mapping": mapping,
+        },
+        default=str,
+    ).encode("utf-8")
+    try:
+        _s3.put_object(
+            Bucket=_OUTPUT_BUCKET,
+            Key=key,
+            Body=body,
+            ContentType="application/json",
+        )
+        return f"s3://{_OUTPUT_BUCKET}/{key}"
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Mapping store failed (ignored): %s", exc)
+        return None
+
+
+def _delete_original(input_key: str) -> bool:
+    """Delete the original document entirely (S3 input/output + tracking rows)
+    via the host's tested helper, so a redactcopy_and_stop original does not
+    linger as a REDACTED_SUPERSEDED stub. Best-effort: a failure is logged and
+    never blocks the pipeline (the redacted copy is already written)."""
+    if not _TRACKING_TABLE or not _INPUT_BUCKET:
+        logger.warning("TRACKING_TABLE/INPUT_BUCKET not set; cannot delete original")
+        return False
+    try:
+        from idp_common.delete_documents import delete_single_document
+
+        table = _dynamodb.Table(_TRACKING_TABLE)
+        result = delete_single_document(
+            object_key=input_key,
+            tracking_table=table,
+            s3_client=_s3,
+            input_bucket=_INPUT_BUCKET,
+            output_bucket=_OUTPUT_BUCKET,
+        )
+        ok = bool(result.get("success"))
+        logger.info("Deleted original %s: %s", input_key, result.get("deleted"))
+        return ok
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Delete original failed (ignored): %s", exc)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Handler
 # ---------------------------------------------------------------------------
@@ -434,18 +443,20 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     if _is_redacted_key(input_key):
         return _skip(document_id, "input is already a redacted copy (REDACTED marker)")
 
-    # (3) settings from the config version this document runs under
+    # (3) settings from the hook's generic args (the dispatcher-flattened
+    # argsMap). This keeps the pipeline hook-agnostic — all PII specifics live
+    # in the hook's args, not in named config fields.
+    args = event.get("argsMap") or {}
     version = document.get("config_version") or _DEFAULT_COMPANION_VERSION
-    pp = _read_preprocessing_config(version)
-    if pp.get("enabled") is False:
-        return _skip(document_id, f"preprocessing disabled in Config#{version}")
-    mode = pp.get("mode") or "redacted_only"
+    mode = args.get("mode") or _MODE_STOP
+    if mode not in _VALID_MODES:
+        logger.warning("Unknown mode %r; defaulting to %s", mode, _MODE_STOP)
+        mode = _MODE_STOP
     companion_version = (
-        pp.get("companion_config_version")
-        or pp.get("redacted_config_version")
-        or _DEFAULT_COMPANION_VERSION
+        args.get("companion_config_version") or _DEFAULT_COMPANION_VERSION
     )
-    pii_config = _build_pii_config(pp)
+    store_mapping = str(args.get("store_mapping", "false")).lower() == "true"
+    pii_config = _build_pii_config(args)
 
     if not _INPUT_BUCKET or not _WORKING_BUCKET:
         return _skip(document_id, "INPUT_BUCKET/WORKING_BUCKET env not set")
@@ -457,9 +468,9 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         # rather than silently dropping the document.
         return _skip(document_id, "unsupported format; passed through unredacted")
 
-    # (5) copy the redacted copy into the Input bucket under the reserved prefix,
-    # stamping the companion config-version as S3 metadata so the spawned
-    # execution processes it normally (no preprocessing hook on that version).
+    # (5) copy the redacted copy into the Input bucket beside the original with
+    # the REDACTED marker, stamping the companion config-version as S3 metadata
+    # so the spawned execution processes it normally (no preprocessing hook).
     redacted_key = _redacted_input_key(input_key, redaction.get("out_ext"))
     _s3.copy_object(
         CopySource={"Bucket": _WORKING_BUCKET, "Key": redaction["scratch_key"]},
@@ -477,9 +488,20 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         mode,
     )
 
-    halt = mode == "redacted_only"
+    # (5b) OPTIONAL: persist the original->synthetic mapping (a re-identification
+    # key — contains real PII). Stored CMK-encrypted in the Output bucket; the
+    # Redaction Report only reveals it to users with access to the ORIGINAL's
+    # config version. Off unless store_mapping=true.
+    mapping_uri = None
+    if store_mapping and redaction.get("mapping"):
+        mapping_uri = _store_mapping(
+            document_id or input_key, version, redaction["mapping"]
+        )
 
-    # (6) audit row — metadata only, never PII.
+    halt = mode == _MODE_STOP
+
+    # (6) audit row — metadata only, never PII. Records the ORIGINAL's config
+    # version so the report can RBAC-gate the mapping view.
     _write_audit(
         {
             "documentId": document_id,
@@ -489,13 +511,23 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             "redactedKey": redacted_key,
             "mode": mode,
             "companionConfigVersion": companion_version,
-            "configVersion": version,
+            "originalConfigVersion": version,
             "piiCount": int(redaction["pii_count"] or 0),
             "replacements": int(redaction.get("replacements") or 0),
             "halted": halt,
+            "mappingStored": bool(mapping_uri),
+            "mappingUri": mapping_uri or "",
             "executionArn": event.get("executionArn") or "",
         }
     )
+
+    # (7) redacted-only: DELETE the original entirely (S3 + tracking) so it no
+    # longer appears anywhere — instead of leaving a REDACTED_SUPERSEDED stub.
+    # Uses the host's tested delete helper. Guarded so a delete failure never
+    # blocks the pipeline.
+    deleted_original = False
+    if halt:
+        deleted_original = _delete_original(input_key)
 
     return {
         "halt": halt,
@@ -505,4 +537,6 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         "companionConfigVersion": companion_version,
         "piiCount": redaction["pii_count"],
         "replacements": redaction.get("replacements"),
+        "deletedOriginal": deleted_original,
+        "mappingStored": bool(mapping_uri),
     }

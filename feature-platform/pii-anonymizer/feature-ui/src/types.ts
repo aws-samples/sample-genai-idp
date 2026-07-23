@@ -37,10 +37,12 @@ export interface RedactionRow {
   redactedKey?: string;
   mode?: string;
   companionConfigVersion?: string;
-  configVersion?: string;
+  originalConfigVersion?: string;
   piiCount?: number;
   replacements?: number;
   halted?: boolean;
+  mappingStored?: boolean;
+  mappingUri?: string;
   executionArn?: string;
 }
 

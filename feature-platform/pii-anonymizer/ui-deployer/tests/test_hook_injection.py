@@ -53,48 +53,65 @@ def mod(monkeypatch):
     return m
 
 
-def test_injects_hook_into_empty_preprocessing(mod):
-    preset: dict[str, Any] = {"preprocessing": {"mode": "redacted_only"}}
+def test_fills_arn_preserving_args(mod):
+    """The bundled preset ships a full preHook entry with args (minus the ARN);
+    injection fills the ARN and preserves the args."""
+    preset: dict[str, Any] = {
+        "preprocessing": {
+            "preHook": [
+                {
+                    "featureId": "pii-anonymizer",
+                    "order": 100,
+                    "onError": "fail",
+                    "enabled": True,
+                    "args": [
+                        {"key": "mode", "value": "redactcopy_and_stop"},
+                        {"key": "store_mapping", "value": "false"},
+                    ],
+                }
+            ]
+        }
+    }
     mod._inject_preprocessing_hook(preset)
-
     hooks = preset["preprocessing"]["preHook"]
     assert len(hooks) == 1
     h = hooks[0]
-    assert h["featureId"] == "pii-anonymizer"
     assert h["arn"] == _HOOK_ARN
-    # redacted_only fails closed
-    assert h["onError"] == "fail"
-    assert h["enabled"] is True
-    assert "point" not in h
-    assert preset["preprocessing"]["mode"] == "redacted_only"
+    # args preserved
+    assert {"key": "mode", "value": "redactcopy_and_stop"} in h["args"]
+    assert {"key": "store_mapping", "value": "false"} in h["args"]
 
 
-def test_process_both_mode_uses_continue(mod):
-    preset: dict[str, Any] = {"preprocessing": {"mode": "redacted_and_unredacted"}}
-    mod._inject_preprocessing_hook(preset)
-    assert preset["preprocessing"]["preHook"][0]["onError"] == "continue"
-
-
-def test_creates_preprocessing_block_when_missing(mod):
+def test_adds_minimal_entry_when_missing(mod):
     preset: dict[str, Any] = {"classes": []}
     mod._inject_preprocessing_hook(preset)
-    # default mode redacted_only -> fail closed
-    assert preset["preprocessing"]["preHook"][0]["arn"] == _HOOK_ARN
-    assert preset["preprocessing"]["preHook"][0]["onError"] == "fail"
+    h = preset["preprocessing"]["preHook"][0]
+    assert h["arn"] == _HOOK_ARN
+    assert h["onError"] == "fail"
+    assert h["args"] == []
 
 
 def test_is_idempotent_on_reapply(mod):
     """Stack Update re-runs the deployer; the same featureId must not duplicate."""
-    preset: dict[str, Any] = {"preprocessing": {}}
+    preset: dict[str, Any] = {
+        "preprocessing": {
+            "preHook": [
+                {"featureId": "pii-anonymizer", "args": [{"key": "mode", "value": "x"}]}
+            ]
+        }
+    }
     mod._inject_preprocessing_hook(preset)
     mod._inject_preprocessing_hook(preset)
-    assert len(preset["preprocessing"]["preHook"]) == 1
+    hooks = preset["preprocessing"]["preHook"]
+    assert len(hooks) == 1
+    assert hooks[0]["arn"] == _HOOK_ARN
+    # args still preserved after re-apply
+    assert hooks[0]["args"] == [{"key": "mode", "value": "x"}]
 
 
 def test_preserves_other_features_hooks(mod):
     preset: dict[str, Any] = {
         "preprocessing": {
-            "mode": "redacted_only",
             "preHook": [
                 {"featureId": "some-other-feature", "arn": "arn:other", "order": 50}
             ],
@@ -108,6 +125,6 @@ def test_preserves_other_features_hooks(mod):
 def test_no_arn_skips_injection(mod, monkeypatch):
     """Without the hook ARN we must not write a half-formed entry."""
     monkeypatch.setattr(mod, "_HOOK_FUNCTION_ARN", "")
-    preset: dict[str, Any] = {"preprocessing": {"mode": "redacted_only"}}
+    preset: dict[str, Any] = {"preprocessing": {}}
     mod._inject_preprocessing_hook(preset)
     assert "preHook" not in preset["preprocessing"]

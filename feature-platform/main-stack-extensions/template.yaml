@@ -102,6 +102,20 @@ Parameters:
       Grant write access scoped to that reserved prefix only. Leave blank to
       skip the export.
 
+  UsersTableName:
+    Type: String
+    Default: ''
+    Description: Name of the main stack's UsersTable (stores per-user
+      allowedConfigVersions scope). Re-exported as `<MainStackName>-UsersTableName`
+      / `-UsersTableArn` so a feature can RBAC-gate a sensitive view by the
+      caller's config-version access (has an EmailIndex GSI). Leave blank to skip.
+
+  UsersTableArn:
+    Type: String
+    Default: ''
+    Description: ARN of the main stack's UsersTable (for the re-exported
+      `<MainStackName>-UsersTableArn`).
+
   WebUIBucketArn:
     Type: String
     Description: ARN of the WebUIBucket.
@@ -224,6 +238,7 @@ Conditions:
   HasOutputBucket: !Not [!Equals [!Ref OutputBucketName, '']]
   HasWorkingBucket: !Not [!Equals [!Ref WorkingBucketName, '']]
   HasInputBucket: !Not [!Equals [!Ref InputBucketName, '']]
+  HasUsersTable: !Not [!Equals [!Ref UsersTableName, '']]
   HasDiscoveryBucket: !Not [!Equals [!Ref DiscoveryBucketName, '']]
   HasCustomerManagedEncryptionKey: !Not [!Equals [!Ref CustomerManagedEncryptionKeyArn, '']]
   HasSellerBuckets: !Not [!Equals [!Join ['', !Ref SellerBucketObjectArns], '']]
@@ -769,6 +784,25 @@ Outputs:
     Value: !Ref InputBucketName
     Export:
       Name: !Sub '${MainStackName}-InputBucketName'
+
+  UsersTableName:
+    Condition: HasUsersTable
+    Description: >-
+      Re-export of the main stack's UsersTable name. A feature imports this to
+      RBAC-gate a sensitive view by the caller's allowedConfigVersions (query
+      the EmailIndex GSI), matching the host's document-scoping rule.
+    Value: !Ref UsersTableName
+    Export:
+      Name: !Sub '${MainStackName}-UsersTableName'
+
+  UsersTableArn:
+    Condition: HasUsersTable
+    Description: >-
+      Re-export of the main stack's UsersTable ARN (for scoped dynamodb:Query
+      on the table + its EmailIndex GSI).
+    Value: !Ref UsersTableArn
+    Export:
+      Name: !Sub '${MainStackName}-UsersTableArn'
 
   TrackingTableArn:
     Description: >-

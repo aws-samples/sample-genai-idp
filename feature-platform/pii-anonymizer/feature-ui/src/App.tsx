@@ -54,6 +54,13 @@ const App: React.FC<FeatureContext> = ({
       }
     >
       <SpaceBetween size="l">
+        <Alert type="warning" header="Experimental feature">
+          PII Anonymization is <b>experimental and unproven</b>. Try it, but
+          validate the redacted output yourself and do not rely on it as a sole
+          PII control. We want your feedback — what works, what&apos;s missing,
+          and the use cases you need — via GitHub issues at{' '}
+          <b>github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws</b>.
+        </Alert>
         {!subscriptionActive && (
           <Alert type="info" header="Read-only">
             This feature&apos;s subscription is not active. Views are shown but

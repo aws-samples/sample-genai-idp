@@ -195,6 +195,15 @@ def _read_hooks_from_config(
         arn = h.get("arn")
         if not arn:
             continue
+        # Generic hook args: an optional list of {key, value} string pairs the
+        # hook reads its settings from (keeps the platform hook-agnostic — the
+        # PII feature, or any preprocessing job, carries its own config here).
+        raw_args = h.get("args")
+        args: List[Dict[str, Any]] = (
+            [a for a in raw_args if isinstance(a, dict) and "key" in a]
+            if isinstance(raw_args, list)
+            else []
+        )
         valid.append(
             {
                 "featureId": h.get("featureId") or "unknown",
@@ -203,6 +212,7 @@ def _read_hooks_from_config(
                 if h.get("order") is not None
                 else 100,
                 "onError": h.get("onError") or "continue",
+                "args": args,
             }
         )
     valid.sort(key=lambda h: (h["order"], h["featureId"]))
@@ -272,12 +282,22 @@ def lambda_handler(event: Dict[str, Any], _ctx: Any) -> Dict[str, Any]:
 
     results: List[Dict[str, Any]] = []
     for h in hooks:
+        # Provide args both as the raw list and a flattened {key: value} map for
+        # hook convenience. Values are strings; the hook parses as needed.
+        args_list = h.get("args") or []
+        args_map = {
+            str(a["key"]): a.get("value")
+            for a in args_list
+            if isinstance(a, dict) and "key" in a
+        }
         payload = {
             "hookPoint": point,
             "featureId": h["featureId"],
             "document": event.get("document"),
             "section": event.get("section"),
             "executionArn": event.get("executionArn"),
+            "args": args_list,
+            "argsMap": args_map,
         }
         r = _invoke_hook(h, payload)
         results.append(r)

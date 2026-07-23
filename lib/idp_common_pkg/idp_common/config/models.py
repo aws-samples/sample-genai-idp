@@ -462,6 +462,12 @@ class PipelineHook(BaseModel):
         description="continue | skip-remaining | fail",
     )
     enabled: bool = Field(default=True, description="Whether this hook is active")
+    args: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Generic key/value args passed to the hook (list of "
+        "{key, value}); the hook reads its own config from these, keeping the "
+        "pipeline hook-agnostic.",
+    )
 
 
 class PreprocessingConfig(BaseModel):

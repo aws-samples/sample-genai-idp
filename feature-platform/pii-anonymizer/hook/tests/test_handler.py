@@ -68,105 +68,137 @@ def test_missing_input_key_skips():
     assert out["halt"] is False and out["skipped"] is True
 
 
-def test_redacted_only_mode_halts_and_writes_copy(monkeypatch):
+def _redaction_stub(**over):
+    base = {
+        "scratch_key": "pii_scratch/x/redacted_foo.txt",
+        "out_ext": "pdf",
+        "pii_count": 3,
+        "replacements": 3,
+        "mapping": None,
+    }
+    base.update(over)
+    return base
+
+
+def test_stop_mode_halts_writes_copy_and_deletes_original(monkeypatch):
     mod = _load()
     monkeypatch.setattr(
-        mod,
-        "_read_preprocessing_config",
-        lambda v: {
-            "mode": "redacted_only",
-            "companion_config_version": "base__standard",
-        },
-    )
-    monkeypatch.setattr(
-        mod,
-        "_redact_to_scratch",
-        lambda doc, cfg, did: {
-            "scratch_key": "pii_scratch/x/redacted_foo.txt",
-            "out_ext": "pdf",
-            "pii_count": 3,
-            "replacements": 3,
-        },
+        mod, "_redact_to_scratch", lambda doc, cfg, did: _redaction_stub()
     )
     copies = {}
-    monkeypatch.setattr(
-        mod._s3,
-        "copy_object",
-        lambda **kw: copies.update(kw) or {},
-    )
+    monkeypatch.setattr(mod._s3, "copy_object", lambda **kw: copies.update(kw) or {})
+    deleted = {}
+
+    def _fake_delete(k):
+        deleted["k"] = k
+        return True
+
+    monkeypatch.setattr(mod, "_delete_original", _fake_delete)
     out = mod.lambda_handler(
         {
             "hookPoint": "preprocessing",
+            "argsMap": {
+                "mode": "redactcopy_and_stop",
+                "companion_config_version": "base__pii_target",
+            },
             "document": {
                 "input_key": "foo.pdf",
                 "id": "foo.pdf",
                 "input_bucket": "input-bkt",
-                "config_version": "base__pii_only",
+                "config_version": "base__pii_stop",
             },
         },
         None,
     )
     assert out["halt"] is True
     assert out["redactedKey"] == "foo(REDACTED).pdf"
-    assert out["companionConfigVersion"] == "base__standard"
-    # copied into the Input bucket beside the original with the REDACTED marker,
-    # with companion config-version stamped as metadata
+    assert out["companionConfigVersion"] == "base__pii_target"
+    assert out["deletedOriginal"] is True
     assert copies["Bucket"] == "input-bkt"
     assert copies["Key"] == "foo(REDACTED).pdf"
-    assert copies["Metadata"] == {"config-version": "base__standard"}
-    assert copies["CopySource"] == {
-        "Bucket": "working-bkt",
-        "Key": "pii_scratch/x/redacted_foo.txt",
-    }
+    assert copies["Metadata"] == {"config-version": "base__pii_target"}
+    # the ORIGINAL (not the redacted copy) is deleted
+    assert deleted["k"] == "foo.pdf"
 
 
-def test_process_both_mode_does_not_halt(monkeypatch):
+def test_continue_mode_does_not_halt_or_delete(monkeypatch):
     mod = _load()
     monkeypatch.setattr(
-        mod,
-        "_read_preprocessing_config",
-        lambda v: {
-            "mode": "redacted_and_unredacted",
-            "companion_config_version": "base__standard",
-        },
-    )
-    monkeypatch.setattr(
-        mod,
-        "_redact_to_scratch",
-        lambda doc, cfg, did: {
-            "scratch_key": "s/k.pdf",
-            "out_ext": "pdf",
-            "pii_count": 1,
-            "replacements": 1,
-        },
+        mod, "_redact_to_scratch", lambda doc, cfg, did: _redaction_stub()
     )
     monkeypatch.setattr(mod._s3, "copy_object", lambda **kw: {})
+    called = {"delete": False}
+    monkeypatch.setattr(
+        mod, "_delete_original", lambda k: called.__setitem__("delete", True)
+    )
     out = mod.lambda_handler(
         {
             "hookPoint": "preprocessing",
+            "argsMap": {
+                "mode": "redactcopy_and_continue",
+                "companion_config_version": "base__pii_target",
+            },
             "document": {
                 "input_key": "a.pdf",
                 "id": "a.pdf",
-                "config_version": "base__both",
+                "config_version": "base__pii_go",
             },
         },
         None,
     )
     assert out["halt"] is False
-    assert out.get("skipped") is not True  # it DID redact, just doesn't halt
     assert out["redactedKey"] == "a(REDACTED).pdf"
+    assert out["deletedOriginal"] is False
+    assert called["delete"] is False
+
+
+def test_store_mapping_opt_in(monkeypatch):
+    mod = _load()
+    monkeypatch.setattr(
+        mod,
+        "_redact_to_scratch",
+        lambda doc, cfg, did: _redaction_stub(mapping={"John Smith": "Jane Doe"}),
+    )
+    monkeypatch.setattr(mod._s3, "copy_object", lambda **kw: {})
+    monkeypatch.setattr(mod, "_delete_original", lambda k: True)
+    stored = {}
+    monkeypatch.setattr(
+        mod,
+        "_store_mapping",
+        lambda did, ver, m: stored.update({"m": m, "ver": ver}) or "s3://x/y",
+    )
+    # store_mapping=false -> not stored
+    out = mod.lambda_handler(
+        {
+            "hookPoint": "preprocessing",
+            "argsMap": {"mode": "redactcopy_and_continue"},
+            "document": {"input_key": "a.pdf", "id": "a.pdf", "config_version": "v1"},
+        },
+        None,
+    )
+    assert out["mappingStored"] is False
+    assert stored == {}
+    # store_mapping=true -> stored, keyed to the ORIGINAL's config version
+    out2 = mod.lambda_handler(
+        {
+            "hookPoint": "preprocessing",
+            "argsMap": {"mode": "redactcopy_and_continue", "store_mapping": "true"},
+            "document": {"input_key": "b.pdf", "id": "b.pdf", "config_version": "v1"},
+        },
+        None,
+    )
+    assert out2["mappingStored"] is True
+    assert stored["ver"] == "v1"
+    assert stored["m"] == {"John Smith": "Jane Doe"}
 
 
 def test_unsupported_format_passes_through(monkeypatch):
     mod = _load()
-    monkeypatch.setattr(
-        mod, "_read_preprocessing_config", lambda v: {"mode": "redacted_only"}
-    )
-    # _redact_to_scratch returns None for unsupported formats
     monkeypatch.setattr(mod, "_redact_to_scratch", lambda doc, cfg, did: None)
     out = mod.lambda_handler(
         {
             "hookPoint": "preprocessing",
+            "argsMap": {"mode": "redactcopy_and_stop"},
             "document": {"input_key": "movie.mp3", "id": "m"},
         },
         None,
@@ -176,17 +208,26 @@ def test_unsupported_format_passes_through(monkeypatch):
     assert "unsupported" in out["reason"]
 
 
-def test_disabled_preprocessing_skips(monkeypatch):
+def test_unknown_mode_defaults_to_stop(monkeypatch):
     mod = _load()
-    monkeypatch.setattr(mod, "_read_preprocessing_config", lambda v: {"enabled": False})
+    monkeypatch.setattr(
+        mod, "_redact_to_scratch", lambda doc, cfg, did: _redaction_stub()
+    )
+    monkeypatch.setattr(mod._s3, "copy_object", lambda **kw: {})
+    monkeypatch.setattr(mod, "_delete_original", lambda k: True)
     out = mod.lambda_handler(
-        {"hookPoint": "preprocessing", "document": {"input_key": "a.pdf", "id": "a"}},
+        {
+            "hookPoint": "preprocessing",
+            "argsMap": {"mode": "banana"},
+            "document": {"input_key": "a.pdf", "id": "a.pdf", "config_version": "v1"},
+        },
         None,
     )
-    assert out["halt"] is False and out["skipped"] is True
+    assert out["mode"] == mod._MODE_STOP
+    assert out["halt"] is True
 
 
-def test_build_pii_config_defaults():
+def test_build_pii_config_from_args():
     mod = _load()
     cfg = mod._build_pii_config({})
     # Default is Claude Haiku (large output budget for dense forms).
@@ -196,13 +237,17 @@ def test_build_pii_config_defaults():
     # Required hard-accessed blocks for the image path are always present.
     assert cfg["performance"]["dpi"] == 300
     assert "process_embedded_images" in cfg["processing"]
-    # amazon inferred for a nova id
-    cfg2 = mod._build_pii_config({"model": {"id": "us.amazon.nova-lite-v1:0"}})
+    # amazon inferred for a nova id; dpi + redaction from args
+    cfg2 = mod._build_pii_config(
+        {
+            "model_id": "us.amazon.nova-lite-v1:0",
+            "redaction_mode": "blackout",
+            "detection_dpi": "150",
+        }
+    )
     assert cfg2["model"]["provider"] == "amazon"
-    # partial performance override merges onto defaults (keeps dpi)
-    cfg3 = mod._build_pii_config({"performance": {"max_retries": 5}})
-    assert cfg3["performance"]["dpi"] == 300
-    assert cfg3["performance"]["max_retries"] == 5
+    assert cfg2["redaction"]["mode"] == "blackout"
+    assert cfg2["performance"]["dpi"] == 150
 
 
 def test_redacted_input_key_deterministic():

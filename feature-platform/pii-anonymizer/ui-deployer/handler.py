@@ -235,14 +235,16 @@ def _inject_preprocessing_hook(preset: Dict[str, Any]) -> None:
     orphan the hook. Baking it into the preset payload keeps the redaction
     settings and the hook together atomically.
 
-    onError posture: redacted_only MUST fail closed (better to stop than to leak
-    PII downstream). We read the preset's preprocessing.mode to decide: `fail`
-    for redacted_only, else `continue`.
+    The preprocessing step is GENERIC: the preHook entry carries the Lambda ARN
+    plus a list of key/value `args` the hook reads its own settings from (mode,
+    model, redaction, companion, store_mapping). The bundled preset already
+    ships that full entry (minus the ARN, unknown until this stack deploys); we
+    just FILL IN the ARN here from HOOK_FUNCTION_ARN, preserving the entry's args.
+    If the preset has no matching entry, we add a minimal one (ARN only) so the
+    hook still fires with its defaults.
 
-    The hook ARN isn't known until the feature stack deploys, so it's injected
-    here at install time from HOOK_FUNCTION_ARN (set via !GetAtt in
-    template.yaml). Idempotent on Update: an existing entry for this featureId
-    is replaced, not duplicated.
+    Idempotent on Update: the entry for this featureId keeps its args; only the
+    arn is (re)set.
     """
     if not _HOOK_FUNCTION_ARN:
         logger.warning(
@@ -254,33 +256,28 @@ def _inject_preprocessing_hook(preset: Dict[str, Any]) -> None:
     if not isinstance(pp, dict):
         pp = {}
         preset["preprocessing"] = pp
-    mode = pp.get("mode") or "redacted_only"
-    on_error = "fail" if mode == "redacted_only" else "continue"
     existing = pp.get("preHook")
     if not isinstance(existing, list):
         existing = []
-    kept = [
-        h
-        for h in existing
-        if not (isinstance(h, dict) and h.get("featureId") == _FEATURE_ID)
-    ]
-    kept.append(
-        {
-            "featureId": _FEATURE_ID,
-            "arn": _HOOK_FUNCTION_ARN,
-            "order": 100,
-            "onError": on_error,
-            "enabled": True,
-        }
-    )
-    pp["preHook"] = kept
-    logger.info(
-        "Injected preprocessing hook %s into preset preprocessing.preHook "
-        "(mode=%s, onError=%s)",
-        _HOOK_FUNCTION_ARN,
-        mode,
-        on_error,
-    )
+    found = False
+    for h in existing:
+        if isinstance(h, dict) and h.get("featureId") == _FEATURE_ID:
+            # Preserve the entry's args (mode/model/redaction/...); set the ARN.
+            h["arn"] = _HOOK_FUNCTION_ARN
+            found = True
+    if not found:
+        existing.append(
+            {
+                "featureId": _FEATURE_ID,
+                "arn": _HOOK_FUNCTION_ARN,
+                "order": 100,
+                "onError": "fail",
+                "enabled": True,
+                "args": [],
+            }
+        )
+    pp["preHook"] = existing
+    logger.info("Filled preprocessing hook ARN %s into the preset", _HOOK_FUNCTION_ARN)
 
 
 def _apply_config_preset() -> None:

@@ -290,67 +290,13 @@ Resources:
             collapsible: true
             defaultExpanded: false
             sectionLabel: Preprocessing
-            description: >-
-              Standalone preprocessing step that runs FIRST, before OCR/BDA
-              routing, in both processing modes. Home of the `preHook` pipeline
-              extension point — Lambda functions invoked on the source document
-              before any processing (used by the PII Anonymization extension to
-              redact PII before the classification/extraction models see it).
-              Most fields below (mode, model, redaction, companion version) are
-              read by that extension; a plain accelerator install can leave this
-              collapsed/empty.
+            description: Standalone preprocessing step that runs FIRST, before OCR/BDA routing, in both processing modes.
             properties:
               enabled:
                 type: boolean
                 description: Master switch for preprocessing hooks in this config version.
                 default: true
                 order: 0
-              mode:
-                type: string
-                enum: ["redacted_only", "redacted_and_unredacted"]
-                default: redacted_only
-                description: >-
-                  PII Anonymization mode. redacted_only: process only the
-                  de-identified copy; the original is marked REDACTED_SUPERSEDED
-                  and not processed further. redacted_and_unredacted: process the
-                  original AND a redacted copy as separate documents (scope each
-                  to different users via allowedConfigVersions).
-                order: 1
-              companion_config_version:
-                type: string
-                description: >-
-                  Config version the redacted copy is processed under. MUST NOT
-                  itself carry a preprocessing hook (a reserved re-entrancy guard
-                  also prevents double-redaction). The Config Pairing wizard sets
-                  this to "<base>__standard".
-                order: 2
-              model:
-                type: object
-                sectionLabel: Detection model
-                description: Bedrock model for the PII detection pass.
-                order: 3
-                properties:
-                  id:
-                    type: string
-                    description: "Model id. Claude Haiku is recommended (large output budget for dense forms); Nova Lite is cheaper but may truncate."
-                    default: "us.anthropic.claude-haiku-4-5-20251001-v1:0"
-                    order: 0
-                  provider:
-                    type: string
-                    enum: ["anthropic", "amazon"]
-                    default: anthropic
-                    order: 1
-              redaction:
-                type: object
-                sectionLabel: Redaction style
-                order: 4
-                properties:
-                  mode:
-                    type: string
-                    enum: ["synthetic", "blackout"]
-                    default: synthetic
-                    description: "synthetic: structure-preserving fake values (keeps extraction accuracy). blackout: solid boxes / [REDACTED]."
-                    order: 0
               preHook:
                 type: array
                 collapsible: true
@@ -358,24 +304,25 @@ Resources:
                 sectionLabel: Preprocessing pipeline hooks
                 description: >-
                   Lambda functions invoked on the source document BEFORE any
-                  processing step (the only pre-step extension point). A hook may
-                  return halt=true to end the execution (e.g. after spawning a
-                  redacted copy). The Lambda ARN must EITHER be tagged
-                  `idp:feature-id=<anything>` OR have a name starting with
-                  `GENAIIDP-`; other functions are rejected by the dispatcher's
-                  IAM policy at invoke time.
+                  processing step (the only pre-step extension point). Generic:
+                  each hook is a Lambda ARN plus a list of key/value args the
+                  hook reads its own configuration from (e.g. the PII
+                  Anonymization extension reads mode/model/redaction here). A
+                  hook may return halt=true to end the execution. The Lambda ARN
+                  must EITHER be tagged `idp:feature-id=<anything>` OR have a
+                  name starting with `GENAIIDP-`; other functions are rejected by
+                  the dispatcher's IAM policy at invoke time.
                 listLabel: Preprocessing pipeline hooks
                 itemLabel: Hook
                 order: 99
                 items:
                   type: object
                   required:
-                    - featureId
                     - arn
                   properties:
                     featureId:
                       type: string
-                      description: Feature that owns this hook (label only)
+                      description: Feature/owner that provides this hook (label only)
                       order: 0
                     arn:
                       type: string
@@ -384,22 +331,45 @@ Resources:
                         `idp:feature-id=<anything>` OR have a function name
                         beginning with `GENAIIDP-`.
                       order: 1
+                    args:
+                      type: array
+                      sectionLabel: Hook arguments
+                      description: >-
+                        Key/value arguments passed to the hook (as strings). The
+                        hook reads its own configuration from these — this keeps
+                        the preprocessing step generic and reusable for any job.
+                      listLabel: Arguments
+                      itemLabel: Argument
+                      order: 2
+                      items:
+                        type: object
+                        required:
+                          - key
+                        properties:
+                          key:
+                            type: string
+                            description: Argument name
+                            order: 0
+                          value:
+                            type: string
+                            description: Argument value (string)
+                            order: 1
                     order:
                       type: number
                       description: Execution order (lower = earlier)
                       default: 100
-                      order: 2
+                      order: 3
                     onError:
                       type: string
                       enum: ["continue", "fail", "skip-remaining"]
                       default: continue
                       description: Behavior when this hook errors
-                      order: 3
+                      order: 4
                     enabled:
                       type: boolean
                       description: Disable without removing
                       default: true
-                      order: 4
+                      order: 5
           ocr:
             order: 3
             type: object

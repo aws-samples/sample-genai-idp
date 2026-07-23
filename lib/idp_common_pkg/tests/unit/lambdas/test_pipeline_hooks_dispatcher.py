@@ -223,6 +223,60 @@ def test_preprocessing_reads_prehook_from_own_section(monkeypatch):
     assert [h["featureId"] for h in hooks] == ["pii"]
 
 
+def test_hook_args_parsed_and_passed_in_payload(monkeypatch):
+    """Generic hook args (list of {key,value}) are parsed from config and
+    delivered to the hook as both `args` and a flattened `argsMap`."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+
+    class _Table:
+        def get_item(self, Key):
+            return {
+                "Item": {
+                    "Configuration": "Config#default",
+                    "preprocessing": {
+                        "preHook": [
+                            {
+                                "featureId": "pii",
+                                "arn": "arn:pii",
+                                "args": [
+                                    {"key": "mode", "value": "redactcopy_and_stop"},
+                                    {"key": "store_mapping", "value": "true"},
+                                    {"not_a_key": "x"},  # dropped: no key
+                                ],
+                            }
+                        ],
+                    },
+                }
+            }
+
+    hooks = mod._read_hooks_from_config(_Table(), "default", "preprocessing")
+    assert hooks[0]["args"] == [
+        {"key": "mode", "value": "redactcopy_and_stop"},
+        {"key": "store_mapping", "value": "true"},
+    ]
+
+    # end-to-end: the invoke payload carries args + argsMap
+    monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: hooks)
+    monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "default")
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: object())
+    seen = {}
+
+    def _capture(h, payload):
+        seen.update(payload)
+        return {
+            "featureId": "pii",
+            "arn": "arn:pii",
+            "ok": True,
+            "result": {"halt": False},
+        }
+
+    monkeypatch.setattr(mod, "_invoke_hook", _capture)
+    mod.lambda_handler({"hookPoint": "preprocessing", "document": {}}, None)
+    assert seen["argsMap"] == {"mode": "redactcopy_and_stop", "store_mapping": "true"}
+    assert {"key": "mode", "value": "redactcopy_and_stop"} in seen["args"]
+
+
 def test_halt_aggregated_from_hook_result(monkeypatch):
     """A successful hook returning result.halt=true surfaces top-level halt."""
     monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")

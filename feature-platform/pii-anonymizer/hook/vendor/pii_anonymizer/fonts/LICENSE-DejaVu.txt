@@ -1,0 +1,9 @@
+DejaVuSans.ttf — DejaVu Fonts
+Bundled so the image-path redactor renders synthetic replacement text at the
+correct (bounding-box-fitted) size. Without a TrueType font present, PIL falls
+back to load_default() (a tiny fixed-size bitmap that ignores the requested
+size), which made the replacement labels far too small.
+
+DejaVu fonts are licensed under a permissive license (Bitstream Vera Fonts
+Copyright + Arev derivative), free for any use including redistribution and
+embedding. See: https://dejavu-fonts.github.io/License.html

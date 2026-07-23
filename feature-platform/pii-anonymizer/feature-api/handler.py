@@ -36,9 +36,56 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 _AUDIT_TABLE = os.environ.get("AUDIT_TABLE_NAME", "")
 _HOOK_FUNCTION_ARN = os.environ.get("HOOK_FUNCTION_ARN", "")
+_USERS_TABLE = os.environ.get("USERS_TABLE_NAME", "")
+_OUTPUT_BUCKET = os.environ.get("OUTPUT_BUCKET", "")
 _WINDOW_RE = re.compile(r"^(\d+)([hdw])$")
 
 _dynamodb = boto3.resource("dynamodb")
+_s3 = boto3.client("s3")
+
+
+def _caller_claims(event: Dict[str, Any]) -> Dict[str, Any]:
+    """JWT claims the HTTP API's Cognito authorizer attached to the request."""
+    return (
+        event.get("requestContext", {})
+        .get("authorizer", {})
+        .get("jwt", {})
+        .get("claims", {})
+    ) or {}
+
+
+def _caller_email(event: Dict[str, Any]) -> str:
+    c = _caller_claims(event)
+    return c.get("email") or c.get("cognito:username") or c.get("sub") or ""
+
+
+def _caller_groups(event: Dict[str, Any]) -> list:
+    raw = _caller_claims(event).get("cognito:groups") or []
+    if isinstance(raw, str):
+        # Cognito serializes the groups claim as a bracketed string over HTTP API.
+        raw = [g for g in raw.strip("[]").replace(",", " ").split() if g]
+    return list(raw)
+
+
+def _caller_allowed_versions(email: str) -> Optional[list]:
+    """The caller's allowedConfigVersions scope from the host UsersTable, or
+    None if unrestricted (no scope set / lookup unavailable)."""
+    if not _USERS_TABLE or not email:
+        return None
+    try:
+        from boto3.dynamodb.conditions import Key as _Key
+
+        table = _dynamodb.Table(_USERS_TABLE)
+        resp = table.query(
+            IndexName="EmailIndex", KeyConditionExpression=_Key("email").eq(email)
+        )
+        items = resp.get("Items", [])
+        if items:
+            scope = items[0].get("allowedConfigVersions")
+            return list(scope) if scope else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("User scope lookup failed for %s: %s", email, exc)
+    return None
 
 
 def _parse_window(raw: Optional[str]) -> Optional[timedelta]:
@@ -106,6 +153,20 @@ def _get_row(doc_id: str) -> Optional[Dict[str, Any]]:
     return _to_plain(item) if item else None
 
 
+def _read_mapping(uri: str) -> Optional[Dict[str, Any]]:
+    """Read the stored mapping JSON (contains real PII) from its s3:// URI."""
+    from urllib.parse import urlparse
+
+    p = urlparse(uri)
+    try:
+        resp = _s3.get_object(Bucket=p.netloc, Key=p.path.lstrip("/"))
+        body = json.loads(resp["Body"].read().decode("utf-8"))
+        return body if isinstance(body, dict) else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not read mapping %s: %s", uri, exc)
+        return None
+
+
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     path = event.get("rawPath", "/")
     qs = event.get("queryStringParameters") or {}
@@ -147,6 +208,43 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 "asOf": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             },
         )
+
+    # GET /report/{docId}/mapping — RBAC-GATED. Returns the original->synthetic
+    # PII mapping (a re-identification key) ONLY to a caller whose
+    # allowedConfigVersions include the ORIGINAL document's config version.
+    mm = re.match(r"^/report/(.+)/mapping$", path)
+    if mm:
+        doc_id = unquote(mm.group(1))
+        try:
+            row = _get_row(doc_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("get report row failed")
+            return _response(500, {"error": str(exc)})
+        if not row:
+            return _response(404, {"error": f"no redaction record for {doc_id!r}"})
+        if not row.get("mappingStored") or not row.get("mappingUri"):
+            return _response(404, {"error": "no stored mapping for this document"})
+
+        # RBAC: caller must be allowed the ORIGINAL's config version. Admins
+        # (or users with no scope restriction) pass; a scoped user must have the
+        # original's config version in their allowedConfigVersions.
+        original_version = row.get("originalConfigVersion") or ""
+        groups = _caller_groups(event)
+        allowed = _caller_allowed_versions(_caller_email(event))
+        is_admin = "Admin" in groups
+        if not is_admin and allowed is not None and original_version not in allowed:
+            return _response(
+                403,
+                {
+                    "error": "Access denied: you do not have access to the "
+                    "config version that processed the original document."
+                },
+            )
+
+        mapping_doc = _read_mapping(row["mappingUri"])
+        if mapping_doc is None:
+            return _response(404, {"error": "stored mapping not readable"})
+        return _response(200, mapping_doc)
 
     m = re.match(r"^/report/(.+)$", path)
     if m:

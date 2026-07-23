@@ -25,6 +25,7 @@ import {
   Alert,
   Box,
   Button,
+  Checkbox,
   Container,
   FormField,
   Header,
@@ -46,16 +47,16 @@ const HOOK_FEATURE_ID = 'pii-anonymizer';
 
 const MODE_OPTIONS = [
   {
-    value: 'redacted_only',
-    label: 'Redacted only',
+    value: 'redactcopy_and_stop',
+    label: 'Redact copy and stop',
     description:
-      'Process ONLY the de-identified copy. The original is marked REDACTED_SUPERSEDED and not processed further. PII never reaches the model.',
+      'Write the de-identified copy, then DELETE the original entirely so only the redacted version remains. PII never reaches the model.',
   },
   {
-    value: 'redacted_and_unredacted',
-    label: 'Process both',
+    value: 'redactcopy_and_continue',
+    label: 'Redact copy and continue',
     description:
-      'Process the original AND a redacted copy as separate documents. Scope each to different users via allowedConfigVersions RBAC.',
+      'Write the de-identified copy AND keep processing the original as a separate document. Scope each to different users via allowedConfigVersions RBAC.',
   },
 ];
 
@@ -86,6 +87,7 @@ const ConfigPairingView: React.FC<{ enabled: boolean; hookFunctionArn: string | 
   const [mode, setMode] = useState<Opt>(MODE_OPTIONS[0]);
   const [model, setModel] = useState<Opt>(MODEL_OPTIONS[0]);
   const [redaction, setRedaction] = useState<Opt>(REDACTION_OPTIONS[0]);
+  const [storeMapping, setStoreMapping] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ initiating: string; companion: string } | null>(
@@ -104,9 +106,16 @@ const ConfigPairingView: React.FC<{ enabled: boolean; hookFunctionArn: string | 
 
   useEffect(refresh, [refresh]);
 
-  const suffix = mode.value === 'redacted_only' ? '__pii_redacted_only' : '__pii_both';
-  const initiatingName = base ? `${base.value}${suffix}` : '';
-  const companionName = base ? `${base.value}__standard` : '';
+  // Short, intuitive suffixes (config version names are capped at 50 chars):
+  //   __pii_stop    initiating, redactcopy_and_stop
+  //   __pii_go      initiating, redactcopy_and_continue
+  //   __pii_target  companion (processes the redacted copy)
+  const suffix = mode.value === 'redactcopy_and_stop' ? '__pii_stop' : '__pii_go';
+  // Truncate the base so the full name (with the longest suffix) stays <= 50.
+  const maxBase = 50 - '__pii_target'.length;
+  const baseTrunc = base ? base.value.slice(0, maxBase) : '';
+  const initiatingName = base ? `${baseTrunc}${suffix}` : '';
+  const companionName = base ? `${baseTrunc}__pii_target` : '';
 
   async function createPair() {
     if (!base) return;
@@ -133,32 +142,33 @@ const ConfigPairingView: React.FC<{ enabled: boolean; hookFunctionArn: string | 
         `PII companion of ${base.value} — processes the redacted copy (no preprocessing hook).`,
       );
 
-      // Initiating: base + preprocessing block. The hook ARN is injected by the
-      // ui-deployer into whatever version the preset installs; here we mark the
-      // block so the host's applyFeatureConfigPreset / hook registration can
-      // resolve it. We set featureId so the register step can fill the ARN.
+      // Initiating: base + a GENERIC preprocessing preHook. The hook reads all
+      // its PII settings from `args` (keeping the preprocessing step reusable
+      // for any job). onError=fail for stop mode (fail closed — never leak PII),
+      // else continue. The hook ARN comes from the feature API's /config (GET).
+      const args = [
+        { key: 'mode', value: mode.value },
+        { key: 'companion_config_version', value: companionName },
+        { key: 'model_id', value: model.value },
+        {
+          key: 'model_provider',
+          value: model.value.includes('nova') ? 'amazon' : 'anthropic',
+        },
+        { key: 'redaction_mode', value: redaction.value },
+        { key: 'store_mapping', value: storeMapping ? 'true' : 'false' },
+      ];
       const initiating = {
         ...baseConfig,
         preprocessing: {
           enabled: true,
-          mode: mode.value,
-          companion_config_version: companionName,
-          model: {
-            id: model.value,
-            provider: model.value.includes('nova') ? 'amazon' : 'anthropic',
-          },
-          redaction: { mode: redaction.value },
-          // The preprocessing hook entry the dispatcher reads. onError=fail for
-          // redacted_only (fail closed — never leak PII), else continue. The
-          // hook ARN comes from the feature API's /config (GET), so the wizard
-          // writes a fully-resolved entry.
           preHook: [
             {
               featureId: HOOK_FEATURE_ID,
               arn: hookFunctionArn,
               enabled: true,
               order: 100,
-              onError: mode.value === 'redacted_only' ? 'fail' : 'continue',
+              onError: mode.value === 'redactcopy_and_stop' ? 'fail' : 'continue',
+              args,
             },
           ],
         },
@@ -202,7 +212,7 @@ const ConfigPairingView: React.FC<{ enabled: boolean; hookFunctionArn: string | 
 
   const versionOptions: Opt[] = versions
     // Don't offer feature-derived versions as a base (avoid nesting).
-    .filter((v) => !/__pii_(redacted_only|both)$|__standard$/.test(v.versionName))
+    .filter((v) => !/__pii_(stop|go|target)$/.test(v.versionName))
     .map((v) => ({
       value: v.versionName,
       label: v.versionName + (v.isActive ? ' (active)' : ''),
@@ -255,7 +265,7 @@ const ConfigPairingView: React.FC<{ enabled: boolean; hookFunctionArn: string | 
 
             <FormField
               label="PII detection model"
-              description="Runs a detection pass per page before processing. Nova Lite is the cost-sensitive default."
+              description="Runs a detection pass per page before processing. Claude Haiku is the default (large output budget for dense forms)."
             >
               <Select
                 selectedOption={model}
@@ -270,6 +280,19 @@ const ConfigPairingView: React.FC<{ enabled: boolean; hookFunctionArn: string | 
                 onChange={({ detail }) => setRedaction(detail.selectedOption as Opt)}
                 options={REDACTION_OPTIONS}
               />
+            </FormField>
+
+            <FormField
+              label="Store PII mapping (sensitive)"
+              description="When synthetic redaction is used, save the original→fake value map so it can be viewed in the Redaction Report. The mapping IS real PII (a re-identification key); it is encrypted and shown only to users with access to the original's config version. Off by default."
+            >
+              <Checkbox
+                checked={storeMapping}
+                onChange={({ detail }) => setStoreMapping(detail.checked)}
+                disabled={redaction.value !== 'synthetic'}
+              >
+                Store original→synthetic mapping for this pair
+              </Checkbox>
             </FormField>
 
             {base && (

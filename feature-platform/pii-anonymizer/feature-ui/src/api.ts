@@ -14,10 +14,18 @@ export interface FeatureConfig {
   hookFunctionArn: string | null;
 }
 
+export interface MappingResponse {
+  documentId: string;
+  originalConfigVersion: string;
+  createdAt: string;
+  mapping: Record<string, string>; // original PII value -> synthetic replacement
+}
+
 export interface ApiClient {
   getConfig: () => Promise<FeatureConfig>;
   listReport: (opts?: { window?: string }) => Promise<RedactionReportResponse>;
   getRow: (docId: string) => Promise<RedactionRow>;
+  getMapping: (docId: string) => Promise<MappingResponse>;
 }
 
 class ApiError extends Error {}
@@ -55,5 +63,7 @@ export function createApiClient(
     },
     getRow: (docId: string) =>
       call(`/report/${encodeURIComponent(docId)}`) as Promise<RedactionRow>,
+    getMapping: (docId: string) =>
+      call(`/report/${encodeURIComponent(docId)}/mapping`) as Promise<MappingResponse>,
   };
 }

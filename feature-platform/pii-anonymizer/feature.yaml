@@ -11,22 +11,23 @@ featureId: pii-anonymizer
 displayName: "PII Anonymization"
 version: 0.1.1
 description: |
-  Detect and redact PII (names, SSNs, dates of birth, addresses, phone numbers,
-  emails, and more) from documents BEFORE they reach the classification and
-  extraction models. A standalone preprocessing hook writes a de-identified copy
-  of each source document and re-submits it for processing under a companion
-  config version, so raw PII never transits a GenAI model.
+  [EXPERIMENTAL] Detect and redact PII (names, SSNs, dates of birth, addresses,
+  phone numbers, emails, and more) from documents BEFORE they reach the
+  classification and extraction models, so raw PII never transits a GenAI model.
+  A preprocessing hook writes a de-identified copy of each source document and
+  re-submits it under a companion config version.
 
-  Two modes, chosen per config version via the in-UI Config Pairing wizard:
-    - Redacted only: process only the de-identified copy; the original is marked
-      REDACTED_SUPERSEDED and not processed further.
-    - Process both: process the original AND the redacted copy as separate
-      documents, so privileged users (via allowedConfigVersions RBAC) can see the
-      original while others see only the redacted results.
+  EXPERIMENTAL and unproven — try it and send feedback (GitHub issues), but
+  validate the output yourself; not a sole PII control.
 
-  Redaction uses structure-preserving synthetic replacement by default, so
-  downstream extraction accuracy is retained; blackout is also available.
-  Documents only (PDF, images, TXT, CSV) in v1.
+  Two modes (Config Pairing wizard): "redact copy and stop" processes only the
+  de-identified copy and deletes the original; "redact copy and continue"
+  processes the original AND the redacted copy as separate documents, scoped by
+  allowedConfigVersions RBAC.
+
+  Structure-preserving synthetic replacement by default; blackout also available.
+  PDFs in / redacted PDFs out. Integrates AWS Labs pii-anonymizer
+  (github.com/awslabs/pii-anonymizer). Documents (PDF, images, TXT, CSV) in v1.
 docsUrl: extensions/pii-anonymizer
 showInNav: false
 template:

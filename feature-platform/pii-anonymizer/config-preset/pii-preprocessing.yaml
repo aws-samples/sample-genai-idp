@@ -1,55 +1,46 @@
-# PII Anonymization — minimal quick-start config preset.
+# PII Anonymization — minimal quick-start config preset.  [EXPERIMENTAL FEATURE]
 #
 # Installed by the ui-deployer as a NON-ACTIVE config version
-# `pii-anonymizer-v<version>`. It carries ONLY the `preprocessing` section; the
-# ui-deployer injects this feature's preprocessing hook into
-# `preprocessing.preHook` at install time (the hook ARN isn't known until the
-# feature stack deploys).
+# `pii-anonymizer-v<version>`. It carries ONLY a generic `preprocessing.preHook`
+# entry; the ui-deployer injects this feature's hook ARN at install time.
+#
+# The preprocessing step is GENERIC (a Lambda ARN + key/value args). This
+# feature's PII settings live entirely in the hook's `args` — mode, detection
+# model, redaction style, companion config version, store_mapping.
 #
 # This standalone preset is a reference/quick-start. The PRIMARY path is the
 # feature UI's Config Pairing wizard, which clones an admin's EXISTING working
-# config version into a matched pair:
-#   <base>__pii_redacted   (initiating; has this preprocessing block + hook)
-#   <base>__standard       (companion; same as base, NO preprocessing hook)
-# so redaction layers on top of the customer's real extraction settings rather
-# than forking a whole config.
-#
-# NOTE: activating THIS preset alone only makes sense if `default` (the
-# companion) is a viable processing config — the redacted copy is stamped with
-# `companion_config_version` and re-submitted under that version.
+# config version into a matched pair (initiating + companion) with the right
+# args, so redaction layers on top of the customer's real extraction settings.
 
 preprocessing:
-  # Master switch. Set false to disable redaction without removing the hook.
   enabled: true
-
-  # Mode:
-  #   redacted_only          -> process ONLY the de-identified copy; the
-  #                             original is marked REDACTED_SUPERSEDED and not
-  #                             processed further (hook returns halt=true).
-  #   redacted_and_unredacted-> process the original AND the redacted copy as
-  #                             separate documents (hook returns halt=false).
-  mode: redacted_only
-
-  # The config version the redacted copy is processed under. It must NOT carry
-  # a preprocessing hook (else the copy would be redacted again — the hook's
-  # reserved-prefix guard still blocks the loop, but a clean companion avoids
-  # the wasted invocation). The wizard sets this to "<base>__standard".
-  companion_config_version: default
-
-  # Detection/redaction model. Claude Haiku is the default: PII detection over
-  # dense forms (W2, lending) needs a large output-token budget — Nova Lite's
-  # smaller cap truncates the detection JSON and the detector fails closed. Nova
-  # Lite is still selectable for cheaper, lighter documents.
-  model:
-    id: us.anthropic.claude-haiku-4-5-20251001-v1:0
-    provider: anthropic
-
-  redaction:
-    # synthetic -> structure-preserving fake values (default; keeps downstream
-    #              extraction accuracy). blackout -> solid boxes / [REDACTED].
-    mode: synthetic
-
-  # Optional tuning (all have built-in defaults in the vendored library):
-  # detection:  { temperature: 0.0, max_tokens: 4096 }
-  # synthetic:  { temperature: 0.7 }
-  # concurrency: { max_workers: 4 }
+  preHook:
+    - featureId: pii-anonymizer
+      # arn injected at install by the ui-deployer (unknown until the stack deploys)
+      order: 100
+      onError: fail          # redactcopy_and_stop fails closed (never leak PII)
+      enabled: true
+      args:
+        # mode: redactcopy_and_stop     -> write redacted copy, DELETE the original
+        #       redactcopy_and_continue -> write redacted copy, also process original
+        - key: mode
+          value: redactcopy_and_stop
+        # The companion config version the redacted copy is processed under. It
+        # must NOT carry a preprocessing hook (a REDACTED-marker guard also
+        # prevents double-redaction). Point at a normal processing version.
+        - key: companion_config_version
+          value: default
+        # Detection model. Claude Haiku is the default (large output budget for
+        # dense forms); Nova Lite is cheaper but may truncate and fail closed.
+        - key: model_id
+          value: us.anthropic.claude-haiku-4-5-20251001-v1:0
+        - key: model_provider
+          value: anthropic
+        # synthetic (structure-preserving fake values) | blackout
+        - key: redaction_mode
+          value: synthetic
+        # Persist the original->synthetic mapping (real PII; RBAC-gated view).
+        # Off by default.
+        - key: store_mapping
+          value: "false"

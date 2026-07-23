@@ -15,3 +15,6 @@ openpyxl>=3.0.10
 faker>=30.0.0
 defusedxml>=0.7.1
 PyYAML>=6.0
+# Host library — used ONLY for delete_single_document (redactcopy_and_stop mode
+# deletes the original's S3 objects + tracking rows). [core] keeps it minimal.
+../../../lib/idp_common_pkg[core]

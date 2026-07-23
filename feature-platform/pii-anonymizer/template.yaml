@@ -121,19 +121,29 @@ Resources:
           AUDIT_TABLE_NAME: !Ref RedactionAuditTable
           INPUT_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-InputBucketName' }
           WORKING_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
-          CONFIGURATION_TABLE_NAME: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }
+          OUTPUT_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
+          # Only used to DELETE the original in redactcopy_and_stop mode.
+          TRACKING_TABLE_NAME: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
       Policies:
         - Statement:
-            # Read the config version's preprocessing block.
-            - Effect: Allow
-              Action: dynamodb:GetItem
-              Resource: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableArn' }
             # Record the redaction audit row (metadata only).
             - Effect: Allow
               Action: dynamodb:PutItem
               Resource: !GetAtt RedactionAuditTable.Arn
-            # Read the source document from Input; read compressed document
-            # state + write the redaction scratch output in Working.
+            # Delete the ORIGINAL in redactcopy_and_stop mode: read metadata +
+            # delete the doc/list/run rows via delete_single_document.
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:DeleteItem
+              Resource:
+                - { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableArn' }
+                - !Sub
+                  - '${Arn}/index/*'
+                  - Arn: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableArn' }
+            # Read source from Input + Working; write scratch + mapping; delete
+            # original on stop mode.
             - Effect: Allow
               Action: s3:GetObject
               Resource:
@@ -159,6 +169,31 @@ Resources:
                 - 'arn:${AWS::Partition}:s3:::${Bucket}/*${RedactedSuffix}*'
                 - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-InputBucketName' }
                   RedactedSuffix: !Ref RedactedSuffix
+            # redactcopy_and_stop: delete the original from Input + its Output
+            # artifacts (delete_single_document). List needed to enumerate output.
+            - Effect: Allow
+              Action:
+                - s3:DeleteObject
+                - s3:ListBucket
+              Resource:
+                - !Sub
+                  - 'arn:${AWS::Partition}:s3:::${Bucket}'
+                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-InputBucketName' }
+                - !Sub
+                  - 'arn:${AWS::Partition}:s3:::${Bucket}/*'
+                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-InputBucketName' }
+                - !Sub
+                  - 'arn:${AWS::Partition}:s3:::${Bucket}'
+                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
+                - !Sub
+                  - 'arn:${AWS::Partition}:s3:::${Bucket}/*'
+                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
+            # Store the optional PII mapping (opt-in) in the Output bucket.
+            - Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub
+                - 'arn:${AWS::Partition}:s3:::${Bucket}/pii_mappings/*'
+                - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
             # Bedrock Converse for PII detection + synthetic generation.
             - Effect: Allow
               Action:
@@ -226,6 +261,10 @@ Resources:
           # wizard can write the real hook ARN into the preprocessing.preHook
           # entry of the config versions it creates.
           HOOK_FUNCTION_ARN: !GetAtt PiiAnonymizerHookFunction.Arn
+          # For the RBAC-gated PII mapping view: read the caller's
+          # allowedConfigVersions (UsersTable) and the mapping (Output bucket).
+          USERS_TABLE_NAME: { 'Fn::ImportValue': !Sub '${MainStackName}-UsersTableName' }
+          OUTPUT_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
       Policies:
         - Statement:
             - Effect: Allow
@@ -236,6 +275,30 @@ Resources:
               Resource:
                 - !GetAtt RedactionAuditTable.Arn
                 - !Sub '${RedactionAuditTable.Arn}/index/*'
+            # RBAC scope lookup: query UsersTable.EmailIndex for the caller's
+            # allowedConfigVersions.
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+              Resource:
+                - { 'Fn::ImportValue': !Sub '${MainStackName}-UsersTableArn' }
+                - !Sub
+                  - '${Arn}/index/*'
+                  - Arn: { 'Fn::ImportValue': !Sub '${MainStackName}-UsersTableArn' }
+            # Read the stored PII mapping (opt-in) from the Output bucket.
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub
+                - 'arn:${AWS::Partition}:s3:::${Bucket}/pii_mappings/*'
+                - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
+            # Output bucket + tables are CMK-encrypted.
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource:
+                'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn'
       Events:
         Root:
           Type: HttpApi
