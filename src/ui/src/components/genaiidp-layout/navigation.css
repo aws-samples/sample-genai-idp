@@ -16,10 +16,3 @@
 .idp-side-nav a[href='#/features'] {
   font-style: italic;
 }
-
-/* Search icon rendered via the link's `info` slot (see
-   feature-platform-nav-items.ts). Align it with the link text. */
-.browse-catalog-info {
-  display: inline-flex;
-  vertical-align: middle;
-}

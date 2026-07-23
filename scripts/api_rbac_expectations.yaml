@@ -52,7 +52,7 @@
 #                  tracked deficiency. Mismatches become WARN, not FAIL. Every
 #                  id must exist in the known_gaps register at the bottom;
 #                  also referenced from
-#                  threat-modeling/feature-threats/rbac-authentication.md.
+#                  security/threat-modeling/feature-threats/rbac-authentication.md.
 #   note:          free text for humans.
 #
 # Paths are relative to the repo root. DDB_DIRECT is shorthand for
@@ -680,7 +680,7 @@ operations:
 # Known gaps register — tracked deviations between the ideal authorization
 # posture and current enforcement. Each id must be referenced by at least one
 # operation above, and is mirrored in
-# threat-modeling/feature-threats/rbac-authentication.md (AUTH.T07/T08).
+# security/threat-modeling/feature-threats/rbac-authentication.md (AUTH.T07/T08).
 # A gap entry downgrades a scan/test mismatch from FAIL to WARN; remove the
 # gap (and its references) when the enforcement is fixed, and the harness
 # will then hold the line.
