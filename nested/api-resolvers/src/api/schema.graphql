@@ -1031,20 +1031,22 @@ type Mutation {
 
   # All authenticated users (creates state but read-like operations)
   deleteAgentJob(jobId: ID!): Boolean @aws_cognito_user_pools
-  # Agent Chat operations (all authenticated Cognito users + IAM for backend)
-  # Note: Reviewer exclusion from Agent Chat is enforced at the QUERY level —
-  # all supporting queries (listChatSessions, getChatMessages, listAvailableAgents)
-  # have @aws_cognito_user_pools(cognito_groups) directives excluding Reviewer.
-  # The mutations below use unrestricted @aws_cognito_user_pools because a
-  # cognito_groups restriction cannot be combined with @aws_iam on the same
-  # field in AppSync (and these fields need IAM for the backend publish path).
+  # Agent Chat operations. Reviewer is excluded from Agent Chat: the group
+  # restriction is declared here AND enforced server-side in each resolver's
+  # _caller_in_groups check (the single REST route's authorizer only
+  # authenticates). The IAM backend publish path has no Cognito identity, so it
+  # bypasses the group check. (Historically these fields could not carry a
+  # cognito_groups restriction alongside @aws_iam under AppSync; AppSync has
+  # since been removed, so the real groups are now declared.)
   sendAgentChatMessage(
     prompt: String!
     sessionId: String
     method: String
     enableCodeIntelligence: Boolean
     toolMetadata: ToolMetadataInput
-  ): AgentChatMessage @aws_cognito_user_pools @aws_iam
+  ): AgentChatMessage
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
+    @aws_iam
   updateAgentChatMessage(sessionId: ID!, content: String!): AgentChatMessage
     @aws_cognito_user_pools
     @aws_iam
@@ -1225,11 +1227,16 @@ type Query @aws_cognito_user_pools @aws_iam {
   getLatestPublishedVersion: LatestPublishedVersion
 
   # Agent Chat & Code Explorer queries
-  # Note: These need both Cognito and IAM auth (for return type resolution).
-  # AppSync does not support a @aws_cognito_user_pools(cognito_groups:[...]) restriction + @aws_iam on the same field.
-  # Reviewer exclusion is enforced by UI navigation (Agent Chat hidden for Reviewer)
-  # and session scoping (users only see their own sessions).
-  listAvailableAgents: [Agent] @aws_cognito_user_pools @aws_iam
+  # Note: These need both Cognito and IAM auth (IAM for the backend publish
+  # path / return type resolution).
+  # listAvailableAgents excludes Reviewer from Agent Chat: the group restriction
+  # is declared here AND enforced server-side in the resolver's
+  # _caller_in_groups check.
+  # The ownership-scoped session queries below stay open to any authenticated
+  # user; session scoping (users only see their own sessions) is the boundary.
+  listAvailableAgents: [Agent]
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Viewer"])
+    @aws_iam
   getAgentChatMessages(sessionId: ID!): [AgentChatMessage] @aws_cognito_user_pools @aws_iam
   listChatSessions(limit: Int, nextToken: String, surface: String): ChatSessionConnection @aws_cognito_user_pools @aws_iam
   getChatMessages(sessionId: ID!): [AgentChatMessage] @aws_cognito_user_pools @aws_iam
