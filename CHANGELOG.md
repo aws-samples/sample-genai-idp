@@ -26,6 +26,8 @@ SPDX-License-Identifier: MIT-0
 
 ### Fixed
 
+- **S3 console folder creation no longer triggers spurious processing or pollutes Test Studio pattern matching.** Creating a "folder" in the input bucket via the S3 console writes a zero-byte pseudo-object whose key ends in `/` (e.g. `testfolder/`). The Queue Sender Lambda treated it as a document — creating a tracking entry and starting a Step Functions execution for empty content — and Test Studio's "Add Test Set from File Pattern" (`find_matching_files`) could pull such placeholders into a test set. Both paths now skip `/`-terminated keys (the trailing-slash guard already used elsewhere in the codebase). (#552)
+
 - **Documents with `#` in their name no longer break View Data / View Page Text and results metadata.** `urllib.parse.urlparse` treats `#` in an S3 URI as a URL-fragment delimiter, so keys like `Report_#2.pdf/pages/1/result.json` were silently truncated at the `#`, causing `NoSuchKey` errors ("No response from getFileContents" in the UI) and wrongly-named `.metadata.json` files. The `getFileContents`/`getFilePresignedUrl` resolver and the two processresults functions now parse S3 URIs with a plain string split (matching `idp_common.utils.parse_s3_uri`), preserving `#` in keys.
 
 - **Claude Sonnet 5 now appears in the UI model picker.** Sonnet 5 (`claude-sonnet-5` and the `:1m` extended-context variant) was present in pricing, model limits, and the Bedrock client routing — and is the system default extraction model — but was missing from the CloudFormation model enums in `patterns/unified/template.yaml` that feed the config schema, so it never showed in the config UI's model dropdown. Both variants are now registered across all three inference-profile prefixes (`us.`/`eu.`/`global.`). (#544)
