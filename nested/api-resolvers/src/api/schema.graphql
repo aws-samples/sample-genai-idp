@@ -657,6 +657,7 @@ type TestRun @aws_cognito_user_pools @aws_iam {
   completedAt: AWSDateTime
   context: String
   configVersion: String
+  testSetVersion: Int
   config: AWSJSON
 }
 

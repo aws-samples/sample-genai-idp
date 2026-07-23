@@ -252,3 +252,72 @@ class TestTestRunnerRBAC:
             assert "testRunId" in result
             assert result["status"] == "QUEUED"
             mock_sqs.assert_called_once()
+
+    @patch.dict(
+        os.environ,
+        {
+            "TRACKING_TABLE": "test-table",
+            "CONFIG_TABLE": "test-config-table",
+            "FILE_COPY_QUEUE_URL": "https://sqs.us-east-1.amazonaws.com/123456789012/test-queue",
+        },
+    )
+    def test_pins_test_set_active_reference_into_run(self):
+        """The test set's activeReference is passed through as test_set_version."""
+        with (
+            patch.object(test_runner_index, "_get_test_set") as mock_get_test_set,
+            patch.object(test_runner_index, "_capture_config") as mock_capture_config,
+            patch.object(
+                test_runner_index, "_store_test_run_metadata"
+            ) as mock_store_metadata,
+            patch.object(test_runner_index.sqs, "send_message"),
+            patch("datetime.datetime") as mock_datetime,
+        ):
+            mock_get_test_set.return_value = {
+                "name": "Test-Set",
+                "fileCount": 3,
+                "activeReference": 2,
+            }
+            mock_capture_config.return_value = {"Config": {}}
+            mock_datetime.utcnow.return_value.strftime.return_value = "20260611-120000"
+
+            event = {
+                "arguments": {"input": {"testSetId": "ts1"}},
+                "identity": _ADMIN_IDENTITY,
+            }
+            test_runner_index.handler(event, {})
+
+            # test_set_version is the last positional arg to _store_test_run_metadata
+            args, _ = mock_store_metadata.call_args
+            assert args[-1] == 2
+
+    @patch.dict(
+        os.environ,
+        {
+            "TRACKING_TABLE": "test-table",
+            "CONFIG_TABLE": "test-config-table",
+            "FILE_COPY_QUEUE_URL": "https://sqs.us-east-1.amazonaws.com/123456789012/test-queue",
+        },
+    )
+    def test_unpublished_test_set_pins_no_version(self):
+        """A test set never published pins test_set_version=None."""
+        with (
+            patch.object(test_runner_index, "_get_test_set") as mock_get_test_set,
+            patch.object(test_runner_index, "_capture_config") as mock_capture_config,
+            patch.object(
+                test_runner_index, "_store_test_run_metadata"
+            ) as mock_store_metadata,
+            patch.object(test_runner_index.sqs, "send_message"),
+            patch("datetime.datetime") as mock_datetime,
+        ):
+            mock_get_test_set.return_value = {"name": "Test-Set", "fileCount": 3}
+            mock_capture_config.return_value = {"Config": {}}
+            mock_datetime.utcnow.return_value.strftime.return_value = "20260611-120000"
+
+            event = {
+                "arguments": {"input": {"testSetId": "ts1"}},
+                "identity": _ADMIN_IDENTITY,
+            }
+            test_runner_index.handler(event, {})
+
+            args, _ = mock_store_metadata.call_args
+            assert args[-1] is None

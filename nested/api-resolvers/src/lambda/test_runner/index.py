@@ -106,9 +106,14 @@ def handler(event, context):
         
         # Capture config for the specified version or current active config
         config = _capture_config(config_table, config_version)
-        
+
+        # Pin the test set's active reference version this run scored against
+        # (symmetric to ConfigVersion). None for sets that were never published,
+        # so comparisons can distinguish config drift from ground-truth drift.
+        test_set_version = test_set.get('activeReference')
+
         # Store initial test run metadata
-        _store_test_run_metadata(tracking_table, test_run_id, test_set_id, test_set['name'], config, [], test_context, files_to_process, config_version)
+        _store_test_run_metadata(tracking_table, test_run_id, test_set_id, test_set['name'], config, [], test_context, files_to_process, config_version, test_set_version)
         
         # Send file copying job to SQS queue
         queue_url = os.environ['FILE_COPY_QUEUE_URL']
@@ -227,7 +232,7 @@ def _capture_config(config_table, config_version=None):
     
     return config
 
-def _store_test_run_metadata(tracking_table, test_run_id, test_set_id, test_set_name, config, files, context=None, file_count=0, config_version=None):
+def _store_test_run_metadata(tracking_table, test_run_id, test_set_id, test_set_name, config, files, context=None, file_count=0, config_version=None, test_set_version=None):
     """Store test run metadata in tracking table"""
     table = dynamodb.Table(tracking_table)  # type: ignore[attr-defined]
     
@@ -255,7 +260,10 @@ def _store_test_run_metadata(tracking_table, test_run_id, test_set_id, test_set_
             
         if config_version:
             item['ConfigVersion'] = config_version
-            
+
+        if test_set_version is not None:
+            item['TestSetVersion'] = test_set_version
+
         table.put_item(Item=item)
         logger.info(f"Stored test run metadata for {test_run_id}")
     except Exception as e:
