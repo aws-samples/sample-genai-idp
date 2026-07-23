@@ -3,112 +3,140 @@ title: "PII Anonymization"
 ---
 # PII Anonymization
 
+:::caution[Experimental]
+PII Anonymization is an **experimental, unproven** feature. Try it and tell us
+what works and what's missing — but **validate the redacted output yourself** and
+do not rely on it as your sole PII control. LLM-based detection is probabilistic;
+missed PII is possible. See [Feedback](#feedback).
+:::
+
 **PII Anonymization** is a bundled [Extension Feature](../feature-platform.md)
-that detects and redacts personally identifiable information (PII) from source
-documents **before** the accelerator's classification and extraction models see
-them — so raw PII never transits a GenAI model. It is the reference example of a
-**`preprocessing`** pipeline hook: a standalone extension point that runs first
-in the workflow, before the BDA/pipeline routing, in both processing modes.
+that detects and redacts personally identifiable information (PII) from documents
+**before** the accelerator's classification and extraction models see them — so
+raw PII never transits a GenAI model. It is the reference example of the
+standalone **`preprocessing`** pipeline-hook point, which runs first in the
+workflow (before the BDA/pipeline routing).
 
-It reuses the document detection/redaction library from the AWS Labs
-[pii-anonymizer](https://github.com/awslabs/pii-anonymizer) sample (Apache-2.0),
-vendored into the feature so the accelerator owns and security-scans the code.
-
-> **Not a sole compliance control.** LLM-based PII detection is probabilistic —
-> missed PII is possible. Pair this with human verification for
-> compliance-critical workflows. Position it as a strong risk-reduction layer,
-> not a guarantee.
+It integrates the detection/redaction library from the AWS Labs
+**[pii-anonymizer](https://github.com/awslabs/pii-anonymizer)** project
+(Apache-2.0). That code is *vendored* into this feature (copied, security-scanned,
+and shipped as part of the accelerator) rather than deployed as a separate stack —
+see the feature's `hook/vendor/PROVENANCE.md` and the `sync-pii-anonymizer` skill
+for how it is kept in sync with upstream.
 
 ## Why use it
 
 - **Unblocks GenAI adoption in regulated settings.** Healthcare, finance,
-  insurance, and government teams that currently *can't* use GenAI extraction
-  because raw PII can't transit a model can now redact first.
+  insurance, and government teams that can't let raw PII reach a model can redact
+  first, then extract from the de-identified copy.
 - **De-identified datasets as a deliverable** — safe for analytics, ML training,
-  or sharing with third parties.
-- **Dual-track access** — process both an original and a redacted copy, and scope
+  or third-party sharing.
+- **Dual-track access** — process both an original and a redacted copy and scope
   each to different users via the existing config-version RBAC.
 - **Structure-preserving synthetic redaction** keeps downstream extraction
-  accuracy intact (unlike simple blackout).
+  accuracy intact (unlike a plain blackout).
 
 ## How it works
 
 1. A document is uploaded under a config version that carries a `preprocessing`
-   block and hook (created by the **Config Pairing** wizard).
+   hook (created by the **Config Pairing** wizard).
 2. The preprocessing hook runs first. It detects and redacts PII, then writes a
-   **de-identified copy** into the Input bucket beside the original with a
-   `(REDACTED)` marker in its name (e.g. `report(REDACTED).pdf`), tagged with S3
+   **de-identified copy** into the Input bucket **beside the original with a
+   `(REDACTED)` marker** in its name (e.g. `report(REDACTED).pdf`), tagged with S3
    metadata pointing at a **companion** config version.
 3. That upload re-triggers processing: the redacted copy is processed under the
    companion version (which has no preprocessing hook, so it is not redacted
    again — a `(REDACTED)`-marker guard prevents any loop).
-4. Depending on the **mode**, the original execution either halts or continues.
+4. Depending on the **mode**, the original is either deleted or also processed.
 
 ### Modes
 
 | Mode | Original document | Redacted copy | When to use |
 |------|-------------------|---------------|-------------|
-| **Redacted only** | Halted, marked `REDACTED_SUPERSEDED` | Processed | PII must never reach the model or be stored in results |
-| **Process both** | Processed | Processed | You need two result sets; scope each to different users |
+| **Redact copy and stop** | **Deleted** (S3 + tracking) so it no longer appears | Processed | PII must never reach the model, and the original should not be retained |
+| **Redact copy and continue** | Processed normally | Processed | You need two result sets; scope each to different users |
+
+### Formats
+
+PDFs are **redacted PDF-in / PDF-out**: every PDF goes through the image path
+(pages rasterized, PII boxed/replaced, flattened) so the redacted copy is a real
+PDF with **no leaked text layer**. Images (JPG/PNG/TIFF/BMP/WEBP), TXT, and CSV
+are also supported. Office formats (DOCX/XLSX) are processed but lower-fidelity;
+audio is out of scope in v1.
+
+## Use cases
+
+- **De-identified extraction** — redact-and-stop so extraction runs only on
+  synthetic data; the real document is not retained by the pipeline.
+- **Two-tier review** — redact-and-continue, granting a small privileged group
+  the original's config version and everyone else only the redacted companion.
+- **Safe data products** — export the redacted copies and (optionally) the
+  extraction results as a shareable, de-identified dataset.
 
 ## Enabling it — the Config Pairing wizard
 
-Install the feature from the **Extensions → Browse catalog** page, then open its
-page. The **Config Pairing** tab is the primary way to turn redaction on:
+Install the feature from **Extensions → Browse catalog**, then open its page. The
+**Config Pairing** tab is the primary way to turn redaction on:
 
 1. Pick one of your **existing** config versions as the base (your real
    extraction settings are preserved).
 2. Choose a mode, a PII-detection model (Claude Haiku is the default — dense
-   forms like W2s need a large output-token budget, and Nova Lite's smaller cap
-   truncates the detection JSON, which the detector fails closed on), and a
-   redaction style (synthetic or blackout).
+   forms like W2s need a large output budget; Nova Lite is cheaper but can
+   truncate and fail closed), a redaction style, and whether to store the PII
+   mapping (see below).
 3. Click **Create config pair**. The wizard creates two **non-active** versions:
-   - `<base>__pii_redacted_only` (or `__pii_both`) — the *initiating* version,
-     with the redaction hook.
-   - `<base>__standard` — the *companion*, which processes the redacted copy.
-4. Click **Activate** to make the initiating version active. New uploads under it
-   are redacted first.
+   - `<base>__pii_stop` or `<base>__pii_go` — the *initiating* version, carrying
+     the generic preprocessing hook with its args.
+   - `<base>__pii_target` — the *companion*, which processes the redacted copy.
+4. Click **Activate** to make the initiating version active.
 
-This clones on top of your existing config rather than forking a whole
-configuration you'd have to keep in sync. (A minimal `pii-anonymizer-v<version>`
-quick-start preset is also installed, non-active, for reference.)
+The preprocessing step is **generic** — a Lambda ARN plus key/value args — so the
+`preprocessing` section in **View/Edit Configuration** works for any preprocessing
+job, not just PII. This feature's settings (mode, model, redaction, companion,
+store_mapping) live in that hook's `args`.
 
-### RBAC — two-track access
+## RBAC — how access works
 
-For **Process both**, the original is processed under `<base>__pii_both` and the
-redacted copy under `<base>__standard`. Grant privileged reviewers access to the
-original's config version and everyone else access to `<base>__standard` using
-each user's **allowed config versions** (Configuration page → user scope). Note
-this reuses the config-version scope as a data-sensitivity boundary.
+Access follows the accelerator's existing **config-version scoping**
+(`allowedConfigVersions` per user, on the Configuration page):
+
+- **Two-tier documents** — in *redact copy and continue* mode, the original is
+  processed under the initiating version and the redacted copy under
+  `<base>__pii_target`. Grant privileged reviewers the initiating version and
+  everyone else `<base>__pii_target`. Users only see documents whose config
+  version is in their allowed set.
+- **PII mapping (re-identification key)** — when synthetic redaction is used you
+  can optionally store the original→synthetic value map. **It contains real PII.**
+  It is stored encrypted (the stack's customer-managed KMS key) and the Redaction
+  Report reveals it **only** to a caller whose `allowedConfigVersions` include the
+  **original** document's config version (Admins always pass). Off by default;
+  enable per-pair with the wizard's "Store PII mapping" toggle.
 
 ## Redaction Report
 
-The **Redaction Report** tab shows a **metadata-only** audit (no PII is ever
-stored or displayed): per-document PII count, mode, companion version, redacted
-copy location, and timestamp, with a time-window filter.
+The **Redaction Report** tab shows a metadata-only audit (no PII by default):
+per-document PII count, mode, companion version, redacted-copy location, and
+timestamp. When a mapping was stored, a **View mapping** action opens the
+original→synthetic table — subject to the RBAC gate above.
 
 ## Cost and latency
 
-Redaction adds a detection pass per page **before** processing:
+Redaction adds a detection pass per page **before** processing. Because PDFs use
+the image path, expect a Textract + vision pass per page; *redact copy and
+continue* on scanned PDFs runs roughly the whole pipeline twice. Choose the
+detection model deliberately (Haiku for dense forms, Nova Lite for lighter docs).
 
-- **Text-native** documents (digital PDF, TXT, CSV) use lightweight text
-  extraction — modest added cost.
-- **Scanned/image** documents require the anonymizer's own Textract + vision
-  pass, so **Redacted only** on scanned docs runs OCR twice, and **Process both**
-  runs roughly twice the whole pipeline. Budget accordingly.
+## Feedback
 
-Claude Haiku is the default detection model (reliable on dense forms). Nova Lite
-is cheaper and fine for lighter documents, but may truncate — and fail closed —
-on dense multi-field pages.
-
-## Supported formats (v1)
-
-PDF (redacted **PDF** out — PDFs always go through the image path so the copy is
-a real, flattened PDF with no leaked text layer), images (JPG/PNG/TIFF/BMP/WEBP),
-TXT, and CSV. Office formats (DOCX/XLSX) are processed but lower-fidelity; audio
-is out of scope.
+This feature is experimental and we want your input — accuracy gaps, missing
+formats, and the use cases you need. Please open an issue on the accelerator's
+GitHub repository:
+**https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues**.
+Upstream detection/redaction issues can also be raised at
+[awslabs/pii-anonymizer](https://github.com/awslabs/pii-anonymizer).
 
 ## See also
 
 - [Feature Platform](../feature-platform.md) — how extensions work.
 - [Feature Platform developer guide](../feature-platform-developer-guide.md).
+- Upstream: [awslabs/pii-anonymizer](https://github.com/awslabs/pii-anonymizer).

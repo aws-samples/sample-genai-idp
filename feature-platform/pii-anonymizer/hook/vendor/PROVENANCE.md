@@ -59,6 +59,13 @@ None to the copied module bodies (kept byte-for-byte to ease re-sync).
 Only `pii_anonymizer/__init__.py` was replaced (see above). Any future local
 patch MUST be recorded here with a rationale so re-sync can re-apply it.
 
+**Added (not from upstream):** `pii_anonymizer/fonts/DejaVuSans.ttf` — bundled so
+the image-path redactor renders synthetic replacement text at the correct
+(bounding-box-fitted) size. `helpers/font_config.py` searches `../fonts/` relative
+to itself; without a TrueType font present it falls back to PIL `load_default()`
+(a tiny fixed-size bitmap that ignores the requested size). DejaVu is under a
+permissive license (see `fonts/LICENSE-DejaVu.txt`). Re-sync must keep this file.
+
 ## Re-syncing from upstream
 
 Use the `.claude/skills/sync-pii-anonymizer.md` skill (or run it manually): it

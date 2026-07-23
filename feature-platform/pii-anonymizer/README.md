@@ -1,5 +1,8 @@
 # PII Anonymization — IDP Accelerator Extension
 
+> **EXPERIMENTAL / unproven.** Try it and send feedback (GitHub issues), but
+> validate the redacted output yourself; not a sole PII control.
+
 Detects and redacts PII from source documents **before** the accelerator's
 classification and extraction models see them, so raw PII never transits a GenAI
 model. Built on a new standalone **`preprocessing`** pipeline hook that runs
@@ -22,47 +25,53 @@ the re-sync procedure.
 3. That upload re-triggers processing — the redacted copy is processed under the
    **companion** config version (which has **no** preprocessing hook, so it is
    not redacted again; a `(REDACTED)`-marker guard is the belt-and-suspenders).
-4. Depending on **mode**, the hook either halts the original execution
-   (`redacted_only` → the original is marked `REDACTED_SUPERSEDED`) or lets it
-   run too (`redacted_and_unredacted` → original + redacted processed separately).
+4. Depending on **mode**, the hook either deletes the original or lets it run too.
 
 ## Modes
 
 | Mode | Original | Redacted copy | Use case |
 |------|----------|---------------|----------|
-| `redacted_only` | halted (`REDACTED_SUPERSEDED`) | processed | PII must never reach the model / be stored in results |
-| `redacted_and_unredacted` | processed | processed | Two result sets; scope each to different users via `allowedConfigVersions` RBAC |
+| `redactcopy_and_stop` | **deleted** (S3 + tracking) | processed | PII must never reach the model / be retained |
+| `redactcopy_and_continue` | processed | processed | Two result sets; scope each to different users via `allowedConfigVersions` RBAC |
+
+## Generic preprocessing hook
+
+The `preprocessing` step is **generic**: each `preHook` entry is a Lambda ARN
+plus a list of key/value **args** the hook reads its own config from. This
+feature's PII settings all live in those args (`mode`, `companion_config_version`,
+`model_id`, `model_provider`, `redaction_mode`, `store_mapping`) — so the
+preprocessing step is reusable for any preprocessing job, not just PII.
 
 ## Config Pairing wizard (primary UX)
 
 The feature UI's **Config Pairing** tab clones an admin's **existing** working
-config version into a matched pair:
+config version into a matched pair (base truncated to keep names ≤ 50 chars):
 
-- `<base>__pii_redacted_only` / `<base>__pii_both` — *initiating* version: the
-  base + a `preprocessing` block (mode, detection model, redaction style,
-  companion pointer) + the resolved `preprocessing.preHook` entry.
-- `<base>__standard` — *companion* version: the base with **no** preprocessing
-  block/hook; the redacted copy is processed under it.
+- `<base>__pii_stop` / `<base>__pii_go` — *initiating* version: base + the
+  generic `preprocessing.preHook` entry (ARN + PII args).
+- `<base>__pii_target` — *companion* version: base with **no** preprocessing
+  hook; the redacted copy is processed under it.
 
-Both are created **non-active**; the admin activates the initiating version
-(one click in the wizard). This keeps the customer's real extraction settings
-authoritative and layers redaction on top.
-
-A minimal `config-preset/pii-preprocessing.yaml` is also installed as a
+Both are created **non-active**; the admin activates the initiating version (one
+click). A minimal `config-preset/pii-preprocessing.yaml` is also installed as a
 non-active `pii-anonymizer-v<version>` quick-start reference.
 
-## Redaction Report
+## Redaction Report + PII mapping (RBAC-gated)
 
-The **Redaction Report** tab shows a **metadata-only** audit (no PII is stored):
-per-document PII count, mode, companion version, redacted-copy key, timestamp.
-Backed by the feature API (`/report`) over the feature-owned audit table.
+The **Redaction Report** tab shows a **metadata-only** audit: per-document PII
+count, mode, companion version, redacted-copy key, timestamp.
+
+Optionally (wizard toggle, off by default) the original→synthetic **mapping** is
+stored CMK-encrypted in the Output bucket. It contains **real PII**; the report's
+**View mapping** action reveals it only to callers whose `allowedConfigVersions`
+include the **original** document's config version (Admins always pass).
 
 ## Cost note
 
-Redaction adds a detection pass per page **before** processing. On scanned
-documents the anonymizer runs its own Textract + vision pass, so `redacted_only`
-on scanned docs OCRs twice, and `redacted_and_unredacted` runs ~2× the whole
-pipeline. Nova Lite is the cost-sensitive default detection model.
+Redaction adds a detection pass per page **before** processing. PDFs use the
+image path (Textract + vision per page), so `redactcopy_and_continue` on scanned
+docs runs ~2× the whole pipeline. Claude Haiku is the default detection model
+(large output budget for dense forms); Nova Lite is cheaper but can truncate.
 
 ## Formats (v1)
 
