@@ -593,6 +593,9 @@ srt-fix: ## Run SRT interactive fix
 	@echo "Running SRT interactive fix..."
 	$(PYTHON) scripts/srt/fix.py
 
+security-results: ## Run security tests + curate a public-safe snapshot into security/test-results/<version>/ (STACK_NAME=... for the live ZAP+RBAC tests; omit for offline-only)
+	PYTHON="$(PYTHON)" bash scripts/security/run_security_tests.sh
+
 ##@ Dependencies
 dep-manifest: ## Generate dependency manifests for artifact repository mirroring (Python + Node)
 	@bash scripts/generate-dep-manifest.sh
