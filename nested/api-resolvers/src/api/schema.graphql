@@ -687,6 +687,7 @@ type TestSet @aws_cognito_user_pools @aws_iam {
   description: String
   filePattern: String
   fileCount: Int
+  source: String
   status: String
   createdAt: AWSDateTime!
   error: String

@@ -153,6 +153,7 @@ def add_test_set_from_upload(args):
         'name': test_set_name,
         'description': description,
         'filePattern': '',  # Empty for uploaded test sets
+        'source': 'uploaded',
         'status': 'QUEUED',
         'createdAt': now
     }
@@ -206,6 +207,7 @@ def add_test_set(args):
         'description': description,
         'filePattern': args['filePattern'],
         'fileCount': file_count,
+        'source': 'uploaded',
         'status': 'QUEUED',
         'createdAt': now
     }
@@ -244,6 +246,7 @@ def add_test_set(args):
         'description': description,
         'filePattern': args['filePattern'],
         'fileCount': file_count,
+        'source': 'uploaded',
         'status': 'QUEUED',
         'createdAt': now
     }
@@ -576,6 +579,7 @@ def get_test_sets():
             'description': item.get('description', ''),
             'filePattern': item.get('filePattern', ''),
             'fileCount': item.get('fileCount'),  # Returns None if attribute doesn't exist
+            'source': item.get('source'),  # 'uploaded' | 'synthetic'; None for pre-existing records
             'status': item.get('status'),
             'createdAt': item['createdAt'],
             'error': item.get('error'),  # Include error message for failed test sets
@@ -611,26 +615,30 @@ def get_test_sets():
                 # Check if this looks like a test set (has input/ and baseline/ folders)
                 if _is_valid_test_set_structure(s3_client, test_set_bucket, prefix):
                     logger.info(f"Found direct upload test set: {prefix}")
-                    
+
                     # Get creation timestamp from first file in the test set
                     created_at = _get_test_set_creation_time(s3_client, test_set_bucket, prefix)
-                    
+
                     # Validate file matching and get counts
                     validation_result = _validate_test_set_files(s3_client, test_set_bucket, prefix)
-                    
+
+                    # Source: synthetic generator drops a '.source' marker; otherwise a user upload
+                    source = _get_test_set_source(s3_client, test_set_bucket, prefix)
+
                     # Create tracking entry
                     status = 'COMPLETED' if validation_result['valid'] else 'FAILED'
                     error_message = validation_result.get('error')
-                    
+
                     _create_test_set_tracking_entry(
-                        prefix, 
+                        prefix,
                         prefix,  # Use prefix as name
                         validation_result['input_count'],
                         status,
                         error_message,
-                        created_at
+                        created_at,
+                        source
                     )
-                    
+
                     # Add to results
                     result.append({
                         'id': prefix,
@@ -638,6 +646,7 @@ def get_test_sets():
                         'description': '',  # Direct uploads don't have descriptions
                         'filePattern': '',
                         'fileCount': validation_result['input_count'],
+                        'source': source,
                         'status': status,
                         'createdAt': created_at,
                         'documentClassType': None
@@ -811,7 +820,16 @@ def _get_test_set_creation_time(s3_client, bucket, prefix):
     
     return earliest_time.isoformat()
 
-def _create_test_set_tracking_entry(test_set_id, name, file_count, status, error=None, created_at=None):
+def _get_test_set_source(s3_client, bucket, prefix):
+    """Return 'synthetic' if the generator left a '.source' marker, else 'uploaded'."""
+    try:
+        s3_client.head_object(Bucket=bucket, Key=f"{prefix}/.source")
+        return 'synthetic'
+    except Exception:
+        return 'uploaded'
+
+
+def _create_test_set_tracking_entry(test_set_id, name, file_count, status, error=None, created_at=None, source=None):
     """Create tracking table entry for direct upload test set"""
     try:
         now = datetime.utcnow().isoformat() + 'Z'
@@ -828,10 +846,12 @@ def _create_test_set_tracking_entry(test_set_id, name, file_count, status, error
             'status': status,
             'createdAt': now
         }
-        
+
+        if source:
+            item['source'] = source
         if error:
             item['error'] = error
-        
+
         db_client.put_item(item)
         logger.info(f"Created tracking entry for direct upload test set {test_set_id}")
         

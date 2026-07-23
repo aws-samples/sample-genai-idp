@@ -705,6 +705,7 @@ export const getTestSets = /* GraphQL */ `
       description
       filePattern
       fileCount
+      source
       status
       createdAt
       error

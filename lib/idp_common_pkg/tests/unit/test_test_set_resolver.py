@@ -203,6 +203,50 @@ class TestTestSetResolver:
                 mock_table.query.assert_called_once()
                 assert len(result) == 1
                 assert result[0]["id"] == "test-id"
+                # 'source' maps through; absent on this record -> None (back-compat)
+                assert result[0]["source"] is None
+
+    @patch.dict(
+        os.environ, {"INPUT_BUCKET": "test-bucket", "TRACKING_TABLE": "test-table"}
+    )
+    def test_get_test_sets_maps_source_when_present(self):
+        """A record's 'source' attribute is returned in the mapped result."""
+        with patch.object(test_set_index, "find_matching_files") as mock_find_files:
+            mock_find_files.return_value = []
+            with patch.object(test_set_index, "boto3") as mock_boto3:
+                mock_table = MagicMock()
+                mock_table.query.return_value = {
+                    "Items": [{"PK": "testset#syn-id", "SK": "metadata"}]
+                }
+                mock_boto3.resource.return_value.Table.return_value = mock_table
+                mock_boto3.resource.return_value.batch_get_item.return_value = {
+                    "Responses": {
+                        "test-table": [
+                            {
+                                "PK": "testset#syn-id",
+                                "SK": "metadata",
+                                "id": "syn-id",
+                                "name": "syn-name",
+                                "source": "synthetic",
+                                "createdAt": "2025-10-17T16:00:00Z",
+                            }
+                        ]
+                    }
+                }
+                result = test_set_index.get_test_sets()
+                assert result[0]["source"] == "synthetic"
+
+    def test_get_test_set_source_reads_marker(self):
+        """_get_test_set_source returns 'synthetic' iff a '.source' marker exists."""
+        s3 = MagicMock()
+        # marker present -> synthetic
+        s3.head_object.return_value = {}
+        assert (
+            test_set_index._get_test_set_source(s3, "bucket", "prefix") == "synthetic"
+        )
+        # marker absent (head_object raises) -> uploaded
+        s3.head_object.side_effect = Exception("404")
+        assert test_set_index._get_test_set_source(s3, "bucket", "prefix") == "uploaded"
 
     @patch.dict("os.environ", {"INPUT_BUCKET": "test-bucket"})
     def test_list_input_bucket_files(self):

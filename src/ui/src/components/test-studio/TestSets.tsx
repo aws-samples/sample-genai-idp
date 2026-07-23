@@ -68,6 +68,7 @@ interface TestSetItem {
   description?: string | null;
   filePattern?: string | null;
   fileCount?: number | null;
+  source?: string | null;
   status?: string | null;
   createdAt: string;
   error?: string | null;
@@ -750,6 +751,22 @@ const TestSets = (): React.JSX.Element => {
       id: 'fileCount',
       header: 'Files',
       cell: (item: TestSetItem) => item.fileCount,
+    },
+    {
+      id: 'source',
+      header: 'Source',
+      cell: (item: TestSetItem) => {
+        if (!item.source) {
+          return '-';
+        }
+        const badges: Record<string, React.JSX.Element> = {
+          synthetic: <Badge color="grey">Synthetic</Badge>,
+          uploaded: <Badge color="blue">Uploaded</Badge>,
+          mixed: <Badge color="green">Mixed</Badge>,
+        };
+        return badges[item.source] || item.source;
+      },
+      sortingField: 'source',
     },
     {
       id: 'documentClassType',

@@ -5,6 +5,7 @@ query GetTestSets {
     description
     filePattern
     fileCount
+    source
     status
     createdAt
     error

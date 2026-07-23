@@ -1693,6 +1693,7 @@ export type TestSet = {
   id: Scalars['String']['output'];
   lastAddResult?: Maybe<Scalars['String']['output']>;
   name: Scalars['String']['output'];
+  source?: Maybe<Scalars['String']['output']>;
   status?: Maybe<Scalars['String']['output']>;
 };
 
