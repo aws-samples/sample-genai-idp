@@ -106,3 +106,33 @@ class TestFindMatchingFiles:
 
         # Only single character matches, not / or multiple chars
         assert result == ["file1.txt", "file2.txt"]
+
+    @patch("idp_common.s3.get_s3_client")
+    def test_skips_folder_pseudo_objects(self, mock_get_client):
+        """Zero-byte '/'-terminated folder placeholders are never matched.
+
+        The S3 console "Create folder" action writes a zero-byte object whose
+        key ends in '/'. These are not documents and must be excluded even when
+        the pattern would otherwise match them.
+        """
+        mock_s3 = Mock()
+        mock_get_client.return_value = mock_s3
+
+        mock_paginator = Mock()
+        mock_s3.get_paginator.return_value = mock_paginator
+        mock_paginator.paginate.return_value = [
+            {
+                "Contents": [
+                    {"Key": "testfolder/"},
+                    {"Key": "testfolder/doc1.pdf"},
+                    {"Key": "testfolder/sub/"},
+                ]
+            }
+        ]
+
+        # Pattern that would otherwise match the "testfolder/" placeholder
+        result = find_matching_files("bucket", "testfolder/*")
+        assert result == ["testfolder/doc1.pdf"]
+
+        # A pattern ending in '/' must not pull in the placeholder either
+        assert find_matching_files("bucket", "testfolder/") == []
