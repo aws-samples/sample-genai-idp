@@ -18,7 +18,7 @@ https://github.com/user-attachments/assets/7c5adf30-8d5c-4292-93b0-0149506322c7
 ## Generating synthetic test sets
 
 When the [Test Set Generator](extensions/idp-data-generator.md) extension is
-installed, the **Test Sets** tab shows a **Generate Synthetic Data** button. It
+installed, the **Test Sets** tab shows a **Generate Test Set** button. It
 opens a modal to generate labeled synthetic documents (PDF + ground-truth JSON)
 — either from a plain-language description of a document type, or from an
 existing configuration version's document class. You can add an optional

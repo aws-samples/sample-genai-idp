@@ -48,7 +48,7 @@ labels for evaluating OCR, classification, and extraction:
 
 Once installed, the generator is reachable three ways:
 
-- **Test Studio → Test Sets → Generate Synthetic Data** — a modal (shown only
+- **Test Studio → Test Sets → Generate Test Set** — a modal (shown only
   when this extension is installed) to generate from a description or a
   configuration version/class, with scenario, quality, and document-count
   controls. The resulting test set appears in the list when the background job

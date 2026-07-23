@@ -928,17 +928,6 @@ const TestSets = (): React.JSX.Element => {
                 Refresh
               </Button>
               <Button
-                disabled={selectedItems.length !== 1 || selectedItems[0]?.status !== 'COMPLETED' || loading}
-                onClick={() => {
-                  const selected = selectedItems[0];
-                  if (selected) {
-                    window.location.hash = testSetDetailHref(selected.id).substring(1);
-                  }
-                }}
-              >
-                Browse Documents
-              </Button>
-              <Button
                 iconName="edit"
                 disabled={selectedItems.length !== 1 || loading}
                 onClick={() => {
@@ -982,7 +971,7 @@ const TestSets = (): React.JSX.Element => {
               </ButtonDropdown>
               {generatorAvailable && (
                 <Button iconName="gen-ai" disabled={loading} onClick={() => setShowGenerateModal(true)}>
-                  Generate Synthetic Data
+                  Generate Test Set
                 </Button>
               )}
               <ButtonDropdown

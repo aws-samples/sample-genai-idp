@@ -9,7 +9,7 @@ import type { FeatureContext } from './types';
 declare const __FEATURE_VERSION__: string;
 
 // Host Test Studio hash route. Test Sets is the default tab there, where the
-// "Generate Synthetic Data" action lives.
+// "Generate Test Set" action lives.
 const TEST_STUDIO_HASH = '#/test-studio';
 
 // Upstream SEED generator documentation.
@@ -38,7 +38,7 @@ const App: React.FC<FeatureContext> = ({ installedVersion }) => (
         ground-truth JSON) from a plain-language description or an existing configuration version.
       </Box>
       <Box variant="p">
-        Start a generation from <strong>Test Studio → Test Sets → Generate Synthetic Data</strong>. The resulting test
+        Start a generation from <strong>Test Studio → Test Sets → Generate Test Set</strong>. The resulting test
         set appears in the Test Sets list when the background job completes.
       </Box>
       <Link href={TEST_STUDIO_HASH}>Go to Test Studio → Test Sets</Link>
