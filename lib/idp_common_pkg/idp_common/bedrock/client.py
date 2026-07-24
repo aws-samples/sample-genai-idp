@@ -85,6 +85,11 @@ DEFAULT_MAX_BACKOFF = 300  # 5 minutes
 _CLAUDE_4_7_BASE_NAMES = {
     "anthropic.claude-opus-4-7",
     "anthropic.claude-opus-4-8",
+    # Claude Opus 5 keeps the Opus 4.7/4.8 request surface: temperature/top_p/
+    # top_k are rejected (400). Thinking is ON by default on Opus 5 (unlike
+    # 4.7/4.8); the Converse path does not send a `thinking` field, so requests
+    # run adaptive thinking within max_tokens.
+    "anthropic.claude-opus-5",
     # Claude Sonnet 5 shares the Opus-4.7+ request surface: it REJECTS non-default
     # temperature/top_p/top_k (400). IDP's default decoding config sets top_k=5 /
     # top_p=0.0, so Sonnet 5 must be treated like the sampling-param-stripped models
@@ -134,6 +139,7 @@ _CLAUDE_EFFORT_BASE_NAMES = {
     "anthropic.claude-opus-4-6",
     "anthropic.claude-opus-4-7",
     "anthropic.claude-opus-4-8",
+    "anthropic.claude-opus-5",
     "anthropic.claude-fable-5",
 }
 
@@ -147,7 +153,9 @@ def _strip_region_and_1m(model_id: str) -> str:
     the :1m suffix. Also tolerates Opus 4.5/4.6 dated/`-v1` foundation IDs by
     matching on a prefix in is_claude_effort_model."""
     parts = model_id.split(".", 1)
-    base = parts[1] if len(parts) == 2 and parts[0] in ("us", "eu", "global") else model_id
+    base = (
+        parts[1] if len(parts) == 2 and parts[0] in ("us", "eu", "global") else model_id
+    )
     if base.endswith(":1m"):
         base = base[:-3]
     return base
@@ -185,6 +193,8 @@ CACHEPOINT_SUPPORTED_MODELS = [
     "us.anthropic.claude-opus-4-7:1m",
     "us.anthropic.claude-opus-4-8",
     "us.anthropic.claude-opus-4-8:1m",
+    "us.anthropic.claude-opus-5",
+    "us.anthropic.claude-opus-5:1m",
     "us.anthropic.claude-opus-4-1-20250805-v1:0",
     "us.anthropic.claude-opus-4-20250514-v1:0",
     "us.anthropic.claude-sonnet-4-20250514-v1:0",
@@ -213,6 +223,8 @@ CACHEPOINT_SUPPORTED_MODELS = [
     "eu.anthropic.claude-opus-4-7:1m",
     "eu.anthropic.claude-opus-4-8",
     "eu.anthropic.claude-opus-4-8:1m",
+    "eu.anthropic.claude-opus-5",
+    "eu.anthropic.claude-opus-5:1m",
     "eu.amazon.nova-lite-v1:0",
     "eu.amazon.nova-pro-v1:0",
     "eu.amazon.nova-2-lite-v1:0",
@@ -234,6 +246,8 @@ CACHEPOINT_SUPPORTED_MODELS = [
     "global.anthropic.claude-opus-4-7:1m",
     "global.anthropic.claude-opus-4-8",
     "global.anthropic.claude-opus-4-8:1m",
+    "global.anthropic.claude-opus-5",
+    "global.anthropic.claude-opus-5:1m",
 ]
 
 # Build set of base model names (without region/tier prefixes) for inference profile resolution.
@@ -795,9 +809,7 @@ class BedrockClient:
                 effort = str(reasoning_effort).lower().strip()
                 if effort in CLAUDE_EFFORT_LEVELS:
                     additional_model_fields["output_config"] = {"effort": effort}
-                    logger.info(
-                        "Using reasoning effort '%s' for %s", effort, model_id
-                    )
+                    logger.info("Using reasoning effort '%s' for %s", effort, model_id)
                 else:
                     logger.warning(
                         "Ignoring unsupported Claude reasoning effort '%s' for %s "

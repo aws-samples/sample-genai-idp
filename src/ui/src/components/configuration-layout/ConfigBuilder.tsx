@@ -60,6 +60,7 @@ const _CLAUDE_EFFORT_TOKENS = [
   'claude-opus-4-6',
   'claude-opus-4-7',
   'claude-opus-4-8',
+  'claude-opus-5',
   'claude-fable-5',
 ];
 function modelSupportsReasoningEffort(modelId: unknown): boolean {
