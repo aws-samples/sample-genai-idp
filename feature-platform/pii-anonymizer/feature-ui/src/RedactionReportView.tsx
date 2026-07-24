@@ -40,7 +40,7 @@ const RedactionReportView: React.FC<{ api: ApiClient; enabled: boolean }> = ({
   const [totalPii, setTotalPii] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [window, setWindow] = useState(WINDOW_OPTIONS[0]);
+  const [timeWindow, setTimeWindow] = useState(WINDOW_OPTIONS[0]);
   // Mapping modal state
   const [mapDoc, setMapDoc] = useState<string | null>(null);
   const [mapRows, setMapRows] = useState<Array<{ original: string; synthetic: string }>>([]);
@@ -70,14 +70,14 @@ const RedactionReportView: React.FC<{ api: ApiClient; enabled: boolean }> = ({
     setLoading(true);
     setError(null);
     api
-      .listReport({ window: window.value || undefined })
+      .listReport({ window: timeWindow.value || undefined })
       .then((r) => {
         setRows(r.rows);
         setTotalPii(r.totalPiiRedacted);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
-  }, [api, enabled, window]);
+  }, [api, enabled, timeWindow]);
 
   useEffect(load, [load]);
 
@@ -99,13 +99,19 @@ const RedactionReportView: React.FC<{ api: ApiClient; enabled: boolean }> = ({
           actions={
             <SpaceBetween size="xs" direction="horizontal">
               <Select
-                selectedOption={window}
+                selectedOption={timeWindow}
                 onChange={({ detail }) =>
-                  setWindow(detail.selectedOption as { value: string; label: string })
+                  setTimeWindow(detail.selectedOption as { value: string; label: string })
                 }
                 options={WINDOW_OPTIONS}
+                ariaLabel="Time window filter"
               />
-              <Button iconName="refresh" onClick={load} loading={loading} />
+              <Button
+                iconName="refresh"
+                onClick={load}
+                loading={loading}
+                ariaLabel="Refresh redaction report"
+              />
             </SpaceBetween>
           }
         >
@@ -140,10 +146,10 @@ const RedactionReportView: React.FC<{ api: ApiClient; enabled: boolean }> = ({
               id: 'mode',
               header: 'Mode',
               cell: (r) =>
-                r.mode === 'redacted_only' ? (
-                  <StatusIndicator type="info">Redacted only</StatusIndicator>
+                r.mode === 'redactcopy_and_stop' ? (
+                  <StatusIndicator type="info">Redact &amp; stop</StatusIndicator>
                 ) : (
-                  <StatusIndicator type="success">Both</StatusIndicator>
+                  <StatusIndicator type="success">Redact &amp; continue</StatusIndicator>
                 ),
             },
             {

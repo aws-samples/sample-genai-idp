@@ -99,6 +99,33 @@ Resources:
           Value: !Ref FeatureId
 
   ###########################################################################
+  # Redaction MAPPING table — OWNED by this feature. Holds the original->
+  # synthetic value map (a RE-IDENTIFICATION KEY containing real PII), keyed by
+  # documentId, only when store_mapping is enabled. Deliberately a feature-owned
+  # DynamoDB table — NOT the host Output/Working buckets — because the host's
+  # getFileContents resolver proxies any Output-bucket key to any authenticated
+  # user (no config-version scoping), which would bypass the RBAC gate. Reachable
+  # ONLY via the feature API's RBAC-gated /report/{docId}/mapping route.
+  ###########################################################################
+  RedactionMappingTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: documentId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: documentId
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: 'idp:feature-id'
+          Value: !Ref FeatureId
+
+  ###########################################################################
   # Preprocessing hook — invoked FIRST by the host's pipeline-hooks dispatcher
   # (before BDA/pipeline routing). The dispatcher only invokes Lambdas tagged
   # `idp:feature-id` — the Tags below are REQUIRED. Heavy timeout/memory:
@@ -119,15 +146,18 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           REDACTED_SUFFIX: !Ref RedactedSuffix
           AUDIT_TABLE_NAME: !Ref RedactionAuditTable
+          MAPPING_TABLE_NAME: !Ref RedactionMappingTable
           INPUT_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-InputBucketName' }
           WORKING_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
-          OUTPUT_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
       Policies:
         - Statement:
-            # Record the redaction audit row (metadata only).
+            # Record the redaction audit row (metadata only) + the optional PII
+            # mapping (feature-owned table; not host-proxyable).
             - Effect: Allow
               Action: dynamodb:PutItem
-              Resource: !GetAtt RedactionAuditTable.Arn
+              Resource:
+                - !GetAtt RedactionAuditTable.Arn
+                - !GetAtt RedactionMappingTable.Arn
             # Read the source document from Input + compressed state from Working.
             # NOTE: the original is deleted by the HOST workflow_tracker in
             # redactcopy_and_stop mode (race-free), so the hook needs no delete
@@ -157,12 +187,6 @@ Resources:
                 - 'arn:${AWS::Partition}:s3:::${Bucket}/*${RedactedSuffix}*'
                 - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-InputBucketName' }
                   RedactedSuffix: !Ref RedactedSuffix
-            # Store the optional PII mapping (opt-in) in the Output bucket.
-            - Effect: Allow
-              Action: s3:PutObject
-              Resource: !Sub
-                - 'arn:${AWS::Partition}:s3:::${Bucket}/pii_mappings/*'
-                - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
             # Bedrock Converse for PII detection + synthetic generation.
             - Effect: Allow
               Action:
@@ -196,6 +220,13 @@ Resources:
   FeatureApi:
     Type: AWS::Serverless::HttpApi
     Properties:
+      # CORS AllowOrigins='*' is safe here: every route requires a Cognito
+      # Bearer JWT (Authorization header), never cookies/credentials, so the
+      # browser same-origin policy does not gate access — the JWT authorizer +
+      # server-side config-version RBAC do. The sensitive PII mapping is gated
+      # server-side regardless of Origin. (The host does not export its
+      # CloudFront origin for features to pin, so a specific origin isn't
+      # available without a host change.)
       CorsConfiguration:
         AllowOrigins: ['*']
         AllowMethods: [GET, POST, OPTIONS]
@@ -226,14 +257,12 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           MAIN_STACK_NAME: !Ref MainStackName
           AUDIT_TABLE_NAME: !Ref RedactionAuditTable
-          # Surfaced to the Config Pairing wizard via GET /config so the
-          # wizard can write the real hook ARN into the preprocessing.preHook
-          # entry of the config versions it creates.
+          MAPPING_TABLE_NAME: !Ref RedactionMappingTable
+          # Surfaced to the Config Pairing wizard via GET /config so the wizard
+          # can write the real hook ARN into the preprocessing hook it creates.
           HOOK_FUNCTION_ARN: !GetAtt PiiAnonymizerHookFunction.Arn
-          # For the RBAC-gated PII mapping view: read the caller's
-          # allowedConfigVersions (UsersTable) and the mapping (Output bucket).
+          # RBAC-gated PII mapping view: read the caller's allowedConfigVersions.
           USERS_TABLE_NAME: { 'Fn::ImportValue': !Sub '${MainStackName}-UsersTableName' }
-          OUTPUT_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
       Policies:
         - Statement:
             - Effect: Allow
@@ -244,6 +273,11 @@ Resources:
               Resource:
                 - !GetAtt RedactionAuditTable.Arn
                 - !Sub '${RedactionAuditTable.Arn}/index/*'
+            # Read the stored PII mapping (feature-owned table) for the
+            # RBAC-gated /report/{docId}/mapping route.
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt RedactionMappingTable.Arn
             # RBAC scope lookup: query UsersTable.EmailIndex for the caller's
             # allowedConfigVersions.
             - Effect: Allow
@@ -255,13 +289,7 @@ Resources:
                 - !Sub
                   - '${Arn}/index/*'
                   - Arn: { 'Fn::ImportValue': !Sub '${MainStackName}-UsersTableArn' }
-            # Read the stored PII mapping (opt-in) from the Output bucket.
-            - Effect: Allow
-              Action: s3:GetObject
-              Resource: !Sub
-                - 'arn:${AWS::Partition}:s3:::${Bucket}/pii_mappings/*'
-                - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-OutputBucketName' }
-            # Output bucket + tables are CMK-encrypted.
+            # Feature tables are CMK-encrypted.
             - Effect: Allow
               Action:
                 - kms:Decrypt

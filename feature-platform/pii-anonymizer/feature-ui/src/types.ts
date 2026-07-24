@@ -42,7 +42,6 @@ export interface RedactionRow {
   replacements?: number;
   halted?: boolean;
   mappingStored?: boolean;
-  mappingUri?: string;
   executionArn?: string;
 }
 
@@ -56,7 +55,7 @@ export interface RedactionReportResponse {
 
 // ---- Config-pairing wizard types -------------------------------------------
 
-export type RedactionMode = 'redacted_only' | 'redacted_and_unredacted';
+export type RedactionMode = 'redactcopy_and_stop' | 'redactcopy_and_continue';
 
 export interface ConfigVersionSummary {
   versionName: string;
@@ -66,8 +65,8 @@ export interface ConfigVersionSummary {
 
 export interface PairPlan {
   baseVersion: string;
-  initiatingVersion: string; // <base>__pii_redacted_only | <base>__pii_both
-  companionVersion: string; // <base>__standard
+  initiatingVersion: string; // <base>__pii_stop | <base>__pii_go
+  companionVersion: string; // <base>__pii_target
   mode: RedactionMode;
   detectionModelId: string;
   redactionMode: 'synthetic' | 'blackout';

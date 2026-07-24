@@ -150,7 +150,7 @@ def test_store_mapping_opt_in(monkeypatch):
     monkeypatch.setattr(
         mod,
         "_store_mapping",
-        lambda did, ver, m: stored.update({"m": m, "ver": ver}) or "s3://x/y",
+        lambda did, ver, m: bool(stored.update({"m": m, "ver": ver}) or True),
     )
     # store_mapping=false -> not stored
     out = mod.lambda_handler(

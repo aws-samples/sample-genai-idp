@@ -23,7 +23,7 @@ XLSX, DOCX). Traced by import graph from the format processors:
 core/        pii_detector, synthetic_pii_generator, text_replacer, prompts, value_categorizer
 helpers/     model_config_helper, model_router, threaded_detector, text_chunker,
              token_tracker, pdf_processor, textract_helper, page_type_checker,
-             font_config, config_loader, pricing.yaml
+             font_config, config_loader
 processors/  pdf_text_processor, txt_processor, tabular_processor, word_processor,
              pdf_image_processor, image_processor
 redaction/   pdf_redactor
@@ -40,6 +40,10 @@ validation/  model_schemas, pdf_validator, document_validator
 - `helpers/throttle_handler.py`, `helpers/log_scrubber.py` — not in the closure.
 - `core/redactor.py` — the standalone Step-3 redactor; nothing in the closure
   imports it (the processors call `redaction/pdf_redactor` and the text replacers).
+- `helpers/pricing.yaml` — upstream's per-model price table, used only by
+  `token_tracker.estimate_cost()`. Not vendored: the accelerator has its own
+  pricing/metering system, and `_load_pricing()` degrades gracefully to an
+  empty table (cost estimate 0) when the file is absent.
 
 The upstream `src/__init__.py` eagerly re-exported the whole package (including
 the excluded modules); it was replaced here with an empty marker

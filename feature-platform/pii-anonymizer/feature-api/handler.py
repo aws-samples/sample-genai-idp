@@ -35,13 +35,16 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 _AUDIT_TABLE = os.environ.get("AUDIT_TABLE_NAME", "")
+_MAPPING_TABLE = os.environ.get("MAPPING_TABLE_NAME", "")
 _HOOK_FUNCTION_ARN = os.environ.get("HOOK_FUNCTION_ARN", "")
 _USERS_TABLE = os.environ.get("USERS_TABLE_NAME", "")
-_OUTPUT_BUCKET = os.environ.get("OUTPUT_BUCKET", "")
 _WINDOW_RE = re.compile(r"^(\d+)([hdw])$")
 
 _dynamodb = boto3.resource("dynamodb")
-_s3 = boto3.client("s3")
+
+
+class ScopeLookupError(Exception):
+    """UsersTable scope lookup failed — callers must fail CLOSED (deny)."""
 
 
 def _caller_claims(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -68,10 +71,17 @@ def _caller_groups(event: Dict[str, Any]) -> list:
 
 
 def _caller_allowed_versions(email: str) -> Optional[list]:
-    """The caller's allowedConfigVersions scope from the host UsersTable, or
-    None if unrestricted (no scope set / lookup unavailable)."""
-    if not _USERS_TABLE or not email:
-        return None
+    """The caller's allowedConfigVersions scope from the host UsersTable.
+
+    Returns None = unrestricted (no scope set, matching the host's own rule).
+    Raises ScopeLookupError on a lookup failure so callers gating a sensitive
+    resource (the PII mapping) FAIL CLOSED rather than treating a transient
+    DynamoDB error as 'unrestricted'."""
+    if not email:
+        raise ScopeLookupError("no caller email in JWT claims")
+    if not _USERS_TABLE:
+        # No UsersTable wired — cannot evaluate scope; deny for the mapping.
+        raise ScopeLookupError("USERS_TABLE_NAME not configured")
     try:
         from boto3.dynamodb.conditions import Key as _Key
 
@@ -83,9 +93,10 @@ def _caller_allowed_versions(email: str) -> Optional[list]:
         if items:
             scope = items[0].get("allowedConfigVersions")
             return list(scope) if scope else None
+        return None  # user has no explicit scope row → unrestricted
     except Exception as exc:  # noqa: BLE001
         logger.warning("User scope lookup failed for %s: %s", email, exc)
-    return None
+        raise ScopeLookupError(str(exc)) from exc
 
 
 def _parse_window(raw: Optional[str]) -> Optional[timedelta]:
@@ -153,18 +164,30 @@ def _get_row(doc_id: str) -> Optional[Dict[str, Any]]:
     return _to_plain(item) if item else None
 
 
-def _read_mapping(uri: str) -> Optional[Dict[str, Any]]:
-    """Read the stored mapping JSON (contains real PII) from its s3:// URI."""
-    from urllib.parse import urlparse
-
-    p = urlparse(uri)
-    try:
-        resp = _s3.get_object(Bucket=p.netloc, Key=p.path.lstrip("/"))
-        body = json.loads(resp["Body"].read().decode("utf-8"))
-        return body if isinstance(body, dict) else None
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Could not read mapping %s: %s", uri, exc)
+def _read_mapping(doc_id: str) -> Optional[Dict[str, Any]]:
+    """Read the stored mapping (contains real PII) from the FEATURE-OWNED
+    mapping DynamoDB table — never a host-proxyable bucket."""
+    if not _MAPPING_TABLE:
         return None
+    try:
+        item = (
+            _dynamodb.Table(_MAPPING_TABLE)
+            .get_item(Key={"documentId": doc_id})
+            .get("Item")
+        )
+        return _to_plain(item) if item else None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not read mapping for %s: %s", doc_id, exc)
+        return None
+
+
+def _visible_to(row: Dict[str, Any], is_admin: bool, allowed: Optional[list]) -> bool:
+    """Config-version RBAC for a report row: Admins and unrestricted users see
+    all; a scoped user sees a row only if the ORIGINAL's config version is in
+    their allowedConfigVersions."""
+    if is_admin or allowed is None:
+        return True
+    return (row.get("originalConfigVersion") or "") in allowed
 
 
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
@@ -185,18 +208,26 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             },
         )
 
+    is_admin = "Admin" in _caller_groups(event)
+
     if path.rstrip("/") == "/report":
         try:
             window = _parse_window(qs.get("window"))
         except ValueError as exc:
             return _response(400, {"error": str(exc)})
         since = datetime.now(timezone.utc) - window if window else None
+        # RBAC: scope the list to config versions the caller may see. A scope
+        # lookup failure denies (empty list) rather than leaking all rows.
         try:
-            rows = _list_report(since)
+            allowed = _caller_allowed_versions(_caller_email(event))
+        except ScopeLookupError:
+            logger.warning("Scope lookup failed for report list — returning empty")
+            allowed = []
+        try:
+            rows = [r for r in _list_report(since) if _visible_to(r, is_admin, allowed)]
         except Exception as exc:  # noqa: BLE001
             logger.exception("list report failed")
             return _response(500, {"error": str(exc)})
-        # Aggregate a small summary for the report header.
         total_pii = sum(int(r.get("piiCount") or 0) for r in rows)
         return _response(
             200,
@@ -222,17 +253,16 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return _response(500, {"error": str(exc)})
         if not row:
             return _response(404, {"error": f"no redaction record for {doc_id!r}"})
-        if not row.get("mappingStored") or not row.get("mappingUri"):
+        if not row.get("mappingStored"):
             return _response(404, {"error": "no stored mapping for this document"})
 
-        # RBAC: caller must be allowed the ORIGINAL's config version. Admins
-        # (or users with no scope restriction) pass; a scoped user must have the
-        # original's config version in their allowedConfigVersions.
-        original_version = row.get("originalConfigVersion") or ""
-        groups = _caller_groups(event)
-        allowed = _caller_allowed_versions(_caller_email(event))
-        is_admin = "Admin" in groups
-        if not is_admin and allowed is not None and original_version not in allowed:
+        # RBAC: caller must be allowed the ORIGINAL's config version. FAIL CLOSED
+        # on a scope-lookup error (this is a re-identification key).
+        try:
+            allowed = _caller_allowed_versions(_caller_email(event))
+        except ScopeLookupError:
+            return _response(403, {"error": "Access denied: could not verify scope."})
+        if not _visible_to(row, is_admin, allowed):
             return _response(
                 403,
                 {
@@ -241,9 +271,9 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
                 },
             )
 
-        mapping_doc = _read_mapping(row["mappingUri"])
+        mapping_doc = _read_mapping(doc_id)
         if mapping_doc is None:
-            return _response(404, {"error": "stored mapping not readable"})
+            return _response(404, {"error": "stored mapping not found"})
         return _response(200, mapping_doc)
 
     m = re.match(r"^/report/(.+)$", path)
@@ -256,6 +286,14 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             return _response(500, {"error": str(exc)})
         if not row:
             return _response(404, {"error": f"no redaction record for {doc_id!r}"})
+        # RBAC: a scoped user may only see a row for a config version they're
+        # allowed (fail closed on lookup error → 403).
+        try:
+            allowed = _caller_allowed_versions(_caller_email(event))
+        except ScopeLookupError:
+            return _response(403, {"error": "Access denied: could not verify scope."})
+        if not _visible_to(row, is_admin, allowed):
+            return _response(403, {"error": "Access denied."})
         return _response(200, row)
 
     return _response(404, {"error": f"unknown path {path}"})

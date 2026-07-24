@@ -220,7 +220,14 @@ const ConfigPairingView: React.FC<{ enabled: boolean; hookFunctionArn: string | 
         <Header
           variant="h2"
           description="Create a matched pair of config versions that redact PII before processing, cloned from one of your existing config versions."
-          actions={<Button iconName="refresh" onClick={refresh} disabled={busy} />}
+          actions={
+            <Button
+              iconName="refresh"
+              onClick={refresh}
+              disabled={busy}
+              ariaLabel="Refresh config versions"
+            />
+          }
         >
           Config Pairing
         </Header>

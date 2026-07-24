@@ -178,13 +178,17 @@ def update_document_completion(
             # The tracker is the LAST writer for the execution, so it owns the
             # delete — doing it in the hook mid-execution races with this write
             # (the tracker would re-create the row). Delete the whole document
-            # (input S3 + tracking rows) here and return; nothing to persist.
+            # (input S3 + tracking rows) here; the handler detects this status
+            # and skips run-record/metrics persistence. We still return a real
+            # Document (never None) so the caller never dereferences None.
             if workflow_status == "SUCCEEDED" and (
                 processed_doc.status == Status.REDACTED_SUPERSEDED
                 or wrapper_status == Status.REDACTED_SUPERSEDED.value
             ):
                 _delete_superseded_original(object_key)
-                return
+                processed_doc.status = Status.REDACTED_SUPERSEDED
+                processed_doc.completion_time = datetime.now(timezone.utc).isoformat()
+                return processed_doc
 
             # Use the processed document directly and update status. This is
             # safer than copying fields and ensures we don't miss any data.
@@ -550,8 +554,17 @@ def handler(event, context):
             object_key, workflow_status, output_data
         )
 
+        # A REDACTED_SUPERSEDED original was deleted (redact-copy-and-stop): there
+        # is no document to record a run/metrics for, and its output artifacts are
+        # gone. Skip run-record + metrics; the counter is still decremented below
+        # exactly once. (updated_doc is a real Document, so no None deref.)
+        superseded = (
+            updated_doc is not None
+            and getattr(updated_doc, "status", None) == Status.REDACTED_SUPERSEDED
+        )
+
         # Publish metrics for successful executions
-        if workflow_status == "SUCCEEDED":
+        if workflow_status == "SUCCEEDED" and not superseded:
             # Record this run as an immutable document version (S3-version
             # manifest + run record) before anything can overwrite outputs.
             if not updated_doc.workflow_execution_arn:

@@ -75,6 +75,10 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 _INPUT_BUCKET = os.environ.get("INPUT_BUCKET", "")
 _WORKING_BUCKET = os.environ.get("WORKING_BUCKET", "")
 _AUDIT_TABLE = os.environ.get("AUDIT_TABLE_NAME", "")
+# Feature-owned table for the original->synthetic PII mapping (a
+# re-identification key). Kept OUT of any host-proxyable bucket so it can only be
+# read via the feature API's RBAC-gated route.
+_MAPPING_TABLE = os.environ.get("MAPPING_TABLE_NAME", "")
 # Marker suffix appended to the redacted copy's document id / key stem, e.g.
 # `report.pdf` -> `report(REDACTED).pdf`. The re-entrancy guard refuses to run
 # on any key whose stem already ends with this marker (prevents an infinite
@@ -84,7 +88,6 @@ _REDACTED_SUFFIX = os.environ.get("REDACTED_SUFFIX", "(REDACTED)")
 _DEFAULT_COMPANION_VERSION = os.environ.get(
     "DEFAULT_COMPANION_CONFIG_VERSION", "default"
 )
-_OUTPUT_BUCKET = os.environ.get("OUTPUT_BUCKET", "")
 
 # Redaction modes (the `mode` hook arg). Names mirror the wizard-generated
 # config-version suffixes so operators can reason about them consistently:
@@ -319,7 +322,15 @@ def _stem_ext(key: str) -> tuple[str, str]:
 
 
 def _is_redacted_key(input_key: str) -> bool:
-    """True if this key is already a redacted copy (stem ends with the marker)."""
+    """Belt-and-suspenders re-entrancy guard: True if this key looks like a
+    redacted copy (stem ends with the marker).
+
+    The PRIMARY guard against infinite redaction is that the redacted copy is
+    stamped with the COMPANION config version, which has NO preprocessing hook —
+    so this hook never runs on a copy. This filename check is a secondary
+    safety net. It is fail-SAFE: a user who literally names a source
+    `report(REDACTED).pdf` is passed through un-redacted (redaction skipped),
+    which never leaks PII — it just doesn't redact that oddly-named file."""
     stem, _ = _stem_ext(input_key.lstrip("/"))
     return stem.endswith(_REDACTED_SUFFIX)
 
@@ -358,37 +369,35 @@ def _write_audit(row: Dict[str, Any]) -> None:
 
 def _store_mapping(
     document_id: str, original_config_version: str, mapping: Dict[str, Any]
-) -> Optional[str]:
-    """Persist the original->synthetic mapping as JSON in the Output bucket
-    (CMK-encrypted by the bucket default). Returns the s3:// URI, or None on
-    failure. This object CONTAINS REAL PII — the Redaction Report reveals it
-    only to users whose allowedConfigVersions include original_config_version
-    (enforced in the feature API, feature-api/handler.py)."""
-    if not _OUTPUT_BUCKET:
-        logger.warning("OUTPUT_BUCKET not set; cannot store mapping")
-        return None
-    key = f"pii_mappings/{document_id}/mapping.json"
-    body = json.dumps(
-        {
-            "documentId": document_id,
-            "originalConfigVersion": original_config_version,
-            "createdAt": _now_iso(),
-            # {original PII value: synthetic replacement}
-            "mapping": mapping,
-        },
-        default=str,
-    ).encode("utf-8")
+) -> bool:
+    """Persist the original->synthetic mapping in the FEATURE-OWNED mapping
+    DynamoDB table (CMK-encrypted). Returns True on success.
+
+    SECURITY: the mapping is a re-identification key (contains REAL PII). It is
+    stored in a feature-owned table — NOT the host Output/Working buckets —
+    precisely because the host's getFileContents resolver will proxy any
+    Output-bucket key to any authenticated user (no config-version scoping),
+    which would bypass the RBAC gate. Kept out of any host-proxyable location,
+    the mapping is reachable ONLY via the feature API's RBAC-gated
+    /report/{docId}/mapping route (feature-api/handler.py), which checks the
+    caller's allowedConfigVersions against original_config_version."""
+    if not _MAPPING_TABLE:
+        logger.warning("MAPPING_TABLE_NAME not set; cannot store mapping")
+        return False
     try:
-        _s3.put_object(
-            Bucket=_OUTPUT_BUCKET,
-            Key=key,
-            Body=body,
-            ContentType="application/json",
+        _dynamodb.Table(_MAPPING_TABLE).put_item(
+            Item={
+                "documentId": document_id,
+                "originalConfigVersion": original_config_version,
+                "createdAt": _now_iso(),
+                # {original PII value: synthetic replacement}
+                "mapping": mapping,
+            }
         )
-        return f"s3://{_OUTPUT_BUCKET}/{key}"
+        return True
     except Exception as exc:  # noqa: BLE001
         logger.warning("Mapping store failed (ignored): %s", exc)
-        return None
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -462,16 +471,19 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     # key — contains real PII). Stored CMK-encrypted in the Output bucket; the
     # Redaction Report only reveals it to users with access to the ORIGINAL's
     # config version. Off unless store_mapping=true.
-    mapping_uri = None
+    mapping_stored = False
     if store_mapping and redaction.get("mapping"):
-        mapping_uri = _store_mapping(
+        mapping_stored = _store_mapping(
             document_id or input_key, version, redaction["mapping"]
         )
 
     halt = mode == _MODE_STOP
 
     # (6) audit row — metadata only, never PII. Records the ORIGINAL's config
-    # version so the report can RBAC-gate the mapping view.
+    # version so the report can RBAC-gate the mapping view. NOTE: we record only
+    # a `mappingStored` boolean — never a location/URI. The mapping lives in a
+    # feature-owned DynamoDB table (not any host-proxyable bucket) and is fetched
+    # only through the RBAC-gated feature-API route keyed by documentId.
     _write_audit(
         {
             "documentId": document_id,
@@ -485,8 +497,7 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             "piiCount": int(redaction["pii_count"] or 0),
             "replacements": int(redaction.get("replacements") or 0),
             "halted": halt,
-            "mappingStored": bool(mapping_uri),
-            "mappingUri": mapping_uri or "",
+            "mappingStored": mapping_stored,
             "executionArn": event.get("executionArn") or "",
         }
     )
@@ -504,5 +515,5 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         "companionConfigVersion": companion_version,
         "piiCount": redaction["pii_count"],
         "replacements": redaction.get("replacements"),
-        "mappingStored": bool(mapping_uri),
+        "mappingStored": mapping_stored,
     }

@@ -4,7 +4,7 @@
     "States": {
         "PreprocessingHook": {
             "Type": "Task",
-            "Comment": "Standalone preprocessing extension point — runs FIRST, before the BDA/pipeline routing, so it fires in both processing modes and even when OCR is disabled. Dispatches to any feature hook registered under the config's preprocessing.preHook (e.g. PII anonymization). A hook may return halt=true to short-circuit this execution (e.g. when it has spawned a redacted copy that will be processed as a separate document).",
+            "Comment": "Standalone preprocessing extension point — runs FIRST, before the BDA/pipeline routing, so it fires in both processing modes and even when OCR is disabled. Dispatches to the single generic hook (arn + args) in the config's preprocessing section (e.g. PII anonymization). A hook may return halt=true to short-circuit this execution (e.g. when it has spawned a redacted copy that will be processed as a separate document). NOTE: a dispatcher/hook error is NOT caught to normal routing — a preprocessing hook that fails (e.g. onError:fail on a redaction hook) must STOP the execution, never fall through to processing the un-preprocessed original (which for PII redaction would leak the original). It fails the execution instead.",
             "Resource": "arn:${Partition}:states:::lambda:invoke",
             "Parameters": {
                 "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
@@ -19,9 +19,14 @@
                 { "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2 }
             ],
             "Catch": [
-                { "ErrorEquals": ["States.ALL"], "ResultPath": "$.HookResults.preprocessing.error", "Next": "RouteByProcessingMode" }
+                { "ErrorEquals": ["States.ALL"], "ResultPath": "$.HookResults.preprocessing.error", "Next": "PreprocessingHookFailed" }
             ],
             "Next": "CheckPreprocessingHalt"
+        },
+        "PreprocessingHookFailed": {
+            "Type": "Fail",
+            "Error": "PreprocessingHookFailed",
+            "Cause": "A preprocessing hook failed (e.g. a PII-redaction hook with onError:fail). The execution is stopped rather than continuing to process the un-preprocessed original."
         },
         "CheckPreprocessingHalt": {
             "Type": "Choice",
