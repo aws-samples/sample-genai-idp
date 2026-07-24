@@ -566,6 +566,7 @@ Resources:
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
+          GENERATOR_MODEL_ID: !Ref GeneratorModelId
           BOOTSTRAP_TRACKING_TABLE: !Ref BootstrapTrackingTable
           HOST_TRACKING_TABLE: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
           CONFIGURATION_TABLE_NAME: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }

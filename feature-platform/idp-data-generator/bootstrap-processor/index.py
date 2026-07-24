@@ -141,7 +141,7 @@ def _process_job(job_id, body):
         doc_count=int(body.get("docCount", 3)),
         quality_threshold=int(body.get("threshold", 7)),
         augment=bool(body.get("augment", False)),
-        model_id=body.get("modelId"),
+        model_id=body.get("modelId") or os.environ.get("GENERATOR_MODEL_ID"),
         example_doc_keys=body.get("exampleDocKeys", []),
         scenario=body.get("scenario") or "",
     )
@@ -177,7 +177,16 @@ def _process_job(job_id, body):
             status_cb=lambda pct, msg: _status(job_id, "IN_PROGRESS", message=msg),
         )
         if schema is None:
-            _status(job_id, "FAILED", error=f"Schema resolution failed (tier={tier})")
+            _status(
+                job_id,
+                "FAILED",
+                error=(
+                    "Could not author a valid schema from the description after "
+                    "retries (see processor logs for the model error). Try a more "
+                    "specific description or generate from an existing "
+                    f"configuration. (tier={tier})"
+                ),
+            )
             return
 
     target_version = request.target_version or bootstrap_mod._default_version_name(
