@@ -173,11 +173,17 @@ def synthesize(
     model_key = _seed_model_key(job.model_id) if job.model_id else None
     model_kwargs = {"data": model_key, "doc": model_key} if model_key else {}
 
+    # Share one boto3 Session across SEED's concurrent workers. Without it SEED
+    # creates a fresh Session per worker thread, which races botocore's
+    # credential resolver under fan-out (NoCredentialsError in containers).
+    import boto3
+
     generator = Generator(
         models=ModelConfig(**model_kwargs),
         threshold=job.threshold,
         output_dir=batch_out,
         augment=job.augment,
+        session=boto3.Session(),
     )
 
     # SEED fires on_document(index, total, GeneratedDoc) as each result lands;
