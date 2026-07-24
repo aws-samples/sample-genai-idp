@@ -105,6 +105,16 @@ Notes:
   of active MRs (typically ≤5) — not a hard cap. If concurrent deploys ever
   exhaust account quotas, revert to a single shared `resource_group:
   integration_deploy`.
+- **Auto-cancel is disabled on `develop`** (`workflow` rule with
+  `auto_cancel: on_new_commit: none`). Previously, *any* new push to develop —
+  including a doc-only commit whose pipeline skips the deploy stages — would
+  auto-cancel the in-flight ~1h integration deploy of the prior commit, and
+  that deploy was never re-run (the merge went permanently untested). Now every
+  develop pipeline runs to completion; back-to-back deploys serialize via the
+  resource_group rather than superseding each other. MR pipelines keep the
+  default supersede-on-push behavior (there, `changes:` compares against the
+  target branch, so a doc push to an MR that still touches deploy-affecting
+  files re-runs the deploy anyway).
 
 ## Test Execution Strategy
 
