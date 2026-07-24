@@ -290,15 +290,7 @@ Resources:
             collapsible: true
             defaultExpanded: false
             sectionLabel: Preprocessing
-            description: >-
-              A single generic preprocessing hook that runs FIRST, before OCR/BDA
-              routing, in both processing modes. When enabled, the Lambda at
-              `arn` is invoked on each source document and reads its own
-              configuration from `args` (key/value strings) — so this step is
-              reusable for any preprocessing job (e.g. the PII Anonymization
-              extension). The hook may return halt=true to end the execution. The
-              ARN must EITHER be tagged `idp:feature-id=<anything>` OR have a name
-              starting with `GENAIIDP-`; others are rejected at invoke time.
+            description: A single generic preprocessing hook (Lambda ARN + args) that runs FIRST, before OCR/BDA routing, in both processing modes.
             properties:
               enabled:
                 type: boolean
