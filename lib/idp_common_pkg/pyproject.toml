@@ -181,7 +181,10 @@ test = [
   "moto>=5.1.8",
   "pytest-asyncio>=1.1.0",
   "typer>=0.19.2",
-  "ruff>=0.14.0",
+  # Keep in sync with the ruff pin in .gitlab-ci.yml. Cap below 0.16: ruff 0.16
+  # formats Python code blocks in Markdown files, which fails `ruff format
+  # --check` on ~49 README/skill-file snippets during CodeBuild publish.
+  "ruff>=0.14.0,<0.16",
   "deepdiff>=6.0.0",                    # Required for BDA blueprint service tests
   "datamodel-code-generator>=0.25.0",   # Required for schema/pydantic generator tests
   "mypy-boto3-bedrock-runtime>=1.39.0", # Required for bedrock_utils tests
