@@ -106,7 +106,10 @@ export default defineConfig({
         'react-dom',
         'react-dom/client',
         'react-router-dom',
-        /^@cloudscape-design\/.*/,
+        // components + design-tokens resolve to host globals. collection-hooks
+        // is NOT external — the host exposes no global for it, and it's a tiny
+        // pure-logic package (React itself stays external), so it's bundled.
+        /^@cloudscape-design\/(components|design-tokens)(\/.*)?$/,
         /^aws-amplify(\/.*)?$/,
       ],
       output: {

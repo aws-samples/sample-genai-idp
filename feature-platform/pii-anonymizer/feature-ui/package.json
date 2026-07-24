@@ -1,7 +1,7 @@
 {
   "name": "idp-pii-anonymizer-feature-ui",
   "private": true,
-  "version": "0.1.5",
+  "version": "0.1.6",
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit && vite build",
@@ -12,6 +12,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@cloudscape-design/collection-hooks": "^1.0.103",
     "@cloudscape-design/components": "^3.0.900",
     "@cloudscape-design/design-tokens": "^3.0.0",
     "@types/react": "^18.3.0",

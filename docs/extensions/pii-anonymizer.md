@@ -108,10 +108,16 @@ Access follows the accelerator's existing **config-version scoping**
   version is in their allowed set.
 - **PII mapping (re-identification key)** — when synthetic redaction is used you
   can optionally store the original→synthetic value map. **It contains real PII.**
-  It is stored encrypted (the stack's customer-managed KMS key) and the Redaction
-  Report reveals it **only** to a caller whose `allowedConfigVersions` include the
-  **original** document's config version (Admins always pass). Off by default;
-  enable per-pair with the wizard's "Store PII mapping" toggle.
+  It lives in a feature-owned, KMS-encrypted DynamoDB table — deliberately *not*
+  in any host bucket, so the host's generic file-contents API can never serve it —
+  and the only read path is the feature API's `GET /report/{docId}/mapping`
+  route. That route reveals it **only** to a caller whose `allowedConfigVersions`
+  include the **original** document's config version (Admins always pass), and it
+  **fails closed**: if the user-scope lookup errors for any reason the request is
+  denied (403), never treated as unrestricted. The Redaction Report *list* is
+  filtered by the same scoping, and audit rows carry only a stored-yes/no flag —
+  never the mapping itself or its location. Off by default; enable per-pair with
+  the wizard's "Store PII mapping" toggle.
 
 ## Redaction Report
 
