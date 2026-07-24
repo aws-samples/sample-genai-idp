@@ -34,6 +34,7 @@ class BootstrapRequest:
     augment: bool = False
     model_id: Optional[str] = None
     example_doc_keys: List[str] = field(default_factory=list)
+    scenario: str = ""
 
 
 @dataclass
@@ -207,7 +208,7 @@ def run_bootstrap(
         count=request.doc_count,
         threshold=request.quality_threshold,
         augment=request.augment,
-        extra=request.prompt,
+        extra=request.scenario or request.prompt,
         model_id=request.model_id,
     )
     try:

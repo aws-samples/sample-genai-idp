@@ -1,6 +1,6 @@
 # Talos Mitigation Report — Incremental Updates
 
-**Parent document:** `threat-modeling/Mitigation Report 04252026.md`
+**Parent document:** `security/threat-modeling/Mitigation Report 04252026.md`
 **Scope of this file:** Only the deltas *since* the last incremental update
 was shared with Talos. Paste individual sections below directly into Talos
 as each set of changes lands, instead of re-sending the full report.
@@ -34,7 +34,7 @@ Fixed / False Positive / Risk-Accepted).
 - **Files changed in this update:**
   - `docs/alb-hosting.md` (new "Security Hardening for ALB-Hosted Deployments" section)
 - **Mitigation Report section:** See the full "Talos-ready response"
-  in `threat-modeling/Mitigation Report 04252026.md` → Finding #14.
+  in `security/threat-modeling/Mitigation Report 04252026.md` → Finding #14.
 
 **Short Talos-ready response:**
 
@@ -81,7 +81,7 @@ anti-clickjacking, follow the guidance in `docs/alb-hosting.md`.
 - **Files changed in this update:** Documentation only (Mitigation
   Report updated with full compensating-controls justification).
 - **Mitigation Report section:** See the full "Talos-ready response"
-  in `threat-modeling/Mitigation Report 04252026.md` → Finding #17.
+  in `security/threat-modeling/Mitigation Report 04252026.md` → Finding #17.
 
 **Short Talos-ready response:**
 
@@ -131,7 +131,7 @@ supply a `PermissionsBoundaryArn` via the stack parameter.
   dependency bumps needed — the transitive chain has already
   carried the patches into the installed tree.
 - **Mitigation Report section:** See the full "Talos-ready response"
-  in `threat-modeling/Mitigation Report 04252026.md` → Finding
+  in `security/threat-modeling/Mitigation Report 04252026.md` → Finding
   #18–20.
 
 **Short Talos-ready response:**

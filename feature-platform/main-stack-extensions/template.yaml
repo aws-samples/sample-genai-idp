@@ -115,6 +115,14 @@ Parameters:
     Default: ''
     Description: ARN of the main stack's UsersTable (for the re-exported
       `<MainStackName>-UsersTableArn`).
+  TestSetBucketName:
+    Type: String
+    Default: ''
+    Description: Name of the main stack's Test Set bucket (where Test Studio test
+      sets live and are auto-discovered). Re-exported as
+      `<MainStackName>-TestSetBucketName` so feature stacks that generate test
+      sets (e.g. idp-data-generator) can write documents Test Studio will list.
+      Leave blank to skip the export.
 
   WebUIBucketArn:
     Type: String
@@ -239,6 +247,7 @@ Conditions:
   HasWorkingBucket: !Not [!Equals [!Ref WorkingBucketName, '']]
   HasInputBucket: !Not [!Equals [!Ref InputBucketName, '']]
   HasUsersTable: !Not [!Equals [!Ref UsersTableName, '']]
+  HasTestSetBucket: !Not [!Equals [!Ref TestSetBucketName, '']]
   HasDiscoveryBucket: !Not [!Equals [!Ref DiscoveryBucketName, '']]
   HasCustomerManagedEncryptionKey: !Not [!Equals [!Ref CustomerManagedEncryptionKeyArn, '']]
   HasSellerBuckets: !Not [!Equals [!Join ['', !Ref SellerBucketObjectArns], '']]
@@ -576,6 +585,14 @@ Resources:
   # to write under features/<id>/*. The ui-deployer custom resource in each
   # feature stack assumes a role that carries that session tag.
   ###########################################################################
+  InstalledFeaturesTableNameParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${MainStackName}/feature-platform/installed-features-table'
+      Type: String
+      Description: Name of the InstalledFeatures DynamoDB table (runtime-resolved by main-stack Lambdas).
+      Value: !Ref InstalledFeaturesTable
+
   WebUIBucketFeaturePolicyStatement:
     Type: AWS::SSM::Parameter
     Properties:
@@ -803,6 +820,15 @@ Outputs:
     Value: !Ref UsersTableArn
     Export:
       Name: !Sub '${MainStackName}-UsersTableArn'
+  TestSetBucketName:
+    Condition: HasTestSetBucket
+    Description: >-
+      Re-export of the main stack's Test Set bucket name. Feature stacks that
+      generate test sets (e.g. idp-data-generator) import this to write
+      documents into the bucket Test Studio auto-discovers.
+    Value: !Ref TestSetBucketName
+    Export:
+      Name: !Sub '${MainStackName}-TestSetBucketName'
 
   TrackingTableArn:
     Description: >-

@@ -536,11 +536,14 @@ const AgentChatLayout = ({
                         <TableDisplay tableData={message.parsedData.data as Record<string, unknown>} />
                       )}
 
-                      {messageIndex === lastAssistantIndex && !message.isProcessing && message.parsedData.textContent && (
-                        <Box>
-                          <CreateIssueButton findings={message.parsedData.textContent} />
-                        </Box>
-                      )}
+                      {mode !== 'quick_start' &&
+                        messageIndex === lastAssistantIndex &&
+                        !message.isProcessing &&
+                        message.parsedData.textContent && (
+                          <Box>
+                            <CreateIssueButton findings={message.parsedData.textContent} />
+                          </Box>
+                        )}
                     </SpaceBetween>
                   );
                 }
@@ -549,11 +552,14 @@ const AgentChatLayout = ({
                 return (
                   <SpaceBetween size="xs">
                     <SafeMarkdown components={markdownComponents}>{contentText}</SafeMarkdown>
-                    {messageIndex === lastAssistantIndex && !message.isProcessing && contentText.trim().length > 0 && (
-                      <Box>
-                        <CreateIssueButton findings={contentText} />
-                      </Box>
-                    )}
+                    {mode !== 'quick_start' &&
+                      messageIndex === lastAssistantIndex &&
+                      !message.isProcessing &&
+                      contentText.trim().length > 0 && (
+                        <Box>
+                          <CreateIssueButton findings={contentText} />
+                        </Box>
+                      )}
                   </SpaceBetween>
                 );
               })()}

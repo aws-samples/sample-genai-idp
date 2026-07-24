@@ -118,7 +118,7 @@ code_checks:
     # lint-cicd UI targets run with SKIP_NPM_CI=1 so they reuse this instead of
     # each doing its own `npm ci` (which previously happened 3× per run).
     - cd src/ui && npm ci --prefer-offline --no-audit && cd ../..
-    - uv pip install ruff
+    - uv pip install 'ruff==0.15.13'
     # Install dependencies needed by publish.py for test imports
     - uv pip install typer rich boto3
     # Install test dependencies

@@ -34,7 +34,7 @@ def check_generator_availability_impl() -> str:
     if _generation_queue_url():
         return "Document generation is available."
     return (
-        "Document generation is NOT available: the IDP Data Generator extension "
+        "Document generation is NOT available: the Test Set Generator extension "
         "is not installed. Schema authoring and config creation still work, and "
         "the user can upload example documents to build a test set. The Data "
         "Generator can be installed from the Extensions page."
@@ -42,6 +42,16 @@ def check_generator_availability_impl() -> str:
 
 
 DATA_GENERATOR_FEATURE_ID = "idp-data-generator"
+
+MAX_DOC_COUNT = 100
+
+
+def _clamp_doc_count(doc_count: int) -> int:
+    return max(1, min(int(doc_count), MAX_DOC_COUNT))
+
+
+def _clamp_threshold(threshold: int) -> int:
+    return max(1, min(int(threshold), 10))
 
 
 def list_available_extensions_impl() -> str:
@@ -78,13 +88,38 @@ def list_available_extensions_impl() -> str:
     return json.dumps({"available": True, "extensions": extensions})
 
 
+def _installed_features_table_name() -> Optional[str]:
+    """Resolve the InstalledFeatures table name.
+
+    Prefer the INSTALLED_FEATURES_TABLE env var; otherwise resolve it at runtime
+    from the SSM parameter FeaturePlatformStack publishes at a fixed path
+    (/<MainStackName>/feature-platform/installed-features-table). The SSM
+    indirection avoids a deploy-time cross-stack reference that would form a
+    circular dependency between the agent Lambda and FeaturePlatformStack.
+    """
+    name = os.environ.get("INSTALLED_FEATURES_TABLE")
+    if name:
+        return name
+    stack = os.environ.get("MAIN_STACK_NAME") or os.environ.get("AWS_STACK_NAME")
+    if not stack:
+        return None
+    try:
+        import boto3
+
+        param = f"/{stack}/feature-platform/installed-features-table"
+        return boto3.client("ssm").get_parameter(Name=param)["Parameter"]["Value"]
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning("Could not resolve installed features table from SSM: %s", e)
+        return None
+
+
 def _installed_features() -> Optional[list]:
     """Scan the InstalledFeatures DynamoDB table; None if unavailable.
 
     Returns None (not []) when the registry is unavailable so callers can tell
     "not enabled/unreachable" apart from "enabled but nothing installed".
     """
-    table_name = os.environ.get("INSTALLED_FEATURES_TABLE")
+    table_name = _installed_features_table_name()
     if not table_name:
         return None
     try:
@@ -298,13 +333,14 @@ def request_document_generation_impl(
     doc_count: int = 3,
     threshold: int = 7,
     augment: bool = False,
+    scenario: str = "",
 ) -> str:
     queue_url = _generation_queue_url()
     if not queue_url:
         return json.dumps(
             {
                 "enqueued": False,
-                "reason": "The IDP Data Generator extension is not installed.",
+                "reason": "The Test Set Generator extension is not installed.",
                 "hint": "Install it from the Extensions page to enable generation.",
             }
         )
@@ -320,9 +356,10 @@ def request_document_generation_impl(
         "jobId": job_id,
         "prompt": "",
         "targetVersion": config_version,
-        "docCount": doc_count,
-        "threshold": threshold,
+        "docCount": _clamp_doc_count(doc_count),
+        "threshold": _clamp_threshold(threshold),
         "augment": augment,
+        "scenario": scenario or "",
         "generateDocs": True,
         "preauthoredSchema": schema,
         "allowedFieldNames": allowed,
@@ -403,6 +440,7 @@ def generate_from_existing_config_impl(
     doc_count: int = 3,
     threshold: int = 7,
     augment: bool = False,
+    scenario: str = "",
 ) -> str:
     from idp_common.config.configuration_manager import ConfigurationManager
 
@@ -411,7 +449,7 @@ def generate_from_existing_config_impl(
         return json.dumps(
             {
                 "enqueued": False,
-                "reason": "The IDP Data Generator extension is not installed.",
+                "reason": "The Test Set Generator extension is not installed.",
                 "hint": "Install it from the Extensions page to enable generation.",
             }
         )
@@ -443,9 +481,10 @@ def generate_from_existing_config_impl(
         "jobId": job_id,
         "prompt": "",
         "targetVersion": version_name,
-        "docCount": doc_count,
-        "threshold": threshold,
+        "docCount": _clamp_doc_count(doc_count),
+        "threshold": _clamp_threshold(threshold),
         "augment": augment,
+        "scenario": scenario or "",
         "generateDocs": True,
         "preauthoredSchema": schema,
         "allowedFieldNames": allowed,
@@ -477,7 +516,7 @@ def list_available_extensions() -> str:
 
     Use this when the user asks what add-ons/extensions are available, or before
     offering a capability an extension provides — for example, synthetic document
-    generation is provided by the "IDP Data Generator" extension
+    generation is provided by the "Test Set Generator" extension
     (featureId "idp-data-generator"), and "IDP AutoTune"/"Auto Optimizer"
     (featureId "idp-autotune") can optimize a configuration. Each returned
     extension has featureId, displayName, installedVersion, and featureApiEndpoint.
@@ -594,6 +633,7 @@ def request_document_generation(
     doc_count: int = 3,
     threshold: int = 7,
     augment: bool = False,
+    scenario: str = "",
 ) -> str:
     """Enqueue an asynchronous synthetic-document generation job for a test set.
 
@@ -607,9 +647,11 @@ def request_document_generation(
         doc_count: Number of documents to generate.
         threshold: Quality threshold (1-10).
         augment: Whether to apply scan/fax-style image augmentation.
+        scenario: Optional high-level theme the generator diversifies into
+            distinct documents (e.g. "small-business owners in retail").
     """
     return request_document_generation_impl(
-        schema_text, config_version, doc_count, threshold, augment
+        schema_text, config_version, doc_count, threshold, augment, scenario
     )
 
 
@@ -649,6 +691,7 @@ def generate_from_existing_config(
     doc_count: int = 3,
     threshold: int = 7,
     augment: bool = False,
+    scenario: str = "",
 ) -> str:
     """Enqueue synthetic-document generation for a class in an EXISTING config version.
 
@@ -663,7 +706,9 @@ def generate_from_existing_config(
         doc_count: Number of documents to generate.
         threshold: Quality threshold (1-10).
         augment: Whether to apply scan/fax-style image augmentation.
+        scenario: Optional high-level theme the generator diversifies into
+            distinct documents (e.g. "small-business owners in retail").
     """
     return generate_from_existing_config_impl(
-        version_name, class_name, doc_count, threshold, augment
+        version_name, class_name, doc_count, threshold, augment, scenario
     )

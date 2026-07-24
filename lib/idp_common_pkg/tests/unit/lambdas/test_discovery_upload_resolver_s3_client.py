@@ -115,3 +115,115 @@ def test_clear_version_schema_noop_without_version(monkeypatch):
     mod = _reload()
     # No ConfigurationManager import should even happen; passing None returns early.
     mod._clear_version_schema(None, discovery_type="classes")
+
+
+# --- multi-doc discovery zip upload -----------------------------------------
+#
+# The upload mutation (uploadMultiDocDiscoveryZip) and the start mutation
+# (startMultiDocDiscovery) run as separate calls, and the UI passes only
+# zipFileName to start — so both sides MUST derive the same deterministic
+# object key, and the presigned URL must be a plain PUT URL (the UI uploads
+# with fetch(url, {method: 'PUT'}), which cannot consume a POST form).
+
+
+def _fake_creds(monkeypatch):
+    """Presigned-URL generation signs locally but needs credentials configured."""
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    monkeypatch.setenv("AWS_SESSION_TOKEN", "testing")
+
+
+def test_multi_doc_zip_key_deterministic_and_sanitized(monkeypatch):
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    mod = _reload()
+    assert (
+        mod.multi_doc_zip_key("My Statements.zip")
+        == "multi-doc-discovery/uploads/My_Statements.zip"
+    )
+    # Deterministic: same input, same key — no random job-id component.
+    assert mod.multi_doc_zip_key("docs.zip") == mod.multi_doc_zip_key("docs.zip")
+
+
+def test_upload_multi_doc_zip_returns_plain_put_url(monkeypatch):
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setenv("DISCOVERY_BUCKET", "discovery-bucket")
+    _fake_creds(monkeypatch)
+    mod = _reload()
+
+    result = mod.handle_upload_multi_doc_discovery_zip(
+        {
+            "arguments": {
+                "fileName": "docs.zip",
+                "fileSize": 123,
+                "configVersion": "v1",
+            }
+        },
+        None,
+    )
+
+    # Plain presigned PUT URL string — not a json.dumps'd POST form.
+    assert result["presignedUrl"].startswith("https://")
+    assert not result["presignedUrl"].startswith("{")
+    assert result["objectKey"] == mod.multi_doc_zip_key("docs.zip")
+
+
+def test_start_multi_doc_discovery_fallback_matches_upload_key(monkeypatch):
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setenv("DISCOVERY_BUCKET", "discovery-bucket")
+    monkeypatch.delenv("DISCOVERY_TRACKING_TABLE", raising=False)
+    monkeypatch.setenv(
+        "MULTI_DOC_DISCOVERY_STATE_MACHINE_ARN",
+        "arn:aws:states:us-east-1:123456789012:stateMachine:multi-doc",
+    )
+    mod = _reload()
+    mod.sfn_client = MagicMock()
+    mod.sfn_client.start_execution.return_value = {"executionArn": "arn:exec"}
+
+    mod.handle_start_multi_doc_discovery(
+        {
+            "arguments": {
+                "configVersion": "v1",
+                "zipFileName": "docs.zip",
+                "zipFileSize": 123,
+            }
+        },
+        None,
+    )
+
+    import json
+
+    sfn_input = json.loads(mod.sfn_client.start_execution.call_args.kwargs["input"])
+    # The start handler must look where the upload handler put the zip.
+    assert sfn_input["prefix"] == mod.multi_doc_zip_key("docs.zip")
+    assert sfn_input["bucket"] == "discovery-bucket"
+    assert sfn_input["isZipUpload"] is True
+
+
+def test_start_multi_doc_discovery_honors_explicit_prefix(monkeypatch):
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    monkeypatch.setenv("DISCOVERY_BUCKET", "discovery-bucket")
+    monkeypatch.delenv("DISCOVERY_TRACKING_TABLE", raising=False)
+    monkeypatch.setenv(
+        "MULTI_DOC_DISCOVERY_STATE_MACHINE_ARN",
+        "arn:aws:states:us-east-1:123456789012:stateMachine:multi-doc",
+    )
+    mod = _reload()
+    mod.sfn_client = MagicMock()
+    mod.sfn_client.start_execution.return_value = {"executionArn": "arn:exec"}
+
+    mod.handle_start_multi_doc_discovery(
+        {
+            "arguments": {
+                "configVersion": "v1",
+                "zipFileName": "docs.zip",
+                "s3Prefix": "custom/location/docs.zip",
+            }
+        },
+        None,
+    )
+
+    import json
+
+    sfn_input = json.loads(mod.sfn_client.start_execution.call_args.kwargs["input"])
+    # Callers that pass the objectKey back as s3Prefix are honored verbatim.
+    assert sfn_input["prefix"] == "custom/location/docs.zip"

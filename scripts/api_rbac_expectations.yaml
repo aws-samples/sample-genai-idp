@@ -52,7 +52,7 @@
 #                  tracked deficiency. Mismatches become WARN, not FAIL. Every
 #                  id must exist in the known_gaps register at the bottom;
 #                  also referenced from
-#                  threat-modeling/feature-threats/rbac-authentication.md.
+#                  security/threat-modeling/feature-threats/rbac-authentication.md.
 #   note:          free text for humans.
 #
 # Paths are relative to the repo root. DDB_DIRECT is shorthand for
@@ -463,11 +463,12 @@ operations:
     enforced_in: *ddb
     args: { jobId: "__nope__" }
   listAvailableAgents:
-    groups: ANY
+    groups: [Admin, Author, Viewer]
     kind: read
     enforced_in: nested/api-resolvers/src/lambda/list_available_agents/index.py
     args: {}
-    known_gap: GAP-03
+    note: server-side _caller_in_groups check matches the schema directive
+      (Reviewer excluded). Formerly GAP-03.
   listChatSessions:
     groups: ANY
     kind: read
@@ -487,14 +488,15 @@ operations:
     enforced_in: nested/api-resolvers/src/lambda/delete_agent_chat_session_resolver/index.py
     args: { sessionId: "__nope__" }
   sendAgentChatMessage:
-    groups: ANY
+    groups: [Admin, Author, Viewer]
     kind: mutation
     ownership: true
     skip_allowed: true
     enforced_in: nested/api-resolvers/src/lambda/agent_chat_resolver/index.py
     args: { prompt: "hi" }
-    known_gap: GAP-03
-    note: allowed-role call skipped (would start a live agent session)
+    note: server-side _caller_in_groups check matches the schema directive
+      (Reviewer excluded, closes former GAP-03); allowed-role call skipped
+      (would start a live agent session)
   sendChatDocumentMessage:
     groups: ANY
     kind: mutation
@@ -680,7 +682,7 @@ operations:
 # Known gaps register — tracked deviations between the ideal authorization
 # posture and current enforcement. Each id must be referenced by at least one
 # operation above, and is mirrored in
-# threat-modeling/feature-threats/rbac-authentication.md (AUTH.T07/T08).
+# security/threat-modeling/feature-threats/rbac-authentication.md (AUTH.T07/T08).
 # A gap entry downgrades a scan/test mismatch from FAIL to WARN; remove the
 # gap (and its references) when the enforcement is fixed, and the harness
 # will then hold the line.
@@ -698,15 +700,13 @@ known_gaps:
     detail: >
       Any authenticated user (including Reviewer) can query the knowledge base
       when one is configured.
-  GAP-03:
-    summary: Reviewer exclusion from Agent Chat is UI-only
-    detail: >
-      sendAgentChatMessage / listAvailableAgents accept Reviewer callers; the
-      exclusion is enforced only by UI navigation. Carried over from the
-      AppSync design where cognito_groups could not be combined with @aws_iam
-      on the same field.
-# GAP-04, GAP-05 and GAP-06 were RESOLVED (no longer accepted risks — a
+# GAP-03, GAP-04, GAP-05 and GAP-06 were RESOLVED (no longer accepted risks — a
 # regression now hard-FAILS the gate):
+#   GAP-03 listAvailableAgents / sendAgentChatMessage now carry a server-side
+#          _caller_in_groups check (Admin/Author/Viewer; Reviewer excluded)
+#          matching their schema directives — the exclusion is no longer
+#          UI-only. (AppSync, which forbade cognito_groups + @aws_iam on one
+#          field, has been removed, so the schema now declares the real groups.)
 #   GAP-04 listUsers is now Admin-only (server-side check in user_management).
 #   GAP-05 calculateCapacity now has a server-side group check matching its
 #          schema directive (Admin/Author/Viewer; Reviewer excluded).

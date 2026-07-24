@@ -40,7 +40,7 @@ Notes:
 - Suites that need conditions not present are recorded as **SKIP (pass)**, never
   silent omissions (e.g. expiry without `IDP_SECTEST_WAIT_EXPIRY`).
 - Threat-model coverage: AUTH.T09 (IDOR), AUTH.T10 (token lifecycle), AUTH.T11
-  (TLS) in `threat-modeling/feature-threats/rbac-authentication.md`.
+  (TLS) in `security/threat-modeling/feature-threats/rbac-authentication.md`.
 
 ## The architecture you are testing (read this first)
 
