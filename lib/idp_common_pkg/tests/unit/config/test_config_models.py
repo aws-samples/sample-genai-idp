@@ -368,6 +368,38 @@ class TestPipelineHookPreservation:
         assert cfg.rule_validation.postHook == []
         assert cfg.classification.postHook == []
 
+    def test_preprocessing_flat_hook_survives_round_trip(self):
+        """The flat `preprocessing` section (arn/args/onError + generic args)
+        must survive the IDPConfig round-trip — otherwise the PII Anonymization
+        wizard/preset would lose the hook + args on Save-as-Version /
+        applyFeatureConfigPreset, and the dispatcher would find no hook."""
+        cfg_dict = {
+            "preprocessing": {
+                "enabled": True,
+                "featureId": "pii-anonymizer",
+                "arn": "arn:aws:lambda:us-west-2:111122223333:function:PiiHook",
+                "onError": "fail",
+                "args": [
+                    {"key": "mode", "value": "redactcopy_and_stop"},
+                    {"key": "model_id", "value": "us.amazon.nova-lite-v1:0"},
+                ],
+            }
+        }
+        dumped = IDPConfig.model_validate(cfg_dict).model_dump(mode="python")
+        pp = dumped["preprocessing"]
+        assert pp["enabled"] is True
+        assert pp["arn"].endswith(":PiiHook")
+        assert pp["onError"] == "fail"
+        # generic args (feature config) preserved
+        assert {"key": "mode", "value": "redactcopy_and_stop"} in pp["args"]
+        assert {"key": "model_id", "value": "us.amazon.nova-lite-v1:0"} in pp["args"]
+
+    def test_preprocessing_defaults(self):
+        cfg = IDPConfig.model_validate({})
+        assert cfg.preprocessing.enabled is False
+        assert cfg.preprocessing.arn is None
+        assert cfg.preprocessing.args == []
+
     def test_sparse_rule_validation_overlay_keeps_hook_and_merges_defaults(self):
         """The real failure mode: a sparse preset overlay carrying only
         rule_validation.postHook must keep the hook AND inherit classification

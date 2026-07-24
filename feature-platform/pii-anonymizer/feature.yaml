@@ -1,0 +1,58 @@
+# PII Anonymization — an Extension Feature that redacts personally identifiable
+# information from source documents BEFORE the accelerator's processing pipeline
+# runs, using a standalone `preprocessing` pipeline hook (runs first, in both BDA
+# and pipeline modes). Reuses the detection/redaction library from AWS Labs
+# pii-anonymizer (Apache-2.0), vendored under hook/vendor/ (see
+# hook/vendor/PROVENANCE.md) so the accelerator owns and security-scans the code.
+#
+# Listed in config_library/extensions-oss.yaml so it appears in the host UI
+# catalog as available to install.
+featureId: pii-anonymizer
+displayName: "PII Anonymization"
+version: 0.1.0
+description: |
+  [EXPERIMENTAL] Detect and redact PII (names, SSNs, dates of birth, addresses,
+  phone numbers, emails, and more) from documents BEFORE they reach the
+  classification and extraction models, so the processing pipeline and its
+  stored results operate only on de-identified content. (The detection pass
+  itself uses a Bedrock model, which does see the original.) A preprocessing
+  hook writes a de-identified copy of each source document and re-submits it
+  under a companion config version.
+
+  EXPERIMENTAL and unproven — validate the output yourself; not a sole PII
+  control. Feedback welcome via GitHub issues.
+
+  Two modes (Config Pairing wizard): "redact copy and stop" processes only the
+  de-identified copy and deletes the original; "redact copy and continue" also
+  processes the original, scoped by allowedConfigVersions RBAC.
+
+  Synthetic replacement (structure-preserving) or blackout. PDFs in / redacted
+  PDFs out. Integrates AWS Labs pii-anonymizer. PDF, images, TXT, CSV in v1.
+docsUrl: extensions/pii-anonymizer
+showInNav: true
+template:
+  path: template.yaml
+  requiresMainStackName: true
+ui:
+  bundlePath: feature-ui/dist/ui-bundle.js
+  build:
+    - cwd: feature-ui
+      argv: ["npm", "ci"]
+    - cwd: feature-ui
+      argv: ["npm", "run", "build"]
+# Minimal preset carrying the `preprocessing` section defaults + preHook entry
+# (hook ARN injected at install by the ui-deployer). Installed NON-ACTIVE as
+# `pii-anonymizer-v<version>`. The in-UI Config Pairing wizard is the primary
+# path (clones an admin's existing working config into a matched pair).
+configPreset:
+  path: config-preset/pii-preprocessing.yaml
+pipelineHooks:
+  preprocessing: PiiAnonymizerHookFunction
+defaultParameters:
+  LogLevel: INFO
+capabilities:
+  - reads-documents
+  - writes-documents
+  - custom-api
+  - registers-pipeline-hooks
+  - applies-config-preset

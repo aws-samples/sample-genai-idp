@@ -10,6 +10,7 @@ const logger = new ConsoleLogger('AbortWorkflowModal');
 const ABORTABLE_STATUSES = [
   'QUEUED',
   'RUNNING',
+  'PREPROCESSING',
   'OCR',
   'CLASSIFYING',
   'EXTRACTING',
@@ -97,8 +98,8 @@ const AbortWorkflowModal = ({
         </>
       ) : (
         <Alert type="info" statusIconAriaLabel="Info">
-          Documents can only be aborted when they have an active workflow (status: QUEUED, RUNNING, OCR, CLASSIFYING, EXTRACTING, ASSESSING,
-          POSTPROCESSING, HITL_IN_PROGRESS, SUMMARIZING, or EVALUATING).
+          Documents can only be aborted when they have an active workflow (status: QUEUED, RUNNING, PREPROCESSING, OCR, CLASSIFYING,
+          EXTRACTING, ASSESSING, POSTPROCESSING, HITL_IN_PROGRESS, SUMMARIZING, or EVALUATING).
         </Alert>
       )}
       {nonAbortableItems.length > 0 && abortableItems.length > 0 && (

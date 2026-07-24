@@ -159,6 +159,7 @@
       },
       "propertyNames": {
         "enum": [
+          "preprocessing",
           "postOcr",
           "postClassification",
           "postExtraction",
@@ -166,7 +167,7 @@
           "postSummarization"
         ]
       },
-      "description": "Map of pipeline hook point -> CloudFormation logical Lambda resource name in this template. The feature stack registers the resolved ARNs with the host via registerFeatureHooks at install time."
+      "description": "Map of pipeline hook point -> CloudFormation logical Lambda resource name in this template. The feature stack registers the resolved ARNs with the host via registerFeatureHooks at install time. `preprocessing` runs first (before BDA/pipeline routing); the rest are post-step."
     },
     "agentSource": {
       "type": "object",

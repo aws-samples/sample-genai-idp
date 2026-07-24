@@ -13,6 +13,10 @@ extend-exclude = [
     "patterns",
     "src",
     "scripts",
+    # Vendored third-party code (AWS Labs pii-anonymizer, Apache-2.0). Kept
+    # byte-for-byte to ease re-sync; not linted against our style. See
+    # feature-platform/pii-anonymizer/hook/vendor/PROVENANCE.md.
+    "feature-platform/pii-anonymizer/hook/vendor",
 ]
 
 # Exclude a variety of commonly ignored directories.
