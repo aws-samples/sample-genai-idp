@@ -19,17 +19,15 @@ description: |
   hook writes a de-identified copy of each source document and re-submits it
   under a companion config version.
 
-  EXPERIMENTAL and unproven — try it and send feedback (GitHub issues), but
-  validate the output yourself; not a sole PII control.
+  EXPERIMENTAL and unproven — validate the output yourself; not a sole PII
+  control. Feedback welcome via GitHub issues.
 
   Two modes (Config Pairing wizard): "redact copy and stop" processes only the
-  de-identified copy and deletes the original; "redact copy and continue"
-  processes the original AND the redacted copy as separate documents, scoped by
-  allowedConfigVersions RBAC.
+  de-identified copy and deletes the original; "redact copy and continue" also
+  processes the original, scoped by allowedConfigVersions RBAC.
 
-  Structure-preserving synthetic replacement by default; blackout also available.
-  PDFs in / redacted PDFs out. Integrates AWS Labs pii-anonymizer
-  (github.com/awslabs/pii-anonymizer). Documents (PDF, images, TXT, CSV) in v1.
+  Synthetic replacement (structure-preserving) or blackout. PDFs in / redacted
+  PDFs out. Integrates AWS Labs pii-anonymizer. PDF, images, TXT, CSV in v1.
 docsUrl: extensions/pii-anonymizer
 showInNav: true
 template:
