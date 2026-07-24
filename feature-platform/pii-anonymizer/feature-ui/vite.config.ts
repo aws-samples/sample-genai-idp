@@ -92,6 +92,10 @@ export default defineConfig({
     __FEATURE_ID__: JSON.stringify(manifest.featureId),
     __FEATURE_DISPLAY_NAME__: JSON.stringify(manifest.displayName),
     __FEATURE_VERSION__: JSON.stringify(manifest.version),
+    // Bundled node-flavored deps (@cloudscape-design/collection-hooks) read
+    // process.env.NODE_ENV; `process` is undefined in the browser and the
+    // UMD bundle would throw before calling window.IdpFeatures.register.
+    'process.env.NODE_ENV': JSON.stringify('production'),
   },
   build: {
     lib: {
