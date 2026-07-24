@@ -13,9 +13,11 @@ version: 0.1.0
 description: |
   [EXPERIMENTAL] Detect and redact PII (names, SSNs, dates of birth, addresses,
   phone numbers, emails, and more) from documents BEFORE they reach the
-  classification and extraction models, so raw PII never transits a GenAI model.
-  A preprocessing hook writes a de-identified copy of each source document and
-  re-submits it under a companion config version.
+  classification and extraction models, so the processing pipeline and its
+  stored results operate only on de-identified content. (The detection pass
+  itself uses a Bedrock model, which does see the original.) A preprocessing
+  hook writes a de-identified copy of each source document and re-submits it
+  under a companion config version.
 
   EXPERIMENTAL and unproven — try it and send feedback (GitHub issues), but
   validate the output yourself; not a sole PII control.

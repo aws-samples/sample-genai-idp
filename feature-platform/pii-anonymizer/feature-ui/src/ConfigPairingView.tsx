@@ -50,7 +50,7 @@ const MODE_OPTIONS = [
     value: 'redactcopy_and_stop',
     label: 'Redact copy and stop',
     description:
-      'Write the de-identified copy, then DELETE the original entirely so only the redacted version remains. PII never reaches the model.',
+      'Write the de-identified copy, then DELETE the original entirely so only the redacted version remains — the processing pipeline sees no PII (the detection pass itself does see the original).',
   },
   {
     value: 'redactcopy_and_continue',

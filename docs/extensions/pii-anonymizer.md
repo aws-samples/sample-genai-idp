@@ -13,7 +13,12 @@ missed PII is possible. See [Feedback](#feedback).
 **PII Anonymization** is a bundled [Extension Feature](../feature-platform.md)
 that detects and redacts personally identifiable information (PII) from documents
 **before** the accelerator's classification and extraction models see them — so
-raw PII never transits a GenAI model. It is the reference example of the
+the processing pipeline (its prompts, logs, and stored extraction results)
+operates only on de-identified content. Note the boundary precisely: the
+redaction step itself sends each page to a Bedrock model to *detect* the PII,
+so PII does transit that single detection call; what the feature prevents is
+PII flowing through the rest of the pipeline and into its stored outputs. It
+is the reference example of the
 standalone **`preprocessing`**
 [pipeline-hook point](../feature-platform.md#pipeline-hooks), which runs first
 in the workflow (before the BDA/pipeline routing).

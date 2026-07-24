@@ -4,9 +4,13 @@
 > validate the redacted output yourself; not a sole PII control.
 
 Detects and redacts PII from source documents **before** the accelerator's
-classification and extraction models see them, so raw PII never transits a GenAI
-model. Built on a new standalone **`preprocessing`** pipeline hook that runs
-first — before the BDA/pipeline routing — in both processing modes.
+classification and extraction models see them, so the processing pipeline —
+its prompts, logs, and stored results — operates only on de-identified
+content. (The redaction step itself uses a Bedrock model to *detect* the PII,
+so PII does transit that one detection call; what this feature prevents is PII
+spreading through the rest of the pipeline.) Built on a new standalone
+**`preprocessing`** pipeline hook that runs first — before the BDA/pipeline
+routing — in both processing modes.
 
 Reuses the document detection/redaction library from the AWS Labs
 [pii-anonymizer](https://github.com/awslabs/pii-anonymizer) sample (Apache-2.0),
