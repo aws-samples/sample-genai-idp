@@ -138,6 +138,36 @@ def _seed_model_key(model_id: str) -> str:
     return model_id
 
 
+def _raise_seed_node_timeout() -> None:
+    """Raise SEED's per-node timeout default (600s) for long high-quality runs.
+
+    seed-data 0.0.6 added a hard per-node cap in ``build_pipeline_graph``
+    (``node_timeout=600``) as a wedge safety net, but a 600s cap kills
+    legitimately slow nodes (a 20-doc high-quality doc_loop can exceed it). The
+    Generator API does not expose the knob, so adjust the function's default —
+    ``batch.py`` holds a reference to the same function object, so this covers
+    the fan-out path too. Our runtime watchdog (just under the ~8h AgentCore
+    session ceiling) remains the terminal backstop. Tunable via
+    SEED_NODE_TIMEOUT_S; skipped gracefully if SEED's signature changes.
+    """
+    timeout_s = int(os.environ.get("SEED_NODE_TIMEOUT_S", "3600"))
+    try:
+        import inspect
+
+        from seed_data.stages.pipeline import build_pipeline_graph
+
+        params = inspect.signature(build_pipeline_graph).parameters
+        if "node_timeout" not in params:
+            return
+        if build_pipeline_graph.__kwdefaults__ and "node_timeout" in (
+            build_pipeline_graph.__kwdefaults__ or {}
+        ):
+            build_pipeline_graph.__kwdefaults__["node_timeout"] = timeout_s
+        logger.info("SEED per-node timeout set to %ds", timeout_s)
+    except Exception:  # pragma: no cover - defensive
+        logger.warning("Could not adjust SEED node_timeout", exc_info=True)
+
+
 def synthesize(
     job: SynthesisJob, *, status_cb: Optional[StatusCallback] = None
 ) -> SynthesisResult:
@@ -173,11 +203,20 @@ def synthesize(
     model_key = _seed_model_key(job.model_id) if job.model_id else None
     model_kwargs = {"data": model_key, "doc": model_key} if model_key else {}
 
+    # Share one boto3 Session across SEED's concurrent workers. Without it SEED
+    # creates a fresh Session per worker thread, which races botocore's
+    # credential resolver under fan-out (NoCredentialsError in containers).
+    import boto3
+
+    _raise_seed_node_timeout()
+
     generator = Generator(
         models=ModelConfig(**model_kwargs),
         threshold=job.threshold,
         output_dir=batch_out,
         augment=job.augment,
+        session=boto3.Session(),
+        timeout=int(os.environ.get("SEED_PIPELINE_TIMEOUT_S", str(3 * 3600))),
     )
 
     # SEED fires on_document(index, total, GeneratedDoc) as each result lands;
