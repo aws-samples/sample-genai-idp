@@ -144,6 +144,7 @@ class Status(Enum):
     """Document processing status."""
     QUEUED = "QUEUED"                                       # Initial state
     RUNNING = "RUNNING"                                     # Workflow started
+    PREPROCESSING = "PREPROCESSING"                         # Preprocessing hook running (e.g. PII redaction)
     OCR = "OCR"                                             # OCR processing
     CLASSIFYING = "CLASSIFYING"                             # Document classification
     EXTRACTING = "EXTRACTING"                               # Information extraction
@@ -157,6 +158,7 @@ class Status(Enum):
     COMPLETED = "COMPLETED"                                 # All processing completed
     FAILED = "FAILED"                                       # Processing failed
     ABORTED = "ABORTED"                                     # User cancelled
+    REDACTED_SUPERSEDED = "REDACTED_SUPERSEDED"             # Original superseded by its redacted copy
 ```
 
 ## 📦 Document Compression for Large Documents

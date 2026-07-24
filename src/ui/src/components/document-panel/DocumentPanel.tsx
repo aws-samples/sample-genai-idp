@@ -635,6 +635,7 @@ const DocumentAttributes = ({ item, versions }: DocumentAttributesProps): React.
 const ABORTABLE_STATUSES = [
   'QUEUED',
   'RUNNING',
+  'PREPROCESSING',
   'OCR',
   'CLASSIFYING',
   'EXTRACTING',

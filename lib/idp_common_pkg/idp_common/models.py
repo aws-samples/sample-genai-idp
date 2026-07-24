@@ -22,6 +22,7 @@ class Status(Enum):
     IN_PROGRESS = "IN_PROGRESS"  # Batch job file is being processed
     QUEUED = "QUEUED"  # Initial state when document is added to queue
     RUNNING = "RUNNING"  # Step function workflow has started
+    PREPROCESSING = "PREPROCESSING"  # Preprocessing hook (e.g. PII redaction)
     OCR = "OCR"  # OCR processing
     CLASSIFYING = "CLASSIFYING"  # Document classification
     EXTRACTING = "EXTRACTING"  # Information extraction

@@ -152,7 +152,7 @@ flowchart LR
 |-----------|----------|---------|
 | `FeaturePlatformStack` | nested stack from `feature-platform/main-stack-extensions/template.yaml` | Owns the `InstalledFeatures` table, the feature-platform Lambdas, and AppSync data sources / resolvers |
 | `FeatureBucket` | main `template.yaml`, condition-gated on `EnableFeaturePlatform` | Holds the catalog of published features (CFN template + UI bundle + `feature.yaml` manifest per feature). Auto-created and pre-populated with the bundled sample feature unless `FeaturePlatformFeatureBucket` is supplied. |
-| Pipeline hooks | `patterns/unified/` (`PipelineHooksDispatcherFunction` + `postHook` config) | Lets features inject Lambdas at six post-step extension points in the processing workflow. Inert when no hooks are registered. |
+| Pipeline hooks | `patterns/unified/` (`PipelineHooksDispatcherFunction` + `preprocessing` / `postHook` config) | Lets features inject Lambdas at the `preprocessing` point and five post-step extension points in the processing workflow. Inert when no hooks are registered. |
 | Feature stack | standalone CFN template published by the author via `idp-feature-cli publish` | Creates the feature's own resources + registers into the main stack |
 
 ### GraphQL surface
@@ -173,15 +173,46 @@ Each GraphQL operation is backed by a Lambda under
 
 ## Pipeline hooks
 
-Features can inject custom Lambdas at six post-step extension points in the
-unified processing workflow: `postOcr`, `postClassification`, `postExtraction`,
-`postAssessment`, `postRuleValidation`, `postSummarization`. After each step the
-Step Functions workflow invokes `PipelineHooksDispatcherFunction`, which runs
-any hook Lambdas registered for that point.
+Features can inject custom Lambdas at extension points in the unified
+processing workflow. There are two kinds:
+
+- **`preprocessing`** — a single hook that runs **FIRST**, before the
+  BDA/pipeline routing decision, so it fires in both processing modes and even
+  when OCR is disabled. It operates on the *source document* (before any OCR
+  output exists) and can **halt** the execution by returning `halt: true` —
+  used by the [PII Anonymization extension](extensions/pii-anonymizer.md) to
+  short-circuit an original whose only purpose was to spawn a redacted copy.
+  While it runs, the document's status shows **`PREPROCESSING`**.
+- **Five post-step points** — `postOcr`, `postClassification`,
+  `postExtraction`, `postRuleValidation`, `postSummarization` — invoked after
+  the corresponding step. (`postAssessment` was removed in v0.6 when
+  assessment folded into extraction.)
+
+At each point the Step Functions workflow invokes
+`PipelineHooksDispatcherFunction`, which runs any hook Lambdas registered for
+that point.
 
 **Inert by default** — hooks are stored inline in the active configuration
-version under each step's `postHook` list. With no `postHook` entries the
-dispatcher returns after a single DynamoDB read and the pipeline is unchanged.
+version. With none registered the dispatcher returns after a single DynamoDB
+read and the pipeline is unchanged.
+
+**`preprocessing` shape** — a standalone top-level config section holding ONE
+flat hook (no list; the hook's own settings travel in generic `args` key/value
+pairs, keeping the platform hook-agnostic). Editable in the View/Edit
+Configuration UI:
+
+```yaml
+preprocessing:
+  enabled: true               # default false
+  featureId: pii-anonymizer   # owner label (for traceability)
+  arn: <hook-lambda-arn>      # Lambda to invoke
+  onError: fail               # continue | fail — use fail when the hook MUST
+                              # gate processing (a failure ends the execution
+                              # via a terminal Fail state; it never falls
+                              # through to processing the unprocessed original)
+  args:                       # hook-specific settings, opaque to the platform
+    - { key: mode, value: redactcopy_and_stop }
+```
 
 **`postHook` entry shape** (per step, in the active config version):
 
@@ -199,12 +230,18 @@ extraction:
 
 ```json
 { "hookPoint": "postExtraction", "featureId": "my-feature",
-  "document": { ... }, "section": { ... }, "executionArn": "arn:aws:states:..." }
+  "document": { ... }, "section": { ... }, "executionArn": "arn:aws:states:...",
+  "args": [ { "key": "...", "value": "..." } ], "argsMap": { "...": "..." } }
 ```
 
-It returns any JSON result (surfaced under `$.HookResults`). `onError`
-controls failure handling: `continue` (log and proceed), `skip-remaining` (stop
-later hooks at that point), or `fail` (fail the workflow).
+It returns any JSON result (surfaced under `$.HookResults`). A `preprocessing`
+hook may include `"halt": true` in its result to end the execution (the
+document is marked according to the hook's semantics — e.g.
+`REDACTED_SUPERSEDED` for PII redaction). `onError` controls failure handling:
+`continue` (log and proceed), `skip-remaining` (stop later hooks at that
+point), or `fail` (fail the workflow — for `preprocessing` this stops the
+execution in a terminal `PreprocessingHookFailed` state rather than continuing
+to normal processing).
 
 **Security** — the dispatcher's `lambda:InvokeFunction` is scoped so a hook
 Lambda must either carry the `idp:feature-id` resource tag (ABAC, used by

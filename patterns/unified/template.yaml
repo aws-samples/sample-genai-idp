@@ -5028,6 +5028,12 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:Scan
                 Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigurationTable}'
+              # Status-only write: flip the doc row to PREPROCESSING while a
+              # preprocessing hook runs (UI step visibility; best-effort).
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TrackingTable}'
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -5075,6 +5081,9 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          # Lets the dispatcher surface PREPROCESSING as the document's visible
+          # status while a preprocessing hook runs (best-effort, cosmetic).
+          TRACKING_TABLE: !Ref TrackingTable
 
   PipelineHooksDispatcherFunctionLogGroup:
     Type: AWS::Logs::LogGroup

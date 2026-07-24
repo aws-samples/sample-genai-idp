@@ -25,11 +25,19 @@ import {
 import type { ApiClient } from './api';
 import type { RedactionRow } from './types';
 
+// Mirrors the host Document List "Load:" time-period dropdown
+// (TIME_PERIOD_DROPDOWN_CONFIG in src/ui/.../documents-table-config.tsx),
+// expressed as feature-API window strings (^(\d+)([hdw])$). The host default
+// is 2 hours, so it is listed first and used as the initial selection.
 const WINDOW_OPTIONS = [
-  { value: '', label: 'All time' },
-  { value: '24h', label: 'Last 24 hours' },
-  { value: '7d', label: 'Last 7 days' },
-  { value: '4w', label: 'Last 4 weeks' },
+  { value: '2h', label: '2 hrs' },
+  { value: '4h', label: '4 hrs' },
+  { value: '8h', label: '8 hrs' },
+  { value: '24h', label: '1 day' },
+  { value: '2d', label: '2 days' },
+  { value: '1w', label: '1 week' },
+  { value: '2w', label: '2 weeks' },
+  { value: '30d', label: '30 days' },
 ];
 
 const RedactionReportView: React.FC<{ api: ApiClient; enabled: boolean }> = ({

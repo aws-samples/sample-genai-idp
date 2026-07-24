@@ -346,3 +346,97 @@ def test_no_hooks_registered_returns_halt_false(monkeypatch):
     out = mod.lambda_handler({"hookPoint": "preprocessing", "document": {}}, None)
     assert out["invoked"] == 0
     assert out["halt"] is False
+
+
+def test_preprocessing_sets_visible_status(monkeypatch):
+    """When a preprocessing hook WILL run, the dispatcher flips the doc row's
+    ObjectStatus to PREPROCESSING (best-effort UI step visibility)."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    monkeypatch.setenv("TRACKING_TABLE", "TrackTable")
+    mod = _reload()
+    hook = {"featureId": "pii", "arn": "arn:pii", "order": 1, "onError": "continue"}
+    monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: [hook])
+    monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "default")
+    monkeypatch.setattr(
+        mod,
+        "_invoke_hook",
+        lambda h, p: {"featureId": "pii", "arn": "arn:pii", "ok": True, "result": {}},
+    )
+    updates = {}
+
+    class _Table:
+        def update_item(self, **kw):
+            updates.update(kw)
+
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: _Table())
+    mod.lambda_handler(
+        {"hookPoint": "preprocessing", "document": {"document_id": "w2.pdf"}}, None
+    )
+    assert updates["Key"] == {"PK": "doc#w2.pdf", "SK": "none"}
+    assert updates["ExpressionAttributeValues"] == {":s": "PREPROCESSING"}
+    # Conditional write: never resurrect a deleted/missing row.
+    assert "attribute_exists" in updates["ConditionExpression"]
+
+
+def test_preprocessing_status_not_set_when_no_hooks(monkeypatch):
+    """No hook registered ⇒ no status write (host stays inert)."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    monkeypatch.setenv("TRACKING_TABLE", "TrackTable")
+    mod = _reload()
+    monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: [])
+    monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "default")
+    called = []
+    monkeypatch.setattr(mod, "_set_preprocessing_status", lambda d: called.append(d))
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: object())
+    mod.lambda_handler(
+        {"hookPoint": "preprocessing", "document": {"document_id": "w2.pdf"}}, None
+    )
+    assert called == []
+
+
+def test_preprocessing_status_failure_never_breaks_dispatch(monkeypatch):
+    """A DDB error while writing the status is swallowed; the hook still runs."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    monkeypatch.setenv("TRACKING_TABLE", "TrackTable")
+    mod = _reload()
+    hook = {"featureId": "pii", "arn": "arn:pii", "order": 1, "onError": "continue"}
+    monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: [hook])
+    monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "default")
+    monkeypatch.setattr(
+        mod,
+        "_invoke_hook",
+        lambda h, p: {"featureId": "pii", "arn": "arn:pii", "ok": True, "result": {}},
+    )
+
+    class _Boom:
+        def update_item(self, **kw):
+            raise RuntimeError("ddb down")
+
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: _Boom())
+    out = mod.lambda_handler(
+        {"hookPoint": "preprocessing", "document": {"document_id": "w2.pdf"}}, None
+    )
+    assert out["invoked"] == 1
+
+
+def test_post_step_points_do_not_touch_status(monkeypatch):
+    """Only the preprocessing point writes the visible status (post-step points
+    already have their own per-step statuses set by the step functions)."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    monkeypatch.setenv("TRACKING_TABLE", "TrackTable")
+    mod = _reload()
+    hook = {"featureId": "f", "arn": "arn:f", "order": 1, "onError": "continue"}
+    monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: [hook])
+    monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "default")
+    called = []
+    monkeypatch.setattr(mod, "_set_preprocessing_status", lambda d: called.append(d))
+    monkeypatch.setattr(
+        mod,
+        "_invoke_hook",
+        lambda h, p: {"featureId": "f", "arn": "arn:f", "ok": True, "result": {}},
+    )
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: object())
+    mod.lambda_handler(
+        {"hookPoint": "postExtraction", "document": {"document_id": "w2.pdf"}}, None
+    )
+    assert called == []

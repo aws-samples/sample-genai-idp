@@ -14,8 +14,9 @@ missed PII is possible. See [Feedback](#feedback).
 that detects and redacts personally identifiable information (PII) from documents
 **before** the accelerator's classification and extraction models see them — so
 raw PII never transits a GenAI model. It is the reference example of the
-standalone **`preprocessing`** pipeline-hook point, which runs first in the
-workflow (before the BDA/pipeline routing).
+standalone **`preprocessing`**
+[pipeline-hook point](../feature-platform.md#pipeline-hooks), which runs first
+in the workflow (before the BDA/pipeline routing).
 
 It integrates the detection/redaction library from the AWS Labs
 **[pii-anonymizer](https://github.com/awslabs/pii-anonymizer)** project
@@ -138,5 +139,7 @@ Upstream detection/redaction issues can also be raised at
 ## See also
 
 - [Feature Platform](../feature-platform.md) — how extensions work.
+- [Feature Platform → Pipeline hooks](../feature-platform.md#pipeline-hooks) —
+  the generic `preprocessing` hook contract this feature builds on.
 - [Feature Platform developer guide](../feature-platform-developer-guide.md).
 - Upstream: [awslabs/pii-anonymizer](https://github.com/awslabs/pii-anonymizer).

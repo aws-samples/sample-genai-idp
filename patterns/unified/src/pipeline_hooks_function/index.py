@@ -61,6 +61,7 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 _CONFIG_TABLE = os.environ.get("CONFIGURATION_TABLE_NAME", "")
+_TRACKING_TABLE = os.environ.get("TRACKING_TABLE", "")
 
 # Map hook point -> config section under the active config version.
 #
@@ -90,6 +91,7 @@ def _hook_list_field(point: str) -> str:
     """The hook-list field name for a hook point: preHook for pre* points,
     postHook otherwise. Keeps pre/post hooks in the same section distinct."""
     return "preHook" if point.startswith("pre") else "postHook"
+
 
 _CONFIG_METADATA_FIELDS = {
     "Configuration",
@@ -227,6 +229,32 @@ def _read_hooks_from_config(
     return valid
 
 
+def _set_preprocessing_status(document: Any) -> None:
+    """Best-effort: flip the doc row's ObjectStatus to PREPROCESSING while a
+    preprocessing hook runs, so the UI shows a real step name instead of the
+    generic RUNNING (mirrors how OCR/CLASSIFYING/... set per-step statuses).
+
+    Minimal, idp_common-free write (this function deliberately has no layer
+    deps). Never fatal — a preprocessing hook must not fail because a status
+    cosmetic couldn't be written. The next step (OCR etc.) or the workflow
+    tracker overwrites the status, so no reset is needed here."""
+    if not _TRACKING_TABLE or not isinstance(document, dict):
+        return
+    doc_id = document.get("document_id") or document.get("input_key")
+    if not doc_id:
+        return
+    try:
+        _dynamodb.Table(_TRACKING_TABLE).update_item(
+            Key={"PK": f"doc#{doc_id}", "SK": "none"},
+            UpdateExpression="SET #s = :s",
+            ConditionExpression="attribute_exists(PK)",
+            ExpressionAttributeNames={"#s": "ObjectStatus"},
+            ExpressionAttributeValues={":s": "PREPROCESSING"},
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.info("Could not set PREPROCESSING status for %s: %s", doc_id, exc)
+
+
 def _invoke_hook(hook: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
     try:
         resp = _lambda.invoke(
@@ -287,6 +315,12 @@ def lambda_handler(event: Dict[str, Any], _ctx: Any) -> Dict[str, Any]:
     if not hooks:
         logger.info("No hooks registered for %s in Config#%s", point, version)
         return {"hookPoint": point, "invoked": 0, "halt": False, "results": []}
+
+    # Surface the preprocessing step in the document's visible status (the
+    # generic RUNNING otherwise persists for the whole — possibly long —
+    # redaction pass). Only when a hook will actually run.
+    if point == "preprocessing":
+        _set_preprocessing_status(document)
 
     results: List[Dict[str, Any]] = []
     for h in hooks:

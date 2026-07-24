@@ -272,6 +272,7 @@ export const CUSTOM_DATE_RANGE_STORAGE_KEY = 'customDateRange';
 const ABORTABLE_STATUSES = [
   'QUEUED',
   'RUNNING',
+  'PREPROCESSING',
   'OCR',
   'CLASSIFYING',
   'EXTRACTING',
