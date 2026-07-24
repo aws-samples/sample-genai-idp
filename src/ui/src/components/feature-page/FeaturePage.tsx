@@ -3,7 +3,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { Box, SpaceBetween } from '@cloudscape-design/components';
+import { SpaceBetween } from '@cloudscape-design/components';
 import { fetchAuthSession } from 'aws-amplify/auth';
 
 import useInstalledFeatures from '../../hooks/use-installed-features';
@@ -15,12 +15,14 @@ import useUnsubscribeFeature from '../../hooks/use-unsubscribe-feature';
 import type { FeatureContext } from '../../types/feature-platform';
 
 import FeatureLoader from './FeatureLoader';
+import FeatureCatalogBrowser from './FeatureCatalogBrowser';
 import { resolveFeatureDocsUrl } from './feature-docs-url';
 import {
   ActiveSubscriptionBanner,
   AwaitingAdminInstall,
   ExpiredBanner,
   InstallPrompt,
+  LearnMore,
   LoadingBlock,
   SubscriptionRequired,
   UpToDateBanner,
@@ -158,7 +160,9 @@ const FeaturePage: React.FC<FeaturePageProps> = ({ featureIdOverride, groups, ma
   }, [unsubscribe, featureId, refreshEntitlement, refreshInstalled]);
 
   if (!featureId) {
-    return <Box padding="xxl">No feature ID provided.</Box>;
+    // /features with no id: the catalog browser — the discovery surface for
+    // available (not-yet-installed) extensions, which don't get nav links.
+    return <FeatureCatalogBrowser />;
   }
   if (installedLoading || entitlementLoading) {
     return <LoadingBlock />;
@@ -289,6 +293,7 @@ const FeaturePage: React.FC<FeaturePageProps> = ({ featureIdOverride, groups, ma
         // subscription, so suppress the source suffix for them.
         <UpToDateBanner version={installed.installedVersion} source={isOss ? 'auto' : (entitlement?.source ?? 'marketplace')} />
       )}
+      <LearnMore docsUrl={docsUrl} />
       {featureContent}
     </SpaceBetween>
   );

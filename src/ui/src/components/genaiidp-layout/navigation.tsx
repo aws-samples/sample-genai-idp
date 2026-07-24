@@ -61,7 +61,7 @@ const withNavHotspots = (items: readonly SideNavigationProps.Item[]): SideNaviga
   items.map((item) => {
     if (item.type === 'section' && Array.isArray((item as SideNavigationProps.Section).items)) {
       const section = item as SideNavigationProps.Section;
-      if (section.text === 'Extensions (Preview)' && section.items.length > 0) {
+      if (section.text === 'Extensions' && section.items.length > 0) {
         const [first, ...rest] = section.items;
         const firstWithHotspot = first.type === 'link' ? withInfoHotspot(first as SideNavigationProps.Link, 'nav-extensions') : first;
         return { ...section, items: [firstWithHotspot, ...rest] };
@@ -320,11 +320,11 @@ const Navigation = ({
   const { features: installedFeatures } = useInstalledFeatures();
   const { features: catalogFeatures } = useCatalogFeatures();
 
-  // Dynamic "Extensions" section driven by InstalledFeatures +
-  // CatalogFeatures. Always visible (shows "No features installed" placeholder
-  // when both lists are empty) per the feature platform plan. Catalog-only
-  // entries (published to the feature bucket but not yet installed) render
-  // with a "Subscribe" badge so admins can reach the FeaturePage Subscribe CTA.
+  // Dynamic "Extensions" section: installed features plus catalog features
+  // with showInNav !== false, ending with a "Browse catalog" link. Always
+  // visible per the feature platform plan. Catalog entries with
+  // showInNav: false (the bundled reference samples) are reachable from the
+  // catalog browser at /features, not from their own nav links.
   const featuresSection = useMemo(() => buildFeaturesNavSection(installedFeatures, catalogFeatures), [installedFeatures, catalogFeatures]);
 
   // Version-check for the "Update available" indicator. Returns
@@ -540,7 +540,7 @@ const Navigation = ({
   }
 
   return (
-    <>
+    <div className="idp-side-nav">
       {isQuickStartWidgetEnabled() && (
         <div className="nav-quick-start">
           <Hotspot hotspotId="nav-quick-start" side="right">
@@ -556,7 +556,7 @@ const Navigation = ({
         activeHref={activeHref}
         onFollow={onFollowHandler}
       />
-    </>
+    </div>
   );
 };
 

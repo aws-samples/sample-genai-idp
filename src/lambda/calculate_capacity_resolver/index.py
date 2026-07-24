@@ -2,9 +2,26 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-import boto3
 import os
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List
+
+import boto3
+
+
+def _caller_in_groups(event, allowed):
+    """Defense-in-depth RBAC check against the caller's Cognito groups.
+
+    The schema restricts calculateCapacity via @aws_cognito_user_pools(
+    cognito_groups: ["Admin","Author","Viewer"]), but the REST dispatcher's
+    Cognito authorizer only authenticates — it does not enforce the group. So we
+    also enforce the group server-side (matching the pattern in
+    abort_test_runs / abort_workflow_resolver) so a Reviewer calling
+    /op/calculateCapacity directly is rejected (closes GAP-05).
+    """
+    groups = (event.get("identity") or {}).get("claims", {}).get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [groups]
+    return bool(set(allowed).intersection(groups))
 
 
 def sanitize_quota_requirements(quota_reqs: List[Dict]) -> List[Dict]:
@@ -156,7 +173,19 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     try:
         print(f"[RESOLVER] Received event: {json.dumps(event, default=str)[:1000]}")
-        
+
+        # Defense-in-depth RBAC: calculateCapacity is Admin/Author/Viewer (schema).
+        # A Cognito invocation always carries a non-None 'identity'; direct Lambda
+        # invocations (CI/automation) have no identity and are gated by IAM
+        # (lambda:InvokeFunction), so we only group-check real UI callers.
+        # Raise (not a 200 error dict) so the dispatcher maps it to 403/Unauthorized.
+        if event.get('identity') is not None and not _caller_in_groups(
+            event, ("Admin", "Author", "Viewer")
+        ):
+            raise PermissionError(
+                "Unauthorized: calculateCapacity requires Admin, Author or Viewer group"
+            )
+
         # Get the input from GraphQL arguments
         input_data = event.get('arguments', {}).get('input', '{}')
         print(f"[RESOLVER] Input data type: {type(input_data).__name__}, length: {len(str(input_data))}")
@@ -264,6 +293,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             print(f"[RESOLVER] ERROR: {error_msg}")
             return build_error_response(error_msg)
             
+    except PermissionError:
+        # Authorization denial must propagate so the dispatcher returns
+        # 403/Unauthorized — NOT be swallowed into a 200 build_error_response.
+        raise
     except Exception as e:
         print(f"[RESOLVER] Unhandled exception: {type(e).__name__}: {str(e)}")
         import traceback

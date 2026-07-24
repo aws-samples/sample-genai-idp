@@ -382,6 +382,13 @@ class TestGetModelMaxOutputTokens:
         # With :1m suffix
         assert get_model_max_output_tokens("us.anthropic.claude-opus-4-8:1m") == 128_000
 
+    def test_opus_5_returns_128k(self):
+        """Claude Opus 5 returns 128,000 max tokens, incl. :1m and all geos."""
+        assert get_model_max_output_tokens("us.anthropic.claude-opus-5") == 128_000
+        assert get_model_max_output_tokens("us.anthropic.claude-opus-5:1m") == 128_000
+        assert get_model_max_output_tokens("eu.anthropic.claude-opus-5:1m") == 128_000
+        assert get_model_max_output_tokens("global.anthropic.claude-opus-5") == 128_000
+
     def test_sonnet_5_returns_128k(self):
         """Claude Sonnet 5 returns 128,000 max tokens (1M context), incl. :1m.
         Sonnet 5 does NOT match the claude-(opus|sonnet|haiku)-4 catch-all, so it

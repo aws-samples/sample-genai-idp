@@ -1,0 +1,1 @@
+../../.claude/skills/dependabot-prs.md

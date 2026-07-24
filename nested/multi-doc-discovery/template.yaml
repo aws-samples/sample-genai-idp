@@ -136,6 +136,26 @@ Resources:
       EncryptionConfiguration:
         EncryptionType: KMS
         KmsKey: !Ref CustomerManagedEncryptionKeyArn
+      # Durable pull permission for the container-image Lambda functions below.
+      # Without an explicit repository policy, Lambda only auto-attaches a pull
+      # policy at function CREATE time; it is NOT reapplied when a function is
+      # updated (e.g. an env-var/IAM change), so the image re-pull on update
+      # fails with "The function does not have permission to access the
+      # specified image" and the function never stabilizes — breaking stack
+      # updates. Scoped to Lambda functions in this account/region.
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: LambdaECRImageRetrieval
+            Effect: Allow
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+            Action:
+              - ecr:BatchGetImage
+              - ecr:GetDownloadUrlForLayer
+            Condition:
+              StringLike:
+                aws:sourceArn: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:*"
 
   ##########################################################################
   # CodeBuild Project - builds Docker image and pushes to ECR

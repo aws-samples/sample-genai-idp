@@ -103,6 +103,9 @@ def _to_catalog_feature(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "iconUrl": entry.get("iconUrl") or None,
         "description": entry.get("description") or None,
         "docsUrl": entry.get("docsUrl") or None,
+        # Whether the feature gets its own Extensions nav entry before it's
+        # installed (default True; the bundled samples publish False).
+        "showInNav": entry.get("showInNav", True) is not False,
         "source": source,
         # Marketplace-only metadata; null/empty for OSS features.
         "productCode": entry.get("productCode") or None,

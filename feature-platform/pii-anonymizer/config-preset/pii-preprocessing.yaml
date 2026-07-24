@@ -1,0 +1,42 @@
+# PII Anonymization — minimal quick-start config preset.  [EXPERIMENTAL FEATURE]
+#
+# Installed by the ui-deployer as a NON-ACTIVE config version
+# `pii-anonymizer-v<version>`. The `preprocessing` section is a SINGLE flat hook:
+# arn/args/onError live directly on it (no nested list). The ui-deployer fills in
+# the hook ARN at install time (unknown until the feature stack deploys).
+#
+# The preprocessing step is GENERIC (a Lambda ARN + key/value args). This
+# feature's PII settings live entirely in `args` — mode, detection model,
+# redaction style, companion config version, store_mapping.
+#
+# This standalone preset is a reference/quick-start. The PRIMARY path is the
+# feature UI's Config Pairing wizard, which clones an admin's EXISTING working
+# config version into a matched pair (initiating + companion) with the right
+# args, so redaction layers on top of the customer's real extraction settings.
+
+preprocessing:
+  enabled: true
+  # arn: filled in at install by the ui-deployer (unknown until the stack deploys)
+  onError: fail          # redactcopy_and_stop fails closed (never leak PII)
+  featureId: pii-anonymizer
+  args:
+    # mode: redactcopy_and_stop     -> write redacted copy, DELETE the original
+    #       redactcopy_and_continue -> write redacted copy, also process original
+    - key: mode
+      value: redactcopy_and_stop
+    # Companion config version the redacted copy is processed under. It must NOT
+    # carry a preprocessing hook (a REDACTED-marker guard also blocks loops).
+    - key: companion_config_version
+      value: default
+    # Detection model. Claude Haiku default (large output for dense forms);
+    # Nova Lite is cheaper but may truncate and fail closed.
+    - key: model_id
+      value: us.anthropic.claude-haiku-4-5-20251001-v1:0
+    - key: model_provider
+      value: anthropic
+    # synthetic (structure-preserving fake values) | blackout
+    - key: redaction_mode
+      value: synthetic
+    # Persist the original->synthetic mapping (real PII; RBAC-gated view). Off by default.
+    - key: store_mapping
+      value: "false"

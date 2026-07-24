@@ -13,6 +13,9 @@ description: |
 # OSS docs-site slug — the UI "Learn more" link resolves this against the
 # published docs site. Source: docs/extensions/sample-document-status.md.
 docsUrl: extensions/sample-document-status
+# Reference sample: no Extensions nav entry until installed — discoverable
+# via the UI's Browse catalog page instead.
+showInNav: false
 template:
   path: template.yaml
   requiresMainStackName: true

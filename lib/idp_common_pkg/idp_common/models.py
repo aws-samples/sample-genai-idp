@@ -22,6 +22,7 @@ class Status(Enum):
     IN_PROGRESS = "IN_PROGRESS"  # Batch job file is being processed
     QUEUED = "QUEUED"  # Initial state when document is added to queue
     RUNNING = "RUNNING"  # Step function workflow has started
+    PREPROCESSING = "PREPROCESSING"  # Preprocessing hook (e.g. PII redaction)
     OCR = "OCR"  # OCR processing
     CLASSIFYING = "CLASSIFYING"  # Document classification
     EXTRACTING = "EXTRACTING"  # Information extraction
@@ -36,6 +37,9 @@ class Status(Enum):
     COMPLETED = "COMPLETED"  # All processing completed
     FAILED = "FAILED"  # Processing failedy
     ABORTED = "ABORTED"  # User cancelled workflow
+    REDACTED_SUPERSEDED = "REDACTED_SUPERSEDED"  # A preprocessing hook (e.g. PII
+    # anonymization) produced a redacted copy that is processed as a separate
+    # document; this original was intentionally not processed further.
 
 
 @dataclass

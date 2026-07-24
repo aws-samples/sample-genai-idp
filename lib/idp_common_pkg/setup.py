@@ -92,11 +92,20 @@ extras_require = {
     ],
     # Synthesis / cold-start bootstrap. The schema bridge, prompt->schema
     # authoring, catalog match and orchestration use only core deps. The heavy
-    # SEED document generator is an optional add-on whose packaging mechanism
-    # (pip package vs git submodule) is owned by the SEED team; declare it here
-    # once that contract is finalized.
+    # SEED document generator is a separate optional extra (synthesis-generator)
+    # so this base capability stays light.
     "synthesis": [
         "jsonschema>=4.0.0",
+    ],
+    # Optional synthetic-document generator (SEED, published as seed-data). Heavy
+    # (Strands + Bedrock + rendering); install only where generation runs. The
+    # engine adapter imports it lazily and degrades gracefully when absent.
+    # NOTE: seed-data requires numpy 2.x (opencv/scikit-image/numba), which
+    # CONFLICTS with the numpy==1.26.4 pin in the ocr/evaluation/all extras.
+    # Install this in an isolated environment (the generator's own container /
+    # AgentCore runtime), NOT alongside idp_common[ocr|evaluation|all].
+    "synthesis-generator": [
+        "seed-data>=0.0.6",
     ],
     # Full package with all dependencies
     "all": [
@@ -122,7 +131,7 @@ extras_require = {
 
 setup(
     name="idp_common",
-    version="0.6.1",
+    version="0.6.2",
     packages=find_packages(
         exclude=[
             "build",

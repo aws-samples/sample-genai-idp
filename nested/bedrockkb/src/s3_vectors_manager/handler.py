@@ -13,6 +13,12 @@ logger = logging.getLogger()
 log_level = os.environ.get('LOG_LEVEL', 'INFO')
 logger.setLevel(getattr(logging, log_level))
 
+
+def get_partition(region):
+    """Resolve the AWS partition (aws, aws-us-gov, aws-cn) for a region."""
+    return boto3.Session().get_partition_for_region(region)
+
+
 def lambda_handler(event, context):
     """
     Custom Resource handler for S3 Vectors and Knowledge Base management.
@@ -458,9 +464,10 @@ def create_s3_vector_resources(s3vectors_client, bucket_name, index_name, embedd
         # Construct ARNs
         sts_client = boto3.client('sts', region_name=region)
         account_id = sts_client.get_caller_identity()['Account']
-        
-        bucket_arn = f"arn:aws:s3vectors:{region}:{account_id}:bucket/{bucket_name}"
-        index_arn = f"arn:aws:s3vectors:{region}:{account_id}:bucket/{bucket_name}/index/{index_name}"
+        partition = get_partition(region)
+
+        bucket_arn = f"arn:{partition}:s3vectors:{region}:{account_id}:bucket/{bucket_name}"
+        index_arn = f"arn:{partition}:s3vectors:{region}:{account_id}:bucket/{bucket_name}/index/{index_name}"
         
         logger.info(f"Vector bucket ARN: {bucket_arn}")
         logger.info(f"Vector index ARN: {index_arn}")
@@ -535,18 +542,19 @@ def get_s3_vector_info(s3vectors_client, bucket_name, index_name, index_config=N
         account_id = sts_client.get_caller_identity()['Account']
         
         # Construct bucket ARN if not returned in response
+        partition = get_partition(region)
         if not bucket_arn:
-            bucket_arn = f"arn:aws:s3vectors:{region}:{account_id}:bucket/{bucket_name}"
-        
+            bucket_arn = f"arn:{partition}:s3vectors:{region}:{account_id}:bucket/{bucket_name}"
+
         logger.info(f"Found existing vector bucket ARN: {bucket_arn}")
-        
+
         # Always attempt to create the index - if it exists, we'll get ConflictException
         # This is more robust than trying to check existence with potentially non-existent API methods
         logger.info(f"Ensuring vector index exists: {index_name}")
         if index_config:
             index_created = create_vector_index(
-                s3vectors_client, 
-                bucket_name, 
+                s3vectors_client,
+                bucket_name,
                 index_name,
                 dimension=index_config['dimension'],
                 distance_metric=index_config['distance_metric'],
@@ -554,9 +562,9 @@ def get_s3_vector_info(s3vectors_client, bucket_name, index_name, index_config=N
             )
         else:
             index_created = create_vector_index(s3vectors_client, bucket_name, index_name)
-        
+
         # Construct index ARN (required for Knowledge Base configuration)
-        index_arn = f"arn:aws:s3vectors:{region}:{account_id}:bucket/{bucket_name}/index/{index_name}"
+        index_arn = f"arn:{partition}:s3vectors:{region}:{account_id}:bucket/{bucket_name}/index/{index_name}"
         
         logger.info(f"Vector bucket ARN: {bucket_arn}")
         logger.info(f"Vector index ARN: {index_arn}")
@@ -587,17 +595,18 @@ def update_s3_vector_info(s3vectors_client, bucket_name, index_name, index_confi
         account_id = sts_client.get_caller_identity()['Account']
         
         # Construct bucket ARN if not returned in response
+        partition = get_partition(region)
         if not bucket_arn:
-            bucket_arn = f"arn:aws:s3vectors:{region}:{account_id}:bucket/{bucket_name}"
-        
+            bucket_arn = f"arn:{partition}:s3vectors:{region}:{account_id}:bucket/{bucket_name}"
+
         logger.info(f"Found existing vector bucket ARN: {bucket_arn}")
-        
+
         # For updates, always recreate the index to ensure fresh configuration
         logger.info(f"Recreating vector index for update: {index_name}")
         recreate_vector_index(s3vectors_client, bucket_name, index_name, index_config)
-        
+
         # Construct index ARN (required for Knowledge Base configuration)
-        index_arn = f"arn:aws:s3vectors:{region}:{account_id}:bucket/{bucket_name}/index/{index_name}"
+        index_arn = f"arn:{partition}:s3vectors:{region}:{account_id}:bucket/{bucket_name}/index/{index_name}"
         
         logger.info(f"Vector bucket ARN: {bucket_arn}")
         logger.info(f"Vector index ARN: {index_arn}")

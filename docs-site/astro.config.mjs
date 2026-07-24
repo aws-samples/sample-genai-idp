@@ -166,6 +166,14 @@ export default defineConfig({
                   slug: "extensions/auto-optimizer",
                 },
                 {
+                  label: "PII Anonymization",
+                  slug: "extensions/pii-anonymizer",
+                },
+                {
+                  label: "Test Set Generator",
+                  slug: "extensions/idp-data-generator",
+                },
+                {
                   label: "Sample: Document Status (feature add-on)",
                   slug: "extensions/sample-document-status",
                 },

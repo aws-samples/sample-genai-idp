@@ -291,9 +291,7 @@ def find_matching_files(
         # Parse modified_after filter if provided
         cutoff_time = None
         if modified_after:
-            cutoff_time = datetime.fromisoformat(
-                modified_after.replace("Z", "+00:00")
-            )
+            cutoff_time = datetime.fromisoformat(modified_after.replace("Z", "+00:00"))
             if cutoff_time.tzinfo is None:
                 cutoff_time = cutoff_time.replace(tzinfo=timezone.utc)
             logger.info(f"Filtering files modified after {cutoff_time.isoformat()}")
@@ -304,6 +302,11 @@ def find_matching_files(
             if "Contents" in page:
                 for obj in page["Contents"]:
                     key = obj["Key"]
+                    # Skip S3 "folder" pseudo-objects (zero-byte keys ending
+                    # in '/' created by the S3 console). They are not documents
+                    # and must never be pulled into a test set.
+                    if key.endswith("/"):
+                        continue
                     if regex.match(key):
                         if cutoff_time and obj.get("LastModified"):
                             last_modified = obj["LastModified"]

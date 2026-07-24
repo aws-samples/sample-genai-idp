@@ -8,13 +8,39 @@ complementary layers that share one source of truth:
    op universe, the schema directives, and the expectations file for drift and
    missing server-side checks.
 2. **Dynamic tests** (`make api-test STACK_NAME=<stack>`) — spins up temporary
-   Cognito users (one per group + a config-version-scoped Author), calls every
-   op as every role + unauthenticated + with malformed tokens against a
-   *deployed* stack, and writes an auditable report.
+   Cognito users (one per group + a config-version-scoped Author + a second
+   independent user for IDOR), calls every op as every role + unauthenticated +
+   with malformed tokens against a *deployed* stack, PLUS the mandatory
+   security-focused suites below, and writes an auditable report.
 
 > The dynamic harness has already caught a real, shipping vulnerability
 > (config-version scope silently failing open because a resolver was missing a
 > `dynamodb:Query` IAM grant). Treat a hard fail as real until proven otherwise.
+
+### Mandatory security-focused test cases (AppSec checklist)
+
+`make api-test` covers the AppSec "Minimum Mandatory Security Focused Test Cases
+for APIs" checklist. Mapping (suite → checklist item), implemented in
+`scripts/api_security_cases.py`:
+
+| # | Checklist item | Where |
+|---|----------------|-------|
+| 1 | Unauthenticated access denied | `run_group_matrix` (unauth cell) + `run_token_negatives` |
+| 2 / 2.2 | Authorization matrix, negative + positive; role X not authorized for API Y | `run_group_matrix` (every op × every role) |
+| 2.1 | IDOR — User A's data unreachable by User B | `run_idor_suite` (chat session ownership) |
+| 2.3 | Tokens rejected after expiry | `run_token_lifecycle_suite` (+ token negatives); real-expiry wait via `IDP_SECTEST_WAIT_EXPIRY=<seconds>` |
+| 2.4 | Tokens revoked after logout | `run_token_lifecycle_suite` — global sign-out then re-test; **stateless-JWT reuse is a documented gap** (`GAP-SEC-LOGOUT`, WARN — see AUTH.T10) |
+| 2.5 | Deleted resources no longer accessible | `run_deleted_resource_suite` (config version create→delete→read-gone) |
+| 3 | Input validation (invalid input rejected) | `run_input_validation_suite` — **tolerant** by default (4xx or 5xx ok); `IDP_SECTEST_STRICT_INPUT=true` requires a clean 4xx (the behavior central schema validation introduces) |
+| 4 | TLS 1.0/1.1/HTTP refused, TLS 1.2+ accepted | `run_tls_suite` (raw-socket protocol probes) |
+
+Notes:
+- The AppSec engineer may request **additional** tests per use case — this is the
+  floor, not the ceiling.
+- Suites that need conditions not present are recorded as **SKIP (pass)**, never
+  silent omissions (e.g. expiry without `IDP_SECTEST_WAIT_EXPIRY`).
+- Threat-model coverage: AUTH.T09 (IDOR), AUTH.T10 (token lifecycle), AUTH.T11
+  (TLS) in `security/threat-modeling/feature-threats/rbac-authentication.md`.
 
 ## The architecture you are testing (read this first)
 

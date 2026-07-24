@@ -284,6 +284,59 @@ Resources:
             description: Automatically optimize BDA blueprints using ground truth data during discovery to improve extraction accuracy
             default: false
             dependsOn: { field: "use_bda", value: true }
+          preprocessing:
+            order: 2.5
+            type: object
+            collapsible: true
+            defaultExpanded: false
+            sectionLabel: Preprocessing
+            description: A single generic preprocessing hook (Lambda ARN + args) that runs FIRST, before OCR/BDA routing, in both processing modes.
+            properties:
+              enabled:
+                type: boolean
+                description: Run the preprocessing hook for this config version.
+                default: false
+                order: 0
+              arn:
+                type: string
+                description: >-
+                  Lambda function ARN to invoke on the source document. Must
+                  either be tagged `idp:feature-id=<anything>` OR have a function
+                  name beginning with `GENAIIDP-`.
+                order: 1
+              onError:
+                type: string
+                enum: ["continue", "fail", "skip-remaining"]
+                default: continue
+                description: Behavior when the hook errors.
+                order: 2
+              args:
+                type: array
+                sectionLabel: Hook arguments
+                description: >-
+                  Key/value arguments passed to the hook (as strings). The hook
+                  reads its own configuration from these — keeping the step
+                  generic (e.g. PII Anonymization reads mode/model/redaction here).
+                listLabel: Arguments
+                itemLabel: Argument
+                order: 3
+                items:
+                  type: object
+                  required:
+                    - key
+                  properties:
+                    key:
+                      type: string
+                      description: Argument name
+                      order: 0
+                    value:
+                      type: string
+                      description: Argument value (string)
+                      order: 1
+              featureId:
+                type: string
+                description: Feature/owner that provides this hook (label only).
+                order: 4
           ocr:
             order: 3
             type: object
@@ -360,6 +413,8 @@ Resources:
                   - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "us.anthropic.claude-sonnet-4-6"
                   - "us.anthropic.claude-sonnet-4-6:1m"
+                  - "us.anthropic.claude-sonnet-5"
+                  - "us.anthropic.claude-sonnet-5:1m"
                   - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "us.anthropic.claude-opus-4-6-v1"
                   - "us.anthropic.claude-opus-4-6-v1:1m"
@@ -367,6 +422,8 @@ Resources:
                   - "us.anthropic.claude-opus-4-7:1m"
                   - "us.anthropic.claude-opus-4-8"
                   - "us.anthropic.claude-opus-4-8:1m"
+                  - "us.anthropic.claude-opus-5"
+                  - "us.anthropic.claude-opus-5:1m"
                   - "openai.gpt-5.4"
                   - "openai.gpt-5.5"
                   - "openai.gpt-5.6-sol"
@@ -381,6 +438,8 @@ Resources:
                   - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "eu.anthropic.claude-sonnet-4-6"
                   - "eu.anthropic.claude-sonnet-4-6:1m"
+                  - "eu.anthropic.claude-sonnet-5"
+                  - "eu.anthropic.claude-sonnet-5:1m"
                   - "eu.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "eu.anthropic.claude-opus-4-6-v1"
                   - "eu.anthropic.claude-opus-4-6-v1:1m"
@@ -388,6 +447,8 @@ Resources:
                   - "eu.anthropic.claude-opus-4-7:1m"
                   - "eu.anthropic.claude-opus-4-8"
                   - "eu.anthropic.claude-opus-4-8:1m"
+                  - "eu.anthropic.claude-opus-5"
+                  - "eu.anthropic.claude-opus-5:1m"
                   - "qwen.qwen3-vl-235b-a22b"
                   - "us.meta.llama4-maverick-17b-instruct-v1:0"
                   - "us.meta.llama4-scout-17b-instruct-v1:0"
@@ -397,6 +458,8 @@ Resources:
                   - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
                   - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "global.anthropic.claude-sonnet-4-6:1m"
+                  - "global.anthropic.claude-sonnet-5"
+                  - "global.anthropic.claude-sonnet-5:1m"
                   - "global.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "global.anthropic.claude-opus-4-6-v1"
                   - "global.anthropic.claude-opus-4-6-v1:1m"
@@ -404,6 +467,8 @@ Resources:
                   - "global.anthropic.claude-opus-4-7:1m"
                   - "global.anthropic.claude-opus-4-8"
                   - "global.anthropic.claude-opus-4-8:1m"
+                  - "global.anthropic.claude-opus-5"
+                  - "global.anthropic.claude-opus-5:1m"
                 order: 2
                 dependsOn: { field: "backend", value: "bedrock" }
               model_lambda_hook_arn:
@@ -557,6 +622,8 @@ Resources:
                     - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                     - "us.anthropic.claude-sonnet-4-6"
                     - "us.anthropic.claude-sonnet-4-6:1m"
+                    - "us.anthropic.claude-sonnet-5"
+                    - "us.anthropic.claude-sonnet-5:1m"
                     - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                     - "us.anthropic.claude-opus-4-6-v1"
                     - "us.anthropic.claude-opus-4-6-v1:1m"
@@ -564,6 +631,8 @@ Resources:
                     - "us.anthropic.claude-opus-4-7:1m"
                     - "us.anthropic.claude-opus-4-8"
                     - "us.anthropic.claude-opus-4-8:1m"
+                    - "us.anthropic.claude-opus-5"
+                    - "us.anthropic.claude-opus-5:1m"
                     - "openai.gpt-5.4"
                     - "openai.gpt-5.5"
                     - "openai.gpt-5.6-sol"
@@ -576,6 +645,8 @@ Resources:
                     - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
                     - "eu.anthropic.claude-sonnet-4-6"
                     - "eu.anthropic.claude-sonnet-4-6:1m"
+                    - "eu.anthropic.claude-sonnet-5"
+                    - "eu.anthropic.claude-sonnet-5:1m"
                     - "eu.anthropic.claude-opus-4-5-20251101-v1:0"
                     - "eu.anthropic.claude-opus-4-6-v1"
                     - "eu.anthropic.claude-opus-4-6-v1:1m"
@@ -583,11 +654,15 @@ Resources:
                     - "eu.anthropic.claude-opus-4-7:1m"
                     - "eu.anthropic.claude-opus-4-8"
                     - "eu.anthropic.claude-opus-4-8:1m"
+                    - "eu.anthropic.claude-opus-5"
+                    - "eu.anthropic.claude-opus-5:1m"
                     - "global.amazon.nova-2-lite-v1:0"
                     - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
                     - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                     - "global.anthropic.claude-sonnet-4-6"
                     - "global.anthropic.claude-sonnet-4-6:1m"
+                    - "global.anthropic.claude-sonnet-5"
+                    - "global.anthropic.claude-sonnet-5:1m"
                     - "global.anthropic.claude-opus-4-5-20251101-v1:0"
                     - "global.anthropic.claude-opus-4-6-v1"
                     - "global.anthropic.claude-opus-4-6-v1:1m"
@@ -595,6 +670,8 @@ Resources:
                     - "global.anthropic.claude-opus-4-7:1m"
                     - "global.anthropic.claude-opus-4-8"
                     - "global.anthropic.claude-opus-4-8:1m"
+                    - "global.anthropic.claude-opus-5"
+                    - "global.anthropic.claude-opus-5:1m"
                 examples:
                   type: array
                   description: Class few-shot examples
@@ -855,6 +932,8 @@ Resources:
                   - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "us.anthropic.claude-sonnet-4-6"
                   - "us.anthropic.claude-sonnet-4-6:1m"
+                  - "us.anthropic.claude-sonnet-5"
+                  - "us.anthropic.claude-sonnet-5:1m"
                   - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "us.anthropic.claude-opus-4-6-v1"
                   - "us.anthropic.claude-opus-4-6-v1:1m"
@@ -862,6 +941,8 @@ Resources:
                   - "us.anthropic.claude-opus-4-7:1m"
                   - "us.anthropic.claude-opus-4-8"
                   - "us.anthropic.claude-opus-4-8:1m"
+                  - "us.anthropic.claude-opus-5"
+                  - "us.anthropic.claude-opus-5:1m"
                   - "openai.gpt-5.4"
                   - "openai.gpt-5.5"
                   - "openai.gpt-5.6-sol"
@@ -876,6 +957,8 @@ Resources:
                   - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "eu.anthropic.claude-sonnet-4-6"
                   - "eu.anthropic.claude-sonnet-4-6:1m"
+                  - "eu.anthropic.claude-sonnet-5"
+                  - "eu.anthropic.claude-sonnet-5:1m"
                   - "eu.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "eu.anthropic.claude-opus-4-6-v1"
                   - "eu.anthropic.claude-opus-4-6-v1:1m"
@@ -883,6 +966,8 @@ Resources:
                   - "eu.anthropic.claude-opus-4-7:1m"
                   - "eu.anthropic.claude-opus-4-8"
                   - "eu.anthropic.claude-opus-4-8:1m"
+                  - "eu.anthropic.claude-opus-5"
+                  - "eu.anthropic.claude-opus-5:1m"
                   - "qwen.qwen3-vl-235b-a22b"
                   - "us.meta.llama4-maverick-17b-instruct-v1:0"
                   - "us.meta.llama4-scout-17b-instruct-v1:0"
@@ -893,6 +978,8 @@ Resources:
                   - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "global.anthropic.claude-sonnet-4-6"
                   - "global.anthropic.claude-sonnet-4-6:1m"
+                  - "global.anthropic.claude-sonnet-5"
+                  - "global.anthropic.claude-sonnet-5:1m"
                   - "global.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "global.anthropic.claude-opus-4-6-v1"
                   - "global.anthropic.claude-opus-4-6-v1:1m"
@@ -900,6 +987,8 @@ Resources:
                   - "global.anthropic.claude-opus-4-7:1m"
                   - "global.anthropic.claude-opus-4-8"
                   - "global.anthropic.claude-opus-4-8:1m"
+                  - "global.anthropic.claude-opus-5"
+                  - "global.anthropic.claude-opus-5:1m"
                 order: 1
               model_lambda_hook_arn:
                 type: string
@@ -1215,6 +1304,8 @@ Resources:
                           - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                           - "us.anthropic.claude-sonnet-4-6"
                           - "us.anthropic.claude-sonnet-4-6:1m"
+                          - "us.anthropic.claude-sonnet-5"
+                          - "us.anthropic.claude-sonnet-5:1m"
                           - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                           - "us.anthropic.claude-opus-4-6-v1"
                           - "us.anthropic.claude-opus-4-6-v1:1m"
@@ -1222,6 +1313,8 @@ Resources:
                           - "us.anthropic.claude-opus-4-7:1m"
                           - "us.anthropic.claude-opus-4-8"
                           - "us.anthropic.claude-opus-4-8:1m"
+                          - "us.anthropic.claude-opus-5"
+                          - "us.anthropic.claude-opus-5:1m"
                           - "openai.gpt-5.4"
                           - "openai.gpt-5.5"
                           - "openai.gpt-5.6-sol"
@@ -1236,6 +1329,8 @@ Resources:
                           - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
                           - "eu.anthropic.claude-sonnet-4-6"
                           - "eu.anthropic.claude-sonnet-4-6:1m"
+                          - "eu.anthropic.claude-sonnet-5"
+                          - "eu.anthropic.claude-sonnet-5:1m"
                           - "eu.anthropic.claude-opus-4-5-20251101-v1:0"
                           - "eu.anthropic.claude-opus-4-6-v1"
                           - "eu.anthropic.claude-opus-4-6-v1:1m"
@@ -1243,6 +1338,8 @@ Resources:
                           - "eu.anthropic.claude-opus-4-7:1m"
                           - "eu.anthropic.claude-opus-4-8"
                           - "eu.anthropic.claude-opus-4-8:1m"
+                          - "eu.anthropic.claude-opus-5"
+                          - "eu.anthropic.claude-opus-5:1m"
                           - "qwen.qwen3-vl-235b-a22b"
                           - "us.meta.llama4-maverick-17b-instruct-v1:0"
                           - "us.meta.llama4-scout-17b-instruct-v1:0"
@@ -1252,6 +1349,8 @@ Resources:
                           - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                           - "global.anthropic.claude-sonnet-4-6"
                           - "global.anthropic.claude-sonnet-4-6:1m"
+                          - "global.anthropic.claude-sonnet-5"
+                          - "global.anthropic.claude-sonnet-5:1m"
                           - "global.anthropic.claude-opus-4-5-20251101-v1:0"
                           - "global.anthropic.claude-opus-4-6-v1"
                           - "global.anthropic.claude-opus-4-6-v1:1m"
@@ -1259,6 +1358,8 @@ Resources:
                           - "global.anthropic.claude-opus-4-7:1m"
                           - "global.anthropic.claude-opus-4-8"
                           - "global.anthropic.claude-opus-4-8:1m"
+                          - "global.anthropic.claude-opus-5"
+                          - "global.anthropic.claude-opus-5:1m"
                         default: ""
                       min_population_ratio:
                         type: number
@@ -1335,6 +1436,8 @@ Resources:
                   - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "us.anthropic.claude-sonnet-4-6"
                   - "us.anthropic.claude-sonnet-4-6:1m"
+                  - "us.anthropic.claude-sonnet-5"
+                  - "us.anthropic.claude-sonnet-5:1m"
                   - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "us.anthropic.claude-opus-4-6-v1"
                   - "us.anthropic.claude-opus-4-6-v1:1m"
@@ -1342,6 +1445,8 @@ Resources:
                   - "us.anthropic.claude-opus-4-7:1m"
                   - "us.anthropic.claude-opus-4-8"
                   - "us.anthropic.claude-opus-4-8:1m"
+                  - "us.anthropic.claude-opus-5"
+                  - "us.anthropic.claude-opus-5:1m"
                   - "openai.gpt-5.4"
                   - "openai.gpt-5.5"
                   - "openai.gpt-5.6-sol"
@@ -1356,6 +1461,8 @@ Resources:
                   - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "eu.anthropic.claude-sonnet-4-6"
                   - "eu.anthropic.claude-sonnet-4-6:1m"
+                  - "eu.anthropic.claude-sonnet-5"
+                  - "eu.anthropic.claude-sonnet-5:1m"
                   - "eu.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "eu.anthropic.claude-opus-4-6-v1"
                   - "eu.anthropic.claude-opus-4-6-v1:1m"
@@ -1363,6 +1470,8 @@ Resources:
                   - "eu.anthropic.claude-opus-4-7:1m"
                   - "eu.anthropic.claude-opus-4-8"
                   - "eu.anthropic.claude-opus-4-8:1m"
+                  - "eu.anthropic.claude-opus-5"
+                  - "eu.anthropic.claude-opus-5:1m"
                   - "qwen.qwen3-vl-235b-a22b"
                   - "us.meta.llama4-maverick-17b-instruct-v1:0"
                   - "us.meta.llama4-scout-17b-instruct-v1:0"
@@ -1373,6 +1482,8 @@ Resources:
                   - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                   - "global.anthropic.claude-sonnet-4-6"
                   - "global.anthropic.claude-sonnet-4-6:1m"
+                  - "global.anthropic.claude-sonnet-5"
+                  - "global.anthropic.claude-sonnet-5:1m"
                   - "global.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "global.anthropic.claude-opus-4-6-v1"
                   - "global.anthropic.claude-opus-4-6-v1:1m"
@@ -1380,6 +1491,8 @@ Resources:
                   - "global.anthropic.claude-opus-4-7:1m"
                   - "global.anthropic.claude-opus-4-8"
                   - "global.anthropic.claude-opus-4-8:1m"
+                  - "global.anthropic.claude-opus-5"
+                  - "global.anthropic.claude-opus-5:1m"
                 order: 5
               model_lambda_hook_arn:
                 type: string
@@ -1518,6 +1631,8 @@ Resources:
                         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "us.anthropic.claude-sonnet-4-6",
                         "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-sonnet-5",
+                        "us.anthropic.claude-sonnet-5:1m",
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
@@ -1525,6 +1640,8 @@ Resources:
                         "us.anthropic.claude-opus-4-7:1m",
                         "us.anthropic.claude-opus-4-8",
                         "us.anthropic.claude-opus-4-8:1m",
+                        "us.anthropic.claude-opus-5",
+                        "us.anthropic.claude-opus-5:1m",
                         "openai.gpt-5.4",
                         "openai.gpt-5.5",
                         "openai.gpt-5.6-sol",
@@ -1537,6 +1654,8 @@ Resources:
                         "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "eu.anthropic.claude-sonnet-4-6",
                         "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-sonnet-5",
+                        "eu.anthropic.claude-sonnet-5:1m",
                         "eu.anthropic.claude-opus-4-5-20251101-v1:0",
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
@@ -1544,6 +1663,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-7:1m",
                         "eu.anthropic.claude-opus-4-8",
                         "eu.anthropic.claude-opus-4-8:1m",
+                        "eu.anthropic.claude-opus-5",
+                        "eu.anthropic.claude-opus-5:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -1554,13 +1675,17 @@ Resources:
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "global.anthropic.claude-sonnet-4-6",
                         "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-sonnet-5",
+                        "global.anthropic.claude-sonnet-5:1m",
                         "global.anthropic.claude-opus-4-5-20251101-v1:0",
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
                         "global.anthropic.claude-opus-4-7:1m",
                         "global.anthropic.claude-opus-4-8",
-                        "global.anthropic.claude-opus-4-8:1m"
+                        "global.anthropic.claude-opus-4-8:1m",
+                        "global.anthropic.claude-opus-5",
+                        "global.anthropic.claude-opus-5:1m"
                       ]
                     order: 3
                   model_lambda_hook_arn:
@@ -1760,6 +1885,8 @@ Resources:
                     "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                     "us.anthropic.claude-sonnet-4-6",
                     "us.anthropic.claude-sonnet-4-6:1m",
+                    "us.anthropic.claude-sonnet-5",
+                    "us.anthropic.claude-sonnet-5:1m",
                     "us.anthropic.claude-opus-4-5-20251101-v1:0",
                     "us.anthropic.claude-opus-4-6-v1",
                     "us.anthropic.claude-opus-4-6-v1:1m",
@@ -1767,6 +1894,8 @@ Resources:
                     "us.anthropic.claude-opus-4-7:1m",
                     "us.anthropic.claude-opus-4-8",
                     "us.anthropic.claude-opus-4-8:1m",
+                    "us.anthropic.claude-opus-5",
+                    "us.anthropic.claude-opus-5:1m",
                     "openai.gpt-5.4",
                     "openai.gpt-5.5",
                     "openai.gpt-5.6-sol",
@@ -1779,6 +1908,8 @@ Resources:
                     "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                     "eu.anthropic.claude-sonnet-4-6",
                     "eu.anthropic.claude-sonnet-4-6:1m",
+                    "eu.anthropic.claude-sonnet-5",
+                    "eu.anthropic.claude-sonnet-5:1m",
                     "eu.anthropic.claude-opus-4-5-20251101-v1:0",
                     "eu.anthropic.claude-opus-4-6-v1",
                     "eu.anthropic.claude-opus-4-6-v1:1m",
@@ -1786,6 +1917,8 @@ Resources:
                     "eu.anthropic.claude-opus-4-7:1m",
                     "eu.anthropic.claude-opus-4-8",
                     "eu.anthropic.claude-opus-4-8:1m",
+                    "eu.anthropic.claude-opus-5",
+                    "eu.anthropic.claude-opus-5:1m",
                     "qwen.qwen3-vl-235b-a22b",
                     "us.meta.llama4-maverick-17b-instruct-v1:0",
                     "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -1796,13 +1929,17 @@ Resources:
                     "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                     "global.anthropic.claude-sonnet-4-6",
                     "global.anthropic.claude-sonnet-4-6:1m",
+                    "global.anthropic.claude-sonnet-5",
+                    "global.anthropic.claude-sonnet-5:1m",
                     "global.anthropic.claude-opus-4-5-20251101-v1:0",
                     "global.anthropic.claude-opus-4-6-v1",
                     "global.anthropic.claude-opus-4-6-v1:1m",
                     "global.anthropic.claude-opus-4-7",
                     "global.anthropic.claude-opus-4-7:1m",
                     "global.anthropic.claude-opus-4-8",
-                    "global.anthropic.claude-opus-4-8:1m"
+                    "global.anthropic.claude-opus-4-8:1m",
+                    "global.anthropic.claude-opus-5",
+                    "global.anthropic.claude-opus-5:1m"
                   ]
                 order: 1
               model_lambda_hook_arn:
@@ -1960,6 +2097,8 @@ Resources:
                         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "us.anthropic.claude-sonnet-4-6",
                         "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-sonnet-5",
+                        "us.anthropic.claude-sonnet-5:1m",
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
@@ -1967,6 +2106,8 @@ Resources:
                         "us.anthropic.claude-opus-4-7:1m",
                         "us.anthropic.claude-opus-4-8",
                         "us.anthropic.claude-opus-4-8:1m",
+                        "us.anthropic.claude-opus-5",
+                        "us.anthropic.claude-opus-5:1m",
                         "openai.gpt-5.4",
                         "openai.gpt-5.5",
                         "openai.gpt-5.6-sol",
@@ -1979,6 +2120,8 @@ Resources:
                         "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "eu.anthropic.claude-sonnet-4-6",
                         "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-sonnet-5",
+                        "eu.anthropic.claude-sonnet-5:1m",
                         "eu.anthropic.claude-opus-4-5-20251101-v1:0",
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
@@ -1986,6 +2129,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-7:1m",
                         "eu.anthropic.claude-opus-4-8",
                         "eu.anthropic.claude-opus-4-8:1m",
+                        "eu.anthropic.claude-opus-5",
+                        "eu.anthropic.claude-opus-5:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -1996,13 +2141,17 @@ Resources:
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "global.anthropic.claude-sonnet-4-6",
                         "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-sonnet-5",
+                        "global.anthropic.claude-sonnet-5:1m",
                         "global.anthropic.claude-opus-4-5-20251101-v1:0",
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
                         "global.anthropic.claude-opus-4-7:1m",
                         "global.anthropic.claude-opus-4-8",
-                        "global.anthropic.claude-opus-4-8:1m"
+                        "global.anthropic.claude-opus-4-8:1m",
+                        "global.anthropic.claude-opus-5",
+                        "global.anthropic.claude-opus-5:1m"
                       ]
                     order: 1
                   model_params:
@@ -2086,6 +2235,8 @@ Resources:
                         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "us.anthropic.claude-sonnet-4-6",
                         "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-sonnet-5",
+                        "us.anthropic.claude-sonnet-5:1m",
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
@@ -2093,6 +2244,8 @@ Resources:
                         "us.anthropic.claude-opus-4-7:1m",
                         "us.anthropic.claude-opus-4-8",
                         "us.anthropic.claude-opus-4-8:1m",
+                        "us.anthropic.claude-opus-5",
+                        "us.anthropic.claude-opus-5:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -2100,6 +2253,8 @@ Resources:
                         "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "eu.anthropic.claude-sonnet-4-6",
                         "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-sonnet-5",
+                        "eu.anthropic.claude-sonnet-5:1m",
                         "eu.anthropic.claude-opus-4-5-20251101-v1:0",
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
@@ -2107,6 +2262,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-7:1m",
                         "eu.anthropic.claude-opus-4-8",
                         "eu.anthropic.claude-opus-4-8:1m",
+                        "eu.anthropic.claude-opus-5",
+                        "eu.anthropic.claude-opus-5:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -2117,13 +2274,17 @@ Resources:
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "global.anthropic.claude-sonnet-4-6",
                         "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-sonnet-5",
+                        "global.anthropic.claude-sonnet-5:1m",
                         "global.anthropic.claude-opus-4-5-20251101-v1:0",
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
                         "global.anthropic.claude-opus-4-7:1m",
                         "global.anthropic.claude-opus-4-8",
-                        "global.anthropic.claude-opus-4-8:1m"
+                        "global.anthropic.claude-opus-4-8:1m",
+                        "global.anthropic.claude-opus-5",
+                        "global.anthropic.claude-opus-5:1m"
                       ]
                     default: "us.amazon.nova-pro-v1:0"
                     order: 0
@@ -2176,6 +2337,8 @@ Resources:
                         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "us.anthropic.claude-sonnet-4-6",
                         "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-sonnet-5",
+                        "us.anthropic.claude-sonnet-5:1m",
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
@@ -2183,6 +2346,8 @@ Resources:
                         "us.anthropic.claude-opus-4-7:1m",
                         "us.anthropic.claude-opus-4-8",
                         "us.anthropic.claude-opus-4-8:1m",
+                        "us.anthropic.claude-opus-5",
+                        "us.anthropic.claude-opus-5:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -2190,6 +2355,8 @@ Resources:
                         "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "eu.anthropic.claude-sonnet-4-6",
                         "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-sonnet-5",
+                        "eu.anthropic.claude-sonnet-5:1m",
                         "eu.anthropic.claude-opus-4-5-20251101-v1:0",
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
@@ -2197,6 +2364,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-7:1m",
                         "eu.anthropic.claude-opus-4-8",
                         "eu.anthropic.claude-opus-4-8:1m",
+                        "eu.anthropic.claude-opus-5",
+                        "eu.anthropic.claude-opus-5:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -2207,13 +2376,17 @@ Resources:
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "global.anthropic.claude-sonnet-4-6",
                         "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-sonnet-5",
+                        "global.anthropic.claude-sonnet-5:1m",
                         "global.anthropic.claude-opus-4-5-20251101-v1:0",
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
                         "global.anthropic.claude-opus-4-7:1m",
                         "global.anthropic.claude-opus-4-8",
-                        "global.anthropic.claude-opus-4-8:1m"
+                        "global.anthropic.claude-opus-4-8:1m",
+                        "global.anthropic.claude-opus-5",
+                        "global.anthropic.claude-opus-5:1m"
                       ]
                     default: "us.amazon.nova-pro-v1:0"
                     order: 0
@@ -2266,6 +2439,8 @@ Resources:
                         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "us.anthropic.claude-sonnet-4-6",
                         "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-sonnet-5",
+                        "us.anthropic.claude-sonnet-5:1m",
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
@@ -2273,6 +2448,8 @@ Resources:
                         "us.anthropic.claude-opus-4-7:1m",
                         "us.anthropic.claude-opus-4-8",
                         "us.anthropic.claude-opus-4-8:1m",
+                        "us.anthropic.claude-opus-5",
+                        "us.anthropic.claude-opus-5:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -2280,6 +2457,8 @@ Resources:
                         "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "eu.anthropic.claude-sonnet-4-6",
                         "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-sonnet-5",
+                        "eu.anthropic.claude-sonnet-5:1m",
                         "eu.anthropic.claude-opus-4-5-20251101-v1:0",
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
@@ -2287,6 +2466,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-7:1m",
                         "eu.anthropic.claude-opus-4-8",
                         "eu.anthropic.claude-opus-4-8:1m",
+                        "eu.anthropic.claude-opus-5",
+                        "eu.anthropic.claude-opus-5:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -2297,13 +2478,17 @@ Resources:
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "global.anthropic.claude-sonnet-4-6",
                         "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-sonnet-5",
+                        "global.anthropic.claude-sonnet-5:1m",
                         "global.anthropic.claude-opus-4-5-20251101-v1:0",
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
                         "global.anthropic.claude-opus-4-7:1m",
                         "global.anthropic.claude-opus-4-8",
-                        "global.anthropic.claude-opus-4-8:1m"
+                        "global.anthropic.claude-opus-4-8:1m",
+                        "global.anthropic.claude-opus-5",
+                        "global.anthropic.claude-opus-5:1m"
                       ]
                     default: "us.amazon.nova-pro-v1:0"
                     order: 0
@@ -2372,12 +2557,16 @@ Resources:
                       - "us.anthropic.claude-3-5-haiku-20241022-v1:0"
                       - "us.anthropic.claude-sonnet-4-20250514-v1:0"
                       - "us.anthropic.claude-sonnet-4-6"
+                      - "us.anthropic.claude-sonnet-5"
+                      - "us.anthropic.claude-sonnet-5:1m"
                       - "us.anthropic.claude-opus-4-20250514-v1:0"
                       - "us.anthropic.claude-opus-4-6-v1:1m"
                       - "us.anthropic.claude-opus-4-7"
                       - "us.anthropic.claude-opus-4-7:1m"
                       - "us.anthropic.claude-opus-4-8"
                       - "us.anthropic.claude-opus-4-8:1m"
+                      - "us.anthropic.claude-opus-5"
+                      - "us.anthropic.claude-opus-5:1m"
                     order: 1
                   temperature:
                     type: number
@@ -2439,28 +2628,40 @@ Resources:
                       [
                         "us.anthropic.claude-sonnet-4-6",
                         "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-sonnet-5",
+                        "us.anthropic.claude-sonnet-5:1m",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
                         "us.anthropic.claude-opus-4-7",
                         "us.anthropic.claude-opus-4-7:1m",
                         "us.anthropic.claude-opus-4-8",
                         "us.anthropic.claude-opus-4-8:1m",
+                        "us.anthropic.claude-opus-5",
+                        "us.anthropic.claude-opus-5:1m",
                         "eu.anthropic.claude-sonnet-4-6",
                         "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-sonnet-5",
+                        "eu.anthropic.claude-sonnet-5:1m",
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
                         "eu.anthropic.claude-opus-4-7",
                         "eu.anthropic.claude-opus-4-7:1m",
                         "eu.anthropic.claude-opus-4-8",
                         "eu.anthropic.claude-opus-4-8:1m",
+                        "eu.anthropic.claude-opus-5",
+                        "eu.anthropic.claude-opus-5:1m",
                         "global.anthropic.claude-sonnet-4-6",
                         "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-sonnet-5",
+                        "global.anthropic.claude-sonnet-5:1m",
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
                         "global.anthropic.claude-opus-4-7:1m",
                         "global.anthropic.claude-opus-4-8",
-                        "global.anthropic.claude-opus-4-8:1m"
+                        "global.anthropic.claude-opus-4-8:1m",
+                        "global.anthropic.claude-opus-5",
+                        "global.anthropic.claude-opus-5:1m"
                       ]
                     default: "global.anthropic.claude-sonnet-4-6"
                     order: 0
@@ -2529,6 +2730,8 @@ Resources:
                       - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "us.anthropic.claude-sonnet-4-6"
                       - "us.anthropic.claude-sonnet-4-6:1m"
+                      - "us.anthropic.claude-sonnet-5"
+                      - "us.anthropic.claude-sonnet-5:1m"
                       - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                       - "us.anthropic.claude-opus-4-6-v1"
                       - "us.anthropic.claude-opus-4-6-v1:1m"
@@ -2536,10 +2739,14 @@ Resources:
                       - "us.anthropic.claude-opus-4-7:1m"
                       - "us.anthropic.claude-opus-4-8"
                       - "us.anthropic.claude-opus-4-8:1m"
+                      - "us.anthropic.claude-opus-5"
+                      - "us.anthropic.claude-opus-5:1m"
                       - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
                       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "global.anthropic.claude-sonnet-4-6"
                       - "global.anthropic.claude-sonnet-4-6:1m"
+                      - "global.anthropic.claude-sonnet-5"
+                      - "global.anthropic.claude-sonnet-5:1m"
                       - "global.anthropic.claude-opus-4-5-20251101-v1:0"
                       - "global.anthropic.claude-opus-4-6-v1"
                       - "global.anthropic.claude-opus-4-6-v1:1m"
@@ -2547,6 +2754,8 @@ Resources:
                       - "global.anthropic.claude-opus-4-7:1m"
                       - "global.anthropic.claude-opus-4-8"
                       - "global.anthropic.claude-opus-4-8:1m"
+                      - "global.anthropic.claude-opus-5"
+                      - "global.anthropic.claude-opus-5:1m"
                       - "eu.amazon.nova-lite-v1:0"
                       - "eu.amazon.nova-pro-v1:0"
                       - "eu.amazon.nova-2-lite-v1:0"
@@ -2556,6 +2765,8 @@ Resources:
                       - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "eu.anthropic.claude-sonnet-4-6"
                       - "eu.anthropic.claude-sonnet-4-6:1m"
+                      - "eu.anthropic.claude-sonnet-5"
+                      - "eu.anthropic.claude-sonnet-5:1m"
                       - "eu.anthropic.claude-opus-4-5-20251101-v1:0"
                       - "eu.anthropic.claude-opus-4-6-v1"
                       - "eu.anthropic.claude-opus-4-6-v1:1m"
@@ -2563,6 +2774,8 @@ Resources:
                       - "eu.anthropic.claude-opus-4-7:1m"
                       - "eu.anthropic.claude-opus-4-8"
                       - "eu.anthropic.claude-opus-4-8:1m"
+                      - "eu.anthropic.claude-opus-5"
+                      - "eu.anthropic.claude-opus-5:1m"
                       - "qwen.qwen3-vl-235b-a22b"
                       - "us.meta.llama4-maverick-17b-instruct-v1:0"
                       - "us.meta.llama4-scout-17b-instruct-v1:0"
@@ -2584,6 +2797,8 @@ Resources:
                       - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "us.anthropic.claude-sonnet-4-6"
                       - "us.anthropic.claude-sonnet-4-6:1m"
+                      - "us.anthropic.claude-sonnet-5"
+                      - "us.anthropic.claude-sonnet-5:1m"
                       - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                       - "us.anthropic.claude-opus-4-6-v1"
                       - "us.anthropic.claude-opus-4-6-v1:1m"
@@ -2591,10 +2806,14 @@ Resources:
                       - "us.anthropic.claude-opus-4-7:1m"
                       - "us.anthropic.claude-opus-4-8"
                       - "us.anthropic.claude-opus-4-8:1m"
+                      - "us.anthropic.claude-opus-5"
+                      - "us.anthropic.claude-opus-5:1m"
                       - "global.amazon.nova-pro-v1:0"
                       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "global.anthropic.claude-sonnet-4-6"
                       - "global.anthropic.claude-sonnet-4-6:1m"
+                      - "global.anthropic.claude-sonnet-5"
+                      - "global.anthropic.claude-sonnet-5:1m"
                       - "global.anthropic.claude-opus-4-5-20251101-v1:0"
                       - "global.anthropic.claude-opus-4-6-v1"
                       - "global.anthropic.claude-opus-4-6-v1:1m"
@@ -2602,10 +2821,14 @@ Resources:
                       - "global.anthropic.claude-opus-4-7:1m"
                       - "global.anthropic.claude-opus-4-8"
                       - "global.anthropic.claude-opus-4-8:1m"
+                      - "global.anthropic.claude-opus-5"
+                      - "global.anthropic.claude-opus-5:1m"
                       - "eu.amazon.nova-pro-v1:0"
                       - "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "eu.anthropic.claude-sonnet-4-6"
                       - "eu.anthropic.claude-sonnet-4-6:1m"
+                      - "eu.anthropic.claude-sonnet-5"
+                      - "eu.anthropic.claude-sonnet-5:1m"
                       - "eu.anthropic.claude-opus-4-5-20251101-v1:0"
                       - "eu.anthropic.claude-opus-4-6-v1"
                       - "eu.anthropic.claude-opus-4-6-v1:1m"
@@ -2613,6 +2836,8 @@ Resources:
                       - "eu.anthropic.claude-opus-4-7:1m"
                       - "eu.anthropic.claude-opus-4-8"
                       - "eu.anthropic.claude-opus-4-8:1m"
+                      - "eu.anthropic.claude-opus-5"
+                      - "eu.anthropic.claude-opus-5:1m"
                     default: "us.anthropic.claude-sonnet-4-6"
                     order: 0
                   lookback_hours:
@@ -2657,6 +2882,8 @@ Resources:
                     "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                     "us.anthropic.claude-sonnet-4-6",
                     "us.anthropic.claude-sonnet-4-6:1m",
+                    "us.anthropic.claude-sonnet-5",
+                    "us.anthropic.claude-sonnet-5:1m",
                     "us.anthropic.claude-opus-4-5-20251101-v1:0",
                     "us.anthropic.claude-opus-4-6-v1",
                     "us.anthropic.claude-opus-4-6-v1:1m",
@@ -2664,6 +2891,8 @@ Resources:
                     "us.anthropic.claude-opus-4-7:1m",
                     "us.anthropic.claude-opus-4-8",
                     "us.anthropic.claude-opus-4-8:1m",
+                    "us.anthropic.claude-opus-5",
+                    "us.anthropic.claude-opus-5:1m",
                     "openai.gpt-5.4",
                     "openai.gpt-5.5",
                     "openai.gpt-5.6-sol",
@@ -2676,6 +2905,8 @@ Resources:
                     "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                     "eu.anthropic.claude-sonnet-4-6",
                     "eu.anthropic.claude-sonnet-4-6:1m",
+                    "eu.anthropic.claude-sonnet-5",
+                    "eu.anthropic.claude-sonnet-5:1m",
                     "eu.anthropic.claude-opus-4-5-20251101-v1:0",
                     "eu.anthropic.claude-opus-4-6-v1",
                     "eu.anthropic.claude-opus-4-6-v1:1m",
@@ -2683,17 +2914,23 @@ Resources:
                     "eu.anthropic.claude-opus-4-7:1m",
                     "eu.anthropic.claude-opus-4-8",
                     "eu.anthropic.claude-opus-4-8:1m",
+                    "eu.anthropic.claude-opus-5",
+                    "eu.anthropic.claude-opus-5:1m",
                     "global.anthropic.claude-haiku-4-5-20251001-v1:0",
                     "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                     "global.anthropic.claude-sonnet-4-6",
                     "global.anthropic.claude-sonnet-4-6:1m",
+                    "global.anthropic.claude-sonnet-5",
+                    "global.anthropic.claude-sonnet-5:1m",
                     "global.anthropic.claude-opus-4-5-20251101-v1:0",
                     "global.anthropic.claude-opus-4-6-v1",
                     "global.anthropic.claude-opus-4-6-v1:1m",
                     "global.anthropic.claude-opus-4-7",
                     "global.anthropic.claude-opus-4-7:1m",
                     "global.anthropic.claude-opus-4-8",
-                    "global.anthropic.claude-opus-4-8:1m"
+                    "global.anthropic.claude-opus-4-8:1m",
+                    "global.anthropic.claude-opus-5",
+                    "global.anthropic.claude-opus-5:1m"
                   ]
                 order: 1
               model_lambda_hook_arn:
@@ -2814,6 +3051,8 @@ Resources:
                         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "us.anthropic.claude-sonnet-4-6",
                         "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-sonnet-5",
+                        "us.anthropic.claude-sonnet-5:1m",
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
@@ -2821,6 +3060,8 @@ Resources:
                         "us.anthropic.claude-opus-4-7:1m",
                         "us.anthropic.claude-opus-4-8",
                         "us.anthropic.claude-opus-4-8:1m",
+                        "us.anthropic.claude-opus-5",
+                        "us.anthropic.claude-opus-5:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -2828,6 +3069,8 @@ Resources:
                         "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "eu.anthropic.claude-sonnet-4-6",
                         "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-sonnet-5",
+                        "eu.anthropic.claude-sonnet-5:1m",
                         "eu.anthropic.claude-opus-4-5-20251101-v1:0",
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
@@ -2835,6 +3078,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-7:1m",
                         "eu.anthropic.claude-opus-4-8",
                         "eu.anthropic.claude-opus-4-8:1m",
+                        "eu.anthropic.claude-opus-5",
+                        "eu.anthropic.claude-opus-5:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -2845,13 +3090,17 @@ Resources:
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "global.anthropic.claude-sonnet-4-6",
                         "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-sonnet-5",
+                        "global.anthropic.claude-sonnet-5:1m",
                         "global.anthropic.claude-opus-4-5-20251101-v1:0",
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
                         "global.anthropic.claude-opus-4-7:1m",
                         "global.anthropic.claude-opus-4-8",
-                        "global.anthropic.claude-opus-4-8:1m"
+                        "global.anthropic.claude-opus-4-8:1m",
+                        "global.anthropic.claude-opus-5",
+                        "global.anthropic.claude-opus-5:1m"
                       ]
                     default: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                     order: 0
@@ -2907,6 +3156,8 @@ Resources:
                         "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "us.anthropic.claude-sonnet-4-6",
                         "us.anthropic.claude-sonnet-4-6:1m",
+                        "us.anthropic.claude-sonnet-5",
+                        "us.anthropic.claude-sonnet-5:1m",
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
@@ -2914,6 +3165,8 @@ Resources:
                         "us.anthropic.claude-opus-4-7:1m",
                         "us.anthropic.claude-opus-4-8",
                         "us.anthropic.claude-opus-4-8:1m",
+                        "us.anthropic.claude-opus-5",
+                        "us.anthropic.claude-opus-5:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -2921,6 +3174,8 @@ Resources:
                         "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "eu.anthropic.claude-sonnet-4-6",
                         "eu.anthropic.claude-sonnet-4-6:1m",
+                        "eu.anthropic.claude-sonnet-5",
+                        "eu.anthropic.claude-sonnet-5:1m",
                         "eu.anthropic.claude-opus-4-5-20251101-v1:0",
                         "eu.anthropic.claude-opus-4-6-v1",
                         "eu.anthropic.claude-opus-4-6-v1:1m",
@@ -2928,6 +3183,8 @@ Resources:
                         "eu.anthropic.claude-opus-4-7:1m",
                         "eu.anthropic.claude-opus-4-8",
                         "eu.anthropic.claude-opus-4-8:1m",
+                        "eu.anthropic.claude-opus-5",
+                        "eu.anthropic.claude-opus-5:1m",
                         "qwen.qwen3-vl-235b-a22b",
                         "us.meta.llama4-maverick-17b-instruct-v1:0",
                         "us.meta.llama4-scout-17b-instruct-v1:0",
@@ -2938,13 +3195,17 @@ Resources:
                         "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
                         "global.anthropic.claude-sonnet-4-6",
                         "global.anthropic.claude-sonnet-4-6:1m",
+                        "global.anthropic.claude-sonnet-5",
+                        "global.anthropic.claude-sonnet-5:1m",
                         "global.anthropic.claude-opus-4-5-20251101-v1:0",
                         "global.anthropic.claude-opus-4-6-v1",
                         "global.anthropic.claude-opus-4-6-v1:1m",
                         "global.anthropic.claude-opus-4-7",
                         "global.anthropic.claude-opus-4-7:1m",
                         "global.anthropic.claude-opus-4-8",
-                        "global.anthropic.claude-opus-4-8:1m"
+                        "global.anthropic.claude-opus-4-8:1m",
+                        "global.anthropic.claude-opus-5",
+                        "global.anthropic.claude-opus-5:1m"
                       ]
                     default: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
                     order: 0
@@ -4871,6 +5132,12 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:Scan
                 Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigurationTable}'
+              # Status-only write: flip the doc row to PREPROCESSING while a
+              # preprocessing hook runs (UI step visibility; best-effort).
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !Sub 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TrackingTable}'
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -4910,7 +5177,14 @@ Resources:
       Handler: index.lambda_handler
       Runtime: python3.12
       Architectures: [arm64]
-      Timeout: 60
+      # Hooks are invoked synchronously (RequestResponse) through the
+      # dispatcher, so its timeout must cover the LONGEST hook it fronts —
+      # the PII-redaction preprocessing hook budgets up to ~890s for
+      # multi-page Textract+vision passes. 900 is the Lambda maximum. (The
+      # boto3 lambda client read_timeout is raised to match in index.py;
+      # boto's default ~60s would sever the invoke early regardless of this
+      # value.)
+      Timeout: 900
       MemorySize: 256
       Tracing: Active
       Role: !GetAtt PipelineHooksDispatcherFunctionRole.Arn
@@ -4918,6 +5192,9 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          # Lets the dispatcher surface PREPROCESSING as the document's visible
+          # status while a preprocessing hook runs (best-effort, cosmetic).
+          TRACKING_TABLE: !Ref TrackingTable
 
   PipelineHooksDispatcherFunctionLogGroup:
     Type: AWS::Logs::LogGroup

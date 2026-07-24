@@ -27,6 +27,7 @@ document_service = create_document_service()
 ABORTABLE_STATUSES = {
     Status.QUEUED,
     Status.RUNNING,
+    Status.PREPROCESSING,
     Status.OCR,
     Status.CLASSIFYING,
     Status.EXTRACTING,

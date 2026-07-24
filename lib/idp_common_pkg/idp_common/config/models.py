@@ -462,6 +462,57 @@ class PipelineHook(BaseModel):
         description="continue | skip-remaining | fail",
     )
     enabled: bool = Field(default=True, description="Whether this hook is active")
+    args: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Generic key/value args passed to the hook (list of "
+        "{key, value}); the hook reads its own config from these, keeping the "
+        "pipeline hook-agnostic.",
+    )
+
+
+class PreprocessingConfig(BaseModel):
+    """Top-level `preprocessing` section (v0.6).
+
+    The standalone `preprocessing` pipeline-hook point — the only PRE-step
+    extension point, which runs FIRST (before the BDA/pipeline routing) and may
+    halt the execution. It carries a SINGLE inline hook: `arn`/`args`/`onError`
+    live directly on this section (not a list), unlike the post-step hooks which
+    live under each step's `postHook` list. Keeping it flat makes the config UI
+    read cleanly (ARN + args right under Preprocessing).
+
+    This MUST be a declared field on IDPConfig with extra="allow" — otherwise
+    IDPConfig's extra="ignore" would silently drop the whole block (and its
+    `args`) whenever a config round-trips through IDPConfig (Save-as-Version,
+    updateConfiguration, applyFeatureConfigPreset, sparse-config auto-migration),
+    leaving the dispatcher with no hook to call.
+    """
+
+    # extra="allow" is harmless (the args list carries feature config, not extra
+    # top-level fields), but kept for forward-compat with new declared knobs.
+    model_config = ConfigDict(extra="allow")
+
+    enabled: bool = Field(
+        default=False,
+        description="Run the preprocessing hook for this config version.",
+    )
+    arn: Optional[str] = Field(
+        default=None,
+        description="Lambda ARN invoked on the source document before any "
+        "processing step. Must be tagged idp:feature-id or named GENAIIDP-*.",
+    )
+    onError: str = Field(  # noqa: N815 — matches stored config key
+        default="continue",
+        description="Behavior when the hook errors: continue | skip-remaining | fail",
+    )
+    args: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Generic key/value args (list of {key, value}) the hook reads "
+        "its own config from — keeps the step reusable for any preprocessing job.",
+    )
+    featureId: str = Field(  # noqa: N815 — matches stored config key
+        default="",
+        description="Feature/owner that provides this hook (label only).",
+    )
 
 
 class ConfidenceConfig(BaseModel):
@@ -2477,6 +2528,12 @@ class IDPConfig(BaseModel):
     )
 
     notes: Optional[str] = Field(default=None, description="Configuration notes")
+    preprocessing: PreprocessingConfig = Field(
+        default_factory=PreprocessingConfig,
+        description="Preprocessing configuration — home of the standalone "
+        "`preprocessing` pipeline-hook point (runs first, before BDA/pipeline "
+        "routing). Used by the PII Anonymization extension.",
+    )
     ocr: OCRConfig = Field(default_factory=OCRConfig, description="OCR configuration")
     classification: ClassificationConfig = Field(
         default_factory=lambda: ClassificationConfig(model="us.amazon.nova-pro-v1:0"),

@@ -1,0 +1,421 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  pii-anonymizer v<FEATURE_VERSION_TOKEN> — PII Anonymization extension for the
+  IDP Accelerator. Adds a `preprocessing` pipeline hook that detects and redacts
+  PII from source documents BEFORE the classification/extraction models see them,
+  writing a de-identified copy that is re-processed under a companion config
+  version. Reuses the vendored AWS Labs pii-anonymizer document closure
+  (Apache-2.0). Ships a minimal preprocessing config preset and a two-tab UI
+  (Config Pairing wizard + Redaction Report).
+
+Parameters:
+
+  MainStackName:
+    Type: String
+
+  # Version is baked in at publish time (see sample-health-insurance-review
+  # template for the rationale — CFN Console "Update" drops param overrides).
+
+  FeatureId:
+    Type: String
+    Default: pii-anonymizer
+
+  FeatureDisplayName:
+    Type: String
+    Default: "PII Anonymization"
+
+  FeatureBucket:
+    Type: String
+    Description: S3 bucket holding this version's artifacts (host artifacts bucket
+      for OSS). The ui-deployer copies the UI bundle and config preset from here.
+      Pre-filled by the host's getFeatureLaunchUrl.
+
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues: [DEBUG, INFO, WARNING, ERROR]
+
+  RedactedSuffix:
+    Type: String
+    Default: "(REDACTED)"
+    Description: Marker appended to the redacted copy's document-id stem, e.g.
+      report.pdf -> report(REDACTED).pdf. The hook refuses to run on any object
+      whose stem already ends with this marker (infinite-loop guard).
+
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ''
+    Description: Optional IAM permissions boundary ARN applied to created roles.
+
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, '']]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 60
+    MemorySize: 256
+    Tracing: Active
+    Architectures: [arm64]
+
+Resources:
+
+  ###########################################################################
+  # Redaction audit table — OWNED by this feature. One row per redacted
+  # document (metadata only, NO PII): pii_count, mode, redacted key, companion
+  # version. Populated by the hook; read by the feature API for the Redaction
+  # Report tab. GSI ByCreatedAt for the report list.
+  ###########################################################################
+  RedactionAuditTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: documentId
+          AttributeType: S
+        - AttributeName: gsiPk
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: documentId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: ByCreatedAt
+          KeySchema:
+            - AttributeName: gsiPk
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: 'idp:feature-id'
+          Value: !Ref FeatureId
+
+  ###########################################################################
+  # Redaction MAPPING table — OWNED by this feature. Holds the original->
+  # synthetic value map (a RE-IDENTIFICATION KEY containing real PII), keyed by
+  # documentId, only when store_mapping is enabled. Deliberately a feature-owned
+  # DynamoDB table — NOT the host Output/Working buckets — because the host's
+  # getFileContents resolver proxies any Output-bucket key to any authenticated
+  # user (no config-version scoping), which would bypass the RBAC gate. Reachable
+  # ONLY via the feature API's RBAC-gated /report/{docId}/mapping route.
+  ###########################################################################
+  RedactionMappingTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: documentId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: documentId
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: 'idp:feature-id'
+          Value: !Ref FeatureId
+
+  ###########################################################################
+  # Preprocessing hook — invoked FIRST by the host's pipeline-hooks dispatcher
+  # (before BDA/pipeline routing). The dispatcher only invokes Lambdas tagged
+  # `idp:feature-id` — the Tags below are REQUIRED. Heavy timeout/memory:
+  # vision/LLM detection over a multi-page document is expensive.
+  ###########################################################################
+  PiiAnonymizerHookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref 'AWS::NoValue']
+      CodeUri: hook/
+      Handler: handler.lambda_handler
+      # 870, not 900: the host's PipelineHooksDispatcher fronts this hook
+      # synchronously and is capped at the Lambda max (900s) — the hook must
+      # finish (or time out) with margin for the dispatcher to return the
+      # failure cleanly instead of being killed mid-invoke itself.
+      Timeout: 870
+      MemorySize: 3008
+      Tags:
+        'idp:feature-id': !Ref FeatureId
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          REDACTED_SUFFIX: !Ref RedactedSuffix
+          AUDIT_TABLE_NAME: !Ref RedactionAuditTable
+          MAPPING_TABLE_NAME: !Ref RedactionMappingTable
+          INPUT_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-InputBucketName' }
+          WORKING_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
+      Policies:
+        - Statement:
+            # Record the redaction audit row (metadata only) + the optional PII
+            # mapping (feature-owned table; not host-proxyable).
+            - Effect: Allow
+              Action: dynamodb:PutItem
+              Resource:
+                - !GetAtt RedactionAuditTable.Arn
+                - !GetAtt RedactionMappingTable.Arn
+            # Read the source document from Input + compressed state from Working.
+            # NOTE: the original is deleted by the HOST workflow_tracker in
+            # redactcopy_and_stop mode (race-free), so the hook needs no delete
+            # or tracking-table permissions.
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource:
+                - !Sub
+                  - 'arn:${AWS::Partition}:s3:::${Bucket}/*'
+                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-InputBucketName' }
+                - !Sub
+                  - 'arn:${AWS::Partition}:s3:::${Bucket}/*'
+                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+              Resource: !Sub
+                - 'arn:${AWS::Partition}:s3:::${Bucket}/pii_scratch/*'
+                - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-WorkingBucketName' }
+            # Write ONLY redacted copies into Input — keys whose name contains
+            # the REDACTED marker. Scoped by an S3 ARN wildcard so the hook can
+            # never overwrite an arbitrary source document.
+            - Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub
+                - 'arn:${AWS::Partition}:s3:::${Bucket}/*${RedactedSuffix}*'
+                - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-InputBucketName' }
+                  RedactedSuffix: !Ref RedactedSuffix
+            # Bedrock Converse for PII detection + synthetic generation.
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:bedrock:*::foundation-model/*'
+                - !Sub 'arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*'
+                - !Sub 'arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*'
+            # Textract for the scanned/image redaction path.
+            - Effect: Allow
+              Action:
+                - textract:DetectDocumentText
+                - textract:AnalyzeDocument
+              Resource: '*'
+            # Both buckets + config table are encrypted with the main stack's
+            # customer-managed KMS key; S3/DDB require kms:Decrypt (and Encrypt
+            # for the PutObject) transparently.
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+                - kms:DescribeKey
+              Resource:
+                'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn'
+
+  ###########################################################################
+  # Feature API: HttpApi + Lambda, authorized by main stack's Cognito User
+  # Pool. Serves the Redaction Report tab (reads the audit table).
+  ###########################################################################
+  FeatureApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      # CORS AllowOrigins='*' is safe here: every route requires a Cognito
+      # Bearer JWT (Authorization header), never cookies/credentials, so the
+      # browser same-origin policy does not gate access — the JWT authorizer +
+      # server-side config-version RBAC do. The sensitive PII mapping is gated
+      # server-side regardless of Origin. (The host does not export its
+      # CloudFront origin for features to pin, so a specific origin isn't
+      # available without a host change.)
+      CorsConfiguration:
+        AllowOrigins: ['*']
+        AllowMethods: [GET, POST, OPTIONS]
+        AllowHeaders: [authorization, content-type, x-amz-date, x-amz-security-token]
+        MaxAge: 600
+      Auth:
+        DefaultAuthorizer: CognitoJwt
+        Authorizers:
+          CognitoJwt:
+            JwtConfiguration:
+              issuer: !Sub
+                - 'https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${UserPoolId}'
+                - UserPoolId: { 'Fn::ImportValue': !Sub '${MainStackName}-UserPoolId' }
+              audience:
+                - !Sub
+                  - '${ClientId}'
+                  - ClientId: { 'Fn::ImportValue': !Sub '${MainStackName}-UserPoolClientId' }
+            IdentitySource: '$request.header.Authorization'
+
+  FeatureApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref 'AWS::NoValue']
+      CodeUri: feature-api/
+      Handler: handler.lambda_handler
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          MAIN_STACK_NAME: !Ref MainStackName
+          AUDIT_TABLE_NAME: !Ref RedactionAuditTable
+          MAPPING_TABLE_NAME: !Ref RedactionMappingTable
+          # Surfaced to the Config Pairing wizard via GET /config so the wizard
+          # can write the real hook ARN into the preprocessing hook it creates.
+          HOOK_FUNCTION_ARN: !GetAtt PiiAnonymizerHookFunction.Arn
+          # RBAC-gated PII mapping view: read the caller's allowedConfigVersions.
+          USERS_TABLE_NAME: { 'Fn::ImportValue': !Sub '${MainStackName}-UsersTableName' }
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - !GetAtt RedactionAuditTable.Arn
+                - !Sub '${RedactionAuditTable.Arn}/index/*'
+            # Read the stored PII mapping (feature-owned table) for the
+            # RBAC-gated /report/{docId}/mapping route.
+            - Effect: Allow
+              Action: dynamodb:GetItem
+              Resource: !GetAtt RedactionMappingTable.Arn
+            # RBAC scope lookup: query UsersTable.EmailIndex for the caller's
+            # allowedConfigVersions.
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+              Resource:
+                - { 'Fn::ImportValue': !Sub '${MainStackName}-UsersTableArn' }
+                - !Sub
+                  - '${Arn}/index/*'
+                  - Arn: { 'Fn::ImportValue': !Sub '${MainStackName}-UsersTableArn' }
+            # Feature tables are CMK-encrypted.
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource:
+                'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn'
+      Events:
+        Root:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FeatureApi
+            Path: /{proxy+}
+            Method: GET
+
+  ###########################################################################
+  # CloudWatch Log Groups — explicit retention.
+  ###########################################################################
+  PiiAnonymizerHookFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${PiiAnonymizerHookFunction}'
+      RetentionInDays: 30
+
+  FeatureApiFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FeatureApiFunction}'
+      RetentionInDays: 30
+
+  UiDeployerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${UiDeployerFunction}'
+      RetentionInDays: 30
+
+  ###########################################################################
+  # UI deployer: copies the UMD bundle, registers the feature, and applies the
+  # bundled preprocessing config preset (injecting this feature's preprocessing
+  # hook into the preset's preprocessing.preHook).
+  ###########################################################################
+  UiDeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref 'AWS::NoValue']
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: !Sub "lambda.${AWS::URLSuffix}" }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Tags:
+        - Key: 'idp:feature-id'
+          Value: !Ref FeatureId
+      Policies:
+        - PolicyName: ReadFeatureBucket
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${FeatureBucket}/<FEATURE_ARTIFACT_PREFIX_TOKEN>/*'
+        - PolicyName: WriteWebUIBucketPrefix
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                  - s3:DeleteObject
+                Resource: !Sub
+                  - 'arn:${AWS::Partition}:s3:::${Bucket}/features/${FeatureId}/*'
+                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-WebUIBucketName' }
+        - PolicyName: InvokeHostResolvers
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - { 'Fn::ImportValue': !Sub '${MainStackName}-RegisterFeatureFunctionArn' }
+                  - { 'Fn::ImportValue': !Sub '${MainStackName}-RegisterFeatureHooksFunctionArn' }
+                  - { 'Fn::ImportValue': !Sub '${MainStackName}-ApplyFeatureConfigPresetFunctionArn' }
+
+  UiDeployerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ui-deployer/
+      Handler: handler.lambda_handler
+      Role: !GetAtt UiDeployerRole.Arn
+      Environment:
+        Variables:
+          FEATURE_ID: !Ref FeatureId
+          FEATURE_DISPLAY_NAME: !Ref FeatureDisplayName
+          FEATURE_VERSION: '<FEATURE_VERSION_TOKEN>'
+          MAIN_STACK_NAME: !Ref MainStackName
+          WEBUI_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WebUIBucketName' }
+          FEATURE_BUCKET: !Ref FeatureBucket
+          FEATURE_ARTIFACT_PREFIX: '<FEATURE_ARTIFACT_PREFIX_TOKEN>'
+          REGISTER_FEATURE_FUNCTION_ARN: { 'Fn::ImportValue': !Sub '${MainStackName}-RegisterFeatureFunctionArn' }
+          REGISTER_FEATURE_HOOKS_FUNCTION_ARN: { 'Fn::ImportValue': !Sub '${MainStackName}-RegisterFeatureHooksFunctionArn' }
+          APPLY_FEATURE_CONFIG_PRESET_FUNCTION_ARN: { 'Fn::ImportValue': !Sub '${MainStackName}-ApplyFeatureConfigPresetFunctionArn' }
+          FEATURE_API_ENDPOINT: !GetAtt FeatureApi.ApiEndpoint
+          HOOK_FUNCTION_ARN: !GetAtt PiiAnonymizerHookFunction.Arn
+          CONFIG_PRESET_RELATIVE_KEY: config-preset/pii-preprocessing.yaml
+          LOG_LEVEL: !Ref LogLevel
+
+  RegisterFeatureResource:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt UiDeployerFunction.Arn
+      FeatureVersion: '<FEATURE_VERSION_TOKEN>'
+      FeatureDisplayName: !Ref FeatureDisplayName
+
+Outputs:
+  FeatureApiEndpoint:
+    Value: !GetAtt FeatureApi.ApiEndpoint
+  RedactionAuditTableName:
+    Value: !Ref RedactionAuditTable
+  PiiAnonymizerHookFunctionArn:
+    Value: !GetAtt PiiAnonymizerHookFunction.Arn
+  InstalledVersion:
+    Value: '<FEATURE_VERSION_TOKEN>'

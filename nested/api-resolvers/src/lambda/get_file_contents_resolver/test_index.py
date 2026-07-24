@@ -107,3 +107,50 @@ def test_invalid_uri_raises(resolver):
     index, _ = resolver
     with pytest.raises(Exception):
         index.handler(_event("getFilePresignedUrl", "not-an-s3-uri"), None)
+
+
+@pytest.mark.unit
+def test_uri_missing_key_raises(resolver):
+    index, _ = resolver
+    with pytest.raises(Exception, match="Invalid S3 URI"):
+        index.handler(_event("getFilePresignedUrl", f"s3://{OUTPUT_BUCKET}"), None)
+
+
+# Object keys may legitimately contain '#' (document ids like
+# "Report_#2.pdf"). urlparse-based parsing truncated the key at '#'
+# (fragment delimiter), yielding NoSuchKey; these tests pin the fix.
+HASH_KEY = "Report_#2.pdf/pages/1/result.json"
+
+
+@pytest.mark.unit
+def test_get_file_contents_key_with_hash(resolver):
+    index, s3 = resolver
+    s3.put_object(
+        Bucket=OUTPUT_BUCKET,
+        Key=HASH_KEY,
+        Body=b'{"page": 1}',
+        ContentType="application/json",
+    )
+    result = index.handler(
+        _event("getFileContents", f"s3://{OUTPUT_BUCKET}/{HASH_KEY}"),
+        None,
+    )
+    assert result["content"] == '{"page": 1}'
+    assert result["isBinary"] is False
+
+
+@pytest.mark.unit
+def test_get_file_presigned_url_key_with_hash(resolver):
+    index, s3 = resolver
+    s3.put_object(
+        Bucket=OUTPUT_BUCKET,
+        Key=HASH_KEY,
+        Body=b'{"page": 1}',
+        ContentType="application/json",
+    )
+    result = index.handler(
+        _event("getFilePresignedUrl", f"s3://{OUTPUT_BUCKET}/{HASH_KEY}"),
+        None,
+    )
+    assert result["presignedUrl"].startswith("https://")
+    assert result["size"] == len(b'{"page": 1}')

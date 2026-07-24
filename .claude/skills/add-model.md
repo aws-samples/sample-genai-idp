@@ -85,12 +85,17 @@ Cross-check against the file map below.
       changes.
 - [ ] `config/system_defaults/*.yaml` — only if changing a default model.
 
-### C. Templates (CloudFormation enums) — the high-miss-count area
-- [ ] `patterns/unified/template.yaml` — add the ID to **every** service `model`
-      / `model_id` enum: extraction, per-class `extraction_model`,
-      classification, assessment, summarization, confidence model, evaluation
-      `llm_method`, chat. Use the grep count from Step 1 to confirm you hit them
-      all. Put it in the correct region sub-list (US / EU / global).
+### C. Templates (CloudFormation enums / ConfigSchema picklists) — the high-miss-count area
+- [ ] `patterns/unified/template.yaml` — the `UpdateSchemaConfig` custom
+      resource's `Schema:` block IS the **ConfigSchema** that drives every
+      model picklist in the configuration UI. Add the ID to **every** service
+      `model` / `model_id` enum in it: extraction, per-class
+      `extraction_model`, classification, assessment, summarization,
+      confidence model, evaluation `llm_method`, chat. Use the grep count from
+      Step 1 to confirm you hit them all (both YAML-list and JSON-array enum
+      styles appear — watch trailing commas in the JSON-style lists). Put it
+      in the correct region sub-list (US / EU / global), including the `:1m`
+      variants where the sibling has them.
 - [ ] `template.yaml` — IAM. If the model uses an existing endpoint namespace
       already granted (e.g. namespace-wide `bedrock-mantle:*` or
       `bedrock:InvokeModel*` on `foundation-model/*`), no change — VERIFY the

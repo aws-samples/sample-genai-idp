@@ -48,6 +48,15 @@ def _manifest():
     )
 
 
+def _manifest_with_agent_source():
+    """Manifest declaring an agentSource (AgentCore image build context zip)."""
+    m = _manifest()
+    m.agentSource = types.SimpleNamespace(
+        artifactPath="agent-source.zip", packageCommand=None, package=[]
+    )
+    return m
+
+
 def _get(bucket, key):
     return (
         boto3.client("s3", region_name="us-east-1")
@@ -55,6 +64,14 @@ def _get(bucket, key):
         .read()
         .decode("utf-8")
     )
+
+
+def _exists(bucket, key):
+    try:
+        boto3.client("s3", region_name="us-east-1").head_object(Bucket=bucket, Key=key)
+        return True
+    except Exception:
+        return False
 
 
 @mock_aws
@@ -110,6 +127,39 @@ def test_layout_and_token_baking(monkeypatch, tmp_path):
     for rel in uploaded:
         assert "sample-features" not in rel
         assert "/0.5.0/" not in f"{base}/{rel}"
+
+
+@mock_aws
+def test_agent_source_zip_uploaded_under_version(monkeypatch, tmp_path):
+    """A feature with an agentSource must have its packaged zip uploaded to
+    <base>/<version>/agent-source.zip — the CodeBuild Source.Location the
+    feature stack reads to build its AgentCore image. Regression: the publisher
+    previously uploaded ui-bundle/manifest but NOT the agent-source zip, so the
+    install-time CodeBuild failed with NoSuchKey (404)."""
+    monkeypatch.chdir(tmp_path)
+    boto3.client("s3", region_name="us-east-1").create_bucket(Bucket=_BUCKET)
+
+    pub = IDPPublisher(verbose=False)
+    pub.bucket = _BUCKET
+    pub.prefix = _PREFIX
+    pub.version = "0.5.0"
+    pub.prefix_and_version = f"{_PREFIX}/0.5.0"
+    pub.s3_client = boto3.client("s3", region_name="us-east-1")
+    pub.log_success = lambda *a, **k: None
+
+    feature_dir = tmp_path / "feature-platform" / _FEATURE_ID
+    (feature_dir / "feature-ui" / "dist").mkdir(parents=True)
+    (feature_dir / "feature-ui" / "dist" / "ui-bundle.js").write_text("bundle();")
+    (feature_dir / "template.yaml").write_text("Description: x\n")
+    (feature_dir / "agent-source.zip").write_bytes(b"PK\x03\x04 zip payload")
+    bundle_path = feature_dir / "feature-ui" / "dist" / "ui-bundle.js"
+
+    pub._upload_sample_feature_artifacts(
+        feature_dir, _manifest_with_agent_source(), bundle_path
+    )
+
+    base = f"{_PREFIX}/extensions/{_FEATURE_ID}"
+    assert _exists(_BUCKET, f"{base}/{_VERSION}/agent-source.zip")
 
 
 def _acl_is_public(s3, bucket, key):

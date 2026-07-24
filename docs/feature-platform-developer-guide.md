@@ -106,24 +106,39 @@ idp-feature-cli show-schema          # full feature.yaml schema reference
 
 ### Optional: pipeline hooks
 
-A feature can run a Lambda at any of six **post-step extension points** in the
-document-processing workflow — `postOcr`, `postClassification`,
-`postExtraction`, `postAssessment`, `postRuleValidation`, `postSummarization` —
-to enrich, validate, or react to results mid-pipeline. The host's
-`PipelineHooksDispatcherFunction` invokes registered hooks after each step; the
-mechanism is inert until a feature registers one.
+A feature can run a Lambda at **extension points** in the document-processing
+workflow. There are two kinds:
+
+- **`preprocessing`** — a **single** hook that runs FIRST, before the
+  BDA/pipeline routing decision (so it fires in both processing modes, even
+  with OCR disabled), operating on the *source document*. While it runs the
+  document's visible status is `PREPROCESSING`.
+- **Five post-step points** — `postOcr`, `postClassification`,
+  `postExtraction`, `postRuleValidation`, `postSummarization` — a **list** of
+  hooks invoked after the corresponding step, to enrich, validate, or react to
+  results mid-pipeline. (`postAssessment` was removed in v0.6 when assessment
+  folded into extraction.)
+
+The host's `PipelineHooksDispatcherFunction` invokes registered hooks at each
+point; the mechanism is inert until a feature registers one.
 
 **1. Write the hook Lambda.** It's invoked synchronously with:
 
 ```json
 { "hookPoint": "postExtraction", "featureId": "my-feature",
-  "document": { ... }, "section": { ... }, "executionArn": "arn:aws:states:..." }
+  "document": { ... }, "section": { ... }, "executionArn": "arn:aws:states:...",
+  "args": [ { "key": "...", "value": "..." } ], "argsMap": { "...": "..." } }
 ```
 
-Do your work and return any JSON result (surfaced to the workflow under
-`$.HookResults`). The Lambda **must** be tagged `idp:feature-id=<featureId>`
-(the host's dispatcher only invokes tagged or `GENAIIDP-*`-named functions —
-the scaffold tags feature Lambdas for you).
+`args` is the hook entry's generic key/value settings (string values, opaque to
+the platform); `argsMap` is the same list flattened to `{key: value}` for
+convenience. Do your work and return any JSON result (surfaced to the workflow
+under `$.HookResults`). A `preprocessing` hook may return `"halt": true` to
+short-circuit the execution — the document ends in a terminal state instead of
+being processed (e.g. `REDACTED_SUPERSEDED` when the hook spawned a redacted
+copy). The Lambda **must** be tagged `idp:feature-id=<featureId>` (the host's
+dispatcher only invokes tagged or `GENAIIDP-*`-named functions — the scaffold
+tags feature Lambdas for you).
 
 **2. Declare it in `template.yaml` + the manifest.** Add the hook Lambda to your
 feature's CloudFormation template, then map the hook point to that Lambda's
@@ -140,15 +155,35 @@ logical names to ARNs and calls the host's `registerFeatureHooks` mutation on
 Create (and clears them on Delete) — the same custom-resource pattern as
 `registerFeature`. The host writes them into the active config version's
 `<step>.postHook` lists. Each entry is
-`{ featureId, arn, order (default 100), onError (default continue), enabled }`;
+`{ featureId, arn, order (default 100), onError (default continue), enabled, args }`;
 `onError` is `continue` | `skip-remaining` | `fail`.
 
+**`preprocessing` shape.** Unlike the post-step lists, `preprocessing` is a
+standalone top-level config section holding ONE flat hook (its fields live
+directly on the section, no list), editable in the View/Edit Configuration UI:
+
+```yaml
+preprocessing:
+  enabled: true               # default false
+  featureId: pii-anonymizer   # owner label (for traceability)
+  arn: <hook-lambda-arn>
+  onError: fail               # continue | fail
+  args:
+    - { key: mode, value: redactcopy_and_stop }
+```
+
+For `preprocessing`, `onError: fail` is terminal: a failed hook ends the
+execution in a `PreprocessingHookFailed` Fail state and **never** falls through
+to processing the un-preprocessed original (essential when the hook gates
+processing, e.g. PII redaction). Use `fail` whenever the hook must gate.
+
 **Escape hatch (no feature install).** For custom business logic outside the
-feature-install flow, an admin can add `postHook` entries to a config version
-directly (same shape as above). The hook Lambda still needs the
-`idp:feature-id` tag or a `GENAIIDP-*` name to clear the dispatcher's IAM
-check. This is handy for one-off integrations, but installable features should
-use `registerFeatureHooks` so hooks are added/removed with the stack.
+feature-install flow, an admin can add `postHook` entries — or fill in the
+`preprocessing` section — in a config version directly (same shapes as above).
+The hook Lambda still needs the `idp:feature-id` tag or a `GENAIIDP-*` name to
+clear the dispatcher's IAM check. This is handy for one-off integrations, but
+installable features should use `registerFeatureHooks` so hooks are
+added/removed with the stack.
 
 See [Feature Platform → Pipeline hooks](feature-platform.md#pipeline-hooks) for
 the full contract.
@@ -244,6 +279,17 @@ The host's seller-bucket access also requires:
 > `InstalledFeatures` table) and appears in the **Extensions** nav once
 > installed — no catalog entry needed. Use this for private/internal features
 > you don't want surfaced as installable to every admin.
+
+### Nav visibility before install (`showInNav`)
+
+A catalog feature that is **not yet installed** gets its own entry in the
+**Extensions** side nav (with an Install or Subscribe badge) by default. Set
+`showInNav: false` — in `feature.yaml` for OSS features, or on the entry in
+`extensions-marketplace.yaml` for marketplace features — to keep it off the
+nav until it's installed; it stays discoverable on the **Browse catalog** page
+(`/features`). The two bundled reference samples set `showInNav: false` so
+fresh deployments don't advertise them in the nav. Installed features always
+get a nav entry regardless of this flag.
 
 ### Feature documentation (the "Learn more" link)
 

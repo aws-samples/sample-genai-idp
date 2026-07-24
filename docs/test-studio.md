@@ -15,6 +15,22 @@ The Test Studio consists of two main tabs:
 https://github.com/user-attachments/assets/7c5adf30-8d5c-4292-93b0-0149506322c7
 
 
+## Generating synthetic test sets
+
+When the [Test Set Generator](extensions/idp-data-generator.md) extension is
+installed, the **Test Sets** tab shows a **Generate Test Set** button. It
+opens a modal to generate labeled synthetic documents (PDF + ground-truth JSON)
+— either from a plain-language description of a document type, or from an
+existing configuration version's document class. You can add an optional
+**scenario** theme (with an AI **Suggest** helper), choose a **quality** level
+(faster vs. higher quality), and see an estimated cost/time band before starting.
+Generation runs as a background job; the resulting test set appears in the list
+when it completes. Click a test set's name to preview its generated documents
+without running a test execution. See the
+[Test Set Generator extension](extensions/idp-data-generator.md) for details and
+installation.
+
+
 ## Pre-Deployed Test Sets
 
 The accelerator automatically deploys **four benchmark datasets** from HuggingFace as ready-to-use test sets during stack deployment:
@@ -411,6 +427,35 @@ components/
    - **Description**: Optional description field (max 500 characters) to document the test set purpose
    - **Document Classification Type**: Optional metadata (same values as pattern-based creation)
 3. **Direct Upload**: Files uploaded directly to TestSetBucket are auto-detected
+
+### Browsing Test Set Documents and Ground Truth
+
+Click a COMPLETED test set's name in the table (or select it and click
+**Browse Documents**) to open the test set browser at
+`/test-studio/sets/<test-set-id>`. It shows a paginated table of the set's
+input documents with a first-page thumbnail preview, size, last-modified
+time, and ground-truth section count. Thumbnails are rendered lazily in the
+browser as rows scroll into view (for PDFs only the byte ranges needed for
+page 1 are fetched, so large packets stay cheap). Each document name links
+to a per-document detail page (`/test-studio/sets/<id>/doc/<file>`) —
+mirroring the app's Document List → Document Details structure.
+
+The document detail page offers two views:
+
+- **View Source Document** — the original PDF or image rendered inline.
+- **Edit Ground Truth** (read-only for non-Admin/Author roles) — a visual
+  editor with the document's page images on the left and an editable form
+  over the baseline's `inference_result` on the right, plus a raw JSON tab.
+  Multi-section baselines get a section selector that also scopes the page
+  images to that section's `split_document.page_indices`; when a baseline
+  carries `explainability_info` geometry (created via **Copy to Baseline**),
+  focusing a field highlights its bounding box on the page image. Saves write
+  back to the section's `baseline/.../result.json` and append an
+  `_editHistory` provenance entry.
+
+Note: page images are rendered in the browser from the source document
+(test set documents are unprocessed, so no pipeline page images exist).
+TIFF sources cannot be previewed in-browser; ground truth editing still works.
 
 ### Editing Test Sets
 

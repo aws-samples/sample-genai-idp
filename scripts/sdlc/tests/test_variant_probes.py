@@ -22,6 +22,17 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _no_launch_stagger(monkeypatch):
+    """Disable the probe launch stagger by default so launcher tests don't sleep.
+
+    The real default is DEFAULT_PROBE_LAUNCH_STAGGER_SECS (120s/index); with it
+    on, run_variant_probes tests would sleep index*120s. Stagger-resolver tests
+    set IDP_PROBE_LAUNCH_STAGGER_SECS explicitly, which overrides this.
+    """
+    monkeypatch.setenv("IDP_PROBE_LAUNCH_STAGGER_SECS", "0")
+
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
@@ -70,10 +81,15 @@ def _stub_lifecycle(cbd, monkeypatch, *, deploy_status="CREATE_COMPLETE"):
     """
     calls = {"iam": [], "commands": [], "cleanup": [], "cf_events": []}
 
+    # Probes call create_iam_resources(stack_name, create_boundary=False) and
+    # deploy with an EMPTY boundary ARN, so the stub accepts the kwarg and
+    # returns "" for the boundary.
     monkeypatch.setattr(
         cbd,
         "create_iam_resources",
-        lambda stack_name: (calls["iam"].append(stack_name) or ("role-arn", "boundary-arn")),
+        lambda stack_name, create_boundary=True: (
+            calls["iam"].append(stack_name) or ("role-arn", "")
+        ),
     )
     monkeypatch.setattr(cbd, "generate_stack_name", lambda: "idp-0101-000000")
 
@@ -85,7 +101,9 @@ def _stub_lifecycle(cbd, monkeypatch, *, deploy_status="CREATE_COMPLETE"):
 
     monkeypatch.setattr(cbd, "run_command", fake_run_command)
     monkeypatch.setattr(
-        cbd, "cleanup_stack", lambda result: calls["cleanup"].append(result["stack_name"])
+        cbd,
+        "cleanup_stack",
+        lambda result: calls["cleanup"].append(result["stack_name"]),
     )
     monkeypatch.setattr(
         cbd,
@@ -153,6 +171,38 @@ def test_concurrency_never_zero_even_with_zero_probes(cbd, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# _resolve_probe_launch_stagger — burst-flattening mitigation
+# --------------------------------------------------------------------------- #
+
+
+def test_launch_stagger_defaults_when_unset(cbd, monkeypatch):
+    monkeypatch.delenv("IDP_PROBE_LAUNCH_STAGGER_SECS", raising=False)
+    assert cbd._resolve_probe_launch_stagger() == float(
+        cbd.DEFAULT_PROBE_LAUNCH_STAGGER_SECS
+    )
+
+
+def test_launch_stagger_zero_disables(cbd, monkeypatch):
+    # 0 is a valid explicit value (simultaneous launch, pre-mitigation behavior)
+    # and must NOT be coerced to the default.
+    monkeypatch.setenv("IDP_PROBE_LAUNCH_STAGGER_SECS", "0")
+    assert cbd._resolve_probe_launch_stagger() == 0.0
+
+
+def test_launch_stagger_honors_override(cbd, monkeypatch):
+    monkeypatch.setenv("IDP_PROBE_LAUNCH_STAGGER_SECS", "3.5")
+    assert cbd._resolve_probe_launch_stagger() == 3.5
+
+
+def test_launch_stagger_malformed_and_negative_fall_back(cbd, monkeypatch):
+    default = float(cbd.DEFAULT_PROBE_LAUNCH_STAGGER_SECS)
+    monkeypatch.setenv("IDP_PROBE_LAUNCH_STAGGER_SECS", "abc")
+    assert cbd._resolve_probe_launch_stagger() == default
+    monkeypatch.setenv("IDP_PROBE_LAUNCH_STAGGER_SECS", "-5")
+    assert cbd._resolve_probe_launch_stagger() == default
+
+
+# --------------------------------------------------------------------------- #
 # deploy_and_test_probe — single-probe lifecycle
 # --------------------------------------------------------------------------- #
 
@@ -164,8 +214,10 @@ def test_probe_happy_path_deploys_validates_cleans_up(cbd, monkeypatch):
         cbd,
         suffix="apigw",
         params={"WebUIHosting": "APIGateway", "ApiGatewayVisibility": "GLOBAL"},
-        validate=lambda stack_name: validated.append(stack_name)
-        or {"success": True, "web_url": "https://x/api"},
+        validate=lambda stack_name: (
+            validated.append(stack_name)
+            or {"success": True, "web_url": "https://x/api"}
+        ),
     )
 
     result = cbd.deploy_and_test_probe(probe, "a@b.com", "https://tmpl")
@@ -178,9 +230,13 @@ def test_probe_happy_path_deploys_validates_cleans_up(cbd, monkeypatch):
     assert validated == ["idp-0101-000000-apigw"]
     # cleanup ALWAYS runs (finally)
     assert calls["cleanup"] == ["idp-0101-000000-apigw"]
-    # deploy command carried the probe's extra params + the boundary
+    # deploy command carried the probe's extra params + an EMPTY boundary
+    # (probes deploy without a permissions boundary — only the primary suite
+    # creates+tests one).
     deploy_cmd = next(c for c in calls["commands"] if "idp-cli deploy" in c)
-    assert "PermissionsBoundaryArn=boundary-arn" in deploy_cmd
+    assert "PermissionsBoundaryArn=," in deploy_cmd or deploy_cmd.rstrip('"').endswith(
+        "PermissionsBoundaryArn="
+    )
     assert "WebUIHosting=APIGateway" in deploy_cmd
     assert "ApiGatewayVisibility=GLOBAL" in deploy_cmd
     assert "--stack-name idp-0101-000000-apigw" in deploy_cmd
@@ -251,7 +307,11 @@ def test_probe_exception_captures_events_and_cleans_up(cbd, monkeypatch):
 
 def test_probe_iam_failure_still_cleans_up(cbd, monkeypatch):
     calls = _stub_lifecycle(cbd, monkeypatch)
-    monkeypatch.setattr(cbd, "create_iam_resources", lambda stack_name: (None, None))
+    monkeypatch.setattr(
+        cbd,
+        "create_iam_resources",
+        lambda stack_name, create_boundary=True: (None, None),
+    )
 
     probe = _make_probe(cbd)
     result = cbd.deploy_and_test_probe(probe, "a@b.com", "https://tmpl")
@@ -273,8 +333,8 @@ def _logs_race_event():
         "logical_id": "WorkflowTrackerLogGroup",
         "status": "CREATE_FAILED",
         "reason": (
-            "Resource handler returned message: \"The specified log group does "
-            "not exist. (Service: CloudWatchLogs, Status Code: 400)\" "
+            'Resource handler returned message: "The specified log group does '
+            'not exist. (Service: CloudWatchLogs, Status Code: 400)" '
             "(HandlerErrorCode: InvalidRequest)"
         ),
     }
@@ -340,6 +400,48 @@ def test_is_transient_logs_race_handles_missing_or_malformed_events(cbd):
         )
         is False
     )
+
+
+def _codebuild_trust_race_event():
+    # A nested-stack AWS::CodeBuild::Project created right after its service role;
+    # IAM trust-policy propagation is eventually consistent, so CreateProject's
+    # trust validation occasionally races the just-created role. Shape matches
+    # get_cloudformation_logs()'s failure-event dicts.
+    return {
+        "resource_type": "AWS::CodeBuild::Project",
+        "logical_id": "DockerBuildProject",
+        "status": "CREATE_FAILED",
+        "reason": (
+            'Resource handler returned message: "CodeBuild is not authorized to '
+            "perform: sts:AssumeRole on service role. Please verify that ... the "
+            'role has the necessary trust policy configured. (Service: AWSCodeBuild)"'
+        ),
+    }
+
+
+def test_is_transient_race_matches_the_codebuild_trust_propagation_race(cbd):
+    # The broadened detector also retries the CodeBuild service-role trust
+    # propagation race (real CI failure on the jobsapi probe).
+    result = {"failure_type": "deploy", "cf_events": [_codebuild_trust_race_event()]}
+    assert cbd._is_transient_deploy_race(result) is True
+    # Back-compat alias resolves to the same broadened detector.
+    assert cbd._is_transient_logs_race(result) is True
+
+
+def test_is_transient_race_ignores_other_codebuild_errors(cbd):
+    # A real CodeBuild misconfig (e.g. bad source location) is deterministic and
+    # must NOT be retried — only the sts:AssumeRole trust race qualifies.
+    result = {
+        "failure_type": "deploy",
+        "cf_events": [
+            {
+                "resource_type": "AWS::CodeBuild::Project",
+                "status": "CREATE_FAILED",
+                "reason": "Invalid source location: bucket does not exist",
+            }
+        ],
+    }
+    assert cbd._is_transient_deploy_race(result) is False
 
 
 def _stub_attempts(cbd, monkeypatch, results):
@@ -540,7 +642,11 @@ def test_launcher_runs_all_probes_and_folds_results(cbd, monkeypatch):
 
     def fake_deploy(probe, admin_email, template_url):
         ran.append(probe.name)
-        return {"stack_name": f"s-{probe.stack_suffix}", "success": True, "probe": probe.name}
+        return {
+            "stack_name": f"s-{probe.stack_suffix}",
+            "success": True,
+            "probe": probe.name,
+        }
 
     monkeypatch.setattr(cbd, "deploy_and_test_probe", fake_deploy)
 
@@ -569,7 +675,11 @@ def test_launcher_isolates_one_probe_failure(cbd, monkeypatch):
                 "failure_type": "deploy",
                 "probe": "B",
             }
-        return {"stack_name": f"s-{probe.stack_suffix}", "success": True, "probe": probe.name}
+        return {
+            "stack_name": f"s-{probe.stack_suffix}",
+            "success": True,
+            "probe": probe.name,
+        }
 
     monkeypatch.setattr(cbd, "deploy_and_test_probe", fake_deploy)
     probes = [_make_probe(cbd, name=n, suffix=n.lower()) for n in ("A", "B", "C")]
@@ -643,9 +753,7 @@ def test_default_probe_table_has_global_apigw_row(cbd):
     names = [p.name for p in cbd.PROBE_VARIANTS]
     assert any("APIGateway" in n and "GLOBAL" in n for n in names)
     apigw = next(
-        p
-        for p in cbd.PROBE_VARIANTS
-        if "APIGateway" in p.name and "GLOBAL" in p.name
+        p for p in cbd.PROBE_VARIANTS if "APIGateway" in p.name and "GLOBAL" in p.name
     )
     assert apigw.stack_suffix == "apigw"
     assert apigw.deploy_params == {
@@ -658,18 +766,19 @@ def test_default_probe_table_has_global_apigw_row(cbd):
 
 def test_default_probe_table_covers_all_four_variants(cbd):
     by_suffix = {p.stack_suffix: p for p in cbd.PROBE_VARIANTS}
-    # All four requested variants present.
-    assert set(by_suffix) == {"apigw", "waf", "apigwpriv", "headless"}
+    # The four deployment-hosting variants are present (the ZAP DAST probe is a
+    # fifth row, asserted separately in test_zap_dast_probe.py).
+    assert {"apigw", "waf", "apigwpriv", "jobsapi"} <= set(by_suffix)
     # No-VPC probes.
     assert by_suffix["apigw"].requires_vpc is False
     assert by_suffix["waf"].requires_vpc is False
     # VPC-requiring probes flagged so their VPC params are injected from env.
     assert by_suffix["apigwpriv"].requires_vpc is True
-    assert by_suffix["headless"].requires_vpc is True
+    assert by_suffix["jobsapi"].requires_vpc is True
     # Distinguishing params.
     assert by_suffix["waf"].deploy_params.get("WAFAllowedIPv4Ranges")
     assert by_suffix["apigwpriv"].deploy_params["ApiGatewayVisibility"] == "PRIVATE"
-    assert by_suffix["headless"].deploy_params["EnableHeadless"] == "true"
+    assert by_suffix["jobsapi"].deploy_params["EnableJobsApi"] == "true"
     # Every row wires a distinct validator.
     validators = {p.validate_fn for p in cbd.PROBE_VARIANTS}
     assert len(validators) == len(cbd.PROBE_VARIANTS)
@@ -720,14 +829,14 @@ def test_vpc_params_full_mapping(cbd, monkeypatch):
 def test_vpc_probe_skips_when_no_test_vpc(cbd, monkeypatch):
     _clear_test_vpc_env(monkeypatch)
     calls = _stub_lifecycle(cbd, monkeypatch)
-    probe = _make_probe(cbd, name="Headless", suffix="headless", requires_vpc=True)
+    probe = _make_probe(cbd, name="Jobs API", suffix="jobsapi", requires_vpc=True)
 
     result = cbd.deploy_and_test_probe(probe, "a@b.com", "https://tmpl")
 
     # Skipped, not failed — absent infra is not a regression.
     assert result["success"] is True
     assert result["skipped"] is True
-    assert result["probe"] == "Headless"
+    assert result["probe"] == "Jobs API"
     # Nothing deployed: no IAM, no commands, no cleanup.
     assert calls["iam"] == []
     assert calls["commands"] == []
@@ -820,13 +929,24 @@ class _FakeCfn:
     def describe_stacks(self, StackName):
         return {
             "Stacks": [
-                {"Outputs": [{"OutputKey": k, "OutputValue": v} for k, v in self._outputs.items()]}
+                {
+                    "Outputs": [
+                        {"OutputKey": k, "OutputValue": v}
+                        for k, v in self._outputs.items()
+                    ]
+                }
             ]
         }
 
 
 def test_validate_private_hosting_pass(cbd, monkeypatch):
-    apis = [{"name": "idp-s-api", "endpointConfiguration": {"types": ["PRIVATE"]}, "policy": "{...}"}]
+    apis = [
+        {
+            "name": "idp-s-api",
+            "endpointConfiguration": {"types": ["PRIVATE"]},
+            "policy": "{...}",
+        }
+    ]
     _fake_boto3(cbd, monkeypatch, {"apigateway": _FakeApiGw(apis=apis)})
     res = cbd.validate_apigw_private_hosting("idp-s")
     assert res["success"] is True
@@ -834,7 +954,13 @@ def test_validate_private_hosting_pass(cbd, monkeypatch):
 
 
 def test_validate_private_hosting_fails_when_regional(cbd, monkeypatch):
-    apis = [{"name": "idp-s-api", "endpointConfiguration": {"types": ["REGIONAL"]}, "policy": "{...}"}]
+    apis = [
+        {
+            "name": "idp-s-api",
+            "endpointConfiguration": {"types": ["REGIONAL"]},
+            "policy": "{...}",
+        }
+    ]
     _fake_boto3(cbd, monkeypatch, {"apigateway": _FakeApiGw(apis=apis)})
     res = cbd.validate_apigw_private_hosting("idp-s")
     assert res["success"] is False
@@ -849,21 +975,28 @@ def test_validate_private_hosting_fails_without_policy(cbd, monkeypatch):
     assert "resource policy" in res["error"]
 
 
-def test_validate_headless_pass(cbd, monkeypatch):
-    outputs = {"ApiGatewayEndpoint": "https://abc123.execute-api.us-east-1.amazonaws.com/beta"}
+def test_validate_jobs_api_pass(cbd, monkeypatch):
+    outputs = {
+        "ApiGatewayEndpoint": "https://abc123.execute-api.us-east-1.amazonaws.com/beta"
+    }
     _fake_boto3(
         cbd,
         monkeypatch,
-        {"cloudformation": _FakeCfn(outputs), "apigateway": _FakeApiGw(rest_api={"id": "abc123"})},
+        {
+            "cloudformation": _FakeCfn(outputs),
+            "apigateway": _FakeApiGw(rest_api={"id": "abc123"}),
+        },
     )
-    res = cbd.validate_headless_jobs_api("idp-s")
+    res = cbd.validate_jobs_api("idp-s")
     assert res["success"] is True
     assert "execute-api" in res["jobs_url"]
 
 
-def test_validate_headless_fails_without_output(cbd, monkeypatch):
-    _fake_boto3(cbd, monkeypatch, {"cloudformation": _FakeCfn({}), "apigateway": _FakeApiGw()})
-    res = cbd.validate_headless_jobs_api("idp-s")
+def test_validate_jobs_api_fails_without_output(cbd, monkeypatch):
+    _fake_boto3(
+        cbd, monkeypatch, {"cloudformation": _FakeCfn({}), "apigateway": _FakeApiGw()}
+    )
+    res = cbd.validate_jobs_api("idp-s")
     assert res["success"] is False
     assert "ApiGatewayEndpoint" in res["error"]
 
@@ -920,13 +1053,13 @@ def test_consolidated_summary_pass(cbd):
     }
     probes = [
         {"probe": "GLOBAL", "success": True},
-        {"probe": "Headless", "success": True, "skipped": True, "detail": "no VPC"},
+        {"probe": "Jobs API", "success": True, "skipped": True, "detail": "no VPC"},
     ]
     out = cbd.build_consolidated_summary("idp-x", primary, probes, True)
     assert "OVERALL: PASS" in out
     assert "Step 3: Default config" in out
     assert "GLOBAL" in out
-    assert "Headless" in out
+    assert "Jobs API" in out
     # A skipped probe must NOT flip the overall result to FAIL.
     assert "OVERALL: FAIL" not in out
 
@@ -960,3 +1093,76 @@ def test_consolidated_summary_publish_failure(cbd):
     out = cbd.build_consolidated_summary("idp-z", None, [], False)
     assert "OVERALL: FAIL" in out
     assert "Not run (publish failed)" in out
+
+
+# --------------------------------------------------------------------------- #
+# create_iam_resources — adaptive retry so concurrent IAM bursts ride out the
+# account-wide throttle instead of dying at "reached max retries: 4"
+# --------------------------------------------------------------------------- #
+
+
+def test_create_iam_resources_uses_adaptive_retry_clients(cbd, monkeypatch):
+    # The IAM CreatePolicy throttle killed a probe at Step 0 (before deploy).
+    # Assert every boto3 client built here gets the adaptive-retry Config so the
+    # burst backs off through the throttle.
+    seen_configs = []
+
+    class _Cfn:
+        def create_stack(self, **k):
+            return {}
+
+        def get_waiter(self, name):
+            return type("W", (), {"wait": lambda self, **k: None})()
+
+        def describe_stacks(self, StackName):
+            return {
+                "Stacks": [
+                    {
+                        "Outputs": [
+                            {
+                                "OutputKey": "ServiceRoleArn",
+                                "OutputValue": "arn:aws:iam::1:role/r",
+                            }
+                        ]
+                    }
+                ]
+            }
+
+        exceptions = type("E", (), {"AlreadyExistsException": Exception})()
+
+    class _Iam:
+        def create_policy(self, **k):
+            return {}
+
+        exceptions = type("E", (), {"EntityAlreadyExistsException": Exception})()
+
+    class _Sts:
+        def get_caller_identity(self):
+            return {"Account": "123456789012"}
+
+    impls = {"cloudformation": _Cfn(), "iam": _Iam(), "sts": _Sts()}
+
+    def fake_client(name, *a, **k):
+        seen_configs.append((name, k.get("config")))
+        return impls[name]
+
+    monkeypatch.setattr(cbd.boto3, "client", fake_client)
+    # Point the template open() at any readable file (content is not parsed here).
+    import builtins
+
+    real_open = builtins.open
+    monkeypatch.setattr(
+        builtins, "open", lambda *a, **k: real_open(__file__), raising=True
+    )
+
+    role_arn, boundary_arn = cbd.create_iam_resources("idp-test")
+    assert role_arn and boundary_arn
+
+    # The cloudformation + iam clients (mutating, burst-prone) must use adaptive
+    # retry with raised max_attempts.
+    by_service = {name: cfg for name, cfg in seen_configs}
+    for svc in ("cloudformation", "iam"):
+        cfg = by_service.get(svc)
+        assert cfg is not None, f"{svc} client built without a Config"
+        assert cfg.retries["mode"] == "adaptive"
+        assert cfg.retries["max_attempts"] >= 5

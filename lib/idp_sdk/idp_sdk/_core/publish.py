@@ -65,6 +65,7 @@ class IDPPublisher:
         self.skip_validation = False
         self.lint_enabled = True
         self.headless = False  # Set by operations layer when --headless is requested
+        self.govcloud = False  # Set by operations layer when --govcloud is requested
         self.account_id = None
         self._layer_arns = {}  # Store built layer ARNs for template injection
 
@@ -1883,6 +1884,10 @@ STDERR:
                     # Optional absolute docs URL; if omitted the UI falls back to
                     # marketplaceListingUrl for the "Learn more" link.
                     "docsUrl": item.get("docsUrl") or "",
+                    # Not-yet-installed nav visibility (default True). Set
+                    # false for entries that should only be discoverable via
+                    # the UI's Browse catalog page.
+                    "showInNav": bool(item.get("showInNav", True)),
                     "source": "marketplace",
                     "latestVersion": item.get("latestVersion") or "",
                     "productCode": item.get("productCode") or "",
@@ -1999,16 +2004,30 @@ STDERR:
 
         if cached:
             manifest = load_manifest(feature_dir)
-            if _bundle_has_version(manifest.version):
+            # A cache hit skips publisher.build(), so any artifact the upload
+            # step needs must already be on disk. Besides the versioned UI
+            # bundle, a feature with an agentSource must still have its packaged
+            # zip (package_agent_source.sh output) — it is git-ignored and gets
+            # cleaned between runs, so treat a missing zip as a cache MISS.
+            agent_source = getattr(manifest, "agentSource", None)
+            agent_zip_missing = bool(
+                agent_source
+                and getattr(agent_source, "artifactPath", None)
+                and not (feature_dir / agent_source.artifactPath).is_file()
+            )
+            if _bundle_has_version(manifest.version) and not agent_zip_missing:
                 self.log_cached(
                     f"Feature {feature_dir.name} source unchanged — "
                     f"using cached UI bundle"
                 )
             else:
+                reason = (
+                    "agent-source.zip missing"
+                    if agent_zip_missing
+                    else f"cached bundle does not carry version '{manifest.version}'"
+                )
                 self.log_warning(
-                    f"Feature {feature_dir.name}: cached bundle does not carry "
-                    f"version '{manifest.version}' — forcing a rebuild "
-                    f"(stale dist/ or checksum collision)."
+                    f"Feature {feature_dir.name}: {reason} — forcing a rebuild."
                 )
                 cached = False
 
@@ -2067,6 +2086,10 @@ STDERR:
             "description": manifest.description or "",
             "iconUrl": manifest.iconUrl or "",
             "docsUrl": manifest.docsUrl or "",
+            # From feature.yaml showInNav (default True): whether the feature
+            # gets its own nav entry before it's installed. The bundled
+            # samples set false so they're only in the Browse catalog page.
+            "showInNav": manifest.showInNav,
             "source": "oss",
             "latestVersion": manifest.version,
             # OSS extension artifacts live in the (same) artifacts bucket the
@@ -2182,6 +2205,30 @@ STDERR:
                 self.log_error(
                     f"Feature {feature_id} declares configPreset.path "
                     f"'{config_preset.path}' but no file exists at {preset_local}"
+                )
+                sys.exit(1)
+
+        # Agent source zip — if the manifest declares an agentSource. The
+        # feature stack's CodeBuild project reads it from
+        # `<FEATURE_ARTIFACT_PREFIX>/<version>/<artifactPath>` (Source.Location)
+        # to build the AgentCore Runtime image at install, so it MUST be uploaded
+        # at that same relative path under the version subfolder. The publisher
+        # (publisher.build) already produced the zip at feature_dir/<artifactPath>.
+        agent_source = getattr(manifest, "agentSource", None)
+        if agent_source and getattr(agent_source, "artifactPath", None):
+            agent_zip_local = feature_dir / agent_source.artifactPath
+            if agent_zip_local.is_file():
+                _upload(
+                    agent_zip_local,
+                    f"{version_root}/{agent_source.artifactPath}",
+                    "application/zip",
+                )
+            else:
+                self.log_error(
+                    f"Feature {feature_id} declares agentSource.artifactPath "
+                    f"'{agent_source.artifactPath}' but no file exists at "
+                    f"{agent_zip_local} — the package step must produce it before "
+                    f"upload. Check agentSource.package / packageCommand."
                 )
                 sys.exit(1)
 
@@ -2972,12 +3019,13 @@ STDERR:
         # List of templates to lint (packaged templates after token replacement)
         templates_to_lint = []
 
-        # In headless mode (GovCloud), the main template still contains UI/AppSync
-        # /CloudFront/Cognito resources that will be stripped by the headless transformer
-        # later in the publish flow. Linting them here always fails for GovCloud regions
-        # because those resource types don't exist. Skip the main template and any nested
-        # templates that contain headless-stripped resources — the outer publish flow
-        # lints the generated idp-headless.yaml separately.
+        # In headless or govcloud mode, the main template still contains UI/AppSync/
+        # CloudFront/Cognito resources that will be stripped by the headless/govcloud
+        # transformer later in the publish flow. Linting them here always fails for
+        # GovCloud regions because those resource types don't exist. Skip the main
+        # template and any nested templates that contain headless-stripped resources —
+        # the outer publish flow lints the generated idp-headless.yaml / idp-govcloud.yaml
+        # separately, with region-aware checks.
         main_packaged = ".aws-sam/idp-main.yaml"
         if self.headless:
             headless_packaged = ".aws-sam/idp-headless.yaml"
@@ -2987,6 +3035,10 @@ STDERR:
                 self.console.print(
                     "[dim]Skipping main template lint — headless transformation runs later.[/dim]"
                 )
+        elif self.govcloud:
+            self.console.print(
+                "[dim]Skipping main template lint — GovCloud transformation runs later.[/dim]"
+            )
         elif os.path.exists(main_packaged):
             templates_to_lint.append(("Main template", main_packaged))
 

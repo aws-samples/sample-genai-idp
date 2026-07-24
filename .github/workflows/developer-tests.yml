@@ -65,7 +65,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          uv pip install ruff
+          uv pip install 'ruff==0.15.13'
           uv pip install typer rich boto3
           cd lib/idp_common_pkg && uv pip install -e ".[test]" && cd ../..
 

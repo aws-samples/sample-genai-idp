@@ -21,8 +21,11 @@ import {
   Alert,
 } from '@cloudscape-design/components';
 import type { BoxProps } from '@cloudscape-design/components';
+import { useNavigate } from 'react-router-dom';
 import SchemaBuilder from '../json-schema-builder/SchemaBuilder';
 import PromptPreview from './PromptPreview';
+import useSyntheticDataGenerator from '../../hooks/use-synthetic-data-generator';
+import { TEST_STUDIO_PATH } from '../../routes/constants';
 
 // Turn a schema key into a concise, human-readable field label.
 // e.g. "assessment_integration" -> "Assessment Integration",
@@ -57,6 +60,7 @@ const _CLAUDE_EFFORT_TOKENS = [
   'claude-opus-4-6',
   'claude-opus-4-7',
   'claude-opus-4-8',
+  'claude-opus-5',
   'claude-fable-5',
 ];
 function modelSupportsReasoningEffort(modelId: unknown): boolean {
@@ -527,6 +531,16 @@ const ConfigBuilder = ({
   versionDescription = '',
   onDescriptionChange = null,
 }: ConfigBuilderProps): React.JSX.Element => {
+  const navigate = useNavigate();
+  const { available: generatorAvailable } = useSyntheticDataGenerator();
+
+  // Deep-link to Test Studio with the generate modal pre-filled for this version.
+  const goGenerateTestSet = (): void => {
+    const params = new URLSearchParams({ tab: 'sets', generate: '1' });
+    if (currentVersionName) params.set('version', currentVersionName);
+    navigate(`${TEST_STUDIO_PATH}?${params.toString()}`);
+  };
+
   // Track expanded state for all list items across the form - default to collapsed
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
 
@@ -1876,14 +1890,23 @@ const ConfigBuilder = ({
             id: 'extraction-schema',
             label: 'Document Schema',
             content: (
-              <ExtBox style={{ height: 'calc(70vh - 60px)' }}>
-                <SchemaBuilder
-                  key={`schema-${currentVersionName || 'default'}`}
-                  initialSchema={extractionSchema as Record<string, unknown> | null}
-                  onChange={onSchemaChange}
-                  onValidate={onSchemaValidate}
-                />
-              </ExtBox>
+              <SpaceBetween size="s">
+                {generatorAvailable && (
+                  <Box float="right">
+                    <Button iconName="add-plus" onClick={goGenerateTestSet}>
+                      Generate test set
+                    </Button>
+                  </Box>
+                )}
+                <ExtBox style={{ height: 'calc(70vh - 60px)' }}>
+                  <SchemaBuilder
+                    key={`schema-${currentVersionName || 'default'}`}
+                    initialSchema={extractionSchema as Record<string, unknown> | null}
+                    onChange={onSchemaChange}
+                    onValidate={onSchemaValidate}
+                  />
+                </ExtBox>
+              </SpaceBetween>
             ),
           },
           // Only show Policy Schema tab for Pattern2

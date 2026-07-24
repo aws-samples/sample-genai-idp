@@ -421,13 +421,15 @@ def handle_start_multi_doc_discovery(event, context):
     prefix = s3_prefix
 
     # For zip uploads, the prefix is the zip file key in the discovery bucket.
-    # The uploadMultiDocDiscoveryZip mutation already created the key under its
-    # own job id and returned it as objectKey; the caller passes that back as
-    # s3Prefix so we reference the SAME object. Fall back to constructing the
-    # path only if no prefix was supplied (legacy callers).
+    # If the caller passed the objectKey returned by uploadMultiDocDiscoveryZip
+    # back as s3Prefix, use it verbatim. Otherwise reconstruct the SAME
+    # deterministic key the upload mutation used (multi_doc_zip_key) — the web
+    # UI only passes zipFileName here, so inventing a job-id-based path would
+    # point at a location where nothing was uploaded and the Prepare step
+    # would 404.
     if is_zip_upload:
         if not prefix:
-            prefix = f"multi-doc-discovery/{job_id}/upload/{zip_file_name}"
+            prefix = multi_doc_zip_key(zip_file_name)
         bucket = os.environ.get('DISCOVERY_BUCKET', '')
 
     logger.info(
@@ -488,13 +490,44 @@ def handle_start_multi_doc_discovery(event, context):
     }
 
 
+def multi_doc_zip_key(file_name):
+    """
+    Build the deterministic S3 key for a multi-doc discovery zip upload.
+
+    The upload mutation (uploadMultiDocDiscoveryZip) and the start mutation
+    (startMultiDocDiscovery) must agree on this key: the UI uploads the zip in
+    one call, then starts the pipeline in a separate call passing only
+    zipFileName. Deriving the key purely from the sanitized file name lets both
+    sides reconstruct the same location without threading the object key
+    through the UI.
+
+    Args:
+        file_name (str): Original zip file name from the UI.
+
+    Returns:
+        str: S3 object key under the discovery bucket.
+    """
+    sanitized = file_name.replace(' ', '_')
+    return f"multi-doc-discovery/uploads/{sanitized}"
+
+
 def handle_upload_multi_doc_discovery_zip(event, context):
     """
-    Generate a presigned POST URL for uploading a zip file for multi-doc discovery.
+    Generate a presigned PUT URL for uploading a zip file for multi-doc discovery.
 
-    Returns presigned URL and object key. The caller should:
-    1. Upload the zip to the presigned URL
-    2. Call startMultiDocDiscovery with the zipFileName
+    The UI uploads with an HTTP PUT (fetch(url, {method: 'PUT', body: file})),
+    so this returns a plain presigned PUT URL — not a presigned POST form.
+    The object key is deterministic (see multi_doc_zip_key) so the subsequent
+    startMultiDocDiscovery call locates the same object.
+
+    Args:
+        event (dict): Resolver event with arguments fileName, fileSize,
+            configVersion.
+        context: Lambda context (unused).
+
+    Returns:
+        dict: TestSetUploadResponse-shaped dict with testSetId, presignedUrl
+            (a plain URL string), and objectKey.
     """
     arguments = event.get('arguments', {})
     file_name = arguments.get('fileName')
@@ -508,33 +541,30 @@ def handle_upload_multi_doc_discovery_zip(event, context):
     if not config_version:
         raise ValueError("configVersion is required")
 
-    # Generate a job ID for the upload prefix
-    job_id = str(uuid.uuid4())
     bucket = os.environ.get('DISCOVERY_BUCKET', '')
-    object_key = f"multi-doc-discovery/{job_id}/upload/{file_name}"
+    object_key = multi_doc_zip_key(file_name)
 
     logger.info(
-        f"Generating presigned POST for multi-doc zip: "
+        f"Generating presigned PUT URL for multi-doc zip: "
         f"bucket={bucket}, key={object_key}, size={file_size}"
     )
 
-    # Generate presigned POST URL
-    presigned_post = s3_client.generate_presigned_post(
-        Bucket=bucket,
-        Key=object_key,
-        Fields={
-            'Content-Type': 'application/zip',
+    # Presigned PUT URL to match the UI's fetch(..., {method: 'PUT'}) upload.
+    # ContentType must match the Content-Type header the UI sends so the
+    # request signature validates.
+    presigned_url = s3_client.generate_presigned_url(
+        ClientMethod='put_object',
+        Params={
+            'Bucket': bucket,
+            'Key': object_key,
+            'ContentType': 'application/zip',
         },
-        Conditions=[
-            ['content-length-range', 1, 1073741824],  # 1 Byte to 1 GB
-            {'Content-Type': 'application/zip'},
-        ],
         ExpiresIn=900,  # 15 minutes
     )
 
     return {
-        'testSetId': job_id,  # Reuses TestSetUploadResponse type
-        'presignedUrl': json.dumps(presigned_post),
+        'testSetId': object_key,  # Reuses TestSetUploadResponse type
+        'presignedUrl': presigned_url,
         'objectKey': object_key,
     }
 

@@ -1,0 +1,2845 @@
+{
+  "enums": {
+    "DocumentClassType": [
+      "SINGLE_CLASS",
+      "MULTI_CLASS",
+      "PACKET_SPLITTING"
+    ],
+    "FeatureEntitlementState": [
+      "NONE",
+      "ACTIVE",
+      "EXPIRED"
+    ],
+    "FinetuningJobStatus": [
+      "PENDING",
+      "VALIDATING",
+      "GENERATING_DATA",
+      "TRAINING",
+      "DEPLOYING",
+      "COMPLETED",
+      "FAILED",
+      "CANCELLED",
+      "STOPPING",
+      "STOPPED"
+    ]
+  },
+  "fields": {
+    "abortTestRuns": {
+      "args": [
+        {
+          "elem_non_null": true,
+          "is_list": true,
+          "name": "testRunIds",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "abortWorkflow": {
+      "args": [
+        {
+          "elem_non_null": true,
+          "is_list": true,
+          "name": "objectKeys",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "addDocumentsToTestSet": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "testSetId",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "filePattern",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "bucketType",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "fileCount",
+          "non_null": true,
+          "type": "Int"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "modifiedAfter",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "addDocumentsToTestSetFromUpload": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "input",
+          "non_null": true,
+          "type": "TestSetDocumentsUploadInput"
+        }
+      ]
+    },
+    "addTestSet": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "name",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "description",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "filePattern",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "bucketType",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "fileCount",
+          "non_null": true,
+          "type": "Int"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "modifiedAfter",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "documentClassType",
+          "non_null": false,
+          "type": "DocumentClassType"
+        }
+      ]
+    },
+    "addTestSetFromUpload": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "input",
+          "non_null": true,
+          "type": "TestSetUploadInput"
+        }
+      ]
+    },
+    "applyFeatureConfigPreset": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "input",
+          "non_null": true,
+          "type": "ApplyFeatureConfigPresetInput"
+        }
+      ]
+    },
+    "autoDetectSections": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "documentKey",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "bucket",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "version",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "calculateCapacity": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "input",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "checkFeatureEntitlement": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "featureId",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "claimReview": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "objectKey",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "compareDocumentVersions": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "objectKey",
+          "non_null": true,
+          "type": "ID"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "runIdA",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "runIdB",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "compareTestRuns": {
+      "args": [
+        {
+          "elem_non_null": true,
+          "is_list": true,
+          "name": "testRunIds",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "completeSectionReview": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "objectKey",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "sectionId",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "editedData",
+          "non_null": false,
+          "type": "AWSJSON"
+        }
+      ]
+    },
+    "copyToBaseline": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "objectKey",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "createDocument": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "input",
+          "non_null": true,
+          "type": "CreateDocumentInput"
+        }
+      ]
+    },
+    "createFinetuningJob": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "input",
+          "non_null": true,
+          "type": "CreateFinetuningJobInput"
+        }
+      ]
+    },
+    "createUser": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "email",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "persona",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": true,
+          "name": "allowedConfigVersions",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "deleteAgentJob": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "jobId",
+          "non_null": true,
+          "type": "ID"
+        }
+      ]
+    },
+    "deleteChatSession": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "sessionId",
+          "non_null": true,
+          "type": "ID"
+        }
+      ]
+    },
+    "deleteConfigVersion": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "versionName",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "deleteDiscoveryJob": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "jobId",
+          "non_null": true,
+          "type": "ID"
+        }
+      ]
+    },
+    "deleteDocument": {
+      "args": [
+        {
+          "elem_non_null": true,
+          "is_list": true,
+          "name": "objectKeys",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "deleteDocumentVersion": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "objectKey",
+          "non_null": true,
+          "type": "ID"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "runId",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "deleteFinetuningJob": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "jobId",
+          "non_null": true,
+          "type": "ID"
+        }
+      ]
+    },
+    "deleteTestSets": {
+      "args": [
+        {
+          "elem_non_null": true,
+          "is_list": true,
+          "name": "testSetIds",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "deleteTests": {
+      "args": [
+        {
+          "elem_non_null": true,
+          "is_list": true,
+          "name": "testRunIds",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "deleteUser": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "userId",
+          "non_null": true,
+          "type": "ID"
+        }
+      ]
+    },
+    "getAgentChatMessages": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "sessionId",
+          "non_null": true,
+          "type": "ID"
+        }
+      ]
+    },
+    "getAgentJobStatus": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "jobId",
+          "non_null": true,
+          "type": "ID"
+        }
+      ]
+    },
+    "getChatMessages": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "sessionId",
+          "non_null": true,
+          "type": "ID"
+        }
+      ]
+    },
+    "getCircuitBreakerStatus": {
+      "args": []
+    },
+    "getConfigVersion": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "versionName",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "getConfigVersions": {
+      "args": []
+    },
+    "getConfigurationLibraryFile": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "pattern",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "configName",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "fileName",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "getDocument": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "ObjectKey",
+          "non_null": true,
+          "type": "ID"
+        }
+      ]
+    },
+    "getDocumentCount": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "startDateTime",
+          "non_null": false,
+          "type": "AWSDateTime"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "endDateTime",
+          "non_null": false,
+          "type": "AWSDateTime"
+        }
+      ]
+    },
+    "getDocumentVersion": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "objectKey",
+          "non_null": true,
+          "type": "ID"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "runId",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "getFeatureLaunchUrl": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "featureId",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "version",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "getFileContents": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "s3Uri",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "versionId",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "getFilePresignedUrl": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "s3Uri",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "versionId",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "getFinetuningJob": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "jobId",
+          "non_null": true,
+          "type": "ID"
+        }
+      ]
+    },
+    "getLatestPublishedVersion": {
+      "args": []
+    },
+    "getModelConfigLimits": {
+      "args": []
+    },
+    "getMyProfile": {
+      "args": []
+    },
+    "getPricing": {
+      "args": []
+    },
+    "getSampleDocumentUrl": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "s3Key",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "getStepFunctionExecution": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "executionArn",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "getTestRun": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "testRunId",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "getTestRunStatus": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "testRunId",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "getTestRuns": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "timePeriodHours",
+          "non_null": false,
+          "type": "Int"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "startDateTime",
+          "non_null": false,
+          "type": "AWSDateTime"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "endDateTime",
+          "non_null": false,
+          "type": "AWSDateTime"
+        }
+      ]
+    },
+    "getTestSetDocuments": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "testSetId",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "limit",
+          "non_null": false,
+          "type": "Int"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "nextToken",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "objectKey",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "getTestSets": {
+      "args": []
+    },
+    "listAgentJobs": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "limit",
+          "non_null": false,
+          "type": "Int"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "nextToken",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "listAvailableAgents": {
+      "args": []
+    },
+    "listAvailableModels": {
+      "args": []
+    },
+    "listBucketFiles": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "bucketType",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "filePattern",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "modifiedAfter",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "listCatalogFeatures": {
+      "args": []
+    },
+    "listChatSessions": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "limit",
+          "non_null": false,
+          "type": "Int"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "nextToken",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "surface",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "listConfigurationLibrary": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "pattern",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "listDiscoveryJobs": {
+      "args": []
+    },
+    "listDocumentVersions": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "objectKey",
+          "non_null": true,
+          "type": "ID"
+        }
+      ]
+    },
+    "listDocuments": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "startDateTime",
+          "non_null": false,
+          "type": "AWSDateTime"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "endDateTime",
+          "non_null": false,
+          "type": "AWSDateTime"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "limit",
+          "non_null": false,
+          "type": "Int"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "nextToken",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "listDocumentsByDateRange": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "startDateTime",
+          "non_null": true,
+          "type": "AWSDateTime"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "endDateTime",
+          "non_null": true,
+          "type": "AWSDateTime"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "limit",
+          "non_null": false,
+          "type": "Int"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "nextToken",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "listDocumentsDateHour": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "date",
+          "non_null": false,
+          "type": "AWSDate"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "hour",
+          "non_null": false,
+          "type": "Int"
+        }
+      ]
+    },
+    "listDocumentsDateShard": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "date",
+          "non_null": false,
+          "type": "AWSDate"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "shard",
+          "non_null": false,
+          "type": "Int"
+        }
+      ]
+    },
+    "listFinetuningJobs": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "limit",
+          "non_null": false,
+          "type": "Int"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "nextToken",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "listInstalledFeatures": {
+      "args": []
+    },
+    "listSampleDocuments": {
+      "args": []
+    },
+    "listUsers": {
+      "args": []
+    },
+    "pauseCircuitBreaker": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "reason",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "probeCircuitBreaker": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "reason",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "processChanges": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "objectKey",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": true,
+          "is_list": true,
+          "name": "modifiedSections",
+          "non_null": true,
+          "type": "ModifiedSectionInput"
+        },
+        {
+          "elem_non_null": true,
+          "is_list": true,
+          "name": "modifiedPages",
+          "non_null": false,
+          "type": "ModifiedPageInput"
+        }
+      ]
+    },
+    "publishCircuitBreakerStatus": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "status",
+          "non_null": true,
+          "type": "AWSJSON"
+        }
+      ]
+    },
+    "queryKnowledgeBase": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "input",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "sessionId",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "registerFeature": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "input",
+          "non_null": true,
+          "type": "RegisterFeatureInput"
+        }
+      ]
+    },
+    "registerFeatureHooks": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "input",
+          "non_null": true,
+          "type": "RegisterFeatureHooksInput"
+        }
+      ]
+    },
+    "releaseReview": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "objectKey",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "removeFeatureConfigPreset": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "featureId",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "reprocessDocument": {
+      "args": [
+        {
+          "elem_non_null": true,
+          "is_list": true,
+          "name": "objectKeys",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "version",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "restoreDefaultModelConfigLimits": {
+      "args": []
+    },
+    "restoreDefaultPricing": {
+      "args": []
+    },
+    "resumeCircuitBreaker": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "reason",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "sendAgentChatMessage": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "prompt",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "sessionId",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "method",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "enableCodeIntelligence",
+          "non_null": false,
+          "type": "Boolean"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "toolMetadata",
+          "non_null": false,
+          "type": "ToolMetadataInput"
+        }
+      ]
+    },
+    "sendChatDocumentMessage": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "sessionId",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "prompt",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "method",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "s3Uri",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "modelId",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "status",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "timestamp",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "content",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "role",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "isProcessing",
+          "non_null": false,
+          "type": "Boolean"
+        }
+      ]
+    },
+    "setActiveVersion": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "versionName",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "skipAllSectionsReview": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "objectKey",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "startMultiDocDiscovery": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "s3Bucket",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "s3Prefix",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "configVersion",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "zipFileName",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "zipFileSize",
+          "non_null": false,
+          "type": "Int"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "saveMode",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "startTestRun": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "input",
+          "non_null": true,
+          "type": "TestRunInput"
+        }
+      ]
+    },
+    "submitAgentQuery": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "query",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": true,
+          "is_list": true,
+          "name": "agentIds",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "subscribeFeature": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "featureId",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "returnUrl",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "syncBdaIdp": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "direction",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "versionName",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "bdaProjectArn",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "saveArn",
+          "non_null": false,
+          "type": "Boolean"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "syncMode",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "unregisterFeature": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "featureId",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "unregisterFeatureHooks": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "featureId",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "unsubscribeFeature": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "featureId",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "updateAgentChatMessage": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "sessionId",
+          "non_null": true,
+          "type": "ID"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "content",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "updateAgentJobStatus": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "jobId",
+          "non_null": true,
+          "type": "ID"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "status",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "userId",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "result",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "error",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "updateChatSessionTitle": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "sessionId",
+          "non_null": true,
+          "type": "ID"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "title",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "updateConfigBootstrapJobStatus": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "jobId",
+          "non_null": true,
+          "type": "ID"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "status",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "statusMessage",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "errorMessage",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "configVersion",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "testSetId",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "updateConfiguration": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "versionName",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "customConfig",
+          "non_null": true,
+          "type": "AWSJSON"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "description",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "updateDiscoveryJobStatus": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "jobId",
+          "non_null": true,
+          "type": "ID"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "status",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "errorMessage",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "discoveredClassName",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "statusMessage",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "jobType",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "currentStep",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "totalDocuments",
+          "non_null": false,
+          "type": "Int"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "clustersFound",
+          "non_null": false,
+          "type": "Int"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "discoveredClasses",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "reflectionReport",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "updateDocument": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "input",
+          "non_null": true,
+          "type": "UpdateDocumentInput"
+        }
+      ]
+    },
+    "updateDocumentSection": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "input",
+          "non_null": true,
+          "type": "UpdateDocumentSectionInput"
+        }
+      ]
+    },
+    "updateDocumentStatus": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "input",
+          "non_null": true,
+          "type": "UpdateDocumentStatusInput"
+        }
+      ]
+    },
+    "updateFinetuningJobStatus": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "jobId",
+          "non_null": true,
+          "type": "ID"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "status",
+          "non_null": true,
+          "type": "FinetuningJobStatus"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "errorMessage",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "updateModelConfigLimits": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "modelConfigLimits",
+          "non_null": true,
+          "type": "AWSJSON"
+        }
+      ]
+    },
+    "updatePricing": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "pricingConfig",
+          "non_null": true,
+          "type": "AWSJSON"
+        }
+      ]
+    },
+    "updateTestSet": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "input",
+          "non_null": true,
+          "type": "UpdateTestSetInput"
+        }
+      ]
+    },
+    "updateUser": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "userId",
+          "non_null": true,
+          "type": "ID"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": true,
+          "name": "allowedConfigVersions",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "uploadDiscoveryDocument": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "fileName",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "contentType",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "prefix",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "bucket",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "groundTruthFileName",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "version",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": true,
+          "name": "pageRanges",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": true,
+          "name": "pageLabels",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "skipJobCreation",
+          "non_null": false,
+          "type": "Boolean"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "discoveryType",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "saveMode",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "uploadDocument": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "fileName",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "contentType",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "prefix",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "bucket",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "version",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "uploadMultiDocDiscoveryZip": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "fileName",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "fileSize",
+          "non_null": true,
+          "type": "Int"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "configVersion",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "uploadSampleDocument": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "sampleId",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "prefix",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "version",
+          "non_null": false,
+          "type": "String"
+        }
+      ]
+    },
+    "validateTestFileName": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "fileName",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "validateTestSetForFinetuning": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "testSetId",
+          "non_null": true,
+          "type": "ID"
+        }
+      ]
+    }
+  },
+  "inputs": {
+    "ApplyFeatureConfigPresetInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "featureId",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "version",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "config",
+        "non_null": true,
+        "type": "AWSJSON"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "description",
+        "non_null": false,
+        "type": "String"
+      }
+    ],
+    "ConfidenceThresholdAlertInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "attributeName",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "confidence",
+        "non_null": false,
+        "type": "Float"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "confidenceThreshold",
+        "non_null": false,
+        "type": "Float"
+      }
+    ],
+    "CreateDocumentInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "ObjectKey",
+        "non_null": false,
+        "type": "ID"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "ObjectStatus",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "InitialEventTime",
+        "non_null": false,
+        "type": "AWSDateTime"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "QueuedTime",
+        "non_null": false,
+        "type": "AWSDateTime"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "ExpiresAfter",
+        "non_null": false,
+        "type": "AWSTimestamp"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "ConfigVersion",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "TraceId",
+        "non_null": false,
+        "type": "String"
+      }
+    ],
+    "CreateFinetuningJobInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "testSetId",
+        "non_null": true,
+        "type": "ID"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "baseModel",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "jobName",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "trainSplit",
+        "non_null": false,
+        "type": "Float"
+      }
+    ],
+    "FileUploadInfo": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "fileName",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "fileSize",
+        "non_null": true,
+        "type": "Int"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "contentType",
+        "non_null": true,
+        "type": "String"
+      }
+    ],
+    "ModifiedPageInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "pageId",
+        "non_null": true,
+        "type": "Int"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "textModified",
+        "non_null": true,
+        "type": "Boolean"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "classReset",
+        "non_null": true,
+        "type": "Boolean"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "newTextUri",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "newConfidenceUri",
+        "non_null": false,
+        "type": "String"
+      }
+    ],
+    "ModifiedSectionInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "sectionId",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "classification",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": true,
+        "is_list": true,
+        "name": "pageIds",
+        "non_null": true,
+        "type": "Int"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "isNew",
+        "non_null": false,
+        "type": "Boolean"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "isDeleted",
+        "non_null": false,
+        "type": "Boolean"
+      }
+    ],
+    "PageInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "Id",
+        "non_null": false,
+        "type": "Int"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "Class",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "ImageUri",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "TextUri",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "TextConfidenceUri",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "OcrPageDataUri",
+        "non_null": false,
+        "type": "String"
+      }
+    ],
+    "PipelineHookInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "point",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "arn",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "order",
+        "non_null": false,
+        "type": "Int"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "onError",
+        "non_null": false,
+        "type": "String"
+      }
+    ],
+    "RegisterFeatureHooksInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "featureId",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": true,
+        "is_list": true,
+        "name": "hooks",
+        "non_null": true,
+        "type": "PipelineHookInput"
+      }
+    ],
+    "RegisterFeatureInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "featureId",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "displayName",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "installedVersion",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "stackName",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "stackId",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "stackRegion",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "uiBundlePath",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "featureApiEndpoint",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "generationQueueArn",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "iconUrl",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "installedBy",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "productCode",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "marketplaceListingUrl",
+        "non_null": false,
+        "type": "String"
+      }
+    ],
+    "SectionInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "Id",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": true,
+        "name": "PageIds",
+        "non_null": false,
+        "type": "Int"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "Class",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "OutputJSONUri",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": true,
+        "name": "ConfidenceThresholdAlerts",
+        "non_null": false,
+        "type": "ConfidenceThresholdAlertInput"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "Excluded",
+        "non_null": false,
+        "type": "Boolean"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "ExclusionReason",
+        "non_null": false,
+        "type": "String"
+      }
+    ],
+    "TestRunInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "testSetId",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "context",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "numberOfFiles",
+        "non_null": false,
+        "type": "Int"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "configVersion",
+        "non_null": false,
+        "type": "String"
+      }
+    ],
+    "TestSetDocumentsUploadInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "testSetId",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "fileName",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "fileSize",
+        "non_null": true,
+        "type": "Int"
+      }
+    ],
+    "TestSetUploadInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "fileName",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "fileSize",
+        "non_null": true,
+        "type": "Int"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "description",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "documentClassType",
+        "non_null": false,
+        "type": "DocumentClassType"
+      }
+    ],
+    "ToolMetadataInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "toolName",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "toolUseId",
+        "non_null": false,
+        "type": "String"
+      }
+    ],
+    "UpdateDocumentInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "ObjectKey",
+        "non_null": true,
+        "type": "ID"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "ObjectStatus",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "QueuedTime",
+        "non_null": false,
+        "type": "AWSDateTime"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "WorkflowStartTime",
+        "non_null": false,
+        "type": "AWSDateTime"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "CompletionTime",
+        "non_null": false,
+        "type": "AWSDateTime"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "WorkflowExecutionArn",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "WorkflowStatus",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "PageCount",
+        "non_null": false,
+        "type": "Int"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": true,
+        "name": "Sections",
+        "non_null": false,
+        "type": "SectionInput"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": true,
+        "name": "Pages",
+        "non_null": false,
+        "type": "PageInput"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "Metering",
+        "non_null": false,
+        "type": "AWSJSON"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "EvaluationReportUri",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "EvaluationStatus",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "SummaryReportUri",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "RuleValidationResultUri",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "RuleValidationResult",
+        "non_null": false,
+        "type": "AWSJSON"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "HITLStatus",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "HITLReviewURL",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "HITLTriggered",
+        "non_null": false,
+        "type": "Boolean"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "HITLCompleted",
+        "non_null": false,
+        "type": "Boolean"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": true,
+        "name": "HITLSectionsPending",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": true,
+        "name": "HITLSectionsCompleted",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": true,
+        "name": "HITLSectionsSkipped",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "HITLReviewOwner",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "HITLReviewOwnerEmail",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "HITLReviewedBy",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "HITLReviewedByEmail",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "HITLReviewHistory",
+        "non_null": false,
+        "type": "AWSJSON"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "ConfidenceAlertCount",
+        "non_null": false,
+        "type": "Int"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "ConfigVersion",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "TraceId",
+        "non_null": false,
+        "type": "String"
+      }
+    ],
+    "UpdateDocumentSectionInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "ObjectKey",
+        "non_null": true,
+        "type": "ID"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "SectionIndex",
+        "non_null": true,
+        "type": "Int"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "Section",
+        "non_null": true,
+        "type": "SectionInput"
+      }
+    ],
+    "UpdateDocumentStatusInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "ObjectKey",
+        "non_null": true,
+        "type": "ID"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "ObjectStatus",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "WorkflowExecutionArn",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "WorkflowStatus",
+        "non_null": false,
+        "type": "String"
+      }
+    ],
+    "UpdateTestSetInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "id",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "description",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "documentClassType",
+        "non_null": false,
+        "type": "DocumentClassType"
+      }
+    ]
+  }
+}

@@ -43,6 +43,9 @@ PRUNE_DIR_MARKERS = (
     "/site-packages/",
     "/.git/",
     "/.pytest_cache/",
+    # scratch/ is gitignored (local benchmarks, cloned tools, throwaway work);
+    # never part of the gate. CI never sees it, so prune it locally too.
+    "/scratch/",
     # idp_common ships fixture-style helper "tests" that are not a suite.
     "/idp_common/agents/testing/",
 )
@@ -57,6 +60,9 @@ RUN_ROOTS = [
     "lib/idp_feature_sdk/tests",
     "feature-platform/main-stack-extensions/tests",
     "feature-platform/feature-template/feature-api/tests",
+    "feature-platform/pii-anonymizer/feature-api/tests",
+    "feature-platform/pii-anonymizer/hook/tests",
+    "feature-platform/pii-anonymizer/ui-deployer/tests",
     "feature-platform/feature-template/ui-deployer/tests",
     "feature-platform/sample-feature/feature-api/tests",
     "feature-platform/sample-feature/ui-deployer/tests",
@@ -68,6 +74,7 @@ RUN_ROOTS = [
     "nested/api-resolvers/src/lambda/get_stepfunction_execution_resolver",
     "nested/api-resolvers/src/lambda/list_agent_chat_sessions_resolver/tests",
     "nested/api-resolvers/src/lambda/send_chat_document_message_resolver/tests",
+    "nested/api-resolvers/src/lambda/test_set_resolver",
     "nested/api-resolvers/src/lambda/upload_resolver",
     "nested/bedrockkb/src/start_ingestion_job_custom_resource",
     "samples/lambda-hook-inference/GENAIIDP-mistral-ocr-hook",
@@ -82,6 +89,7 @@ RUN_ROOTS = [
     "src/lambda/external_idp_group_mapping",
     "src/lambda/job_tracker",
     "src/lambda/queue_processor",
+    "src/lambda/queue_sender",
     "src/lambda/save_reporting_data",
     "src/lambda/version_check_resolver",
     "src/lambda/workflow_tracker",

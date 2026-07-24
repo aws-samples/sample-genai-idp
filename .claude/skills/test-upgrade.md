@@ -18,6 +18,22 @@ CFN stack update apply cleanly, without rollback"**.
 > --profile default`) before proceeding. Deploy target for this repo's test
 > work: account **912625584728**, region **us-west-2** (see the
 > `idpagentic-deploy-target` memory).
+>
+> **Stale AWS credential env vars shadow the profile.** `AWS_PROFILE=default`
+> on the command line does NOT override `AWS_ACCESS_KEY_ID` /
+> `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` if those are exported in the
+> shell — env-var creds always win, so an expired set produces `ExpiredToken`
+> even after the profile token is refreshed. If `sts get-caller-identity`
+> fails, check for and unset them BEFORE asking the user to re-auth:
+> ```bash
+> env | grep -E '^AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN|SECURITY_TOKEN|CREDENTIAL_EXPIRATION)='
+> unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SECURITY_TOKEN AWS_CREDENTIAL_EXPIRATION
+> ```
+> Note: `unset` does not persist across separate Bash tool calls (each call is
+> a fresh shell sourced from the profile). If the profile itself exports these,
+> prefix the failing command with the unset, or fix the shell profile. A
+> harmless leftover `AWS_PROFILE`/`AWS_REGION` in the env is fine — only the
+> raw key/token vars shadow the profile.
 
 ---
 
@@ -96,7 +112,31 @@ AWS_PROFILE=default aws cloudformation describe-stacks --stack-name "$STACK" \
 ```
 Base create takes ~20-40 min (CodeBuild builds the UI, containers push to ECR).
 
-## 4. Upgrade to the TO version (the actual test)
+## 4. Smoke-test the FROM stack (baseline) — REQUIRED
+
+**Always process `samples/lending_package.pdf` on the FROM stack before
+upgrading**, and capture the output as a baseline. This proves the stack is
+functional pre-upgrade and gives you a diff target to confirm the upgrade
+preserved basic functionality (an upgrade that reaches `UPDATE_COMPLETE` but
+silently breaks extraction is still a regression).
+
+```bash
+STACK=UpgradeTest0517to061 ; REGION=us-west-2
+idp-cli run-inference --stack-name "$STACK" --region "$REGION" \
+  --profile default --dir samples/ --file-pattern 'lending_package.pdf' \
+  --batch-prefix pre-upgrade --monitor
+# note the batch-id it prints, then pull the results:
+idp-cli download-results --stack-name "$STACK" --region "$REGION" \
+  --profile default --batch-id <batch-id> --output-dir /tmp/upgrade-baseline
+```
+> `idp-cli` may import a STALE `idp_common` from another checkout — this only
+> corrupts `config-download`/`config-upload` (silently strips v0.6 fields), NOT
+> `run-inference`/`download-results`. So doc processing is safe, but do not
+> round-trip configs through the CLI here. (See `idpagentic-deploy-target`.)
+
+Keep `/tmp/upgrade-baseline` — §8 compares the post-upgrade run against it.
+
+## 5. Upgrade to the TO version (the actual test)
 
 Use the console-equivalent `update-stack`, reusing all existing parameter
 values so the diff is purely the template:
@@ -124,7 +164,7 @@ AWS_PROFILE=default aws cloudformation wait stack-update-complete \
   --stack-name "$STACK" --region "$REGION"   # returns non-zero on rollback
 ```
 
-## 5. Monitor the config custom resource during the update
+## 6. Monitor the config custom resource during the update
 
 The highest-risk step in an X→Y upgrade is the `UpdateDefaultConfig` custom
 resource in the nested **PATTERNSTACK** (`patterns/unified/template.yaml`). It
@@ -140,7 +180,7 @@ AWS_PROFILE=default aws logs tail "/aws/lambda/$FN" --since 15m --follow --regio
   | grep -iE "error|units|valid|migrat|traceback|pydantic"
 ```
 
-## 6. Diagnose a failure
+## 7. Diagnose a failure
 
 If the update or rollback fails, the parent's failed-resource list is mostly
 **collateral** — find the true root cause in the nested stack's own events:
@@ -174,7 +214,7 @@ AWS_PROFILE=default aws cloudformation continue-update-rollback --stack-name "$S
 ```
 (See the `pricing-units-rollback-deadlock` memory for the verified recovery.)
 
-## 7. Confirm success
+## 8. Confirm success
 
 ```bash
 AWS_PROFILE=default aws cloudformation describe-stacks --stack-name "$STACK" \
@@ -187,7 +227,33 @@ AWS_PROFILE=default aws cloudformation describe-stacks --stack-name "$STACK" \
   --region "$REGION" --query "Stacks[0].Outputs[?contains(OutputKey,'ersion')]" --output table
 ```
 
-## 8. Tear down
+## 9. Smoke-test the upgraded stack & compare to baseline — REQUIRED
+
+Re-run the **same** document on the upgraded stack and diff the output against
+the §4 baseline. `UPDATE_COMPLETE` alone is not a pass — functionality must be
+preserved.
+
+```bash
+idp-cli run-inference --stack-name "$STACK" --region "$REGION" \
+  --profile default --dir samples/ --file-pattern 'lending_package.pdf' \
+  --batch-prefix post-upgrade --monitor
+idp-cli download-results --stack-name "$STACK" --region "$REGION" \
+  --profile default --batch-id <batch-id> --output-dir /tmp/upgrade-after
+```
+Compare the extraction/classification results:
+```bash
+diff -r /tmp/upgrade-baseline /tmp/upgrade-after
+```
+Expect the document to process to completion with comparable extracted values.
+Some drift is normal and NOT a regression: LLM non-determinism, and any
+config-shape changes the v0.5→v0.6 migration intentionally introduces (e.g.
+confidence/assessment structure, new metering fields). What you're ruling out
+is a **functional break** — empty extractions, a workflow that errors/times
+out, classes no longer detected, or confidence collapsing to null across the
+board. Call out clearly whether the doc still processes and whether extracted
+values are materially equivalent.
+
+## 10. Tear down
 
 Throwaway stacks should be deleted once the result is recorded (unless a
 failure needs inspection — keep it and tell the user):
@@ -202,11 +268,15 @@ and delete them manually if doing a full cleanup.
 
 ## Checklist
 
-1. [ ] Creds valid (`sts get-caller-identity` → 912625584728)
+1. [ ] Creds valid (`sts get-caller-identity` → 912625584728); no stale
+       `AWS_ACCESS_KEY_ID`/`SESSION_TOKEN` env vars shadowing the profile
 2. [ ] Template URLs for FROM + TO grepped from CHANGELOG
 3. [ ] Required params confirmed from the FROM template
 4. [ ] Base FROM stack CREATE_COMPLETE
-5. [ ] `update-stack` to TO template, all params reused
-6. [ ] `UpdateConfiguration` Lambda logs watched during update
-7. [ ] Final status `UPDATE_COMPLETE` (no rollback)
-8. [ ] Result reported; throwaway stack deleted (or kept if failed)
+5. [ ] **Baseline**: `lending_package.pdf` processed on FROM stack, output saved
+6. [ ] `update-stack` to TO template, all params reused (drop params removed in TO)
+7. [ ] `UpdateConfiguration` Lambda logs watched during update
+8. [ ] Final status `UPDATE_COMPLETE` (no rollback)
+9. [ ] **Compare**: `lending_package.pdf` re-processed post-upgrade; output vs
+       baseline confirms functionality preserved (no functional break)
+10. [ ] Result reported; throwaway stack deleted (or kept if failed)

@@ -37,11 +37,12 @@ template:
 
 ## Installing
 
-This sample is bundled with the accelerator and listed in the catalog, so it
-appears under **Extensions** in the nav (as **Sample: Document Status (feature
-add-on)**) as soon as the Feature Platform is enabled (the default). An admin
-installs it from its feature page with one click — there's no subscription step
-for open-source extensions.
+This sample is bundled with the accelerator and listed in the catalog, but —
+as a reference sample — it sets `showInNav: false`, so it has no nav entry of
+its own until installed. Open **Extensions → Browse catalog** in the nav and
+select **Sample: Document Status (feature add-on)**; an admin installs it from
+its feature page with one click — there's no subscription step for open-source
+extensions. Once installed it gets its own entry in the **Extensions** nav.
 
 ## Source & authoring
 

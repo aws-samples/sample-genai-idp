@@ -49,7 +49,12 @@ def test_unknown_hook_point_is_noop(monkeypatch):
     monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
     mod = _reload()
     out = mod.lambda_handler({"hookPoint": "postBananas"}, None)
-    assert out == {"hookPoint": "postBananas", "invoked": 0, "results": []}
+    assert out == {
+        "hookPoint": "postBananas",
+        "invoked": 0,
+        "halt": False,
+        "results": [],
+    }
 
 
 def test_missing_config_table_is_noop(monkeypatch):
@@ -180,3 +185,258 @@ def test_onerror_skip_remaining_stops_after_failure(monkeypatch):
     # only the first hook ran before skip-remaining halted the loop
     assert out["invoked"] == 1
     assert out["results"][0]["featureId"] == "f1"
+
+
+def test_preprocessing_reads_single_flat_hook(monkeypatch):
+    """The preprocessing point reads a SINGLE inline hook — arn/args live
+    directly on the `preprocessing` section (no preHook list)."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+
+    class _Table:
+        def get_item(self, Key):
+            return {
+                "Item": {
+                    "Configuration": "Config#default",
+                    "preprocessing": {
+                        "enabled": True,
+                        "featureId": "pii",
+                        "arn": "arn:pii",
+                        "onError": "fail",
+                    },
+                }
+            }
+
+    hooks = mod._read_hooks_from_config(_Table(), "default", "preprocessing")
+    assert len(hooks) == 1
+    assert hooks[0]["featureId"] == "pii"
+    assert hooks[0]["arn"] == "arn:pii"
+    assert hooks[0]["onError"] == "fail"
+
+
+def test_preprocessing_disabled_or_arnless_yields_no_hook(monkeypatch):
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+
+    class _Disabled:
+        def get_item(self, Key):
+            return {
+                "Item": {
+                    "Configuration": "Config#d",
+                    "preprocessing": {"enabled": False, "arn": "arn:x"},
+                }
+            }
+
+    class _NoArn:
+        def get_item(self, Key):
+            return {
+                "Item": {
+                    "Configuration": "Config#d",
+                    "preprocessing": {"enabled": True},
+                }
+            }
+
+    assert mod._read_hooks_from_config(_Disabled(), "d", "preprocessing") == []
+    assert mod._read_hooks_from_config(_NoArn(), "d", "preprocessing") == []
+
+
+def test_hook_args_parsed_and_passed_in_payload(monkeypatch):
+    """Generic hook args (list of {key,value}) are parsed from the flat
+    preprocessing section and delivered as both `args` and `argsMap`."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+
+    class _Table:
+        def get_item(self, Key):
+            return {
+                "Item": {
+                    "Configuration": "Config#default",
+                    "preprocessing": {
+                        "enabled": True,
+                        "featureId": "pii",
+                        "arn": "arn:pii",
+                        "args": [
+                            {"key": "mode", "value": "redactcopy_and_stop"},
+                            {"key": "store_mapping", "value": "true"},
+                            {"not_a_key": "x"},  # dropped: no key
+                        ],
+                    },
+                }
+            }
+
+    hooks = mod._read_hooks_from_config(_Table(), "default", "preprocessing")
+    assert hooks[0]["args"] == [
+        {"key": "mode", "value": "redactcopy_and_stop"},
+        {"key": "store_mapping", "value": "true"},
+    ]
+
+    # end-to-end: the invoke payload carries args + argsMap
+    monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: hooks)
+    monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "default")
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: object())
+    seen = {}
+
+    def _capture(h, payload):
+        seen.update(payload)
+        return {
+            "featureId": "pii",
+            "arn": "arn:pii",
+            "ok": True,
+            "result": {"halt": False},
+        }
+
+    monkeypatch.setattr(mod, "_invoke_hook", _capture)
+    mod.lambda_handler({"hookPoint": "preprocessing", "document": {}}, None)
+    assert seen["argsMap"] == {"mode": "redactcopy_and_stop", "store_mapping": "true"}
+    assert {"key": "mode", "value": "redactcopy_and_stop"} in seen["args"]
+
+
+def test_halt_aggregated_from_hook_result(monkeypatch):
+    """A successful hook returning result.halt=true surfaces top-level halt."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    hook = {"featureId": "pii", "arn": "arn:pii", "order": 1, "onError": "continue"}
+    monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: [hook])
+    monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "default")
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: object())
+    monkeypatch.setattr(
+        mod,
+        "_invoke_hook",
+        lambda h, p: {
+            "featureId": "pii",
+            "arn": "arn:pii",
+            "ok": True,
+            "result": {"halt": True, "redactedKey": "_pii_redacted/x.pdf"},
+        },
+    )
+    out = mod.lambda_handler({"hookPoint": "preprocessing", "document": {}}, None)
+    assert out["halt"] is True
+    assert out["invoked"] == 1
+
+
+def test_halt_false_when_no_hook_requests_it(monkeypatch):
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    hook = {"featureId": "pii", "arn": "arn:pii", "order": 1, "onError": "continue"}
+    monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: [hook])
+    monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "default")
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: object())
+    monkeypatch.setattr(
+        mod,
+        "_invoke_hook",
+        lambda h, p: {
+            "featureId": "pii",
+            "arn": "arn:pii",
+            "ok": True,
+            "result": {"halt": False, "redactedKey": "_pii_redacted/x.pdf"},
+        },
+    )
+    out = mod.lambda_handler({"hookPoint": "preprocessing", "document": {}}, None)
+    assert out["halt"] is False
+
+
+def test_no_hooks_registered_returns_halt_false(monkeypatch):
+    """Backward-compat: no preprocessing hook registered ⇒ halt=false so the
+    workflow Choice defaults to normal routing."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: [])
+    monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "default")
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: object())
+    out = mod.lambda_handler({"hookPoint": "preprocessing", "document": {}}, None)
+    assert out["invoked"] == 0
+    assert out["halt"] is False
+
+
+def test_preprocessing_sets_visible_status(monkeypatch):
+    """When a preprocessing hook WILL run, the dispatcher flips the doc row's
+    ObjectStatus to PREPROCESSING (best-effort UI step visibility)."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    monkeypatch.setenv("TRACKING_TABLE", "TrackTable")
+    mod = _reload()
+    hook = {"featureId": "pii", "arn": "arn:pii", "order": 1, "onError": "continue"}
+    monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: [hook])
+    monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "default")
+    monkeypatch.setattr(
+        mod,
+        "_invoke_hook",
+        lambda h, p: {"featureId": "pii", "arn": "arn:pii", "ok": True, "result": {}},
+    )
+    updates = {}
+
+    class _Table:
+        def update_item(self, **kw):
+            updates.update(kw)
+
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: _Table())
+    mod.lambda_handler(
+        {"hookPoint": "preprocessing", "document": {"document_id": "w2.pdf"}}, None
+    )
+    assert updates["Key"] == {"PK": "doc#w2.pdf", "SK": "none"}
+    assert updates["ExpressionAttributeValues"] == {":s": "PREPROCESSING"}
+    # Conditional write: never resurrect a deleted/missing row.
+    assert "attribute_exists" in updates["ConditionExpression"]
+
+
+def test_preprocessing_status_not_set_when_no_hooks(monkeypatch):
+    """No hook registered ⇒ no status write (host stays inert)."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    monkeypatch.setenv("TRACKING_TABLE", "TrackTable")
+    mod = _reload()
+    monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: [])
+    monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "default")
+    called = []
+    monkeypatch.setattr(mod, "_set_preprocessing_status", lambda d: called.append(d))
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: object())
+    mod.lambda_handler(
+        {"hookPoint": "preprocessing", "document": {"document_id": "w2.pdf"}}, None
+    )
+    assert called == []
+
+
+def test_preprocessing_status_failure_never_breaks_dispatch(monkeypatch):
+    """A DDB error while writing the status is swallowed; the hook still runs."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    monkeypatch.setenv("TRACKING_TABLE", "TrackTable")
+    mod = _reload()
+    hook = {"featureId": "pii", "arn": "arn:pii", "order": 1, "onError": "continue"}
+    monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: [hook])
+    monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "default")
+    monkeypatch.setattr(
+        mod,
+        "_invoke_hook",
+        lambda h, p: {"featureId": "pii", "arn": "arn:pii", "ok": True, "result": {}},
+    )
+
+    class _Boom:
+        def update_item(self, **kw):
+            raise RuntimeError("ddb down")
+
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: _Boom())
+    out = mod.lambda_handler(
+        {"hookPoint": "preprocessing", "document": {"document_id": "w2.pdf"}}, None
+    )
+    assert out["invoked"] == 1
+
+
+def test_post_step_points_do_not_touch_status(monkeypatch):
+    """Only the preprocessing point writes the visible status (post-step points
+    already have their own per-step statuses set by the step functions)."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    monkeypatch.setenv("TRACKING_TABLE", "TrackTable")
+    mod = _reload()
+    hook = {"featureId": "f", "arn": "arn:f", "order": 1, "onError": "continue"}
+    monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: [hook])
+    monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "default")
+    called = []
+    monkeypatch.setattr(mod, "_set_preprocessing_status", lambda d: called.append(d))
+    monkeypatch.setattr(
+        mod,
+        "_invoke_hook",
+        lambda h, p: {"featureId": "f", "arn": "arn:f", "ok": True, "result": {}},
+    )
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: object())
+    mod.lambda_handler(
+        {"hookPoint": "postExtraction", "document": {"document_id": "w2.pdf"}}, None
+    )
+    assert called == []

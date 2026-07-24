@@ -5,14 +5,18 @@
  * Snippets to splice into `src/ui/src/components/genaiidp-layout/navigation.tsx`.
  *
  * The feature platform menu is **always visible** (per the locked plan) even
- * when no features are installed — the item itself links to a stub page
- * (/features with no id) that renders a helpful "no features installed"
- * message, and each installed feature adds a sub-link.
+ * when no features are installed — the section always starts with a "Browse
+ * catalog" link to /features (no id), which renders the catalog browser. It's
+ * styled (italic + search icon) so it reads as the catalog entry point rather
+ * than another extension. Each feature adds a sub-link below it.
  *
- * Because the UI builds the nav list from `useInstalledFeatures()` +
- * `useCatalogFeatures()`, the "Extensions" section dynamically
- * grows as features are published to the seller bucket, regardless of
- * whether they have been installed yet in this IDP stack.
+ * Which features get nav links:
+ *   - every **installed** feature (always, even if removed from the catalog —
+ *     so the user can still reach the page to uninstall an orphaned feature);
+ *   - catalog-only (published, not yet installed) features whose catalog entry
+ *     has `showInNav !== false`. The bundled reference samples publish
+ *     `showInNav: false` (from their feature.yaml), so they're discoverable
+ *     via "Browse catalog" only until installed.
  */
 
 import React from 'react';
@@ -85,9 +89,12 @@ function mergeEntries(installed: InstalledFeature[], catalog: CatalogFeature[]):
     });
   }
 
-  // Overlay catalog: add any not-yet-installed features.
+  // Overlay catalog: add not-yet-installed features that opted into nav
+  // visibility (showInNav !== false; absent means true). Features with
+  // showInNav: false — the bundled reference samples — stay off the nav
+  // until installed and are discoverable via "Browse catalog".
   for (const c of catalog) {
-    if (!byId.has(c.featureId)) {
+    if (!byId.has(c.featureId) && c.showInNav !== false) {
       byId.set(c.featureId, {
         featureId: c.featureId,
         displayName: c.displayName,
@@ -146,10 +153,11 @@ function buildStatusInfo(entry: NavEntry): React.ReactNode {
 }
 
 /**
- * Returns a SideNavigation section listing features. Takes the union of
- * installed features and catalog features so subscribe-able entries appear
- * even before installation. Always returns a non-empty section (even when
- * both lists are empty) so the menu entry is visible to all roles.
+ * Returns a SideNavigation section starting with a "Browse catalog" link to
+ * /features (the catalog browser that lists everything), then — separated by
+ * a divider — installed features plus nav-visible (showInNav !== false)
+ * catalog features. Always returns a non-empty section (even when both lists
+ * are empty) so the menu entry is visible to all roles.
  *
  * Use in navigation.tsx like:
  *
@@ -187,39 +195,40 @@ function comingSoonItems(installed: InstalledFeature[]): SideNavigationProps.Lin
 export function buildFeaturesNavSection(installed: InstalledFeature[], catalog: CatalogFeature[] = []): SideNavigationProps.Section {
   const entries = mergeEntries(installed, catalog);
 
-  const items: SideNavigationProps.Item[] =
-    entries.length === 0
-      ? [
-          // Placeholder link: clicking opens /features (no id), which renders
-          // SubscriptionRequired for the catalog at large. When a featureId
-          // param is present, FeaturePage renders the 7-state machine.
-          {
-            type: 'link',
-            text: 'No features installed',
-            href: `#${FEATURES_PATH_PREFIX}`,
-            info: undefined,
-          } as SideNavigationProps.Link,
-        ]
-      : entries.map(
-          (e) =>
-            ({
-              type: 'link',
-              text: e.displayName,
-              href: featureDetailHref(e.featureId),
-              // `info` is a ReactNode (NOT a descriptor object — passing
-              // { type: 'badge', ... } crashes React with error #31). We render a
-              // status badge, wrapped in a Popover so hovering shows the feature's
-              // description. The actual action (Subscribe / Install / Update) lives
-              // on the feature page; the nav badge only communicates status.
-              info: buildStatusInfo(e),
-            }) as SideNavigationProps.Link,
-        );
+  const items: SideNavigationProps.Item[] = entries.map(
+    (e) =>
+      ({
+        type: 'link',
+        text: e.displayName,
+        href: featureDetailHref(e.featureId),
+        // `info` is a ReactNode (NOT a descriptor object — passing
+        // { type: 'badge', ... } crashes React with error #31). We render a
+        // status badge, wrapped in a Popover so hovering shows the feature's
+        // description. The actual action (Subscribe / Install / Update) lives
+        // on the feature page; the nav badge only communicates status.
+        info: buildStatusInfo(e),
+      }) as SideNavigationProps.Link,
+  );
+
+  // The catalog entry point always comes first: /features (no id) renders the
+  // catalog browser, which lists every extension — including reference samples
+  // with showInNav: false that have no nav links of their own. The italic
+  // treatment (so it reads as the catalog browser, not just another extension
+  // in the list) is applied in navigation.css via an `a[href='#/features']`
+  // selector (Cloudscape nav links expose no per-item className hook).
+  const browseCatalog: SideNavigationProps.Link = {
+    type: 'link',
+    text: 'Browse catalog',
+    href: `#${FEATURES_PATH_PREFIX}`,
+  };
+
+  const extensionItems = [...items, ...comingSoonItems(installed)];
 
   return {
     type: 'section',
     // "(Preview)" signals that the extension framework is still being built out —
     // there are no production extensions to install yet beyond the bundled demo.
-    text: 'Extensions (Preview)',
-    items: [...items, ...comingSoonItems(installed)],
+    text: 'Extensions',
+    items: extensionItems.length > 0 ? [browseCatalog, ...extensionItems] : [browseCatalog],
   };
 }

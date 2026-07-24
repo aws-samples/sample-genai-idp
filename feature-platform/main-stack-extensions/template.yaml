@@ -91,6 +91,39 @@ Parameters:
       host's Rules Discovery flow (e.g. sample-health-insurance-review) can learn the bucket
       to pass to uploadDiscoveryDocument. Leave blank to skip the export.
 
+  InputBucketName:
+    Type: String
+    Default: ''
+    Description: Name of the main stack's Input bucket (where source documents
+      are uploaded to trigger processing). Re-exported as
+      `<MainStackName>-InputBucketName` so a preprocessing feature (e.g. PII
+      anonymization) can read the source document AND write a redacted copy
+      back under a reserved prefix to spawn a new, de-identified execution.
+      Grant write access scoped to that reserved prefix only. Leave blank to
+      skip the export.
+
+  UsersTableName:
+    Type: String
+    Default: ''
+    Description: Name of the main stack's UsersTable (stores per-user
+      allowedConfigVersions scope). Re-exported as `<MainStackName>-UsersTableName`
+      / `-UsersTableArn` so a feature can RBAC-gate a sensitive view by the
+      caller's config-version access (has an EmailIndex GSI). Leave blank to skip.
+
+  UsersTableArn:
+    Type: String
+    Default: ''
+    Description: ARN of the main stack's UsersTable (for the re-exported
+      `<MainStackName>-UsersTableArn`).
+  TestSetBucketName:
+    Type: String
+    Default: ''
+    Description: Name of the main stack's Test Set bucket (where Test Studio test
+      sets live and are auto-discovered). Re-exported as
+      `<MainStackName>-TestSetBucketName` so feature stacks that generate test
+      sets (e.g. idp-data-generator) can write documents Test Studio will list.
+      Leave blank to skip the export.
+
   WebUIBucketArn:
     Type: String
     Description: ARN of the WebUIBucket.
@@ -212,6 +245,9 @@ Conditions:
   HasReportingBucket: !Not [!Equals [!Ref ReportingBucketName, '']]
   HasOutputBucket: !Not [!Equals [!Ref OutputBucketName, '']]
   HasWorkingBucket: !Not [!Equals [!Ref WorkingBucketName, '']]
+  HasInputBucket: !Not [!Equals [!Ref InputBucketName, '']]
+  HasUsersTable: !Not [!Equals [!Ref UsersTableName, '']]
+  HasTestSetBucket: !Not [!Equals [!Ref TestSetBucketName, '']]
   HasDiscoveryBucket: !Not [!Equals [!Ref DiscoveryBucketName, '']]
   HasCustomerManagedEncryptionKey: !Not [!Equals [!Ref CustomerManagedEncryptionKeyArn, '']]
   HasSellerBuckets: !Not [!Equals [!Join ['', !Ref SellerBucketObjectArns], '']]
@@ -549,6 +585,14 @@ Resources:
   # to write under features/<id>/*. The ui-deployer custom resource in each
   # feature stack assumes a role that carries that session tag.
   ###########################################################################
+  InstalledFeaturesTableNameParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${MainStackName}/feature-platform/installed-features-table'
+      Type: String
+      Description: Name of the InstalledFeatures DynamoDB table (runtime-resolved by main-stack Lambdas).
+      Value: !Ref InstalledFeaturesTable
+
   WebUIBucketFeaturePolicyStatement:
     Type: AWS::SSM::Parameter
     Properties:
@@ -745,6 +789,46 @@ Outputs:
     Value: !Ref DiscoveryBucketName
     Export:
       Name: !Sub '${MainStackName}-DiscoveryBucketName'
+
+  InputBucketName:
+    Condition: HasInputBucket
+    Description: >-
+      Re-export of the main stack's Input bucket name. A preprocessing feature
+      (e.g. PII anonymization) imports this to read the source document and to
+      write a redacted copy back under a reserved prefix, which spawns a new
+      de-identified execution. Write access must be scoped to that reserved
+      prefix only.
+    Value: !Ref InputBucketName
+    Export:
+      Name: !Sub '${MainStackName}-InputBucketName'
+
+  UsersTableName:
+    Condition: HasUsersTable
+    Description: >-
+      Re-export of the main stack's UsersTable name. A feature imports this to
+      RBAC-gate a sensitive view by the caller's allowedConfigVersions (query
+      the EmailIndex GSI), matching the host's document-scoping rule.
+    Value: !Ref UsersTableName
+    Export:
+      Name: !Sub '${MainStackName}-UsersTableName'
+
+  UsersTableArn:
+    Condition: HasUsersTable
+    Description: >-
+      Re-export of the main stack's UsersTable ARN (for scoped dynamodb:Query
+      on the table + its EmailIndex GSI).
+    Value: !Ref UsersTableArn
+    Export:
+      Name: !Sub '${MainStackName}-UsersTableArn'
+  TestSetBucketName:
+    Condition: HasTestSetBucket
+    Description: >-
+      Re-export of the main stack's Test Set bucket name. Feature stacks that
+      generate test sets (e.g. idp-data-generator) import this to write
+      documents into the bucket Test Studio auto-discovers.
+    Value: !Ref TestSetBucketName
+    Export:
+      Name: !Sub '${MainStackName}-TestSetBucketName'
 
   TrackingTableArn:
     Description: >-

@@ -51,6 +51,39 @@ CIRCUIT_BREAKER_ENABLED = (
 )
 CIRCUIT_BREAKER_MANAGER_ARN = os.environ.get("CIRCUIT_BREAKER_MANAGER_ARN", "")
 ALERTS_TOPIC_ARN = os.environ.get("ALERTS_TOPIC_ARN", "")
+INPUT_BUCKET = os.environ.get("INPUT_BUCKET", "")
+TRACKING_TABLE = os.environ.get("TRACKING_TABLE", "")
+
+
+def _delete_superseded_original(object_key: str) -> None:
+    """Fully delete an original that a preprocessing hook replaced with a
+    redacted copy (REDACTED_SUPERSEDED). The tracker is the LAST writer for the
+    execution, so it owns the delete — doing it in the hook mid-execution races
+    with this final write. Best-effort: never raise (the redacted copy already
+    exists and is processing independently)."""
+    try:
+        from idp_common.delete_documents import delete_single_document
+
+        if not TRACKING_TABLE or not INPUT_BUCKET:
+            logger.warning(
+                "Cannot delete superseded original %s: TRACKING_TABLE/INPUT_BUCKET unset",
+                object_key,
+            )
+            return
+        result = delete_single_document(
+            object_key=object_key,
+            tracking_table=dynamodb.Table(TRACKING_TABLE),
+            s3_client=s3,
+            input_bucket=INPUT_BUCKET,
+            output_bucket=OUTPUT_BUCKET or "",
+        )
+        logger.info(
+            "Deleted REDACTED_SUPERSEDED original %s: %s",
+            object_key,
+            result.get("deleted"),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error("Failed to delete superseded original %s: %s", object_key, e)
 
 
 def update_document_completion(
@@ -111,8 +144,16 @@ def update_document_completion(
                 logger.info("Using entire output_data as document (fallback)")
 
             # Log compression status for debugging
+            wrapper_status = None
             if isinstance(document_data, dict):
                 is_compressed = document_data.get("compressed", False)
+                # A terminal status the state machine set on the compressed
+                # WRAPPER (e.g. REDACTED_SUPERSEDED from the preprocessing halt
+                # path) lives on the wrapper, NOT inside the compressed snapshot
+                # — that snapshot was serialized earlier in the run (status
+                # RUNNING). Capture it here before load_document decompresses and
+                # overwrites the in-memory status from the older snapshot.
+                wrapper_status = document_data.get("status")
                 logger.info(f"Document data is compressed: {is_compressed}")
                 if is_compressed:
                     logger.info(
@@ -131,8 +172,26 @@ def update_document_completion(
                 f"{len(processed_doc.metering)} metering entries"
             )
 
-            # Use the processed document directly and update status
-            # This is safer than copying fields and ensures we don't miss any data
+            # A preprocessing hook (e.g. PII anonymization "redact copy and
+            # stop") sets REDACTED_SUPERSEDED on the wrapper to signal that this
+            # original was replaced by a redacted copy and should NOT remain.
+            # The tracker is the LAST writer for the execution, so it owns the
+            # delete — doing it in the hook mid-execution races with this write
+            # (the tracker would re-create the row). Delete the whole document
+            # (input S3 + tracking rows) here; the handler detects this status
+            # and skips run-record/metrics persistence. We still return a real
+            # Document (never None) so the caller never dereferences None.
+            if workflow_status == "SUCCEEDED" and (
+                processed_doc.status == Status.REDACTED_SUPERSEDED
+                or wrapper_status == Status.REDACTED_SUPERSEDED.value
+            ):
+                _delete_superseded_original(object_key)
+                processed_doc.status = Status.REDACTED_SUPERSEDED
+                processed_doc.completion_time = datetime.now(timezone.utc).isoformat()
+                return processed_doc
+
+            # Use the processed document directly and update status. This is
+            # safer than copying fields and ensures we don't miss any data.
             processed_doc.status = (
                 Status.COMPLETED if workflow_status == "SUCCEEDED" else Status.FAILED
             )
@@ -495,8 +554,17 @@ def handler(event, context):
             object_key, workflow_status, output_data
         )
 
+        # A REDACTED_SUPERSEDED original was deleted (redact-copy-and-stop): there
+        # is no document to record a run/metrics for, and its output artifacts are
+        # gone. Skip run-record + metrics; the counter is still decremented below
+        # exactly once. (updated_doc is a real Document, so no None deref.)
+        superseded = (
+            updated_doc is not None
+            and getattr(updated_doc, "status", None) == Status.REDACTED_SUPERSEDED
+        )
+
         # Publish metrics for successful executions
-        if workflow_status == "SUCCEEDED":
+        if workflow_status == "SUCCEEDED" and not superseded:
             # Record this run as an immutable document version (S3-version
             # manifest + run record) before anything can overwrite outputs.
             if not updated_doc.workflow_execution_arn:

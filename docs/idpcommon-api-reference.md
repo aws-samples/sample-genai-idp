@@ -110,12 +110,16 @@ Represents a logical group of pages with the same document class.
 ### Status Enum
 
 ```
-QUEUED → RUNNING → OCR → CLASSIFYING → EXTRACTING → ASSESSING →
+QUEUED → RUNNING → PREPROCESSING → OCR → CLASSIFYING → EXTRACTING → ASSESSING →
 HITL_IN_PROGRESS → SUMMARIZING → RULE_VALIDATION →
 RULE_VALIDATION_ORCHESTRATOR → EVALUATING → COMPLETED
 ```
 
-Also: `POSTPROCESSING`, `FAILED`, `ABORTED`
+(`PREPROCESSING` appears only while a preprocessing hook runs — e.g. PII
+redaction; it is skipped when no hook is registered.)
+
+Also: `POSTPROCESSING`, `FAILED`, `ABORTED`, `REDACTED_SUPERSEDED` (a
+redact-copy-and-stop original superseded by its redacted copy)
 
 ## Processing Modules
 

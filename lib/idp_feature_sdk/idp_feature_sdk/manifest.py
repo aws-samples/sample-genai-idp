@@ -115,6 +115,10 @@ class FeatureManifest:
     # Marketplace features have no separate docs concept — the UI falls back to
     # their marketplaceListingUrl.
     docsUrl: Optional[str] = None  # noqa: N815
+    # Whether the feature gets its own Extensions nav entry while not yet
+    # installed. False for reference samples (discoverable only via the
+    # catalog browser). Installed features always appear in the nav.
+    showInNav: bool = True  # noqa: N815
     marketplace: MarketplaceSpec = field(default_factory=MarketplaceSpec)
     defaultParameters: Dict[str, Any] = field(default_factory=dict)  # noqa: N815
     capabilities: List[str] = field(default_factory=list)
@@ -174,6 +178,7 @@ def load_manifest(project_dir: Path | str) -> FeatureManifest:
         displayName=raw["displayName"],
         version=raw["version"],
         docsUrl=raw.get("docsUrl"),
+        showInNav=raw.get("showInNav", True),
         template=TemplateSpec(
             path=template["path"],
             requiresMainStackName=template.get("requiresMainStackName", True),

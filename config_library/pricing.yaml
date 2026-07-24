@@ -205,7 +205,45 @@ pricing:
         price: "3.3E-7"
       - name: cacheWriteInputTokens
         price: "4.125E-6"
-  
+
+  # GovCloud cross-region inference profile for the same underlying model as
+  # bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0 above — no separate
+  # GovCloud per-token pricing is published, so this mirrors the commercial
+  # us. rate. No cacheReadInputTokens/cacheWriteInputTokens units: verified
+  # live against us-gov-west-1 that cachePoint does not reduce input tokens
+  # through this inference profile (repeated identical prompt still reports
+  # cacheReadInputTokens=0), so GovCloud Claude calls should always be costed
+  # as a full cache miss.
+  - name: bedrock/us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0
+    units:
+      - name: inputTokens
+        price: "3.3E-6"
+      - name: outputTokens
+        price: "1.65E-5"
+
+  # GovCloud Nova models are invoked with bare model IDs (the us. cross-region
+  # inference-profile prefix is invalid in GovCloud), so the us.-prefixed
+  # entries above never match at cost-calc time — the lookup in
+  # save_reporting_data._get_unit_cost is substring-based and neither
+  # "bedrock/amazon.nova-pro-v1:0" nor "bedrock/us.amazon.nova-pro-v1:0" is a
+  # substring of the other, so a bare GovCloud Nova call would otherwise be
+  # costed at $0.0. No separate GovCloud per-token pricing is published, so
+  # these mirror the commercial us. rates. Cache units omitted for the same
+  # reason as the us-gov Claude entry above (GovCloud caching unverified).
+  - name: bedrock/amazon.nova-pro-v1:0
+    units:
+      - name: inputTokens
+        price: "8.0E-7"
+      - name: outputTokens
+        price: "3.2E-6"
+
+  - name: bedrock/amazon.nova-lite-v1:0
+    units:
+      - name: inputTokens
+        price: "6.0E-8"
+      - name: outputTokens
+        price: "2.4E-7"
+
   - name: bedrock/us.anthropic.claude-sonnet-4-6
     units:
       - name: inputTokens
@@ -339,6 +377,30 @@ pricing:
         price: "6.25E-6"
 
   - name: bedrock/us.anthropic.claude-opus-4-8:1m
+    units:
+      - name: inputTokens
+        price: "10.0E-6"
+      - name: outputTokens
+        price: "3.75E-5"
+      - name: cacheReadInputTokens
+        price: "1.0E-6"
+      - name: cacheWriteInputTokens
+        price: "12.5E-6"
+
+  # Claude Opus 5 — same pricing as Opus 4.8 ($5/$25 per MTok; :1m long-context
+  # tier at $10/$37.50). 1M context window is the model default.
+  - name: bedrock/us.anthropic.claude-opus-5
+    units:
+      - name: inputTokens
+        price: "5.0E-6"
+      - name: outputTokens
+        price: "2.5E-5"
+      - name: cacheReadInputTokens
+        price: "5.0E-7"
+      - name: cacheWriteInputTokens
+        price: "6.25E-6"
+
+  - name: bedrock/us.anthropic.claude-opus-5:1m
     units:
       - name: inputTokens
         price: "10.0E-6"
@@ -638,6 +700,29 @@ pricing:
       - name: cacheWriteInputTokens
         price: "12.5E-6"
 
+  # Claude Opus 5 — same pricing as Opus 4.8 (:1m long-context tier above 200K)
+  - name: bedrock/eu.anthropic.claude-opus-5
+    units:
+      - name: inputTokens
+        price: "5.0E-6"
+      - name: outputTokens
+        price: "2.5E-5"
+      - name: cacheReadInputTokens
+        price: "5.0E-7"
+      - name: cacheWriteInputTokens
+        price: "6.25E-6"
+
+  - name: bedrock/eu.anthropic.claude-opus-5:1m
+    units:
+      - name: inputTokens
+        price: "10.0E-6"
+      - name: outputTokens
+        price: "3.75E-5"
+      - name: cacheReadInputTokens
+        price: "1.0E-6"
+      - name: cacheWriteInputTokens
+        price: "12.5E-6"
+
   # ---------------------------------------------------------------------------
   # Amazon Bedrock Models - Global/Cross-Region
   # ---------------------------------------------------------------------------
@@ -807,6 +892,29 @@ pricing:
         price: "6.25E-6"
 
   - name: bedrock/global.anthropic.claude-opus-4-8:1m
+    units:
+      - name: inputTokens
+        price: "10.0E-6"
+      - name: outputTokens
+        price: "3.75E-5"
+      - name: cacheReadInputTokens
+        price: "1.0E-6"
+      - name: cacheWriteInputTokens
+        price: "12.5E-6"
+
+  # Claude Opus 5 — same pricing as Opus 4.8 (:1m long-context tier above 200K)
+  - name: bedrock/global.anthropic.claude-opus-5
+    units:
+      - name: inputTokens
+        price: "5.0E-6"
+      - name: outputTokens
+        price: "2.5E-5"
+      - name: cacheReadInputTokens
+        price: "5.0E-7"
+      - name: cacheWriteInputTokens
+        price: "6.25E-6"
+
+  - name: bedrock/global.anthropic.claude-opus-5:1m
     units:
       - name: inputTokens
         price: "10.0E-6"
