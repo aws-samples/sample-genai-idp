@@ -28,6 +28,9 @@ class TestIsClaudeEffortModel:
             "us.anthropic.claude-opus-4-6-v1:1m",
             "us.anthropic.claude-opus-4-7",
             "us.anthropic.claude-opus-4-8:1m",
+            "us.anthropic.claude-opus-5",
+            "eu.anthropic.claude-opus-5:1m",
+            "global.anthropic.claude-opus-5",
             "us.anthropic.claude-fable-5",
         ],
     )
