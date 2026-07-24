@@ -363,7 +363,10 @@ The host contract a feature must satisfy:
   `src/ui/src/components/feature-page/feature-host-globals.ts`).
 - **CFN template** — registers itself via the `registerFeature` mutation from a
   custom resource on create, and uploads its UI bundle into
-  `WebUIBucket/features/<id>/v<ver>/`.
+  `WebUIBucket/features/<id>/v<ver>-<sha8>/` (the `<sha8>` is a content hash
+  of the bundle bytes — the bundle is served with `Cache-Control: immutable`,
+  so the path must change whenever the content changes, including when the
+  same version is republished during development).
 - **`feature.yaml` manifest** — validated against
   `lib/idp_feature_sdk/idp_feature_sdk/schemas/feature-manifest.schema.json`.
 

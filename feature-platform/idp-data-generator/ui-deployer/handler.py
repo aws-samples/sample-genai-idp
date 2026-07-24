@@ -21,6 +21,7 @@ stack's WebUIBucketPolicy allows writes under `features/<FEATURE_ID>/*` only.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -65,12 +66,61 @@ def _artifact_prefix() -> str:
     return f"{_FEATURE_ARTIFACT_PREFIX}/{_FEATURE_VERSION}"
 
 
+_BUNDLE_PREFIX = f"features/{_FEATURE_ID}/"
+
+
+def _bundle_content_hash(src_key: str) -> str:
+    """First 8 hex chars of the sha256 of the bundle bytes.
+
+    The copied bundle is served with `Cache-Control: immutable`, which is only
+    safe if the URL changes whenever the content changes. The feature VERSION
+    alone is not enough: the same version can legitimately be republished
+    (dev iterations, a reinstall after a rollback), and browsers that cached
+    the old bytes under a version-only URL would keep serving them for a year
+    without revalidating.
+    """
+    resp = _s3.get_object(Bucket=_FEATURE_BUCKET, Key=src_key)
+    return hashlib.sha256(resp["Body"].read()).hexdigest()[:8]
+
+
+def _delete_bundle_objects() -> None:
+    """Delete ALL of this feature's objects under features/<id>/ on uninstall.
+
+    Listing the prefix (rather than deleting one computed key) removes every
+    published copy: current + superseded hashed dirs, and keys from the older
+    non-hashed layout (`v<version>/ui-bundle.js`). Superseded copies are
+    deliberately NOT pruned on Update — SPA sessions opened before the update
+    still hold the previous uiBundlePath and must keep loading until they
+    refresh. Best-effort: failures are logged, never raised.
+    """
+    try:
+        paginator = _s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=_WEBUI_BUCKET, Prefix=_BUNDLE_PREFIX):
+            keys = [
+                {"Key": k} for obj in page.get("Contents", []) if (k := obj.get("Key"))
+            ]
+            if keys:
+                _s3.delete_objects(
+                    Bucket=_WEBUI_BUCKET, Delete={"Objects": keys, "Quiet": True}
+                )
+                logger.info(
+                    "Deleted %d object(s) under s3://%s/%s",
+                    len(keys),
+                    _WEBUI_BUCKET,
+                    _BUNDLE_PREFIX,
+                )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("UI bundle cleanup failed (ignored): %s", exc)
+
+
 def _bundle_ui(request_type: str) -> str:
     """Copy/delete the UMD bundle; return the uiBundlePath registered with the host."""
     src_key = f"{_artifact_prefix()}/ui-bundle.js"
-    dst_key = f"features/{_FEATURE_ID}/v{_FEATURE_VERSION}/ui-bundle.js"
 
     if request_type in ("Create", "Update"):
+        digest = _bundle_content_hash(src_key)
+        bundle_dir = f"{_BUNDLE_PREFIX}v{_FEATURE_VERSION}-{digest}"
+        dst_key = f"{bundle_dir}/ui-bundle.js"
         logger.info(
             "Copying s3://%s/%s -> s3://%s/%s",
             _FEATURE_BUCKET,
@@ -86,14 +136,12 @@ def _bundle_ui(request_type: str) -> str:
             ContentType="application/javascript",
             CacheControl="public,max-age=31536000,immutable",
         )
-    elif request_type == "Delete":
-        logger.info("Deleting s3://%s/%s", _WEBUI_BUCKET, dst_key)
-        try:
-            _s3.delete_object(Bucket=_WEBUI_BUCKET, Key=dst_key)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("UI bundle delete failed (ignored): %s", exc)
+        return f"{bundle_dir}/"
 
-    return f"features/{_FEATURE_ID}/v{_FEATURE_VERSION}/"
+    if request_type == "Delete":
+        _delete_bundle_objects()
+
+    return f"{_BUNDLE_PREFIX}v{_FEATURE_VERSION}/"
 
 
 # Feature registration — direct Lambda invoke of the host's registerFeature

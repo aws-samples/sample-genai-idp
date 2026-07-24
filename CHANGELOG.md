@@ -5,6 +5,10 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Extension UI pages no longer serve a stale bundle from the browser cache after a same-version republish.** Feature ui-deployers copied `ui-bundle.js` into the Web UI bucket at a version-only path (`features/<id>/v<ver>/`) with `Cache-Control: public,max-age=31536000,immutable` — so republishing the same feature version (dev iterations, reinstall after a rollback) left browsers serving the old bundle for up to a year without revalidating, since the URL never changed. The destination path now embeds a content hash of the bundle bytes (`features/<id>/v<ver>-<sha8>/`), so any byte change yields a new URL and immutable caching stays safe; uninstall cleans up every published copy (current, superseded, and old-layout keys) via a new prefix-scoped `s3:ListBucket` grant. Applies to all five bundled feature ui-deployers (pii-anonymizer, idp-data-generator, sample-feature, sample-health-insurance-review, feature-template).
+
 ## [0.6.2]
 
 ### Added

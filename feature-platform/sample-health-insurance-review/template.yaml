@@ -328,6 +328,16 @@ Resources:
                 Resource: !Sub
                   - 'arn:${AWS::Partition}:s3:::${Bucket}/features/${FeatureId}/*'
                   - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-WebUIBucketName' }
+              # Cleanup lists the feature's own prefix to find every published
+              # bundle copy (current + superseded content-hashed dirs).
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub
+                  - 'arn:${AWS::Partition}:s3:::${Bucket}'
+                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-WebUIBucketName' }
+                Condition:
+                  StringLike:
+                    's3:prefix': !Sub 'features/${FeatureId}/*'
         - PolicyName: InvokeHostResolvers
           PolicyDocument:
             Version: '2012-10-17'
