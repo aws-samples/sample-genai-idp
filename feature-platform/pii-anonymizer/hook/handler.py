@@ -33,7 +33,8 @@ What it does, per document:
      metadata `config-version=<companion version>` so the spawned execution
      processes it normally (no preprocessing hook).
   5b. OPTIONAL (store_mapping=true): persist the original->synthetic mapping,
-     CMK-encrypted, in the Output bucket for the RBAC-gated Redaction Report view.
+     CMK-encrypted, in the FEATURE-OWNED mapping DynamoDB table (never a
+     host-proxyable bucket) for the RBAC-gated Redaction Report view.
   6. Halt decision + original handling:
        redactcopy_and_stop     -> halt=true; DELETE the original entirely
                                   (S3 + tracking) so only the redacted copy remains.
@@ -468,9 +469,10 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     )
 
     # (5b) OPTIONAL: persist the original->synthetic mapping (a re-identification
-    # key — contains real PII). Stored CMK-encrypted in the Output bucket; the
-    # Redaction Report only reveals it to users with access to the ORIGINAL's
-    # config version. Off unless store_mapping=true.
+    # key — contains real PII). Stored CMK-encrypted in the feature-owned
+    # mapping DynamoDB table (see _store_mapping for why never a host bucket);
+    # the Redaction Report only reveals it to users with access to the
+    # ORIGINAL's config version. Off unless store_mapping=true.
     mapping_stored = False
     if store_mapping and redaction.get("mapping"):
         mapping_stored = _store_mapping(

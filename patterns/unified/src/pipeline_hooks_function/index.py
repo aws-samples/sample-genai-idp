@@ -106,7 +106,17 @@ _CONFIG_METADATA_FIELDS = {
 }
 
 _dynamodb = boto3.resource("dynamodb")
-_lambda = boto3.client("lambda")
+# Hooks run synchronously through this client, so its read timeout must cover
+# the longest hook (the PII preprocessing hook budgets 900s); botocore's
+# default ~60s read timeout would sever the invoke mid-run. Retries are
+# disabled: hooks are not guaranteed idempotent, and the state machine's own
+# Retry handles the transient Lambda.* errors.
+_lambda = boto3.client(
+    "lambda",
+    config=boto3.session.Config(
+        read_timeout=910, connect_timeout=10, retries={"max_attempts": 0}
+    ),
+)
 
 
 def _decompress_item(item: Dict[str, Any]) -> Dict[str, Any]:

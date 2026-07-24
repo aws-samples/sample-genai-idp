@@ -5073,7 +5073,14 @@ Resources:
       Handler: index.lambda_handler
       Runtime: python3.12
       Architectures: [arm64]
-      Timeout: 60
+      # Hooks are invoked synchronously (RequestResponse) through the
+      # dispatcher, so its timeout must cover the LONGEST hook it fronts —
+      # the PII-redaction preprocessing hook budgets up to ~890s for
+      # multi-page Textract+vision passes. 900 is the Lambda maximum. (The
+      # boto3 lambda client read_timeout is raised to match in index.py;
+      # boto's default ~60s would sever the invoke early regardless of this
+      # value.)
+      Timeout: 900
       MemorySize: 256
       Tracing: Active
       Role: !GetAtt PipelineHooksDispatcherFunctionRole.Arn

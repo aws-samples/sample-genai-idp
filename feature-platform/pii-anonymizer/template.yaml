@@ -137,7 +137,11 @@ Resources:
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref 'AWS::NoValue']
       CodeUri: hook/
       Handler: handler.lambda_handler
-      Timeout: 900
+      # 870, not 900: the host's PipelineHooksDispatcher fronts this hook
+      # synchronously and is capped at the Lambda max (900s) — the hook must
+      # finish (or time out) with margin for the dispatcher to return the
+      # failure cleanly instead of being killed mid-invoke itself.
+      Timeout: 870
       MemorySize: 3008
       Tags:
         'idp:feature-id': !Ref FeatureId
