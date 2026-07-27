@@ -350,9 +350,7 @@ class DocumentDynamoDBService:
                 set_expressions.append(
                     "#RuleValidationResultUri = :RuleValidationResultUri"
                 )
-                expression_names["#RuleValidationResultUri"] = (
-                    "RuleValidationResultUri"
-                )
+                expression_names["#RuleValidationResultUri"] = "RuleValidationResultUri"
                 expression_values[":RuleValidationResultUri"] = (
                     document.rule_validation_result.output_uri
                 )
@@ -1152,9 +1150,7 @@ class DocumentDynamoDBService:
             document.rule_validation_result
             and document.rule_validation_result.output_uri
         ):
-            item["RuleValidationResultUri"] = (
-                document.rule_validation_result.output_uri
-            )
+            item["RuleValidationResultUri"] = document.rule_validation_result.output_uri
 
         if document.sections:
             sections_data = []
