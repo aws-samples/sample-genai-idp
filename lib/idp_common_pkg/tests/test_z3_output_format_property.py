@@ -14,18 +14,14 @@ SHALL contain a `recommendation` field with a value that is exactly one of "Pass
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from hypothesis import given, settings, assume
+from hypothesis import given, settings
 from hypothesis import strategies as st
-
 from idp_common.config.schema_constants import (
     X_AWS_IDP_VALIDATION_ENGINE,
-    VALIDATION_ENGINE_LLM,
-    VALIDATION_ENGINE_Z3,
 )
-
 
 # --- Constants ---
 
@@ -136,9 +132,7 @@ class TestEngineOutputFormatInvariant:
         config = build_config_with_rules(rules)
 
         # Build a lookup of expected recommendations per rule description
-        recommendation_lookup = {
-            r["description"]: r["recommendation"] for r in rules
-        }
+        recommendation_lookup = {r["description"]: r["recommendation"] for r in rules}
 
         with patch(
             "idp_common.rule_validation.service.RuleValidationService.__init__",
@@ -208,7 +202,9 @@ class TestEngineOutputFormatInvariant:
     )
     @settings(max_examples=100)
     @pytest.mark.asyncio
-    async def test_z3_engine_output_format(self, rule_desc, policy_type, recommendation):
+    async def test_z3_engine_output_format(
+        self, rule_desc, policy_type, recommendation
+    ):
         """Z3 engine always returns recommendation in the valid set.
 
         Tests the _process_z3_rule method directly with mocked Z3EngineAdapter
@@ -266,7 +262,9 @@ class TestEngineOutputFormatInvariant:
     )
     @settings(max_examples=100)
     @pytest.mark.asyncio
-    async def test_llm_engine_output_format(self, rule_desc, policy_type, recommendation):
+    async def test_llm_engine_output_format(
+        self, rule_desc, policy_type, recommendation
+    ):
         """LLM engine always returns recommendation in the valid set.
 
         Tests the _process_rule_question method with mocked Bedrock invocation
@@ -380,9 +378,7 @@ class TestEngineOutputFormatInvariant:
 
             # Mock Z3EngineAdapter.validate_rule to raise an exception
             mock_adapter = MagicMock()
-            mock_adapter.validate_rule.side_effect = RuntimeError(
-                "Z3 solver timeout"
-            )
+            mock_adapter.validate_rule.side_effect = RuntimeError("Z3 solver timeout")
             service._z3_adapter = mock_adapter
 
             # Execute _process_z3_rule directly (error path)

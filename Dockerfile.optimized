@@ -36,12 +36,15 @@ COPY ${FUNCTION_PATH}/requirements.txt* /build/
 
 # Install all dependencies including idp_common_pkg in one step
 # Using mount from uv stage instead of COPY to avoid layer bloat
+# (z3-solver requires cmake/gcc to build from source, but has manylinux aarch64 wheels on PyPI)
 RUN --mount=from=uv,source=/uv,target=/bin/uv \
   --mount=type=cache,target=/root/.cache/uv \
   if [ -f /build/requirements.txt ]; then \
   sed 's|^\.\./\.\.\(/\.\.\)\?/lib/idp_common_pkg|/tmp/idp_common_pkg|' /build/requirements.txt > /tmp/requirements.txt && \
-  uv pip install --python python3.12 --target "${LAMBDA_TASK_ROOT}" -r /tmp/requirements.txt && \
-  rm /tmp/requirements.txt; \
+  pip3 install --only-binary=z3-solver --target "${LAMBDA_TASK_ROOT}" z3-solver && \
+  grep -v "z3-solver" /tmp/requirements.txt > /tmp/requirements_no_z3.txt && \
+  uv pip install --python python3.12 --target "${LAMBDA_TASK_ROOT}" -r /tmp/requirements_no_z3.txt && \
+  rm /tmp/requirements.txt /tmp/requirements_no_z3.txt; \
   fi && \
   rm -rf /tmp/idp_common_pkg
 

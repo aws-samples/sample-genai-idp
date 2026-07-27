@@ -15,16 +15,14 @@ and the set of accepted values.
 """
 
 import pytest
-from hypothesis import given, settings, assume
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
-from pydantic import ValidationError
-
 from idp_common.config.models import IDPConfig
 from idp_common.config.schema_constants import (
     VALID_VALIDATION_ENGINES,
     X_AWS_IDP_VALIDATION_ENGINE,
 )
-
+from pydantic import ValidationError
 
 # --- Strategies ---
 

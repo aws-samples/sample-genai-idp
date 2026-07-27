@@ -9,15 +9,11 @@ and rejects any other values with a clear error message.
 """
 
 import pytest
-from pydantic import ValidationError
-
 from idp_common.config.models import IDPConfig
 from idp_common.config.schema_constants import (
-    VALID_VALIDATION_ENGINES,
-    VALIDATION_ENGINE_LLM,
-    VALIDATION_ENGINE_Z3,
     X_AWS_IDP_VALIDATION_ENGINE,
 )
+from pydantic import ValidationError
 
 
 class TestValidationEngineFieldValidation:

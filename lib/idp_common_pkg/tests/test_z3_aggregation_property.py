@@ -14,18 +14,14 @@ indicating which engine produced it.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from hypothesis import given, settings, assume
+from hypothesis import given, settings
 from hypothesis import strategies as st
-
 from idp_common.config.schema_constants import (
     X_AWS_IDP_VALIDATION_ENGINE,
-    VALIDATION_ENGINE_LLM,
-    VALIDATION_ENGINE_Z3,
 )
-
 
 # --- Strategies ---
 
@@ -107,16 +103,18 @@ def mixed_engine_policy_class_strategy(draw):
 # --- Helpers ---
 
 # Fields that would expose engine type — these must NOT appear in results
-ENGINE_EXPOSING_FIELDS = frozenset([
-    "engine",
-    "engine_type",
-    "validation_engine",
-    "x-aws-idp-validation-engine",
-    "processed_by",
-    "engine_name",
-    "validator",
-    "validator_type",
-])
+ENGINE_EXPOSING_FIELDS = frozenset(
+    [
+        "engine",
+        "engine_type",
+        "validation_engine",
+        "x-aws-idp-validation-engine",
+        "processed_by",
+        "engine_name",
+        "validator",
+        "validator_type",
+    ]
+)
 
 
 def build_config_with_rules(rules):
@@ -235,8 +233,7 @@ class TestAggregatedResultsCompleteness:
 
             # Verify: exactly N results for N rules
             assert len(results) == n, (
-                f"Expected exactly {n} results for {n} rules, "
-                f"but got {len(results)}"
+                f"Expected exactly {n} results for {n} rules, but got {len(results)}"
             )
 
     @given(rules=policy_class_strategy())

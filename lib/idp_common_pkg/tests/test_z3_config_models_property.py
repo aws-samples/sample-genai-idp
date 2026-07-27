@@ -10,16 +10,14 @@ Validates: Requirements 3.1, 3.2, 3.3, 3.5
 """
 
 import pytest
-from hypothesis import given, settings, assume
+from hypothesis import given, settings
 from hypothesis import strategies as st
-from pydantic import ValidationError
-
 from idp_common.config.models import (
     RuleValidationConfig,
     Z3RuleTranslatorConfig,
     Z3ValueExtractionConfig,
 )
-
+from pydantic import ValidationError
 
 # --- Strategies ---
 
@@ -38,11 +36,17 @@ too_long_model_strings = st.text(
 )
 
 # Valid temperatures: floats in [0.0, 1.0]
-valid_temperatures = st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False)
+valid_temperatures = st.floats(
+    min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False
+)
 
 # Invalid temperatures: floats outside [0.0, 1.0]
-invalid_temperatures_below = st.floats(max_value=-0.001, allow_nan=False, allow_infinity=False)
-invalid_temperatures_above = st.floats(min_value=1.001, allow_nan=False, allow_infinity=False)
+invalid_temperatures_below = st.floats(
+    max_value=-0.001, allow_nan=False, allow_infinity=False
+)
+invalid_temperatures_above = st.floats(
+    min_value=1.001, allow_nan=False, allow_infinity=False
+)
 
 # Valid max_tokens: integers > 0
 valid_max_tokens = st.integers(min_value=1, max_value=1_000_000)
@@ -84,7 +88,10 @@ class TestZ3RuleTranslatorConfigModelField:
         """
         with pytest.raises(ValidationError) as exc_info:
             Z3RuleTranslatorConfig(model=model)
-        assert "model" in str(exc_info.value).lower() or "max_length" in str(exc_info.value).lower()
+        assert (
+            "model" in str(exc_info.value).lower()
+            or "max_length" in str(exc_info.value).lower()
+        )
 
 
 class TestZ3RuleTranslatorConfigTemperature:
@@ -172,7 +179,10 @@ class TestZ3ValueExtractionConfigModelField:
         """
         with pytest.raises(ValidationError) as exc_info:
             Z3ValueExtractionConfig(model=model)
-        assert "model" in str(exc_info.value).lower() or "max_length" in str(exc_info.value).lower()
+        assert (
+            "model" in str(exc_info.value).lower()
+            or "max_length" in str(exc_info.value).lower()
+        )
 
 
 class TestZ3ValueExtractionConfigTemperature:

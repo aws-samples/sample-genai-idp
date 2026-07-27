@@ -15,18 +15,14 @@ LLM engine — with no cross-routing.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from hypothesis import given, settings, assume
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
-
 from idp_common.config.schema_constants import (
     X_AWS_IDP_VALIDATION_ENGINE,
-    VALIDATION_ENGINE_LLM,
-    VALIDATION_ENGINE_Z3,
 )
-
 
 # --- Strategies ---
 
@@ -185,9 +181,7 @@ class TestEngineRoutingCorrectness:
             )
 
             # Verify routing correctness
-            expected_z3_rules = [
-                r["description"] for r in rules if r["engine"] == "z3"
-            ]
+            expected_z3_rules = [r["description"] for r in rules if r["engine"] == "z3"]
             expected_llm_rules = [
                 r["description"]
                 for r in rules

@@ -201,6 +201,9 @@ export const X_AWS_IDP_SOURCE_PAGE_TYPES = 'x-aws-idp-source-page-types';
 /** Per-rule validation engine selector (values: "llm" or "z3") */
 export const X_AWS_IDP_VALIDATION_ENGINE = 'x-aws-idp-validation-engine';
 
+/** Per-rule unique identifier for Z3 rules (maps to RuleJSON file on S3) */
+export const X_AWS_IDP_RULE_ID = 'x-aws-idp-rule-id';
+
 // UI-friendly validation engine options for dropdowns
 export const VALIDATION_ENGINE_OPTIONS = [
   { label: 'Semantic (LLM)', value: 'llm' },

@@ -16,12 +16,10 @@ SHALL be treated as not extracted.
 """
 
 import pytest
-from hypothesis import given, settings, assume
+from hypothesis import given, settings
 from hypothesis import strategies as st
-
 from idp_common.rule_validation.z3.data_extractor import DataExtractor
 from idp_common.rule_validation.z3.exceptions import ExtractionError
-
 
 # --- Strategies ---
 
@@ -34,8 +32,12 @@ valid_real_strings = st.floats(
 ).map(str)
 
 # Valid boolean strings (all accepted representations)
-valid_bool_true_strings = st.sampled_from(["yes", "Yes", "YES", "true", "True", "TRUE", "1"])
-valid_bool_false_strings = st.sampled_from(["no", "No", "NO", "false", "False", "FALSE", "0"])
+valid_bool_true_strings = st.sampled_from(
+    ["yes", "Yes", "YES", "true", "True", "TRUE", "1"]
+)
+valid_bool_false_strings = st.sampled_from(
+    ["no", "No", "NO", "false", "False", "FALSE", "0"]
+)
 valid_bool_strings = st.one_of(valid_bool_true_strings, valid_bool_false_strings)
 
 # Arbitrary strings for String type (any string is valid)
@@ -53,7 +55,10 @@ invalid_real_strings = st.from_regex(r"[a-zA-Z][a-zA-Z0-9]*", fullmatch=True).fi
 
 # Invalid boolean strings: strings not in the accepted set
 invalid_bool_strings = st.text(min_size=2, max_size=20).filter(
-    lambda s: s.strip().lower() not in ("yes", "no", "true", "false", "1", "0") and len(s.strip()) > 0
+    lambda s: (
+        s.strip().lower() not in ("yes", "no", "true", "false", "1", "0")
+        and len(s.strip()) > 0
+    )
 )
 
 
@@ -243,7 +248,11 @@ class TestTypeConversionCorrectness:
         assert isinstance(result, int)
         assert result == value
 
-    @given(value=st.floats(min_value=-1e6, max_value=1e6, allow_nan=False, allow_infinity=False))
+    @given(
+        value=st.floats(
+            min_value=-1e6, max_value=1e6, allow_nan=False, allow_infinity=False
+        )
+    )
     @settings(max_examples=100)
     def test_numeric_values_convert_to_real(self, value: float):
         """Numeric values (int or float) convert to float for Real type.

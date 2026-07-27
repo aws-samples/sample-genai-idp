@@ -90,12 +90,7 @@ The dropdown only writes the field to the schema when the user explicitly intera
 
 ## Lambda Deployment Note
 
-The `z3-solver` package (~50 MB native shared object) is in a **separate optional extra** (`rule_validation_z3`). The base `rule_validation` extra does NOT include z3-solver, keeping Lambda package sizes small.
-
-- **Without Z3 rules**: Use `idp_common[rule_validation]` — no z3-solver, no size impact.
-- **With Z3 rules**: Use `idp_common[rule_validation,rule_validation_z3]` — adds z3-solver. Ensure unzipped package stays under 250 MB or use a container-based Lambda.
-
-At runtime, z3-solver is imported **lazily** — only when a Z3 rule is actually encountered. If your config has no `x-aws-idp-validation-engine: z3` rules, the package is never loaded and has zero cold-start impact even if installed.
+The `z3-solver` package (~50 MB native shared object) is included in the `rule_validation` optional extra and is loaded **lazily** — it is only imported when a Z3 rule is actually encountered at runtime. If your config has no `x-aws-idp-validation-engine: z3` rules, the package is never loaded and has zero cold-start impact. For Lambda deployments with Z3 rules, ensure the unzipped package size stays under 250 MB or use a container-based Lambda.
 
 ## Limitations
 

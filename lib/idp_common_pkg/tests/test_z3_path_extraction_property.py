@@ -9,12 +9,9 @@ Feature: z3-dual-engine-rule-validation, Property 7: Path-Based Extraction Corre
 Validates: Requirements 6.1, 6.2
 """
 
-import pytest
-from hypothesis import given, settings, assume
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
-
 from idp_common.rule_validation.z3.data_extractor import DataExtractor
-
 
 # --- Strategies ---
 
@@ -22,7 +19,9 @@ from idp_common.rule_validation.z3.data_extractor import DataExtractor
 leaf_values = st.one_of(
     st.integers(min_value=-10000, max_value=10000),
     st.floats(min_value=-10000, max_value=10000, allow_nan=False, allow_infinity=False),
-    st.text(min_size=0, max_size=50, alphabet=st.characters(categories=("L", "N", "P"))),
+    st.text(
+        min_size=0, max_size=50, alphabet=st.characters(categories=("L", "N", "P"))
+    ),
     st.booleans(),
     st.none(),
 )
@@ -100,7 +99,9 @@ def nested_dict_with_invalid_path(draw):
 
     if strategy == 0:
         # Completely wrong first key
-        invalid_path = invalid_key + "." + ".".join(keys[1:]) if len(keys) > 1 else invalid_key
+        invalid_path = (
+            invalid_key + "." + ".".join(keys[1:]) if len(keys) > 1 else invalid_key
+        )
     elif strategy == 1:
         # Valid prefix but wrong last key
         if len(keys) > 1:
@@ -127,11 +128,13 @@ def path_through_non_dict(draw):
     assume(key1 != key2)
 
     # The value at key1 is a leaf (not a dict), so key1.key2 should fail
-    leaf = draw(st.one_of(
-        st.integers(min_value=-100, max_value=100),
-        st.text(min_size=1, max_size=20),
-        st.booleans(),
-    ))
+    leaf = draw(
+        st.one_of(
+            st.integers(min_value=-100, max_value=100),
+            st.text(min_size=1, max_size=20),
+            st.booleans(),
+        )
+    )
 
     nested = {key1: leaf}
     invalid_path = f"{key1}.{key2}"

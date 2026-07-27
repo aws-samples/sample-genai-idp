@@ -252,6 +252,13 @@ class RuleValidationOrchestratorService:
                     rule_groups[rule].append(response)
 
                 for rule, rule_responses in rule_groups.items():
+                    # Skip rules already resolved by Z3 — they have a final verdict
+                    if any(r.get("_z3_validated") for r in rule_responses):
+                        if policy_type not in final_responses:
+                            final_responses[policy_type] = []
+                        final_responses[policy_type].extend(rule_responses)
+                        continue
+
                     # Prepare summary prompt
                     prompt = self._prepare_prompt(
                         summary_config.task_prompt,
@@ -460,7 +467,473 @@ class RuleValidationOrchestratorService:
 
         except Exception as e:
             logger.error(f"Error loading section results: {str(e)}")
+            return {}, False
+
+    def _load_rule_json_from_s3(self, rule_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Load a pre-built RuleJSON from S3 using the configured bucket/prefix.
+
+        Args:
+            rule_id: The unique rule identifier
+
+        Returns:
+            Parsed RuleJSON dict, or None if not found or not configured.
+        """
+        bucket = self.config.rule_validation.z3_rules_bucket
+        prefix = self.config.rule_validation.z3_rules_prefix
+
+        if not bucket or not rule_id:
+            logger.warning(
+                f"Cannot load RuleJSON: z3_rules_bucket={bucket}, rule_id={rule_id}"
+            )
+            return None
+
+        key = f"{prefix}/{rule_id}.json" if prefix else f"{rule_id}.json"
+        s3_uri = f"s3://{bucket}/{key}"
+
+        try:
+            data = s3.get_json_content(s3_uri)
+            if data:
+                logger.info(f"Loaded RuleJSON from S3 for orchestrator: {s3_uri}")
+                return data
+            else:
+                logger.warning(f"RuleJSON not found at S3: {s3_uri}")
+                return None
+        except Exception as e:
+            logger.error(f"Failed to load RuleJSON from S3 ({s3_uri}): {e}")
+            return None
+
+    def _collect_facts_across_sections(
+        self, z3_responses: List[Dict[str, Any]]
+    ) -> List[Dict[str, str]]:
+        """
+        Collect all extracted facts from multiple sections for a Z3 rule.
+
+        Args:
+            z3_responses: List of section responses tagged with z3_parameters
+
+        Returns:
+            Combined list of extracted_facts from all sections
+        """
+        all_facts = []
+        for response in z3_responses:
+            facts = response.get("extracted_facts", [])
+            if isinstance(facts, list):
+                all_facts.extend(facts)
+        return all_facts
+
+    async def _extract_z3_values_from_facts(
+        self,
+        rule_json_data: Dict[str, Any],
+        all_facts: List[Dict[str, str]],
+        rule_description: str,
+    ) -> Dict[str, Any]:
+        """
+        Use LLM to extract typed parameter values from collected facts.
+
+        This is the Z3-specific value extraction step in the orchestrator.
+        It takes the text facts gathered across all sections and the RuleJSON
+        parameter definitions, then asks the LLM to produce typed values
+        for each parameter.
+
+        Args:
+            rule_json_data: The RuleJSON dict with parameter definitions
+            all_facts: Combined extracted facts from all sections
+            rule_description: The natural language rule text
+
+        Returns:
+            Dict of {param_name: typed_value} ready for Z3 solver
+        """
+        parameters = rule_json_data.get("parameters", [])
+
+        # Build parameter descriptions
+        param_lines = []
+        for param in parameters:
+            name = param.get("name", "unknown")
+            param_type = param.get("type", "String")
+            description = param.get("description", "")
+            required = param.get("required", True)
+            req_str = "REQUIRED" if required else "OPTIONAL"
+            param_lines.append(
+                f"- {name} (type: {param_type}, {req_str}): {description}"
+            )
+        parameters_text = "\n".join(param_lines)
+
+        # Format facts as text
+        facts_text = json.dumps(all_facts, indent=2)
+
+        system_prompt = (
+            "You are a Value Extraction Specialist. Your task is to extract "
+            "specific typed parameter values from a set of extracted facts. "
+            "These values will be used for formal constraint validation.\n\n"
+            "## Guidelines\n"
+            "1. Return values in their correct type: Int → integer number, "
+            "Real → decimal number, Bool → true/false, String → text\n"
+            "2. If a parameter value cannot be determined from the facts, "
+            "return null\n"
+            "3. Use only information present in the provided facts\n"
+            "4. When multiple facts provide conflicting values for the same "
+            "parameter, prefer the fact with higher relevance or more specific data"
+        )
+
+        task_prompt = (
+            "Given the following extracted facts from a document and the "
+            "parameter definitions for a rule, extract the typed value for "
+            "each parameter.\n\n"
+            f"<rule>\n{rule_description}\n</rule>\n\n"
+            f"<parameters>\n{parameters_text}\n</parameters>\n\n"
+            f"<extracted-facts>\n{facts_text}\n</extracted-facts>\n\n"
+            "For each parameter, determine its value from the facts above. "
+            "Return the value in its correct type.\n\n"
+            "JSON RESPONSE FORMAT:\n"
+            "{\n"
+            '  "values": {\n'
+            '    "parameter_name": <typed value or null>\n'
+            "  }\n"
+            "}\n\n"
+            "CRITICAL: Respond ONLY with the JSON format inside "
+            "<response></response> XML tags."
+        )
+
+        config_obj = self.config
+        cv_config = config_obj.rule_validation.fact_extraction
+        model_id = cv_config.model
+
+        async with self.semaphore:
+            response = await self._invoke_model_async(
+                model_id=model_id,
+                system_prompt=system_prompt,
+                content=task_prompt,
+                temperature=0,
+                top_p=0,
+                top_k=cv_config.top_k,
+                max_tokens=cv_config.max_tokens,
+                context="Z3ValueExtraction",
+            )
+
+        response_text = bedrock.extract_text_from_response(response)
+
+        try:
+            if "<response>" in response_text and "</response>" in response_text:
+                start_idx = response_text.find("<response>") + 10
+                end_idx = response_text.find("</response>")
+                response_text = response_text[start_idx:end_idx].strip()
+            elif "```json" in response_text:
+                start_idx = response_text.find("```json") + 7
+                end_idx = response_text.find("```", start_idx)
+                response_text = response_text[start_idx:end_idx].strip()
+
+            response_dict = json.loads(response_text)
+            return response_dict.get("values", {})
+        except json.JSONDecodeError:
+            logger.error(
+                f"Failed to parse Z3 value extraction response: {response_text[:200]}"
+            )
             return {}
+
+    def _run_z3_validation(
+        self,
+        rule_json_data: Dict[str, Any],
+        extracted_values: Dict[str, Any],
+        supporting_pages: List[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Run Z3 constraint validation with extracted parameter values.
+
+        Uses Z3Validator directly (no LLM translator needed since we already
+        have the RuleJSON and extracted parameter values).
+
+        Args:
+            rule_json_data: The RuleJSON dict loaded from S3
+            extracted_values: Flat dict of {param_name: typed_value} from LLM extraction
+            supporting_pages: Page citations collected from the extracted facts
+
+        Returns:
+            Z3 validation result dict with recommendation, reasoning, supporting_pages
+        """
+        from idp_common.rule_validation.z3.models import RuleJSON
+        from idp_common.rule_validation.z3.z3_validator import Z3Validator
+
+        try:
+            # Parse RuleJSON
+            rule_json = RuleJSON.from_dict(rule_json_data)
+
+            # Run Z3 validation directly (no translator/LLM needed)
+            timeout_ms = self.config.rule_validation.z3_timeout_ms
+            validator = Z3Validator(timeout_ms=timeout_ms)
+            result = validator.validate(rule_json, extracted_values)
+
+            # Determine recommendation from result
+            if result.passes():
+                recommendation = "Pass"
+            elif result.fails():
+                recommendation = "Fail"
+            else:
+                recommendation = "Information Not Found"
+
+            # Build reasoning
+            param_summary = ", ".join(
+                f"{k}={v}" for k, v in extracted_values.items() if v is not None
+            )
+            if result.passes():
+                reasoning = (
+                    f"Z3 formal verification: All constraints satisfied. "
+                    f"Parameters: {param_summary}"
+                )
+            elif result.fails():
+                details = (
+                    getattr(result, "details", None)
+                    or getattr(result, "error_message", None)
+                    or "constraint unsatisfied"
+                )
+                reasoning = (
+                    f"Z3 formal verification: Constraint violation detected. "
+                    f"Parameters: {param_summary}. "
+                    f"Details: {details}"
+                )
+            else:
+                reasoning = (
+                    f"Z3 formal verification: Unable to determine outcome. "
+                    f"Result: {result.outcome}"
+                )
+
+            return {
+                "recommendation": recommendation,
+                "reasoning": reasoning,
+                "supporting_pages": supporting_pages or [],
+                "_z3_validated": True,
+            }
+
+        except Exception as e:
+            logger.error(f"Z3 validation failed in orchestrator: {e}")
+            return {
+                "recommendation": "Information Not Found",
+                "reasoning": f"Z3 validation error in orchestrator: {e}",
+                "supporting_pages": supporting_pages or [],
+                "_z3_error": True,
+            }
+
+    async def _process_z3_cross_section_rules(
+        self,
+        all_responses: Dict[str, Any],
+        config: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Process Z3 rules using collected facts from all sections.
+
+        The orchestrator determines which rules are Z3 by reading the
+        policy_classes config (x-aws-idp-validation-engine + x-aws-idp-rule-id),
+        NOT from any tagging in the per-section responses.
+
+        Flow:
+        1. Build lookup from config: which rules are Z3 and their rule_ids
+        2. Match responses by (policy_type, rule_description) against the lookup
+        3. For each Z3 rule: collect facts from all sections
+        4. Call LLM to extract typed parameter values from the collected facts
+        5. If all required parameters have values: run Z3 solver
+        6. If incomplete: fall back to LLM orchestrator reasoning
+        7. Replace matched responses with Z3 verdicts (or keep for LLM fallback)
+
+        Args:
+            all_responses: All section responses grouped by policy_type
+            config: Configuration dictionary (contains policy_classes)
+
+        Returns:
+            Updated all_responses with Z3 rules resolved to Pass/Fail/Info Not Found
+        """
+        from idp_common.config.schema_constants import (
+            VALIDATION_ENGINE_Z3,
+            X_AWS_IDP_RULE_ID,
+            X_AWS_IDP_VALIDATION_ENGINE,
+        )
+
+        # Step 1: Build Z3 rule lookup from config
+        # {(policy_type, rule_description): rule_id}
+        z3_rule_lookup = {}
+        policy_classes = config.get("policy_classes", [])
+        if not policy_classes:
+            # Try nested under rule_validation
+            policy_classes = config.get("rule_validation", {}).get("policy_classes", [])
+
+        for policy_class in policy_classes:
+            policy_type = policy_class.get("x-aws-idp-policy-type")
+            if not policy_type:
+                continue
+            rule_properties = policy_class.get("rule_properties", {})
+            for prop in rule_properties.values():
+                engine = prop.get(X_AWS_IDP_VALIDATION_ENGINE, "llm")
+                rule_id = prop.get(X_AWS_IDP_RULE_ID)
+                description = prop.get("description")
+                if engine == VALIDATION_ENGINE_Z3 and rule_id and description:
+                    z3_rule_lookup[(policy_type, description)] = rule_id
+
+        if not z3_rule_lookup:
+            logger.debug("No Z3 rules found in config")
+            return all_responses
+
+        logger.info(
+            f"Found {len(z3_rule_lookup)} Z3 rules in config: "
+            f"{list(z3_rule_lookup.values())}"
+        )
+
+        # Step 2: Match responses against the Z3 lookup
+        # Group by rule_id, collecting all matching responses across sections
+        z3_rules_found = {}  # {rule_id: {"policy_type": ..., "rule": ..., "responses": [...]}}
+
+        for policy_type, responses in all_responses.items():
+            if not isinstance(responses, list):
+                continue
+            for response in responses:
+                rule_text = response.get("rule", "")
+                key = (policy_type, rule_text)
+                if key in z3_rule_lookup:
+                    rule_id = z3_rule_lookup[key]
+                    if rule_id not in z3_rules_found:
+                        z3_rules_found[rule_id] = {
+                            "policy_type": policy_type,
+                            "rule": rule_text,
+                            "responses": [],
+                        }
+                    z3_rules_found[rule_id]["responses"].append(response)
+
+        if not z3_rules_found:
+            logger.debug(
+                "No Z3 rule responses matched in section results "
+                "(rules may not have been processed yet)"
+            )
+            return all_responses
+
+        logger.info(
+            f"Matched {len(z3_rules_found)} Z3 rules in section results: "
+            f"{list(z3_rules_found.keys())}"
+        )
+
+        # Step 3: Process each Z3 rule
+        z3_verdicts = {}  # {rule_id: verdict_dict}
+
+        for rule_id, rule_info in z3_rules_found.items():
+            policy_type = rule_info["policy_type"]
+            rule_description = rule_info["rule"]
+            section_responses = rule_info["responses"]
+
+            logger.info(
+                f"Processing Z3 rule_id='{rule_id}' with "
+                f"{len(section_responses)} section responses"
+            )
+
+            # Collect all extracted facts from all sections
+            all_facts = self._collect_facts_across_sections(section_responses)
+            logger.info(
+                f"Z3 rule_id='{rule_id}': collected {len(all_facts)} facts "
+                f"from {len(section_responses)} sections"
+            )
+
+            if not all_facts:
+                logger.warning(
+                    f"Z3 rule_id='{rule_id}': no facts extracted from any section. "
+                    f"Falling back to LLM reasoning."
+                )
+                z3_verdicts[rule_id] = None
+                continue
+
+            # Load RuleJSON from S3
+            rule_json_data = self._load_rule_json_from_s3(rule_id)
+            if not rule_json_data:
+                logger.warning(
+                    f"RuleJSON not found for rule_id='{rule_id}' during orchestration. "
+                    f"Will fall back to LLM reasoning."
+                )
+                z3_verdicts[rule_id] = None
+                continue
+
+            # LLM value extraction — convert facts to typed parameter values
+            extracted_values = await self._extract_z3_values_from_facts(
+                rule_json_data, all_facts, rule_description
+            )
+            logger.info(
+                f"Z3 rule_id='{rule_id}': LLM extracted values: {extracted_values}"
+            )
+
+            # Check if all required parameters have non-null values
+            required_params = [
+                p
+                for p in rule_json_data.get("parameters", [])
+                if p.get("required", True)
+            ]
+            missing_params = [
+                p.get("name")
+                for p in required_params
+                if extracted_values.get(p.get("name")) is None
+            ]
+
+            if missing_params:
+                logger.warning(
+                    f"Z3 rule_id='{rule_id}': missing required parameters "
+                    f"{missing_params} after LLM value extraction. "
+                    f"Falling back to LLM reasoning."
+                )
+                z3_verdicts[rule_id] = None
+                continue
+
+            # Collect supporting pages from facts
+            supporting_pages = []
+            for fact in all_facts:
+                citation = fact.get("citation", "")
+                if citation:
+                    pages = str(citation).split(",")
+                    supporting_pages.extend([p.strip() for p in pages if p.strip()])
+            supporting_pages = sorted(
+                list(set(supporting_pages)),
+                key=lambda x: int(x) if x.isdigit() else 0,
+            )
+
+            # Run Z3 solver
+            verdict = self._run_z3_validation(
+                rule_json_data, extracted_values, supporting_pages
+            )
+            verdict["policy_type"] = policy_type
+            verdict["rule"] = rule_description
+            z3_verdicts[rule_id] = verdict
+
+            logger.info(
+                f"Z3 rule_id='{rule_id}' verdict: {verdict.get('recommendation')}"
+            )
+
+        # Step 4: Update all_responses — replace Z3 rule responses with verdicts
+        # Build a reverse lookup: (policy_type, rule_text) → rule_id for quick matching
+        for policy_type in list(all_responses.keys()):
+            responses = all_responses[policy_type]
+            if not isinstance(responses, list):
+                continue
+
+            updated_responses = []
+            z3_verdicts_added = set()  # Track which Z3 verdicts we've already added
+
+            for response in responses:
+                rule_text = response.get("rule", "")
+                key = (policy_type, rule_text)
+
+                if key in z3_rule_lookup:
+                    rule_id = z3_rule_lookup[key]
+                    verdict = z3_verdicts.get(rule_id)
+
+                    if verdict is not None:
+                        # Z3 produced a verdict — add it once (skip duplicates
+                        # from other sections for the same rule)
+                        if rule_id not in z3_verdicts_added:
+                            updated_responses.append(verdict)
+                            z3_verdicts_added.add(rule_id)
+                    else:
+                        # Fallback to LLM: keep the response as-is so the
+                        # LLM orchestrator can reason over its facts
+                        updated_responses.append(response)
+                else:
+                    # Regular LLM response — keep as-is
+                    updated_responses.append(response)
+
+            all_responses[policy_type] = updated_responses
+
+        return all_responses
 
     def save_policy_type_responses(
         self, all_responses: Dict[str, Any], document_input_key: str, output_bucket: str
@@ -778,6 +1251,14 @@ tr:hover {
             if not all_responses:
                 logger.warning("No section results found to consolidate")
                 return document
+
+            # Process Z3 cross-section rules: merge parameter values from all
+            # sections and run Z3 validation. This must happen BEFORE the LLM
+            # orchestrator summarization so that Z3 verdicts are included in
+            # the final consolidated results.
+            all_responses = await self._process_z3_cross_section_rules(
+                all_responses, config
+            )
 
             # Determine if summarization is needed: multiple sections OR chunking occurred
             prefix = f"{document.input_key}/rule_validation/sections/"

@@ -13,12 +13,9 @@ and deserializing back via `from_dict()` SHALL produce an equivalent RuleJSON in
 **Validates: Requirements 5.5**
 """
 
-import pytest
-from hypothesis import given, settings, assume
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
-
 from idp_common.rule_validation.z3.models import Parameter, PathMapping, RuleJSON
-
 
 # --- Strategies ---
 
@@ -30,7 +27,9 @@ valid_param_names = st.from_regex(r"[a-zA-Z][a-zA-Z0-9_]{0,19}", fullmatch=True)
 
 # Valid dot-notation data paths (no consecutive dots, no leading/trailing dots)
 path_segments = st.from_regex(r"[a-zA-Z][a-zA-Z0-9_]{0,9}", fullmatch=True)
-valid_data_paths = st.lists(path_segments, min_size=1, max_size=4).map(lambda parts: ".".join(parts))
+valid_data_paths = st.lists(path_segments, min_size=1, max_size=4).map(
+    lambda parts: ".".join(parts)
+)
 
 # Valid parameter types
 valid_param_types = st.sampled_from(VALID_PARAM_TYPES)
@@ -44,6 +43,7 @@ non_empty_strings = st.text(
 
 # Version strings
 version_strings = st.from_regex(r"[0-9]+\.[0-9]+\.[0-9]+", fullmatch=True)
+
 
 # Simple SMT-LIB constraint strings (valid expressions using parameter names)
 # We generate constraints that reference parameter names to pass validation
@@ -85,7 +85,9 @@ def valid_parameter(draw):
     param_type = draw(valid_param_types)
     required = draw(st.booleans())
     description = draw(st.one_of(st.none(), non_empty_strings))
-    return Parameter(name=name, type=param_type, required=required, description=description)
+    return Parameter(
+        name=name, type=param_type, required=required, description=description
+    )
 
 
 @st.composite
@@ -102,7 +104,11 @@ def valid_rulejson_without_path_mappings(draw):
         param_type = draw(valid_param_types)
         required = draw(st.booleans())
         description = draw(st.one_of(st.none(), non_empty_strings))
-        parameters.append(Parameter(name=name, type=param_type, required=required, description=description))
+        parameters.append(
+            Parameter(
+                name=name, type=param_type, required=required, description=description
+            )
+        )
 
     # Generate 1-3 constraints referencing the parameter names
     param_name_list = list(param_names_set)
@@ -144,13 +150,19 @@ def valid_rulejson_with_path_mappings(draw):
         param_type = draw(valid_param_types)
         description = draw(st.one_of(st.none(), non_empty_strings))
         # All parameters are required when path mappings exist (bijection requirement)
-        parameters.append(Parameter(name=name, type=param_type, required=True, description=description))
+        parameters.append(
+            Parameter(
+                name=name, type=param_type, required=True, description=description
+            )
+        )
 
     # Generate path mappings for each required parameter (bijection)
     path_mappings = []
     for param in parameters:
         data_path = draw(valid_data_paths)
-        path_mappings.append(PathMapping(parameter_name=param.name, data_path=data_path))
+        path_mappings.append(
+            PathMapping(parameter_name=param.name, data_path=data_path)
+        )
 
     # Generate 1-3 constraints referencing the parameter names
     param_name_list = list(param_names_set)

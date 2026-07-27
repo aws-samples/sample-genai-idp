@@ -20,7 +20,7 @@ Flow per rule:
 
 import json
 import logging
-from typing import Any, Dict, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
 from idp_common import s3
 from idp_common.config.models import (
@@ -28,6 +28,9 @@ from idp_common.config.models import (
     Z3RuleTranslatorConfig,
     Z3ValueExtractionConfig,
 )
+
+if TYPE_CHECKING:
+    from .z3.models import RuleJSON, ValidationResult
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +190,9 @@ class Z3EngineAdapter:
         except Exception as e:
             # Catch all Z3-related exceptions (TranslationError, ExtractionError,
             # ValidationError, ValidationSystemError) and any unexpected errors.
-            logger.error(f"Z3 validation failed for rule '{rule_description[:80]}': {e}")
+            logger.error(
+                f"Z3 validation failed for rule '{rule_description[:80]}': {e}"
+            )
             return {
                 "rule_type": rule_type,
                 "rule": rule_description,
@@ -221,7 +226,9 @@ class Z3EngineAdapter:
 
         if has_structured and has_paths:
             try:
-                return self.system.extractor.extract_values(rule_json, extraction_results)
+                return self.system.extractor.extract_values(
+                    rule_json, extraction_results
+                )
             except Exception as e:
                 logger.warning(
                     f"Path-based extraction failed for {rule_json.rule_id}: {e}. "
@@ -253,7 +260,6 @@ class Z3EngineAdapter:
         cache_prefix: Optional[str] = None,
     ):
         """Load cached RuleJSON or translate from natural language."""
-        from .z3.models import RuleJSON
 
         # Check memory cache first
         if rule_description in self._rule_cache:
@@ -262,7 +268,9 @@ class Z3EngineAdapter:
 
         # Check S3 cache
         if output_bucket and cache_prefix:
-            rule_json = self._load_from_s3(output_bucket, cache_prefix, rule_description)
+            rule_json = self._load_from_s3(
+                output_bucket, cache_prefix, rule_description
+            )
             if rule_json:
                 self._rule_cache[rule_description] = rule_json
                 return rule_json
@@ -317,11 +325,14 @@ class Z3EngineAdapter:
     def _s3_key(prefix, rule_description):
         """Generate a deterministic S3 key for a rule description."""
         import hashlib
+
         rule_hash = hashlib.sha256(rule_description.encode()).hexdigest()[:12]
         return f"{prefix}/z3_rules/{rule_hash}.json"
 
     @staticmethod
-    def _to_llm_response(result: "ValidationResult", rule_type: str, rule_description: str) -> Dict[str, Any]:
+    def _to_llm_response(
+        result: "ValidationResult", rule_type: str, rule_description: str
+    ) -> Dict[str, Any]:
         """Convert Z3 ValidationResult to the dict shape expected by the orchestrator."""
         recommendation = _OUTCOME_TO_RECOMMENDATION.get(
             result.outcome, "Information Not Found"

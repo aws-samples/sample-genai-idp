@@ -47,6 +47,7 @@ import {
   X_AWS_IDP_PAGE_TYPES,
   X_AWS_IDP_SOURCE_PAGE_TYPES,
   X_AWS_IDP_VALIDATION_ENGINE,
+  X_AWS_IDP_RULE_ID,
   VALIDATION_ENGINE_OPTIONS,
 } from '../../constants/schemaConstants';
 
@@ -650,6 +651,18 @@ const SchemaInspector = ({
                 onUpdate({ [X_AWS_IDP_VALIDATION_ENGINE]: detail.selectedOption.value });
               }}
               options={VALIDATION_ENGINE_OPTIONS}
+            />
+          </FormField>
+        )}
+
+        {isRuleSchema && (
+          <FormField label="Rule ID" description="Unique identifier for this rule (e.g., coverage_income_ratio)">
+            <Input
+              value={(selectedAttribute[X_AWS_IDP_RULE_ID] as string) || ''}
+              onChange={({ detail }) => {
+                onUpdate({ [X_AWS_IDP_RULE_ID]: detail.value || undefined });
+              }}
+              placeholder="e.g., coverage_income_ratio"
             />
           </FormField>
         )}

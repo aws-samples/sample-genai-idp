@@ -15,17 +15,15 @@ engine's output (not "Information Not Found"), unless the LLM engine also fails.
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from hypothesis import given, settings, assume
+from hypothesis import given, settings
 from hypothesis import strategies as st
-
 from idp_common.config.schema_constants import (
-    X_AWS_IDP_VALIDATION_ENGINE,
     VALIDATION_ENGINE_Z3,
+    X_AWS_IDP_VALIDATION_ENGINE,
 )
-
 
 # --- Strategies ---
 
@@ -37,14 +35,16 @@ rule_description_strategy = st.text(
 ).filter(lambda s: s.strip())
 
 # Strategy for Z3 error reasoning messages
-z3_error_reasoning_strategy = st.sampled_from([
-    "Z3 engine error: TranslationError - Failed to translate rule to SMT-LIB",
-    "Z3 engine error: ExtractionError - Could not extract parameter values",
-    "Z3 engine error: ValidationError - Constraint parsing failed",
-    "Z3 engine error: Solver timeout exceeded",
-    "Z3 engine error: ValidationSystemError - General system failure",
-    "Z3 engine error: Invalid RuleJSON structure",
-])
+z3_error_reasoning_strategy = st.sampled_from(
+    [
+        "Z3 engine error: TranslationError - Failed to translate rule to SMT-LIB",
+        "Z3 engine error: ExtractionError - Could not extract parameter values",
+        "Z3 engine error: ValidationError - Constraint parsing failed",
+        "Z3 engine error: Solver timeout exceeded",
+        "Z3 engine error: ValidationSystemError - General system failure",
+        "Z3 engine error: Invalid RuleJSON structure",
+    ]
+)
 
 # Strategy for LLM recommendation outcomes (Pass or Fail — valid LLM results)
 llm_recommendation_strategy = st.sampled_from(["Pass", "Fail"])
@@ -76,11 +76,13 @@ def z3_failing_rules_strategy(draw):
         description = f"Z3Rule {i}: {suffix}"
         error_reasoning = draw(z3_error_reasoning_strategy)
         llm_recommendation = draw(llm_recommendation_strategy)
-        rules.append({
-            "description": description,
-            "error_reasoning": error_reasoning,
-            "llm_recommendation": llm_recommendation,
-        })
+        rules.append(
+            {
+                "description": description,
+                "error_reasoning": error_reasoning,
+                "llm_recommendation": llm_recommendation,
+            }
+        )
     return rules
 
 

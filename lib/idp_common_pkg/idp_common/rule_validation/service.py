@@ -25,6 +25,7 @@ from idp_common.config.schema_constants import (
     VALIDATION_ENGINE_LLM,
     VALIDATION_ENGINE_Z3,
     X_AWS_IDP_POLICY_TYPE,
+    X_AWS_IDP_RULE_ID,
     X_AWS_IDP_RULE_TYPE,
     X_AWS_IDP_VALIDATION_ENGINE,
 )
@@ -128,9 +129,7 @@ class RuleValidationService:
         ):
             from idp_common.rule_validation.z3_engine import Z3EngineAdapter
 
-            self._z3_adapter = Z3EngineAdapter(
-                config=self.config, region=self.region
-            )
+            self._z3_adapter = Z3EngineAdapter(config=self.config, region=self.region)
             logger.info("Z3EngineAdapter eagerly initialized from config")
 
     @property
@@ -154,9 +153,7 @@ class RuleValidationService:
         if self._z3_adapter is None:
             from idp_common.rule_validation.z3_engine import Z3EngineAdapter
 
-            self._z3_adapter = Z3EngineAdapter(
-                config=self.config, region=self.region
-            )
+            self._z3_adapter = Z3EngineAdapter(config=self.config, region=self.region)
             logger.info("Z3EngineAdapter lazily initialized on first Z3 rule encounter")
         return self._z3_adapter
 
@@ -170,10 +167,13 @@ class RuleValidationService:
                 # Double-check after acquiring lock
                 if self._z3_adapter is None:
                     from idp_common.rule_validation.z3_engine import Z3EngineAdapter
+
                     self._z3_adapter = Z3EngineAdapter(
                         config=self.config, region=self.region
                     )
-                    logger.info("Z3EngineAdapter lazily initialized on first Z3 rule encounter")
+                    logger.info(
+                        "Z3EngineAdapter lazily initialized on first Z3 rule encounter"
+                    )
         return self._z3_adapter
 
     def _get_policy_types(self, config: Dict[str, Any]) -> List[str]:
@@ -252,10 +252,14 @@ class RuleValidationService:
                         engine = prop.get(
                             X_AWS_IDP_VALIDATION_ENGINE, VALIDATION_ENGINE_LLM
                         )
-                        metadata.append({
-                            "description": description,
-                            "engine": engine,
-                        })
+                        rule_id = prop.get(X_AWS_IDP_RULE_ID)
+                        metadata.append(
+                            {
+                                "description": description,
+                                "engine": engine,
+                                "rule_id": rule_id,
+                            }
+                        )
                 logger.debug(
                     f"Extracted {len(metadata)} rule metadata entries for "
                     f"policy_type '{policy_type}': "
@@ -347,9 +351,7 @@ class RuleValidationService:
         # Early return if entire text fits in one chunk
         estimated_tokens = len(text) // token_size
         if estimated_tokens <= max_chunk_size:
-            logger.debug(
-                f"Page chunk single chunk estimated_tokens={estimated_tokens}"
-            )
+            logger.debug(f"Page chunk single chunk estimated_tokens={estimated_tokens}")
             return [text]
 
         # Parse pages using regex
@@ -692,9 +694,7 @@ class RuleValidationService:
                     f"Raw response keys: {list(response.keys()) if response else 'None'}"
                 )
                 logger.debug(f"Metering data: {metering}")
-                logger.debug(
-                    f"Token metrics before merge: {self.token_metrics}"
-                )
+                logger.debug(f"Token metrics before merge: {self.token_metrics}")
 
                 # Merge metering data using the same utility as extraction service with synchronization
                 async with self.metrics_lock:
@@ -702,9 +702,7 @@ class RuleValidationService:
                     self.token_metrics = utils.merge_metering_data(
                         self.token_metrics, metering or {}
                     )
-                    logger.debug(
-                        f"Token metrics after merge: {self.token_metrics}"
-                    )
+                    logger.debug(f"Token metrics after merge: {self.token_metrics}")
                     logger.debug(
                         f"Metrics changed: {old_metrics != self.token_metrics}"
                     )
@@ -763,8 +761,8 @@ class RuleValidationService:
                     policy_type,
                     extraction_results or {},
                     document_text,
-                    None,  # output_bucket
-                    None,  # cache_prefix
+                    config.get("output_bucket"),  # output_bucket
+                    config.get("input_key", ""),  # cache_prefix
                 )
 
                 duration = time.time() - start_time
@@ -849,6 +847,110 @@ class RuleValidationService:
         # Z3 succeeded — return its result
         return z3_result
 
+    def _load_rule_json_from_s3(self, rule_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Load a pre-built RuleJSON from S3 using the configured bucket/prefix.
+
+        The RuleJSON is stored at:
+            s3://{z3_rules_bucket}/{z3_rules_prefix}/{rule_id}.json
+
+        Args:
+            rule_id: The unique rule identifier (from x-aws-idp-rule-id in config)
+
+        Returns:
+            Parsed RuleJSON dict, or None if not found or not configured.
+        """
+        bucket = self.config.rule_validation.z3_rules_bucket
+        prefix = self.config.rule_validation.z3_rules_prefix
+
+        if not bucket or not rule_id:
+            logger.warning(
+                f"Cannot load RuleJSON: z3_rules_bucket={bucket}, rule_id={rule_id}"
+            )
+            return None
+
+        key = f"{prefix}/{rule_id}.json" if prefix else f"{rule_id}.json"
+        s3_uri = f"s3://{bucket}/{key}"
+
+        try:
+            data = s3.get_json_content(s3_uri)
+            if data:
+                logger.info(f"Loaded RuleJSON from S3: {s3_uri}")
+                return data
+            else:
+                logger.warning(f"RuleJSON not found at S3: {s3_uri}")
+                return None
+        except Exception as e:
+            logger.error(f"Failed to load RuleJSON from S3 ({s3_uri}): {e}")
+            return None
+
+    async def _process_z3_fact_extraction(
+        self,
+        rule_description: str,
+        rule_id: str,
+        policy_type: str,
+        extraction_results: Dict[str, Any],
+        document_text: str,
+        config: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Extract facts for a Z3 rule using the standard fact extraction prompt,
+        augmented with Z3 parameter definitions for better context.
+
+        This uses the same LLM call as standard LLM rules (_process_rule_question),
+        but appends the Z3 parameter names/types/descriptions to the rule text so
+        the LLM knows what specific values to look for in the document.
+
+        The output format is identical to LLM rules — no special tagging.
+        The orchestrator determines which rules are Z3 by reading the config.
+
+        Args:
+            rule_description: The natural language rule text
+            rule_id: Unique rule identifier (used to load RuleJSON for context)
+            policy_type: Type of policy
+            extraction_results: Structured extraction results for this section
+            document_text: Raw document text for this section
+            config: Configuration dictionary
+
+        Returns:
+            FactExtractionResponse dict (same format as LLM rules)
+        """
+        # Load RuleJSON to get parameter definitions for context augmentation
+        rule_json_data = self._load_rule_json_from_s3(rule_id)
+
+        # Build augmented rule description with parameter context
+        augmented_rule = rule_description
+        if rule_json_data:
+            parameters = rule_json_data.get("parameters", [])
+            if parameters:
+                param_lines = []
+                for param in parameters:
+                    name = param.get("name", "unknown")
+                    param_type = param.get("type", "String")
+                    description = param.get("description", "")
+                    param_lines.append(f"  - {name} ({param_type}): {description}")
+                params_context = "\n".join(param_lines)
+                augmented_rule = (
+                    f"{rule_description}\n\n"
+                    f"[Key parameters to extract evidence for:\n"
+                    f"{params_context}]"
+                )
+
+        # Use standard fact extraction with augmented rule text
+        result = await self._process_rule_question(
+            rule=augmented_rule,
+            user_history=document_text,
+            policy_type=policy_type,
+            config=config,
+            extraction_results=extraction_results,
+        )
+
+        # Restore the original rule description (without augmentation)
+        # so the orchestrator can match it against config
+        result["rule"] = rule_description
+
+        return result
+
     async def _process_policy_type(
         self,
         policy_type: str,
@@ -891,15 +993,34 @@ class RuleValidationService:
             for rule_meta in rule_metadata:
                 rule_description = rule_meta["description"]
                 engine = rule_meta["engine"]
+                rule_id = rule_meta.get("rule_id")
 
-                if engine == VALIDATION_ENGINE_Z3:
-                    # Dispatch to Z3 engine with automatic LLM fallback on error
-                    task = self._process_z3_rule_with_fallback(
+                if engine == VALIDATION_ENGINE_Z3 and rule_id:
+                    # Z3 rules: use standard fact extraction (same as LLM rules).
+                    # The orchestration step will later use these extracted facts
+                    # to do LLM-based value extraction + Z3 solver.
+                    # We tag the response with z3 metadata so the orchestrator
+                    # can identify and route it correctly.
+                    task = self._process_z3_fact_extraction(
                         rule_description=rule_description,
+                        rule_id=rule_id,
                         policy_type=policy_type,
                         extraction_results=extraction_results,
                         document_text=user_history,
                         config=config,
+                    )
+                elif engine == VALIDATION_ENGINE_Z3 and not rule_id:
+                    # Z3 rule without rule_id: fall back to standard LLM extraction
+                    logger.warning(
+                        f"Z3 rule missing rule_id, falling back to LLM fact "
+                        f"extraction: '{rule_description[:60]}...'"
+                    )
+                    task = self._process_rule_question(
+                        rule=rule_description,
+                        user_history=user_history,
+                        policy_type=policy_type,
+                        config=config,
+                        extraction_results=extraction_results,
                     )
                 else:
                     # Default to LLM engine (engine == "llm" or absent)
