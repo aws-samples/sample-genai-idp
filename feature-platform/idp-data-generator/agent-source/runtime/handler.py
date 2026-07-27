@@ -108,13 +108,14 @@ def _run_job(payload):
         uploaded = packet_io.upload_packet_to_test_set(
             documents, test_set_id, test_set_bucket
         )
+        total = _test_set_input_count(test_set_bucket, test_set_id)
         _post_status(
             payload,
             job_id,
             "COMPLETED",
             f"{uploaded} document(s) in test set {test_set_id}",
         )
-        _update_test_set(test_set_id, "COMPLETED", file_count=uploaded)
+        _update_test_set(test_set_id, "COMPLETED", file_count=total or uploaded)
     except Exception as e:
         logger.exception("Synthesis job %s failed", job_id)
         _post_status(payload, job_id, "FAILED", str(e))
@@ -169,6 +170,25 @@ def invoke(payload, context=None):
     threading.Thread(target=_worker, daemon=True).start()
 
     return {"accepted": True, "jobId": job_id, "testSetId": payload.get("testSetId")}
+
+
+def _test_set_input_count(bucket, test_set_id):
+    # True document count under the test set's input/ prefix, so appends report
+    # the total (getTestSets reads fileCount from the record). Best-effort.
+    try:
+        s3 = boto3.client("s3")
+        paginator = s3.get_paginator("list_objects_v2")
+        count = 0
+        for page in paginator.paginate(Bucket=bucket, Prefix=f"{test_set_id}/input/"):
+            count += sum(
+                1 for o in page.get("Contents", []) if not o["Key"].endswith("/")
+            )
+        return count
+    except Exception:  # noqa: BLE001 — best-effort
+        logger.warning(
+            "Failed to count test set inputs for %s", test_set_id, exc_info=True
+        )
+        return None
 
 
 def _update_test_set(test_set_id, status, file_count=None):

@@ -49,6 +49,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import uuid
 from typing import Any, Dict
 
@@ -105,6 +106,35 @@ def _int_field(body: Dict[str, Any], name: str, default: int, lo: int, hi: int) 
     return value
 
 
+_NAME_RE = re.compile(r"^[a-zA-Z0-9\s_-]+$")
+
+
+def _test_set_dest(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve the generated-docs destination test set from the request.
+
+    Either testSetId (append to an existing set) or testSetName (create a new
+    one). The id is derived from the name with the host's rule so it matches the
+    console (name.replace(' ', '-').lower()). Returns testSetId/testSetName/append
+    fields to merge into the SQS message.
+    """
+    existing_id = (body.get("testSetId") or "").strip()
+    if existing_id:
+        return {"testSetId": existing_id, "testSetName": existing_id, "append": True}
+    name = (body.get("testSetName") or "").strip()
+    if not name:
+        raise _BadRequest("testSetName or testSetId is required")
+    if len(name) > 50 or not _NAME_RE.match(name):
+        raise _BadRequest(
+            "testSetName may contain only letters, numbers, spaces, hyphens, and "
+            "underscores (max 50 characters)"
+        )
+    return {
+        "testSetId": name.replace(" ", "-").lower(),
+        "testSetName": name,
+        "append": False,
+    }
+
+
 def _handle_generate(body: Dict[str, Any]) -> Dict[str, Any]:
     # Two shapes: a natural-language prompt (the processor authors a schema), or
     # a preauthored schema + target version. Require one or the other.
@@ -122,6 +152,7 @@ def _handle_generate(body: Dict[str, Any]) -> Dict[str, Any]:
         "augment": bool(body.get("augment", False)),
         "scenario": (body.get("scenario") or "").strip(),
         "generateDocs": True,
+        **_test_set_dest(body),
     }
     if schema:
         # Preauthored path — the processor uses the schema as-is and writes it
@@ -150,6 +181,7 @@ def _handle_generate_from_config(body: Dict[str, Any]) -> Dict[str, Any]:
         # The processor reads the class from this version and builds the
         # generator schema (schema_bridge.config_class_to_generator_schema).
         "fromExistingConfig": True,
+        **_test_set_dest(body),
     }
     return _resp(202, {"jobId": _enqueue(message)})
 
