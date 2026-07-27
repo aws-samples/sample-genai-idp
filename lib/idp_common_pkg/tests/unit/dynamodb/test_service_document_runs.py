@@ -3,6 +3,7 @@
 
 """Unit tests for document run (version) records in the DynamoDB service."""
 
+import json
 from decimal import Decimal
 from unittest.mock import Mock
 
@@ -68,6 +69,61 @@ class TestDocumentRuns:
         assert "ItemType" not in item
         assert "InitialEventTime" not in item
         assert item["RunInitialEventTime"] == "2025-07-07T13:59:00.000Z"
+
+    def test_create_document_run_snapshots_section_quality_data(self):
+        """The run snapshot must carry the same per-section confidence alerts and
+        processing issues update_document writes to the live doc item — the UI
+        derives "Low Confidence Fields" and section Status from them, and once a
+        later run overwrites the outputs there is no other source."""
+        from idp_common.models import ProcessingIssue
+
+        doc = self._completed_document()
+        doc.sections[0].confidence_threshold_alerts = [
+            {
+                "attribute_name": "WagesTips",
+                "confidence": 0.42,
+                "confidence_threshold": 0.8,
+            }
+        ]
+        doc.sections[0].processing_issues = [
+            ProcessingIssue(
+                stage="assessment",
+                severity="warning",
+                code="assessment_incomplete",
+                message="some rows unscored",
+                root_cause="truncation",
+                details={"batches": 3},
+            )
+        ]
+
+        self.service.create_document_run(
+            doc, run_id="r1", manifest_uri="s3://m", file_count=1
+        )
+        section = self.mock_client.put_item.call_args[0][0]["Sections"][0]
+        alert = section["ConfidenceThresholdAlerts"][0]
+        assert alert["attributeName"] == "WagesTips"
+        # Floats must be Decimal for DynamoDB. NB: create_document_run also runs
+        # convert_floats_to_decimal over the whole item, so these assertions do
+        # NOT pin the shared helper's own conversion — the guard for that is
+        # test_service_section_updates.py (update_document_section has no
+        # whole-item pass, so it relies on the helper).
+        assert alert["confidence"] == Decimal("0.42")
+        assert alert["confidenceThreshold"] == Decimal("0.8")
+        issue = section["ProcessingIssues"][0]
+        assert issue["code"] == "assessment_incomplete"
+        assert issue["rootCause"] == "truncation"
+        # Details are JSON-stringified so a large blob can't explode the item.
+        assert json.loads(issue["details"]) == {"batches": 3}
+
+    def test_create_document_run_omits_empty_quality_data(self):
+        """Sections with no alerts/issues stay compact (attributes absent)."""
+        doc = self._completed_document()
+        self.service.create_document_run(
+            doc, run_id="r1", manifest_uri="s3://m", file_count=1
+        )
+        section = self.mock_client.put_item.call_args[0][0]["Sections"][0]
+        assert "ConfidenceThresholdAlerts" not in section
+        assert "ProcessingIssues" not in section
 
     def test_rule_validation_result_uri_persisted_as_flat_scalar(self):
         """The schema/UI read the flat RuleValidationResultUri; both the

@@ -18,6 +18,18 @@ query GetDocumentVersion($objectKey: ID!, $runId: String!) {
       PageIds
       Class
       OutputJSONUri
+      ConfidenceThresholdAlerts {
+        attributeName
+        confidence
+        confidenceThreshold
+      }
+      ProcessingIssues {
+        stage
+        severity
+        code
+        message
+        rootCause
+      }
     }
     Pages {
       Id
