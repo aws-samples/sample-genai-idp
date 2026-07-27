@@ -86,9 +86,11 @@ def serialize_confidence_threshold_alerts(section: Section) -> List[Dict[str, An
 def serialize_processing_issues(section: Section) -> List[Dict[str, Any]]:
     """
     Serialize a Section's structured processing issues to compact camelCase
-    dicts mirroring the GraphQL ``ProcessingIssue`` type. The (potentially
-    large) details blob is JSON-stringified so it round-trips without exploding
-    the item.
+    dicts mirroring the GraphQL ``ProcessingIssue`` type. ``details`` is
+    JSON-stringified rather than stored as a nested map, keeping the attribute
+    to one scalar regardless of the blob's shape. Note no consumer reads
+    ``details`` back today (the API resolvers strip it — it is not part of the
+    GraphQL type); it is written for parity with the live doc item.
     """
     issues_data: List[Dict[str, Any]] = []
     for issue in section.processing_issues or []:

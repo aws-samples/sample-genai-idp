@@ -102,7 +102,11 @@ class TestDocumentRuns:
         section = self.mock_client.put_item.call_args[0][0]["Sections"][0]
         alert = section["ConfidenceThresholdAlerts"][0]
         assert alert["attributeName"] == "WagesTips"
-        # Floats must be Decimal for DynamoDB.
+        # Floats must be Decimal for DynamoDB. NB: create_document_run also runs
+        # convert_floats_to_decimal over the whole item, so these assertions do
+        # NOT pin the shared helper's own conversion — the guard for that is
+        # test_service_section_updates.py (update_document_section has no
+        # whole-item pass, so it relies on the helper).
         assert alert["confidence"] == Decimal("0.42")
         assert alert["confidenceThreshold"] == Decimal("0.8")
         issue = section["ProcessingIssues"][0]
