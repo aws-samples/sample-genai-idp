@@ -139,7 +139,14 @@ def _bundle_ui(request_type: str) -> str:
             Key=dst_key,
             MetadataDirective="REPLACE",
             ContentType="application/javascript",
-            CacheControl="public,max-age=31536000,immutable",
+            # Short TTL, NOT immutable: the destination key is version-addressed
+            # (v<FEATURE_VERSION>/), so version bumps already bust caches — but
+            # same-version republishes DO happen (hotfixes re-uploading an
+            # existing version), and a year-long immutable header would pin the
+            # stale bundle in browsers until the version changes. max-age=300
+            # bounds staleness to 5 minutes at negligible re-fetch cost
+            # (~15 KB), matching the CloudFront distribution's own MaxTTL.
+            CacheControl="public,max-age=300",
         )
     elif request_type == "Delete":
         logger.info("Deleting s3://%s/%s", _WEBUI_BUCKET, dst_key)
