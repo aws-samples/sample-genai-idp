@@ -5,6 +5,10 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Sample: Health Insurance Review — Rules Discovery tab failed with "No GraphQL endpoint configured in `Amplify.configure()`" (v0.1.1).** The feature's Rules Discovery flow still called `aws-amplify/api`'s `generateClient().graphql()`, which stopped working when the host replaced AppSync with the REST dispatcher (Amplify now carries no GraphQL endpoint — it is configured for Cognito auth only). The feature now uses the host's REST-backed, GraphQL-shaped client exposed at `window.IdpFeatureHost.generateClient` (the same migration the PII Anonymization feature already made), so uploadDiscoveryDocument / listDiscoveryJobs / getConfigVersion go through the same transport as the host UI. Also, all feature ui-deployers (template + 4 bundled features) previously copied `ui-bundle.js` into the Web UI bucket with `Cache-Control: max-age=31536000,immutable`, which pinned a stale bundle in browsers for up to a year when the same feature version was republished (hotfixes); they now use `max-age=300`, matching the CloudFront distribution's own TTL, so an update propagates within minutes. (#568)
+
 ## [0.6.2]
 
 ### Added
