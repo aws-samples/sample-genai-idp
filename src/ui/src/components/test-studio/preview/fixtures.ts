@@ -138,3 +138,41 @@ export const PREVIEW_ESTIMATE = {
   estEffortHours: 4.3,
   impliedCutoff: 0.88,
 };
+
+// Review-effort model for the interactive estimator. Time per doc scales with
+// how many fields need eyes and how long the doc is (page open/verify cost).
+export const PREVIEW_EFFORT_MODEL = {
+  avgFieldsPerDoc: 12, // flagged fields an annotator actually touches
+  avgPagesPerDoc: 2.4,
+  secondsPerField: 14, // read + verify/correct one field
+  secondsPerPage: 20, // open, orient, scroll a page
+};
+
+/**
+ * Interpolate the burndown curve: given a target accuracy (%), return the
+ * estimated docs to review, residual error, and implied confidence cutoff.
+ * Pure fixture math for the prototype — the real version reads the measured
+ * confidence-accuracy curve.
+ */
+export const estimateForTarget = (targetAccuracy: number): { docs: number; residualError: number; cutoff: number; minutes: number } => {
+  const targetError = 100 - targetAccuracy;
+  const pts = PREVIEW_BURNDOWN;
+  let docs = pts[pts.length - 1].reviewed;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    if (targetError <= a.residualError && targetError >= b.residualError) {
+      const frac = (a.residualError - targetError) / (a.residualError - b.residualError || 1);
+      docs = Math.round(a.reviewed + frac * (b.reviewed - a.reviewed));
+      break;
+    }
+  }
+  if (targetError >= pts[0].residualError) docs = 0;
+  const residualError = Math.max(100 - targetAccuracy, pts[pts.length - 1].residualError);
+  // Cutoff rises with review depth (fixture approximation 0.5 → 1.0).
+  const cutoff = 0.5 + 0.5 * (docs / PREVIEW_ESTIMATE.totalDocs);
+  const m = PREVIEW_EFFORT_MODEL;
+  const secondsPerDoc = m.avgFieldsPerDoc * m.secondsPerField + m.avgPagesPerDoc * m.secondsPerPage;
+  const minutes = Math.round((docs * secondsPerDoc) / 60);
+  return { docs, residualError, cutoff, minutes };
+};

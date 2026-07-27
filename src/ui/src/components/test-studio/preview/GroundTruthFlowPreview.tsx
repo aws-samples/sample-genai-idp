@@ -35,13 +35,15 @@ import {
   PREVIEW_TEST_SETS,
   PREVIEW_DOCS,
   PREVIEW_QUEUE,
-  PREVIEW_FIELDS,
   PREVIEW_ESTIMATE,
   PREVIEW_BURNDOWN,
+  PREVIEW_EFFORT_MODEL,
+  estimateForTarget,
   type PreviewTestSet,
   type LabelSource,
 } from './fixtures';
 import { STORIES, type Story, type StoryStatus } from './stories';
+import MockVisualDocumentEditor from './MockVisualDocumentEditor';
 
 type View =
   | 'list'
@@ -161,6 +163,9 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
   const [reviewMode, setReviewMode] = useState<'lowest' | 'all' | 'accept'>('lowest');
   const [queueIdx, setQueueIdx] = useState(0);
   const [labelsGenerated, setLabelsGenerated] = useState(false);
+  const [targetAccuracy, setTargetAccuracy] = useState(PREVIEW_ESTIMATE.target);
+  const estimate = estimateForTarget(targetAccuracy);
+  const [viewingDoc, setViewingDoc] = useState<string | null>(null);
 
   const go = (v: View): void => {
     setSearchParams(v === 'list' ? {} : { step: v });
@@ -448,12 +453,19 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
           />
         ) : (
           <SpaceBetween size="s">
-            <Alert type="success">Draft labels generated with the active config (invoice-v4). Sorted worst-confidence first.</Alert>
+            <Alert type="success">
+              Draft labels generated with the active config (invoice-v4). Sorted worst-confidence first — click a document to view it with
+              its labels.
+            </Alert>
             <Table
               variant="borderless"
               items={PREVIEW_QUEUE}
               columnDefinitions={[
-                { id: 'name', header: 'Document', cell: (d) => d.name },
+                {
+                  id: 'name',
+                  header: 'Document',
+                  cell: (d) => <Link onFollow={() => setViewingDoc(d.name)}>{d.name}</Link>,
+                },
                 { id: 'conf', header: 'Confidence', cell: (d) => confidenceBadge(d.minConfidence) },
                 { id: 'src', header: 'Label source', cell: () => <Badge color="blue">Draft (machine)</Badge> },
               ]}
@@ -461,6 +473,7 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
           </SpaceBetween>
         )}
       </Container>
+      {labelsGenerated && viewingDoc && <MockVisualDocumentEditor docName={viewingDoc} filter="all" onClose={() => setViewingDoc(null)} />}
     </SpaceBetween>
   );
 
@@ -573,27 +586,74 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
             ))}
           </SpaceBetween>
 
-          <ExpandableSection headerText="Show the math — target a specific label accuracy">
+          <ExpandableSection headerText="Show the math — target a specific label accuracy" defaultExpanded>
             <SpaceBetween size="m">
+              {/* Interactive: slide the desired accuracy; everything recomputes. */}
+              <Box>
+                <Box variant="awsui-key-label">Desired label accuracy: {targetAccuracy.toFixed(1)}%</Box>
+                <input
+                  type="range"
+                  aria-label="Desired label accuracy"
+                  min={95}
+                  max={99.8}
+                  step={0.1}
+                  value={targetAccuracy}
+                  onChange={(e) => setTargetAccuracy(Number(e.target.value))}
+                  style={{ width: '100%', accentColor: '#006ce0' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#5f6b7a' }}>
+                  <span>95% (accept most machine labels)</span>
+                  <span>99.8% (review nearly everything)</span>
+                </div>
+              </Box>
               <KeyValuePairs
                 columns={4}
                 items={[
                   { label: 'Est. current accuracy', value: `≈${PREVIEW_ESTIMATE.currentAccuracy}%` },
-                  { label: 'Target', value: `${PREVIEW_ESTIMATE.target}%` },
-                  { label: 'Docs to review', value: `≈${PREVIEW_ESTIMATE.docsToReview} / ${PREVIEW_ESTIMATE.totalDocs}` },
-                  { label: 'Implied cutoff', value: `≈${PREVIEW_ESTIMATE.impliedCutoff}` },
+                  { label: 'Docs to review', value: `≈${estimate.docs} / ${PREVIEW_ESTIMATE.totalDocs}` },
+                  {
+                    label: 'Est. review time',
+                    value: `≈${estimate.minutes >= 60 ? `${(estimate.minutes / 60).toFixed(1)} hrs` : `${estimate.minutes} min`}`,
+                  },
+                  { label: 'Implied confidence cutoff', value: `≈${estimate.cutoff.toFixed(2)}` },
                 ]}
               />
+              <Box fontSize="body-s" color="text-body-secondary">
+                Time model: ~{PREVIEW_EFFORT_MODEL.secondsPerField}s per flagged field × {PREVIEW_EFFORT_MODEL.avgFieldsPerDoc} fields + ~
+                {PREVIEW_EFFORT_MODEL.secondsPerPage}s per page × {PREVIEW_EFFORT_MODEL.avgPagesPerDoc} pages per document.
+              </Box>
               <Box>
-                <Box variant="awsui-key-label">Error burndown (residual error % as lowest-confidence docs are reviewed)</Box>
+                <Box variant="awsui-key-label">
+                  Error burndown — blue bars are reviewed by humans; grey bars are auto-accepted beyond the cutoff
+                </Box>
                 <SpaceBetween size="xxs">
-                  {PREVIEW_BURNDOWN.map((p) => (
-                    <div key={p.reviewed} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ width: 70, fontSize: 12, color: '#5f6b7a' }}>{p.reviewed} docs</span>
-                      <div style={{ background: '#006ce0', height: 10, borderRadius: 3, width: `${p.residualError * 40}px` }} />
-                      <span style={{ fontSize: 12 }}>{p.residualError}%</span>
-                    </div>
-                  ))}
+                  {PREVIEW_BURNDOWN.map((p) => {
+                    const reviewed = p.reviewed <= estimate.docs;
+                    return (
+                      <div key={p.reviewed} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ width: 70, fontSize: 12, color: '#5f6b7a' }}>{p.reviewed} docs</span>
+                        <div
+                          style={{
+                            background: reviewed ? '#006ce0' : '#c6c6cd',
+                            height: 10,
+                            borderRadius: 3,
+                            width: `${p.residualError * 40}px`,
+                          }}
+                        />
+                        <span style={{ fontSize: 12, color: reviewed ? undefined : '#5f6b7a' }}>
+                          {p.residualError}%{reviewed ? '' : ' · auto-accepted'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {/* cutoff marker */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                    <span style={{ width: 70 }} />
+                    <div style={{ borderTop: '2px dashed #8d6605', flexBasis: 240 }} />
+                    <span style={{ fontSize: 12, color: '#8d6605', fontWeight: 700 }}>
+                      cutoff: review {estimate.docs} docs → target {targetAccuracy.toFixed(1)}% met
+                    </span>
+                  </div>
                 </SpaceBetween>
               </Box>
               <Alert type="warning">
@@ -643,140 +703,56 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
         </Alert>
       </Container>
 
-      <ColumnLayout columns={3}>
-        <Container header={<Header variant="h3">Review queue</Header>}>
-          <SpaceBetween size="xs">
-            {PREVIEW_QUEUE.map((d, i) => (
-              <Box key={d.name} padding="xs">
-                <Link onFollow={() => setQueueIdx(i)}>
-                  <strong style={{ color: i === queueIdx ? '#006ce0' : undefined }}>{d.name}</strong>
-                </Link>
-                <div>
-                  <Box variant="span" fontSize="body-s" color="text-body-secondary">
-                    {d.vendor} ·{' '}
-                  </Box>
-                  {confidenceBadge(d.minConfidence)}
-                </div>
-              </Box>
-            ))}
-          </SpaceBetween>
-        </Container>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+        {/* The ONLY new UI: the scoped, confidence-ordered queue rail. */}
+        <div style={{ flex: '0 0 280px' }}>
+          <Container
+            header={
+              <Header variant="h3" description="new — lowest confidence first, claim to lock">
+                Review queue
+              </Header>
+            }
+          >
+            <SpaceBetween size="xs">
+              {PREVIEW_QUEUE.map((d, i) => (
+                <Box key={d.name} padding="xs">
+                  <Link onFollow={() => setQueueIdx(i)}>
+                    <strong style={{ color: i === queueIdx ? '#006ce0' : undefined }}>{d.name}</strong>
+                  </Link>
+                  <div>
+                    <Box variant="span" fontSize="body-s" color="text-body-secondary">
+                      {d.vendor} ·{' '}
+                    </Box>
+                    {confidenceBadge(d.minConfidence)}
+                  </div>
+                </Box>
+              ))}
+            </SpaceBetween>
+          </Container>
+        </div>
 
-        <Container
-          header={
-            <Header variant="h3" description="Existing Visual Document Editor — reused unchanged">
-              {current?.name}
-            </Header>
-          }
-        >
-          <Box>
-            <div
-              style={{
-                background: '#f7f8f9',
-                border: '1px solid #e9ebed',
-                borderRadius: 8,
-                height: 260,
-                padding: 16,
-                fontFamily: 'monospace',
-                fontSize: 11,
-                color: '#3a3f47',
-              }}
-            >
-              <div style={{ fontFamily: 'inherit', fontWeight: 700 }}>AIR PRODUCTS AND CHEMICALS, INC.</div>
-              <div>INVOICE No. A-4471-X6</div>
-              <div>PO: 4500-7789-02</div>
-              <div>Tax: $50.49 · Total: $662.49</div>
-              <div style={{ marginTop: 16, color: '#8d6605' }}>[page image + bounding boxes — existing widget]</div>
-            </div>
-          </Box>
-        </Container>
-
-        <Container
-          header={
-            <Header variant="h3" description="Confidence Alerts Only (existing filter)">
-              Fields to review
-            </Header>
-          }
-        >
-          <SpaceBetween size="s">
-            {PREVIEW_FIELDS.map((f) => (
-              <Container key={f.name} variant="stacked">
-                <SpaceBetween size="xxs">
-                  <Box>
-                    <strong>{f.name}</strong> {confidenceBadge(f.confidence)}
-                  </Box>
-                  <Box fontSize="body-s" color="text-body-secondary">
-                    Confidence {(f.confidence * 100).toFixed(0)}% / threshold {(f.threshold * 100).toFixed(0)}%
-                  </Box>
-                  <input defaultValue={f.value} style={{ width: '100%', padding: 6, border: '1px solid #c6c6cd', borderRadius: 6 }} />
-                </SpaceBetween>
-              </Container>
-            ))}
-            <Button
-              variant="primary"
-              onClick={() => {
-                if (queueIdx < PREVIEW_QUEUE.length - 1) setQueueIdx(queueIdx + 1);
-                else go('publish');
-              }}
-            >
-              Save &amp; next in queue →
-            </Button>
-          </SpaceBetween>
-        </Container>
-      </ColumnLayout>
+        {/* Everything else IS the existing Visual Document Editor, unchanged.
+            'Next Section' is relabeled by the queue wrapper to advance the queue. */}
+        <div style={{ flex: 1 }}>
+          <MockVisualDocumentEditor
+            docName={current?.name ?? ''}
+            filter="alerts"
+            onNext={() => {
+              if (queueIdx < PREVIEW_QUEUE.length - 1) setQueueIdx(queueIdx + 1);
+              else go('publish');
+            }}
+            nextLabel="Save & next in queue →"
+          />
+        </div>
+      </div>
     </SpaceBetween>
   );
 
-  // ---- SOLO FIX (P1 #5) ---------------------------------------------------------------
+  // ---- SOLO FIX (P1 #5) — the existing editor, opened for one doc ------------
   const fixView = (
     <SpaceBetween size="m">
       <StoryPanel story={STORIES.fix} />
-      <Container
-        header={
-          <Header variant="h2" description="Existing review editor, opened for one document — no queue, no team setup.">
-            Fix labels: INV_air_products_0012.pdf
-          </Header>
-        }
-      >
-        <ColumnLayout columns={2}>
-          <Box>
-            <div
-              style={{
-                background: '#f7f8f9',
-                border: '1px solid #e9ebed',
-                borderRadius: 8,
-                height: 240,
-                padding: 16,
-                fontFamily: 'monospace',
-                fontSize: 11,
-                color: '#3a3f47',
-              }}
-            >
-              <div style={{ fontWeight: 700 }}>AIR PRODUCTS AND CHEMICALS, INC.</div>
-              <div>INVOICE No. A-4471-X6</div>
-              <div style={{ marginTop: 16, color: '#8d6605' }}>[existing widget]</div>
-            </div>
-          </Box>
-          <SpaceBetween size="s">
-            {PREVIEW_FIELDS.slice(0, 2).map((f) => (
-              <Container key={f.name} variant="stacked">
-                <SpaceBetween size="xxs">
-                  <Box>
-                    <strong>{f.name}</strong> {confidenceBadge(f.confidence)}
-                  </Box>
-                  <input defaultValue={f.value} style={{ width: '100%', padding: 6, border: '1px solid #c6c6cd', borderRadius: 6 }} />
-                </SpaceBetween>
-              </Container>
-            ))}
-            <SpaceBetween direction="horizontal" size="xs">
-              <Button onClick={() => go('detail')}>Cancel</Button>
-              <Button variant="primary" onClick={() => go('detail')}>
-                Save &amp; return
-              </Button>
-            </SpaceBetween>
-          </SpaceBetween>
-        </ColumnLayout>
-      </Container>
+      <MockVisualDocumentEditor docName="INV_air_products_0012.pdf" filter="alerts" onClose={() => go('detail')} />
     </SpaceBetween>
   );
 
