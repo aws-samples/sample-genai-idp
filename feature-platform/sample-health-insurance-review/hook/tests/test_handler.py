@@ -213,7 +213,7 @@ def test_no_policy_match_records_insufficient_claim(stack):
                 "rule_summary": {},
                 "overall_statistics": {
                     "total_rules": 0,
-                    "pass_count": 0,
+                    "pass_count": 0,  # nosec B105 - statistics key, not a password
                     "fail_count": 0,
                     "information_not_found_count": 0,
                 },

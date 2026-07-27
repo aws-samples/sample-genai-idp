@@ -85,7 +85,7 @@ class GetResultsTool(IDPTool):
                     "total_in_batch": None,
                     "documents": [document],
                     "summary": {},
-                    "next_token": None,
+                    "next_token": None,  # nosec B105 - pagination field
                     "message": (
                         f"Retrieved results for document "
                         f"{document.get('document_id')} "
