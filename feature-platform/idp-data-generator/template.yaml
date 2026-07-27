@@ -207,7 +207,7 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W11
-            reason: "CloudWatch Logs require wildcard for log group creation"
+            reason: "Log-stream wildcard within the function's own log group"
     Properties:
       Path: /
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
@@ -230,10 +230,9 @@ Resources:
                 Resource: !GetAtt DockerBuildProject.Arn
               - Effect: Allow
                 Action:
-                  - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${MainStackName}-${FeatureId}-docker-build-run:*"
 
   DockerBuildRunFunction:
     Type: AWS::Serverless::Function
@@ -414,7 +413,7 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W11
-            reason: "bedrock-agentcore:* is required: CreateAgentRuntime transitively provisions/deletes endpoints and other sub-resources (CreateAgentRuntimeEndpoint etc.), so an action allow-list is brittle; these control-plane APIs do not support resource-level permissions and the runtime ARN does not exist at create time. CloudWatch Logs require wildcard."
+            reason: "bedrock-agentcore:* is required: CreateAgentRuntime transitively provisions/deletes endpoints and other sub-resources (CreateAgentRuntimeEndpoint etc.), so an action allow-list is brittle; these control-plane APIs do not support resource-level permissions and the runtime ARN does not exist at create time."
     Properties:
       Path: /
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
@@ -447,10 +446,9 @@ Resources:
                     iam:AWSServiceName: !Sub "*bedrock-agentcore.${AWS::URLSuffix}"
               - Effect: Allow
                 Action:
-                  - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*"
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${MainStackName}-${FeatureId}-runtime-manager:*"
 
   AgentCoreRuntimeManagerFunction:
     Type: AWS::Serverless::Function
