@@ -89,7 +89,7 @@ def _register_test_set(
         return
     import datetime
 
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    now = datetime.datetime.utcnow().isoformat() + "Z"
     names = {
         "#status": "status",
         "#itemType": "ItemType",
