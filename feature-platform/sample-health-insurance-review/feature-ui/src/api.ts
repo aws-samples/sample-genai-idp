@@ -22,6 +22,7 @@ export interface ApiClient {
   }) => Promise<ClaimsListResponse>;
   getClaim: (docId: string) => Promise<ClaimDetailResponse>;
   getClaimMarkdown: (docId: string) => Promise<string>;
+  deleteClaim: (docId: string) => Promise<void>;
 }
 
 class ApiError extends Error {}
@@ -30,12 +31,17 @@ export function createApiClient(
   endpoint: string | null,
   getAuthToken: () => Promise<string>,
 ): ApiClient {
-  async function call(path: string, asText = false): Promise<unknown> {
+  async function call(
+    path: string,
+    asText = false,
+    method = 'GET',
+  ): Promise<unknown> {
     if (!endpoint) {
       throw new ApiError('No feature API endpoint configured.');
     }
     const token = await getAuthToken();
     const resp = await fetch(`${endpoint}${path}`, {
+      method,
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!resp.ok) {
@@ -65,5 +71,8 @@ export function createApiClient(
       call(`/claims/${encodeURIComponent(docId)}`) as Promise<ClaimDetailResponse>,
     getClaimMarkdown: (docId: string) =>
       call(`/claims/${encodeURIComponent(docId)}/summary.md`, true) as Promise<string>,
+    deleteClaim: async (docId: string) => {
+      await call(`/claims/${encodeURIComponent(docId)}`, false, 'DELETE');
+    },
   };
 }
