@@ -214,7 +214,11 @@ const GenerateSyntheticDataModal = ({
   }, [visible, parsedCount, threshold, countValid]);
 
   const trimmedNewName = newTestSetName.trim();
-  const newNameValid = trimmedNewName.length > 0 && trimmedNewName.length <= 50 && NAME_RE.test(trimmedNewName);
+  const nameFormatValid = trimmedNewName.length > 0 && trimmedNewName.length <= 50 && NAME_RE.test(trimmedNewName);
+  // A new name whose derived id matches an existing test set would silently
+  // append to it — block it and steer the user to "Add to existing".
+  const newNameCollides = nameFormatValid && testSetOptions.some((o) => o.value === toTestSetId(trimmedNewName));
+  const newNameValid = nameFormatValid && !newNameCollides;
   const destValid = destMode === 'new' ? newNameValid : Boolean(existingTestSet);
   const canSubmit =
     countValid && destValid && (activeTab === 'prompt' ? prompt.trim().length > 0 : Boolean(selectedVersion) && Boolean(selectedClass));
@@ -425,7 +429,11 @@ const GenerateSyntheticDataModal = ({
             {destMode === 'new' ? (
               <FormField
                 errorText={
-                  newTestSetName && !newNameValid ? 'Letters, numbers, spaces, hyphens, and underscores only (max 50 chars)' : undefined
+                  newTestSetName && newNameCollides
+                    ? 'A test set with this name already exists. Choose a different name, or use "Add to existing".'
+                    : newTestSetName && !nameFormatValid
+                      ? 'Letters, numbers, spaces, hyphens, and underscores only (max 50 chars)'
+                      : undefined
                 }
               >
                 <Input

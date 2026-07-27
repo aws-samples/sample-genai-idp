@@ -61,6 +61,7 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 _QUEUE_URL = os.environ.get("BOOTSTRAP_QUEUE_URL", "")
 _TRACKING_TABLE = os.environ.get("BOOTSTRAP_TRACKING_TABLE", "")
+_HOST_TRACKING_TABLE = os.environ.get("HOST_TRACKING_TABLE", "")
 _CONFIG_TABLE = os.environ.get("CONFIGURATION_TABLE_NAME", "")
 _FEATURE_VERSION = os.environ.get("FEATURE_VERSION", "")
 _SUGGEST_MODEL_ID = os.environ.get(
@@ -128,11 +129,32 @@ def _test_set_dest(body: Dict[str, Any]) -> Dict[str, Any]:
             "testSetName may contain only letters, numbers, spaces, hyphens, and "
             "underscores (max 50 characters)"
         )
-    return {
-        "testSetId": name.replace(" ", "-").lower(),
-        "testSetName": name,
-        "append": False,
-    }
+    new_id = name.replace(" ", "-").lower()
+    if _test_set_exists(new_id):
+        raise _BadRequest(
+            f"A test set named '{name}' already exists. Choose a different name, "
+            "or add to the existing test set."
+        )
+    return {"testSetId": new_id, "testSetName": name, "append": False}
+
+
+def _test_set_exists(test_set_id: str) -> bool:
+    """Backstop for the UI's collision check: is there already a host test-set
+    record with this id? Best-effort — if the lookup fails, don't block."""
+    if not _HOST_TRACKING_TABLE:
+        return False
+    try:
+        item = (
+            _dynamodb.Table(_HOST_TRACKING_TABLE)
+            .get_item(Key={"PK": f"testset#{test_set_id}", "SK": "metadata"})
+            .get("Item")
+        )
+        return item is not None
+    except Exception:  # noqa: BLE001 — best-effort, don't block generation
+        logger.warning(
+            "Could not check test set existence for %s", test_set_id, exc_info=True
+        )
+        return False
 
 
 def _handle_generate(body: Dict[str, Any]) -> Dict[str, Any]:
