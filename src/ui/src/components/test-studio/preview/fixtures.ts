@@ -40,8 +40,8 @@ export interface PreviewField {
 
 export const PREVIEW_TEST_SETS: PreviewTestSet[] = [
   {
-    id: 'xom-invoices-golden',
-    name: 'XOM Invoices — Golden',
+    id: 'vendor-invoices-golden',
+    name: 'Vendor Invoices — Golden',
     description: 'Invoices sampled across 8 vendors × 5 product types.',
     docs: 120,
     source: 'Mixed',
@@ -98,10 +98,10 @@ export const PREVIEW_TEST_SETS: PreviewTestSet[] = [
 ];
 
 export const PREVIEW_DOCS: PreviewDoc[] = [
-  { name: 'INV_air_products_0012.pdf', vendor: 'Air Products', minConfidence: 0.61, labelSource: 'draft-machine', reviewer: 'h.scheema' },
+  { name: 'INV_air_products_0012.pdf', vendor: 'Air Products', minConfidence: 0.61, labelSource: 'draft-machine', reviewer: 'reviewer-a' },
   { name: 'INV_welding_5583.pdf', vendor: 'Welding supply', minConfidence: 0.78, labelSource: 'draft-machine' },
   { name: 'INV_industrial_gas_781.pdf', vendor: 'Industrial gas', minConfidence: 0.81, labelSource: 'draft-machine' },
-  { name: 'INV_sand_221.pdf', vendor: 'Sand / aggregate', minConfidence: 0.94, labelSource: 'reviewed-human', reviewer: 'sromo' },
+  { name: 'INV_sand_221.pdf', vendor: 'Sand / aggregate', minConfidence: 0.94, labelSource: 'reviewed-human', reviewer: 'reviewer-b' },
   { name: 'SYN_invoice_air_0007.pdf', vendor: 'Air Products (synthetic)', minConfidence: null, labelSource: 'synthetic' },
 ];
 
