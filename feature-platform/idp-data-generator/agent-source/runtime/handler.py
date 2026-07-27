@@ -106,7 +106,7 @@ def _run_job(payload):
                 )
 
         uploaded = packet_io.upload_packet_to_test_set(
-            documents, test_set_id, test_set_bucket
+            documents, test_set_id, test_set_bucket, name_prefix=f"{job_id[:8]}_"
         )
         total = _test_set_input_count(test_set_bucket, test_set_id)
         _post_status(
