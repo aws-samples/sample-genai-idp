@@ -5,6 +5,10 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Sample: Health Insurance Review — prior-auth documents produced no rule-validation output and never appeared in the Claims dashboard (v0.1.2).** Two compounding defects. (1) The bundled config preset's policy classes matched the document *filename* with `x-aws-idp-document-name-regex: ...(prior_auth|pa_packet)...` — an underscore — but the sample documents it ships with (`samples/rule-validation/Prior-Auth-*.pdf`) use a hyphen, so classification returned `NO_POLICY_MATCH`, rule validation was skipped, and zero rules were evaluated. The regex now accepts any of `-`, `_`, or space (`prior[_ -]?auth`, `pa[_ -]?packet`) across all seven policy classes. (2) The unified workflow's rule-validation skip paths (`SetSkippedRuleValidationResult` for no-policy-match, `SetEmptyRuleValidationResult` for rule-validation-disabled) jumped straight to summarization, **bypassing the `PostRuleValidationHook` dispatch** — so a document that skipped rule validation never fired the feature's `postRuleValidation` hook and thus never recorded a claim (even to flag it as needing documentation). Both skip states now route through `PostRuleValidationHook`; the dispatcher is a no-op when no hook is registered, and the feature's hook records a `NO_POLICY_MATCH` run as `INSUFFICIENT_DOCUMENTATION`. See [patterns/unified/statemachine/workflow.asl.json](patterns/unified/statemachine/workflow.asl.json) and [feature-platform/sample-health-insurance-review/config-preset/claims-config.yaml](feature-platform/sample-health-insurance-review/config-preset/claims-config.yaml).
+
 ## [0.6.2]
 
 ### Added

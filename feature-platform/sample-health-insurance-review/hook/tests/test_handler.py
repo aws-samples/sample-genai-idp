@@ -196,6 +196,42 @@ def test_unresolvable_document_skips_without_raising(stack):
     assert result["skipped"] is True
 
 
+def test_no_policy_match_records_insufficient_claim(stack):
+    """A NO_POLICY_MATCH run (rule validation skipped for lack of a matching
+    policy class) still writes a consolidated summary with zero rules. The
+    workflow now routes that skip path through the postRuleValidation hook, so
+    the claim must land as INSUFFICIENT_DOCUMENTATION rather than never
+    appearing in the Claims dashboard."""
+    boto3.client("s3", region_name="us-east-1").put_object(
+        Bucket=_OUTPUT_BUCKET,
+        Key=_SUMMARY_KEY,
+        Body=json.dumps(
+            {
+                "document_id": _DOC_ID,
+                "overall_status": "NO_POLICY_MATCH",
+                "total_policy_types": 0,
+                "rule_summary": {},
+                "overall_statistics": {
+                    "total_rules": 0,
+                    "pass_count": 0,
+                    "fail_count": 0,
+                    "information_not_found_count": 0,
+                },
+                "rule_details": {},
+                "supporting_pages": [],
+            }
+        ).encode("utf-8"),
+    )
+    # Skip-path document carries no rule_validation_result block; the hook
+    # falls back to the conventional output path.
+    result = stack.lambda_handler(_event(_document(output_uri=None)), None)
+    assert result["status"] == "INSUFFICIENT_DOCUMENTATION"
+    row = _get_row()
+    assert row["status"] == "INSUFFICIENT_DOCUMENTATION"
+    assert row["totalRules"] == 0
+    assert row["policyTypes"] == []
+
+
 def test_rerun_is_idempotent_overwrite(stack):
     _put_summary({"Pass": 3})  # nosec B105 - rule counter fixture
     stack.lambda_handler(_event(_document()), None)
