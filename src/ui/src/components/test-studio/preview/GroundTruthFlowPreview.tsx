@@ -38,6 +38,9 @@ import {
   PREVIEW_ESTIMATE,
   PREVIEW_BURNDOWN,
   PREVIEW_EFFORT_MODEL,
+  PREVIEW_CONFIDENCE_DIST,
+  PREVIEW_LOWEST_FIELDS,
+  PREVIEW_HIGHEST_FIELDS,
   estimateForTarget,
   type PreviewTestSet,
   type LabelSource,
@@ -473,6 +476,92 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
           </SpaceBetween>
         )}
       </Container>
+
+      {/* Post-generation confidence summary: distribution + extremes + est. accuracy */}
+      {labelsGenerated && (
+        <ColumnLayout columns={2}>
+          <Container
+            header={
+              <Header variant="h3" description="Per-field confidence across all generated labels">
+                Confidence distribution
+              </Header>
+            }
+          >
+            <SpaceBetween size="s">
+              <KeyValuePairs
+                columns={2}
+                items={[
+                  { label: 'Est. accuracy of draft labels', value: `≈${PREVIEW_ESTIMATE.currentAccuracy}%` },
+                  {
+                    label: 'Fields below threshold (0.8)',
+                    value: `${PREVIEW_CONFIDENCE_DIST.filter((b) => b.low).reduce((s, b) => s + b.fields, 0)} of ${PREVIEW_CONFIDENCE_DIST.reduce((s, b) => s + b.fields, 0)}`,
+                  },
+                ]}
+              />
+              <SpaceBetween size="xxs">
+                {PREVIEW_CONFIDENCE_DIST.map((b) => (
+                  <div key={b.bucket} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ width: 72, fontSize: 12, color: '#5f6b7a' }}>{b.bucket}</span>
+                    <div
+                      style={{
+                        background: b.low ? '#d91515' : '#037f0c',
+                        opacity: b.low ? 0.8 : 0.75,
+                        height: 12,
+                        borderRadius: 3,
+                        width: `${b.fields * 1.6}px`,
+                      }}
+                    />
+                    <span style={{ fontSize: 12 }}>
+                      {b.fields} fields{b.low ? ' · needs review' : ''}
+                    </span>
+                  </div>
+                ))}
+              </SpaceBetween>
+              <Box fontSize="body-s" color="text-body-secondary">
+                Red buckets fall below the review threshold — these drive the review queue and the effort estimate.
+              </Box>
+            </SpaceBetween>
+          </Container>
+
+          <Container header={<Header variant="h3">Extremes — where to look first</Header>}>
+            <SpaceBetween size="s">
+              <Box>
+                <Box variant="awsui-key-label">Lowest-confidence fields</Box>
+                <SpaceBetween size="xxs">
+                  {PREVIEW_LOWEST_FIELDS.map((f) => (
+                    <div key={`${f.doc}-${f.field}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                      <span style={{ fontSize: 13 }}>
+                        <strong>{f.field}</strong>{' '}
+                        <Box variant="span" fontSize="body-s" color="text-body-secondary">
+                          · {f.doc}
+                        </Box>
+                      </span>
+                      {confidenceBadge(f.confidence)}
+                    </div>
+                  ))}
+                </SpaceBetween>
+              </Box>
+              <Box>
+                <Box variant="awsui-key-label">Highest-confidence fields</Box>
+                <SpaceBetween size="xxs">
+                  {PREVIEW_HIGHEST_FIELDS.map((f) => (
+                    <div key={`${f.doc}-${f.field}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                      <span style={{ fontSize: 13 }}>
+                        <strong>{f.field}</strong>{' '}
+                        <Box variant="span" fontSize="body-s" color="text-body-secondary">
+                          · {f.doc}
+                        </Box>
+                      </span>
+                      {confidenceBadge(f.confidence)}
+                    </div>
+                  ))}
+                </SpaceBetween>
+              </Box>
+            </SpaceBetween>
+          </Container>
+        </ColumnLayout>
+      )}
+
       {labelsGenerated && viewingDoc && <MockVisualDocumentEditor docName={viewingDoc} filter="all" onClose={() => setViewingDoc(null)} />}
     </SpaceBetween>
   );

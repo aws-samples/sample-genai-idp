@@ -139,6 +139,35 @@ export const PREVIEW_ESTIMATE = {
   impliedCutoff: 0.88,
 };
 
+// Post-generation confidence summary for the draft-labels screen: histogram of
+// per-field confidence across the whole set, plus the extreme fields.
+export const PREVIEW_CONFIDENCE_DIST: { bucket: string; fields: number; low: boolean }[] = [
+  { bucket: '0.5–0.6', fields: 14, low: true },
+  { bucket: '0.6–0.7', fields: 31, low: true },
+  { bucket: '0.7–0.8', fields: 57, low: true },
+  { bucket: '0.8–0.9', fields: 129, low: false },
+  { bucket: '0.9–0.95', fields: 168, low: false },
+  { bucket: '0.95–1.0', fields: 81, low: false },
+];
+
+export interface PreviewFieldStat {
+  field: string;
+  doc: string;
+  confidence: number;
+}
+
+export const PREVIEW_LOWEST_FIELDS: PreviewFieldStat[] = [
+  { field: 'Invoice Number', doc: 'INV_air_products_0012.pdf', confidence: 0.52 },
+  { field: 'Line Item 7 · Amount', doc: 'INV_welding_5583.pdf', confidence: 0.58 },
+  { field: 'Remit-To Address · ZIP', doc: 'INV_industrial_gas_781.pdf', confidence: 0.61 },
+];
+
+export const PREVIEW_HIGHEST_FIELDS: PreviewFieldStat[] = [
+  { field: 'Vendor Name', doc: 'INV_sand_221.pdf', confidence: 0.999 },
+  { field: 'Invoice Date', doc: 'INV_air_products_0012.pdf', confidence: 0.997 },
+  { field: 'Currency', doc: 'INV_welding_5583.pdf', confidence: 0.995 },
+];
+
 // Review-effort model for the interactive estimator. Time per doc scales with
 // how many fields need eyes and how long the doc is (page open/verify cost).
 export const PREVIEW_EFFORT_MODEL = {
