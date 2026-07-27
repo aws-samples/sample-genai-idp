@@ -204,3 +204,73 @@ in the "About this screen" panel.
 | 7 (list columns), 4 (publish/version backend + button), 6 (run pins version) | **Built & verified live** on the real Test Sets page of this stack |
 | 1 backend (send-to-review trigger, correction→baseline write-back), 3 draft-labels backend, 11 remove (API) | **Built & unit-tested; UI is the prototype** |
 | 1 deep-link queue URL (prototype demoes it via `?step=`), 8/10 synthetic wiring, 9 auto-detect upload, 12 merge | **Proposed** |
+
+---
+
+## Session state — pick up here (last updated 2026-07-27)
+
+### The live deployment
+
+| What | Value |
+|---|---|
+| Stack | `sr-testing` — account **195275636621** (Isengard), region **us-west-2**, `WebUIHosting=APIGateway` |
+| App URL | https://929mlbhmua.execute-api.us-west-2.amazonaws.com/api/ |
+| Prototype walkthrough | https://929mlbhmua.execute-api.us-west-2.amazonaws.com/api/#/test-studio/preview (screens via `?step=<id>`; the ▶ links above) |
+| Real Test Sets page (live backend: Source/Version columns, Publish version) | https://929mlbhmua.execute-api.us-west-2.amazonaws.com/api/#/test-studio?tab=sets |
+| Admin login | `sromo@amazon.com` (password set by owner) |
+| AWS access | `accelerator` profile (needs `mwinit`); publish bucket `sr-testing-idp-us-west-2` |
+
+### Code state
+
+- Branch **`feature/test-set-lifecycle`** (local only, **not pushed**), based on `origin/develop`.
+- ~14 commits: versioned test-set backend (publish version / active reference / run-pinning /
+  source / remove-documents / send-to-review / correction→baseline write-back — all unit-tested,
+  publish+pinning verified live) + the fixture-driven prototype (all screens above).
+- Deploy loop: `python3 publish.py sr-testing-idp idp us-west-2 --lint off` → `aws cloudformation
+  update-stack` (same params) → hard-refresh. ~10 min end to end.
+- Known repo gotchas (pre-existing on develop, documented in
+  `implementation/DEPLOY-NOTES.md`): publish lint gate fails on 49 unformatted files (use
+  `--lint off`); default CloudFront hosting mode fails to deploy (conditional-DependsOn bug);
+  APIGateway mode needed a WebUIProxyRole trust-policy fix (applied live to this stack).
+- Cleanup checklist for eventual teardown: `implementation/CLEANUP-TODO-SPENCER.md`.
+
+### Prototype iteration log (feedback already incorporated)
+
+1. Interactive estimator: desired-accuracy **slider** → live docs-to-review, **review-time
+   estimate** (fields-per-doc × pages-per-doc model, shown transparently), implied cutoff.
+2. Burndown bars **two-tone** (blue = human-reviewed, grey = auto-accepted) with dashed
+   **cutoff marker**.
+3. Draft-labels screen: documents **clickable → open with labels visible**; post-generation
+   **confidence distribution** (red below threshold / green above), **est. draft accuracy**,
+   and **lowest/highest-confidence field** widgets.
+4. All annotation/review surfaces render a **faithful stand-in of the existing Visual Document
+   Editor** (tabs, pages pane, Confidence Alerts Only filter, section footer) — design rule:
+   the real implementation reuses that widget unchanged; only queue/scoping/progress are new.
+5. Fixtures scrubbed of customer references (generic vendor names, `reviewer-a/b`).
+
+### Tomorrow: colleague demo — prep checklist
+
+1. **Add colleague users**: User Management in the app (Admin role for full walkthrough), or
+   `aws cognito-idp admin-create-user --user-pool-id us-west-2_A7IJBedLY --username <email>
+   --user-attributes Name=email,Value=<email> Name=email_verified,Value=true` — invite email
+   contains a temp password (note: in APIGateway hosting mode the email has **no URL**; share the
+   App URL alongside).
+2. **Suggested demo path** (mirrors the priority order): `list` → `chooser` → `onramp-upload` →
+   `generate-labels` (click ⚡, show distribution + extremes, open a doc) → `detail` →
+   `configure` (drag the slider, expand Show the math) → `annotate` (queue + editor,
+   Save & next) → `publish` → `executions` (⚠ mismatch row). Then the **real** page at
+   `#/test-studio?tab=sets` to show publish-version working against live DynamoDB.
+3. Each screen's **"About this screen"** panel carries the story + feedback questions — use them
+   to structure the discussion; capture reactions per `?step=` id.
+4. If a screen looks stale after a redeploy: hard-refresh (bundle hash changes each deploy).
+
+### Open items (next work, in rough order)
+
+- Incorporate demo feedback into the prototype (fast loop, ~10 min/round).
+- Wire prototype screens to the already-built backends (publish/versions, send-to-review,
+  draft-labels, remove) — swap fixtures for hooks.
+- Decide S3 content-pinning approach for versions (manifest vs copy-on-publish vs lifecycle
+  change — blocked on retention decision, see requirements-v3 open questions).
+- Upstream fixes worth their own PRs: the two hosting-mode deploy bugs + repo format debt.
+- Not started: `allowedTestSets` reviewer scoping, multi-annotator/time-box, merge, synthetic
+  on-ramp wiring.
