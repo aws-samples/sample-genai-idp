@@ -229,6 +229,8 @@ Resources:
                 - dynamodb:GetItem
                 - dynamodb:Query
                 - dynamodb:Scan
+                # DELETE /claims/{docId} (Admin/Author) removes a claim row.
+                - dynamodb:DeleteItem
               Resource:
                 - !GetAtt ClaimsStatusTable.Arn
                 - !Sub '${ClaimsStatusTable.Arn}/index/*'
@@ -261,6 +263,15 @@ Resources:
             ApiId: !Ref FeatureApi
             Path: /{proxy+}
             Method: GET
+        # DELETE /claims/{docId} — claim-row deletion (Admin/Author enforced in
+        # the handler). Listed explicitly (not ANY) to keep OPTIONS preflight
+        # on the gateway's built-in CORS handler; see the NOTE above.
+        Delete:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FeatureApi
+            Path: /{proxy+}
+            Method: DELETE
 
   ###########################################################################
   # CloudWatch Log Groups — explicit retention to avoid never-expire default
