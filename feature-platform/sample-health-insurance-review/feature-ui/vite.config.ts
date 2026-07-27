@@ -9,9 +9,11 @@ import react from '@vitejs/plugin-react';
  * IDP Feature UI — Vite config.
  *
  * Produces a single UMD bundle at `dist/ui-bundle.js`. React, ReactDOM,
- * Cloudscape, aws-amplify, and react-router-dom are ALL externalised so the
- * feature bundle is small and shares the host's library instances (avoiding
- * the classic "two copies of React" crashes).
+ * Cloudscape, and react-router-dom are ALL externalised so the feature
+ * bundle is small and shares the host's library instances (avoiding the
+ * classic "two copies of React" crashes). Host API calls go through
+ * `window.IdpFeatureHost.generateClient` (see src/hostGraphql.ts), so
+ * aws-amplify is no longer imported or externalised.
  *
  * When the bundle is loaded in the host, these externals are resolved via
  * `window.*` globals set up by the main IDP UI's build.
@@ -107,7 +109,6 @@ export default defineConfig({
         'react-dom/client',
         'react-router-dom',
         /^@cloudscape-design\/.*/,
-        /^aws-amplify(\/.*)?$/,
       ],
       output: {
         globals: {
@@ -115,13 +116,6 @@ export default defineConfig({
           'react-dom': 'ReactDOM',
           'react-dom/client': 'ReactDOM',
           'react-router-dom': 'ReactRouterDOM',
-          'aws-amplify': 'awsAmplify',
-          // `generateClient` lives in the aws-amplify/api subpath; the host
-          // exposes it as its own `awsAmplifyApi` global (see
-          // src/ui/src/components/feature-page/feature-host-globals.ts).
-          // Without this mapping rollup warns and guesses the global name
-          // "api", which the host does not define.
-          'aws-amplify/api': 'awsAmplifyApi',
           '@cloudscape-design/components': 'CloudscapeComponents',
           '@cloudscape-design/design-tokens': 'CloudscapeDesignTokens',
         },

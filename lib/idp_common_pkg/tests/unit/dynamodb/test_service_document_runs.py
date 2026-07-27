@@ -8,7 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 from idp_common.dynamodb.service import DocumentDynamoDBService
-from idp_common.models import Document, Section, Status
+from idp_common.models import Document, RuleValidationResult, Section, Status
 
 
 @pytest.mark.unit
@@ -68,6 +68,35 @@ class TestDocumentRuns:
         assert "ItemType" not in item
         assert "InitialEventTime" not in item
         assert item["RunInitialEventTime"] == "2025-07-07T13:59:00.000Z"
+
+    def test_rule_validation_result_uri_persisted_as_flat_scalar(self):
+        """The schema/UI read the flat RuleValidationResultUri; both the
+        update_document write and the run-record snapshot must carry it,
+        derived from rule_validation_result.output_uri. (Regression: the flat
+        field was dropped in the AppSync->DynamoDB write migration, so the
+        Rule Validation tab never rendered despite the nested result being
+        stored.)"""
+        summary_md = (
+            "s3://out/loan-12345/package.pdf/rule_validation/"
+            "consolidated/consolidated_summary.md"
+        )
+        doc = self._completed_document()
+        doc.rule_validation_result = RuleValidationResult(
+            request_id="loan-12345/package.pdf",
+            output_uri=summary_md,
+            matched_policy_types=["global_periods"],
+        )
+
+        # 1. update_document write expression (call the pure builder directly;
+        # update_document() itself does a Mock read-back that isn't relevant here)
+        _expr, names, values = self.service._document_to_update_expressions(doc)
+        assert names["#RuleValidationResultUri"] == "RuleValidationResultUri"
+        assert values[":RuleValidationResultUri"] == summary_md
+
+        # 2. run-record snapshot path
+        self.service.create_document_run(doc, run_id="r1", manifest_uri="s3://m")
+        item = self.mock_client.put_item.call_args[0][0]
+        assert item["RuleValidationResultUri"] == summary_md
 
     def test_create_document_run_increments_version_count(self):
         doc = self._completed_document()
