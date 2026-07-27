@@ -5,6 +5,10 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Rule Validation report/tab missing from the document detail page (regression from the AppSync removal).** The document detail UI renders the "View Rule Validation Summary" button and the Rule Validation tab only when the `getDocument` response carries the flat `RuleValidationResultUri` scalar, but the write path stored only the nested `RuleValidationResult` object — the flat scalar was never persisted. The old `appsync/service.py` set `RuleValidationResultUri = rule_validation_result.output_uri` "for backward compatibility"; that line was dropped when document writes moved to `dynamodb/service.py`. Restore it in both the `update_document` expression and the `create_document_run` snapshot item, so a completed rule-validation run surfaces its report in the UI. See [lib/idp_common_pkg/idp_common/dynamodb/service.py](lib/idp_common_pkg/idp_common/dynamodb/service.py).
+
 ## [0.6.2]
 
 ### Added
