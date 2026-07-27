@@ -13,7 +13,7 @@ SPDX-License-Identifier: MIT-0
 
 This pattern implements an intelligent document processing workflow that uses Amazon Bedrock with Nova or Claude models for both page classification/grouping and information extraction.
 
-<img src="../images/IDP-Pattern2-Bedrock.drawio.png" alt="Architecture" width="800">
+For the current architecture diagram, see the unified architecture in [architecture.md](./architecture.md).
 
 ## Table of Contents
 
