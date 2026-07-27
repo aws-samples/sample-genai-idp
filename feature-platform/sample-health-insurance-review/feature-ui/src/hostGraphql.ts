@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Calls the HOST's AppSync GraphQL API directly from the feature UI.
+ * Calls the HOST's API directly from the feature UI through the host's
+ * REST-backed, GraphQL-shaped client (`window.IdpFeatureHost.generateClient`).
  *
- * This works because the host installs `window.awsAmplify` (see
- * src/ui/src/components/feature-page/feature-host-globals.ts) — the SAME
- * configured, signed-in Amplify instance the host UI uses. `generateClient()`
- * therefore inherits the user's Cognito session and talks to the host's
- * GraphQL endpoint with the user's own JWT and group memberships. No extra
- * configuration is needed in the feature.
+ * AppSync was removed from the accelerator — the host UI now POSTs operations
+ * to a REST dispatcher (`/op/<field>`). The host exposes its shim client as a
+ * window global (see src/ui/src/components/feature-page/feature-host-globals.ts)
+ * so features use the SAME transport, carrying the user's Cognito token and
+ * group memberships. (Calling `aws-amplify/api`'s generateClient().graphql()
+ * here instead throws "No GraphQL endpoint configured in Amplify.configure()".)
  *
  * We use this for the Rules Discovery flow, which is built entirely on host
  * mutations/queries (uploadDiscoveryDocument, listDiscoveryJobs,
@@ -17,16 +18,13 @@
  * discovery pipeline and the config it writes to.
  *
  * NOTE on auth: uploadDiscoveryDocument is restricted to the Admin/Author
- * Cognito groups (see schema.graphql). A Reviewer-role user will get an
- * authorization error — the RulesDiscoveryView surfaces that as a friendly
- * "needs Admin or Author" message rather than a raw GraphQL error.
+ * Cognito groups (enforced server-side in the host's resolvers). A
+ * Reviewer-role user will get an authorization error — the RulesDiscoveryView
+ * surfaces that as a friendly "needs Admin or Author" message rather than a
+ * raw GraphQL error.
  */
 
-import { generateClient } from 'aws-amplify/api';
-
-// Minimal structural type for the bits of the Amplify client we use. We avoid
-// `ReturnType<typeof generateClient>` because that generic recurses deeply on
-// the schema-less form and trips TS2321 "Excessive stack depth" at build time.
+// Minimal structural type for the bits of the host client we use.
 interface GraphqlClient {
   graphql: (operation: {
     query: string;
@@ -34,22 +32,30 @@ interface GraphqlClient {
   }) => Promise<unknown>;
 }
 
+interface FeatureHostWindow {
+  IdpFeatureHost?: { generateClient?: () => GraphqlClient };
+}
+
 /**
- * Lazily create the GraphQL client on first use — NOT at module-eval time.
+ * Lazily create the host client on first use — NOT at module-eval time.
  *
  * This UMD bundle is injected via a <script> tag; its top-level code can run
- * before the host has finished `Amplify.configure()`. Calling
- * `generateClient()` at module scope then throws "Amplify has not been
- * configured. Please call Amplify.configure() before using this service."
- * — which Amplify rejects as a plain object, surfacing in the UI as
- * `[object Object]`. By deferring to first call (always inside a user-driven
- * handler or a mounted-component effect), the host's Amplify instance is
- * guaranteed to be configured. The client is memoised after the first call.
+ * before the host has installed its `window.IdpFeatureHost` globals. By
+ * deferring to first call (always inside a user-driven handler or a
+ * mounted-component effect), the host globals are guaranteed to be present.
+ * The client is memoised after the first call.
  */
 let _client: GraphqlClient | null = null;
 function getClient(): GraphqlClient {
   if (!_client) {
-    _client = generateClient() as unknown as GraphqlClient;
+    const host = (window as unknown as FeatureHostWindow).IdpFeatureHost;
+    if (!host?.generateClient) {
+      throw new Error(
+        'Host API client not available (window.IdpFeatureHost.generateClient). ' +
+          'The host UI may be older than the version that exposes it.',
+      );
+    }
+    _client = host.generateClient();
   }
   return _client;
 }

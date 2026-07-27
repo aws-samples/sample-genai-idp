@@ -361,6 +361,22 @@ class DocumentDynamoDBService:
             expression_values[":RuleValidationResult"] = json.dumps(
                 rule_validation_dict, default=str
             )
+            # Also persist the flat URI scalar the schema/UI read directly
+            # (getDocument returns RuleValidationResultUri, and the UI's
+            # DocumentViewers renders the Rule Validation tab only when it is
+            # present). Without this the report never appears in the doc detail
+            # page even though the nested RuleValidationResult is stored. This
+            # mirrors the pre-AppSync-removal behaviour, where appsync/service.py
+            # set RuleValidationResultUri = output_uri "for backward
+            # compatibility"; that line was lost in the move to DynamoDB writes.
+            if document.rule_validation_result.output_uri:
+                set_expressions.append(
+                    "#RuleValidationResultUri = :RuleValidationResultUri"
+                )
+                expression_names["#RuleValidationResultUri"] = "RuleValidationResultUri"
+                expression_values[":RuleValidationResultUri"] = (
+                    document.rule_validation_result.output_uri
+                )
 
         # Add trace_id if available
         if document.trace_id:
@@ -1145,6 +1161,11 @@ class DocumentDynamoDBService:
             item["SummaryReportUri"] = document.summary_report_uri
         if document.evaluation_report_uri:
             item["EvaluationReportUri"] = document.evaluation_report_uri
+        if (
+            document.rule_validation_result
+            and document.rule_validation_result.output_uri
+        ):
+            item["RuleValidationResultUri"] = document.rule_validation_result.output_uri
 
         if document.sections:
             sections_data = []

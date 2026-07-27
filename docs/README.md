@@ -111,8 +111,6 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 The documentation references several screenshots and diagrams from the `../images` folder:
 
 - Unified architecture diagram (`IDP.UnifiedPatterns.drawio.png`)
-- BDA mode architecture (`IDP-Pattern1-BDA.drawio.png`)
-- Pipeline mode architecture (`IDP-Pattern2-Bedrock.drawio.png`)
 - Web UI screenshots (`WebUI.png`)
 - Dashboard screenshots (`Dashboard1.png`, `Dashboard2.png`, `Dashboard3.png`)
 
