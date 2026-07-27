@@ -10,9 +10,13 @@ from typing import Any, Dict
 import boto3
 from botocore.exceptions import ClientError, EventStreamError
 
-from idp_common.agents.analytics.config import get_analytics_config
-from idp_common.agents.analytics.agent import create_analytics_agent
 from .base import IDPTool
+
+# NOTE: the analytics agent stack (idp_common.agents.analytics -> strands) is
+# imported inside execute(), not here. This module is imported for every tool
+# lookup, and a module-level import would turn a missing/broken agents
+# dependency into a Runtime.ImportModuleError that disables ALL tools in the
+# handler instead of just this one.
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +37,25 @@ class SearchTool(IDPTool):
         """Execute search query using analytics agent"""
         if not query:
             return {"error": "No query provided"}
+
+        try:
+            from idp_common.agents.analytics.agent import create_analytics_agent
+            from idp_common.agents.analytics.config import get_analytics_config
+        except ImportError as e:
+            # A missing dependency (e.g. strands not present in the attached
+            # Lambda layer) is a deployment/packaging defect: name the module
+            # so the caller can report it, rather than a generic failure.
+            logger.error(f"Search tool dependencies unavailable: {e}", exc_info=True)
+            return {
+                "success": False,
+                "query": query,
+                "error": (
+                    f"Search tool dependencies are not installed in this "
+                    f"deployment ({e}). The Lambda layer providing "
+                    f"idp_common[agents] is missing or incomplete — redeploy "
+                    f"the stack with a correctly built agents layer."
+                ),
+            }
 
         try:
             session = boto3.Session()

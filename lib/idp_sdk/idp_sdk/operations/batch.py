@@ -856,7 +856,6 @@ class BatchOperation:
             Dictionary with batch metadata and paginated documents
         """
         import base64
-        import json
 
         from idp_sdk._core.batch_processor import BatchProcessor
         from idp_sdk._core.progress_monitor import ProgressMonitor
@@ -895,92 +894,16 @@ class BatchOperation:
         s3_client = boto3.client("s3", region_name=self._client._region)
         output_bucket = batch_processor.resources.get("OutputBucket")
 
-        documents = []
-        for doc_id in page_docs:
-            try:
-                # Get status
-                status_data = monitor.get_batch_status([doc_id])
-                status = "UNKNOWN"
-                if status_data.get("completed"):
-                    status = "COMPLETED"
-                elif status_data.get("running"):
-                    status = "RUNNING"
-                elif status_data.get("queued"):
-                    status = "QUEUED"
-                elif status_data.get("failed"):
-                    status = "FAILED"
-
-                # Try to get results.json from S3
-                document_class = None
-                fields = None
-                confidence = None
-                page_count = None
-
-                if status == "COMPLETED":
-                    try:
-                        s3_key = f"{doc_id}/sections/{section_id}/result.json"
-                        response = s3_client.get_object(
-                            Bucket=output_bucket, Key=s3_key
-                        )
-                        result_data = json.loads(response["Body"].read())
-
-                        document_class = result_data.get("document_class", {}).get(
-                            "type"
-                        )
-                        inference = result_data.get("inference_result", {})
-                        fields = {
-                            k: v
-                            for k, v in inference.items()
-                            if k not in ["metadata", "explainability_info"]
-                        }
-
-                        # Extract confidence from explainability_info - nested structure
-                        explainability = result_data.get("explainability_info", [])
-                        if explainability:
-                            confidence = {}
-
-                            def extract_confidences(obj, target_dict):
-                                for key, val in obj.items():
-                                    if isinstance(val, dict):
-                                        if "confidence" in val:
-                                            target_dict[key] = val["confidence"]
-                                        else:
-                                            target_dict[key] = {}
-                                            extract_confidences(val, target_dict[key])
-
-                            for item in explainability:
-                                extract_confidences(item, confidence)
-
-                        page_count = len(
-                            result_data.get("split_document", {}).get(
-                                "page_indices", []
-                            )
-                        )
-                    except Exception as e:
-                        logger.warning(f"Could not read results.json for {doc_id}: {e}")
-
-                documents.append(
-                    {
-                        "document_id": doc_id,
-                        "document_class": document_class,
-                        "fields": fields,
-                        "confidence": confidence,
-                        "page_count": page_count,
-                        "status": status,
-                    }
-                )
-            except Exception as e:
-                logger.warning(f"Error retrieving metadata for {doc_id}: {e}")
-                documents.append(
-                    {
-                        "document_id": doc_id,
-                        "document_class": None,
-                        "fields": None,
-                        "confidence": None,
-                        "page_count": None,
-                        "status": "ERROR",
-                    }
-                )
+        documents = [
+            self._get_document_metadata(
+                monitor=monitor,
+                s3_client=s3_client,
+                output_bucket=output_bucket,
+                doc_id=doc_id,
+                section_id=section_id,
+            )
+            for doc_id in page_docs
+        ]
 
         result = {
             "batch_id": batch_id,
@@ -998,6 +921,186 @@ class BatchOperation:
             ).decode("utf-8")
 
         return result
+
+    def get_document_results(
+        self,
+        document_id: str,
+        section_id: int = 1,
+        stack_name: Optional[str] = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """Get extracted metadata and fields for a single document by its id.
+
+        Unlike :meth:`get_results`, no batch id is needed: the document id (the
+        S3 object key of the source document) is also the prefix of its results
+        in the output bucket, so the document is addressed directly. An
+        ``s3://`` URI pointing at the document's output prefix (e.g. the
+        ``idp_raw_ref`` emitted to post-processing hook consumers) is also
+        accepted — its key part is used as the document id.
+
+        Args:
+            document_id: Document identifier (S3 object key of the source
+                document), or an ``s3://`` URI whose key is the document id
+            section_id: Section number within the document (default: 1)
+            stack_name: Optional stack name override
+            **kwargs: Additional parameters
+
+        Returns:
+            Dictionary with the document's metadata: document_id,
+            document_class, fields, confidence, page_count, status
+        """
+        import boto3
+
+        from idp_sdk._core.batch_processor import BatchProcessor
+        from idp_sdk._core.progress_monitor import ProgressMonitor
+
+        name = self._client._require_stack(stack_name)
+        batch_processor = BatchProcessor(stack_name=name, region=self._client._region)
+        monitor = ProgressMonitor(
+            stack_name=name,
+            resources=batch_processor.resources,
+            region=self._client._region,
+        )
+        s3_client = boto3.client("s3", region_name=self._client._region)
+        output_bucket = batch_processor.resources.get("OutputBucket")
+
+        doc_id = self._document_id_from_ref(document_id=document_id)
+        return self._get_document_metadata(
+            monitor=monitor,
+            s3_client=s3_client,
+            output_bucket=output_bucket,
+            doc_id=doc_id,
+            section_id=section_id,
+        )
+
+    @staticmethod
+    def _document_id_from_ref(document_id: str) -> str:
+        """Normalize a document reference to a bare document id.
+
+        Accepts either a bare document id (S3 object key) or an ``s3://``
+        URI pointing at the document's output prefix. The URI is parsed with a
+        plain string split — never ``urllib.parse.urlparse``, which treats
+        ``#`` in keys (e.g. ``Report_#2.pdf``) as a fragment delimiter and
+        silently truncates them.
+
+        Args:
+            document_id: Bare document id or ``s3://bucket/<document_id>[/]``
+
+        Returns:
+            The bare document id, without any trailing slash.
+        """
+        if document_id.startswith("s3://"):
+            parts = document_id[len("s3://") :].split("/", 1)
+            if len(parts) < 2 or not parts[1]:
+                raise ValueError(
+                    f"Invalid document reference: {document_id}. "
+                    "Expected s3://bucket/<document_id>"
+                )
+            document_id = parts[1]
+        return document_id.rstrip("/")
+
+    def _get_document_metadata(
+        self,
+        monitor: Any,
+        s3_client: Any,
+        output_bucket: Optional[str],
+        doc_id: str,
+        section_id: int,
+    ) -> Dict[str, Any]:
+        """Retrieve status and extracted metadata for one document.
+
+        Reads ``<doc_id>/sections/<section_id>/result.json`` from the output
+        bucket when the document has completed processing. Shared by
+        :meth:`get_results` (per batch document) and
+        :meth:`get_document_results` (single document).
+
+        Args:
+            monitor: ProgressMonitor for the stack (document status lookup)
+            s3_client: boto3 S3 client
+            output_bucket: Name of the stack's output bucket
+            doc_id: Document identifier (S3 object key)
+            section_id: Section number within the document
+
+        Returns:
+            Dictionary with document_id, document_class, fields, confidence,
+            page_count, and status (ERROR status if retrieval failed).
+        """
+        import json
+
+        try:
+            # Get status
+            status_data = monitor.get_batch_status([doc_id])
+            status = "UNKNOWN"
+            if status_data.get("completed"):
+                status = "COMPLETED"
+            elif status_data.get("running"):
+                status = "RUNNING"
+            elif status_data.get("queued"):
+                status = "QUEUED"
+            elif status_data.get("failed"):
+                status = "FAILED"
+
+            # Try to get results.json from S3
+            document_class = None
+            fields = None
+            confidence = None
+            page_count = None
+
+            if status == "COMPLETED":
+                try:
+                    s3_key = f"{doc_id}/sections/{section_id}/result.json"
+                    response = s3_client.get_object(Bucket=output_bucket, Key=s3_key)
+                    result_data = json.loads(response["Body"].read())
+
+                    document_class = result_data.get("document_class", {}).get("type")
+                    inference = result_data.get("inference_result", {})
+                    fields = {
+                        k: v
+                        for k, v in inference.items()
+                        if k not in ["metadata", "explainability_info"]
+                    }
+
+                    # Extract confidence from explainability_info - nested structure
+                    explainability = result_data.get("explainability_info", [])
+                    if explainability:
+                        confidence = {}
+
+                        def extract_confidences(obj, target_dict):
+                            for key, val in obj.items():
+                                if isinstance(val, dict):
+                                    if "confidence" in val:
+                                        target_dict[key] = val["confidence"]
+                                    else:
+                                        target_dict[key] = {}
+                                        extract_confidences(val, target_dict[key])
+
+                        for item in explainability:
+                            extract_confidences(item, confidence)
+
+                    page_count = len(
+                        result_data.get("split_document", {}).get("page_indices", [])
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not read results.json for {doc_id}: {e}")
+
+            return {
+                "document_id": doc_id,
+                "document_class": document_class,
+                "fields": fields,
+                "confidence": confidence,
+                "page_count": page_count,
+                "status": status,
+            }
+        except Exception as e:
+            logger.warning(f"Error retrieving metadata for {doc_id}: {e}")
+            return {
+                "document_id": doc_id,
+                "document_class": None,
+                "fields": None,
+                "confidence": None,
+                "page_count": None,
+                "status": "ERROR",
+            }
 
     def get_confidence(
         self,

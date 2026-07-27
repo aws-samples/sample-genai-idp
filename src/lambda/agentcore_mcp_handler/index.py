@@ -8,13 +8,26 @@ Provides IDP operations through AgentCore Gateway's built-in MCP server.
 
 import json
 import logging
+import os
 from typing import Any, Dict
 
-from idp_common.agents.common.config import configure_logging
 from tools import get_tool
 
-# Configure logging
-configure_logging()
+# Configure logging. Importing idp_common.agents.common.config transitively
+# imports strands (via the agents.common package __init__), so a missing/broken
+# agents layer would fail THIS module's import and take down every tool with
+# Runtime.ImportModuleError. Fall back to stdlib logging so the handler always
+# loads; the failure then surfaces per-tool with a diagnosable message.
+try:
+    from idp_common.agents.common.config import configure_logging
+
+    configure_logging()
+except ImportError as _logging_import_error:
+    logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
+    logging.getLogger(__name__).warning(
+        f"idp_common agents logging unavailable, using stdlib logging: "
+        f"{_logging_import_error}"
+    )
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
