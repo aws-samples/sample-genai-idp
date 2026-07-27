@@ -929,26 +929,35 @@ const TestSets = (): React.JSX.Element => {
           description="Manage test sets for document processing"
           actions={
             <SpaceBetween direction="horizontal" size="xs">
-              <Button iconName="refresh" loading={refreshing} onClick={handleRefresh}>
-                Refresh
-              </Button>
-              <Button
-                iconName="edit"
-                disabled={selectedItems.length !== 1 || loading}
-                onClick={() => {
-                  const selected = selectedItems[0];
-                  if (selected) {
-                    setEditDescription(selected.description || '');
-                    const classTypeOption =
-                      DOCUMENT_CLASS_TYPE_OPTIONS.find((opt) => opt.value === selected.documentClassType) || DOCUMENT_CLASS_TYPE_OPTIONS[0];
-                    setEditDocumentClassType(classTypeOption);
-                    setShowEditModal(true);
-                  }
-                }}
-              >
-                Edit
-              </Button>
-              <Button iconName="remove" disabled={selectedItems.length === 0 || loading} onClick={() => setShowDeleteModal(true)} />
+              <span title="Refresh test set list">
+                <Button iconName="refresh" loading={refreshing} onClick={handleRefresh} ariaLabel="Refresh" />
+              </span>
+              <span title="Edit selected test set">
+                <Button
+                  iconName="edit"
+                  disabled={selectedItems.length !== 1 || loading}
+                  onClick={() => {
+                    const selected = selectedItems[0];
+                    if (selected) {
+                      setEditDescription(selected.description || '');
+                      const classTypeOption =
+                        DOCUMENT_CLASS_TYPE_OPTIONS.find((opt) => opt.value === selected.documentClassType) ||
+                        DOCUMENT_CLASS_TYPE_OPTIONS[0];
+                      setEditDocumentClassType(classTypeOption);
+                      setShowEditModal(true);
+                    }
+                  }}
+                  ariaLabel="Edit"
+                />
+              </span>
+              <span title="Delete selected test sets">
+                <Button
+                  iconName="remove"
+                  disabled={selectedItems.length === 0 || loading}
+                  onClick={() => setShowDeleteModal(true)}
+                  ariaLabel="Delete"
+                />
+              </span>
               <ButtonDropdown
                 items={[
                   { id: 'docs-pattern', text: 'From Existing Files' },
