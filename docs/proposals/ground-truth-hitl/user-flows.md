@@ -2,9 +2,16 @@
 
 **What this is:** the proposed functionality expressed as user stories in **priority
 order** (P0 → P3), each with the step-by-step flow through the UI. Companion to
-`requirements-v3.md` (what to build) and `mockups/v2/` (visuals). A clickable
-prototype of these flows (dummy data) runs on a live deployment at
-`#/test-studio/preview`.
+`requirements-v3.md` (what to build) and `mockups/v2/` (visuals).
+
+**Review it live:** every story below has a **▶ See it live** link into a clickable
+prototype (dummy data, no backend) running on the test deployment. Each prototype
+screen carries an expandable **"About this screen"** panel with the story, design
+notes, build status, and the feedback we want.
+
+> Prototype base: https://929mlbhmua.execute-api.us-west-2.amazonaws.com/api/#/test-studio/preview
+> (test stack `sr-testing`; sign in as the stack admin. Screens are addressable via
+> `?step=<id>` — which itself demonstrates story 1's shareable deep link.)
 
 **Personas**
 
@@ -26,6 +33,8 @@ around those widgets — no new editor is built.
 
 ### 1. "As an annotator, I want a link that drops me straight into my queue, with the most suspect documents first, so my time removes the most error."
 
+**▶ See it live:** [?step=annotate](https://929mlbhmua.execute-api.us-west-2.amazonaws.com/api/#/test-studio/preview?step=annotate)
+
 1. The config owner shares a **direct queue URL** for the workstream, e.g.
    `…/#/test-studio/sets/{testSetId}/annotate` — annotators bookmark it, or land on
    it from their onboarding note. After login they are **in the queue**: no console
@@ -46,6 +55,8 @@ just the document's output) — that's what turns review into reusable ground tr
 
 ### 2. "As a config owner, I want to send a test set for review and choose how much effort to spend, so I get trustworthy labels without over-reviewing."
 
+**▶ See it live:** [?step=configure](https://929mlbhmua.execute-api.us-west-2.amazonaws.com/api/#/test-studio/preview?step=configure) — includes the shareable queue URL and, under "Show the math", the target-accuracy estimator + error burndown
+
 1. On the test-set detail page, click **Set up team annotation →**.
 2. Choose review depth — three plain presets: **review lowest-confidence docs**
    (recommended) / **review everything** / **accept machine labels as-is**.
@@ -58,6 +69,8 @@ just the document's output) — that's what turns review into reusable ground tr
    with annotators.
 
 ### 3. "As a config owner, I want to upload unlabeled documents and have the system draft labels, so I don't have to label from scratch."
+
+**▶ See it live:** [?step=generate-labels](https://929mlbhmua.execute-api.us-west-2.amazonaws.com/api/#/test-studio/preview?step=generate-labels) — click "⚡ Generate draft labels" to see the before/after
 
 *Closes today's biggest creation gap: a test set currently cannot exist without labels.*
 
@@ -75,6 +88,8 @@ just the document's output) — that's what turns review into reusable ground tr
 
 ### 4. "As a config owner, I want to freeze reviewed labels as an immutable version, so evaluation has a stable reference."
 
+**▶ See it live:** [?step=publish](https://929mlbhmua.execute-api.us-west-2.amazonaws.com/api/#/test-studio/preview?step=publish) — *backend already built & verified on this stack*
+
 1. From the detail page (or the end of the queue), click **Publish version**.
 2. Review the summary: new version number, doc count, labels **Reviewed (human)**
    vs still **Draft (machine)**.
@@ -86,11 +101,15 @@ just the document's output) — that's what turns review into reusable ground tr
 
 ### 5. "As a config owner working alone, I want to fix a few bad labels without setting up a team workflow."
 
+**▶ See it live:** [?step=fix](https://929mlbhmua.execute-api.us-west-2.amazonaws.com/api/#/test-studio/preview?step=fix)
+
 1. On the detail page, docs sort worst-first; click any row.
 2. The **same existing editor** opens for that document; correct, save, return.
 3. No queue or team setup — annotation is an *opt-in*, never a gate.
 
 ### 6. "As an evaluator, I want every test run to record which test-set version it scored against, so comparisons never silently mix label changes with config changes."
+
+**▶ See it live:** [?step=executions](https://929mlbhmua.execute-api.us-west-2.amazonaws.com/api/#/test-studio/preview?step=executions) — note the ⚠ row showing an incomparable pair · *run-pinning backend already built & verified*
 
 1. Start a test run as today (test set + config version).
 2. The run **pins the test set's active reference version** automatically —
@@ -99,6 +118,8 @@ just the document's output) — that's what turns review into reusable ground tr
    only apples-to-apples when both match.
 
 ### 7. "As a config owner, I want to see where each set came from and which version is trusted, so I can manage many sets without confusion."
+
+**▶ See it live:** [list (default view)](https://929mlbhmua.execute-api.us-west-2.amazonaws.com/api/#/test-studio/preview) and the detail hub at [?step=detail](https://929mlbhmua.execute-api.us-west-2.amazonaws.com/api/#/test-studio/preview?step=detail) — *Stage/Source/Version columns already built & verified on the real Test Sets page*
 
 1. **Test Studio → Test Sets** — one row per set: **Stage** (Draft → In review →
    Published), **Source** (Uploaded / Synthetic / Mixed), **Version** badge, and
@@ -115,6 +136,8 @@ just the document's output) — that's what turns review into reusable ground tr
 
 ### 8. "As a config owner, I want to generate a labeled test set from my existing config, so I can test it without sourcing documents."
 
+**▶ See it live:** [?step=onramp-config](https://929mlbhmua.execute-api.us-west-2.amazonaws.com/api/#/test-studio/preview?step=onramp-config) (chooser at [?step=chooser](https://929mlbhmua.execute-api.us-west-2.amazonaws.com/api/#/test-studio/preview?step=chooser))
+
 1. **New Test Set → From an existing config** (recommended synthetic on-ramp).
 2. Pick a config version + document class(es); choose how many docs to generate.
 3. Documents arrive **already labeled**, schema-matched to the config exactly.
@@ -123,10 +146,14 @@ just the document's output) — that's what turns review into reusable ground tr
 
 ### 9. "As a config owner, I want to upload documents I already have labels for, so existing ground truth becomes a managed test set."
 
+**▶ See it live:** [?step=onramp-upload](https://929mlbhmua.execute-api.us-west-2.amazonaws.com/api/#/test-studio/preview?step=onramp-upload) — one upload surface covers stories 9 and 3 (labels auto-detected)
+
 1. **New Test Set → Upload labeled docs**; labels **auto-detected** from the upload.
 2. Land on the detail page fully labeled — ready to publish.
 
 ### 10. "As a config owner, I want to describe a document type in words and get a synthetic test set, so I can start with no config and no documents."
+
+**▶ See it live:** [?step=onramp-describe](https://929mlbhmua.execute-api.us-west-2.amazonaws.com/api/#/test-studio/preview?step=onramp-describe)
 
 1. **New Test Set → Describe it**; type a description ("vendor invoices with line
    items, tax, PO number").
@@ -139,11 +166,15 @@ just the document's output) — that's what turns review into reusable ground tr
 
 ### 11. "As a config owner, I want to add or remove documents, so a set can grow and shed bad samples without starting over."
 
+**▶ See it live:** [?step=manage](https://929mlbhmua.execute-api.us-west-2.amazonaws.com/api/#/test-studio/preview?step=manage) — *remove API already built & unit-tested*
+
 1. Detail page → **Manage documents**: add via any on-ramp, or select rows → **Remove**.
 2. Edits change the **draft** only; published versions are untouched. Publishing
    after an edit cuts the next version, preserving lineage.
 
 ### 12. "As a config owner, I want to merge two test sets, so per-vendor sets can become one golden set."
+
+**▶ See it live:** [?step=merge](https://929mlbhmua.execute-api.us-west-2.amazonaws.com/api/#/test-studio/preview?step=merge) — includes the conflict-resolution question we need answered
 
 1. Select two sets → **Merge**; resolve label conflicts where docs overlap.
 2. The merged set starts as a new draft with provenance carried per document.
@@ -164,9 +195,12 @@ CREATE (any on-ramp)
 
 ## Status legend (what's real today)
 
-| Story | Status |
+Every story has a prototype screen (the ▶ links above); this table is about the
+*underlying implementation*. Each prototype screen also shows its own status badge
+in the "About this screen" panel.
+
+| Story | Implementation status |
 |---|---|
-| 7 (list columns), 4 (publish/version backend + button), 6 (run pins version) | **Built & verified live** |
-| 1 backend (send-to-review trigger, correction→baseline write-back), 11 remove (API) | **Built & unit-tested; not yet in UI** |
-| 1–3 workspace/configure/chooser screens, 4 publish screen | **Clickable prototype (dummy data) — live at `#/test-studio/preview`** |
-| 1 deep-link queue URL, 8/10 synthetic wiring, 12 merge | **Proposed** |
+| 7 (list columns), 4 (publish/version backend + button), 6 (run pins version) | **Built & verified live** on the real Test Sets page of this stack |
+| 1 backend (send-to-review trigger, correction→baseline write-back), 3 draft-labels backend, 11 remove (API) | **Built & unit-tested; UI is the prototype** |
+| 1 deep-link queue URL (prototype demoes it via `?step=`), 8/10 synthetic wiring, 9 auto-detect upload, 12 merge | **Proposed** |
