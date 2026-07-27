@@ -31,8 +31,8 @@ vi.mock('../../../hooks/use-user-role', () => ({
 import DocumentVersionsPanel from '../DocumentVersionsPanel';
 
 const VERSIONS = [
-  { RunId: '20250707T141530Z-b', CompletionTime: '2025-07-07T14:15:30Z', ConfigVersion: 'v2', PageCount: 6, FileCount: 12 },
-  { RunId: '20250101T090000Z-a', CompletionTime: '2025-01-01T09:00:00Z', ConfigVersion: 'v1', PageCount: 6, FileCount: 10 },
+  { RunId: '20250707T141530Z-b', CompletionTime: '2025-07-07T14:15:30Z', ConfigVersion: 'v2', PageCount: 6 },
+  { RunId: '20250101T090000Z-a', CompletionTime: '2025-01-01T09:00:00Z', ConfigVersion: 'v1', PageCount: 6 },
 ];
 
 // Route each query by the operation name embedded in the query string.
@@ -61,6 +61,13 @@ describe('DocumentVersionsPanel', () => {
     expect(screen.getByText('v1')).toBeInTheDocument();
     // The newest run (first row) is badged Current.
     expect(screen.getByText('Current')).toBeInTheDocument();
+  });
+
+  it('does not show a Files column (internal pinned-object count, not user-meaningful)', async () => {
+    render(<DocumentVersionsPanel objectKey="doc.pdf" />);
+    await waitFor(() => expect(screen.getByText('v2')).toBeInTheDocument());
+    expect(screen.getByText('Pages')).toBeInTheDocument();
+    expect(screen.queryByText('Files')).not.toBeInTheDocument();
   });
 
   it('shows a View action for non-admins (read-only access)', async () => {

@@ -28,6 +28,10 @@ Each version records:
 
 - **When** it completed and which **configuration version** processed it
 - Its section/page structure and metering (cost) snapshot
+- Per-section quality data — the low-confidence field alerts and any processing
+  issues detected for that run — so a historical view shows the same
+  **Low Confidence Fields** count and section **Status** the document showed
+  when it completed
 - A **manifest** that pins the exact S3 object version of every output file the
   run produced
 
@@ -133,6 +137,11 @@ The GraphQL/REST API exposes:
   noncurrent S3 versions, but there are no run manifests, so those old runs
   cannot be enumerated as versions. Version history begins accruing from the
   first run after upgrade.
+- **Quality data on pre-existing versions.** The per-section low-confidence
+  alerts and processing issues are written into the run record at completion.
+  Versions recorded before the release that added them have no stored quality
+  data, so they display a **Low Confidence Fields** count of 0 and an empty
+  section **Status**. Versions recorded after upgrading show the real values.
 - **Logical grouping is by object key.** Two different S3 keys are two different
   logical documents. To version a packet, upload it under the same key each
   time.

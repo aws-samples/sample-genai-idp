@@ -5,6 +5,14 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Changed
+
+- **Removed the "Files" column from the document Version History panel.** It showed `FileCount` — the number of output S3 objects the run's manifest pinned (`sections/*/result.json`, page text/images, reports) — an internal storage-plumbing detail that reads as "how many files were in my document" (that's the adjacent **Pages** column) and offers no action. The attribute is still recorded on each run record and returned by `listDocumentVersions`/`getDocumentVersion`, and `idp-cli list-versions` still displays it. See [docs/document-versions.md](docs/document-versions.md).
+
+### Fixed
+
+- **Historical document versions no longer report "Low Confidence Fields: 0" for every section.** Viewing a past version showed a zero low-confidence count (and an empty section Status) even when that run had low-confidence fields, because the per-section quality data was dropped at all three layers: `create_document_run` never snapshotted `ConfidenceThresholdAlerts`/`ProcessingIssues` into the run record (unlike `update_document`, which writes both to the live document item), the versions resolver's `_shape_version` omitted them, and the `GetDocumentVersion` query didn't select them. All three now carry the fields, so a historical view renders the same counts and section status the live document does. **Note:** the snapshot is written at run-completion time, so this applies to runs recorded *after* upgrading — versions already in the table have no stored alerts and will continue to show 0. Runs missing the attributes return `[]` (not null), matching the live-document shape.
+
 ## [0.6.2]
 
 ### Added
