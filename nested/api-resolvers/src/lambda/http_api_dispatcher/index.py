@@ -79,6 +79,9 @@ FIELD_ALIASES: Dict[str, str] = {
     "publishTestSetVersion": "getTestSets",
     "getTestSetVersions": "getTestSets",
     "removeDocumentsFromTestSet": "getTestSets",
+    # sendTestRunToReview shares the TestRunnerFunction (startTestRun's ARN);
+    # the resolver branches on fieldName.
+    "sendTestRunToReview": "startTestRun",
 }
 
 

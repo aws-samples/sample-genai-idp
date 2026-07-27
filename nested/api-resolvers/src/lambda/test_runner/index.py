@@ -68,8 +68,13 @@ def handler(event, context):
         is_appsync_invoke = event.get('identity') is not None
         if is_appsync_invoke and not _caller_in_groups(event, ("Admin", "Author")):
             raise Exception(
-                "Unauthorized: startTestRun requires Admin or Author group"
+                "Unauthorized: this operation requires Admin or Author group"
             )
+
+        # Route by GraphQL field. startTestRun is the default/legacy path.
+        field_name = event.get('info', {}).get('fieldName', 'startTestRun')
+        if field_name == 'sendTestRunToReview':
+            return send_test_run_to_review(event['arguments'])
 
         input_data = event['arguments']['input']
         test_set_id = input_data['testSetId']
@@ -152,6 +157,72 @@ def handler(event, context):
     except Exception as e:
         logger.error(f"Error in test runner: {str(e)}")
         raise
+
+def send_test_run_to_review(args):
+    """Mark a completed test run's documents for HITL review, on demand.
+
+    Running a test set copies its inputs into the pipeline under a
+    ``{test_run_id}/`` prefix, so each doc becomes a first-class ``doc#`` item
+    with confidence-threshold alerts. This flips those docs into the review
+    hopper (HITLTriggered / HITLStatus=PendingReview) without waiting for the
+    confidence-only auto-trigger — the entry point for annotating a test set's
+    ground truth. Only docs that actually have confidence alerts are queued.
+    """
+    test_run_id = args['testRunId']
+    tracking_table = os.environ['TRACKING_TABLE']
+    table = dynamodb.Table(tracking_table)  # type: ignore[attr-defined]
+
+    run = table.get_item(
+        Key={'PK': f'testrun#{test_run_id}', 'SK': 'metadata'}
+    ).get('Item')
+    if not run:
+        raise ValueError(f"Test run '{test_run_id}' not found")
+
+    files = run.get('Files') or []
+    queued = 0
+    skipped = 0
+    for file_name in files:
+        object_key = f"{test_run_id}/{file_name}"
+        doc = table.get_item(
+            Key={'PK': f'doc#{object_key}', 'SK': 'none'}
+        ).get('Item')
+        if not doc:
+            skipped += 1
+            continue
+
+        # Only queue docs with confidence alerts, and never clobber a review
+        # that's already completed/skipped.
+        alert_count = int(doc.get('ConfidenceAlertCount', 0) or 0)
+        status = doc.get('HITLStatus', '')
+        if alert_count <= 0 or status in (
+            'Review Completed', 'Review Skipped', 'Completed', 'Skipped'
+        ):
+            skipped += 1
+            continue
+
+        table.update_item(
+            Key={'PK': f'doc#{object_key}', 'SK': 'none'},
+            UpdateExpression=(
+                'SET HITLTriggered = :t, HITLStatus = :s, TestSetId = :tsid'
+            ),
+            ExpressionAttributeValues={
+                ':t': True,
+                ':s': 'PendingReview',
+                ':tsid': run.get('TestSetId'),
+            },
+        )
+        queued += 1
+
+    logger.info(
+        f"send_test_run_to_review: run={test_run_id} queued={queued} skipped={skipped}"
+    )
+    return {
+        'testRunId': test_run_id,
+        'testSetId': run.get('TestSetId'),
+        'queuedCount': queued,
+        'skippedCount': skipped,
+    }
+
 
 def _get_test_set(tracking_table, test_set_id):
     """Get test set by ID"""

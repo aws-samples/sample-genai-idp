@@ -716,6 +716,13 @@ input PublishTestSetVersionInput {
   setAsActiveReference: Boolean
 }
 
+type SendTestRunToReviewResult @aws_cognito_user_pools @aws_iam {
+  testRunId: String!
+  testSetId: String
+  queuedCount: Int
+  skippedCount: Int
+}
+
 input TestSetUploadInput {
   fileName: String!
   fileSize: Int!
@@ -1007,6 +1014,8 @@ type Mutation {
   publishTestSetVersion(input: PublishTestSetVersionInput!): TestSetVersion
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   removeDocumentsFromTestSet(testSetId: String!, fileNames: [String!]!): TestSet
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  sendTestRunToReview(testRunId: String!): SendTestRunToReviewResult
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   # Fine-Tuning (Admin + Author)
   createFinetuningJob(input: CreateFinetuningJobInput!): FinetuningJob

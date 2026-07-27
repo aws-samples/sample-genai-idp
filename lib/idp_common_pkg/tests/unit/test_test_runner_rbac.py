@@ -321,3 +321,72 @@ class TestTestRunnerRBAC:
 
             args, _ = mock_store_metadata.call_args
             assert args[-1] is None
+
+    # -- send_test_run_to_review (on-demand HITL trigger) -----------------
+
+    @patch.dict(os.environ, {"TRACKING_TABLE": "test-table"})
+    def test_send_test_run_to_review_queues_docs_with_alerts(self):
+        """Docs with confidence alerts are flipped to PendingReview; clean ones skipped."""
+        from unittest.mock import MagicMock
+
+        table = MagicMock()
+        # run metadata with two files
+        run_item = {"TestSetId": "ts1", "Files": ["a.pdf", "b.pdf"]}
+        doc_a = {"ConfidenceAlertCount": 3, "HITLStatus": ""}      # should queue
+        doc_b = {"ConfidenceAlertCount": 0, "HITLStatus": ""}      # no alerts -> skip
+
+        def _get_item(Key):
+            sk_pk = Key["PK"]
+            if sk_pk == "testrun#run-1":
+                return {"Item": run_item}
+            if sk_pk == "doc#run-1/a.pdf":
+                return {"Item": doc_a}
+            if sk_pk == "doc#run-1/b.pdf":
+                return {"Item": doc_b}
+            return {}
+
+        table.get_item.side_effect = _get_item
+        with patch.object(test_runner_index.dynamodb, "Table", return_value=table):
+            result = test_runner_index.send_test_run_to_review({"testRunId": "run-1"})
+
+        assert result["queuedCount"] == 1
+        assert result["skippedCount"] == 1
+        assert result["testSetId"] == "ts1"
+        # exactly one doc updated, and it's a.pdf -> PendingReview + TestSetId
+        assert table.update_item.call_count == 1
+        upd = table.update_item.call_args.kwargs
+        assert upd["Key"]["PK"] == "doc#run-1/a.pdf"
+        assert upd["ExpressionAttributeValues"][":s"] == "PendingReview"
+        assert upd["ExpressionAttributeValues"][":tsid"] == "ts1"
+
+    @patch.dict(os.environ, {"TRACKING_TABLE": "test-table"})
+    def test_send_test_run_to_review_skips_completed(self):
+        """Already-reviewed docs are not re-queued."""
+        from unittest.mock import MagicMock
+
+        table = MagicMock()
+        run_item = {"TestSetId": "ts1", "Files": ["done.pdf"]}
+        doc = {"ConfidenceAlertCount": 5, "HITLStatus": "Review Completed"}
+
+        def _get_item(Key):
+            if Key["PK"] == "testrun#run-2":
+                return {"Item": run_item}
+            return {"Item": doc}
+
+        table.get_item.side_effect = _get_item
+        with patch.object(test_runner_index.dynamodb, "Table", return_value=table):
+            result = test_runner_index.send_test_run_to_review({"testRunId": "run-2"})
+
+        assert result["queuedCount"] == 0
+        assert result["skippedCount"] == 1
+        assert table.update_item.call_count == 0
+
+    @patch.dict(os.environ, {"TRACKING_TABLE": "test-table"})
+    def test_send_test_run_to_review_missing_run_raises(self):
+        from unittest.mock import MagicMock
+
+        table = MagicMock()
+        table.get_item.return_value = {}
+        with patch.object(test_runner_index.dynamodb, "Table", return_value=table):
+            with pytest.raises(ValueError, match="Test run 'ghost' not found"):
+                test_runner_index.send_test_run_to_review({"testRunId": "ghost"})

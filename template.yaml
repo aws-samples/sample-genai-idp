@@ -10657,6 +10657,10 @@ Resources:
           OUTPUT_BUCKET: !Ref OutputBucket
           INPUT_BUCKET: !Ref InputBucket
           WORKING_BUCKET: !Ref WorkingBucket
+          # Test-set HITL: when a reviewed doc belongs to a test set, corrected
+          # labels are also written back to the test set's baseline so a later
+          # publishTestSetVersion captures the human annotations as ground truth.
+          TEST_SET_BUCKET: !Ref TestSetBucket
           QUEUE_URL: !Ref DocumentQueue
       LoggingConfig:
         LogGroup: !Ref CompleteSectionReviewFunctionLogGroup
@@ -10667,6 +10671,8 @@ Resources:
             BucketName: !Ref OutputBucket
         - S3CrudPolicy:
             BucketName: !Ref WorkingBucket
+        - S3CrudPolicy:
+            BucketName: !Ref TestSetBucket
         - SQSSendMessagePolicy:
             QueueName: !GetAtt DocumentQueue.QueueName
         - Statement:
