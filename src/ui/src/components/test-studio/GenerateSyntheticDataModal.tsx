@@ -120,6 +120,7 @@ const GenerateSyntheticDataModal = ({
   const [newTestSetName, setNewTestSetName] = useState('');
   const [existingTestSet, setExistingTestSet] = useState<SelectProps.Option | null>(null);
   const [testSetOptions, setTestSetOptions] = useState<SelectProps.Option[]>([]);
+  const [allTestSetIds, setAllTestSetIds] = useState<Set<string>>(new Set());
 
   const versionOptions = useMemo<SelectProps.Option[]>(
     () => versions.map((v) => ({ label: v.versionName, value: v.versionName })),
@@ -134,7 +135,6 @@ const GenerateSyntheticDataModal = ({
     // initialClassName is applied once the version's classes load (below).
   }, [visible, initialTab, initialVersion]);
 
-  // Load existing COMPLETED test sets for the "add to existing" dropdown.
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
@@ -142,11 +142,15 @@ const GenerateSyntheticDataModal = ({
       .graphql({ query: getTestSets })
       .then((result) => {
         if (cancelled) return;
-        const sets = (result.data.getTestSets || []).filter((t): t is NonNullable<typeof t> => t != null && t.status === 'COMPLETED');
-        setTestSetOptions(sets.map((t) => ({ label: t.name, value: t.id })));
+        const all = (result.data.getTestSets || []).filter((t): t is NonNullable<typeof t> => t != null);
+        setAllTestSetIds(new Set(all.map((t) => t.id)));
+        setTestSetOptions(all.filter((t) => t.status === 'COMPLETED').map((t) => ({ label: t.name, value: t.id })));
       })
       .catch(() => {
-        if (!cancelled) setTestSetOptions([]);
+        if (!cancelled) {
+          setTestSetOptions([]);
+          setAllTestSetIds(new Set());
+        }
       });
     return () => {
       cancelled = true;
@@ -217,7 +221,7 @@ const GenerateSyntheticDataModal = ({
   const nameFormatValid = trimmedNewName.length > 0 && trimmedNewName.length <= 50 && NAME_RE.test(trimmedNewName);
   // A new name whose derived id matches an existing test set would silently
   // append to it — block it and steer the user to "Add to existing".
-  const newNameCollides = nameFormatValid && testSetOptions.some((o) => o.value === toTestSetId(trimmedNewName));
+  const newNameCollides = nameFormatValid && allTestSetIds.has(toTestSetId(trimmedNewName));
   const newNameValid = nameFormatValid && !newNameCollides;
   const destValid = destMode === 'new' ? newNameValid : Boolean(existingTestSet);
   const canSubmit =
