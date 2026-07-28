@@ -92,6 +92,10 @@ so on.</p>
 <ul>
 <li><strong>When</strong> it completed and which <strong>configuration version</strong> processed it</li>
 <li>Its section/page structure and metering (cost) snapshot</li>
+<li>Per-section quality data — the low-confidence field alerts and any processing
+issues detected for that run — so a historical view shows the same
+<strong>Low Confidence Fields</strong> count and section <strong>Status</strong> the document showed
+when it completed</li>
 <li>A <strong>manifest</strong> that pins the exact S3 object version of every output file the
 run produced</li>
 </ul>
@@ -195,6 +199,11 @@ release without version history, the prior object <em>bytes</em> may still exist
 noncurrent S3 versions, but there are no run manifests, so those old runs
 cannot be enumerated as versions. Version history begins accruing from the
 first run after upgrade.</li>
+<li><strong>Quality data on pre-existing versions.</strong> The per-section low-confidence
+alerts and processing issues are written into the run record at completion.
+Versions recorded before the release that added them have no stored quality
+data, so they display a <strong>Low Confidence Fields</strong> count of 0 and an empty
+section <strong>Status</strong>. Versions recorded after upgrading show the real values.</li>
 <li><strong>Logical grouping is by object key.</strong> Two different S3 keys are two different
 logical documents. To version a packet, upload it under the same key each
 time.</li>

@@ -80,9 +80,15 @@ missed PII is possible. See <a href="#feedback">Feedback</a>.</p></div></aside>
 <p><strong>PII Anonymization</strong> is a bundled <a href="https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/feature-platform.md">Extension Feature</a>
 that detects and redacts personally identifiable information (PII) from documents
 <strong>before</strong> the accelerator’s classification and extraction models see them — so
-raw PII never transits a GenAI model. It is the reference example of the
-standalone <strong><code dir="auto">preprocessing</code></strong> pipeline-hook point, which runs first in the
-workflow (before the BDA/pipeline routing).</p>
+the processing pipeline (its prompts, logs, and stored extraction results)
+operates only on de-identified content. Note the boundary precisely: the
+redaction step itself sends each page to a Bedrock model to <em>detect</em> the PII,
+so PII does transit that single detection call; what the feature prevents is
+PII flowing through the rest of the pipeline and into its stored outputs. It
+is the reference example of the
+standalone <strong><code dir="auto">preprocessing</code></strong>
+<a href="https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/feature-platform.md#pipeline-hooks">pipeline-hook point</a>, which runs first
+in the workflow (before the BDA/pipeline routing).</p>
 <p>It integrates the detection/redaction library from the AWS Labs
 <strong><a href="https://github.com/awslabs/pii-anonymizer">pii-anonymizer</a></strong> project
 (Apache-2.0). That code is <em>vendored</em> into this feature (copied, security-scanned,
@@ -188,10 +194,16 @@ everyone else <code dir="auto">&#x3C;base>__pii_target</code>. Users only see do
 version is in their allowed set.</li>
 <li><strong>PII mapping (re-identification key)</strong> — when synthetic redaction is used you
 can optionally store the original→synthetic value map. <strong>It contains real PII.</strong>
-It is stored encrypted (the stack’s customer-managed KMS key) and the Redaction
-Report reveals it <strong>only</strong> to a caller whose <code dir="auto">allowedConfigVersions</code> include the
-<strong>original</strong> document’s config version (Admins always pass). Off by default;
-enable per-pair with the wizard’s “Store PII mapping” toggle.</li>
+It lives in a feature-owned, KMS-encrypted DynamoDB table — deliberately <em>not</em>
+in any host bucket, so the host’s generic file-contents API can never serve it —
+and the only read path is the feature API’s <code dir="auto">GET /report/{docId}/mapping</code>
+route. That route reveals it <strong>only</strong> to a caller whose <code dir="auto">allowedConfigVersions</code>
+include the <strong>original</strong> document’s config version (Admins always pass), and it
+<strong>fails closed</strong>: if the user-scope lookup errors for any reason the request is
+denied (403), never treated as unrestricted. The Redaction Report <em>list</em> is
+filtered by the same scoping, and audit rows carry only a stored-yes/no flag —
+never the mapping itself or its location. Off by default; enable per-pair with
+the wizard’s “Store PII mapping” toggle.</li>
 </ul>
 <div class="sl-heading-wrapper level-h2"><h2 id="redaction-report">Redaction Report</h2><a class="sl-anchor-link" href="#redaction-report"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Redaction Report”</span></a></div>
 <p>The <strong>Redaction Report</strong> tab shows a metadata-only audit (no PII by default):
@@ -213,6 +225,8 @@ Upstream detection/redaction issues can also be raised at
 <div class="sl-heading-wrapper level-h2"><h2 id="see-also">See also</h2><a class="sl-anchor-link" href="#see-also"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “See also”</span></a></div>
 <ul>
 <li><a href="https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/feature-platform.md">Feature Platform</a> — how extensions work.</li>
+<li><a href="https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/feature-platform.md#pipeline-hooks">Feature Platform → Pipeline hooks</a> —
+the generic <code dir="auto">preprocessing</code> hook contract this feature builds on.</li>
 <li><a href="https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/feature-platform-developer-guide.md">Feature Platform developer guide</a>.</li>
 <li>Upstream: <a href="https://github.com/awslabs/pii-anonymizer">awslabs/pii-anonymizer</a>.</li>
 </ul></div><footer class="sl-flex astro-xhxjzfa7"><div class="meta sl-flex astro-xhxjzfa7"></div><div class="pagination-links print:hidden astro-jgq3vlii" dir="ltr"><a href="/accelerated-intelligent-document-processing-on-aws/extensions/auto-optimizer/" rel="prev" class="astro-jgq3vlii"><svg aria-hidden="true" class="astro-jgq3vlii astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg><span class="astro-jgq3vlii">Previous<br class="astro-jgq3vlii"><span class="link-title astro-jgq3vlii">Auto Optimizer</span></span></a><a href="/accelerated-intelligent-document-processing-on-aws/extensions/idp-data-generator/" rel="next" class="astro-jgq3vlii"><svg aria-hidden="true" class="astro-jgq3vlii astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg><span class="astro-jgq3vlii">Next<br class="astro-jgq3vlii"><span class="link-title astro-jgq3vlii">Test Set Generator</span></span></a></div></footer></div></div></main></div></div></div></div></body></html>
