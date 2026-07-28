@@ -39,6 +39,14 @@ from rich.progress import (
 LIB_DEPENDENCY = "./lib/idp_common_pkg/idp_common"
 LIB_PKG_PATH = "./lib/idp_common_pkg"
 
+# Files the multi-doc discovery CodeBuild project needs from the source zip in
+# order to build its container image. Kept as a constant so the packaging step
+# and its test assert on the same list.
+MULTI_DOC_DISCOVERY_BUILD_INPUTS = (
+    "nested/multi-doc-discovery/Dockerfile",
+    "nested/multi-doc-discovery/requirements.txt",
+)
+
 
 class IDPPublisher:
     def __init__(self, verbose=False):
@@ -1332,6 +1340,21 @@ STDERR:
                     file_path = os.path.join(root, file)
                     arcname = os.path.relpath(file_path, ".")
                     zipf.write(file_path, arcname)
+
+            # Add the build inputs themselves. The CodeBuild buildspec builds
+            # `-f nested/multi-doc-discovery/Dockerfile`, which in turn COPYs
+            # nested/multi-doc-discovery/requirements.txt, so BOTH must be in
+            # the zip. They used to be heredoc'd inline in the buildspec, which
+            # let the real files (and Dependabot's security bumps to them) drift
+            # out of the image entirely.
+            for build_input in MULTI_DOC_DISCOVERY_BUILD_INPUTS:
+                if not os.path.isfile(build_input):
+                    self.console.print(
+                        f"[red]❌ Missing multi-doc discovery build input: "
+                        f"{build_input}[/red]"
+                    )
+                    sys.exit(1)
+                zipf.write(build_input, build_input)
 
         self.console.print(
             f"[green]✅ Created multi-doc discovery source zip ({os.path.getsize(zipfile_path) / 1024 / 1024:.2f} MB)[/green]"
@@ -2802,6 +2825,11 @@ STDERR:
                 LIB_DEPENDENCY,
                 "nested/multi-doc-discovery/docker_build_lambda",
                 "nested/multi-doc-discovery/template.yaml",
+                # The container image's build inputs. Without these two, a
+                # Dependabot bump to requirements.txt (or a Dockerfile change)
+                # would not invalidate the checksum, so the smart-rebuild logic
+                # would skip the component and keep shipping the old image.
+                *MULTI_DOC_DISCOVERY_BUILD_INPUTS,
                 "src/lambda/multi_doc_discovery",
             ],
             # Unified pattern (combines BDA + Pipeline)
