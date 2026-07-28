@@ -1782,6 +1782,11 @@ _CODEBUILD_CR_FAILURE_MARKER = "codebuild failed with status"
 # command + its traceback + the buildspec phase summary) is always at the tail.
 _CODEBUILD_LOG_TAIL_LINES = 120
 
+# Build statuses that represent a settled failure worth reporting on. Notably
+# EXCLUDES IN_PROGRESS: a still-running build carries no failure phase, so
+# treating it as "the failure" produces an empty, misleading report.
+_TERMINAL_BUILD_FAILURE_STATUSES = ("FAILED", "FAULT", "TIMED_OUT", "STOPPED")
+
 
 def _codebuild_projects_in_stack(cf_client, stack_name):
     """Logical-id → project name for every CodeBuild project in a stack."""
@@ -1872,12 +1877,22 @@ def get_codebuild_failure_details(stack_name, failed_events, max_projects=3):
                 ).get("ids", [])
                 if not ids:
                     continue
-                # Inspect the few most recent builds and report the newest that
-                # did not succeed (the retry in the custom resource means the
-                # newest build may be a successful second attempt).
+                # Inspect the few most recent builds and report the newest one
+                # that reached a TERMINAL FAILURE. Matching on "not SUCCEEDED"
+                # would also match IN_PROGRESS — and since the DockerBuildRun
+                # custom resource now retries once, the newest build is often
+                # still running when we look. An in-progress build has no
+                # FAILED/FAULT/TIMED_OUT phase, so it yields an empty
+                # phase_error and a partial log tail, and next() would stop
+                # there and never reach the build that actually failed.
                 builds = cb_client.batch_get_builds(ids=ids[:5]).get("builds", [])
                 failed = next(
-                    (b for b in builds if b.get("buildStatus") != "SUCCEEDED"), None
+                    (
+                        b
+                        for b in builds
+                        if b.get("buildStatus") in _TERMINAL_BUILD_FAILURE_STATUSES
+                    ),
+                    None,
                 )
                 if not failed:
                     continue

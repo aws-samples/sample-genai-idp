@@ -2504,9 +2504,29 @@ STDERR:
                     "<w2_dataset_deployer_HASH_TOKEN>": self.get_directory_checksum(
                         "src/lambda/w2_dataset_deployer"
                     )[:16],
-                    "<MULTI_DOC_DISCOVERY_BUILD_HASH_TOKEN>": self.get_directory_checksum(
-                        "src/lambda/multi_doc_discovery"
-                    )[:16],
+                    # BuildHash is the ONLY meaningful property of the
+                    # DockerBuildRun custom resource, so it is the sole thing
+                    # that re-triggers the container build on a stack update: if
+                    # it doesn't change, CloudFormation sees no delta, never
+                    # re-invokes the resource, and the ECR :latest image keeps
+                    # whatever it had. It must therefore cover EVERY input to the
+                    # image — the handler code AND the Dockerfile/requirements.txt
+                    # the build installs from. Hashing only the handler directory
+                    # meant a Dependabot bump to requirements.txt left BuildHash
+                    # byte-identical and the vulnerable dependency stayed
+                    # deployed (a fresh create always builds, so this is only
+                    # observable on an in-place update).
+                    "<MULTI_DOC_DISCOVERY_BUILD_HASH_TOKEN>": hashlib.sha256(
+                        (
+                            self.get_directory_checksum(
+                                "src/lambda/multi_doc_discovery"
+                            )
+                            + "".join(
+                                self.get_file_checksum(build_input)
+                                for build_input in MULTI_DOC_DISCOVERY_BUILD_INPUTS
+                            )
+                        ).encode()
+                    ).hexdigest()[:16],
                     "<SAMPLE_FEATURES_HASH_TOKEN>": sample_features_hash,
                     "<SAMPLE_FEATURES_LIST_TOKEN>": json.dumps(
                         sample_features_list or []

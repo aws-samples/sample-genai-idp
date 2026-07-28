@@ -213,6 +213,118 @@ def test_codebuild_detail_prefers_the_failed_build_over_a_later_success(
     assert [d["build_id"] for d in details] == ["proj:old"]
 
 
+def _in_progress_build(build_id="proj:retry"):
+    """A build that has started but not finished — no failure phase yet."""
+    return {
+        "id": build_id,
+        "buildStatus": "IN_PROGRESS",
+        "phases": [
+            {"phaseType": "PRE_BUILD", "phaseStatus": "SUCCEEDED"},
+            {"phaseType": "BUILD"},  # still running: no phaseStatus
+        ],
+        "logs": {
+            "groupName": "/aws/codebuild/proj",
+            "streamName": "retry-stream",
+            "deepLink": "https://console.aws.amazon.com/cloudwatch/home#retry",
+        },
+    }
+
+
+def test_codebuild_detail_skips_an_in_progress_build_for_the_real_failure(
+    cbd, monkeypatch
+):
+    """An IN_PROGRESS build is not "the failure" — keep looking.
+
+    Regression guard. The selector originally matched any build that was
+    `!= "SUCCEEDED"`, which includes IN_PROGRESS. Because the DockerBuildRun
+    custom resource now retries once, the newest build is frequently still
+    running when the summary captures evidence — so the selector would stop at
+    the retry, yielding an empty phase_error and a partial log tail, and never
+    reach the build that actually failed. Worse, the prompt labels that section
+    authoritative, actively steering the model toward empty evidence.
+    """
+    nested = "nested-stack"
+    cfn = _FakeCfn(
+        resources={
+            nested: [
+                {
+                    "ResourceType": "AWS::CodeBuild::Project",
+                    "LogicalResourceId": "DockerBuildProject",
+                    "PhysicalResourceId": "proj",
+                }
+            ]
+        }
+    )
+    # Newest first, as list_builds_for_project(sortOrder=DESCENDING) returns.
+    codebuild = _FakeCodeBuild(
+        {"proj": [_in_progress_build("proj:retry"), _failed_build("proj:real")]}
+    )
+    logs = _FakeLogs(
+        {
+            (
+                "/aws/codebuild/DockerBuildProject-9qS7dcXXFFIe",
+                "f86e3cbc-09b4-47fa-9d3d-aced84824872",
+            ): ["BrokenPipeError: [Errno 32] Broken pipe"]
+        }
+    )
+    _patch_clients(cbd, monkeypatch, cfn=cfn, codebuild=codebuild, logs=logs)
+
+    ev = dict(_codebuild_cr_event(), stack_name=nested)
+    details = cbd.get_codebuild_failure_details("parent", [ev])
+
+    assert [d["build_id"] for d in details] == ["proj:real"], (
+        "reported on the in-progress retry instead of the build that failed"
+    )
+    # And the report is actually useful, not empty.
+    assert details[0]["failed_phase"] == "BUILD"
+    assert "docker build" in details[0]["phase_error"]
+    assert "BrokenPipeError" in details[0]["log_tail"]
+
+
+def test_codebuild_detail_returns_nothing_when_only_in_progress(cbd, monkeypatch):
+    """No terminal failure yet → report nothing rather than empty noise."""
+    nested = "nested-stack"
+    cfn = _FakeCfn(
+        resources={
+            nested: [
+                {
+                    "ResourceType": "AWS::CodeBuild::Project",
+                    "LogicalResourceId": "P",
+                    "PhysicalResourceId": "proj",
+                }
+            ]
+        }
+    )
+    codebuild = _FakeCodeBuild({"proj": [_in_progress_build()]})
+    _patch_clients(cbd, monkeypatch, cfn=cfn, codebuild=codebuild)
+
+    ev = dict(_codebuild_cr_event(), stack_name=nested)
+    assert cbd.get_codebuild_failure_details("parent", [ev]) == []
+
+
+@pytest.mark.parametrize("status", ["FAILED", "FAULT", "TIMED_OUT", "STOPPED"])
+def test_every_terminal_failure_status_is_reported(cbd, monkeypatch, status):
+    nested = "nested-stack"
+    cfn = _FakeCfn(
+        resources={
+            nested: [
+                {
+                    "ResourceType": "AWS::CodeBuild::Project",
+                    "LogicalResourceId": "P",
+                    "PhysicalResourceId": "proj",
+                }
+            ]
+        }
+    )
+    build = dict(_failed_build("proj:x"), buildStatus=status)
+    codebuild = _FakeCodeBuild({"proj": [build]})
+    _patch_clients(cbd, monkeypatch, cfn=cfn, codebuild=codebuild)
+
+    ev = dict(_codebuild_cr_event(), stack_name=nested)
+    details = cbd.get_codebuild_failure_details("parent", [ev])
+    assert [d["build_status"] for d in details] == [status]
+
+
 def test_codebuild_detail_degrades_gracefully_on_api_error(cbd, monkeypatch):
     """Evidence collection must never raise into the summary path."""
     nested = "nested-stack"
