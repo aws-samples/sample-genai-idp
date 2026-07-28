@@ -1,0 +1,67 @@
+{
+  "description": "Flat W2-style doc exercising EXACT / FUZZY / NUMERIC_EXACT / DATE. One field mismatched, one within numeric tolerance (baseline behavior — Phase 1 R1 will legitimately shift this).",
+  "section_id": "1",
+  "classification": "W2",
+  "page_ids": ["1"],
+  "config": {
+    "classes": [
+      {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "w2",
+        "x-aws-idp-document-type": "W2",
+        "x-aws-idp-evaluation-model-name": "W2",
+        "x-aws-idp-evaluation-match-threshold": 0.8,
+        "type": "object",
+        "properties": {
+          "employer_ein": {
+            "type": "string",
+            "description": "Employer EIN",
+            "x-aws-idp-evaluation-method": "EXACT",
+            "x-aws-idp-evaluation-weight": 3.0
+          },
+          "employer_name": {
+            "type": "string",
+            "description": "Employer name",
+            "x-aws-idp-evaluation-method": "FUZZY",
+            "x-aws-idp-evaluation-threshold": 0.85,
+            "x-aws-idp-evaluation-weight": 1.5
+          },
+          "wages": {
+            "type": "number",
+            "description": "Wages, tips, other compensation",
+            "x-aws-idp-evaluation-method": "NUMERIC_EXACT",
+            "x-aws-idp-evaluation-threshold": 0.5,
+            "x-aws-idp-evaluation-weight": 2.0
+          },
+          "federal_income_tax": {
+            "type": "number",
+            "description": "Federal income tax withheld",
+            "x-aws-idp-evaluation-method": "NUMERIC_EXACT",
+            "x-aws-idp-evaluation-threshold": 0.01,
+            "x-aws-idp-evaluation-weight": 2.0
+          },
+          "tax_year": {
+            "type": "string",
+            "description": "Tax year",
+            "x-aws-idp-evaluation-method": "DATE",
+            "x-aws-idp-evaluation-weight": 1.0
+          }
+        }
+      }
+    ]
+  },
+  "expected": {
+    "employer_ein": "12-3456789",
+    "employer_name": "Acme Corporation",
+    "wages": 50000.00,
+    "federal_income_tax": 5000.00,
+    "tax_year": "2023"
+  },
+  "actual": {
+    "employer_ein": "12-3456789",
+    "employer_name": "Acme Corp.",
+    "wages": 50000.25,
+    "federal_income_tax": 5001.00,
+    "tax_year": "2023"
+  }
+}

@@ -638,12 +638,12 @@ Test results include detailed per-field extraction performance metrics displayed
 - **Expandable Section**: Collapsed by default to keep results view clean
 - **Paginated**: 10 fields per page for easy navigation
 - **Resizable Columns**: Adjust column widths as needed
-- **Backward Compatible**: Confidence columns only shown for test runs with Stickler v0.4.0+ data
+- **Backward Compatible**: Confidence columns only appear for test runs whose per-doc results include the `confidenceMetrics` blob (older runs from before this feature landed simply don't show them)
 - **Interactive Help**: Info icons next to metric names provide explanatory tooltips with links to documentation (Wikipedia for standard metrics, Stickler docs for ECARB@30). Available for all accuracy metrics, confidence metrics, confusion matrix components, error rates, and split classification metrics
 
 **How It Works:**
 - Backend stores confusion matrix values (TP, FP, TN, FN) from Stickler aggregation
-- Backend computes confidence calibration metrics (AUROC, ECE, Brier) using Stickler v0.4.0+ ConfidenceCalculator
+- Backend computes confidence calibration metrics (AUROC, ECE, Brier) using Stickler's `BulkStructuredModelEvaluator` in the aggregation Lambda
 - UI calculates Accuracy, Precision, and Recall on-the-fly from confusion matrix values
 - Confidence columns dynamically appear only when `confidenceMetrics` data is present
 - Metrics displayed with 3 decimal precision (e.g., 0.850)
@@ -656,11 +656,11 @@ Test results include detailed per-field extraction performance metrics displayed
 - **Prioritization**: Prioritize prompt engineering efforts on problematic fields or fields with poor confidence calibration
 - **Tracking**: Track improvement in specific fields after configuration changes
 
-#### Confidence Calibration Metrics (Stickler v0.4.0+)
+#### Confidence Calibration Metrics
 
 https://github.com/user-attachments/assets/1d17ea33-f098-4d9e-a461-1113b9dc3ce9
 
-The evaluation engine uses **Stickler v0.4.0** to compute confidence calibration metrics alongside traditional accuracy metrics. These metrics assess how well the model's confidence scores reflect actual correctness.
+The evaluation engine uses Stickler's bulk aggregator to compute confidence calibration metrics alongside traditional accuracy metrics. These metrics assess how well the model's confidence scores reflect actual correctness.
 
 **What Are Confidence Calibration Metrics?**
 
@@ -689,8 +689,8 @@ When a model extracts a field with 90% confidence, ideally 90% of such predictio
 
 2. **Test Aggregation**: When viewing test results, the aggregation function:
    - Loads all `stickler_comparison_result` records for the test run
-   - Computes calibration metrics (AUROC, ECE, Brier) using Stickler's `ConfidenceMetricsCalculator`
-   - Computes ECAB (Error Capture at Budget) metrics using `BulkStructuredModelEvaluator` with `ErrorCaptureAtBudgetMetric`
+   - Computes calibration metrics (AUROC, ECE, Brier) via `aggregate_from_comparisons` and a `BulkStructuredModelEvaluator` with the confidence metrics installed as bulk-level accumulators
+   - Also runs `BulkStructuredModelEvaluator` with `ErrorCaptureAtBudgetMetric` to compute ECAB (Error Capture at Budget)
    - Aggregates path-based keys (e.g., `LineItems[0].Rate`) to pattern-based keys (`LineItems.Rate`)
    - Merges ECAB metrics into the confidence metrics structure
    - Returns `confidence_metrics` field with overall and per-field calibration data
@@ -704,17 +704,16 @@ When a model extracts a field with 90% confidence, ideally 90% of such predictio
 
 **Known Limitations:**
 
-- **Overall Brier Score**: Stickler v0.4.0's bulk aggregator returns `null` for overall Brier score (implementation pending). However, **field-level Brier scores are computed** via scikit-learn in the test aggregation function and are available in the field metrics table.
 - **Coverage**: Confidence metrics only available for fields where extraction service provided confidence scores
-- **Backward Compatibility**: Test runs executed before Stickler v0.4.0 upgrade will not have confidence calibration data
+- **Backward Compatibility**: Test runs executed before this feature landed will not carry the `confidenceMetrics` blob, so the UI hides those columns
 
 **Architecture:**
 
 - **Evaluation Service**: `lib/idp_common_pkg/idp_common/evaluation/service.py`
   - Flattens confidence scores and patches field_comparisons
 - **Confidence Integration**: `lib/idp_common_pkg/idp_common/evaluation/confidence_integration.py`
-  - Wrapper for Stickler's ConfidenceMetricsCalculator
+  - Contains `get_average_confidence_from_metrics`, the small helper used by the aggregation Lambda's confidence merging path
 - **Test Aggregation**: `patterns/unified/src/test_execution_aggregation_function/index.py`
-  - Computes and aggregates calibration metrics across test run
+  - Computes and aggregates calibration metrics across test run via `aggregate_from_comparisons` + `BulkStructuredModelEvaluator`
 - **UI Display**: `src/ui/src/components/test-studio/TestResults.tsx`
   - Renders confidence columns in field metrics table

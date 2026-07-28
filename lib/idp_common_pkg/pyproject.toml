@@ -86,10 +86,19 @@ assessment = [
 
 # Evaluation module dependencies
 evaluation = [
+  # Note: the `[llm]` extra (strands-based LLM comparator) is intentionally
+  # NOT installed — IDP provides its own Bedrock-backed comparator via
+  # ``idp_common.evaluation.llm_comparator.LLMComparator``, which rides
+  # ``idp_common.bedrock`` (retry/throttling, cost metering, GovCloud endpoints,
+  # robust JSON response parsing) that upstream's strands-based comparator does
+  # not replicate.
   "stickler-eval==0.5.0",
   "genson==1.3.0",  # For automatic JSON Schema generation from data
-  "munkres>=1.1.4", # For Hungarian algorithm (legacy, may be removed)
-  "numpy==1.26.4",  # For numeric operations
+  # Numpy pin relaxed: stickler-eval declares ``numpy>=1.26,<3``; an exact 1.26.4
+  # pin invited resolver conflicts on upgrade. Kept above 1.26 so the eval
+  # extras still install into environments that need matching numpy on other
+  # extras.
+  "numpy>=1.26,<3",
   # Explicitly prevent ruamel-yaml C extensions (they require compilation in Lambda)
   "ruamel-yaml>=0.17.0,<0.19.0; python_version>='3.10'",  # Pure Python YAML, no C extensions
 ]
@@ -191,8 +200,7 @@ test = [
   # Evaluation module dependencies (from evaluation group)
   "stickler-eval==0.5.0",
   "genson==1.3.0",
-  "munkres>=1.1.4",
-  "numpy==1.26.4",
+  "numpy>=1.26,<3",
   "build==1.3.0",
 ]
 
@@ -203,7 +211,6 @@ all = [
   "Pillow==12.2.0",
   "pypdfium2>=5.5.0",
   "amazon-textract-textractor[pandas]==1.9.2",
-  "munkres>=1.1.4",
   "numpy==1.26.4",
   "pandas==2.2.3",
   "requests==2.33.0",
