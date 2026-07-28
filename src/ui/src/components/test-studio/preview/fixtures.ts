@@ -183,6 +183,92 @@ export const PREVIEW_EFFORT_MODEL = {
  * Pure fixture math for the prototype — the real version reads the measured
  * confidence-accuracy curve.
  */
+/**
+ * Immutable published version of a test set. Mirrors the backend version item
+ * (SK=version#NNNNNN) surfaced by getTestSetVersions: version number, label,
+ * doc count, who published it and when, the config version it was frozen
+ * against, and the review coverage at publish time.
+ */
+export interface PreviewVersion {
+  version: number;
+  label: string;
+  fileCount: number;
+  createdAt: string;
+  createdBy: string;
+  configVersion: string;
+  reviewedPct: number;
+  isActiveReference: boolean;
+  notes?: string;
+}
+
+// Version history keyed by test-set id. Sets with no published version yet
+// (still Draft / In review) simply have no entry — the UI shows the empty state.
+export const PREVIEW_VERSIONS: Record<string, PreviewVersion[]> = {
+  confbench: [
+    {
+      version: 1,
+      label: 'v1 — first pass',
+      fileCount: 39,
+      createdAt: '2026-06-30T18:22:00Z',
+      createdBy: 'reviewer-a@example.com',
+      configVersion: 'confbench-cfg@3',
+      reviewedPct: 72,
+      isActiveReference: false,
+      notes: 'Time-boxed first pass; 11 docs still machine-labeled.',
+    },
+    {
+      version: 2,
+      label: 'v2 — fully reviewed',
+      fileCount: 39,
+      createdAt: '2026-07-14T15:04:00Z',
+      createdBy: 'sromo@amazon.com',
+      configVersion: 'confbench-cfg@4',
+      reviewedPct: 100,
+      isActiveReference: true,
+      notes: 'All fields human-verified.',
+    },
+  ],
+  'fake-w2': [
+    {
+      version: 1,
+      label: 'v1',
+      fileCount: 2000,
+      createdAt: '2026-05-02T09:10:00Z',
+      createdBy: 'sromo@amazon.com',
+      configVersion: 'fake-w2@1',
+      reviewedPct: 100,
+      isActiveReference: true,
+      notes: 'Synthetic — ground truth by construction.',
+    },
+  ],
+};
+
+export const versionsFor = (testSetId: string): PreviewVersion[] => PREVIEW_VERSIONS[testSetId] ?? [];
+
+/**
+ * Estimate label accuracy given how many documents have been human-reviewed,
+ * by interpolating the residual-error burndown (which self-corrects as reviews
+ * land). Reviewing the lowest-confidence docs first drives error down fastest,
+ * so accuracy rises quickly then flattens. Fixture math for the prototype.
+ */
+export const estimateAccuracyForReviewed = (reviewed: number, total: number): number => {
+  const pts = PREVIEW_BURNDOWN;
+  const maxReviewed = pts[pts.length - 1].reviewed;
+  // Scale the reviewed count onto the burndown's document axis.
+  const scaled = total > 0 ? (reviewed / total) * maxReviewed : 0;
+  let residual = pts[pts.length - 1].residualError;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    if (scaled >= a.reviewed && scaled <= b.reviewed) {
+      const frac = (scaled - a.reviewed) / (b.reviewed - a.reviewed || 1);
+      residual = a.residualError + frac * (b.residualError - a.residualError);
+      break;
+    }
+  }
+  return Math.round((100 - residual) * 10) / 10;
+};
+
 export const estimateForTarget = (targetAccuracy: number): { docs: number; residualError: number; cutoff: number; minutes: number } => {
   const targetError = 100 - targetAccuracy;
   const pts = PREVIEW_BURNDOWN;

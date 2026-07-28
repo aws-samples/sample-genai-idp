@@ -42,6 +42,8 @@ import {
   PREVIEW_LOWEST_FIELDS,
   PREVIEW_HIGHEST_FIELDS,
   estimateForTarget,
+  estimateAccuracyForReviewed,
+  versionsFor,
   type PreviewTestSet,
   type LabelSource,
 } from './fixtures';
@@ -616,6 +618,61 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
     </SpaceBetween>
   );
 
+  // Version history — the immutable published versions of the selected set.
+  // Backed by getTestSetVersions on the real page; fixtures here.
+  const versions = versionsFor(selected.id);
+  const versionHistoryPanel = (
+    <Container
+      header={
+        <Header
+          variant="h2"
+          counter={versions.length ? `(${versions.length})` : undefined}
+          description="Every publish freezes an immutable snapshot. Scoring runs pin one of these versions so label changes never masquerade as config changes."
+        >
+          Version history
+        </Header>
+      }
+    >
+      {versions.length === 0 ? (
+        <Box color="text-body-secondary" padding={{ vertical: 's' }}>
+          No published versions yet. Publish the draft to cut <strong>v1</strong> and set the evaluation baseline.
+        </Box>
+      ) : (
+        <Table
+          variant="borderless"
+          items={[...versions].sort((a, b) => b.version - a.version)}
+          columnDefinitions={[
+            {
+              id: 'version',
+              header: 'Version',
+              cell: (v) => (
+                <SpaceBetween direction="horizontal" size="xs">
+                  <Badge color="blue">{`v${v.version}`}</Badge>
+                  {v.isActiveReference && <Badge color="green">active reference</Badge>}
+                </SpaceBetween>
+              ),
+            },
+            { id: 'label', header: 'Label', cell: (v) => v.label },
+            { id: 'docs', header: 'Docs', cell: (v) => v.fileCount },
+            {
+              id: 'coverage',
+              header: 'Review coverage',
+              cell: (v) =>
+                v.reviewedPct >= 100 ? (
+                  <Badge color="green">100% reviewed</Badge>
+                ) : (
+                  <Box color="text-status-warning">{v.reviewedPct}% reviewed</Box>
+                ),
+            },
+            { id: 'config', header: 'Config version', cell: (v) => v.configVersion },
+            { id: 'by', header: 'Published by', cell: (v) => v.createdBy },
+            { id: 'at', header: 'Published', cell: (v) => new Date(v.createdAt).toLocaleDateString() },
+          ]}
+        />
+      )}
+    </Container>
+  );
+
   // ---- DETAIL HUB (P0) --------------------------------------------------------
   const detailView = (
     <SpaceBetween size="m">
@@ -686,6 +743,8 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
           ]}
         />
       </Container>
+
+      {versionHistoryPanel}
     </SpaceBetween>
   );
 
@@ -1018,16 +1077,30 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
         }
       >
         <SpaceBetween size="l">
-          <KeyValuePairs
-            columns={4}
-            items={[
-              { label: 'New version', value: `v${(selected.latestVersion ?? 0) + 1} (from draft)` },
-              { label: 'Documents', value: String(selected.docs) },
-              // Derived from the selected set so the arithmetic always holds
-              { label: 'Reviewed (human)', value: String(Math.round(selected.docs * ((selected.reviewedPct ?? 65) / 100))) },
-              { label: 'Draft (machine)', value: String(selected.docs - Math.round(selected.docs * ((selected.reviewedPct ?? 65) / 100))) },
-            ]}
-          />
+          {(() => {
+            const pct = selected.reviewedPct ?? 65;
+            const reviewed = Math.round(selected.docs * (pct / 100));
+            const estAccuracy = estimateAccuracyForReviewed(reviewed, selected.docs);
+            return (
+              <>
+                <KeyValuePairs
+                  columns={4}
+                  items={[
+                    { label: 'New version', value: `v${(selected.latestVersion ?? 0) + 1} (from draft)` },
+                    { label: 'Documents', value: String(selected.docs) },
+                    // Derived from the selected set so the arithmetic always holds
+                    { label: 'Reviewed (human)', value: String(reviewed) },
+                    { label: 'Draft (machine)', value: String(selected.docs - reviewed) },
+                  ]}
+                />
+                <Alert type={estAccuracy >= 99 ? 'success' : 'info'}>
+                  <strong>Estimated label accuracy at this version: ~{estAccuracy}%</strong> — based on {reviewed} of {selected.docs}{' '}
+                  documents human-reviewed (lowest-confidence first). Reviewing more of the flagged docs raises this; the estimate
+                  self-corrects as scoring runs measure the version against real predictions.
+                </Alert>
+              </>
+            );
+          })()}
           <Box>
             <Box variant="awsui-key-label">Use v{(selected.latestVersion ?? 0) + 1} as the active reference?</Box>
             <SpaceBetween size="xxs">
