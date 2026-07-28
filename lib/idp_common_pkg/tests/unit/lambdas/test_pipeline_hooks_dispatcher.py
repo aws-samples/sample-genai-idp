@@ -1008,3 +1008,133 @@ def test_s3_put_failure_degrades_to_passive(monkeypatch):
     out = mod.lambda_handler({"hookPoint": "postOcr", "document": inbound}, None)
     assert out["document"] == inbound
     assert "working bucket" in out["results"][0]["documentUpdateRejected"]
+
+
+def test_workflow_control_fields_survive_a_hook_round_trip(monkeypatch):
+    """`use_bda` / `bda_project_arn` are injected onto the document payload by
+    the queue processor for the state machine's JSONPath reads, but are NOT
+    Document model fields — so a hook that does the natural
+    load -> mutate -> return through idp_common drops them.
+
+    Regression: dropping `use_bda` failed the execution outright at
+    RouteByProcessingMode with "Invalid path '$.document.use_bda'". The
+    dispatcher must carry them forward onto the hook's document.
+    """
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    inbound = {
+        "compressed": True,
+        "s3_uri": "s3://wb/v0.json",
+        "document_id": "w2.pdf",
+        "use_bda": False,
+        "bda_project_arn": "arn:aws:bedrock:us-west-2:1:data-automation-project/p",
+    }
+    # A faithful stand-in for idp_common's round-trip: control fields absent.
+    _mutation_env(
+        monkeypatch,
+        mod,
+        [_hook()],
+        lambda h, p: _ok(
+            {
+                "updatedDocument": {
+                    "compressed": True,
+                    "s3_uri": "s3://wb/v1.json",
+                    "document_id": "w2.pdf",
+                }
+            }
+        ),
+    )
+    out = mod.lambda_handler({"hookPoint": "preprocessing", "document": inbound}, None)
+    assert out["document"]["s3_uri"] == "s3://wb/v1.json"  # mutation applied
+    assert out["document"]["use_bda"] is False
+    assert out["document"]["bda_project_arn"] == inbound["bda_project_arn"]
+
+
+def test_hook_may_deliberately_change_a_control_field(monkeypatch):
+    """Back-filling must not clobber a value the hook set on purpose — a
+    preprocessing hook rerouting a document to the pipeline branch is a
+    legitimate use of this feature."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    inbound = {
+        "compressed": True,
+        "s3_uri": "s3://wb/v0.json",
+        "document_id": "w2.pdf",
+        "use_bda": True,
+    }
+    _mutation_env(
+        monkeypatch,
+        mod,
+        [_hook()],
+        lambda h, p: _ok(
+            {
+                "updatedDocument": {
+                    "compressed": True,
+                    "s3_uri": "s3://wb/v1.json",
+                    "document_id": "w2.pdf",
+                    "use_bda": False,
+                }
+            }
+        ),
+    )
+    out = mod.lambda_handler({"hookPoint": "preprocessing", "document": inbound}, None)
+    assert out["document"]["use_bda"] is False
+
+
+def test_control_fields_carried_across_a_hook_chain(monkeypatch):
+    """Each hook in the chain drops them; each must get them back, or a later
+    hook's document reaches the workflow without them."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    inbound = {
+        "compressed": True,
+        "s3_uri": "s3://wb/v0.json",
+        "document_id": "w2.pdf",
+        "use_bda": False,
+    }
+    seen = []
+
+    def _invoke(h, payload):
+        seen.append(payload["document"].get("use_bda"))
+        return _ok(
+            {
+                "updatedDocument": {
+                    "compressed": True,
+                    "s3_uri": f"s3://wb/{h['featureId']}.json",
+                    "document_id": "w2.pdf",
+                }
+            },
+            feature_id=h["featureId"],
+        )
+
+    _mutation_env(monkeypatch, mod, [_hook("h1"), _hook("h2", order=2)], _invoke)
+    out = mod.lambda_handler({"hookPoint": "postOcr", "document": inbound}, None)
+    # Hook #2 saw the control field even though hook #1's document lacked it.
+    assert seen == [False, False]
+    assert out["document"]["use_bda"] is False
+
+
+def test_inline_document_update_preserves_control_fields(monkeypatch):
+    """The inline path rebuilds the wrapper from scratch, so it needs the same
+    back-fill as the compressed-reference path."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    monkeypatch.setenv("WORKING_BUCKET", "wb")
+    mod = _reload()
+    inbound = {
+        "compressed": True,
+        "s3_uri": "s3://wb/v0.json",
+        "document_id": "w2.pdf",
+        "use_bda": False,
+    }
+    monkeypatch.setattr(mod._s3, "put_object", lambda **kw: {})
+    _mutation_env(
+        monkeypatch,
+        mod,
+        [_hook()],
+        lambda h, p: _ok(
+            {"updatedDocument": {"id": "w2.pdf", "num_pages": 1, "sections": []}}
+        ),
+    )
+    out = mod.lambda_handler({"hookPoint": "preprocessing", "document": inbound}, None)
+    assert out["document"]["compressed"] is True
+    assert out["document"]["use_bda"] is False

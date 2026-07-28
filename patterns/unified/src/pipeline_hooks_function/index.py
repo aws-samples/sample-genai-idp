@@ -103,6 +103,22 @@ _IMMUTABLE_DOC_FIELDS = (
 # JSON we will re-serialize and PutObject.
 _MAX_INLINE_DOC_BYTES = 5 * 1024 * 1024
 
+# Workflow CONTROL fields that ride on the document payload but are NOT part of
+# the Document model — the queue processor injects them from the resolved config
+# (see src/lambda/queue_processor/index.py) purely so the state machine can read
+# them via JSONPath:
+#
+#   $.document.use_bda          -> RouteByProcessingMode Choice
+#   $.document.bda_project_arn  -> BDA_InvokeDataAutomation Parameters
+#
+# Because they are not Document fields, a hook doing the natural
+# load -> mutate -> return round-trip through idp_common drops them. Losing
+# `use_bda` makes RouteByProcessingMode fail the execution outright
+# ("Invalid path '$.document.use_bda'"), so the dispatcher carries them forward
+# from the inbound payload onto any hook-returned document. A hook that
+# deliberately sets one keeps its value; only absent keys are back-filled.
+_CONTROL_FIELDS = ("use_bda", "bda_project_arn")
+
 # Map hook point -> config section under the active config version.
 #
 # The hook LIST field within that section is chosen by the hook point's
@@ -494,6 +510,15 @@ def _resolve_updated_document(
             resolved.get("config_version"),
         )
         resolved["config_version"] = prev_version
+
+    # Carry forward the state machine's routing control fields, which are not
+    # Document model fields and so are dropped by any hook that round-trips the
+    # document through idp_common. Without this, losing `use_bda` fails the
+    # execution at RouteByProcessingMode.
+    if isinstance(previous, dict):
+        for field in _CONTROL_FIELDS:
+            if field in previous and field not in resolved:
+                resolved[field] = previous[field]
     return resolved, None
 
 

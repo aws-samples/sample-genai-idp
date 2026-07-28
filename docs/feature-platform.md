@@ -282,6 +282,12 @@ fails the workflow):
 | `config_version` is preserved | It resolves hooks for the rest of the pipeline; a changed value is restored (the content change is still honored). |
 | Inline documents are capped at 5 MB | Bounded by Lambda's own 6 MB synchronous response limit. Return a compressed reference instead. |
 
+The workflow's routing control fields — `use_bda` and `bda_project_arn` — ride
+on the document payload but are not `Document` model fields, so a hook's
+load → mutate → return round-trip drops them (which would fail the execution at
+the BDA/pipeline routing Choice). The dispatcher carries them forward
+automatically; a hook that sets one explicitly keeps its own value.
+
 Chained hooks at the same point **compose**: hook #2 receives hook #1's
 document, in `order`. Set `allowDocumentUpdate: false` on a hook entry to pin it
 to observe-only.

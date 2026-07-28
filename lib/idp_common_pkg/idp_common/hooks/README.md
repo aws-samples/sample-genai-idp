@@ -99,6 +99,13 @@ the workflow over a bad update:
 | `config_version` is preserved | It resolves hooks for the rest of the pipeline |
 | Inline documents capped at 5 MB | Bounded by Lambda's 6 MB response limit |
 
+The dispatcher also **carries forward** the state machine's routing control
+fields — `use_bda` and `bda_project_arn`. These ride on the document payload
+(injected by the queue processor from the resolved config) but are *not*
+`Document` model fields, so the load → mutate → return round-trip drops them.
+Left dropped, `use_bda` would fail the execution at the BDA/pipeline routing
+Choice. You get them back automatically; set one explicitly to override.
+
 ## Hook-point scope
 
 Where a mutation reaches depends on the point:
