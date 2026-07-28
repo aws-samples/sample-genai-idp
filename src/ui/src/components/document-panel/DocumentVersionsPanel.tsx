@@ -30,7 +30,6 @@ interface DocumentVersion {
   CompletionTime?: string;
   ConfigVersion?: string;
   PageCount?: number;
-  FileCount?: number;
   WorkflowExecutionArn?: string;
 }
 
@@ -286,11 +285,6 @@ const DocumentVersionsPanel = ({ objectKey, viewingRunId = null, onViewVersion }
               id: 'pageCount',
               header: 'Pages',
               cell: (item: DocumentVersion) => item.PageCount ?? '-',
-            },
-            {
-              id: 'fileCount',
-              header: 'Files',
-              cell: (item: DocumentVersion) => item.FileCount ?? '-',
             },
             {
               id: 'actions',

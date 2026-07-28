@@ -620,7 +620,7 @@
                 "document.$": "$.PolicyClassificationResult.document"
             },
             "ResultPath": "$.RuleValidationOrchestrationResult",
-            "Next": "SummarizationStep"
+            "Next": "PostRuleValidationHook"
         },
         "SetEmptyRuleValidationResult": {
             "Type": "Pass",
@@ -628,7 +628,7 @@
                 "document.$": "$.Result.document"
             },
             "ResultPath": "$.RuleValidationOrchestrationResult",
-            "Next": "SummarizationStep"
+            "Next": "PostRuleValidationHook"
         },
         "ProcessRuleValidationSections": {
             "Type": "Map",

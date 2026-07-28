@@ -2512,6 +2512,11 @@ Resources:
       ClientSecret: !GetAtt ExternalAppClient.ClientSecret
       ConnectorClientId: !Ref MCPConnectorClient
       ExecutionRoleArn: !GetAtt AgentCoreGatewayExecutionRole.Arn
+      # Bump when IDP_TOOLS_SCHEMA in the gateway manager Lambda changes.
+      # Custom resources only re-run when a property changes; this forces the
+      # manager to run on stack update and re-sync the gateway target's tool
+      # schema (update_gateway_target_if_needed) onto existing deployments.
+      ToolSchemaVersion: "2026-07-26-get-results-document-id"
       SourceCodeHash: <LAMBDA_HASH_TOKEN>
 
   ##########################################################################

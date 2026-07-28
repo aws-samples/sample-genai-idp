@@ -264,14 +264,23 @@ Reprocess documents from classification or extraction steps.
 
 ### get_results
 
-Retrieve processing results and extracted metadata for all documents in a batch.
+Retrieve processing results and extracted metadata for documents. Two addressing modes:
+
+- **Batch mode** — pass `batch_id` to retrieve paginated results for every document in a batch.
+- **Single-document mode** — pass `document_id` to retrieve one document's results with no batch id. The document id is the S3 object key of the source document; an `s3://` URI of the document's output prefix (e.g. the `idp_raw_ref` a post-processing hook consumer receives, like `s3://<output-bucket>/Borrowing_Notice_#3.pdf/`) is also accepted. Use this when a downstream integration only holds a document reference — hook events do not carry batch ids.
+
+Exactly one of `batch_id` or `document_id` must be provided; passing neither returns a `missing_identifier` error.
 
 **Input Schema:**
 ```json
 {
   "batch_id": {
     "type": "string",
-    "description": "Batch identifier (e.g., 'mcp-batch-20250124-143022'). Required to identify which batch to retrieve metadata from."
+    "description": "Batch identifier (e.g., 'mcp-batch-20250124-143022') to retrieve results for every document in the batch. Provide either batch_id or document_id."
+  },
+  "document_id": {
+    "type": "string",
+    "description": "Single document identifier — the document's S3 object key or its s3:// output-prefix URI. Provide either batch_id or document_id."
   },
   "section_id": {
     "type": "integer",
@@ -279,11 +288,11 @@ Retrieve processing results and extracted metadata for all documents in a batch.
   },
   "limit": {
     "type": "integer",
-    "description": "Maximum documents to return per page (default: 10, max: 100)."
+    "description": "Maximum documents to return per page (default: 10, max: 100). Batch mode only."
   },
   "next_token": {
     "type": "string",
-    "description": "Pagination token from previous request for retrieving next page of results."
+    "description": "Pagination token from previous request for retrieving next page of results. Batch mode only."
   }
 }
 ```
@@ -292,10 +301,10 @@ Retrieve processing results and extracted metadata for all documents in a batch.
 ```json
 {
   "success": "boolean",
-  "batch_id": "string",
+  "batch_id": "string (null in single-document mode)",
   "section_id": "integer",
   "count": "integer",
-  "total_in_batch": "integer",
+  "total_in_batch": "integer (null in single-document mode)",
   "documents": "array",
   "next_token": "string (optional)",
   "message": "string"

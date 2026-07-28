@@ -482,6 +482,18 @@ export const getDocumentVersion = /* GraphQL */ `
         PageIds
         Class
         OutputJSONUri
+        ConfidenceThresholdAlerts {
+          attributeName
+          confidence
+          confidenceThreshold
+        }
+        ProcessingIssues {
+          stage
+          severity
+          code
+          message
+          rootCause
+        }
       }
       Pages {
         Id

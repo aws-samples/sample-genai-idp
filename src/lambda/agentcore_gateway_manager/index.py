@@ -12,6 +12,142 @@ from bedrock_agentcore_starter_toolkit.operations.gateway.client import GatewayC
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
+# Tool schema for the IDPTools Lambda target. Single source of truth:
+# used when the gateway target is CREATED and re-applied when the target
+# is UPDATED (see update_gateway_target_if_needed) so schema changes in
+# this file reach existing deployments on a stack update.
+IDP_TOOLS_SCHEMA = [
+    {
+        "name": "search",
+        "description": "Search and query processed documents using natural language. Returns analytics, metrics, and document information from the IDP system.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Natural language query about processed documents, metrics, or system status"
+                }
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "process",
+        "description": "Process documents through the IDP pipeline. Accepts S3 locations or base64-encoded content. Intelligently handles missing information by requesting specific details.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "S3 URI for batch processing (e.g., 's3://bucket/documents/'). Optional if content is provided."
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Base64-encoded document content for single document processing. Optional if location is provided."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Document filename with extension (e.g., 'invoice.pdf', 'contract.docx'). Required if content is provided; optional for S3 locations."
+                },
+                "prefix": {
+                    "type": "string",
+                    "description": "Optional batch ID prefix (default: 'mcp-batch')"
+                }
+            },
+            "required": []
+        }
+    },
+    {
+        "name": "reprocess",
+        "description": "Reprocess documents from a specific pipeline step. Supports classification or extraction reprocessing. Returns batch ID for status tracking.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "step": {
+                    "type": "string",
+                    "description": "Pipeline step to reprocess from (classification or extraction)"
+                },
+                "document_ids": {
+                    "type": "string",
+                    "description": "Comma-separated list of document IDs to reprocess (alternative to batch_id)"
+                },
+                "batch_id": {
+                    "type": "string",
+                    "description": "Batch ID to get document IDs from (alternative to document_ids)"
+                },
+                "region": {
+                    "type": "string",
+                    "description": "AWS region (optional)"
+                }
+            },
+            "required": ["step"]
+        }
+    },
+    {
+        "name": "status",
+        "description": "Get processing status for a batch of documents. Returns progress, timing, and error information.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "batch_id": {
+                    "type": "string",
+                    "description": "Batch identifier (e.g., 'mcp-batch-20250124-143000')"
+                },
+                "options": {
+                    "type": "object",
+                    "description": "Optional status parameters",
+                    "properties": {
+                        "detailed": {
+                            "type": "boolean",
+                            "description": "Include per-document details (default: false)"
+                        },
+                        "include_errors": {
+                            "type": "boolean",
+                            "description": "Include error details (default: true)"
+                        }
+                    }
+                },
+                "region": {
+                    "type": "string",
+                    "description": "AWS region (optional)"
+                }
+            },
+            "required": ["batch_id"]
+        }
+    },
+    {
+        "name": "get_results",
+        "description": "Retrieve processing results and extracted metadata for documents. Use this tool when users ask for results, metadata, extracted fields, or processing outcomes. Provide either batch_id (all documents in a batch, paginated) or document_id (a single document — no batch id needed). Returns document classification, extracted fields with values, field-level confidence scores, page counts, and processing status for each document. Batch mode includes a batch-level summary with average confidence and document class distribution, and supports pagination for large batches.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "batch_id": {
+                    "type": "string",
+                    "description": "Batch identifier (e.g., 'mcp-batch-20250124-143022') to retrieve results for every document in the batch. Provide either batch_id or document_id."
+                },
+                "document_id": {
+                    "type": "string",
+                    "description": "Single document identifier — the document's S3 object key (e.g., 'invoice.pdf') or its s3:// output-prefix URI (e.g., 's3://output-bucket/invoice.pdf/'). Use when no batch id is known, e.g. when following up on a single processed document. Provide either batch_id or document_id."
+                },
+                "section_id": {
+                    "type": "integer",
+                    "description": "Section number within documents (default: 1). Use for multi-section documents like healthcare packages. Section 1 contains primary extraction, sections 2+ contain additional document types within the same file."
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum documents to return per page (default: 10, max: 100). Batch mode only. Use lower values for faster responses, higher values to retrieve more documents in one call."
+                },
+                "next_token": {
+                    "type": "string",
+                    "description": "Pagination token from previous request for retrieving next page of results. Batch mode only. Omit for first page."
+                }
+            },
+            "required": []
+        }
+    }
+]
+
+
 def handler(event, context):
     """CloudFormation custom resource handler for AgentCore Gateway"""
     logger.info(f"Received event: {json.dumps(event)}")
@@ -133,12 +269,16 @@ def create_or_update_gateway(props, gateway_name):
 
 def update_gateway_target_if_needed(control_client, gateway_id, expected_lambda_arn):
     """
-    Check if any gateway target's Lambda ARN differs from expected_lambda_arn.
-    If so, update it. Returns True if an update was performed.
+    Check if any gateway target's Lambda ARN or tool schema differs from what
+    this code expects. If so, update it. Returns True if an update was performed.
 
-    This is needed when the Lambda function is replaced during a stack update (e.g. due to
-    a CloudFormation logical resource ID rename), which creates a new Lambda with a new ARN
-    while the gateway target still points to the old deleted Lambda's ARN.
+    Two staleness cases:
+    - The Lambda function was replaced during a stack update (e.g. due to a
+      CloudFormation logical resource ID rename), so the target points at the
+      old deleted Lambda's ARN.
+    - The IDPTools tool schema changed in this file (new tools or new/changed
+      parameters). The schema is only sent at target CREATE time, so without
+      this re-sync, existing deployments keep enforcing the old schema forever.
     """
     try:
         response = control_client.list_gateway_targets(gatewayIdentifier=gateway_id)
@@ -159,15 +299,27 @@ def update_gateway_target_if_needed(control_client, gateway_id, expected_lambda_
                 target_config = target_details.get("targetConfiguration", {})
                 mcp_lambda = target_config.get("mcp", {}).get("lambda", {})
                 current_lambda_arn = mcp_lambda.get("lambdaArn", "")
+                existing_tool_schema = mcp_lambda.get("toolSchema", {})
 
-                if current_lambda_arn and current_lambda_arn != expected_lambda_arn:
+                arn_stale = bool(
+                    current_lambda_arn and current_lambda_arn != expected_lambda_arn
+                )
+                # Only the IDPTools target is owned by this code; leave any
+                # other target's schema alone.
+                desired_tool_schema = existing_tool_schema
+                schema_stale = False
+                if target_name == "IDPTools":
+                    desired_tool_schema = {"inlinePayload": IDP_TOOLS_SCHEMA}
+                    schema_stale = existing_tool_schema != desired_tool_schema
+
+                if arn_stale or schema_stale:
                     logger.info(
-                        f"Target {target_name} ({target_id}) has stale Lambda ARN: "
-                        f"{current_lambda_arn} -> {expected_lambda_arn}. Updating..."
+                        f"Target {target_name} ({target_id}) is stale "
+                        f"(arn_stale={arn_stale}, schema_stale={schema_stale}). "
+                        f"Updating to Lambda ARN {expected_lambda_arn}..."
                     )
-                    # Preserve existing toolSchema and credentialProviderConfigurations —
-                    # both are required fields for update_gateway_target.
-                    existing_tool_schema = mcp_lambda.get("toolSchema", {})
+                    # Preserve credentialProviderConfigurations — required field
+                    # for update_gateway_target.
                     existing_credential_configs = target_details.get(
                         "credentialProviderConfigurations", []
                     )
@@ -179,7 +331,7 @@ def update_gateway_target_if_needed(control_client, gateway_id, expected_lambda_
                             "mcp": {
                                 "lambda": {
                                     "lambdaArn": expected_lambda_arn,
-                                    "toolSchema": existing_tool_schema,
+                                    "toolSchema": desired_tool_schema,
                                 }
                             }
                         },
@@ -187,10 +339,10 @@ def update_gateway_target_if_needed(control_client, gateway_id, expected_lambda_
                     if existing_credential_configs:
                         update_kwargs["credentialProviderConfigurations"] = existing_credential_configs
                     control_client.update_gateway_target(**update_kwargs)
-                    logger.info(f"Successfully updated target {target_id} Lambda ARN")
+                    logger.info(f"Successfully updated target {target_id}")
                     return True
                 else:
-                    logger.info(f"Target {target_name} Lambda ARN is current, no update needed")
+                    logger.info(f"Target {target_name} is current, no update needed")
 
             except Exception as e:
                 logger.warning(f"Could not get/update target {target_id}: {e}")
@@ -268,134 +420,7 @@ def create_gateway(props, gateway_name, client: GatewayClient):
         target_type="lambda",
         target_payload={
             "lambdaArn": lambda_arn,
-            "toolSchema": {
-                "inlinePayload": [
-                    {
-                        "name": "search",
-                        "description": "Search and query processed documents using natural language. Returns analytics, metrics, and document information from the IDP system.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "query": {
-                                    "type": "string",
-                                    "description": "Natural language query about processed documents, metrics, or system status"
-                                }
-                            },
-                            "required": ["query"]
-                        }
-                    },
-                    {
-                        "name": "process",
-                        "description": "Process documents through the IDP pipeline. Accepts S3 locations or base64-encoded content. Intelligently handles missing information by requesting specific details.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "location": {
-                                    "type": "string",
-                                    "description": "S3 URI for batch processing (e.g., 's3://bucket/documents/'). Optional if content is provided."
-                                },
-                                "content": {
-                                    "type": "string",
-                                    "description": "Base64-encoded document content for single document processing. Optional if location is provided."
-                                },
-                                "name": {
-                                    "type": "string",
-                                    "description": "Document filename with extension (e.g., 'invoice.pdf', 'contract.docx'). Required if content is provided; optional for S3 locations."
-                                },
-                                "prefix": {
-                                    "type": "string",
-                                    "description": "Optional batch ID prefix (default: 'mcp-batch')"
-                                }
-                            },
-                            "required": []
-                        }
-                    },
-                    {
-                        "name": "reprocess",
-                        "description": "Reprocess documents from a specific pipeline step. Supports classification or extraction reprocessing. Returns batch ID for status tracking.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "step": {
-                                    "type": "string",
-                                    "description": "Pipeline step to reprocess from (classification or extraction)"
-                                },
-                                "document_ids": {
-                                    "type": "string",
-                                    "description": "Comma-separated list of document IDs to reprocess (alternative to batch_id)"
-                                },
-                                "batch_id": {
-                                    "type": "string",
-                                    "description": "Batch ID to get document IDs from (alternative to document_ids)"
-                                },
-                                "region": {
-                                    "type": "string",
-                                    "description": "AWS region (optional)"
-                                }
-                            },
-                            "required": ["step"]
-                        }
-                    },
-                    {
-                        "name": "status",
-                        "description": "Get processing status for a batch of documents. Returns progress, timing, and error information.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "batch_id": {
-                                    "type": "string",
-                                    "description": "Batch identifier (e.g., 'mcp-batch-20250124-143000')"
-                                },
-                                "options": {
-                                    "type": "object",
-                                    "description": "Optional status parameters",
-                                    "properties": {
-                                        "detailed": {
-                                            "type": "boolean",
-                                            "description": "Include per-document details (default: false)"
-                                        },
-                                        "include_errors": {
-                                            "type": "boolean",
-                                            "description": "Include error details (default: true)"
-                                        }
-                                    }
-                                },
-                                "region": {
-                                    "type": "string",
-                                    "description": "AWS region (optional)"
-                                }
-                            },
-                            "required": ["batch_id"]
-                        }
-                    },
-                    {
-                        "name": "get_results",
-                        "description": "Retrieve processing results and extracted metadata for all documents in a batch. Use this tool when users ask for batch results, metadata, extracted fields, or processing outcomes. Returns document classification, extracted fields with values, field-level confidence scores, page counts, and processing status for each document. Includes batch-level summary with average confidence and document class distribution. Supports pagination for large batches.",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "batch_id": {
-                                    "type": "string",
-                                    "description": "Batch identifier (e.g., 'mcp-batch-20250124-143022'). Required to identify which batch to retrieve metadata from."
-                                },
-                                "section_id": {
-                                    "type": "integer",
-                                    "description": "Section number within documents (default: 1). Use for multi-section documents like healthcare packages. Section 1 contains primary extraction, sections 2+ contain additional document types within the same file."
-                                },
-                                "limit": {
-                                    "type": "integer",
-                                    "description": "Maximum documents to return per page (default: 10, max: 100). Use lower values for faster responses, higher values to retrieve more documents in one call."
-                                },
-                                "next_token": {
-                                    "type": "string",
-                                    "description": "Pagination token from previous request for retrieving next page of results. Omit for first page."
-                                }
-                            },
-                            "required": ["batch_id"]
-                        }
-                    }
-                ]
-            },
+            "toolSchema": {"inlinePayload": IDP_TOOLS_SCHEMA},
         },
     )
 

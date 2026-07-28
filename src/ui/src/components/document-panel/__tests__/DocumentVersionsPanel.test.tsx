@@ -31,9 +31,20 @@ vi.mock('../../../hooks/use-user-role', () => ({
 import DocumentVersionsPanel from '../DocumentVersionsPanel';
 
 const VERSIONS = [
-  { RunId: '20250707T141530Z-b', CompletionTime: '2025-07-07T14:15:30Z', ConfigVersion: 'v2', PageCount: 6, FileCount: 12 },
-  { RunId: '20250101T090000Z-a', CompletionTime: '2025-01-01T09:00:00Z', ConfigVersion: 'v1', PageCount: 6, FileCount: 10 },
+  { RunId: '20250707T141530Z-b', CompletionTime: '2025-07-07T14:15:30Z', ConfigVersion: 'v2', PageCount: 6 },
+  { RunId: '20250101T090000Z-a', CompletionTime: '2025-01-01T09:00:00Z', ConfigVersion: 'v1', PageCount: 6 },
 ];
+
+// A run snapshot's section carries the per-section quality data the document
+// page derives "Low Confidence Fields" and section Status from.
+const VERSION_SECTION = {
+  Id: '1',
+  PageIds: [1, 2],
+  Class: 'W2',
+  OutputJSONUri: 's3://out/doc.pdf/sections/1/result.json',
+  ConfidenceThresholdAlerts: [{ attributeName: 'WagesTips', confidence: 0.42, confidenceThreshold: 0.8 }],
+  ProcessingIssues: [{ stage: 'assessment', severity: 'warning', code: 'assessment_incomplete', message: 'some rows unscored' }],
+};
 
 // Route each query by the operation name embedded in the query string.
 const routeGraphql = ({ query }: { query: string }) => {
@@ -42,7 +53,7 @@ const routeGraphql = ({ query }: { query: string }) => {
   }
   if (query.includes('getDocumentVersion')) {
     return Promise.resolve({
-      data: { getDocumentVersion: { RunId: '20250101T090000Z-a', Files: [], Sections: [], Pages: [] } },
+      data: { getDocumentVersion: { RunId: '20250101T090000Z-a', Files: [], Sections: [VERSION_SECTION], Pages: [] } },
     });
   }
   return Promise.resolve({ data: {} });
@@ -63,6 +74,13 @@ describe('DocumentVersionsPanel', () => {
     expect(screen.getByText('Current')).toBeInTheDocument();
   });
 
+  it('does not show a Files column (internal pinned-object count, not user-meaningful)', async () => {
+    render(<DocumentVersionsPanel objectKey="doc.pdf" />);
+    await waitFor(() => expect(screen.getByText('v2')).toBeInTheDocument());
+    expect(screen.getByText('Pages')).toBeInTheDocument();
+    expect(screen.queryByText('Files')).not.toBeInTheDocument();
+  });
+
   it('shows a View action for non-admins (read-only access)', async () => {
     render(<DocumentVersionsPanel objectKey="doc.pdf" />);
     await waitFor(() => expect(screen.getByText('v2')).toBeInTheDocument());
@@ -81,6 +99,40 @@ describe('DocumentVersionsPanel', () => {
 
     await waitFor(() => expect(onViewVersion).toHaveBeenCalled());
     expect(onViewVersion).toHaveBeenCalledWith('20250101T090000Z-a', expect.objectContaining({ RunId: '20250101T090000Z-a' }));
+  });
+
+  it('passes the section quality data through to the page (drives Low Confidence Fields / Status)', async () => {
+    const onViewVersion = vi.fn();
+    render(<DocumentVersionsPanel objectKey="doc.pdf" onViewVersion={onViewVersion} />);
+    await waitFor(() => expect(screen.getByText('v1')).toBeInTheDocument());
+
+    const viewButtons = screen.getAllByText(/^View$/i);
+    fireEvent.click(viewButtons[viewButtons.length - 1]);
+    await waitFor(() => expect(onViewVersion).toHaveBeenCalled());
+
+    // The document page derives the section's "Low Confidence Fields" count and
+    // Status from these; dropping them made every historical section read 0/clean.
+    const detail = onViewVersion.mock.calls[0][1];
+    expect(detail.Sections[0].ConfidenceThresholdAlerts).toHaveLength(1);
+    expect(detail.Sections[0].ConfidenceThresholdAlerts[0].attributeName).toBe('WagesTips');
+    expect(detail.Sections[0].ProcessingIssues[0].code).toBe('assessment_incomplete');
+  });
+
+  it('requests the section quality fields in the getDocumentVersion query', async () => {
+    // Guard on the generated query text itself. The GraphQL selection set is the
+    // silently-breakable link in this chain: deleting the fields from
+    // GetDocumentVersion.graphql raises no type error and would leave every
+    // other test green while the historical view silently reverts to showing 0.
+    render(<DocumentVersionsPanel objectKey="doc.pdf" onViewVersion={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText('v1')).toBeInTheDocument());
+
+    fireEvent.click(screen.getAllByText(/^View$/i).slice(-1)[0]);
+    await waitFor(() => expect(mockGraphql).toHaveBeenCalledTimes(2));
+
+    const { query } = mockGraphql.mock.calls.find((c) => String(c[0].query).includes('getDocumentVersion'))![0];
+    expect(query).toContain('ConfidenceThresholdAlerts');
+    expect(query).toContain('confidenceThreshold');
+    expect(query).toContain('ProcessingIssues');
   });
 
   it('returns to current when the currently-viewed version row is actioned', async () => {

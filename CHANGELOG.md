@@ -33,10 +33,21 @@ SPDX-License-Identifier: MIT-0
 - **LLM comparator registered via Stickler's public API.** IDP's LLM comparator is now registered as `IDPLLMComparator` via `stickler.structured_object_evaluator.models.comparator_registry.register_comparator`, instead of reaching into `_global_registry._registry` to shadow the built-in `LLMComparator`. The `LLM` evaluation method now maps to this distinct name in `SticklerConfigMapper.METHOD_TO_COMPARATOR`. Upstream's `LLMComparator` is left untouched.
 - **LLM configuration passed per-service via schema extension, not module-level state.** `evaluation.llm_method` from IDP config is now surfaced on each `LLM`-method field as `x-aws-stickler-comparator-config`, which Stickler forwards verbatim to `IDPLLMComparator(**config)`. The `_global_llm_config` singleton and its `set_global_llm_config` / `get_global_llm_config` helpers were removed from `idp_common.evaluation.llm_comparator`. Two `EvaluationService` instances in one process (e.g. `idp_cli` batch, warm Lambda after config update) no longer silently share whichever config was set last.
 
+
+- **Removed the "Files" column from the document Version History panel.** It showed `FileCount` — the number of output S3 objects the run's manifest pinned (`sections/*/result.json`, page text/images, reports) — an internal storage-plumbing detail that reads as "how many files were in my document" (that's the adjacent **Pages** column) and offers no action. The attribute is still recorded on each run record and returned by `listDocumentVersions`/`getDocumentVersion`, and `idp-cli list-versions` still displays it. See [docs/document-versions.md](docs/document-versions.md).
+- **Sample: Health Insurance Review v0.1.3 — Claims dashboard upgraded to a full Cloudscape collection table, claims can now be deleted, and the sample docs/instructions point at a working sample document.** The Processed Claims list now matches the Document List UX: multi-select with a **Delete** action (confirmation modal; new `DELETE /claims/{docId}` feature-API route, Admin/Author only — deleting removes only the dashboard record, never the document or its rule-validation outputs), text filtering, sortable + resizable columns, pagination, and table preferences (page size, wrap lines, visible columns). The empty-state instructions and [docs](docs/extensions/sample-health-insurance-review.md) now point at `samples/rule-validation/medicare_respiratory_pa_packet.pdf` — whose content actually matches the bundled NCCI policy rules and produces real Pass/Fail results (verified: 9 Pass / 5 Fail) — and the two `Prior-Auth-*.pdf` samples are removed: their content (an allergy/immunotherapy history) matched none of the NCCI surgical-coding rules, so every rule returned "Information Not Found" and the claim always landed as Insufficient documentation, which read as a bug. The sample set is now just the policy manual (for Rules Discovery) + one working claim packet.
+
 ### Fixed
 
 - **NUMERIC_EXACT tolerance now reaches Stickler in the production path.** `x-aws-idp-evaluation-threshold` on a NUMERIC_EXACT field is now emitted as `x-aws-stickler-comparator-config: {"tolerance": …}` instead of `x-aws-stickler-threshold`. `NumericComparator.compare` is binary 1.0/0.0, so a score-threshold gate was silently a no-op — the configured ±tolerance never reached the comparator. Also allows tolerances >1.0 (e.g. ±$5) that used to trip the 0.0–1.0 threshold validator.
 - **Hungarian `match_threshold` now reaches Stickler.** Array-level `x-aws-idp-evaluation-match-threshold` is now also copied onto the array's items schema so Stickler's element-class builder (`structured_model.py:594` in 0.5.0) picks it up instead of silently keeping the ClassVar default (0.7). The document-level `match_threshold` is applied to the top-level model class after `create_model` for the same reason. IDP's display and re-derived match logic already read the configured value; only Stickler's actual TP/FD gating was still on the default.
+
+
+- **Historical document versions no longer report "Low Confidence Fields: 0" for every section.** Viewing a past version showed a zero low-confidence count (and an empty section Status) even when that run had low-confidence fields, because the per-section quality data was dropped at all three layers: `create_document_run` never snapshotted `ConfidenceThresholdAlerts`/`ProcessingIssues` into the run record (unlike `update_document`, which writes both to the live document item), the versions resolver's `_shape_version` omitted them, and the `GetDocumentVersion` query didn't select them. All three now carry the fields, so a historical view renders the same counts and section status the live document does. **Note:** the snapshot is written at run-completion time, so this applies to runs recorded *after* upgrading — versions already in the table have no stored alerts and will continue to show 0. Runs missing the attributes return `[]` (not null), matching the live-document shape.
+- **Developer Tests CI job no longer fails with `npm: not found` when NodeSource is unreachable.** The workflow installed Node 22 by piping NodeSource's installer into bash (`curl -fsSL https://deb.nodesource.com/setup_22.x | bash -`). That pipeline reports bash's exit status, not curl's, so when NodeSource returned HTTP 403 the failure was swallowed: the apt repo was never registered, the following `apt-get install -y nodejs` quietly installed Debian bookworm's own **nodejs 18** — which ships no `npm` — and the job died several steps later with a bare `npm: not found`, giving no hint that a download had failed. Node is now installed with the first-party `actions/setup-node` action (SHA-pinned, matching what `deploy-docs.yml` already does), which fails loudly and immediately on a download problem and doesn't depend on NodeSource being reachable. See [.github/workflows/developer-tests.yml](.github/workflows/developer-tests.yml).
+- **Rule Validation report/tab missing from the document detail page (regression from the AppSync removal).** The document detail UI renders the "View Rule Validation Summary" button and the Rule Validation tab only when the `getDocument` response carries the flat `RuleValidationResultUri` scalar, but the write path stored only the nested `RuleValidationResult` object — the flat scalar was never persisted. The old `appsync/service.py` set `RuleValidationResultUri = rule_validation_result.output_uri` "for backward compatibility"; that line was dropped when document writes moved to `dynamodb/service.py`. Restore it in both the `update_document` expression and the `create_document_run` snapshot item, so a completed rule-validation run surfaces its report in the UI. See [lib/idp_common_pkg/idp_common/dynamodb/service.py](lib/idp_common_pkg/idp_common/dynamodb/service.py).
+- **Sample: Health Insurance Review — prior-auth documents produced no rule-validation output and never appeared in the Claims dashboard (v0.1.2).** Two compounding defects. (1) The bundled config preset's policy classes matched the document *filename* with `x-aws-idp-document-name-regex: ...(prior_auth|pa_packet)...` — an underscore — but the sample documents it ships with (`samples/rule-validation/Prior-Auth-*.pdf`) use a hyphen, so classification returned `NO_POLICY_MATCH`, rule validation was skipped, and zero rules were evaluated. The regex now accepts any of `-`, `_`, or space (`prior[_ -]?auth`, `pa[_ -]?packet`) across all seven policy classes. (2) The unified workflow's rule-validation skip paths (`SetSkippedRuleValidationResult` for no-policy-match, `SetEmptyRuleValidationResult` for rule-validation-disabled) jumped straight to summarization, **bypassing the `PostRuleValidationHook` dispatch** — so a document that skipped rule validation never fired the feature's `postRuleValidation` hook and thus never recorded a claim (even to flag it as needing documentation). Both skip states now route through `PostRuleValidationHook`; the dispatcher is a no-op when no hook is registered, and the feature's hook records a `NO_POLICY_MATCH` run as `INSUFFICIENT_DOCUMENTATION`. See [patterns/unified/statemachine/workflow.asl.json](patterns/unified/statemachine/workflow.asl.json) and [feature-platform/sample-health-insurance-review/config-preset/claims-config.yaml](feature-platform/sample-health-insurance-review/config-preset/claims-config.yaml).
+- **Sample: Health Insurance Review — Rules Discovery tab failed with "No GraphQL endpoint configured in `Amplify.configure()`" (v0.1.1).** The feature's Rules Discovery flow still called `aws-amplify/api`'s `generateClient().graphql()`, which stopped working when the host replaced AppSync with the REST dispatcher (Amplify now carries no GraphQL endpoint — it is configured for Cognito auth only). The feature now uses the host's REST-backed, GraphQL-shaped client exposed at `window.IdpFeatureHost.generateClient` (the same migration the PII Anonymization feature already made), so uploadDiscoveryDocument / listDiscoveryJobs / getConfigVersion go through the same transport as the host UI. Also, all feature ui-deployers (template + 4 bundled features) previously copied `ui-bundle.js` into the Web UI bucket with `Cache-Control: max-age=31536000,immutable`, which pinned a stale bundle in browsers for up to a year when the same feature version was republished (hotfixes); they now use `max-age=300`, matching the CloudFront distribution's own TTL, so an update propagates within minutes. (#568)
 
 ## [0.6.2]
 
@@ -65,6 +76,8 @@ SPDX-License-Identifier: MIT-0
 - **Renamed the `EnableHeadless` CloudFormation parameter to `EnableJobsApi`.** The old name conflated this parameter with "headless mode" — but it is an *additive* switch that stands up the Jobs REST API (Private API Gateway + `/jobs` endpoints + supporting Lambdas + a machine-to-machine Cognito OAuth client) **in addition to** the Web UI; it does not remove the UI. (That is the separate `idp-cli deploy --headless` template transform, which is unchanged.) The parameter, its metadata (ParameterGroups/ParameterLabels), the `JobsApiRequiresVPC` rule, and all docs now say "Jobs API". **Upgrade note (breaking parameter rename):** existing stacks deployed with `EnableHeadless` must supply `EnableJobsApi` (with the same `true`/`false` value) on their next stack update — the old parameter name is no longer recognized. See [docs/govcloud-deployment.md](docs/govcloud-deployment.md). (#525)
 
 ### Fixed
+
+- **MCP `get_results` can now fetch a single document's results, and one broken tool no longer disables the whole MCP tool suite.** Two fixes for external MCP consumers (e.g. downstream gateways fed by post-processing hook events, which carry a document reference but no batch id): (1) `get_results` accepts a new `document_id` argument — the document's S3 object key or its `s3://` output-prefix URI — as an alternative to `batch_id`, backed by a new `idp_sdk` `client.batch.get_document_results()`; the gateway tool schema no longer hard-requires `batch_id`, and the schema is now re-synced onto existing gateway targets during stack updates (previously it was only sent at target creation, so schema changes never reached deployed gateways). (2) The MCP handler imported the analytics agent stack (`strands`) at module load, so a missing/incomplete agents Lambda layer failed the import of the whole handler — every tool died with `Runtime.ImportModuleError`. Tool modules are now imported lazily per call: batch tools work regardless, and `search` returns a structured error naming the missing dependency. See [docs/mcp-server.md](docs/mcp-server.md).
 
 - **Multi-Doc Discovery container-image Lambdas no longer fail to pull their image on a stack update.** The `MultiDocDiscoveryEmbed`/`Cluster`/`Save`/`Analyze` functions are container-image Lambdas backed by a stack-created ECR repository that had **no repository policy** and whose execution roles carried **no `ecr:` pull actions** — the functions relied on Lambda auto-attaching a pull policy at function *create* time. That auto-attach is best-effort and is **not reapplied on update**, so when a later change forces the functions to update (e.g. the AppSync→DynamoDB env-var/IAM edit), the image re-pull fails with `The function does not have permission to access the specified image` and the functions never stabilize — failing the stack update. The ECR repository now declares an explicit `RepositoryPolicyText` granting the Lambda service (`lambda.amazonaws.com`, scoped to functions in this account/region) `ecr:BatchGetImage` and `ecr:GetDownloadUrlForLayer`, so the pull permission is durable across updates. (The CMK that encrypts the repo needs no change — Amazon ECR decrypts image layers server-side via a grant it creates on the key at repo-create time; the pulling principal does not call KMS.) See [nested/multi-doc-discovery/template.yaml](nested/multi-doc-discovery/template.yaml).
 
@@ -156,8 +169,6 @@ are migrated automatically on read — no manual edit is required.** See the
 [AppSync → REST migration guide](docs/migration-appsync-to-rest.md).
 
 ### Added
-
-
 
 - **Integrated confidence — per-field confidence produced inside extraction, no separate assessment pass.** `confidence.mode: integrated` emits each value's confidence in the extraction inference itself (then enriches with per-field thresholds/alerts, grounds geometry, and writes the same `explainability_info` contract, so downstream evaluation/reporting/UI/HITL are unchanged and the standalone Assessment step auto-skips). On Simple mode this uses a single **1S-TopK** call that asks the model for its top-K guesses with probabilities — better-calibrated than single-value self-assessment — halving extraction-workflow LLM calls. Works on both the Advanced (agentic) and Simple paths. See the [Extraction & Confidence guide](docs/extraction-and-confidence.md#confidence-mode-separate-vs-integrated-vs-off).
 
@@ -995,7 +1006,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - **OCR Benchmark Config Optimization** — Optimized `config_library/unified/ocr-benchmark` configuration with targeted field descriptions, explicit model/prompt/OCR settings, and corrected date format (YYYY-MM-DD to match ground truth). Improved overall extraction accuracy from 51.5% to 75.2% on the full 293-document benchmark at equivalent cost (~$2.62). Classification remains 100% across all 9 document classes. ([#220](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/pull/220))
 
 - **GraphQL Type Generation & Unit Testing** — Replaced 60+ hand-written GraphQL query/mutation/subscription files with auto-generated types via `@graphql-codegen`, added typed AWSJSON parsers with unit tests (vitest + jsdom), and integrated a CI codegen-check to prevent type drift.
@@ -1037,7 +1047,6 @@ Hardening response to security review - Highlights:
 - **Pattern-3 (UDOP + Bedrock)** — Pattern-3 is no longer available as a deployment option. If you are currently using Pattern-3 with a SageMaker UDOP endpoint, do not upgrade to v0.5.x without first testing in a non-production environment. You can use the [Lambda Inference Hooks](./docs/lambda-hook-inference.md) feature (introduced in v0.4.15) to call your existing SageMaker UDOP endpoint from the unified pattern's classification step via a custom Lambda function.
 
 ### Changed
-
 
 - **Switched `idp_sdk` pyproject.toml to auto-discovery** — Replaced explicit subpackage listing with `setuptools.packages.find` using `include = ["idp_sdk*"]` so new subpackages are automatically included without manual pyproject.toml updates.
 
@@ -1174,7 +1183,6 @@ Hardening response to security review - Highlights:
   - **Use Cases**: Correct extraction errors, add baseline data for evaluation comparison, re-run evaluation after data corrections, update document summaries
 
 ### Changed
-
 
 - **HITL Decoupled from Step Functions**: HITL review operations now update document status directly in DynamoDB without triggering workflow reprocessing, improving reliability and reducing unintended side effects
 
@@ -1320,7 +1328,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - **Scripts Directory Reorganization**
   - Consolidated development environment setup scripts into `scripts/setup/` subdirectory
   - Moved CI/CD scripts (`codebuild_deployment.py`, `integration_test_deployment.py`, `validate_buildspec.py`, `typecheck_pr_changes.py`, `validate_service_role_permissions.py`) into `scripts/sdlc/` subdirectory
@@ -1418,7 +1425,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - **HITL Configuration**
   - HITL is now disabled by default in the configuration
   - Users must explicitly enable HITL in the Configuration page (Assessment & HITL Configuration section) to trigger human review workflows
@@ -1433,7 +1439,6 @@ Hardening response to security review - Highlights:
 
 
 ### Changed
-
 
 - **Lambda Layers Architecture for Improved Build Efficiency**
   - Replaced bundled `idp_common` package dependencies in individual Lambda functions with three shared Lambda Layers
@@ -1592,7 +1597,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - **Test Studio UI Enhancements for Improved Table Layouts and User Experience**
   - Added resizable columns and CollectionPreferences with wrap lines for all tables in TestComparison and TestResults
   - Combined accuracy and split classification metrics into collapsible "Average Accuracy and Split Metrics" section with expandable "Additional Metrics" for comprehensive review
@@ -1745,7 +1749,6 @@ Hardening response to security review - Highlights:
   - Resolves #146
 
 ### Changed
-
 
 - **Improved Temperature and Top_P Parameter Logic for Deterministic Output**
   - Changed inference parameter selection logic to allow `temperature=0.0` for deterministic output (recommended by Anthropic and other model providers)
@@ -1906,7 +1909,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - **Containerized Pattern-1 and Pattern-3 Deployment Pipelines**
   - Migrated Pattern-1 and Pattern-3 Lambda functions to Docker image deployments (following Pattern-2 approach from v0.3.20)
   - Builds and pushes all Lambda images via CodeBuild with automated ECR cleanup
@@ -1939,7 +1941,6 @@ Hardening response to security review - Highlights:
 ## [0.4.1]
 
 ### Changed
-
 
 - **Configuration Library Updates with JSON Schema Support**
   - Updated configuration library with JSON schema format for lending package, bank statement, and RVL-CDIP package samples
@@ -2073,7 +2074,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - **Migrated Evaluation from EventBridge Trigger to Step Functions Workflow**
   - Moved evaluation processing from external EventBridge-triggered Lambda to integrated Step Functions workflow step
   - **Race Condition Eliminated**: Evaluation now runs inside state machine before WorkflowTracker marks documents COMPLETE, preventing premature completion status when evaluation is still running
@@ -2128,7 +2128,6 @@ Hardening response to security review - Highlights:
   - **Benefits**: Context-aware summaries referencing extracted values, improved accuracy and quality, better extraction-summary alignment
 
 ### Changed
-
 
 - **Containerized Pattern-2 deployment pipeline** that builds and pushes all Lambda images via CodeBuild using the new Dockerfile, plus automated ECR cleanup and tests.
   - Lambda docker image deployments have a 10 GB image size limit compared to the 250 MB zip limit of regular deployment. This however doesn't allow for viewing the code in the AWS console.
@@ -2225,7 +2224,6 @@ Hardening response to security review - Highlights:
   - **Faster Time-to-Query**: Agent has immediate access to table overview and can proceed directly to detailed schema loading for relevant tables
 
 ### Changed
-
 
 - Add UI code lint/validation to publish.py script
 
@@ -2403,7 +2401,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - **Reverted to python3.12 runtime to resolve build package dependency problems**
 
 ### Fixed
@@ -2479,7 +2476,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - **Updated Python Lambda Runtime to 3.13**
 
 ### Fixed
@@ -2549,7 +2545,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - Updated lending_package.pdf sample with more realistic driver's license image
 
 ### Fixed
@@ -2578,7 +2573,6 @@ Hardening response to security review - Highlights:
   - Configurable through Web UI without requiring code changes or redeployment
 
 ### Changed
-
 
 - **Converted text confidence data format from JSON to markdown table for improved readability and reduced token usage**
   - Removed unnecessary "page_count" field
@@ -2676,7 +2670,6 @@ Hardening response to security review - Highlights:
   - Resolves "size exceeding the maximum number of bytes service limit" errors for documents with 500+ pages
 
 ### Changed
-
 
 - **Default behavior for image attachment in Pattern-2 and Pattern3**
   - If the prompt contains a `{DOCUMENT_IMAGE}` placeholder, keep the current behavior (insert image at placeholder)
@@ -2846,7 +2839,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - Pin packages to tested versions to avoid vulnerability from incompatible new package versions.
 - Updated reporting data to use document's queued_time for consistent timestamps
 - Create new extensible SaveReportingData class in idp_common package for saving evaluation results to Parquet format
@@ -3009,7 +3001,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - **Simplified Model Configuration Architecture**
   - Removed individual model parameters from main template: `Pattern1SummarizationModel`, `Pattern2ClassificationModel`, `Pattern2ExtractionModel`, `Pattern2SummarizationModel`, `Pattern3ExtractionModel`, `Pattern3SummarizationModel`, `EvaluationLLMModelId`
   - Model selection now handled through enum constraints in UpdateSchemaConfig sections within each pattern template
@@ -3054,7 +3045,6 @@ Hardening response to security review - Highlights:
 - Added document reprocessing capability to the UI - New "Reprocess" button with confirmation dialog
 
 ### Changed
-
 
 - Refactored code for better maintainability
 - Updated UI components to support markdown table viewing
