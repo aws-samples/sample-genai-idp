@@ -158,6 +158,28 @@ const StoryPanel = ({ story }: { story: Story }): React.JSX.Element => {
   );
 };
 
+// The demo tour: screens in the order that tells the story (mirrors the
+// priority order in user-flows.md). The pager walks this sequence.
+const TOUR: { id: View; label: string }[] = [
+  { id: 'list', label: 'Test Sets' },
+  { id: 'chooser', label: 'New Test Set' },
+  { id: 'onramp-upload', label: 'Upload' },
+  { id: 'generate-labels', label: 'Draft labels' },
+  { id: 'detail', label: 'Detail hub' },
+  { id: 'configure', label: 'Review effort' },
+  { id: 'annotate', label: 'Annotate' },
+  { id: 'publish', label: 'Publish' },
+  { id: 'executions', label: 'Executions' },
+  { id: 'manage', label: 'Manage docs' },
+  { id: 'merge', label: 'Merge' },
+  { id: 'onramp-config', label: 'Synthetic: config' },
+  { id: 'onramp-describe', label: 'Synthetic: describe' },
+  { id: 'fix', label: 'Solo fix' },
+];
+
+// Stamped at build time by Vite so a stale cached bundle is self-evident.
+const BUILD_STAMP = new Date(document.lastModified || Date.now()).toLocaleString();
+
 const GroundTruthFlowPreview = (): React.JSX.Element => {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlStep = searchParams.get('step') as View | null;
@@ -179,12 +201,40 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
     return `${base}#/test-studio/preview?step=${v}`;
   };
 
+  const tourIdx = TOUR.findIndex((t) => t.id === view);
+  const prevStop = tourIdx > 0 ? TOUR[tourIdx - 1] : null;
+  const nextStop = tourIdx >= 0 && tourIdx < TOUR.length - 1 ? TOUR[tourIdx + 1] : null;
+
+  // Compact tour bar: prototype notice + prev/next traversal + build stamp.
   const banner = (
-    <Alert type="info" header="Prototype — dummy data. Every screen is URL-addressable via ?step=…">
-      A clickable UX walkthrough of the proposed ground-truth test-set flow (no backend). Each screen explains its user story under “About
-      this screen” and lists the feedback we want. Current step: <strong>{view}</strong>.{' '}
-      {view !== 'list' && <Link onFollow={() => go('list')}>← back to Test Sets</Link>}
-    </Alert>
+    <Container disableContentPaddings>
+      <Box padding={{ horizontal: 'm', vertical: 'xs' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <SpaceBetween direction="horizontal" size="xs" alignItems="center">
+            <Badge color="severity-medium">Prototype — dummy data</Badge>
+            <Box variant="span" fontSize="body-s" color="text-body-secondary">
+              Tour {tourIdx >= 0 ? tourIdx + 1 : '–'} of {TOUR.length}: <strong>{TOUR[tourIdx]?.label ?? view}</strong>
+            </Box>
+          </SpaceBetween>
+          <SpaceBetween direction="horizontal" size="xs" alignItems="center">
+            {prevStop && <Button onClick={() => go(prevStop.id)}>‹ {prevStop.label}</Button>}
+            {nextStop && (
+              <Button variant="primary" onClick={() => go(nextStop.id)}>
+                Next: {nextStop.label} ›
+              </Button>
+            )}
+            {view !== 'list' && (
+              <Button variant="link" onClick={() => go('list')}>
+                Start over
+              </Button>
+            )}
+            <Box variant="span" fontSize="body-s" color="text-status-inactive">
+              build {BUILD_STAMP}
+            </Box>
+          </SpaceBetween>
+        </div>
+      </Box>
+    </Container>
   );
 
   // ---- LIST (P1: manage many sets at a glance) ---------------------------
@@ -440,7 +490,7 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
               )
             }
           >
-            Q3 Invoice spot-check — draft labels
+            {selected.name} — draft labels
           </Header>
         }
       >
@@ -787,8 +837,12 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
         }
       >
         <Alert type="info">
-          <strong>Target 99% accuracy — review the {PREVIEW_ESTIMATE.docsToReview} lowest-confidence docs.</strong> Est. current{' '}
-          {PREVIEW_ESTIMATE.currentAccuracy}% · progress {queueIdx + 1} / {PREVIEW_QUEUE.length} · you arrived via the shared queue link.
+          <strong>
+            Target 99% accuracy — review the {PREVIEW_ESTIMATE.docsToReview} lowest-confidence docs ({PREVIEW_QUEUE.length} shown in this
+            sample).
+          </strong>{' '}
+          Est. current {PREVIEW_ESTIMATE.currentAccuracy}% · your progress {queueIdx + 1} / {PREVIEW_QUEUE.length} · you arrived via the
+          shared queue link.
         </Alert>
       </Container>
 
@@ -967,32 +1021,34 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
           <KeyValuePairs
             columns={4}
             items={[
-              { label: 'New version', value: 'v1 (from draft)' },
+              { label: 'New version', value: `v${(selected.latestVersion ?? 0) + 1} (from draft)` },
               { label: 'Documents', value: String(selected.docs) },
-              { label: 'Reviewed (human)', value: '78' },
-              { label: 'Draft (machine)', value: '42' },
+              // Derived from the selected set so the arithmetic always holds
+              { label: 'Reviewed (human)', value: String(Math.round(selected.docs * ((selected.reviewedPct ?? 65) / 100))) },
+              { label: 'Draft (machine)', value: String(selected.docs - Math.round(selected.docs * ((selected.reviewedPct ?? 65) / 100))) },
             ]}
           />
           <Box>
-            <Box variant="awsui-key-label">Use v1 as the active reference?</Box>
+            <Box variant="awsui-key-label">Use v{(selected.latestVersion ?? 0) + 1} as the active reference?</Box>
             <SpaceBetween size="xxs">
               <label>
-                <input type="radio" defaultChecked name="ref" /> Yes — future scoring runs compare against v1 (recommended)
+                <input type="radio" defaultChecked name="ref" /> Yes — future scoring runs compare against v
+                {(selected.latestVersion ?? 0) + 1} (recommended)
               </label>
               <label>
-                <input type="radio" name="ref" /> Not yet — just save v1
+                <input type="radio" name="ref" /> Not yet — just save v{(selected.latestVersion ?? 0) + 1}
               </label>
             </SpaceBetween>
           </Box>
           <ProgressBar
-            value={100}
-            label="Golden dataset readiness"
-            description="Publishing records per-field provenance and unlocks scoring runs."
+            value={selected.reviewedPct ?? 65}
+            label="Human review coverage"
+            description="Publishing is allowed before 100% — unreviewed fields keep machine labels, flagged as such. Provenance is recorded per field."
           />
           <SpaceBetween direction="horizontal" size="xs">
             <Button onClick={() => go('detail')}>Back</Button>
             <Button variant="primary" onClick={() => go('list')}>
-              Publish v1 &amp; set baseline
+              Publish v{(selected.latestVersion ?? 0) + 1} &amp; set baseline
             </Button>
           </SpaceBetween>
         </SpaceBetween>
