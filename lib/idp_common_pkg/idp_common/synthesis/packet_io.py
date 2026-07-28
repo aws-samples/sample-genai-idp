@@ -147,13 +147,21 @@ def upload_packet_to_test_set(
     bucket: str,
     *,
     s3_client: Optional[Any] = None,
+    name_prefix: str = "",
 ) -> int:
+    """Upload generated docs into <test_set_id>/input|baseline.
+
+    ``name_prefix`` is prepended to each document's filename so a run's docs
+    have unique keys — without it, every SEED run names files doc_0001.pdf,
+    doc_0002.pdf, ... and appending to an existing test set overwrites the
+    prior run's same-named docs instead of adding.
+    """
     import boto3
 
     client = s3_client or boto3.client("s3")
     uploaded = 0
     for doc in documents:
-        pdf_name = os.path.basename(doc.pdf_path)
+        pdf_name = f"{name_prefix}{os.path.basename(doc.pdf_path)}"
         input_key = f"{test_set_id}/input/{pdf_name}"
         client.upload_file(doc.pdf_path, bucket, input_key)
         uploaded += 1

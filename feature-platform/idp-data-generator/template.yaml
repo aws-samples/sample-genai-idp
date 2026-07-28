@@ -681,6 +681,7 @@ Resources:
           MAIN_STACK_NAME: !Ref MainStackName
           BOOTSTRAP_QUEUE_URL: !Ref BootstrapQueue
           BOOTSTRAP_TRACKING_TABLE: !Ref BootstrapTrackingTable
+          HOST_TRACKING_TABLE: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
           CONFIGURATION_TABLE_NAME: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }
           SUGGEST_MODEL_ID: !Ref GeneratorModelId
       Policies:
@@ -695,6 +696,12 @@ Resources:
                 - !Sub
                   - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}"
                   - T: { 'Fn::ImportValue': !Sub '${MainStackName}-ConfigurationTableName' }
+            - Effect: Allow
+              Action: [dynamodb:GetItem]
+              Resource:
+                - !Sub
+                  - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}"
+                  - T: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
             # KMS grant for the CMK-encrypted BootstrapQueue + tables.
             - Effect: Allow
               Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
