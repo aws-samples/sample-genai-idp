@@ -224,6 +224,9 @@ extraction:
       order: 100                # lower runs first within a point (default 100)
       onError: continue         # continue | skip-remaining | fail (default continue)
       enabled: true             # default true
+      allowDocumentUpdate: true # default true — may this hook return an
+                                # `updatedDocument`? Set false to pin it to
+                                # observe-only (see "Modifying the document")
 ```
 
 **Hook Lambda contract** — invoked synchronously (`RequestResponse`) with:
@@ -242,6 +245,57 @@ document is marked according to the hook's semantics — e.g.
 point), or `fail` (fail the workflow — for `preprocessing` this stops the
 execution in a terminal `PreprocessingHookFailed` state rather than continuing
 to normal processing).
+
+**Modifying the document (optional)** — a hook is not limited to observing. To
+change what the *next* workflow step consumes, return the modified document
+under `updatedDocument`:
+
+```json
+{ "updatedDocument": { ...document... }, "myOwnField": "whatever" }
+```
+
+This is how a hook injects business logic into the pipeline itself —
+relabelling a section's classification, adding or dropping sections, correcting
+extracted attributes, adjusting confidence alerts, or appending metering — as
+opposed to only rewriting the S3 objects the document points at.
+
+The document may be returned either **inline** (the dispatcher spills it to the
+working bucket for you) or as a **compressed reference** the hook wrote itself
+(`{compressed: true, s3_uri, document_id, sections, num_pages, config_version}`),
+which has no size ceiling. Use
+[`idp_common.hooks`](feature-platform-developer-guide.md#writing-a-mutating-hook)
+to get the round-trip right in two calls.
+
+Omit `updatedDocument` and nothing changes — the document passes through
+byte-identical, which is why every hook written before this capability existed
+keeps working unmodified.
+
+Guardrails the dispatcher enforces (a violation is **refused**, leaving the
+document at its pre-hook value and recording the reason in
+`$.HookResults.<point>.Payload.results[].documentUpdateRejected` — it never
+fails the workflow):
+
+| Rule | Why |
+|---|---|
+| `id` / `input_key` / `input_bucket` / `output_bucket` are immutable | The tracking-table row and output S3 prefixes are keyed off them. A hook that needs a *different* document should spawn one and `halt`. |
+| `sections` in a compressed reference must be a list of section-id strings | The workflow's `ProcessSections` Map iterates it directly, so a malformed value would fail the whole execution. |
+| `config_version` is preserved | It resolves hooks for the rest of the pipeline; a changed value is restored (the content change is still honored). |
+| Inline documents are capped at 5 MB | Bounded by Lambda's own 6 MB synchronous response limit. Return a compressed reference instead. |
+
+Chained hooks at the same point **compose**: hook #2 receives hook #1's
+document, in `order`. Set `allowDocumentUpdate: false` on a hook entry to pin it
+to observe-only.
+
+**Where a mutation reaches** — the hook point determines scope:
+
+| Point | Document scope | Propagates to |
+|---|---|---|
+| `preprocessing` | Whole document, pre-OCR | Everything downstream |
+| `postOcr` | Whole document + page results | Classification onward |
+| `postClassification` | Whole document | The `ProcessSections` Map fan-out (section adds/removes/relabels) and everything after |
+| `postExtraction` | **A single section** (runs inside the Map) | Assessment, then `sections[0]` + `metering` are merged into the final document — top-level and page-level changes made here are discarded |
+| `postRuleValidation` | Whole document | Summarization, evaluation, final output |
+| `postSummarization` | Whole document | Evaluation and the final workflow output |
 
 **Security** — the dispatcher's `lambda:InvokeFunction` is scoped so a hook
 Lambda must either carry the `idp:feature-id` resource tag (ABAC, used by

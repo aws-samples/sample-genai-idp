@@ -37,6 +37,16 @@ The dispatcher's return value includes a top-level `halt` flag (true if any
 successful hook returned result.halt == true) so the workflow's post-hook
 Choice can short-circuit the execution via a stable JSONPath.
 
+It ALSO always includes a top-level `document` — the document the next
+workflow step should consume. A hook that wants to change the document for
+downstream steps returns `{"updatedDocument": <doc>}`; the dispatcher
+validates it, threads it into the next hook at the same point, and returns it
+here. Hooks that return anything else (the historical, read-only contract) get
+their input document echoed back verbatim, so the pipeline is byte-identical
+to the pre-mutation behavior. The state machine copies this value into the
+canonical path the next step reads via a small `Apply<Point>HookDocument`
+Pass state (see statemachine/workflow.asl.json).
+
 Resolution rules:
   1. If the SFN input has `document.config_version`, use it.
   2. Else, scan the table for the row with IsActive=true.
@@ -49,11 +59,13 @@ keeping the no-vertical-pack overhead at one DDB GetItem.
 from __future__ import annotations
 
 import base64
+import copy
 import gzip
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
 
@@ -62,6 +74,34 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 _CONFIG_TABLE = os.environ.get("CONFIGURATION_TABLE_NAME", "")
 _TRACKING_TABLE = os.environ.get("TRACKING_TABLE", "")
+# Needed only to spill a hook-returned INLINE document dict to S3 in the same
+# compressed-wrapper shape the step Lambdas use. Hooks that write the document
+# themselves and return a compressed reference need nothing here.
+_WORKING_BUCKET = os.environ.get("WORKING_BUCKET", "")
+
+# The key a hook sets to hand a modified document to the next workflow step.
+# Deliberately NOT "document": no existing hook returns `updatedDocument`, so a
+# read-only hook that happens to echo its input under "document" cannot
+# accidentally start mutating the pipeline.
+_UPDATED_DOC_KEY = "updatedDocument"
+
+# Identity fields a hook may never change. Rewriting these mid-pipeline would
+# corrupt the tracking-table row and the output S3 prefixes (both keyed off the
+# document id / input key). A hook that needs a DIFFERENT document should spawn
+# one and `halt` (the pattern the PII preprocessing hook uses) rather than
+# swapping identity underneath the running execution.
+_IMMUTABLE_DOC_FIELDS = (
+    "id",
+    "document_id",
+    "input_bucket",
+    "input_key",
+    "output_bucket",
+)
+
+# Ceiling on an inline document dict returned by a hook, before compression.
+# Lambda's own 6MB synchronous response limit is the real gate; this bounds the
+# JSON we will re-serialize and PutObject.
+_MAX_INLINE_DOC_BYTES = 5 * 1024 * 1024
 
 # Map hook point -> config section under the active config version.
 #
@@ -117,6 +157,7 @@ _lambda = boto3.client(
         read_timeout=910, connect_timeout=10, retries={"max_attempts": 0}
     ),
 )
+_s3 = boto3.client("s3")
 
 
 def _decompress_item(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -194,6 +235,11 @@ def _normalize_hook(h: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "order": int(h.get("order", 100)) if h.get("order") is not None else 100,
         "onError": h.get("onError") or "continue",
         "args": args,
+        # Admin kill-switch for document mutation on a per-hook basis. Defaults
+        # to True (a registered hook is already admin-approved and IAM-gated,
+        # and can already rewrite the S3 objects the document points at), but an
+        # admin can pin a specific hook to observe-only.
+        "allowDocumentUpdate": h.get("allowDocumentUpdate") is not False,
     }
 
 
@@ -265,6 +311,192 @@ def _set_preprocessing_status(document: Any) -> None:
         logger.info("Could not set PREPROCESSING status for %s: %s", doc_id, exc)
 
 
+def _doc_identity(doc: Any) -> Dict[str, Any]:
+    """The immutable identity fields present on a document payload.
+
+    Works on both shapes the workflow passes around: a full document dict
+    (`id`/`input_key`/…) and a compressed wrapper (`document_id`/`s3_uri`/…).
+    Only fields actually present are returned, so a compressed wrapper (which
+    carries `document_id` but not `input_key`) is compared on what it has.
+    """
+    if not isinstance(doc, dict):
+        return {}
+    return {f: doc[f] for f in _IMMUTABLE_DOC_FIELDS if f in doc}
+
+
+def _identity_matches(previous: Any, candidate: Any) -> Optional[str]:
+    """None if `candidate` keeps `previous`'s identity, else a reason string.
+
+    A compressed wrapper's `document_id` and a full dict's `id` are the same
+    logical value, so they are compared against each other as well — this
+    catches a hook that decompresses, changes `id`, and returns an inline dict.
+    """
+    prev_id = _doc_identity(previous)
+    cand_id = _doc_identity(candidate)
+    prev_logical = prev_id.get("id") or prev_id.get("document_id")
+    cand_logical = cand_id.get("id") or cand_id.get("document_id")
+    if prev_logical is not None and cand_logical is not None:
+        if str(prev_logical) != str(cand_logical):
+            return (
+                f"document identity changed: {prev_logical!r} -> {cand_logical!r}"
+            )
+    for f in _IMMUTABLE_DOC_FIELDS:
+        if f in prev_id and f in cand_id and prev_id[f] != cand_id[f]:
+            return f"immutable field {f!r} changed: {prev_id[f]!r} -> {cand_id[f]!r}"
+    return None
+
+
+def _validate_compressed_ref(ref: Dict[str, Any]) -> Optional[str]:
+    """None if `ref` is a usable compressed-document wrapper, else a reason.
+
+    `sections` must be a list of STRING section ids: the workflow's
+    ProcessSections Map iterates that list directly (ItemsPath
+    $.ClassificationResult.document.sections), so a malformed value would fail
+    the whole execution rather than just the hook.
+    """
+    s3_uri = ref.get("s3_uri")
+    if not isinstance(s3_uri, str) or not s3_uri.startswith("s3://"):
+        return f"compressed document reference has invalid s3_uri: {s3_uri!r}"
+    sections = ref.get("sections")
+    if sections is not None:
+        if not isinstance(sections, list) or not all(
+            isinstance(s, str) for s in sections
+        ):
+            return (
+                "compressed document reference `sections` must be a list of "
+                f"section-id strings, got {type(sections).__name__}"
+            )
+    return None
+
+
+def _compress_inline_document(
+    doc: Dict[str, Any], point: str, feature_id: str
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Spill a hook-returned INLINE document dict to the working bucket.
+
+    Returns (compressed_wrapper, None) on success or (None, reason) on failure.
+    Mirrors idp_common.models.Document.compress() so the wrapper is
+    indistinguishable from one a step Lambda produced — the dispatcher stays
+    deliberately free of the idp_common layer (see module docstring), so the
+    ~15 lines are inlined rather than imported.
+    """
+    if not _WORKING_BUCKET:
+        return None, "WORKING_BUCKET is not configured; cannot store inline document"
+    doc_id = doc.get("id") or doc.get("input_key")
+    if not doc_id:
+        return None, "inline document has no id/input_key"
+    try:
+        body = json.dumps(doc, default=str).encode("utf-8")
+    except Exception as exc:  # noqa: BLE001
+        return None, f"inline document is not JSON-serializable: {exc}"
+    if len(body) > _MAX_INLINE_DOC_BYTES:
+        return None, (
+            f"inline document is {len(body)} bytes, over the "
+            f"{_MAX_INLINE_DOC_BYTES}-byte limit; return a compressed reference "
+            "instead"
+        )
+
+    timestamp = str(int(time.time() * 1000))
+    key = (
+        f"compressed_documents/{doc_id}/{timestamp}_hook_{point}_"
+        f"{feature_id}_state.json"
+    )
+    try:
+        _s3.put_object(
+            Bucket=_WORKING_BUCKET,
+            Key=key,
+            Body=body,
+            ContentType="application/json",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to store hook document for %s", doc_id)
+        return None, f"could not store inline document in working bucket: {exc}"
+
+    # Section ids only — the Map state iterates this list.
+    sections = [
+        s.get("section_id")
+        for s in (doc.get("sections") or [])
+        if isinstance(s, dict) and s.get("section_id") is not None
+    ]
+    status = doc.get("status")
+    return {
+        "document_id": doc_id,
+        "s3_uri": f"s3://{_WORKING_BUCKET}/{key}",
+        "timestamp": timestamp,
+        "status": status if isinstance(status, str) else str(status or ""),
+        "num_pages": doc.get("num_pages", 0),
+        "sections": [str(s) for s in sections],
+        "config_version": doc.get("config_version"),
+        "compressed": True,
+    }, None
+
+
+def _resolve_updated_document(
+    result: Dict[str, Any],
+    previous: Any,
+    hook: Dict[str, Any],
+    point: str,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """Extract + validate a hook's `updatedDocument`, if it returned one.
+
+    Returns (document_to_use, None) when the hook handed back a valid document,
+    (None, None) when it returned no document at all (the read-only contract —
+    by far the common case), or (None, reason) when it returned one the
+    dispatcher refuses. On refusal the CALLER keeps the previous document, so a
+    malformed hook response degrades to the historical passive behavior instead
+    of corrupting the pipeline.
+    """
+    payload = result.get("result")
+    if not isinstance(payload, dict) or _UPDATED_DOC_KEY not in payload:
+        return None, None
+    if not hook.get("allowDocumentUpdate", True):
+        return None, (
+            "hook returned updatedDocument but allowDocumentUpdate=false for "
+            f"{hook['featureId']}"
+        )
+
+    candidate = payload.get(_UPDATED_DOC_KEY)
+    if not isinstance(candidate, dict) or not candidate:
+        return None, (
+            f"updatedDocument must be a non-empty object, got "
+            f"{type(candidate).__name__}"
+        )
+
+    reason = _identity_matches(previous, candidate)
+    if reason:
+        return None, reason
+
+    prev_version = (
+        previous.get("config_version") if isinstance(previous, dict) else None
+    )
+    if candidate.get("compressed") is True:
+        reason = _validate_compressed_ref(candidate)
+        if reason:
+            return None, reason
+        resolved = copy.deepcopy(candidate)
+    else:
+        resolved, reason = _compress_inline_document(
+            candidate, point, hook["featureId"]
+        )
+        if reason or resolved is None:
+            return None, reason or "could not process inline document"
+
+    # config_version drives hook resolution for the REST of the pipeline (this
+    # dispatcher reads it on every invoke), so a hook must not silently drop or
+    # repoint it. Restore the inbound value rather than rejecting the whole
+    # update — the hook's real intent is the document content.
+    if prev_version is not None and resolved.get("config_version") != prev_version:
+        logger.warning(
+            "Hook %s changed config_version (%r -> %r); restoring the inbound "
+            "value",
+            hook["featureId"],
+            prev_version,
+            resolved.get("config_version"),
+        )
+        resolved["config_version"] = prev_version
+    return resolved, None
+
+
 def _invoke_hook(hook: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
     try:
         resp = _lambda.invoke(
@@ -302,29 +534,45 @@ def _invoke_hook(hook: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any
         }
 
 
+def _noop(point: Any, document: Any) -> Dict[str, Any]:
+    """An empty dispatch result.
+
+    Carries halt=False AND the inbound document unchanged, so both state-machine
+    reads — $.HookResults.<point>.Payload.halt (the Choice) and
+    ...Payload.document (the Apply Pass state) — resolve unconditionally, even
+    when no hook is registered or the point is unknown.
+    """
+    return {
+        "hookPoint": point,
+        "invoked": 0,
+        "halt": False,
+        "document": document,
+        "results": [],
+    }
+
+
 def lambda_handler(event: Dict[str, Any], _ctx: Any) -> Dict[str, Any]:
     point = event.get("hookPoint")
-    # Every early return carries halt=false so the state machine Choice can
-    # rely on $.HookResults.<point>.Payload.halt existing unconditionally.
+    inbound_document = event.get("document")
     if point not in _HOOK_TO_STEP:
         logger.warning("Unknown hookPoint=%s — returning empty result", point)
-        return {"hookPoint": point, "invoked": 0, "halt": False, "results": []}
+        return _noop(point, inbound_document)
     if not _CONFIG_TABLE:
         logger.info("CONFIGURATION_TABLE_NAME not set — no hooks dispatched")
-        return {"hookPoint": point, "invoked": 0, "halt": False, "results": []}
+        return _noop(point, inbound_document)
 
     table = _dynamodb.Table(_CONFIG_TABLE)
-    document = event.get("document") or {}
+    document = inbound_document or {}
     pinned = document.get("config_version") if isinstance(document, dict) else None
     version = _resolve_active_version(table, pinned)
     if not version:
         logger.info("No config version resolvable; returning no-hooks")
-        return {"hookPoint": point, "invoked": 0, "halt": False, "results": []}
+        return _noop(point, inbound_document)
 
     hooks = _read_hooks_from_config(table, version, point)
     if not hooks:
         logger.info("No hooks registered for %s in Config#%s", point, version)
-        return {"hookPoint": point, "invoked": 0, "halt": False, "results": []}
+        return _noop(point, inbound_document)
 
     # Surface the preprocessing step in the document's visible status (the
     # generic RUNNING otherwise persists for the whole — possibly long —
@@ -333,6 +581,11 @@ def lambda_handler(event: Dict[str, Any], _ctx: Any) -> Dict[str, Any]:
         _set_preprocessing_status(document)
 
     results: List[Dict[str, Any]] = []
+    # The document threaded through the chain. Each hook sees the OUTPUT of the
+    # previous hook at this point (not the original), so hooks compose; and this
+    # is what the dispatcher hands back for the next workflow step.
+    current_document: Any = inbound_document
+    updated_by: List[str] = []
     for h in hooks:
         # Provide args both as the raw list and a flattened {key: value} map for
         # hook convenience. Values are strings; the hook parses as needed.
@@ -345,7 +598,7 @@ def lambda_handler(event: Dict[str, Any], _ctx: Any) -> Dict[str, Any]:
         payload = {
             "hookPoint": point,
             "featureId": h["featureId"],
-            "document": event.get("document"),
+            "document": current_document,
             "section": event.get("section"),
             "executionArn": event.get("executionArn"),
             "args": args_list,
@@ -353,6 +606,35 @@ def lambda_handler(event: Dict[str, Any], _ctx: Any) -> Dict[str, Any]:
         }
         r = _invoke_hook(h, payload)
         results.append(r)
+
+        if r["ok"]:
+            updated, reason = _resolve_updated_document(
+                r, current_document, h, str(point)
+            )
+            if updated is not None:
+                logger.info(
+                    "Hook %s returned an updated document for %s", h["featureId"], point
+                )
+                current_document = updated
+                updated_by.append(h["featureId"])
+                # Record WHAT the workflow will consume, not the (possibly
+                # multi-MB) inline dict the hook returned, keeping the SFN
+                # execution history readable.
+                r["result"] = {
+                    k: v for k, v in r["result"].items() if k != _UPDATED_DOC_KEY
+                }
+                r["documentUpdated"] = True
+            elif reason:
+                # Refused: keep the previous document (degrade to passive) and
+                # surface why in the execution history.
+                logger.warning(
+                    "Rejected document update from hook %s at %s: %s",
+                    h["featureId"],
+                    point,
+                    reason,
+                )
+                r["documentUpdateRejected"] = reason
+
         if not r["ok"] and h["onError"] == "fail":
             raise RuntimeError(
                 f"Pipeline hook {h['featureId']} at {point} failed and onError=fail: {r.get('error')}"
@@ -381,5 +663,10 @@ def lambda_handler(event: Dict[str, Any], _ctx: Any) -> Dict[str, Any]:
         "configVersion": version,
         "invoked": len(results),
         "halt": halt,
+        # Always present. Equals the inbound document unless a hook returned a
+        # validated `updatedDocument`. The state machine's Apply<Point>Hook-
+        # Document Pass state copies this into the path the next step reads.
+        "document": current_document,
+        "documentUpdatedBy": updated_by,
         "results": results,
     }
