@@ -63,6 +63,7 @@ def _run_job(payload):
     count = int(payload.get("count", 3))
     threshold = int(payload.get("threshold", 7))
     augment = bool(payload.get("augment", False))
+    append = bool(payload.get("append", False))
     extra = payload.get("scenario") or payload.get("extra", "")
     model_id = payload.get("modelId") or os.environ.get("GENERATOR_MODEL_ID")
     allowed_field_names = set(payload.get("allowedFieldNames", []))
@@ -91,6 +92,7 @@ def _run_job(payload):
         result = engine.synthesize(job, status_cb=_status)
         if not result.success or not result.packet_dir:
             _post_status(payload, job_id, "FAILED", result.error or "Generation failed")
+            _fail_test_set(test_set_id, append, test_set_bucket)
             return
 
         documents = packet_io.read_packet(result.packet_dir)
@@ -119,7 +121,7 @@ def _run_job(payload):
     except Exception as e:
         logger.exception("Synthesis job %s failed", job_id)
         _post_status(payload, job_id, "FAILED", str(e))
-        _update_test_set(test_set_id, "FAILED")
+        _fail_test_set(test_set_id, append, test_set_bucket)
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -189,6 +191,17 @@ def _test_set_input_count(bucket, test_set_id):
             "Failed to count test set inputs for %s", test_set_id, exc_info=True
         )
         return None
+
+
+def _fail_test_set(test_set_id, append, bucket):
+    if append:
+        _update_test_set(
+            test_set_id,
+            "COMPLETED",
+            file_count=_test_set_input_count(bucket, test_set_id),
+        )
+    else:
+        _update_test_set(test_set_id, "FAILED")
 
 
 def _update_test_set(test_set_id, status, file_count=None):

@@ -50,9 +50,11 @@ Once installed, the generator is reachable three ways:
 - **Test Studio → Test Sets → Generate Test Set** — a modal (shown only
   when this extension is installed) to generate from a description or a
   configuration version/class, with scenario, quality, and document-count
-  controls. The resulting test set appears in the list when the background job
-  completes; click a test set's name to preview its documents without running a
-  test execution.
+  controls. Choose a **destination**: create a new test set (a unique name is
+  required — a name that already exists is rejected) or add the generated
+  documents to an existing test set. The resulting test set appears in the list
+  when the background job completes; click a test set's name to preview its
+  documents without running a test execution.
 - **View/Edit Configuration → Document Schema** — a **Generate test set** button
   deep-links into Test Studio with the modal pre-filled for the current
   configuration version.
@@ -75,9 +77,12 @@ The generator requires Amazon Bedrock model access for the models SEED uses
 A self-contained extension stack that plugs into the host contract:
 
 - **FeatureApi** (HTTP API + Cognito JWT) — `POST /generate` and
-  `/generate-from-config` enqueue a job; `POST /estimate-cost` returns a
-  cost/time band; `POST /suggest-scenario` proposes scenario themes via Bedrock;
-  `GET /jobs` lists in-flight jobs and `GET /jobs/{id}` returns one job's status.
+  `/generate-from-config` enqueue a job (each takes a destination: `testSetName`
+  to create a new set, or `testSetId` to append to an existing one; both require
+  the caller to be in the `Admin` or `Author` group); `POST /estimate-cost`
+  returns a cost/time band; `POST /suggest-scenario` proposes scenario themes via
+  Bedrock; `GET /jobs` lists in-flight jobs and `GET /jobs/{id}` returns one
+  job's status.
 - **BootstrapProcessor** (SQS-driven Lambda) — authors/resolves the document
   class schema, writes it into a configuration version, and invokes the
   AgentCore Runtime asynchronously.

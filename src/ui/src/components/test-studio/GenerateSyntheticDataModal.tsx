@@ -121,6 +121,8 @@ const GenerateSyntheticDataModal = ({
   const [existingTestSet, setExistingTestSet] = useState<SelectProps.Option | null>(null);
   const [testSetOptions, setTestSetOptions] = useState<SelectProps.Option[]>([]);
   const [allTestSetIds, setAllTestSetIds] = useState<Set<string>>(new Set());
+  const [testSetsLoading, setTestSetsLoading] = useState(false);
+  const [testSetsError, setTestSetsError] = useState(false);
 
   const versionOptions = useMemo<SelectProps.Option[]>(
     () => versions.map((v) => ({ label: v.versionName, value: v.versionName })),
@@ -138,6 +140,8 @@ const GenerateSyntheticDataModal = ({
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
+    setTestSetsLoading(true);
+    setTestSetsError(false);
     client
       .graphql({ query: getTestSets })
       .then((result) => {
@@ -150,7 +154,11 @@ const GenerateSyntheticDataModal = ({
         if (!cancelled) {
           setTestSetOptions([]);
           setAllTestSetIds(new Set());
+          setTestSetsError(true);
         }
+      })
+      .finally(() => {
+        if (!cancelled) setTestSetsLoading(false);
       });
     return () => {
       cancelled = true;
@@ -427,9 +435,18 @@ const GenerateSyntheticDataModal = ({
               onChange={({ detail }) => setDestMode(detail.value as 'new' | 'existing')}
               items={[
                 { value: 'new', label: 'Create new test set' },
-                { value: 'existing', label: 'Add to existing test set', disabled: testSetOptions.length === 0 },
+                {
+                  value: 'existing',
+                  label: 'Add to existing test set',
+                  disabled: testSetsLoading || testSetOptions.length === 0,
+                },
               ]}
             />
+            {testSetsError && (
+              <Alert type="warning">
+                Could not load existing test sets. You can still create a new one; retry by reopening this dialog.
+              </Alert>
+            )}
             {destMode === 'new' ? (
               <FormField
                 errorText={
@@ -453,6 +470,8 @@ const GenerateSyntheticDataModal = ({
                 options={testSetOptions}
                 placeholder="Select a test set"
                 empty="No completed test sets"
+                statusType={testSetsLoading ? 'loading' : 'finished'}
+                loadingText="Loading test sets"
                 filteringType="auto"
               />
             )}

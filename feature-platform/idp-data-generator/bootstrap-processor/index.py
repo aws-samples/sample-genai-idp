@@ -89,13 +89,16 @@ def _register_test_set(
         return
     import datetime
 
-    now = datetime.datetime.utcnow().isoformat() + "Z"
+    now = (
+        datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+    )
     names = {
         "#status": "status",
         "#itemType": "ItemType",
         "#id": "id",
         "#name": "name",
         "#createdAt": "createdAt",
+        "#iet": "InitialEventTime",
         "#description": "description",
     }
     values = {
@@ -112,6 +115,7 @@ def _register_test_set(
         "#id = :id",
         "#name = if_not_exists(#name, :name)",
         "#createdAt = if_not_exists(#createdAt, :createdAt)",
+        "#iet = if_not_exists(#iet, :createdAt)",
         "#description = if_not_exists(#description, :description)",
     ]
     if document_class_type:
@@ -259,6 +263,7 @@ def _process_job(job_id, body):
     # Fall back to target_version for old-shape messages that predate the split.
     test_set_id = body.get("testSetId") or target_version
     test_set_name = body.get("testSetName") or test_set_id
+    append = bool(body.get("append", False))
 
     schema_prefix = f"bootstrap/{job_id}/schema/"
     _stage_schema_dir(schema, schema_prefix)
@@ -268,11 +273,13 @@ def _process_job(job_id, body):
         "IN_PROGRESS",
         message="Invoking generator",
         config_version=target_version,
+        test_set_id=test_set_id,
     )
 
     payload = {
         "jobId": job_id,
         "testSetId": test_set_id,
+        "append": append,
         "workingBucket": WORKING_BUCKET,
         "schemaPrefix": schema_prefix,
         "testSetBucket": TEST_SET_BUCKET,

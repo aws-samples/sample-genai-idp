@@ -96,6 +96,31 @@ class _BadRequest(Exception):
     """Raised for invalid request fields; surfaced as a 400."""
 
 
+class _Forbidden(Exception):
+    """Raised when the caller lacks the required Cognito group; surfaced as 403."""
+
+
+_WRITE_GROUPS = ("Admin", "Author")
+
+
+def _caller_groups(event: Dict[str, Any]) -> list:
+    claims = (
+        event.get("requestContext", {})
+        .get("authorizer", {})
+        .get("jwt", {})
+        .get("claims", {})
+    ) or {}
+    raw = claims.get("cognito:groups") or []
+    if isinstance(raw, str):
+        raw = [g for g in raw.strip("[]").replace(",", " ").split() if g]
+    return list(raw)
+
+
+def _require_write_group(event: Dict[str, Any]) -> None:
+    if not any(g in _WRITE_GROUPS for g in _caller_groups(event)):
+        raise _Forbidden("generating test sets requires the Admin or Author group")
+
+
 def _int_field(body: Dict[str, Any], name: str, default: int, lo: int, hi: int) -> int:
     raw = body.get(name, default)
     try:
@@ -120,6 +145,8 @@ def _test_set_dest(body: Dict[str, Any]) -> Dict[str, Any]:
     """
     existing_id = (body.get("testSetId") or "").strip()
     if existing_id:
+        if len(existing_id) > 50 or not _NAME_RE.match(existing_id):
+            raise _BadRequest("testSetId contains invalid characters")
         return {"testSetId": existing_id, "testSetName": existing_id, "append": True}
     name = (body.get("testSetName") or "").strip()
     if not name:
@@ -315,8 +342,10 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
 
     try:
         if method == "POST" and path.endswith("/generate"):
+            _require_write_group(event)
             return _handle_generate(json.loads(event.get("body") or "{}"))
         if method == "POST" and path.endswith("/generate-from-config"):
+            _require_write_group(event)
             return _handle_generate_from_config(json.loads(event.get("body") or "{}"))
         if method == "POST" and path.endswith("/estimate-cost"):
             return _handle_estimate_cost(json.loads(event.get("body") or "{}"))
@@ -335,6 +364,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         return _resp(400, {"error": "invalid JSON body"})
     except _BadRequest as exc:
         return _resp(400, {"error": str(exc)})
+    except _Forbidden as exc:
+        return _resp(403, {"error": str(exc)})
     except Exception:  # noqa: BLE001
         logger.exception("feature-api error")
         return _resp(500, {"error": "internal error"})
