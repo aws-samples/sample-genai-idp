@@ -30,6 +30,16 @@ Fixed / False Positive / Risk-Accepted).
 
 ## Finding #14 — Missing Anti-Clickjacking Headers in ALB Hosting Path *(upgraded to Risk-Accepted)*
 
+> **⚠️ Superseded 2026-07-28 — resolved by removal.** The ALB hosting mode
+> described below was deleted in **v0.6.0** (`nested/alb-hosting/`, all `ALB*`
+> parameters, and `docs/alb-hosting.md` no longer exist) and replaced by API
+> Gateway S3-proxy hosting, which sets `X-Frame-Options: DENY`, `nosniff`, HSTS,
+> and `Referrer-Policy` per-method on the SPA routes. This risk acceptance is
+> **void** — it was conditioned on guidance in a file that no longer exists.
+> Residual gap (no CSP in APIGateway mode) is tracked as **UI.T07** in
+> [`feature-threats/web-ui.md`](feature-threats/web-ui.md). Retained below for
+> the audit trail only.
+
 - **New status:** Risk-Accepted (customer-action guidance documented)
 - **Files changed in this update:**
   - `docs/alb-hosting.md` (new "Security Hardening for ALB-Hosted Deployments" section)
