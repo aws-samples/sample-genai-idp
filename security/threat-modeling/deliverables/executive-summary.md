@@ -4,8 +4,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 2.0 |
-| **Last Updated** | 2025-03-19 |
+| **Document Version** | 3.0 |
+| **Last Updated** | 2026-07-28 |
+| **Applies to release** | v0.6.3 |
 | **Classification** | Internal |
 | **System** | GenAI Intelligent Document Processing (IDP) Accelerator |
 
@@ -26,13 +27,14 @@ The system includes a web UI, multi-agent AI assistant, SDK/CLI for automation, 
 
 | Metric | Value |
 |--------|-------|
-| **AWS Services Used** | 15+ (Bedrock, Textract, Lambda, Step Functions, DynamoDB, S3, AppSync, Cognito, Athena, Glue, OpenSearch, CloudFront, SQS, EventBridge, CloudWatch) |
-| **Lambda Functions** | 50+ |
-| **DynamoDB Tables** | 6+ |
-| **S3 Buckets** | 4+ |
-| **CloudWatch Alarms** | 60+ |
+| **AWS Services Used** | 15+ (Bedrock incl. Data Automation/AgentCore, Textract, Lambda, Step Functions, DynamoDB, S3, **API Gateway**, Cognito, Athena, Glue, OpenSearch, CloudFront, WAF, SQS, EventBridge, CloudWatch) |
+| **Lambda Functions** | 115+ |
+| **DynamoDB Tables** | 12 |
+| **S3 Buckets** | 13 |
+| **UI API operations** | 97 (single `POST /op/{field}` route) |
 | **Processing Modes** | 2 (Pipeline, BDA) |
-| **RBAC Roles** | 4 (Admin, Author, Reviewer, Viewer) |
+| **RBAC Roles** | 4 (Admin, Author, Reviewer, Viewer) + separate M2M OAuth realm for the Jobs API |
+| **UI hosting modes** | 2 (CloudFront, API Gateway S3 proxy) |
 
 ## 3. Threat Model Results
 
@@ -40,30 +42,41 @@ The system includes a web UI, multi-agent AI assistant, SDK/CLI for automation, 
 
 | Category | Count |
 |----------|-------|
-| **Total threats identified** | **62** |
-| Critical risk (score 8-12) | 5 |
-| High risk (score 6-9) | 19 |
-| Medium risk (score 3-4) | 28 |
-| Low risk (score 1-2) | 10 |
+| **Total threats identified** | **83** |
+| Critical risk (score 8-9) | 6 |
+| High risk (score 6-7) | 26 |
+| Medium risk (score 3-5) | 37 |
+| Low risk (score 1-2) | 14 |
 
 ### 3.2 STRIDE Distribution
 
 | STRIDE Category | Count | Key Concern |
 |----------------|-------|-------------|
-| **Tampering** | 22 | Prompt injection, configuration manipulation, data poisoning |
-| **Information Disclosure** | 16 | Data exfiltration via extensibility points, token/credential exposure |
-| **Elevation of Privilege** | 12 | RBAC bypass, hook privilege escalation, agent routing manipulation |
-| **Denial of Service** | 10 | Resource exhaustion, cost escalation, service dependency |
-| **Spoofing** | 7 | Token theft, credential compromise, service impersonation |
-| **Repudiation** | 5 | Insufficient audit trail, BDA opacity |
+| **Tampering** | 36 | Prompt injection, configuration manipulation, data/ground-truth poisoning |
+| **Information Disclosure** | 35 | Data exfiltration via extensibility points, object-read scoping, token/credential exposure |
+| **Elevation of Privilege** | 25 | RBAC bypass, hook/feature privilege escalation, agent routing manipulation |
+| **Denial of Service** | 14 | Resource exhaustion, cost escalation, redaction loops, service dependency |
+| **Spoofing** | 11 | Token theft, caller-identity spoofing, credential compromise |
+| **Repudiation** | 3 | Insufficient audit trail, BDA opacity |
+
+> Counts sum to more than 83 because a threat may carry multiple STRIDE categories.
 
 ### 3.3 Mitigation Status
 
 | Status | Count | Percentage |
 |--------|-------|------------|
-| **Mitigated** | 50 | 81% |
-| **Partially Mitigated** | 7 | 11% |
-| **Accepted** | 5 | 8% |
+| **Mitigated** | 56 | 67% |
+| **Partially Mitigated** | 19 | 23% |
+| **Open** (real gap, needs work) | **5** | **6%** |
+| **Accepted** | 3 | 4% |
+
+The five **Open** items are CHAT.T03 and CHAT.T06 (chat streaming Function URL
+enforces neither RBAC group nor session ownership, and the agent route trusts a
+client-supplied caller identity), UI.T06 (presigned object reads are
+bucket-scoped but not key-scoped, and callable by any authenticated user),
+UI.T07 (no CSP in API-Gateway/GovCloud hosting mode), and JOB.T02 (the Jobs API
+sits outside the automated authorization harness). All five are code/config
+changes; see [risk-matrix §5](../risk-assessment/risk-matrix.md#5-recommendations).
 
 ## 4. Key Risk Areas
 
@@ -87,23 +100,30 @@ The system's high configurability (prompts, schemas, model selection, agent tool
 
 ### 4.4 Authentication & Authorization
 
-RBAC is enforced at multiple layers (Cognito → AppSync → Lambda) but authorization gaps in any layer could enable privilege escalation (AUTH.T03). The system is single-tenant per deployment.
+RBAC is enforced **entirely inside the resolver Lambdas** — the API Gateway Cognito authorizer only authenticates the JWT and performs no group evaluation. Any resolver missing its server-side check exposes a privileged operation to every authenticated user (AUTH.T03, AUTH.T08). The system is single-tenant per deployment.
 
-**Mitigations**: Comprehensive AppSync resolver authorization, defense-in-depth with Lambda-level role checks, Cognito advanced security features.
+**Mitigations**: Per-operation resolver authorization for all 97 routable operations, config-version scope checks, object-level ownership checks, and — because the boundary is now imperative code rather than a declarative gateway rule — an **automated authorization test harness** (`make api-test` / `make api-test-static`) that fails the CI gate on any missing or regressed check. Cognito advanced security features.
 
 ## 5. Recommendations
 
 ### Immediate (Partially Mitigated Critical/High Risks)
 
-1. **Implement VPC egress controls** for MCP Lambda functions to prevent unauthorized data exfiltration
-2. **Publish secure hook deployment guide** with reference VPC architecture and IAM templates
+1. **Close the chat streaming authorization gaps (CHAT.T03, CHAT.T06)** — enforce
+   session ownership and the RBAC group on the Lambda Function URL transport, and
+   stop trusting a body-supplied `callerSub` on `/chat/agent`
+2. **Scope presigned object reads to the caller (UI.T06)** — today any
+   authenticated user can read any object in the stack's buckets by key
+3. **Add bundle integrity verification (SRI) to the Feature Platform (FEAT.T01)** —
+   installed extension UI code runs unsandboxed in the host origin with the user's session
+4. **Implement VPC egress controls** for MCP Lambda functions to prevent unauthorized data exfiltration
+5. **Publish secure hook deployment guide** with reference VPC architecture and IAM templates
 3. **Enhance SDK credential management** with credential helper integration
-4. **Conduct AppSync authorization audit** to verify all resolvers enforce role-based access
+4. **Extend the automated authorization harness to the chat streaming Function URL** — it currently covers `POST /op/{field}` only, leaving that transport's gaps (CHAT.T03/T06) undetectable by CI
 
 ### Ongoing
 
 1. **Monitor evaluation metrics** for accuracy degradation indicating prompt injection attacks
-2. **Periodic authorization review** of AppSync resolver rules
+2. **Periodic authorization review** via `make api-test` against a live stack, reviewing the op×role matrix report and any WARN gaps
 3. **Athena query pattern monitoring** for anomalous data access
 4. **Agent usage analytics** to detect tool invocation anomalies
 
@@ -124,4 +144,4 @@ The threat model has been developed using:
 | [STRIDE Analysis](../threat-analysis/stride-analysis.md) | Full STRIDE analysis across all components |
 | [Risk Matrix](../risk-assessment/risk-matrix.md) | Complete risk register with scoring |
 | [Implementation Guide](implementation-guide.md) | Security controls implementation details |
-| [Threat ID Glossary](../threat-id-glossary.md) | All 62 threat IDs with cross-references |
+| [Threat ID Glossary](../threat-id-glossary.md) | All 83 threat IDs with cross-references |

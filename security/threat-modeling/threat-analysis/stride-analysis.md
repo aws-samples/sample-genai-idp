@@ -4,8 +4,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 2.0 |
-| **Last Updated** | 2025-03-19 |
+| **Document Version** | 3.0 |
+| **Last Updated** | 2026-07-28 |
+| **Applies to release** | v0.6.3 |
 | **Classification** | Internal |
 | **Methodology** | STRIDE (Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege) |
 
@@ -21,11 +22,11 @@ Spoofing threats involve an attacker pretending to be something or someone they 
 
 | Threat | Component | Risk | Mitigations |
 |--------|-----------|------|-------------|
-| **Stolen JWT tokens** used to impersonate legitimate users | AppSync API, Cognito | High | Short-lived tokens (1hr), Cognito advanced security, TLS enforcement |
+| **Stolen JWT tokens** used to impersonate legitimate users | API Gateway REST API, Cognito | High | Short-lived tokens (1hr), Cognito advanced security, TLS enforcement; token-negative + expiry + logout suites in `make api-test` (see AUTH.T10) |
 | **Compromised SDK/CLI credentials** on developer machines | IDP SDK/CLI | Medium | Environment variable-based credentials, credential helpers, documentation |
 | **Self-registration** of unauthorized accounts | Cognito User Pool | Medium | Self-signup disabled, admin-created accounts only |
 | **Refresh token replay** for persistent access | Cognito | Medium | Configurable refresh token expiry, revocation capabilities, anomaly detection |
-| **External MCP client impersonation** | AppSync API | Medium | Cognito authentication required for all clients |
+| **External MCP client impersonation** | AgentCore Gateway / MCP handler | Medium | Cognito authentication required for all clients (dedicated M2M resource server) |
 
 ### 2.2 Service Spoofing
 
@@ -99,7 +100,7 @@ Information disclosure threats involve exposure of sensitive data to unauthorize
 | Threat | Component | Risk | Mitigations |
 |--------|-----------|------|-------------|
 | **JWT token theft via XSS** — browser-stored tokens stolen | Web UI | High | React XSS protection, CSP headers, short token lifetime |
-| **Subscription eavesdropping** — listening to other users' streams | AppSync | High | Subscription authorization, user-scoped filtering |
+| **Chat stream cross-user access** — reading another user's stream via their `sessionId` | Lambda Function URL (chat streaming) | High | **OPEN GAP** — SigV4 authenticates but no group or session-ownership check on this transport; see CHAT.T03 |
 | **Conversation session hijacking** — accessing other users' chats | Companion Chat | High | UUID session IDs, user-scoped DynamoDB queries |
 | **SDK credential exposure** — credentials on developer machines | SDK/CLI | High | Env var credentials, short-lived tokens, secure documentation |
 | **Presigned URL interception** — captured upload URLs reused | Web UI | Medium | Short expiration, conditions, TLS |
@@ -128,7 +129,7 @@ Elevation of privilege threats involve gaining capabilities beyond what was auth
 | Threat | Component | Risk | Mitigations |
 |--------|-----------|------|-------------|
 | **Cognito group manipulation** — self-promoting to Admin role | Authentication | Critical | IAM-protected Cognito admin APIs, no self-service groups, CloudTrail |
-| **AppSync authorization bypass** — exploiting resolver gaps | RBAC | High | Comprehensive resolver auth, defense-in-depth with Lambda checks |
+| **API authorization bypass** — exploiting resolver gaps | RBAC | High | Per-op resolver group checks (the authorization boundary — the gateway authorizer only authenticates); `make api-test`/`api-test-static` gate regressions; see AUTH.T03/T08 |
 | **Agent routing manipulation** — tricking orchestrator to invoke restricted agents | Agent System | Medium | Agent-level auth, tool access controls, audit logging |
 | **Configuration-driven privilege escalation** — malicious config enabling unauthorized model access | Configuration | High | Config schema validation, RBAC, model allowlisting |
 | **MCP tool parameter manipulation** — causing tools to access unauthorized resources | MCP Integration | High | Input validation, parameter schemas, least-privilege credentials |

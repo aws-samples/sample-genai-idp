@@ -31,10 +31,40 @@ README for the curation process).
 
 The RBAC suites map to specific threat IDs in
 [`threat-modeling/feature-threats/rbac-authentication.md`](./threat-modeling/feature-threats/rbac-authentication.md)
-— e.g. AUTH.T09 (IDOR), AUTH.T10 (token lifecycle), AUTH.T11 (TLS). SRT and ZAP
-provide broad SAST/DAST coverage complementary to the per-feature threat
-analysis. The full threat register is in
-[`threat-modeling/threat-id-glossary.md`](./threat-modeling/threat-id-glossary.md).
+— e.g. AUTH.T09 (IDOR), AUTH.T10 (token lifecycle), AUTH.T11 (TLS), AUTH.T12
+(input-shape validation). SRT and ZAP provide broad SAST/DAST coverage
+complementary to the per-feature threat analysis. The full threat register (83
+threats) is in
+[`threat-modeling/threat-id-glossary.md`](./threat-modeling/threat-id-glossary.md),
+and [`threat-modeling/README.md`](./threat-modeling/README.md) lists the currently
+**Open** items.
+
+#### Known coverage gaps in the automated tests
+
+The threat model records where these four tests do **not** reach, so a green
+gate is not mistaken for full coverage:
+
+| Surface | Covered? | Threat |
+|---------|----------|--------|
+| UI API `POST /op/{field}` (97 ops × 4 roles) | **Yes** — RBAC static + dynamic | AUTH.T03, AUTH.T08 |
+| Chat streaming **Lambda Function URL** (`/chat/*`) | **No** — the harness drives `/op` only | CHAT.T03, CHAT.T06 |
+| **Jobs API** (`/jobs`, M2M OAuth realm) | **No** scope-negative test in the gate | JOB.T02 |
+| Object-read key scoping (`getFilePresignedUrl`) | **No** out-of-scope-key case | UI.T06 |
+| CSP in `WebUIHosting=APIGateway` mode | ZAP scans the API, not that hosting mode's SPA responses | UI.T07 |
+| Feature UI bundle integrity | **No** — no SRI/digest check exists to test | FEAT.T01 |
+
+Closing these is tracked in
+[`threat-modeling/risk-assessment/risk-matrix.md` §5](./threat-modeling/risk-assessment/risk-matrix.md#5-recommendations).
+
+### Regenerating the threat model export
+
+`threat-modeling/deliverables/threat-model.tc.json` is **generated** from the
+Markdown corpus — do not hand-edit it:
+
+```bash
+python3 security/threat-modeling/scripts/build_threat_model.py          # regenerate
+python3 security/threat-modeling/scripts/build_threat_model.py --check  # CI drift gate
+```
 
 ## CI gating (where these run automatically)
 
