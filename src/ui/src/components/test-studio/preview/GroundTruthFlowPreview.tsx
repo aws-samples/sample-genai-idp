@@ -20,6 +20,7 @@ import {
   Cards,
   ColumnLayout,
   Container,
+  CopyToClipboard,
   ExpandableSection,
   Header,
   Input,
@@ -350,7 +351,7 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
             cardsPerRow={[{ cards: 2 }]}
             items={[
               {
-                title: 'From an existing config ✦ recommended',
+                title: 'From an existing config — recommended',
                 step: 'onramp-config',
                 desc: 'Pick a config version + document class; generate synthetic, labeled documents that match its schema exactly — no prompt.',
                 out: '→ Synthetic labeled set · schema-matched',
@@ -496,7 +497,7 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
             actions={
               !labelsGenerated ? (
                 <Button variant="primary" onClick={() => setLabelsGenerated(true)}>
-                  ⚡ Generate draft labels
+                  Generate draft labels
                 </Button>
               ) : (
                 <Button variant="primary" onClick={() => go('detail')}>
@@ -802,7 +803,7 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
             />
           </Box>
 
-          <ExpandableSection headerText="Show the math — target a specific label accuracy" defaultExpanded>
+          <ExpandableSection headerText="Show the math — target a specific label accuracy">
             <SpaceBetween size="m">
               {/* Interactive: slide the desired accuracy; everything recomputes. */}
               <Box>
@@ -870,7 +871,7 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
                   </div>
                 </SpaceBetween>
               </Box>
-              <Alert type="warning">
+              <Alert type="info">
                 Rough estimate — based on a prior confidence–accuracy curve, not yet measured on this set. Self-corrects as your team
                 reviews.
               </Alert>
@@ -905,20 +906,37 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
           <Header
             variant="h2"
             description="You are assigned to this test set. Work the queue lowest-confidence first."
-            actions={<Badge color="severity-medium">⏱ ends Fri 5:00 PM · 1d 4h left</Badge>}
+            actions={
+              <SpaceBetween direction="horizontal" size="xs" alignItems="center">
+                <Badge color="blue">Ends Fri 5:00 PM · 1d 4h left</Badge>
+                <CopyToClipboard
+                  variant="button"
+                  copyButtonText="Copy queue link"
+                  textToCopy={shareUrl('annotate')}
+                  copySuccessText="Queue link copied — share it with annotators"
+                  copyErrorText="Could not copy the queue link"
+                />
+              </SpaceBetween>
+            }
           >
             Annotate: {selected.name}
           </Header>
         }
       >
-        <Alert type="info">
-          <strong>
-            Target 99% accuracy — review the {PREVIEW_ESTIMATE.docsToReview} lowest-confidence docs ({PREVIEW_QUEUE.length} shown in this
-            sample).
-          </strong>{' '}
-          Est. current {PREVIEW_ESTIMATE.currentAccuracy}% · your progress {queueIdx + 1} / {PREVIEW_QUEUE.length} · you arrived via the
-          shared queue link.
-        </Alert>
+        <SpaceBetween size="s">
+          <Alert type="info">
+            <strong>
+              Target 99% accuracy — review the {PREVIEW_ESTIMATE.docsToReview} lowest-confidence docs ({PREVIEW_QUEUE.length} shown in this
+              sample).
+            </strong>{' '}
+            Est. current label accuracy {PREVIEW_ESTIMATE.currentAccuracy}%.
+          </Alert>
+          <ProgressBar
+            value={Math.round(((queueIdx + 1) / PREVIEW_QUEUE.length) * 100)}
+            label="Queue progress"
+            additionalInfo={`${queueIdx + 1} of ${PREVIEW_QUEUE.length} documents reviewed`}
+          />
+        </SpaceBetween>
       </Container>
 
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
