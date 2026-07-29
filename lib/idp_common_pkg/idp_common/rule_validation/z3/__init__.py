@@ -9,8 +9,25 @@ from .exceptions import (
 )
 from .models import Parameter, PathMapping, RuleJSON, RuleWithValues, ValidationResult
 from .rule_translator import RuleTranslator
-from .validation_system import ValidationSystem
-from .z3_validator import Z3Validator
+
+
+def __getattr__(name):
+    """Lazy import for z3-dependent modules (Z3Validator, ValidationSystem).
+
+    These require the z3 Python package which is only available in Lambda
+    environments with the z3 layer attached. Importing them eagerly would
+    break Lambdas that only need RuleTranslator (e.g., configuration_resolver).
+    """
+    if name == "Z3Validator":
+        from .z3_validator import Z3Validator
+
+        return Z3Validator
+    if name == "ValidationSystem":
+        from .validation_system import ValidationSystem
+
+        return ValidationSystem
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "Parameter",

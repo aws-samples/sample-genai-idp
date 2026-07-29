@@ -26,6 +26,7 @@ from idp_common.config.schema_constants import (
     VALIDATION_ENGINE_Z3,
     X_AWS_IDP_POLICY_TYPE,
     X_AWS_IDP_RULE_ID,
+    X_AWS_IDP_RULE_JSON,
     X_AWS_IDP_RULE_TYPE,
     X_AWS_IDP_VALIDATION_ENGINE,
 )
@@ -253,11 +254,13 @@ class RuleValidationService:
                             X_AWS_IDP_VALIDATION_ENGINE, VALIDATION_ENGINE_LLM
                         )
                         rule_id = prop.get(X_AWS_IDP_RULE_ID)
+                        rule_json = prop.get(X_AWS_IDP_RULE_JSON)
                         metadata.append(
                             {
                                 "description": description,
                                 "engine": engine,
                                 "rule_id": rule_id,
+                                "rule_json": rule_json,
                             }
                         )
                 logger.debug(
@@ -849,40 +852,15 @@ class RuleValidationService:
 
     def _load_rule_json_from_s3(self, rule_id: str) -> Optional[Dict[str, Any]]:
         """
-        Load a pre-built RuleJSON from S3 using the configured bucket/prefix.
-
-        The RuleJSON is stored at:
-            s3://{z3_rules_bucket}/{z3_rules_prefix}/{rule_id}.json
-
-        Args:
-            rule_id: The unique rule identifier (from x-aws-idp-rule-id in config)
-
-        Returns:
-            Parsed RuleJSON dict, or None if not found or not configured.
+        DEPRECATED: This method is no longer used. RuleJSON is now embedded
+        directly in the config under x-aws-idp-rule-json.
+        Kept temporarily for backward compatibility.
         """
-        bucket = self.config.rule_validation.z3_rules_bucket
-        prefix = self.config.rule_validation.z3_rules_prefix
-
-        if not bucket or not rule_id:
-            logger.warning(
-                f"Cannot load RuleJSON: z3_rules_bucket={bucket}, rule_id={rule_id}"
-            )
-            return None
-
-        key = f"{prefix}/{rule_id}.json" if prefix else f"{rule_id}.json"
-        s3_uri = f"s3://{bucket}/{key}"
-
-        try:
-            data = s3.get_json_content(s3_uri)
-            if data:
-                logger.info(f"Loaded RuleJSON from S3: {s3_uri}")
-                return data
-            else:
-                logger.warning(f"RuleJSON not found at S3: {s3_uri}")
-                return None
-        except Exception as e:
-            logger.error(f"Failed to load RuleJSON from S3 ({s3_uri}): {e}")
-            return None
+        logger.warning(
+            f"_load_rule_json_from_s3 called but RuleJSON should be in config. "
+            f"rule_id={rule_id}"
+        )
+        return None
 
     async def _process_z3_fact_extraction(
         self,
@@ -892,6 +870,7 @@ class RuleValidationService:
         extraction_results: Dict[str, Any],
         document_text: str,
         config: Dict[str, Any],
+        rule_json: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Extract facts for a Z3 rule using the standard fact extraction prompt,
@@ -906,22 +885,20 @@ class RuleValidationService:
 
         Args:
             rule_description: The natural language rule text
-            rule_id: Unique rule identifier (used to load RuleJSON for context)
+            rule_id: Unique rule identifier
             policy_type: Type of policy
             extraction_results: Structured extraction results for this section
             document_text: Raw document text for this section
             config: Configuration dictionary
+            rule_json: The RuleJSON object from config (x-aws-idp-rule-json)
 
         Returns:
             FactExtractionResponse dict (same format as LLM rules)
         """
-        # Load RuleJSON to get parameter definitions for context augmentation
-        rule_json_data = self._load_rule_json_from_s3(rule_id)
-
-        # Build augmented rule description with parameter context
+        # Build augmented rule description with parameter context from RuleJSON
         augmented_rule = rule_description
-        if rule_json_data:
-            parameters = rule_json_data.get("parameters", [])
+        if rule_json:
+            parameters = rule_json.get("parameters", [])
             if parameters:
                 param_lines = []
                 for param in parameters:
@@ -994,13 +971,13 @@ class RuleValidationService:
                 rule_description = rule_meta["description"]
                 engine = rule_meta["engine"]
                 rule_id = rule_meta.get("rule_id")
+                rule_json = rule_meta.get("rule_json")
 
                 if engine == VALIDATION_ENGINE_Z3 and rule_id:
-                    # Z3 rules: use standard fact extraction (same as LLM rules).
+                    # Z3 rules: use standard fact extraction (same as LLM rules)
+                    # augmented with Z3 parameter context from the embedded RuleJSON.
                     # The orchestration step will later use these extracted facts
                     # to do LLM-based value extraction + Z3 solver.
-                    # We tag the response with z3 metadata so the orchestrator
-                    # can identify and route it correctly.
                     task = self._process_z3_fact_extraction(
                         rule_description=rule_description,
                         rule_id=rule_id,
@@ -1008,20 +985,29 @@ class RuleValidationService:
                         extraction_results=extraction_results,
                         document_text=user_history,
                         config=config,
+                        rule_json=rule_json,
                     )
                 elif engine == VALIDATION_ENGINE_Z3 and not rule_id:
-                    # Z3 rule without rule_id: fall back to standard LLM extraction
-                    logger.warning(
-                        f"Z3 rule missing rule_id, falling back to LLM fact "
-                        f"extraction: '{rule_description[:60]}...'"
+                    # Strict mode: Z3 rule without rule_id is a configuration error
+                    logger.error(
+                        f"Z3 rule missing rule_id — cannot validate. "
+                        f"Rule: '{rule_description[:60]}...'"
                     )
-                    task = self._process_rule_question(
-                        rule=rule_description,
-                        user_history=user_history,
-                        policy_type=policy_type,
-                        config=config,
-                        extraction_results=extraction_results,
-                    )
+                    # Return a hard fail — do not silently fall back to LLM
+
+                    async def _z3_config_error(rd=rule_description, pt=policy_type):
+                        return {
+                            "policy_type": pt,
+                            "rule": rd,
+                            "extracted_facts": [],
+                            "extraction_summary": (
+                                "Z3 configuration error: rule_id is missing. "
+                                "Set x-aws-idp-rule-id in the rule property."
+                            ),
+                            "z3_parameters": None,
+                        }
+
+                    task = _z3_config_error()
                 else:
                     # Default to LLM engine (engine == "llm" or absent)
                     task = self._process_rule_question(

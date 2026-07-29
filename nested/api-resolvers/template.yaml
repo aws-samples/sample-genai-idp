@@ -739,6 +739,13 @@ Resources:
               Resource:
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:data-automation-project/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:blueprint/*"
+            # Bedrock InvokeModel for Z3 RuleJSON generation (translate natural language rules to SMT-LIB)
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*"
         # Read-only access on UsersTable + EmailIndex so the resolver can look up
         # the caller's allowedConfigVersions and enforce config-version scope.
         # Without this, the scope query fails with AccessDenied, is caught, and

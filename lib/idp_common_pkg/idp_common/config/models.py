@@ -2213,14 +2213,6 @@ class RuleValidationConfig(BaseModel):
         le=300000,
         description="Z3 solver timeout in milliseconds. Must be between 1 and 300000.",
     )
-    z3_rules_bucket: Optional[str] = Field(
-        default=None,
-        description="S3 bucket where pre-built RuleJSON files are stored for Z3 validation",
-    )
-    z3_rules_prefix: Optional[str] = Field(
-        default=None,
-        description="S3 key prefix for RuleJSON files. Full path: s3://bucket/prefix/rule_id.json",
-    )
 
     @field_validator(
         "semaphore",

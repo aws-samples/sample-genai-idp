@@ -469,39 +469,50 @@ class RuleValidationOrchestratorService:
             logger.error(f"Error loading section results: {str(e)}")
             return {}, False
 
-    def _load_rule_json_from_s3(self, rule_id: str) -> Optional[Dict[str, Any]]:
+    def _get_rule_json_from_config(
+        self, rule_id: str, config: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
         """
-        Load a pre-built RuleJSON from S3 using the configured bucket/prefix.
+        Load RuleJSON from the config's policy_classes (embedded inline).
+
+        Looks for the x-aws-idp-rule-json field on the rule property that
+        matches the given rule_id.
 
         Args:
             rule_id: The unique rule identifier
+            config: Configuration dictionary containing policy_classes
 
         Returns:
-            Parsed RuleJSON dict, or None if not found or not configured.
+            Parsed RuleJSON dict, or None if not found.
         """
-        bucket = self.config.rule_validation.z3_rules_bucket
-        prefix = self.config.rule_validation.z3_rules_prefix
+        from idp_common.config.schema_constants import (
+            X_AWS_IDP_RULE_ID,
+            X_AWS_IDP_RULE_JSON,
+        )
 
-        if not bucket or not rule_id:
-            logger.warning(
-                f"Cannot load RuleJSON: z3_rules_bucket={bucket}, rule_id={rule_id}"
-            )
-            return None
+        policy_classes = config.get("policy_classes", [])
+        if not policy_classes:
+            policy_classes = config.get("rule_validation", {}).get("policy_classes", [])
 
-        key = f"{prefix}/{rule_id}.json" if prefix else f"{rule_id}.json"
-        s3_uri = f"s3://{bucket}/{key}"
+        for policy_class in policy_classes:
+            rule_properties = policy_class.get("rule_properties", {})
+            for prop in rule_properties.values():
+                if prop.get(X_AWS_IDP_RULE_ID) == rule_id:
+                    rule_json = prop.get(X_AWS_IDP_RULE_JSON)
+                    if rule_json and isinstance(rule_json, dict):
+                        logger.info(
+                            f"Loaded RuleJSON from config for rule_id='{rule_id}'"
+                        )
+                        return rule_json
+                    else:
+                        logger.warning(
+                            f"Rule rule_id='{rule_id}' has no embedded RuleJSON "
+                            f"(x-aws-idp-rule-json is missing or not a dict)"
+                        )
+                        return None
 
-        try:
-            data = s3.get_json_content(s3_uri)
-            if data:
-                logger.info(f"Loaded RuleJSON from S3 for orchestrator: {s3_uri}")
-                return data
-            else:
-                logger.warning(f"RuleJSON not found at S3: {s3_uri}")
-                return None
-        except Exception as e:
-            logger.error(f"Failed to load RuleJSON from S3 ({s3_uri}): {e}")
-            return None
+        logger.warning(f"Rule rule_id='{rule_id}' not found in config policy_classes")
+        return None
 
     def _collect_facts_across_sections(
         self, z3_responses: List[Dict[str, Any]]
@@ -829,21 +840,39 @@ class RuleValidationOrchestratorService:
             )
 
             if not all_facts:
-                logger.warning(
+                logger.error(
                     f"Z3 rule_id='{rule_id}': no facts extracted from any section. "
-                    f"Falling back to LLM reasoning."
+                    f"Cannot validate (strict mode)."
                 )
-                z3_verdicts[rule_id] = None
+                z3_verdicts[rule_id] = {
+                    "recommendation": "Fail",
+                    "reasoning": (
+                        "Z3 validation error: no facts were extracted from any "
+                        "document section for this rule. Ensure the document "
+                        "contains relevant data for the rule parameters."
+                    ),
+                    "supporting_pages": [],
+                    "_z3_validated": True,
+                }
                 continue
 
-            # Load RuleJSON from S3
-            rule_json_data = self._load_rule_json_from_s3(rule_id)
+            # Load RuleJSON from config (embedded inline)
+            rule_json_data = self._get_rule_json_from_config(rule_id, config)
             if not rule_json_data:
-                logger.warning(
-                    f"RuleJSON not found for rule_id='{rule_id}' during orchestration. "
-                    f"Will fall back to LLM reasoning."
+                logger.error(
+                    f"RuleJSON not found for rule_id='{rule_id}' in config. "
+                    f"Generate RuleJSON in the Config Editor before using Z3 engine."
                 )
-                z3_verdicts[rule_id] = None
+                z3_verdicts[rule_id] = {
+                    "recommendation": "Fail",
+                    "reasoning": (
+                        f"Z3 configuration error: RuleJSON (x-aws-idp-rule-json) "
+                        f"is missing for rule_id='{rule_id}'. Use the 'Generate "
+                        f"RuleJSON' button in the Config Editor to create it."
+                    ),
+                    "supporting_pages": [],
+                    "_z3_validated": True,
+                }
                 continue
 
             # LLM value extraction — convert facts to typed parameter values
@@ -867,12 +896,21 @@ class RuleValidationOrchestratorService:
             ]
 
             if missing_params:
-                logger.warning(
+                logger.error(
                     f"Z3 rule_id='{rule_id}': missing required parameters "
                     f"{missing_params} after LLM value extraction. "
-                    f"Falling back to LLM reasoning."
+                    f"Cannot complete Z3 validation (strict mode)."
                 )
-                z3_verdicts[rule_id] = None
+                z3_verdicts[rule_id] = {
+                    "recommendation": "Information Not Found",
+                    "reasoning": (
+                        f"Z3 validation incomplete: could not extract values for "
+                        f"required parameters {missing_params} from the document. "
+                        f"The document may not contain the necessary data."
+                    ),
+                    "supporting_pages": [],
+                    "_z3_validated": True,
+                }
                 continue
 
             # Collect supporting pages from facts
@@ -924,9 +962,18 @@ class RuleValidationOrchestratorService:
                             updated_responses.append(verdict)
                             z3_verdicts_added.add(rule_id)
                     else:
-                        # Fallback to LLM: keep the response as-is so the
-                        # LLM orchestrator can reason over its facts
-                        updated_responses.append(response)
+                        # Should not happen in strict mode — all paths produce
+                        # a verdict. But if it does, hard fail.
+                        updated_responses.append(
+                            {
+                                "policy_type": policy_type,
+                                "rule": rule_text,
+                                "recommendation": "Fail",
+                                "reasoning": "Z3 engine error: no verdict produced.",
+                                "supporting_pages": [],
+                                "_z3_validated": True,
+                            }
+                        )
                 else:
                     # Regular LLM response — keep as-is
                     updated_responses.append(response)

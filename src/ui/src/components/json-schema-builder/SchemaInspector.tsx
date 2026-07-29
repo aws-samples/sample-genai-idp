@@ -10,8 +10,11 @@ import {
   Multiselect,
   Select,
   SpaceBetween,
+  Spinner,
+  StatusIndicator,
   Textarea,
 } from '@cloudscape-design/components';
+import { generateClient } from '../../api/client-shim';
 import StringConstraints from './constraints/StringConstraints';
 import NumberConstraints from './constraints/NumberConstraints';
 import ArrayConstraints from './constraints/ArrayConstraints';
@@ -48,6 +51,7 @@ import {
   X_AWS_IDP_SOURCE_PAGE_TYPES,
   X_AWS_IDP_VALIDATION_ENGINE,
   X_AWS_IDP_RULE_ID,
+  X_AWS_IDP_RULE_JSON,
   VALIDATION_ENGINE_OPTIONS,
 } from '../../constants/schemaConstants';
 
@@ -109,6 +113,137 @@ interface SchemaInspectorProps {
   onNavigateToAttribute?: ((classId: string, attributeName: string | null) => void) | null;
   isRuleSchema?: boolean;
 }
+
+// GraphQL mutation for generating RuleJSON
+const GENERATE_RULE_JSON_MUTATION = /* GraphQL */ `
+  mutation GenerateRuleJson($ruleDescription: String!) {
+    generateRuleJson(ruleDescription: $ruleDescription) {
+      success
+      ruleJson
+      error {
+        type
+        message
+      }
+    }
+  }
+`;
+
+/**
+ * Sub-component for Z3 RuleJSON generation and display.
+ * Shows Generate button + JSON viewer/editor when engine is Z3.
+ */
+const RuleJsonSection: React.FC<{
+  selectedAttribute: SchemaAttribute;
+  onUpdate: (updates: Partial<SchemaAttribute>) => void;
+}> = ({ selectedAttribute, onUpdate }) => {
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState('');
+
+  const existingRuleJson = selectedAttribute[X_AWS_IDP_RULE_JSON] as Record<string, unknown> | undefined;
+  const ruleDescription = (selectedAttribute.description as string) || '';
+
+  const handleGenerate = async () => {
+    if (!ruleDescription.trim()) {
+      setGenerateError('Rule description is required. Add a description first.');
+      return;
+    }
+    setIsGenerating(true);
+    setGenerateError(null);
+    try {
+      const client = generateClient();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result: any = await client.graphql({
+        query: GENERATE_RULE_JSON_MUTATION,
+        variables: { ruleDescription: ruleDescription.trim() },
+      });
+      const response = result.data?.generateRuleJson;
+      if (response?.success && response.ruleJson) {
+        const parsed = JSON.parse(response.ruleJson);
+        onUpdate({ [X_AWS_IDP_RULE_JSON]: parsed });
+        setGenerateError(null);
+      } else {
+        setGenerateError(response?.error?.message || 'Failed to generate RuleJSON');
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unexpected error';
+      setGenerateError(message);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleSaveEdit = () => {
+    try {
+      const parsed = JSON.parse(editValue);
+      onUpdate({ [X_AWS_IDP_RULE_JSON]: parsed });
+      setIsEditing(false);
+      setGenerateError(null);
+    } catch {
+      setGenerateError('Invalid JSON. Please fix syntax errors before saving.');
+    }
+  };
+
+  return (
+    <SpaceBetween size="s">
+      <FormField
+        label="RuleJSON (Symbolic Z3)"
+        description="SMT-LIB constraints generated from the rule description. Required for Z3 validation."
+      >
+        {existingRuleJson ? (
+          <SpaceBetween size="xs">
+            <StatusIndicator type="success">RuleJSON configured</StatusIndicator>
+            {!isEditing ? (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button onClick={handleGenerate} loading={isGenerating} iconName="refresh">
+                  Regenerate
+                </Button>
+                <Button
+                  onClick={() => {
+                    setEditValue(JSON.stringify(existingRuleJson, null, 2));
+                    setIsEditing(true);
+                  }}
+                  iconName="edit"
+                >
+                  Edit
+                </Button>
+                <Button onClick={() => onUpdate({ [X_AWS_IDP_RULE_JSON]: undefined })} variant="link">
+                  Remove
+                </Button>
+              </SpaceBetween>
+            ) : (
+              <SpaceBetween size="xs">
+                <Textarea value={editValue} onChange={({ detail }) => setEditValue(detail.value)} rows={12} />
+                <SpaceBetween size="xs" direction="horizontal">
+                  <Button onClick={handleSaveEdit} variant="primary">
+                    Save
+                  </Button>
+                  <Button onClick={() => setIsEditing(false)}>Cancel</Button>
+                </SpaceBetween>
+              </SpaceBetween>
+            )}
+            {!isEditing && <Textarea value={JSON.stringify(existingRuleJson, null, 2)} readOnly rows={8} />}
+          </SpaceBetween>
+        ) : (
+          <SpaceBetween size="xs">
+            <div title="Translates the natural language rule description into formal SMT-LIB constraints that the Z3 solver uses for deterministic validation">
+              <Button onClick={handleGenerate} loading={isGenerating} variant="primary" iconName="gen-ai">
+                Generate RuleJSON
+              </Button>
+            </div>
+            {isGenerating && (
+              <Box>
+                <Spinner /> Translating rule to SMT-LIB constraints...
+              </Box>
+            )}
+          </SpaceBetween>
+        )}
+      </FormField>
+      {generateError && <Alert type="error">{generateError}</Alert>}
+    </SpaceBetween>
+  );
+};
 
 const SchemaInspector = ({
   selectedClass = null,
@@ -665,6 +800,10 @@ const SchemaInspector = ({
               placeholder="e.g., coverage_income_ratio"
             />
           </FormField>
+        )}
+
+        {isRuleSchema && selectedAttribute[X_AWS_IDP_VALIDATION_ENGINE] === 'z3' && (
+          <RuleJsonSection selectedAttribute={selectedAttribute} onUpdate={onUpdate} />
         )}
 
         {!isRuleSchema && <MetadataFields attribute={selectedAttribute} onUpdate={onUpdate} />}

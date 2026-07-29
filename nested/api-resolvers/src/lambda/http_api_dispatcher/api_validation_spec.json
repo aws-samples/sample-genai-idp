@@ -1598,6 +1598,17 @@
         }
       ]
     },
+    "generateRuleJson": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "ruleDescription",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
     "updateDiscoveryJobStatus": {
       "args": [
         {

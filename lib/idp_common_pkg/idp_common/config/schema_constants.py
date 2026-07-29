@@ -93,6 +93,9 @@ VALID_VALIDATION_ENGINES = frozenset([VALIDATION_ENGINE_LLM, VALIDATION_ENGINE_Z
 # Per-rule unique identifier for Z3 rules (maps to RuleJSON file on S3)
 X_AWS_IDP_RULE_ID = "x-aws-idp-rule-id"
 
+# Per-rule inline RuleJSON object for Z3 validation (embedded in config)
+X_AWS_IDP_RULE_JSON = "x-aws-idp-rule-json"
+
 # Note: Policy classes use the same regex fields as document types
 # X_AWS_IDP_DOCUMENT_NAME_REGEX - Pattern to match document name for policy filtering
 # X_AWS_IDP_PAGE_CONTENT_REGEX - Pattern to match page content for policy filtering
