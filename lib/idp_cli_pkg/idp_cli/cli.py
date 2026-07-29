@@ -26,8 +26,15 @@ To fix this, run one of:
 If you already ran 'make setup-venv', activate it first:
   source .venv/bin/activate
 
+If idp_sdk IS installed but fails to provide IDPClient, you likely have the
+wrong package: idp-sdk and idp-common are first-party (they live in lib/ and are
+not published to PyPI), but those names are squatted on public PyPI. Verify with:
+  python scripts/check_first_party_deps.py
+
 See docs/idp-cli.md for details.
 """
+
+_IMPORT_ERROR: Optional[ImportError] = None
 
 try:
     import boto3
@@ -38,9 +45,16 @@ try:
     from rich.table import Table
 
     from . import display
-except ImportError:
+except ImportError as exc:
     # Dependencies not installed — main() will print a helpful message and exit.
     # Define minimal stubs so the module can still be imported for entry point resolution.
+    #
+    # Keep the original exception: swallowing it makes a partially-broken install
+    # (e.g. an `idp_sdk` that imports but does not export `IDPClient`, as happens
+    # when the squatted PyPI package is installed instead of the first-party one)
+    # look like "nothing is installed", and any later use of a None stub surfaces
+    # as an unrelated AttributeError far from the real cause.
+    _IMPORT_ERROR = exc
     if not TYPE_CHECKING:
         click = None
         IDPClient = None
@@ -6401,11 +6415,20 @@ def bootstrap(
 
 def main():
     """Main entry point for the CLI"""
-    # Pre-flight check: verify core dependencies are importable
+    # Pre-flight check: verify core dependencies are importable.
+    # Report the underlying ImportError rather than only "not installed": an
+    # `idp_sdk` that imports but lacks `IDPClient` means the wrong (non
+    # first-party) package is installed, and that needs a different fix.
+    if _IMPORT_ERROR is not None:
+        print(_SETUP_HELP, file=sys.stderr)
+        print(f"Underlying import error: {_IMPORT_ERROR}", file=sys.stderr)
+        sys.exit(1)
+
     try:
         import idp_sdk  # noqa: F401
-    except ImportError:
+    except ImportError as exc:
         print(_SETUP_HELP, file=sys.stderr)
+        print(f"Underlying import error: {exc}", file=sys.stderr)
         sys.exit(1)
 
     # Parse --profile from anywhere in sys.argv before Click processes arguments
