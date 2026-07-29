@@ -261,6 +261,10 @@ export default defineConfig({
               slug: "using-notebooks-with-idp-common",
             },
             { label: "Dependency Mirroring", slug: "dependency-mirroring" },
+            {
+              label: "Dependency Confusion",
+              slug: "dependency-confusion",
+            },
           ],
         },
         {

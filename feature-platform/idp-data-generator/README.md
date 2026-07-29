@@ -88,7 +88,9 @@ Stable interface owned by the accelerator (must not break):
 ## Publish & install
 
 ```bash
-pip install idp-feature-sdk
+# idp-feature-sdk is first-party (lib/idp_feature_sdk) and is NOT installed from
+# PyPI — install it from the local checkout. See docs/dependency-confusion.md.
+pip install -e lib/idp_feature_sdk        # run from the repo root
 cd feature-platform/idp-data-generator
 idp-feature-cli publish --feature-bucket <your-bucket>                 # dev
 idp-feature-cli publish --feature-bucket <dist-bucket> --make-public   # release
