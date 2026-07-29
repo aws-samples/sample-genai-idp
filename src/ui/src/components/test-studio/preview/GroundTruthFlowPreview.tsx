@@ -26,7 +26,9 @@ import {
   KeyValuePairs,
   Link,
   ProgressBar,
+  RadioGroup,
   Select,
+  Slider,
   SpaceBetween,
   Table,
   Textarea,
@@ -193,6 +195,7 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
   const [targetAccuracy, setTargetAccuracy] = useState(PREVIEW_ESTIMATE.target);
   const estimate = estimateForTarget(targetAccuracy);
   const [viewingDoc, setViewingDoc] = useState<string | null>(null);
+  const [publishSetActive, setPublishSetActive] = useState(true);
 
   const go = (v: View): void => {
     setSearchParams(v === 'list' ? {} : { step: v });
@@ -302,11 +305,21 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
             { id: 'source', header: 'Source', cell: (t) => sourceBadge(t.source) },
             {
               id: 'version',
-              header: 'Version',
+              header: 'Active version',
               cell: (t) =>
-                t.activeReference ? <Badge color="blue">{`v${t.activeReference}`}</Badge> : <Box color="text-status-inactive">draft</Box>,
+                t.activeReference ? (
+                  <SpaceBetween direction="horizontal" size="xxs">
+                    <Badge color="blue">{`v${t.activeReference}`}</Badge>
+                    {t.latestVersion && t.latestVersion > t.activeReference && (
+                      <Box fontSize="body-s" color="text-body-secondary">
+                        (latest v{t.latestVersion})
+                      </Box>
+                    )}
+                  </SpaceBetween>
+                ) : (
+                  <Box color="text-status-inactive">— not published</Box>
+                ),
             },
-            { id: 'ref', header: 'Active reference', cell: (t) => (t.activeReference ? `v${t.activeReference}` : '—') },
           ]}
         />
       </Container>
@@ -695,32 +708,36 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
       >
         <SpaceBetween size="m">
           <Alert type="info">
-            <strong>Three steps:</strong> ① Add documents ✓ · ② Generate draft labels · ③ Publish a version. Annotation is an optional
-            refinement, not a gate.
+            <strong>Three steps:</strong> ① Add documents {'✓'} · ② Generate draft labels{' '}
+            {selected.stage !== 'draft' || selected.boundConfig !== '—' ? '✓' : ''} · ③ Publish a version{' '}
+            {selected.stage === 'published' ? '✓' : ''}. Annotation is an optional refinement, not a gate.
           </Alert>
-          <ColumnLayout columns={2} variant="text-grid">
-            <KeyValuePairs
-              columns={1}
-              items={[
-                { label: 'Lifecycle stage', value: stageBadge(selected.stage) },
-                { label: 'Documents', value: String(selected.docs) },
-                { label: 'Source', value: sourceBadge(selected.source) },
-              ]}
-            />
-            <KeyValuePairs
-              columns={1}
-              items={[
-                { label: 'Bound config', value: selected.boundConfig },
-                { label: 'Published version', value: selected.activeReference ? `v${selected.activeReference}` : 'none yet' },
-                { label: 'Active reference', value: selected.activeReference ? `v${selected.activeReference}` : 'none yet' },
-              ]}
-            />
-          </ColumnLayout>
+          <KeyValuePairs
+            columns={3}
+            items={[
+              { label: 'Lifecycle stage', value: stageBadge(selected.stage) },
+              { label: 'Source', value: sourceBadge(selected.source) },
+              { label: 'Active reference', value: selected.activeReference ? `v${selected.activeReference}` : 'none yet' },
+            ]}
+          />
+          {/* Primary action follows the lifecycle stage */}
           <SpaceBetween direction="horizontal" size="xs">
-            <Button variant="primary" onClick={() => go('generate-labels')}>
-              ⚡ Generate draft labels
-            </Button>
-            <Button onClick={() => go('configure')}>Set up team annotation →</Button>
+            {selected.stage === 'draft' && (
+              <Button variant="primary" onClick={() => go('generate-labels')}>
+                Generate draft labels
+              </Button>
+            )}
+            {selected.stage === 'in-review' && (
+              <Button variant="primary" onClick={() => go('annotate')}>
+                Open annotation queue ({selected.reviewedPct ?? 0}% reviewed)
+              </Button>
+            )}
+            {selected.stage === 'published' && (
+              <Button variant="primary" onClick={() => go('executions')}>
+                Start test run
+              </Button>
+            )}
+            <Button onClick={() => go('configure')}>Set up team annotation</Button>
           </SpaceBetween>
         </SpaceBetween>
       </Container>
@@ -754,54 +771,53 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
       <StoryPanel story={STORIES.configure} />
       <Container
         header={
-          <Header variant="h2" description="Set how good the golden dataset needs to be; we estimate the minimum review effort.">
-            Configure team annotation — {selected.name}
+          <Header variant="h2" description="Choose how much human review this set gets; we estimate the effort.">
+            Set up annotation — {selected.name}
           </Header>
         }
       >
         <SpaceBetween size="l">
-          <Box variant="h3">How much should annotators review?</Box>
-          <SpaceBetween size="xs">
-            {(
-              [
-                ['lowest', 'Review the lowest-confidence docs', 'Focus human effort where the model is least sure. (recommended)'],
-                ['all', 'Review everything', 'Every document gets human eyes. Highest confidence; most effort.'],
-                ['accept', 'Accept machine labels as-is', 'No human review — publish draft labels directly.'],
-              ] as const
-            ).map(([id, title, desc]) => (
-              <Box key={id} padding="s">
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input type="radio" aria-label={title} checked={reviewMode === id} onChange={() => setReviewMode(id)} />
-                  <span>
-                    <strong>{title}</strong>
-                    <br />
-                    <Box variant="span" color="text-body-secondary" fontSize="body-s">
-                      {desc}
-                    </Box>
-                  </span>
-                </div>
-              </Box>
-            ))}
-          </SpaceBetween>
+          <Box>
+            <Box variant="awsui-key-label">Review depth</Box>
+            <RadioGroup
+              value={reviewMode}
+              onChange={({ detail }) => setReviewMode(detail.value as 'lowest' | 'all' | 'accept')}
+              items={[
+                {
+                  value: 'lowest',
+                  label: 'Review the lowest-confidence documents (recommended)',
+                  description: 'Focus human effort where the model is least sure.',
+                },
+                {
+                  value: 'all',
+                  label: 'Review everything',
+                  description: 'Every document gets human eyes. Highest trust, most effort.',
+                },
+                {
+                  value: 'accept',
+                  label: 'Accept machine labels as-is',
+                  description: 'No human review — publish the draft labels directly.',
+                },
+              ]}
+            />
+          </Box>
 
           <ExpandableSection headerText="Show the math — target a specific label accuracy" defaultExpanded>
             <SpaceBetween size="m">
               {/* Interactive: slide the desired accuracy; everything recomputes. */}
               <Box>
-                <Box variant="awsui-key-label">Desired label accuracy: {targetAccuracy.toFixed(1)}%</Box>
-                <input
-                  type="range"
-                  aria-label="Desired label accuracy"
+                <Box variant="awsui-key-label">Target label accuracy: {targetAccuracy.toFixed(1)}%</Box>
+                <Slider
+                  value={targetAccuracy}
+                  onChange={({ detail }) => setTargetAccuracy(detail.value)}
                   min={95}
                   max={99.8}
                   step={0.1}
-                  value={targetAccuracy}
-                  onChange={(e) => setTargetAccuracy(Number(e.target.value))}
-                  style={{ width: '100%', accentColor: '#006ce0' }}
+                  ariaLabel="Target label accuracy"
                 />
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#5f6b7a' }}>
-                  <span>95% (accept most machine labels)</span>
-                  <span>99.8% (review nearly everything)</span>
+                  <span>95% — accept most machine labels</span>
+                  <span>99.8% — review nearly everything</span>
                 </div>
               </Box>
               <KeyValuePairs
@@ -1103,15 +1119,20 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
           })()}
           <Box>
             <Box variant="awsui-key-label">Use v{(selected.latestVersion ?? 0) + 1} as the active reference?</Box>
-            <SpaceBetween size="xxs">
-              <label>
-                <input type="radio" defaultChecked name="ref" /> Yes — future scoring runs compare against v
-                {(selected.latestVersion ?? 0) + 1} (recommended)
-              </label>
-              <label>
-                <input type="radio" name="ref" /> Not yet — just save v{(selected.latestVersion ?? 0) + 1}
-              </label>
-            </SpaceBetween>
+            <RadioGroup
+              value={publishSetActive ? 'yes' : 'no'}
+              onChange={({ detail }) => setPublishSetActive(detail.value === 'yes')}
+              items={[
+                {
+                  value: 'yes',
+                  label: `Yes — future scoring runs compare against v${(selected.latestVersion ?? 0) + 1} (recommended)`,
+                },
+                {
+                  value: 'no',
+                  label: `Not yet — just save v${(selected.latestVersion ?? 0) + 1}`,
+                },
+              ]}
+            />
           </Box>
           <ProgressBar
             value={selected.reviewedPct ?? 65}
@@ -1119,9 +1140,11 @@ const GroundTruthFlowPreview = (): React.JSX.Element => {
             description="Publishing is allowed before 100% — unreviewed fields keep machine labels, flagged as such. Provenance is recorded per field."
           />
           <SpaceBetween direction="horizontal" size="xs">
-            <Button onClick={() => go('detail')}>Back</Button>
+            <Button onClick={() => go('detail')}>Cancel</Button>
             <Button variant="primary" onClick={() => go('list')}>
-              Publish v{(selected.latestVersion ?? 0) + 1} &amp; set baseline
+              {publishSetActive
+                ? `Publish v${(selected.latestVersion ?? 0) + 1} & set as baseline`
+                : `Publish v${(selected.latestVersion ?? 0) + 1}`}
             </Button>
           </SpaceBetween>
         </SpaceBetween>

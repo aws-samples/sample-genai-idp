@@ -99,3 +99,12 @@ config_library/catalog.json
 config_library/samples-manifest.json
 
 .claude/worktrees/
+
+# Local scratch / capture artifacts — never committed. Some contain customer
+# references from live-stack captures and must never reach a fork or upstream.
+.playwright-mcp/
+proto-*.png
+proto2-*.png
+proto3-*.png
+live-*.png
+live-testsets-snapshot.md
