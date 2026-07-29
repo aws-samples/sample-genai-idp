@@ -1275,3 +1275,110 @@ def test_document_evaluation_serializes_stickler_comparison():
         result_dict["section_results"][0]["stickler_comparison_result"]
         == stickler_result
     )
+
+
+@pytest.mark.unit
+def test_document_rollup_weight_does_not_double_count_fps():
+    """Regression: field-count rollup weight must not double-count FPs.
+
+    Stickler's invariant: ``fp == fa + fd`` (every FA row is ``{fa:1, fp:1}``;
+    every FD row is ``{fd:1, fp:1}``). An earlier implementation summed
+    ``tp + fa + fd + fp + tn + fn`` for the section-weight in the document
+    rollup, which counted every FP twice and biased ``weighted_overall_score``
+    toward low-scoring sections with more errors.
+
+    Drives ``evaluate_document`` with two sections whose Stickler counts have
+    FPs, asserts the rollup weight equals ``tp + fp + tn + fn`` (i.e. each
+    real field counted once).
+    """
+    config = {
+        "classes": [
+            {
+                "$id": "t",
+                "x-aws-idp-document-type": "T",
+                "type": "object",
+                "properties": {"a": {"type": "string"}},
+            }
+        ]
+    }
+    svc = EvaluationService(region="us-east-1", config=config, max_workers=1)
+
+    # Section A: tp=3, fa=1, fd=1, fp=2, tn=0, fn=0 -> 5 real fields
+    section_a = SectionEvaluationResult(
+        section_id="1",
+        document_class="T",
+        attributes=[],
+        metrics={
+            "weighted_overall_score": 0.6,
+            "_stickler_counts": {
+                "tp": 3,
+                "fa": 1,
+                "fd": 1,
+                "fp": 2,
+                "tn": 0,
+                "fn": 0,
+            },
+        },
+    )
+    # Section B: tp=4, fp=0, tn=1, fn=1 -> 6 real fields
+    section_b = SectionEvaluationResult(
+        section_id="2",
+        document_class="T",
+        attributes=[],
+        metrics={
+            "weighted_overall_score": 0.9,
+            "_stickler_counts": {
+                "tp": 4,
+                "fa": 0,
+                "fd": 0,
+                "fp": 0,
+                "tn": 1,
+                "fn": 1,
+            },
+        },
+    )
+
+    doc = Document(
+        id="doc-fp-rollup",
+        input_key="doc.pdf",
+        input_bucket="in-bucket",
+        output_bucket="out-bucket",
+        status=Status.EXTRACTING,
+    )
+    doc.sections.append(Section(section_id="1", classification="T", page_ids=["1"]))
+    doc.sections.append(Section(section_id="2", classification="T", page_ids=["2"]))
+
+    def fake_process_section(actual_section, expected_section):
+        if actual_section.section_id == "1":
+            return section_a, {
+                "tp": 3,
+                "fp": 2,
+                "fn": 0,
+                "tn": 0,
+                "fp1": 1,
+                "fp2": 1,
+            }
+        return section_b, {
+            "tp": 4,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "fp1": 0,
+            "fp2": 0,
+        }
+
+    with patch.object(svc, "_process_section", side_effect=fake_process_section):
+        with patch("idp_common.s3.write_content"):
+            result = svc.evaluate_document(doc, doc, store_results=False)
+
+    # Expected weight per section (fp counted ONCE, not doubled):
+    #   A: tp=3 + fp=2 + tn=0 + fn=0 = 5   (bug would give 3+1+1+2+0+0 = 7)
+    #   B: tp=4 + fp=0 + tn=1 + fn=1 = 6
+    # Weighted mean: (0.6*5 + 0.9*6) / (5 + 6) = (3.0 + 5.4) / 11 ~= 0.76364
+    # Under the bug: (0.6*7 + 0.9*6) / (7 + 6) = (4.2 + 5.4) / 13 ~= 0.73846
+    expected_weighted = (0.6 * 5 + 0.9 * 6) / (5 + 6)
+    actual_weighted = result.evaluation_result.overall_metrics["weighted_overall_score"]
+    assert abs(actual_weighted - expected_weighted) < 1e-9, (
+        f"weighted_overall_score={actual_weighted!r} does not match expected "
+        f"{expected_weighted!r} — FP double-counting regression?"
+    )

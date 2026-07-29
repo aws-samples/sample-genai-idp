@@ -120,14 +120,17 @@ def aggregate_test_run_with_stickler(
             f"Stickler aggregation complete: document_count={process_eval.document_count}, comparison_results={len(comparison_results)}, weighted_scores={len(doc_weighted_scores)}"
         )
 
-        # R7: replace the sklearn confidence post-pass with a Stickler
-        # accumulator subclass that collapses list-index paths
-        # (LineItems[0].Rate → LineItems.Rate) BEFORE Stickler's
-        # ConfidenceCalculator sees them. Two accumulators can't share
-        # the built-in ``confidence_metrics`` name, so ECARB and the
-        # pattern-collapsed confidence metrics run in two evaluators —
-        # both cheap: each is a single pass over the same
-        # ``update_from_comparison_result`` stream.
+        # Replace the sklearn confidence post-pass with a Stickler accumulator
+        # subclass that collapses list-index paths (LineItems[0].Rate →
+        # LineItems.Rate) BEFORE Stickler's ConfidenceCalculator sees them.
+        # ECARB uses the SAME subclass in a second evaluator so its per-field
+        # keys collapse identically — otherwise the downstream merge (keyed
+        # on field_name) would land ECARB values under indexed buckets the UI
+        # never looks up. Two evaluators (not one with two accumulators)
+        # because both accumulators emit under the same ``confidence_metrics``
+        # name and would collide inside a single BulkStructuredModelEvaluator.
+        # Both passes are cheap — one iteration over
+        # ``update_from_comparison_result`` each.
         confidence_metrics = None
         try:
             evaluator = BulkStructuredModelEvaluator(
@@ -140,6 +143,12 @@ def aggregate_test_run_with_stickler(
             for comp_result in comparison_results:
                 evaluator.update_from_comparison_result(comp_result)
             confidence_metrics = evaluator.compute().confidence_metrics
+            # Stickler's BrierScoreMetric emits under key ``brier_score``; the
+            # deleted sklearn post-pass wrote under ``brier`` and the Test Studio
+            # UI (TestResults.tsx, TestComparison.tsx) + awsjson-types.ts still
+            # read ``brier``. Rename in-place at the aggregation boundary so
+            # the UI keeps rendering Brier Score without touching 8 UI sites.
+            confidence_metrics = _rename_brier_score_key(confidence_metrics)
         except Exception as e:
             logger.warning(
                 f"Failed to compute pattern-collapsed confidence metrics: {e}",
@@ -148,8 +157,18 @@ def aggregate_test_run_with_stickler(
 
         ecab_metrics = None
         try:
+            # Use the SAME index-collapsing accumulator subclass so ECARB's
+            # per-field keys (LineItems[N].Rate → LineItems.Rate) match the
+            # primary confidence-metrics keys. Otherwise the ECARB merge in
+            # _transform_stickler_metrics — which keys on ``field_name`` —
+            # would land indexed keys under buckets the UI never looks up
+            # (UI reads pattern keys like ``LineItems.Rate``).
             ecab_evaluator = BulkStructuredModelEvaluator(
-                confidence_metrics=[ErrorCaptureAtBudgetMetric(budgets=[0.30])]
+                accumulators=[
+                    _IndexCollapsingConfidenceAccumulator(
+                        metrics=[ErrorCaptureAtBudgetMetric(budgets=[0.30])]
+                    )
+                ]
             )
             for comp_result in comparison_results:
                 ecab_evaluator.update_from_comparison_result(comp_result)
@@ -254,13 +273,37 @@ def _load_comparison_results(
     def load_document_results(doc_key):
         """Load and parse a single document's evaluation results.
 
-        NOTE: Uses hardcoded /evaluation/results.json path. This must stay in sync
-        with EvaluationService path format (service.py:2077). If evaluation layout
-        changes, update this path accordingly.
+        Uses ``idp_common.evaluation.contract`` for both the S3 key template
+        and the ``STICKLER_RESULT_VERSION`` shape stamp — the writer
+        (EvaluationService) stamps the same constant into each payload, so a
+        future shape change fails loudly here rather than as wrong dashboard
+        numbers.
         """
-        eval_results_uri = f"s3://{output_bucket}/{doc_key}/evaluation/results.json"
+        from idp_common.evaluation.contract import (
+            STICKLER_RESULT_VERSION,
+            evaluation_results_key,
+        )
+
+        eval_results_uri = f"s3://{output_bucket}/{evaluation_results_key(doc_key)}"
         try:
             eval_data = _load_s3_json(eval_results_uri)
+
+            # Version-stamp check: the writer stamps STICKLER_RESULT_VERSION
+            # onto each results.json; if the payload carries a different
+            # version, log a warning so a shape change surfaces before it
+            # corrupts aggregation output. Missing stamp (old payload) is
+            # tolerated — this is a soft gate for now, not a hard block.
+            payload_version = eval_data.get("stickler_result_version")
+            if (
+                payload_version is not None
+                and payload_version != STICKLER_RESULT_VERSION
+            ):
+                logger.warning(
+                    f"stickler_result_version mismatch on {eval_results_uri}: "
+                    f"payload={payload_version!r} expected={STICKLER_RESULT_VERSION!r}. "
+                    f"Blob shape may have drifted."
+                )
+
             section_results = eval_data.get("section_results", [])
 
             # Extract comparison results from sections
@@ -568,6 +611,37 @@ class _IndexCollapsingConfidenceAccumulator:
             )
         self._fields_with += other_state.get("confidence_fields_with", 0)
         self._fields_total += other_state.get("confidence_fields_total", 0)
+
+
+def _rename_brier_score_key(
+    confidence_metrics: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Rename Stickler's ``brier_score`` key to ``brier`` in-place.
+
+    Stickler's ``BrierScoreMetric.name`` is ``brier_score``; the deleted
+    sklearn post-pass wrote ``brier``; the Test Studio UI + awsjson-types
+    still read ``brier``. Rename here at the aggregation boundary so the UI
+    keeps rendering Brier Score without a cross-repo change. Recurses through
+    ``overall`` + ``fields.<name>`` to catch both scopes.
+    """
+    if not confidence_metrics:
+        return confidence_metrics
+    overall = confidence_metrics.get("overall")
+    if (
+        isinstance(overall, dict)
+        and "brier_score" in overall
+        and "brier" not in overall
+    ):
+        overall["brier"] = overall.pop("brier_score")
+    fields = confidence_metrics.get("fields") or {}
+    for field_metrics in fields.values():
+        if (
+            isinstance(field_metrics, dict)
+            and "brier_score" in field_metrics
+            and "brier" not in field_metrics
+        ):
+            field_metrics["brier"] = field_metrics.pop("brier_score")
+    return confidence_metrics
 
 
 def _empty_metrics() -> Dict[str, Any]:

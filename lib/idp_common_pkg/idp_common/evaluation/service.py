@@ -21,6 +21,10 @@ if TYPE_CHECKING:
 
 from idp_common import s3
 from idp_common.config.models import IDPConfig
+from idp_common.evaluation.contract import (
+    STICKLER_RESULT_VERSION,
+    evaluation_results_key,
+)
 from idp_common.evaluation.models import (
     AttributeEvaluationResult,
     DocSplitMetrics,
@@ -1334,10 +1338,12 @@ class EvaluationService:
                     f"{', '.join('.'.join(p) for p in sorted(skipped_field_paths))}"
                 )
 
-            # Compare using Stickler with field_comparisons and confusion_matrix enabled.
-            # Confidence automatically extracted to 'prediction_confidences' when
-            # rich values used. Metric classes come via stickler_backend so this
-            # module doesn't need a direct ``import stickler`` (single-boundary rule).
+            # Compare using Stickler. Flag set comes from the cross-Lambda
+            # contract module (change one place if the raw blob shape has to
+            # change, and bump STICKLER_RESULT_VERSION with it). Metric
+            # classes come via stickler_backend so this module doesn't need
+            # a direct ``import stickler`` (single-boundary rule).
+            from idp_common.evaluation.contract import compare_with_flags
             from idp_common.evaluation.stickler_backend.confidence import (
                 AUROCMetric,
                 BrierScoreMetric,
@@ -1346,11 +1352,7 @@ class EvaluationService:
 
             stickler_result = expected_instance.compare_with(
                 actual_instance,
-                document_field_comparisons=True,  # Enable detailed field-by-field comparison
-                document_non_matches=True,  # Enable non-match documentation
-                include_confusion_matrix=True,  # Enable confusion matrix for bulk aggregation
-                add_derived_metrics=True,  # Enable per-field precision/recall/F1
-                add_confidence_metrics=True,  # Enable prediction_raw for calibration metrics
+                **compare_with_flags(),
                 confidence_metrics=[  # Compute AUROC, ECE, and Brier for confidence calibration
                     AUROCMetric(),
                     ECEMetric(),
@@ -1812,10 +1814,13 @@ class EvaluationService:
                             "weighted_overall_score", 0.0
                         )
                         counts = result.metrics.get("_stickler_counts") or {}
+                        # Stickler's invariant: fp == fa + fd (every FA row is
+                        # {fa:1, fp:1}; every FD row is {fd:1, fp:1} — see
+                        # ``ConfusionMatrixCalculator``). Summing tp+fa+fd+fp+tn+fn
+                        # would double-count every FP and bias the rollup toward
+                        # low-scoring sections. Use tp+fp+tn+fn instead.
                         section_field_count = float(
                             counts.get("tp", 0)
-                            + counts.get("fa", 0)
-                            + counts.get("fd", 0)
                             + counts.get("fp", 0)
                             + counts.get("tn", 0)
                             + counts.get("fn", 0)
@@ -1898,12 +1903,17 @@ class EvaluationService:
 
             # Store results if requested
             if store_results:
-                # Generate output path
+                # Generate output path via the cross-Lambda contract module.
                 output_bucket = actual_document.output_bucket
-                output_key = f"{actual_document.input_key}/evaluation/results.json"
+                output_key = evaluation_results_key(actual_document.input_key)
 
-                # Store evaluation results in S3
+                # Store evaluation results in S3.
                 result_dict = evaluation_result.to_dict()
+                # Stamp the Stickler-result-blob version so the aggregation
+                # Lambda can detect shape drift at read time rather than
+                # silently emit wrong dashboard numbers if Stickler's raw
+                # ``compare_with`` output ever changes shape.
+                result_dict["stickler_result_version"] = STICKLER_RESULT_VERSION
                 # Convert numpy types to native Python types for JSON serialization
                 result_dict = _convert_numpy_types(result_dict)
                 s3.write_content(

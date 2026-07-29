@@ -788,3 +788,64 @@ class TestAggregation:
         # ECARB computation test removed - Stickler v0.4.0 has specific requirements
         # for ECARB that are not satisfied by this test's mock data structure.
         # ECARB validation is covered by integration tests with real data.
+
+
+@pytest.mark.unit
+class TestBrierScoreKeyRename:
+    """Regression: Stickler's BrierScoreMetric emits under ``brier_score`` but
+    the Test Studio UI (TestResults.tsx, TestComparison.tsx) + awsjson-types
+    still read ``brier`` (matching the deleted sklearn post-pass's key).
+    ``_rename_brier_score_key`` maps the accumulator output to the UI-expected
+    key at the aggregation boundary.
+    """
+
+    def test_renames_overall_brier_score_to_brier(self, mock_env):
+        index = import_test_module()
+        cm = {
+            "overall": {
+                "auroc": {"value": 0.9},
+                "brier_score": {"value": 0.2},
+                "ece": {"value": 0.05},
+            },
+        }
+        out = index._rename_brier_score_key(cm)
+        assert "brier" in out["overall"]
+        assert out["overall"]["brier"] == {"value": 0.2}
+        assert "brier_score" not in out["overall"]
+
+    def test_renames_per_field_brier_score_to_brier(self, mock_env):
+        index = import_test_module()
+        cm = {
+            "fields": {
+                "LineItems.Rate": {
+                    "auroc": {"value": 0.8},
+                    "brier_score": {"value": 0.3},
+                },
+                "Agency": {
+                    "auroc": {"value": 0.95},
+                    "brier_score": {"value": 0.1},
+                },
+            },
+        }
+        out = index._rename_brier_score_key(cm)
+        for field_name in ("LineItems.Rate", "Agency"):
+            assert "brier" in out["fields"][field_name]
+            assert "brier_score" not in out["fields"][field_name]
+
+    def test_passthrough_on_none_or_empty(self, mock_env):
+        index = import_test_module()
+        assert index._rename_brier_score_key(None) is None
+        assert index._rename_brier_score_key({}) == {}
+
+    def test_preserves_existing_brier_key(self, mock_env):
+        """If the payload already has ``brier`` (e.g. from an older codepath),
+        don't clobber it with the (possibly stale) ``brier_score`` value."""
+        index = import_test_module()
+        cm = {
+            "overall": {
+                "brier": {"value": 0.5},
+                "brier_score": {"value": 0.9},  # would clobber if we didn't guard
+            },
+        }
+        out = index._rename_brier_score_key(cm)
+        assert out["overall"]["brier"] == {"value": 0.5}

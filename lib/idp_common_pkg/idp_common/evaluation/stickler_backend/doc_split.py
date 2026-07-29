@@ -23,8 +23,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # Re-export the concrete class so callers can `from ...stickler_backend import
 # DocSplitClassificationMetrics` instead of reaching into stickler directly.
-# Importing the concrete module (not `stickler.doc_split`) keeps
-# pandas/scipy/sklearn out of Lambda cold start.
+# Note: pandas / scipy / sklearn / numpy still land in the Lambda regardless —
+# Python executes ``stickler/doc_split/__init__.py`` on any submodule import,
+# and that package init imports ``packet_evaluation_metrics``, which pulls
+# them all in. The re-export is a code-organization boundary, not a
+# cold-start optimization. ``compute_graded_packet_metrics`` below needs
+# those deps anyway.
 from stickler.doc_split.doc_split_classification_metrics import (  # noqa: F401
     DocSplitClassificationMetrics,
 )
