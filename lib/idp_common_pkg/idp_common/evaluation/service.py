@@ -17,17 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Type, Union
 
 if TYPE_CHECKING:
-    from stickler import StructuredModel
-
-# Doc-split classification metrics come straight from upstream stickler now
-# (v0.5.0+ ships the identical implementation; upstream docstring notes it was
-# "Ported from the GenAI IDP Accelerator"). Importing the concrete module —
-# not the ``stickler.doc_split`` package — avoids pulling pandas/scipy/sklearn
-# through the package's ``__init__`` (which also imports
-# ``packet_evaluation_metrics``) into Lambda cold start.
-from stickler.doc_split.doc_split_classification_metrics import (  # noqa: E402
-    DocSplitClassificationMetrics,
-)
+    from idp_common.evaluation.stickler_backend import StructuredModel
 
 from idp_common import s3
 from idp_common.config.models import IDPConfig
@@ -38,6 +28,7 @@ from idp_common.evaluation.models import (
     SectionEvaluationResult,
 )
 from idp_common.evaluation.stickler_backend import (
+    DocSplitClassificationMetrics,
     SticklerConfigMapper,
     compute_graded_packet_metrics,
     get_stickler_model,
@@ -270,9 +261,10 @@ class EvaluationService:
         self.region = region or os.environ.get("AWS_REGION")
         self.max_workers = max_workers
 
-        # Import and check Stickler availability
+        # Import and check Stickler availability. StructuredModel is re-exported
+        # via stickler_backend to preserve the single-boundary rule.
         try:
-            from stickler import StructuredModel
+            from idp_common.evaluation.stickler_backend import StructuredModel
 
             self._StructuredModel = StructuredModel
 
@@ -1162,6 +1154,11 @@ class EvaluationService:
         BOTH expected and actual (so the comparison stays symmetric and fair),
         and retry. This bounds the blast radius to just the unparseable fields.
 
+        UPSTREAM: candidate for `awslabs/stickler` — good fit for a "lenient
+        ingest" mode on `StructuredModel.from_json` / `model_validate` that
+        drops a single failing field rather than failing the whole record.
+        Delete this method once upstream supports it. No open issue yet.
+
         Args:
             model_class: The Stickler StructuredModel subclass
             coerced_expected: Cleaned/coerced baseline data
@@ -1337,10 +1334,11 @@ class EvaluationService:
                     f"{', '.join('.'.join(p) for p in sorted(skipped_field_paths))}"
                 )
 
-            # Compare using Stickler with field_comparisons and confusion_matrix enabled
-            # Confidence automatically extracted to 'prediction_confidences' when rich values used
-            # Import confidence metrics for calibration
-            from stickler.structured_object_evaluator.models.confidence import (
+            # Compare using Stickler with field_comparisons and confusion_matrix enabled.
+            # Confidence automatically extracted to 'prediction_confidences' when
+            # rich values used. Metric classes come via stickler_backend so this
+            # module doesn't need a direct ``import stickler`` (single-boundary rule).
+            from idp_common.evaluation.stickler_backend.confidence import (
                 AUROCMetric,
                 BrierScoreMetric,
                 ECEMetric,
@@ -1370,8 +1368,13 @@ class EvaluationService:
                     f"Stickler extracted {len(stickler_result['prediction_confidences'])} confidence scores for calibration metrics"
                 )
 
-            # Patch field_comparisons to add field_path for Stickler v0.4.0 ConfidenceCalculator
-            # Some Stickler versions may not populate field_path, so we ensure it's set
+            # Patch field_comparisons to add ``field_path`` where Stickler drops it.
+            # UPSTREAM: candidate for `awslabs/stickler` — the canonical
+            # `expected_key` is always present but `field_path` is inconsistently
+            # populated across Stickler versions, so the ConfidenceCalculator
+            # (which keys off `field_path`) sometimes can't join a comparison
+            # to its confidence value. Delete this shim once Stickler
+            # guarantees `field_path` on every field_comparisons row.
             field_comparisons = stickler_result.get("field_comparisons", [])
             if field_comparisons:
                 for fc in field_comparisons:

@@ -21,6 +21,14 @@ Two things live here:
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
+# Re-export the concrete class so callers can `from ...stickler_backend import
+# DocSplitClassificationMetrics` instead of reaching into stickler directly.
+# Importing the concrete module (not `stickler.doc_split`) keeps
+# pandas/scipy/sklearn out of Lambda cold start.
+from stickler.doc_split.doc_split_classification_metrics import (  # noqa: F401
+    DocSplitClassificationMetrics,
+)
+
 from idp_common import s3
 
 logger = logging.getLogger(__name__)

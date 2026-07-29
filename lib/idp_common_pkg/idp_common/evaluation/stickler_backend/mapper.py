@@ -292,6 +292,14 @@ class SticklerConfigMapper:
 
         Handles circular references by tracking visited definitions.
 
+        UPSTREAM: candidate for `awslabs/stickler` — Stickler's
+        `JsonSchemaFieldConverter._handle_array_type` doesn't propagate the root
+        `$defs` into nested item schemas the way `_handle_nested_object` does,
+        so nested `$ref` resolution silently drops context. When upstream
+        supports root-`$defs` propagation in array items, delete this method.
+        No open issue yet — file one if this branch survives beyond one Stickler
+        upgrade.
+
         Args:
             schema: Schema or sub-schema to process
             defs: The $defs dictionary from the root schema
@@ -578,6 +586,13 @@ class SticklerConfigMapper:
         # "Field required [type=missing]" after None-stripping and fail-score the
         # WHOLE document. Overwriting (not just adding-when-missing) makes explicit
         # configs behave like the genson auto-schema path (_strip_required).
+        #
+        # UPSTREAM (long-term): a "lenient" or "eval" mode on
+        # `StructuredModel.from_json_schema` that treats every field as optional
+        # would let us delete this line AND make our `make_model_fields_nullable`
+        # shim redundant. See `awslabs/stickler#149` for the related nullable-
+        # widening issue. Until then, forcing `required: []` here is the
+        # authoritative IDP evaluation semantic.
         if schema.get(SCHEMA_TYPE) == TYPE_OBJECT and SCHEMA_PROPERTIES in schema:
             schema["required"] = []
 

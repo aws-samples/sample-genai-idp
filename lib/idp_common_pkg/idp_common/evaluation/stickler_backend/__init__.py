@@ -26,11 +26,16 @@ Public surface:
   — the thin adapters over ``stickler.doc_split.*``.
 """
 
+# Re-exported so ``service.py`` and any other backend consumers don't need a
+# direct ``import stickler`` (single-boundary rule).
+from stickler import StructuredModel
+
 from idp_common.evaluation.stickler_backend.comparators import (
     LLMComparator,
     register_idp_comparators,
 )
 from idp_common.evaluation.stickler_backend.doc_split import (
+    DocSplitClassificationMetrics,
     compute_graded_packet_metrics,
     load_sections_for_doc_split,
 )
@@ -39,8 +44,10 @@ from idp_common.evaluation.stickler_backend.model_factory import get_stickler_mo
 from idp_common.evaluation.stickler_backend.results import transform_stickler_result
 
 __all__ = [
+    "DocSplitClassificationMetrics",
     "LLMComparator",
     "SticklerConfigMapper",
+    "StructuredModel",
     "compute_graded_packet_metrics",
     "get_stickler_model",
     "load_sections_for_doc_split",

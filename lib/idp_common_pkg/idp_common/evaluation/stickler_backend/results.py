@@ -75,6 +75,13 @@ def annotate_nested_comparison_methods(
 
     Mutates the dicts in place (adds ``evaluation_method`` and ``weight``).
 
+    UPSTREAM: candidate for `awslabs/stickler` — emit comparator name +
+    weight + threshold + list_match_threshold on every ``field_comparisons``
+    row so downstream renderers don't have to re-walk the schema. Delete this
+    function (and ``resolve_leaf_schema``) once upstream carries the metadata.
+    No open issue yet — file one if this branch survives beyond one Stickler
+    upgrade.
+
     Args:
         field_comparisons: Stickler nested comparison dicts for one attribute.
         field_schema: Translated schema for the (array or object) attribute.
