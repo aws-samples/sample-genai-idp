@@ -119,6 +119,25 @@ _MAX_INLINE_DOC_BYTES = 5 * 1024 * 1024
 # deliberately sets one keeps its value; only absent keys are back-filled.
 _CONTROL_FIELDS = ("use_bda", "bda_project_arn")
 
+# S3 key prefix for compressed document state, matching what the step Lambdas
+# use (idp_common.models.Document.compress) and what the dispatcher's IAM policy
+# grants s3:PutObject on. Both the keys we write and the URIs we accept from a
+# hook are constrained to it.
+_COMPRESSED_DOC_PREFIX = "compressed_documents/"
+
+# Fields the STATE MACHINE reads straight off the document payload via JSONPath:
+#
+#   $.document.num_pages                        -> BDA_CheckExistingData Choice
+#   $.document.status                           -> (BDA branch)
+#   $.ClassificationResult.document.sections    -> ProcessSections Map ItemsPath
+#
+# The dispatcher's own inline path always emits them, as does idp_common's
+# Document.compress(), but a hand-rolled compressed reference need not. An
+# absent one is not a hook error the workflow can survive — an unresolvable
+# ItemsPath/Choice path fails the execution with States.Runtime — so they are
+# back-filled from the previous document rather than left missing.
+_REQUIRED_WRAPPER_FIELDS = ("num_pages", "status", "sections")
+
 # Map hook point -> config section under the active config version.
 #
 # The hook LIST field within that section is chosen by the hook point's
@@ -365,14 +384,41 @@ def _identity_matches(previous: Any, candidate: Any) -> Optional[str]:
 def _validate_compressed_ref(ref: Dict[str, Any]) -> Optional[str]:
     """None if `ref` is a usable compressed-document wrapper, else a reason.
 
-    `sections` must be a list of STRING section ids: the workflow's
-    ProcessSections Map iterates that list directly (ItemsPath
-    $.ClassificationResult.document.sections), so a malformed value would fail
-    the whole execution rather than just the hook.
+    Two constraints, both load-bearing:
+
+    1. `s3_uri` must name an object under `compressed_documents/` in THIS
+       stack's working bucket. Downstream, Document.decompress() parses the URI
+       but *discards its bucket*, reading the KEY against the consumer's own
+       working bucket — so an unconstrained URI is a key-injection vector: a
+       hook could point at any object in the working bucket (e.g. another
+       document's `sections/N/result.json`) and have the next step deserialize
+       it as this document. The identity check can't catch that, because it
+       compares the wrapper's `document_id` field, not the content at the URI.
+
+    2. `sections` must be a list of STRING section ids: the workflow's
+       ProcessSections Map iterates that list directly (ItemsPath
+       $.ClassificationResult.document.sections), so a malformed value would
+       fail the whole execution rather than just the hook.
     """
     s3_uri = ref.get("s3_uri")
     if not isinstance(s3_uri, str) or not s3_uri.startswith("s3://"):
         return f"compressed document reference has invalid s3_uri: {s3_uri!r}"
+    bucket, _, key = s3_uri[len("s3://") :].partition("/")
+    if not key:
+        return f"compressed document reference s3_uri has no key: {s3_uri!r}"
+    # Only enforceable when the dispatcher knows its own working bucket. It
+    # always does in a deployed stack (the template sets WORKING_BUCKET); the
+    # guard keeps the check from rejecting everything if it is ever unset.
+    if _WORKING_BUCKET and bucket != _WORKING_BUCKET:
+        return (
+            f"compressed document reference points at bucket {bucket!r}, not "
+            f"the working bucket {_WORKING_BUCKET!r}"
+        )
+    if not key.startswith(_COMPRESSED_DOC_PREFIX):
+        return (
+            f"compressed document reference key {key!r} is outside the "
+            f"{_COMPRESSED_DOC_PREFIX!r} prefix"
+        )
     sections = ref.get("sections")
     if sections is not None:
         if not isinstance(sections, list) or not all(
@@ -414,7 +460,7 @@ def _compress_inline_document(
 
     timestamp = str(int(time.time() * 1000))
     key = (
-        f"compressed_documents/{doc_id}/{timestamp}_hook_{point}_"
+        f"{_COMPRESSED_DOC_PREFIX}{doc_id}/{timestamp}_hook_{point}_"
         f"{feature_id}_state.json"
     )
     try:
@@ -515,9 +561,21 @@ def _resolve_updated_document(
     # Document model fields and so are dropped by any hook that round-trips the
     # document through idp_common. Without this, losing `use_bda` fails the
     # execution at RouteByProcessingMode.
+    #
+    # Same treatment for the wrapper fields the state machine reads via JSONPath
+    # (num_pages / status / sections): the dispatcher's inline path and
+    # Document.compress() both emit them, but a hand-rolled compressed reference
+    # need not, and an absent one fails the execution with States.Runtime rather
+    # than degrading. Back-fill from the inbound document instead of rejecting —
+    # the hook's intent is the content change, not the wrapper metadata.
     if isinstance(previous, dict):
-        for field in _CONTROL_FIELDS:
+        for field in _CONTROL_FIELDS + _REQUIRED_WRAPPER_FIELDS:
             if field in previous and field not in resolved:
+                logger.info(
+                    "Back-filling %r on the document returned by hook %s",
+                    field,
+                    hook["featureId"],
+                )
                 resolved[field] = previous[field]
     return resolved, None
 

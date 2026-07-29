@@ -497,7 +497,11 @@ def test_document_echoed_when_hook_returns_no_update(monkeypatch):
     the document byte-identical, so the Apply Pass state is a no-op copy."""
     monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
     mod = _reload()
-    doc = {"compressed": True, "s3_uri": "s3://wb/a.json", "document_id": "w2.pdf"}
+    doc = {
+        "compressed": True,
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/a.json",
+        "document_id": "w2.pdf",
+    }
     _mutation_env(
         monkeypatch,
         mod,
@@ -515,7 +519,11 @@ def test_no_hooks_registered_still_returns_document(monkeypatch):
     document, so ApplyXHookDocument resolves even on an inert stack."""
     monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
     mod = _reload()
-    doc = {"compressed": True, "s3_uri": "s3://wb/a.json", "document_id": "w2.pdf"}
+    doc = {
+        "compressed": True,
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/a.json",
+        "document_id": "w2.pdf",
+    }
     monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: [])
     monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "default")
     monkeypatch.setattr(mod._dynamodb, "Table", lambda name: object())
@@ -554,14 +562,14 @@ def test_compressed_reference_update_passes_through(monkeypatch):
     mod = _reload()
     inbound = {
         "compressed": True,
-        "s3_uri": "s3://wb/old.json",
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/old.json",
         "document_id": "w2.pdf",
         "sections": ["1"],
         "config_version": "v1",
     }
     new_ref = {
         "compressed": True,
-        "s3_uri": "s3://wb/new.json",
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/new.json",
         "document_id": "w2.pdf",
         "sections": ["1", "2"],
         "num_pages": 3,
@@ -592,7 +600,7 @@ def test_inline_document_update_is_compressed_to_working_bucket(monkeypatch):
     mod = _reload()
     inbound = {
         "compressed": True,
-        "s3_uri": "s3://wb/old.json",
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/old.json",
         "document_id": "w2.pdf",
     }
     inline = {
@@ -638,7 +646,7 @@ def test_inline_update_rejected_when_working_bucket_unset(monkeypatch):
     mod = _reload()
     inbound = {
         "compressed": True,
-        "s3_uri": "s3://wb/old.json",
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/old.json",
         "document_id": "w2.pdf",
     }
     _mutation_env(
@@ -659,7 +667,11 @@ def test_identity_change_is_rejected(monkeypatch):
     monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
     monkeypatch.setenv("WORKING_BUCKET", "wb")
     mod = _reload()
-    inbound = {"compressed": True, "s3_uri": "s3://wb/o.json", "document_id": "w2.pdf"}
+    inbound = {
+        "compressed": True,
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/o.json",
+        "document_id": "w2.pdf",
+    }
     puts = []
     monkeypatch.setattr(mod._s3, "put_object", lambda **kw: puts.append(kw) or {})
     _mutation_env(
@@ -704,10 +716,14 @@ def test_malformed_sections_in_compressed_ref_is_rejected(monkeypatch):
     directly, so a bad value would fail the whole execution, not just the hook."""
     monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
     mod = _reload()
-    inbound = {"compressed": True, "s3_uri": "s3://wb/o.json", "document_id": "w2.pdf"}
+    inbound = {
+        "compressed": True,
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/o.json",
+        "document_id": "w2.pdf",
+    }
     bad = {
         "compressed": True,
-        "s3_uri": "s3://wb/n.json",
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/n.json",
         "document_id": "w2.pdf",
         "sections": [{"section_id": "1"}],  # objects, not id strings
     }
@@ -724,7 +740,11 @@ def test_malformed_sections_in_compressed_ref_is_rejected(monkeypatch):
 def test_bad_s3_uri_in_compressed_ref_is_rejected(monkeypatch):
     monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
     mod = _reload()
-    inbound = {"compressed": True, "s3_uri": "s3://wb/o.json", "document_id": "w2.pdf"}
+    inbound = {
+        "compressed": True,
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/o.json",
+        "document_id": "w2.pdf",
+    }
     _mutation_env(
         monkeypatch,
         mod,
@@ -765,7 +785,7 @@ def test_config_version_is_restored_if_hook_changes_it(monkeypatch):
     mod = _reload()
     inbound = {
         "compressed": True,
-        "s3_uri": "s3://wb/o.json",
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/o.json",
         "document_id": "w2.pdf",
         "config_version": "pinned-v1",
     }
@@ -777,7 +797,7 @@ def test_config_version_is_restored_if_hook_changes_it(monkeypatch):
             {
                 "updatedDocument": {
                     "compressed": True,
-                    "s3_uri": "s3://wb/n.json",
+                    "s3_uri": "s3://wb/compressed_documents/w2.pdf/n.json",
                     "document_id": "w2.pdf",
                     "config_version": "other-v9",
                 }
@@ -786,13 +806,19 @@ def test_config_version_is_restored_if_hook_changes_it(monkeypatch):
     )
     out = mod.lambda_handler({"hookPoint": "postOcr", "document": inbound}, None)
     assert out["document"]["config_version"] == "pinned-v1"
-    assert out["document"]["s3_uri"] == "s3://wb/n.json"  # content change kept
+    assert (
+        out["document"]["s3_uri"] == "s3://wb/compressed_documents/w2.pdf/n.json"
+    )  # content change kept
 
 
 def test_allow_document_update_false_pins_hook_to_observe_only(monkeypatch):
     monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
     mod = _reload()
-    inbound = {"compressed": True, "s3_uri": "s3://wb/o.json", "document_id": "w2.pdf"}
+    inbound = {
+        "compressed": True,
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/o.json",
+        "document_id": "w2.pdf",
+    }
     _mutation_env(
         monkeypatch,
         mod,
@@ -801,7 +827,7 @@ def test_allow_document_update_false_pins_hook_to_observe_only(monkeypatch):
             {
                 "updatedDocument": {
                     "compressed": True,
-                    "s3_uri": "s3://wb/n.json",
+                    "s3_uri": "s3://wb/compressed_documents/w2.pdf/n.json",
                     "document_id": "w2.pdf",
                 }
             }
@@ -863,7 +889,11 @@ def test_chained_hooks_see_previous_hook_output(monkeypatch):
     ones."""
     monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
     mod = _reload()
-    inbound = {"compressed": True, "s3_uri": "s3://wb/v0.json", "document_id": "w2.pdf"}
+    inbound = {
+        "compressed": True,
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/v0.json",
+        "document_id": "w2.pdf",
+    }
     seen = []
 
     def _invoke(h, payload):
@@ -873,7 +903,7 @@ def test_chained_hooks_see_previous_hook_output(monkeypatch):
             {
                 "updatedDocument": {
                     "compressed": True,
-                    "s3_uri": f"s3://wb/{n}.json",
+                    "s3_uri": f"s3://wb/compressed_documents/w2.pdf/{n}.json",
                     "document_id": "w2.pdf",
                 }
             },
@@ -882,8 +912,11 @@ def test_chained_hooks_see_previous_hook_output(monkeypatch):
 
     _mutation_env(monkeypatch, mod, [_hook("h1"), _hook("h2", order=2)], _invoke)
     out = mod.lambda_handler({"hookPoint": "postOcr", "document": inbound}, None)
-    assert seen == ["s3://wb/v0.json", "s3://wb/h1.json"]
-    assert out["document"]["s3_uri"] == "s3://wb/h2.json"
+    assert seen == [
+        "s3://wb/compressed_documents/w2.pdf/v0.json",
+        "s3://wb/compressed_documents/w2.pdf/h1.json",
+    ]
+    assert out["document"]["s3_uri"] == "s3://wb/compressed_documents/w2.pdf/h2.json"
     assert out["documentUpdatedBy"] == ["h1", "h2"]
 
 
@@ -892,7 +925,11 @@ def test_rejected_update_does_not_break_the_chain(monkeypatch):
     the still-valid inbound document, and the refusal is visible per-hook."""
     monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
     mod = _reload()
-    inbound = {"compressed": True, "s3_uri": "s3://wb/v0.json", "document_id": "w2.pdf"}
+    inbound = {
+        "compressed": True,
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/v0.json",
+        "document_id": "w2.pdf",
+    }
     seen = []
 
     def _invoke(h, payload):
@@ -905,7 +942,7 @@ def test_rejected_update_does_not_break_the_chain(monkeypatch):
             {
                 "updatedDocument": {
                     "compressed": True,
-                    "s3_uri": "s3://wb/good.json",
+                    "s3_uri": "s3://wb/compressed_documents/w2.pdf/good.json",
                     "document_id": "w2.pdf",
                 }
             },
@@ -914,8 +951,11 @@ def test_rejected_update_does_not_break_the_chain(monkeypatch):
 
     _mutation_env(monkeypatch, mod, [_hook("bad"), _hook("good", order=2)], _invoke)
     out = mod.lambda_handler({"hookPoint": "postOcr", "document": inbound}, None)
-    assert seen == ["s3://wb/v0.json", "s3://wb/v0.json"]
-    assert out["document"]["s3_uri"] == "s3://wb/good.json"
+    assert seen == [
+        "s3://wb/compressed_documents/w2.pdf/v0.json",
+        "s3://wb/compressed_documents/w2.pdf/v0.json",
+    ]
+    assert out["document"]["s3_uri"] == "s3://wb/compressed_documents/w2.pdf/good.json"
     assert out["documentUpdatedBy"] == ["good"]
     assert "documentUpdateRejected" in out["results"][0]
 
@@ -925,7 +965,11 @@ def test_failed_hook_document_is_ignored(monkeypatch):
     error payload happens to contain an updatedDocument key."""
     monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
     mod = _reload()
-    inbound = {"compressed": True, "s3_uri": "s3://wb/v0.json", "document_id": "w2.pdf"}
+    inbound = {
+        "compressed": True,
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/v0.json",
+        "document_id": "w2.pdf",
+    }
     _mutation_env(
         monkeypatch,
         mod,
@@ -935,7 +979,10 @@ def test_failed_hook_document_is_ignored(monkeypatch):
             "arn": "arn:f",
             "ok": False,
             "error": {
-                "updatedDocument": {"compressed": True, "s3_uri": "s3://wb/x.json"}
+                "updatedDocument": {
+                    "compressed": True,
+                    "s3_uri": "s3://wb/compressed_documents/w2.pdf/x.json",
+                }
             },
         },
     )
@@ -949,7 +996,11 @@ def test_halt_and_document_update_coexist(monkeypatch):
     Choice reads the same stable path as before."""
     monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
     mod = _reload()
-    inbound = {"compressed": True, "s3_uri": "s3://wb/v0.json", "document_id": "w2.pdf"}
+    inbound = {
+        "compressed": True,
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/v0.json",
+        "document_id": "w2.pdf",
+    }
     _mutation_env(
         monkeypatch,
         mod,
@@ -959,7 +1010,7 @@ def test_halt_and_document_update_coexist(monkeypatch):
                 "halt": True,
                 "updatedDocument": {
                     "compressed": True,
-                    "s3_uri": "s3://wb/red.json",
+                    "s3_uri": "s3://wb/compressed_documents/w2.pdf/red.json",
                     "document_id": "w2.pdf",
                 },
             }
@@ -967,7 +1018,7 @@ def test_halt_and_document_update_coexist(monkeypatch):
     )
     out = mod.lambda_handler({"hookPoint": "preprocessing", "document": inbound}, None)
     assert out["halt"] is True
-    assert out["document"]["s3_uri"] == "s3://wb/red.json"
+    assert out["document"]["s3_uri"] == "s3://wb/compressed_documents/w2.pdf/red.json"
 
 
 def test_oversized_inline_document_is_rejected(monkeypatch):
@@ -1024,7 +1075,7 @@ def test_workflow_control_fields_survive_a_hook_round_trip(monkeypatch):
     mod = _reload()
     inbound = {
         "compressed": True,
-        "s3_uri": "s3://wb/v0.json",
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/v0.json",
         "document_id": "w2.pdf",
         "use_bda": False,
         "bda_project_arn": "arn:aws:bedrock:us-west-2:1:data-automation-project/p",
@@ -1038,14 +1089,16 @@ def test_workflow_control_fields_survive_a_hook_round_trip(monkeypatch):
             {
                 "updatedDocument": {
                     "compressed": True,
-                    "s3_uri": "s3://wb/v1.json",
+                    "s3_uri": "s3://wb/compressed_documents/w2.pdf/v1.json",
                     "document_id": "w2.pdf",
                 }
             }
         ),
     )
     out = mod.lambda_handler({"hookPoint": "preprocessing", "document": inbound}, None)
-    assert out["document"]["s3_uri"] == "s3://wb/v1.json"  # mutation applied
+    assert (
+        out["document"]["s3_uri"] == "s3://wb/compressed_documents/w2.pdf/v1.json"
+    )  # mutation applied
     assert out["document"]["use_bda"] is False
     assert out["document"]["bda_project_arn"] == inbound["bda_project_arn"]
 
@@ -1058,7 +1111,7 @@ def test_hook_may_deliberately_change_a_control_field(monkeypatch):
     mod = _reload()
     inbound = {
         "compressed": True,
-        "s3_uri": "s3://wb/v0.json",
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/v0.json",
         "document_id": "w2.pdf",
         "use_bda": True,
     }
@@ -1070,7 +1123,7 @@ def test_hook_may_deliberately_change_a_control_field(monkeypatch):
             {
                 "updatedDocument": {
                     "compressed": True,
-                    "s3_uri": "s3://wb/v1.json",
+                    "s3_uri": "s3://wb/compressed_documents/w2.pdf/v1.json",
                     "document_id": "w2.pdf",
                     "use_bda": False,
                 }
@@ -1088,7 +1141,7 @@ def test_control_fields_carried_across_a_hook_chain(monkeypatch):
     mod = _reload()
     inbound = {
         "compressed": True,
-        "s3_uri": "s3://wb/v0.json",
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/v0.json",
         "document_id": "w2.pdf",
         "use_bda": False,
     }
@@ -1100,7 +1153,7 @@ def test_control_fields_carried_across_a_hook_chain(monkeypatch):
             {
                 "updatedDocument": {
                     "compressed": True,
-                    "s3_uri": f"s3://wb/{h['featureId']}.json",
+                    "s3_uri": f"s3://wb/compressed_documents/w2.pdf/{h['featureId']}.json",
                     "document_id": "w2.pdf",
                 }
             },
@@ -1122,7 +1175,7 @@ def test_inline_document_update_preserves_control_fields(monkeypatch):
     mod = _reload()
     inbound = {
         "compressed": True,
-        "s3_uri": "s3://wb/v0.json",
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/v0.json",
         "document_id": "w2.pdf",
         "use_bda": False,
     }
@@ -1138,3 +1191,208 @@ def test_inline_document_update_preserves_control_fields(monkeypatch):
     out = mod.lambda_handler({"hookPoint": "preprocessing", "document": inbound}, None)
     assert out["document"]["compressed"] is True
     assert out["document"]["use_bda"] is False
+
+
+# ---------------------------------------------------------------------------
+# Compressed-reference URI constraints. Document.decompress() parses the URI
+# but DISCARDS its bucket, reading the key against the consumer's own working
+# bucket — so an unconstrained s3_uri is a key-injection vector, not merely a
+# cross-account read.
+# ---------------------------------------------------------------------------
+
+
+def test_compressed_ref_in_foreign_bucket_is_rejected(monkeypatch):
+    """A hook may not point the next step at another bucket. Downstream only the
+    KEY survives, so `s3://attacker/x/evil.json` would be read as
+    `s3://<working-bucket>/x/evil.json` — escaping the compressed_documents/
+    prefix the design assumes."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    monkeypatch.setenv("WORKING_BUCKET", "real-wb")
+    mod = _reload()
+    inbound = {
+        "compressed": True,
+        "s3_uri": "s3://real-wb/compressed_documents/w2.pdf/1.json",
+        "document_id": "w2.pdf",
+    }
+    _mutation_env(
+        monkeypatch,
+        mod,
+        [_hook()],
+        lambda h, p: _ok(
+            {
+                "updatedDocument": {
+                    "compressed": True,
+                    "s3_uri": "s3://attacker-bucket/compressed_documents/x/evil.json",
+                    "document_id": "w2.pdf",
+                }
+            }
+        ),
+    )
+    out = mod.lambda_handler({"hookPoint": "postOcr", "document": inbound}, None)
+    assert out["document"] == inbound
+    assert "not the working bucket" in out["results"][0]["documentUpdateRejected"]
+
+
+def test_compressed_ref_outside_prefix_is_rejected(monkeypatch):
+    """Right bucket, wrong prefix: a hook must not repoint the document at an
+    arbitrary object (e.g. another document's sections/N/result.json) that the
+    identity check cannot inspect."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    monkeypatch.setenv("WORKING_BUCKET", "real-wb")
+    mod = _reload()
+    inbound = {
+        "compressed": True,
+        "s3_uri": "s3://real-wb/compressed_documents/w2.pdf/1.json",
+        "document_id": "w2.pdf",
+    }
+    _mutation_env(
+        monkeypatch,
+        mod,
+        [_hook()],
+        lambda h, p: _ok(
+            {
+                "updatedDocument": {
+                    "compressed": True,
+                    "s3_uri": "s3://real-wb/other-doc/sections/1/result.json",
+                    "document_id": "w2.pdf",
+                }
+            }
+        ),
+    )
+    out = mod.lambda_handler({"hookPoint": "postOcr", "document": inbound}, None)
+    assert out["document"] == inbound
+    assert "outside the" in out["results"][0]["documentUpdateRejected"]
+
+
+def test_compressed_ref_without_key_is_rejected(monkeypatch):
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    monkeypatch.setenv("WORKING_BUCKET", "real-wb")
+    mod = _reload()
+    inbound = {"id": "w2.pdf"}
+    _mutation_env(
+        monkeypatch,
+        mod,
+        [_hook()],
+        lambda h, p: _ok(
+            {
+                "updatedDocument": {
+                    "compressed": True,
+                    "s3_uri": "s3://real-wb",
+                    "document_id": "w2.pdf",
+                }
+            }
+        ),
+    )
+    out = mod.lambda_handler({"hookPoint": "postOcr", "document": inbound}, None)
+    assert out["document"] == inbound
+    assert "no key" in out["results"][0]["documentUpdateRejected"]
+
+
+def test_dispatcher_own_inline_wrapper_passes_its_own_validator(monkeypatch):
+    """Guards against the two paths drifting: whatever
+    _compress_inline_document() writes must satisfy _validate_compressed_ref()."""
+    monkeypatch.setenv("WORKING_BUCKET", "real-wb")
+    mod = _reload()
+    monkeypatch.setattr(mod._s3, "put_object", lambda **kw: {})
+    wrapper, reason = mod._compress_inline_document(
+        {"id": "w2.pdf", "num_pages": 1, "sections": [{"section_id": "1"}]},
+        "postOcr",
+        "f",
+    )
+    assert reason is None and wrapper is not None
+    assert mod._validate_compressed_ref(wrapper) is None
+
+
+def test_foreign_bucket_check_is_skipped_when_working_bucket_unset(monkeypatch):
+    """With no WORKING_BUCKET configured the dispatcher cannot know its own
+    bucket, so it must not reject every compressed reference outright."""
+    monkeypatch.delenv("WORKING_BUCKET", raising=False)
+    mod = _reload()
+    assert (
+        mod._validate_compressed_ref(
+            {"compressed": True, "s3_uri": "s3://any-wb/compressed_documents/a/1.json"}
+        )
+        is None
+    )
+
+
+# ---------------------------------------------------------------------------
+# Wrapper fields the STATE MACHINE reads by JSONPath. An absent one is not a
+# survivable hook error: an unresolvable ItemsPath/Choice path fails the whole
+# execution with States.Runtime (the same class of bug as the dropped use_bda).
+# ---------------------------------------------------------------------------
+
+
+def test_thin_compressed_ref_gets_state_machine_fields_backfilled(monkeypatch):
+    """A hand-rolled ref carrying only {compressed, s3_uri, document_id} must
+    still reach the workflow with num_pages/status/sections, or
+    ProcessSections' ItemsPath ($.ClassificationResult.document.sections) fails
+    the execution."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    monkeypatch.setenv("WORKING_BUCKET", "real-wb")
+    mod = _reload()
+    inbound = {
+        "compressed": True,
+        "s3_uri": "s3://real-wb/compressed_documents/w2.pdf/1.json",
+        "document_id": "w2.pdf",
+        "num_pages": 6,
+        "status": "CLASSIFYING",
+        "sections": ["1", "2"],
+    }
+    _mutation_env(
+        monkeypatch,
+        mod,
+        [_hook()],
+        lambda h, p: _ok(
+            {
+                "updatedDocument": {
+                    "compressed": True,
+                    "s3_uri": "s3://real-wb/compressed_documents/w2.pdf/2.json",
+                    "document_id": "w2.pdf",
+                }
+            }
+        ),
+    )
+    out = mod.lambda_handler(
+        {"hookPoint": "postClassification", "document": inbound}, None
+    )
+    doc = out["document"]
+    assert doc["s3_uri"].endswith("2.json")  # the hook's change is honored
+    assert doc["num_pages"] == 6
+    assert doc["status"] == "CLASSIFYING"
+    assert doc["sections"] == ["1", "2"]
+
+
+def test_hook_supplied_wrapper_fields_are_not_overwritten(monkeypatch):
+    """Back-filling only fills ABSENT keys — a hook that legitimately changes the
+    section list (the whole point of postClassification) must keep its value."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    monkeypatch.setenv("WORKING_BUCKET", "real-wb")
+    mod = _reload()
+    inbound = {
+        "compressed": True,
+        "s3_uri": "s3://real-wb/compressed_documents/w2.pdf/1.json",
+        "document_id": "w2.pdf",
+        "num_pages": 6,
+        "sections": ["1", "2"],
+    }
+    _mutation_env(
+        monkeypatch,
+        mod,
+        [_hook()],
+        lambda h, p: _ok(
+            {
+                "updatedDocument": {
+                    "compressed": True,
+                    "s3_uri": "s3://real-wb/compressed_documents/w2.pdf/2.json",
+                    "document_id": "w2.pdf",
+                    "sections": ["1", "2", "3"],
+                }
+            }
+        ),
+    )
+    out = mod.lambda_handler(
+        {"hookPoint": "postClassification", "document": inbound}, None
+    )
+    assert out["document"]["sections"] == ["1", "2", "3"]  # hook wins
+    assert out["document"]["num_pages"] == 6  # absent -> back-filled

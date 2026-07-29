@@ -280,13 +280,27 @@ fails the workflow):
 | `id` / `input_key` / `input_bucket` / `output_bucket` are immutable | The tracking-table row and output S3 prefixes are keyed off them. A hook that needs a *different* document should spawn one and `halt`. |
 | `sections` in a compressed reference must be a list of section-id strings | The workflow's `ProcessSections` Map iterates it directly, so a malformed value would fail the whole execution. |
 | `config_version` is preserved | It resolves hooks for the rest of the pipeline; a changed value is restored (the content change is still honored). |
+| A compressed reference's `s3_uri` must be under `compressed_documents/` in the stack's working bucket | Downstream, `Document.decompress()` parses the URI but *discards its bucket*, reading the key against the consumer's own working bucket — so an unconstrained URI is a key-injection vector, not just a cross-bucket read. |
 | Inline documents are capped at 5 MB | Bounded by Lambda's own 6 MB synchronous response limit. Return a compressed reference instead. |
 
-The workflow's routing control fields — `use_bda` and `bda_project_arn` — ride
-on the document payload but are not `Document` model fields, so a hook's
-load → mutate → return round-trip drops them (which would fail the execution at
-the BDA/pipeline routing Choice). The dispatcher carries them forward
-automatically; a hook that sets one explicitly keeps its own value.
+Some fields the state machine reads by JSONPath are **not** `Document` model
+fields, so a hook's load → mutate → return round-trip drops them — and an
+absent one fails the execution outright rather than degrading. The dispatcher
+back-fills these from the inbound document, and a hook that sets one explicitly
+keeps its own value:
+
+- `use_bda`, `bda_project_arn` — the BDA/pipeline routing Choice and the BDA
+  invoke parameters.
+- `num_pages`, `status`, `sections` — the compressed wrapper's own metadata,
+  read by `BDA_CheckExistingData` and by `ProcessSections`' `ItemsPath`. The
+  `idp_common.hooks` helper and the dispatcher's inline path always emit these;
+  the back-fill covers a hand-rolled compressed reference that omits them.
+
+**Write idempotent mutations.** The workflow retries a hook dispatch on
+transient Lambda faults, which re-invokes the hook — so a mutation that
+*appends* (`classification += "-SUFFIX"`) can apply twice, while one that *sets*
+(`classification = "Invoice"`) is safe. Guard append-style logic against
+re-application.
 
 Chained hooks at the same point **compose**: hook #2 receives hook #1's
 document, in `order`. Set `allowDocumentUpdate: false` on a hook entry to pin it

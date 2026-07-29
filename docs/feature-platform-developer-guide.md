@@ -175,6 +175,9 @@ Three things to know:
 - **`postExtraction` is section-scoped** (it runs inside the section Map), so
   only section-level changes propagate there. Use `postClassification` or
   `postRuleValidation` for whole-document changes.
+- **Make mutations idempotent.** The workflow retries a hook dispatch on
+  transient Lambda faults, so a mutation that *appends* can apply twice while
+  one that *sets* is safe.
 
 The dispatcher refuses an update that changes the document's identity, breaks
 the `sections` list the Map iterates, or exceeds 5 MB inline — keeping the

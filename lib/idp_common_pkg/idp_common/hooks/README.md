@@ -97,14 +97,35 @@ the workflow over a bad update:
 | `id` / `input_key` / `input_bucket` / `output_bucket` are immutable | The tracking-table row and output S3 prefixes are keyed off them |
 | `sections` in a compressed reference must be a list of section-id strings | The workflow's `ProcessSections` Map iterates it directly |
 | `config_version` is preserved | It resolves hooks for the rest of the pipeline |
+| A compressed ref's `s3_uri` must be under `compressed_documents/` in the working bucket | `Document.decompress()` discards the URI's bucket and reads the key against the consumer's own working bucket, so an unconstrained URI is a key-injection vector |
 | Inline documents capped at 5 MB | Bounded by Lambda's 6 MB response limit |
 
-The dispatcher also **carries forward** the state machine's routing control
-fields — `use_bda` and `bda_project_arn`. These ride on the document payload
-(injected by the queue processor from the resolved config) but are *not*
-`Document` model fields, so the load → mutate → return round-trip drops them.
-Left dropped, `use_bda` would fail the execution at the BDA/pipeline routing
-Choice. You get them back automatically; set one explicitly to override.
+The dispatcher also **back-fills** fields the state machine reads by JSONPath
+that are *not* `Document` model fields, and so are dropped by the
+load → mutate → return round-trip. Left dropped, each fails the execution
+outright rather than degrading. Set one explicitly to override:
+
+- `use_bda`, `bda_project_arn` — injected by the queue processor from the
+  resolved config; drive the BDA/pipeline routing Choice.
+- `num_pages`, `status`, `sections` — compressed-wrapper metadata read by
+  `BDA_CheckExistingData` and `ProcessSections`' `ItemsPath`.
+  `updated_document_result()` always emits these, so this only matters if you
+  hand-roll a reference.
+
+## Write idempotent mutations
+
+The workflow **retries** a hook dispatch on transient Lambda faults, which
+re-invokes your hook. A mutation that *sets* a value is safe; one that *appends*
+can apply twice:
+
+```python
+# Unsafe under retry — may yield "W2-REVIEWED-REVIEWED"
+section.classification += "-REVIEWED"
+
+# Safe — idempotent
+if not section.classification.endswith("-REVIEWED"):
+    section.classification += "-REVIEWED"
+```
 
 ## Hook-point scope
 
