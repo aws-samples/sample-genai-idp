@@ -14,12 +14,20 @@ import {
   Alert,
   Tabs,
   SegmentedControl,
+  RadioGroup,
 } from '@cloudscape-design/components';
 import type { SelectProps } from '@cloudscape-design/components';
 import useSyntheticDataGenerator from '../../hooks/use-synthetic-data-generator';
 import type { CostEstimate } from '../../hooks/use-synthetic-data-generator';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
+import { generateClient } from '../../api/client-shim';
+import { getTestSets } from '../../graphql/generated';
 import { getErrorMessage } from '../../utils/errorUtils';
+
+const client = generateClient();
+
+const NAME_RE = /^[a-zA-Z0-9\s_-]+$/;
+const toTestSetId = (name: string): string => name.replace(/ /g, '-').toLowerCase();
 
 // Extract the document-class names from a fetched config version. The config
 // dicts arrive as AWSJSON strings; classes live under `.classes[]`, keyed by
@@ -58,9 +66,9 @@ const extractClassNames = (custom: unknown, def: unknown): string[] => {
 interface GenerateSyntheticDataModalProps {
   visible: boolean;
   onDismiss: () => void;
-  // Called with the enqueued job id after a successful request so the caller can
-  // surface a "generation started" notice and refresh the test set list later.
-  onStarted: (jobId: string, label: string) => void;
+  // Called after a successful request with the job id, a display label, and the
+  // resolved destination test-set id so the caller can key its optimistic row.
+  onStarted: (jobId: string, label: string, testSetId: string) => void;
   // Optional initial values for deep-links (e.g. Schema Builder "generate test
   // set for this class") — pre-selects the config tab, version, and class.
   initialTab?: 'prompt' | 'config';
@@ -107,6 +115,15 @@ const GenerateSyntheticDataModal = ({
   const [classesLoading, setClassesLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Destination: create a new test set (by name) or append to an existing one.
+  const [destMode, setDestMode] = useState<'new' | 'existing'>('new');
+  const [newTestSetName, setNewTestSetName] = useState('');
+  const [existingTestSet, setExistingTestSet] = useState<SelectProps.Option | null>(null);
+  const [testSetOptions, setTestSetOptions] = useState<SelectProps.Option[]>([]);
+  const [allTestSetIds, setAllTestSetIds] = useState<Set<string>>(new Set());
+  const [testSetsLoading, setTestSetsLoading] = useState(false);
+  const [testSetsError, setTestSetsError] = useState(false);
+
   const versionOptions = useMemo<SelectProps.Option[]>(
     () => versions.map((v) => ({ label: v.versionName, value: v.versionName })),
     [versions],
@@ -119,6 +136,34 @@ const GenerateSyntheticDataModal = ({
     if (initialVersion) setSelectedVersion({ label: initialVersion, value: initialVersion });
     // initialClassName is applied once the version's classes load (below).
   }, [visible, initialTab, initialVersion]);
+
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    setTestSetsLoading(true);
+    setTestSetsError(false);
+    client
+      .graphql({ query: getTestSets })
+      .then((result) => {
+        if (cancelled) return;
+        const all = (result.data.getTestSets || []).filter((t): t is NonNullable<typeof t> => t != null);
+        setAllTestSetIds(new Set(all.map((t) => t.id)));
+        setTestSetOptions(all.filter((t) => t.status === 'COMPLETED').map((t) => ({ label: t.name, value: t.id })));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTestSetOptions([]);
+          setAllTestSetIds(new Set());
+          setTestSetsError(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setTestSetsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible]);
 
   // Load the selected version's document classes to populate the class Select,
   // so a user picks a valid class rather than typing (and mistyping) one.
@@ -180,7 +225,15 @@ const GenerateSyntheticDataModal = ({
     };
   }, [visible, parsedCount, threshold, countValid]);
 
-  const canSubmit = countValid && (activeTab === 'prompt' ? prompt.trim().length > 0 : Boolean(selectedVersion) && Boolean(selectedClass));
+  const trimmedNewName = newTestSetName.trim();
+  const nameFormatValid = trimmedNewName.length > 0 && trimmedNewName.length <= 50 && NAME_RE.test(trimmedNewName);
+  // A new name whose derived id matches an existing test set would silently
+  // append to it — block it and steer the user to "Add to existing".
+  const newNameCollides = nameFormatValid && allTestSetIds.has(toTestSetId(trimmedNewName));
+  const newNameValid = nameFormatValid && !newNameCollides;
+  const destValid = destMode === 'new' ? newNameValid : Boolean(existingTestSet);
+  const canSubmit =
+    countValid && destValid && (activeTab === 'prompt' ? prompt.trim().length > 0 : Boolean(selectedVersion) && Boolean(selectedClass));
 
   const reset = () => {
     setPrompt('');
@@ -194,6 +247,9 @@ const GenerateSyntheticDataModal = ({
     setSelectedVersion(null);
     setSelectedClass(null);
     setClassOptions([]);
+    setDestMode('new');
+    setNewTestSetName('');
+    setExistingTestSet(null);
     setError('');
   };
 
@@ -223,9 +279,11 @@ const GenerateSyntheticDataModal = ({
 
   const handleGenerate = async () => {
     setError('');
+    const dest = destMode === 'new' ? { testSetName: trimmedNewName } : { testSetId: existingTestSet?.value as string };
+    const resolvedId = destMode === 'new' ? toTestSetId(trimmedNewName) : (existingTestSet?.value as string);
+    const label = destMode === 'new' ? trimmedNewName : (existingTestSet?.label as string) || resolvedId;
     try {
       let jobId: string;
-      let label: string;
       if (activeTab === 'prompt') {
         jobId = await generateFromPrompt({
           prompt: prompt.trim(),
@@ -234,8 +292,8 @@ const GenerateSyntheticDataModal = ({
           augment,
           threshold,
           scenario: scenario.trim() || undefined,
+          ...dest,
         });
-        label = promptClassName.trim() || 'Synthetic documents';
       } else {
         jobId = await generateFromConfig({
           configVersion: selectedVersion?.value as string,
@@ -244,11 +302,11 @@ const GenerateSyntheticDataModal = ({
           augment,
           threshold,
           scenario: scenario.trim() || undefined,
+          ...dest,
         });
-        label = (selectedClass?.value as string) || 'Synthetic documents';
       }
       reset();
-      onStarted(jobId, label);
+      onStarted(jobId, label, resolvedId);
     } catch (err) {
       setError(getErrorMessage(err));
     }
@@ -369,6 +427,56 @@ const GenerateSyntheticDataModal = ({
             </SpaceBetween>
           </SpaceBetween>
         )}
+
+        <FormField label="Test set destination" description="Create a new test set, or add the generated documents to an existing one.">
+          <SpaceBetween size="xs">
+            <RadioGroup
+              value={destMode}
+              onChange={({ detail }) => setDestMode(detail.value as 'new' | 'existing')}
+              items={[
+                { value: 'new', label: 'Create new test set' },
+                {
+                  value: 'existing',
+                  label: 'Add to existing test set',
+                  disabled: testSetsLoading || testSetOptions.length === 0,
+                },
+              ]}
+            />
+            {testSetsError && (
+              <Alert type="warning">
+                Could not load existing test sets. You can still create a new one; retry by reopening this dialog.
+              </Alert>
+            )}
+            {destMode === 'new' ? (
+              <FormField
+                errorText={
+                  newTestSetName && newNameCollides
+                    ? 'A test set with this name already exists. Choose a different name, or use "Add to existing".'
+                    : newTestSetName && !nameFormatValid
+                      ? 'Letters, numbers, spaces, hyphens, and underscores only (max 50 chars)'
+                      : undefined
+                }
+              >
+                <Input
+                  value={newTestSetName}
+                  onChange={({ detail }) => setNewTestSetName(detail.value)}
+                  placeholder="New test set name (e.g. W2 Synthetic)"
+                />
+              </FormField>
+            ) : (
+              <Select
+                selectedOption={existingTestSet}
+                onChange={({ detail }) => setExistingTestSet(detail.selectedOption)}
+                options={testSetOptions}
+                placeholder="Select a test set"
+                empty="No completed test sets"
+                statusType={testSetsLoading ? 'loading' : 'finished'}
+                loadingText="Loading test sets"
+                filteringType="auto"
+              />
+            )}
+          </SpaceBetween>
+        </FormField>
 
         <FormField
           label="Number of documents"
