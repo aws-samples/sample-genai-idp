@@ -31,6 +31,7 @@ The IDP Common library provides these main modules:
 - **[Utils](utils/README.md)**: Common utility functions
 - **[Metrics](metrics/README.md)**: Performance and token tracking
 - **[Config](config/README.md)**: Configuration loading, merging, validation, and typed models
+- **[Hooks](hooks/README.md)**: Helpers for authoring pipeline-hook Lambdas (load / mutate / return a Document)
 - **[Monitoring](monitoring/README.md)**: Shared monitoring foundation (logs, X-Ray, Step Functions, stack discovery)
 
 ## 🗃️ Key Classes

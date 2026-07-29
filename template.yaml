@@ -10732,6 +10732,51 @@ Resources:
       # Force codebuild to rerun when source code changes (filename will change), and to correctly roll back to
       # previous version if build fails.
       CodeLocation: !Sub "arn:${AWS::Partition}:s3:::<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/<WEBUI_ZIPFILE_TOKEN>"
+      # Force codebuild to rerun when a CloudFormation parameter that Vite BAKES
+      # INTO the bundle changes. This property is the only thing that makes a
+      # parameter-only stack update rebuild the UI.
+      #
+      # Why it is needed: the UI reads these as `import.meta.env.VITE_*`, which
+      # Vite substitutes textually at `npm run build` and freezes into the JS in
+      # WebUIBucket. Changing the parameter updates UICodeBuildProject's env var,
+      # but mutating a CodeBuild project definition does NOT run a build — only
+      # this custom resource does, via start_build. Without a property diff here,
+      # CloudFormation skips the resource entirely (no Update event, no build) and
+      # the previously-built bundle stays deployed, so the change silently has no
+      # effect in the UI. A fresh stack create always runs the build once, which
+      # is why this gate is invisible to create-only testing.
+      #
+      # Regression that prompted this: adding AllowedSignUpEmailDomain to an
+      # existing stack correctly flipped the backend (UserPool
+      # AllowAdminCreateUserOnly=false + the PreSignUp domain-verify Lambda) but
+      # the login page kept hiding the Sign Up tab, because VITE_SHOULD_HIDE_SIGN_UP
+      # was still "true" in the stale bundle.
+      #
+      # ONLY list parameters that are baked in at build time. Values resolved at
+      # runtime (the SSM settings parameter read by useParameterStore, e.g.
+      # ConsoleTitle / DefaultFeatureId) must NOT be here — they already take
+      # effect without a rebuild, and adding them would force needless 30-minute
+      # UI rebuilds. Keep in sync with the VITE_* vars in UICodeBuildProject that
+      # derive from a CFN parameter.
+      UIBuildInputs: !Join
+        - "|"
+        - # -> VITE_SHOULD_HIDE_SIGN_UP (hideSignUp on the Authenticator)
+          - !Ref AllowedSignUpEmailDomain
+          # -> VITE_EXTERNAL_IDP_NAME / VITE_COGNITO_DOMAIN (federated sign-in
+          #    button + Amplify OAuth config in aws-exports.js)
+          - !Ref ExternalIdPType
+          - !Ref ExternalIdPName
+          # -> VITE_EXTERNAL_IDP_AUTO_LOGIN (auto-redirect to the IdP)
+          - !Ref ExternalIdPAutoLogin
+          # -> VITE_ENABLE_QUICK_START_WIDGET
+          - !Ref EnableQuickStartWidget
+          # -> VITE_UI_BASE_PATH + VITE_CLOUDFRONT_DOMAIN (Vite `base`, so every
+          #    asset URL in the bundle) and the CloudFront-invalidation branch of
+          #    the buildspec
+          - !Ref WebUIHosting
+          # -> VITE_CLOUDFRONT_DOMAIN (empty when set, so OAuth redirects fall
+          #    back to window.location.origin)
+          - !Ref CustomDomainUrl
 
   ##########################################################################
   # HITL User Management Lambda
