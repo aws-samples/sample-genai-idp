@@ -1,0 +1,37 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# PLACEHOLDER — not the real idp-mcp-connector. See ../README.md.
+# Published only to hold this name on public PyPI so it cannot be squatted and
+# used for dependency confusion. The real package lives in lib/idp_mcp_connector_pkg.
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "idp-mcp-connector"
+# 0.0.0 is intentional: it sorts below any real release, and this release is
+# yanked after upload so pip will not resolve it for an unpinned requirement.
+version = "0.0.0"
+description = "Reserved name placeholder — not a functional package. See the project URL."
+readme = "README.md"
+authors = [{ name = "Amazon Web Services" }]
+license = { text = "MIT-0" }
+requires-python = ">=3.8"
+dependencies = []
+keywords = ["placeholder", "reserved", "name-reservation"]
+classifiers = [
+    "Development Status :: 7 - Inactive",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws"
+Source = "https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws"
+
+[tool.setuptools]
+packages = ["idp_mcp_connector"]

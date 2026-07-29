@@ -5424,7 +5424,7 @@ def multi_discover(
     agentic analysis to automatically discover document classes and generate
     JSON Schemas.
 
-    Requires: make setup (or: pip install idp-common[multi_document_discovery])
+    Requires: make setup (or: pip install -e 'lib/idp_common_pkg[multi_document_discovery]')
 
     Note: Requires at least 2 documents per expected class. Clusters with
     fewer than 2 documents are filtered as noise. For discovering schemas
@@ -5473,8 +5473,14 @@ def multi_discover(
 
     try:
         from idp_sdk import IDPClient
-    except ImportError:
-        console.print("[red]Error: idp-sdk is required. pip install idp-sdk[/red]")
+    except ImportError as exc:
+        # Never suggest `pip install idp-sdk`: idp-sdk is first-party (lib/idp_sdk)
+        # and the PyPI name is a third-party squat. Point at the local install.
+        console.print(
+            "[red]Error: idp-sdk is required. Install it from the local checkout "
+            "with 'make setup' (or: pip install -e lib/idp_sdk).[/red]"
+        )
+        console.print(f"[red]Underlying import error: {exc}[/red]")
         sys.exit(1)
 
     client = IDPClient(stack_name=stack_name, region=region)

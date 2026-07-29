@@ -669,7 +669,7 @@ class DiscoveryOperation:
         classes using embedding → clustering → agentic analysis. Requires the
         ``multi_document_discovery`` extra for ``idp-common``::
 
-            make setup    (or: pip install idp-common[multi_document_discovery])
+            make setup    (or: pip install -e 'lib/idp_common_pkg[multi_document_discovery]')
 
         Args:
             document_dir: Directory containing documents to analyze (recursive).
@@ -743,7 +743,7 @@ class DiscoveryOperation:
             return MultiDocDiscoveryResult(
                 status="FAILED",
                 error="Multi-document discovery requires additional dependencies. "
-                "Install them with: make setup (or: pip install idp-common[multi_document_discovery])",
+                "Install them with: make setup (or: pip install -e 'lib/idp_common_pkg[multi_document_discovery]')",
             )
 
         resolved_region = (

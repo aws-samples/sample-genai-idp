@@ -24,8 +24,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Prerequisites -----------------------------------------------------------
 command -v idp-feature-cli >/dev/null 2>&1 || {
-  echo "ERROR: idp-feature-cli not found. Install the SDK:  pip install idp-feature-sdk" >&2
+  echo "ERROR: idp-feature-cli not found. Install the SDK from the local checkout:" >&2
+  echo "         pip install -e lib/idp_feature_sdk      # from the repo root" >&2
   echo "       (or:  pip install -e '.[extension]'  from the repo root)" >&2
+  echo "       Do NOT 'pip install idp-feature-sdk' — first-party packages are" >&2
+  echo "       not published to PyPI. See docs/dependency-confusion.md." >&2
   exit 1
 }
 command -v sam >/dev/null 2>&1 || {

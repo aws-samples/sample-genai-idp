@@ -80,10 +80,10 @@ The shared library powering all processing. Key modules:
 
 **Modular installation** — only install what the Lambda needs:
 ```
-pip install "idp_common[core]"         # Minimal
-pip install "idp_common[ocr]"          # OCR support
-pip install "idp_common[extraction]"   # Extraction
-pip install "idp_common[all]"          # Everything
+pip install -e "lib/idp_common_pkg[core]"         # Minimal
+pip install -e "lib/idp_common_pkg[ocr]"          # OCR support
+pip install -e "lib/idp_common_pkg[extraction]"   # Extraction
+pip install -e "lib/idp_common_pkg[all]"          # Everything
 ```
 
 **Lazy loading**: `idp_common/__init__.py` uses `__getattr__` for lazy submodule imports. Don't import submodules eagerly at package level.

@@ -367,7 +367,7 @@ class RulesDiscovery:
         if not AGENTIC_AVAILABLE:
             raise ImportError(
                 "Agentic rule discovery requires Python 3.10+ and strands-agents dependencies. "
-                "Install with: pip install 'idp_common[agentic-extraction]' or use agentic.enabled=False"
+                "Install with: pip install -e 'lib/idp_common_pkg[agentic-extraction]' or use agentic.enabled=False"
             )
 
         from idp_common.discovery.models import RuleDiscoveryOutput
