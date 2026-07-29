@@ -36,6 +36,8 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
+from .s3_security import apply_enforce_ssl_only
+
 LIB_DEPENDENCY = "./lib/idp_common_pkg/idp_common"
 LIB_PKG_PATH = "./lib/idp_common_pkg"
 
@@ -579,6 +581,20 @@ STDERR:
         try:
             self.s3_client.head_bucket(Bucket=self.bucket)
             self.console.print(f"[green]Using existing bucket: {self.bucket}[/green]")
+            # Additive hardening on a bucket we didn't create: ensure non-TLS
+            # requests are denied. Never fatal — the operator may own the
+            # bucket policy and not have granted us s3:PutBucketPolicy.
+            if apply_enforce_ssl_only(
+                self.s3_client, self.bucket, self.region, raise_on_error=False
+            ):
+                self.console.print(
+                    "[green]EnforceSSLOnly bucket policy in place[/green]"
+                )
+            else:
+                self.console.print(
+                    "[yellow]Could not verify/apply the EnforceSSLOnly bucket policy "
+                    "on the existing bucket — add it manually.[/yellow]"
+                )
         except ClientError as e:
             error_code = e.response["Error"]["Code"]
             if error_code == "404":
@@ -601,7 +617,15 @@ STDERR:
                         Bucket=self.bucket,
                         VersioningConfiguration={"Status": "Enabled"},
                     )
-                except ClientError as create_error:
+
+                    # Deny any non-TLS request (same EnforceSSLOnly statement
+                    # the CloudFormation-managed buckets carry). Fatal here —
+                    # we just created the bucket, so we own its policy.
+                    apply_enforce_ssl_only(self.s3_client, self.bucket, self.region)
+                    self.console.print(
+                        "[green]Applied EnforceSSLOnly bucket policy[/green]"
+                    )
+                except (ClientError, RuntimeError) as create_error:
                     self.console.print(
                         f"[red]Failed to create bucket: {create_error}[/red]"
                     )

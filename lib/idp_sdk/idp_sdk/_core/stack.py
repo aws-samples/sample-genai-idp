@@ -18,6 +18,8 @@ from typing import Dict, List, Optional
 
 import boto3
 
+from .s3_security import apply_enforce_ssl_only
+
 logger = logging.getLogger(__name__)
 
 
@@ -2211,6 +2213,10 @@ def get_or_create_config_bucket(region: str) -> str:
                 ]
             },
         )
+
+        # Deny any non-TLS request (same EnforceSSLOnly statement the
+        # CloudFormation-managed buckets carry).
+        apply_enforce_ssl_only(s3, bucket_name, region)
 
         # Add tags
         s3.put_bucket_tagging(
