@@ -21,6 +21,13 @@
             "Catch": [
                 { "ErrorEquals": ["States.ALL"], "ResultPath": "$.HookResults.preprocessing.error", "Next": "PreprocessingHookFailed" }
             ],
+            "Next": "ApplyPreprocessingHookDocument"
+        },
+        "ApplyPreprocessingHookDocument": {
+            "Type": "Pass",
+            "Comment": "Copy the (possibly hook-modified) document the dispatcher returned into $.document, which the routing + OCR steps read. The dispatcher ALWAYS returns a document — the inbound one verbatim when no hook modified it — so this is a no-op copy in the common case. A dispatcher/hook error skips this state via the Catch above, leaving the pre-hook $.document intact.",
+            "InputPath": "$.HookResults.preprocessing.Payload.document",
+            "ResultPath": "$.document",
             "Next": "CheckPreprocessingHalt"
         },
         "PreprocessingHookFailed": {
@@ -250,6 +257,13 @@
             "Catch": [
                 { "ErrorEquals": ["States.ALL"], "ResultPath": "$.HookResults.postOcr.error", "Next": "ClassificationStep" }
             ],
+            "Next": "ApplyPostOcrHookDocument"
+        },
+        "ApplyPostOcrHookDocument": {
+            "Type": "Pass",
+            "Comment": "Copy the (possibly hook-modified) document into $.OCRResult.document, which ClassificationStep reads. No-op copy when no hook modified it. On a dispatcher/hook error the Catch above routes straight to ClassificationStep, bypassing this state, so $.OCRResult keeps its pre-hook value with no restore logic needed.",
+            "InputPath": "$.HookResults.postOcr.Payload.document",
+            "ResultPath": "$.OCRResult.document",
             "Next": "ClassificationStep"
         },
         "ClassificationStep": {
@@ -299,6 +313,13 @@
             "Catch": [
                 { "ErrorEquals": ["States.ALL"], "ResultPath": "$.HookResults.postClassification.error", "Next": "ProcessSections" }
             ],
+            "Next": "ApplyPostClassificationHookDocument"
+        },
+        "ApplyPostClassificationHookDocument": {
+            "Type": "Pass",
+            "Comment": "Copy the (possibly hook-modified) document into $.ClassificationResult.document. This is the most powerful mutation point: ProcessSections iterates ITS sections list, and Pipeline_ProcessResultsStep rebuilds the final document from it — so section adds/removes/relabels made here propagate through the whole rest of the pipeline. No-op copy when no hook modified it; the Catch above bypasses this state on error.",
+            "InputPath": "$.HookResults.postClassification.Payload.document",
+            "ResultPath": "$.ClassificationResult.document",
             "Next": "ProcessSections"
         },
         "ProcessSections": {
@@ -494,6 +515,13 @@
                         "Catch": [
                             { "ErrorEquals": ["States.ALL"], "ResultPath": "$.HookResults.error", "Next": "AssessmentStep" }
                         ],
+                        "Next": "ApplyPostExtractionHookDocument"
+                    },
+                    "ApplyPostExtractionHookDocument": {
+                        "Type": "Pass",
+                        "Comment": "Copy the (possibly hook-modified) document into $.document, which AssessmentStep reads. NOTE this runs INSIDE the ProcessSections Map, so the document here is a SECTION document: Pipeline_ProcessResultsStep rebuilds the final document from the ClassificationResult base and takes only sections[0] + metering from each Map result, so section-scoped mutations propagate but top-level/page-level ones made here do not (use postClassification or postRuleValidation for those). No-op copy when no hook modified it; the Catch above bypasses this state on error.",
+                        "InputPath": "$.HookResults.Payload.document",
+                        "ResultPath": "$.document",
                         "Next": "AssessmentStep"
                     },
                     "AssessmentStep": {
@@ -717,6 +745,13 @@
             "Catch": [
                 { "ErrorEquals": ["States.ALL"], "ResultPath": "$.HookResults.postRuleValidation.error", "Next": "SummarizationStep" }
             ],
+            "Next": "ApplyPostRuleValidationHookDocument"
+        },
+        "ApplyPostRuleValidationHookDocument": {
+            "Type": "Pass",
+            "Comment": "Copy the (possibly hook-modified) document into $.RuleValidationOrchestrationResult.document, which SummarizationStep reads. This is the last whole-document mutation point (the Map fan-out is done, so mutations here reach summarization, evaluation, and the final workflow output). No-op copy when no hook modified it; the Catch above bypasses this state on error.",
+            "InputPath": "$.HookResults.postRuleValidation.Payload.document",
+            "ResultPath": "$.RuleValidationOrchestrationResult.document",
             "Next": "SummarizationStep"
         },
         "CheckHITLRequired": {
@@ -767,6 +802,7 @@
         },
         "PostSummarizationHook": {
             "Type": "Task",
+            "Comment": "At this point in the workflow $ IS the document (SummarizationStep's OutputPath narrowed it), so the dispatcher result is parked under $.PostSummarizationHookOut rather than discarded, and the Apply state below unwraps it back to $. Parameters are evaluated BEFORE ResultPath, so the hook payload still receives a clean document.",
             "Resource": "arn:${Partition}:states:::lambda:invoke",
             "Parameters": {
                 "FunctionName": "${PipelineHooksDispatcherLambdaArn}",
@@ -776,13 +812,20 @@
                     "document.$": "$"
                 }
             },
-            "ResultPath": null,
+            "ResultPath": "$.PostSummarizationHookOut",
             "Retry": [
                 { "ErrorEquals": ["Lambda.ServiceException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException"], "IntervalSeconds": 2, "MaxAttempts": 3, "BackoffRate": 2 }
             ],
             "Catch": [
                 { "ErrorEquals": ["States.ALL"], "ResultPath": null, "Next": "EvaluationStep" }
             ],
+            "Next": "ApplyPostSummarizationHookDocument"
+        },
+        "ApplyPostSummarizationHookDocument": {
+            "Type": "Pass",
+            "Comment": "Replace $ with the (possibly hook-modified) document, which EvaluationStep reads and which becomes the workflow's final output. This also drops the temporary PostSummarizationHookOut key, so the final output shape is byte-identical to before this feature. On a dispatcher/hook error the Catch above keeps ResultPath null and routes past this state, so $ remains the unmodified document.",
+            "InputPath": "$.PostSummarizationHookOut.Payload.document",
+            "ResultPath": "$",
             "Next": "EvaluationStep"
         },
         "EvaluationStep": {
