@@ -4,13 +4,14 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 2.0 |
-| **Last Updated** | 2025-03-19 |
+| **Document Version** | 3.0 |
+| **Last Updated** | 2026-07-28 |
+| **Applies to release** | v0.6.3 |
 | **Classification** | Internal |
 
 ## 1. Overview
 
-This guide details the security controls implemented in the GenAI IDP Accelerator to mitigate the 62 identified threats. Controls are organized by security domain and mapped to the specific threats they address.
+This guide details the security controls implemented in the GenAI IDP Accelerator to mitigate the 83 identified threats. Controls are organized by security domain and mapped to the specific threats they address.
 
 ## 2. Authentication & Identity (AUTH)
 
@@ -37,33 +38,63 @@ This guide details the security controls implemented in the GenAI IDP Accelerato
 | **Reviewer** | `{StackName}-Reviewer` | Document review, HITL tasks, view results |
 | **Viewer** | `{StackName}-Viewer` | Read-only access to results and dashboards |
 
-**Enforcement layers**:
-1. **AppSync resolver authorization**: VTL/JS resolvers check `$ctx.identity.claims['cognito:groups']`
-2. **Lambda authorization**: Business logic verifies role from JWT claims
-3. **UI authorization**: React components conditionally rendered based on role
+**Enforcement layers** (v0.6 — the authorization boundary is the resolver Lambda):
+1. **Resolver Lambda authorization**: every resolver checks `cognito:groups` from the
+   dispatcher-normalized identity and raises `PermissionError` (→ HTTP 403). The API
+   Gateway Cognito authorizer **only authenticates** — it performs no group evaluation.
+2. **Config-version scope**: scope-aware resolvers additionally check the caller's
+   `allowedConfigVersions` (from the UsersTable) — denials return an in-band
+   `Unauthorized` body with HTTP 200.
+3. **Object-level authorization**: owner-scoped keys / `ownerSub`-vs-caller checks on
+   user-owned resources (chat sessions, agent jobs).
+4. **UI authorization**: React components conditionally rendered based on role
+   (**presentation only — never a security control**; the API is directly callable).
+
+> `@aws_cognito_user_pools` directives in `schema.graphql` are **documentation and
+> defense-in-depth intent only** — no gateway enforces them (AUTH.T08).
 
 ### 2.3 JWT Validation
 
-**Threats mitigated**: AUTH.T02, AUTH.T03
+**Threats mitigated**: AUTH.T02, AUTH.T03, AUTH.T10, AUTH.T11
 
-- AppSync validates JWT signature against Cognito JWKS
-- Token expiration enforced by AppSync
-- Group claims extracted for authorization decisions
-- HTTPS-only communication (TLS 1.2+)
+- API Gateway's Cognito User Pools authorizer validates the JWT signature against Cognito JWKS
+- Token expiration enforced by the authorizer (401 on expired/invalid)
+- Group claims forwarded to the dispatcher and consumed by resolvers for authorization
+- HTTPS-only communication (TLS 1.2+); no cleartext HTTP
+- **Known gap**: a global sign-out revokes refresh tokens but a still-valid access/ID
+  token remains accepted until `exp` (**GAP-SEC-LOGOUT**, WARN — AUTH.T10)
 
 ## 3. API Security (UI, SDK)
 
-### 3.1 AppSync GraphQL API
+### 3.1 UI REST API (`POST /op/{field}`)
 
-**Threats mitigated**: UI.T03, AUTH.T03, CHAT.T02, CHAT.T03
+**Threats mitigated**: UI.T03, AUTH.T03, AUTH.T08, AUTH.T12, CHAT.T02
 
 | Control | Implementation |
 |---------|---------------|
-| **Authentication** | Cognito User Pool authorization mode |
-| **Field-level auth** | Resolver-level group membership checks on all mutations |
-| **Subscription auth** | User-scoped subscription filters |
-| **Rate limiting** | AppSync default throttling + CloudWatch alarms |
-| **Query limits** | AppSync max query depth and complexity |
+| **Authentication** | API Gateway Cognito User Pools authorizer (authenticate only) |
+| **Authorization** | Per-operation `cognito:groups` checks **inside each resolver Lambda** |
+| **Input-shape validation** | Dispatcher validates `arguments` against a build-time spec generated from `schema.graphql`; rejects unknown/missing/wrong-typed/out-of-enum args with HTTP 400 |
+| **Network posture** | Optional `ApiGatewayVisibility=PRIVATE` + VPCe resource policy; optional WAFv2 default-Block IP allow-list on the stage |
+| **Rate limiting** | API Gateway stage throttling + Lambda reserved concurrency + CloudWatch alarms |
+| **Security headers** | `nosniff`, HSTS, `X-Frame-Options: DENY`, `Referrer-Policy` on `/op` responses and gateway 4xx/5xx |
+| **Automated testing** | `make api-test-static` (drift/missing-check scan) + `make api-test` (live op×role, scope, IDOR, token-lifecycle, input-validation, TLS suites) |
+
+> **No GraphQL engine is in the request path.** Query-depth/complexity limits and
+> introspection controls are **not applicable** — do not cite them as controls.
+
+### 3.1a Chat Streaming Function URL
+
+**Threats mitigated**: CHAT.T03 (authentication only), CHAT.T06
+
+| Control | Implementation |
+|---------|---------------|
+| **Authentication** | `AuthType=AWS_IAM`; browser signs with SigV4 using Cognito Identity Pool credentials; `lambda:InvokeFunctionUrl` granted to `CognitoAuthorizedRole` |
+| **CORS** | `AllowCredentials: false`, SigV4 in headers, no cookies |
+| **Group authorization** | **NOT ENFORCED** — the Identity Pool role is shared by all four groups (open gap, CHAT.T03) |
+| **Session ownership** | **NOT ENFORCED** on this transport (open gap, CHAT.T03) |
+| **Rate limiting** | Lambda concurrency only — **not** covered by API Gateway throttling or the WAF WebACL |
+| **Automated testing** | **None** — `make api-test` drives `POST /op/{field}` only |
 
 ### 3.2 CloudFront Distribution
 
@@ -73,8 +104,28 @@ This guide details the security controls implemented in the GenAI IDP Accelerato
 |---------|---------------|
 | **Origin Access Control** | OAC for S3 origin (replaces OAI) |
 | **HTTPS enforcement** | Redirect HTTP to HTTPS, TLS 1.2 minimum |
-| **Response headers** | CSP, X-Frame-Options, X-Content-Type-Options |
+| **Response headers** | CSP (see caveat), X-Frame-Options, X-Content-Type-Options, HSTS, Referrer-Policy |
 | **S3 bucket policy** | Only CloudFront OAC can read UI bucket |
+
+> **CSP caveat (UI.T01/UI.T07).** The shipped CSP retains `'unsafe-inline'` and
+> `'unsafe-eval'` in `script-src` (pending Monaco editor work) and allows any
+> `https:` script origin, so it does **not** block injected inline script — treat
+> React escaping as the control of record for XSS. The policy is also gated on
+> `UseCloudFrontHosting`: in `WebUIHosting=APIGateway` mode (required for
+> `--govcloud`) **no CSP is emitted at all**, though the header trio is set
+> per-method on the SPA routes.
+
+### 3.2a API Gateway Web UI Hosting (`WebUIHosting=APIGateway`)
+
+**Threats mitigated**: UI.T04, UI.T07
+
+| Control | Implementation |
+|---------|---------------|
+| **Origin access** | S3-proxy integration assumes a dedicated `WebUIProxyRole` scoped to the Web UI bucket |
+| **Routes** | `GET /` → `index.html`, `GET /{proxy+}` → asset key; both `AuthorizationType: NONE` (SPA shell/assets are not secrets) |
+| **Network posture** | PRIVATE endpoint policy and WAF WebACL still apply to these routes |
+| **Security headers** | `nosniff`, HSTS, `X-Frame-Options: DENY`, `Referrer-Policy` set per-method (**no CSP** — see caveat) |
+| **Missing keys** | S3 4xx mapped to 404; HashRouter means deep links need no server-side rewrite |
 
 ### 3.3 Presigned URLs
 
@@ -82,9 +133,15 @@ This guide details the security controls implemented in the GenAI IDP Accelerato
 
 | Control | Implementation |
 |---------|---------------|
-| **Short expiration** | 15-minute expiration on upload URLs |
-| **Conditions** | Content-type restrictions, file size limits |
-| **Scope** | Presigned to specific S3 prefix per upload |
+| **Short expiration** | Short expiration on upload URLs |
+| **Minting authorization** | `uploadDocument` requires the Admin/Author group (server-side) |
+| **Read allow-list** | `getFilePresignedUrl`/`getFileContents` restrict the target to this stack's buckets (`_validate_bucket`) |
+
+> **Read-scoping gap (UI.T06).** Presigned **read** URLs are bucket-scoped but
+> **not key-scoped**, and both operations are callable by *any authenticated
+> user* — so they are not a valid boundary for deployments relying on
+> `allowedConfigVersions` to partition users. The allow-list also fails **open**
+> if the bucket env vars are unset. Open item.
 
 ## 4. Data Protection
 
@@ -104,7 +161,7 @@ This guide details the security controls implemented in the GenAI IDP Accelerato
 | Resource | Protocol |
 |----------|----------|
 | All API calls | HTTPS / TLS 1.2+ |
-| AppSync subscriptions | WSS (WebSocket Secure) |
+| Chat streaming | HTTPS SSE (`text/event-stream`) over the Lambda Function URL |
 | AWS service calls | TLS via AWS SDK |
 | CloudFront | HTTPS only |
 
@@ -115,7 +172,7 @@ This guide details the security controls implemented in the GenAI IDP Accelerato
 | Mechanism | Implementation |
 |-----------|---------------|
 | **Single-tenant** | One CloudFormation stack per environment |
-| **User-scoped queries** | DynamoDB partition keys include user ID |
+| **User-scoped queries** | `ChatSessionsTable` is keyed `PK=userId`; `ChatMessagesTable` is keyed `PK=sessionId` and relies on **explicit resolver ownership checks** (`_verify_session_ownership` / `ownerSub`), not the key alone |
 | **Session isolation** | UUID-based conversation session IDs |
 | **Stack isolation** | Separate Cognito pools, S3 buckets, DynamoDB tables per stack |
 
@@ -242,7 +299,7 @@ This guide details the security controls implemented in the GenAI IDP Accelerato
 
 | Control | Status |
 |---------|--------|
-| **No public Lambda URLs** | Lambda functions only invoked via AppSync, SQS, EventBridge, Step Functions |
+| **Minimal public Lambda exposure** | Lambda functions are invoked via API Gateway, SQS, EventBridge, or Step Functions. **One exception**: `ChatStreamProcessorFunction` has a public Function URL for SSE chat streaming — gated by `AuthType=AWS_IAM` (SigV4), but **not** behind API Gateway, the WAF, or a VPC endpoint. See CHAT.T03. |
 | **HTTPS everywhere** | All communication over TLS 1.2+ |
 | **CloudFront as WAF endpoint** | Optional WAF integration for additional protection |
 
@@ -283,7 +340,8 @@ For deployments requiring network-level isolation:
 ### Post-Deployment
 
 - [ ] Create Cognito users with appropriate group assignments
-- [ ] Verify AppSync resolver authorization rules
+- [ ] Run `make api-test-static` and `make api-test` — verify every operation's resolver-side group/scope check passes and no new WARN gaps appeared
+- [ ] Confirm any newly added API operation has an entry in `scripts/api_rbac_expectations.yaml` (the static scan fails on drift)
 - [ ] Test RBAC permissions across all four roles
 - [ ] Configure CloudWatch alarm notifications
 - [ ] Review CloudTrail logging coverage
@@ -292,7 +350,8 @@ For deployments requiring network-level isolation:
 
 ### Ongoing Operations
 
-- [ ] Periodic AppSync authorization audit
+- [ ] Periodic API authorization audit (`make api-test` against a live stack; review the op×role matrix report)
+- [ ] Review the chat streaming Function URL path separately — it is **outside** the automated harness (CHAT.T03)
 - [ ] Review CloudWatch alarm history for security events
 - [ ] Monitor Athena query patterns for anomalies
 - [ ] Review and rotate SDK/CLI credentials

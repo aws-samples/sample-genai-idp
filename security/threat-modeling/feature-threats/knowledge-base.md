@@ -4,8 +4,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 2.0 |
-| **Last Updated** | 2025-03-19 |
+| **Document Version** | 3.0 |
+| **Last Updated** | 2026-07-28 |
+| **Applies to release** | v0.6.3 |
 | **Feature** | Bedrock Knowledge Base (RAG Integration) |
 | **Classification** | Internal |
 

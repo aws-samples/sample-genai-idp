@@ -4,10 +4,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 2.1 |
-| **Last Updated** | 2026-07-17 |
+| **Document Version** | 3.0 |
+| **Last Updated** | 2026-07-28 |
+| **Applies to release** | v0.6.3 |
 | **Classification** | Internal |
-| **Total Threat IDs** | 68 |
+| **Total Threat IDs** | 83 |
 
 ## 1. Threat ID Naming Convention
 
@@ -25,11 +26,14 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | **SDK** | SDK/CLI | Programmatic access and automation threats | [feature-threats/sdk-cli.md](feature-threats/sdk-cli.md) |
 | **HOOK** | Lambda Hooks | Customer-managed extensibility threats | [feature-threats/lambda-hooks.md](feature-threats/lambda-hooks.md) |
 | **UI** | Web UI | Frontend and API threats | [feature-threats/web-ui.md](feature-threats/web-ui.md) |
-| **RPT** | Reporting/Analytics | Data analytics, evaluation, and discovery threats | [feature-threats/reporting-analytics.md](feature-threats/reporting-analytics.md) |
+| **RPT** | Reporting/Analytics | Data analytics, evaluation, discovery, test sets, document versions | [feature-threats/reporting-analytics.md](feature-threats/reporting-analytics.md) |
+| **FEAT** | Feature Platform | Installable extension / feature-platform threats | [feature-threats/feature-platform.md](feature-threats/feature-platform.md) |
+| **JOB** | Jobs API | Machine-to-machine Jobs REST API threats | [feature-threats/jobs-api.md](feature-threats/jobs-api.md) |
+| **PII** | PII Anonymization | Preprocessing hook + PII redaction extension threats | [feature-threats/pii-anonymization.md](feature-threats/pii-anonymization.md) |
 
 ## 2. Complete Threat ID Reference
 
-### PM — Pipeline Mode (7 threats)
+### PM — Pipeline Mode (8 threats)
 
 | ID | Short Name | STRIDE | Risk |
 |----|-----------|--------|------|
@@ -40,6 +44,7 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | PM.T05 | Textract service dependency | DoS | 4 (Medium) |
 | PM.T06 | Configuration tampering | Tampering, EoP | 8 (Critical) |
 | PM.T07 | Few-shot example poisoning | Tampering | 2 (Low) |
+| PM.T08 | Document content sent to a non-Anthropic model family (OpenAI via `bedrock-mantle`) | ID | 4 (Medium) |
 
 ### BDA — BDA Mode (5 threats)
 
@@ -61,15 +66,16 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | AGT.T04 | Conversation history poisoning | Tampering | 2 (Low) |
 | AGT.T05 | Cross-user data leakage via Athena | ID | 6 (High) |
 
-### CHAT — Companion Chat (5 threats)
+### CHAT — Companion Chat (6 threats)
 
 | ID | Short Name | STRIDE | Risk |
 |----|-----------|--------|------|
 | CHAT.T01 | Prompt injection via chat messages | Tampering, EoP | 9 (Very High) |
 | CHAT.T02 | Conversation session hijacking | Spoofing, ID | 3 (Medium) |
-| CHAT.T03 | Real-time subscription eavesdropping | ID | 3 (Medium) |
+| CHAT.T03 | Chat streaming Function URL — missing group + session-ownership enforcement | ID, EoP | 6 (High) |
 | CHAT.T04 | Conversation history data exposure | ID | 3 (Medium) |
 | CHAT.T05 | Streaming response denial of service | DoS | 4 (Medium) |
+| CHAT.T06 | Client-supplied caller identity on the agent streaming route | Spoofing | 3 (Medium) |
 
 ### MCP — MCP Integration (6 threats)
 
@@ -117,7 +123,7 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | SDK.T03 | SDK supply chain attack | Tampering | 3 (Medium) |
 | SDK.T04 | Batch processing abuse | DoS | 4 (Medium) |
 
-### HOOK — Lambda Hooks (5 threats)
+### HOOK — Lambda Hooks (6 threats)
 
 | ID | Short Name | STRIDE | Risk |
 |----|-----------|--------|------|
@@ -126,18 +132,21 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | HOOK.T03 | Inference hook result tampering | Tampering | 3 (Medium) |
 | HOOK.T04 | Hook Lambda timeout / failure cascade | DoS | 4 (Medium) |
 | HOOK.T05 | Privilege escalation via hook IAM role | EoP | 3 (Medium) |
+| HOOK.T06 | Preprocessing hook sees raw source document; can halt or replace it | Tampering, ID, DoS | 6 (High) |
 
-### UI — Web UI (5 threats)
+### UI — Web UI (7 threats)
 
 | ID | Short Name | STRIDE | Risk |
 |----|-----------|--------|------|
 | UI.T01 | Cross-site scripting (XSS) | Tampering, ID | 6 (High) |
-| UI.T02 | Presigned URL abuse | Spoofing, Tampering | 2 (Low) |
-| UI.T03 | GraphQL API abuse | Tampering, ID | 4 (Medium) |
-| UI.T04 | CloudFront distribution misconfiguration | ID | 2 (Low) |
+| UI.T02 | Presigned upload URL abuse | Spoofing, Tampering | 2 (Low) |
+| UI.T03 | UI API abuse (REST dispatcher) | Tampering, ID, DoS | 6 (High) |
+| UI.T04 | Hosting origin misconfiguration (CloudFront / API Gateway S3 proxy) | ID | 2 (Low) |
 | UI.T05 | Client-side configuration exposure | ID | 2 (Low) |
+| UI.T06 | Presigned read URLs are bucket-scoped, not key-scoped | ID, EoP | 6 (High) |
+| UI.T07 | Security-header / CSP divergence between hosting modes | Tampering, ID | 3 (Medium) |
 
-### RPT — Reporting & Analytics (6 threats)
+### RPT — Reporting & Analytics (8 threats)
 
 | ID | Short Name | STRIDE | Risk |
 |----|-----------|--------|------|
@@ -147,6 +156,35 @@ Threat IDs follow the pattern: `{CATEGORY}.T{NN}`
 | RPT.T04 | Evaluation data manipulation | Tampering | 3 (Medium) |
 | RPT.T05 | Discovery prompt injection via sample docs | Tampering, EoP | 6 (High) |
 | RPT.T06 | Test Studio uncontrolled processing costs | DoS | 4 (Medium) |
+| RPT.T07 | Ground-truth tampering via the Test Set visual editor | Tampering, Repudiation | 6 (High) |
+| RPT.T08 | Extended data retention via document version history | ID | 3 (Medium) |
+
+### FEAT — Feature Platform (4 threats)
+
+| ID | Short Name | STRIDE | Risk |
+|----|-----------|--------|------|
+| FEAT.T01 | Feature UI bundle executes unsandboxed in the host origin | Tampering, ID, EoP | 8 (Critical) |
+| FEAT.T02 | Feature registry enumeration by any authenticated user | ID | 2 (Low) |
+| FEAT.T03 | Feature stack IAM privilege and host resource access | EoP, Tampering | 6 (High) |
+| FEAT.T04 | Stale or downgraded feature bundle served to users | Tampering, DoS | 3 (Medium) |
+
+### JOB — Jobs API (3 threats)
+
+| ID | Short Name | STRIDE | Risk |
+|----|-----------|--------|------|
+| JOB.T01 | Jobs API clients bypass the Cognito group RBAC model | EoP | 6 (High) |
+| JOB.T02 | Jobs API is outside the automated authorization test harness | EoP (detection gap) | 3 (Medium) |
+| JOB.T03 | Static client secret with no rotation mechanism | Spoofing | 3 (Medium) |
+
+### PII — PII Anonymization & Preprocessing (5 threats)
+
+| ID | Short Name | STRIDE | Risk |
+|----|-----------|--------|------|
+| PII.T01 | Un-redacted document content reaches the detection model | ID | 4 (Medium) |
+| PII.T02 | Redaction loop / re-entrancy via input-bucket writeback | DoS | 3 (Medium) |
+| PII.T03 | Redaction bypass — un-redacted document processed on hook failure | ID, Tampering | 6 (High) |
+| PII.T04 | Redaction mapping table as a re-identification oracle | ID, EoP | 6 (High) |
+| PII.T05 | Companion config-version pairing misconfiguration | ID | 3 (Medium) |
 
 ## 3. STRIDE Abbreviations
 

@@ -49,6 +49,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import uuid
 from typing import Any, Dict
 
@@ -60,6 +61,7 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 _QUEUE_URL = os.environ.get("BOOTSTRAP_QUEUE_URL", "")
 _TRACKING_TABLE = os.environ.get("BOOTSTRAP_TRACKING_TABLE", "")
+_HOST_TRACKING_TABLE = os.environ.get("HOST_TRACKING_TABLE", "")
 _CONFIG_TABLE = os.environ.get("CONFIGURATION_TABLE_NAME", "")
 _FEATURE_VERSION = os.environ.get("FEATURE_VERSION", "")
 _SUGGEST_MODEL_ID = os.environ.get(
@@ -94,6 +96,31 @@ class _BadRequest(Exception):
     """Raised for invalid request fields; surfaced as a 400."""
 
 
+class _Forbidden(Exception):
+    """Raised when the caller lacks the required Cognito group; surfaced as 403."""
+
+
+_WRITE_GROUPS = ("Admin", "Author")
+
+
+def _caller_groups(event: Dict[str, Any]) -> list:
+    claims = (
+        event.get("requestContext", {})
+        .get("authorizer", {})
+        .get("jwt", {})
+        .get("claims", {})
+    ) or {}
+    raw = claims.get("cognito:groups") or []
+    if isinstance(raw, str):
+        raw = [g for g in raw.strip("[]").replace(",", " ").split() if g]
+    return list(raw)
+
+
+def _require_write_group(event: Dict[str, Any]) -> None:
+    if not any(g in _WRITE_GROUPS for g in _caller_groups(event)):
+        raise _Forbidden("generating test sets requires the Admin or Author group")
+
+
 def _int_field(body: Dict[str, Any], name: str, default: int, lo: int, hi: int) -> int:
     raw = body.get(name, default)
     try:
@@ -103,6 +130,58 @@ def _int_field(body: Dict[str, Any], name: str, default: int, lo: int, hi: int) 
     if value < lo or value > hi:
         raise _BadRequest(f"{name} must be between {lo} and {hi}")
     return value
+
+
+_NAME_RE = re.compile(r"^[a-zA-Z0-9\s_-]+$")
+
+
+def _test_set_dest(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve the generated-docs destination test set from the request.
+
+    Either testSetId (append to an existing set) or testSetName (create a new
+    one). The id is derived from the name with the host's rule so it matches the
+    console (name.replace(' ', '-').lower()). Returns testSetId/testSetName/append
+    fields to merge into the SQS message.
+    """
+    existing_id = (body.get("testSetId") or "").strip()
+    if existing_id:
+        if len(existing_id) > 50 or not _NAME_RE.match(existing_id):
+            raise _BadRequest("testSetId contains invalid characters")
+        return {"testSetId": existing_id, "testSetName": existing_id, "append": True}
+    name = (body.get("testSetName") or "").strip()
+    if not name:
+        raise _BadRequest("testSetName or testSetId is required")
+    if len(name) > 50 or not _NAME_RE.match(name):
+        raise _BadRequest(
+            "testSetName may contain only letters, numbers, spaces, hyphens, and "
+            "underscores (max 50 characters)"
+        )
+    new_id = name.replace(" ", "-").lower()
+    if _test_set_exists(new_id):
+        raise _BadRequest(
+            f"A test set named '{name}' already exists. Choose a different name, "
+            "or add to the existing test set."
+        )
+    return {"testSetId": new_id, "testSetName": name, "append": False}
+
+
+def _test_set_exists(test_set_id: str) -> bool:
+    """Backstop for the UI's collision check: is there already a host test-set
+    record with this id? Best-effort — if the lookup fails, don't block."""
+    if not _HOST_TRACKING_TABLE:
+        return False
+    try:
+        item = (
+            _dynamodb.Table(_HOST_TRACKING_TABLE)
+            .get_item(Key={"PK": f"testset#{test_set_id}", "SK": "metadata"})
+            .get("Item")
+        )
+        return item is not None
+    except Exception:  # noqa: BLE001 — best-effort, don't block generation
+        logger.warning(
+            "Could not check test set existence for %s", test_set_id, exc_info=True
+        )
+        return False
 
 
 def _handle_generate(body: Dict[str, Any]) -> Dict[str, Any]:
@@ -122,6 +201,7 @@ def _handle_generate(body: Dict[str, Any]) -> Dict[str, Any]:
         "augment": bool(body.get("augment", False)),
         "scenario": (body.get("scenario") or "").strip(),
         "generateDocs": True,
+        **_test_set_dest(body),
     }
     if schema:
         # Preauthored path — the processor uses the schema as-is and writes it
@@ -150,6 +230,7 @@ def _handle_generate_from_config(body: Dict[str, Any]) -> Dict[str, Any]:
         # The processor reads the class from this version and builds the
         # generator schema (schema_bridge.config_class_to_generator_schema).
         "fromExistingConfig": True,
+        **_test_set_dest(body),
     }
     return _resp(202, {"jobId": _enqueue(message)})
 
@@ -261,8 +342,10 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
 
     try:
         if method == "POST" and path.endswith("/generate"):
+            _require_write_group(event)
             return _handle_generate(json.loads(event.get("body") or "{}"))
         if method == "POST" and path.endswith("/generate-from-config"):
+            _require_write_group(event)
             return _handle_generate_from_config(json.loads(event.get("body") or "{}"))
         if method == "POST" and path.endswith("/estimate-cost"):
             return _handle_estimate_cost(json.loads(event.get("body") or "{}"))
@@ -281,6 +364,8 @@ def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         return _resp(400, {"error": "invalid JSON body"})
     except _BadRequest as exc:
         return _resp(400, {"error": str(exc)})
+    except _Forbidden as exc:
+        return _resp(403, {"error": str(exc)})
     except Exception:  # noqa: BLE001
         logger.exception("feature-api error")
         return _resp(500, {"error": "internal error"})

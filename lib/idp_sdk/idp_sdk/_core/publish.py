@@ -39,6 +39,14 @@ from rich.progress import (
 LIB_DEPENDENCY = "./lib/idp_common_pkg/idp_common"
 LIB_PKG_PATH = "./lib/idp_common_pkg"
 
+# Files the multi-doc discovery CodeBuild project needs from the source zip in
+# order to build its container image. Kept as a constant so the packaging step
+# and its test assert on the same list.
+MULTI_DOC_DISCOVERY_BUILD_INPUTS = (
+    "nested/multi-doc-discovery/Dockerfile",
+    "nested/multi-doc-discovery/requirements.txt",
+)
+
 
 class IDPPublisher:
     def __init__(self, verbose=False):
@@ -1333,6 +1341,21 @@ STDERR:
                     arcname = os.path.relpath(file_path, ".")
                     zipf.write(file_path, arcname)
 
+            # Add the build inputs themselves. The CodeBuild buildspec builds
+            # `-f nested/multi-doc-discovery/Dockerfile`, which in turn COPYs
+            # nested/multi-doc-discovery/requirements.txt, so BOTH must be in
+            # the zip. They used to be heredoc'd inline in the buildspec, which
+            # let the real files (and Dependabot's security bumps to them) drift
+            # out of the image entirely.
+            for build_input in MULTI_DOC_DISCOVERY_BUILD_INPUTS:
+                if not os.path.isfile(build_input):
+                    self.console.print(
+                        f"[red]❌ Missing multi-doc discovery build input: "
+                        f"{build_input}[/red]"
+                    )
+                    sys.exit(1)
+                zipf.write(build_input, build_input)
+
         self.console.print(
             f"[green]✅ Created multi-doc discovery source zip ({os.path.getsize(zipfile_path) / 1024 / 1024:.2f} MB)[/green]"
         )
@@ -2481,9 +2504,29 @@ STDERR:
                     "<w2_dataset_deployer_HASH_TOKEN>": self.get_directory_checksum(
                         "src/lambda/w2_dataset_deployer"
                     )[:16],
-                    "<MULTI_DOC_DISCOVERY_BUILD_HASH_TOKEN>": self.get_directory_checksum(
-                        "src/lambda/multi_doc_discovery"
-                    )[:16],
+                    # BuildHash is the ONLY meaningful property of the
+                    # DockerBuildRun custom resource, so it is the sole thing
+                    # that re-triggers the container build on a stack update: if
+                    # it doesn't change, CloudFormation sees no delta, never
+                    # re-invokes the resource, and the ECR :latest image keeps
+                    # whatever it had. It must therefore cover EVERY input to the
+                    # image — the handler code AND the Dockerfile/requirements.txt
+                    # the build installs from. Hashing only the handler directory
+                    # meant a Dependabot bump to requirements.txt left BuildHash
+                    # byte-identical and the vulnerable dependency stayed
+                    # deployed (a fresh create always builds, so this is only
+                    # observable on an in-place update).
+                    "<MULTI_DOC_DISCOVERY_BUILD_HASH_TOKEN>": hashlib.sha256(
+                        (
+                            self.get_directory_checksum(
+                                "src/lambda/multi_doc_discovery"
+                            )
+                            + "".join(
+                                self.get_file_checksum(build_input)
+                                for build_input in MULTI_DOC_DISCOVERY_BUILD_INPUTS
+                            )
+                        ).encode()
+                    ).hexdigest()[:16],
                     "<SAMPLE_FEATURES_HASH_TOKEN>": sample_features_hash,
                     "<SAMPLE_FEATURES_LIST_TOKEN>": json.dumps(
                         sample_features_list or []
@@ -2802,6 +2845,11 @@ STDERR:
                 LIB_DEPENDENCY,
                 "nested/multi-doc-discovery/docker_build_lambda",
                 "nested/multi-doc-discovery/template.yaml",
+                # The container image's build inputs. Without these two, a
+                # Dependabot bump to requirements.txt (or a Dockerfile change)
+                # would not invalidate the checksum, so the smart-rebuild logic
+                # would skip the component and keep shipping the old image.
+                *MULTI_DOC_DISCOVERY_BUILD_INPUTS,
                 "src/lambda/multi_doc_discovery",
             ],
             # Unified pattern (combines BDA + Pipeline)

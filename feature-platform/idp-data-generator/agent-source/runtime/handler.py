@@ -63,6 +63,7 @@ def _run_job(payload):
     count = int(payload.get("count", 3))
     threshold = int(payload.get("threshold", 7))
     augment = bool(payload.get("augment", False))
+    append = bool(payload.get("append", False))
     extra = payload.get("scenario") or payload.get("extra", "")
     model_id = payload.get("modelId") or os.environ.get("GENERATOR_MODEL_ID")
     allowed_field_names = set(payload.get("allowedFieldNames", []))
@@ -91,6 +92,7 @@ def _run_job(payload):
         result = engine.synthesize(job, status_cb=_status)
         if not result.success or not result.packet_dir:
             _post_status(payload, job_id, "FAILED", result.error or "Generation failed")
+            _fail_test_set(test_set_id, append, test_set_bucket)
             return
 
         documents = packet_io.read_packet(result.packet_dir)
@@ -106,19 +108,20 @@ def _run_job(payload):
                 )
 
         uploaded = packet_io.upload_packet_to_test_set(
-            documents, test_set_id, test_set_bucket
+            documents, test_set_id, test_set_bucket, name_prefix=f"{job_id[:8]}_"
         )
+        total = _test_set_input_count(test_set_bucket, test_set_id)
         _post_status(
             payload,
             job_id,
             "COMPLETED",
             f"{uploaded} document(s) in test set {test_set_id}",
         )
-        _update_test_set(test_set_id, "COMPLETED", file_count=uploaded)
+        _update_test_set(test_set_id, "COMPLETED", file_count=total or uploaded)
     except Exception as e:
         logger.exception("Synthesis job %s failed", job_id)
         _post_status(payload, job_id, "FAILED", str(e))
-        _update_test_set(test_set_id, "FAILED")
+        _fail_test_set(test_set_id, append, test_set_bucket)
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 
@@ -169,6 +172,36 @@ def invoke(payload, context=None):
     threading.Thread(target=_worker, daemon=True).start()
 
     return {"accepted": True, "jobId": job_id, "testSetId": payload.get("testSetId")}
+
+
+def _test_set_input_count(bucket, test_set_id):
+    # True document count under the test set's input/ prefix, so appends report
+    # the total (getTestSets reads fileCount from the record). Best-effort.
+    try:
+        s3 = boto3.client("s3")
+        paginator = s3.get_paginator("list_objects_v2")
+        count = 0
+        for page in paginator.paginate(Bucket=bucket, Prefix=f"{test_set_id}/input/"):
+            count += sum(
+                1 for o in page.get("Contents", []) if not o["Key"].endswith("/")
+            )
+        return count
+    except Exception:  # noqa: BLE001 — best-effort
+        logger.warning(
+            "Failed to count test set inputs for %s", test_set_id, exc_info=True
+        )
+        return None
+
+
+def _fail_test_set(test_set_id, append, bucket):
+    if append:
+        _update_test_set(
+            test_set_id,
+            "COMPLETED",
+            file_count=_test_set_input_count(bucket, test_set_id),
+        )
+    else:
+        _update_test_set(test_set_id, "FAILED")
 
 
 def _update_test_set(test_set_id, status, file_count=None):
