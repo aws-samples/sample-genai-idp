@@ -22,6 +22,7 @@ from idp_sdk._core.s3_security import (
     enforce_ssl_only_policy,
     get_partition,
     merge_enforce_ssl_only,
+    statement_list,
 )
 from moto import mock_aws
 
@@ -116,6 +117,68 @@ def test_merge_preserves_other_statements():
     ]
 
 
+def test_merge_handles_single_object_statement():
+    """``Statement`` may legally be a single object rather than an array — the
+    IAM grammar allows both. Iterating the object form naively yields its
+    *keys*, which would replace the operator's statement with the strings
+    "Sid", "Effect", … and produce an invalid policy."""
+    existing = {
+        "Version": "2012-10-17",
+        "Statement": {
+            "Sid": "OperatorGrant",
+            "Effect": "Allow",
+            "Principal": {"AWS": "123456789012"},
+            "Action": "s3:GetObject",
+            "Resource": "arn:aws:s3:::b/*",
+        },
+    }
+    merged = merge_enforce_ssl_only(existing, "b", REGION)
+    # Every statement is still a dict — no stringified key leaked in.
+    assert all(isinstance(s, dict) for s in merged["Statement"])
+    assert [s["Sid"] for s in merged["Statement"]] == [
+        "OperatorGrant",
+        "EnforceSSLOnly",
+    ]
+    # The operator's grant survives intact, not reduced to its field names.
+    operator = merged["Statement"][0]
+    assert operator["Action"] == "s3:GetObject"
+    assert operator["Principal"] == {"AWS": "123456789012"}
+
+
+def test_merge_replaces_stale_enforce_ssl_in_single_object_form():
+    """A single-object Statement that IS the EnforceSSLOnly statement is
+    replaced rather than duplicated."""
+    existing = {
+        "Version": "2012-10-17",
+        "Statement": {
+            "Sid": "EnforceSSLOnly",
+            "Effect": "Deny",
+            "Resource": ["stale"],
+        },
+    }
+    merged = merge_enforce_ssl_only(existing, "b", REGION)
+    assert [s["Sid"] for s in merged["Statement"]] == ["EnforceSSLOnly"]
+    assert merged["Statement"][0]["Resource"] == [
+        "arn:aws:s3:::b",
+        "arn:aws:s3:::b/*",
+    ]
+
+
+@pytest.mark.parametrize("raw", ["a-string", 42])
+def test_statement_list_refuses_malformed_statement(raw):
+    """A Statement that's neither object nor list is refused rather than
+    silently dropped — writing a policy that discarded it would be worse."""
+    with pytest.raises(ValueError, match="Unsupported"):
+        statement_list({"Version": "2012-10-17", "Statement": raw})
+
+
+def test_statement_list_normalizes_both_forms():
+    assert statement_list(None) == []
+    assert statement_list({}) == []
+    assert statement_list({"Statement": {"Sid": "A"}}) == [{"Sid": "A"}]
+    assert statement_list({"Statement": [{"Sid": "A"}]}) == [{"Sid": "A"}]
+
+
 def test_merge_replaces_stale_enforce_ssl_statement():
     """A pre-existing EnforceSSLOnly (e.g. with a wrong partition) is replaced,
     not duplicated."""
@@ -191,6 +254,43 @@ def test_apply_preserves_existing_statements(aws_credentials):
             "OperatorGrant",
             "EnforceSSLOnly",
         }
+
+
+def test_apply_preserves_a_single_object_statement_end_to_end(aws_credentials):
+    """End-to-end guard for the single-object ``Statement`` form: the written
+    policy must keep the operator's grant as a real statement, not as the
+    stringified field names iterating a dict would produce."""
+    with mock_aws():
+        s3 = boto3.client("s3", region_name=REGION)
+        _make_bucket(s3, "single-stmt-bucket")
+        s3.put_bucket_policy(
+            Bucket="single-stmt-bucket",
+            Policy=json.dumps(
+                {
+                    "Version": "2012-10-17",
+                    "Statement": {
+                        "Sid": "OperatorGrant",
+                        "Effect": "Allow",
+                        "Principal": {"AWS": "123456789012"},
+                        "Action": "s3:GetObject",
+                        "Resource": "arn:aws:s3:::single-stmt-bucket/*",
+                    },
+                }
+            ),
+        )
+
+        assert apply_enforce_ssl_only(s3, "single-stmt-bucket", REGION) is True
+
+        policy = json.loads(s3.get_bucket_policy(Bucket="single-stmt-bucket")["Policy"])
+        assert all(isinstance(s, dict) for s in policy["Statement"]), (
+            f"non-dict statement written: {policy['Statement']}"
+        )
+        assert {s["Sid"] for s in policy["Statement"]} == {
+            "OperatorGrant",
+            "EnforceSSLOnly",
+        }
+        operator = next(s for s in policy["Statement"] if s["Sid"] == "OperatorGrant")
+        assert operator["Action"] == "s3:GetObject"
 
 
 def _s3_denying_put_policy(region: str = REGION):
@@ -283,3 +383,63 @@ def test_deploy_config_bucket_applies_policy(aws_credentials):
             f"arn:aws:s3:::{bucket}",
             f"arn:aws:s3:::{bucket}/*",
         }
+
+
+def test_deploy_config_bucket_hardens_reused_bucket(aws_credentials):
+    """A config bucket left behind by an older idp-cli (created without the
+    policy) is hardened when it's reused, not just when it's created.
+
+    `get_or_create_config_bucket` returns early on a prefix match, so these —
+    the buckets most likely to be unhardened — would otherwise stay that way
+    forever, since this function is the only code that touches them.
+    """
+    with mock_aws():
+        from idp_sdk._core.stack import get_or_create_config_bucket
+
+        first = get_or_create_config_bucket(REGION)
+        s3 = boto3.client("s3", region_name=REGION)
+
+        # Simulate the pre-fix state: bucket exists, no policy.
+        s3.delete_bucket_policy(Bucket=first)
+
+        second = get_or_create_config_bucket(REGION)
+        assert second == first, "expected the existing bucket to be reused"
+        assert _statement(s3, second) is not None
+
+
+def test_deploy_config_bucket_reuse_survives_put_policy_denial(aws_credentials):
+    """Hardening a reused config bucket is best-effort: a PutBucketPolicy
+    denial must not break the deploy that just needs to stage a config."""
+    with mock_aws():
+        import idp_sdk._core.stack as stack_mod
+
+        get_or_create_config_bucket = stack_mod.get_or_create_config_bucket
+        bucket = get_or_create_config_bucket(REGION)
+        s3 = boto3.client("s3", region_name=REGION)
+        s3.delete_bucket_policy(Bucket=bucket)
+
+        real_client = stack_mod.boto3.client
+
+        def _boom(**_):
+            raise botocore.exceptions.ClientError(
+                {"Error": {"Code": "AccessDenied", "Message": "denied"}},
+                "PutBucketPolicy",
+            )
+
+        def _deny(service, **kwargs):
+            # Build the client from the *unpatched* factory — calling the
+            # patched name here would recurse.
+            client = real_client(service, **kwargs)
+            if service == "s3":
+                client.put_bucket_policy = _boom
+            return client
+
+        stack_mod.boto3.client = _deny
+        try:
+            assert get_or_create_config_bucket(REGION) == bucket
+        finally:
+            stack_mod.boto3.client = real_client
+
+        # Still no policy (the denial stood), but the deploy path continued.
+        with pytest.raises(Exception, match="NoSuchBucketPolicy"):
+            s3.get_bucket_policy(Bucket=bucket)

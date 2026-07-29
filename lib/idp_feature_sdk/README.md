@@ -145,6 +145,32 @@ Typical output of `publish`:
 https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?...
 ```
 
+## Artifacts-bucket security
+
+The artifacts bucket (`idp-accelerator-artifacts-<account>-<region>` when you
+omit `--bucket-basename`) is hardened by `ensure_artifacts_bucket`:
+
+| Control | New bucket | Pre-existing bucket |
+|---|---|---|
+| `EnforceSSLOnly` bucket policy (deny `s3:*` when `aws:SecureTransport` is false) | Applied; failure is fatal | Applied best-effort — a `PutBucketPolicy` denial warns and continues |
+| S3 Block Public Access (all four flags) | Enabled | **Left untouched** |
+| `PackPublicArtifactsRead` public-read on `extensions/*` + `host/*` | Only with `--public` | Only with `--public` |
+
+Two deliberate asymmetries:
+
+- **Block Public Access is never changed on a bucket the CLI didn't create.**
+  Relaxing it could silently revert a manual security remediation, so a
+  pre-existing bucket keeps whatever BPA settings its operator set.
+- **`EnforceSSLOnly` *is* applied to pre-existing buckets**, because it only
+  ever *tightens* access. It's merged additively: your own statements survive,
+  and a stale `EnforceSSLOnly` is replaced rather than duplicated, so
+  re-publishing is idempotent. On a bucket you own but haven't granted us
+  `s3:PutBucketPolicy` on, the publish warns and continues rather than failing
+  — add the statement manually in that case.
+
+ARNs use the region's real partition (`arn:aws-us-gov:` in GovCloud), mirroring
+`arn:${AWS::Partition}:` in the CloudFormation templates.
+
 ## Build & package commands in `feature.yaml`
 
 The publisher can (re)build the UI bundle and package agent source before

@@ -638,6 +638,34 @@ def _enforce_ssl_statement(bucket: str, region: str) -> Dict[str, Any]:
     }
 
 
+def _statement_list(policy: Optional[Dict[str, Any]]) -> List[Any]:
+    """Return ``policy``'s statements as a list, whatever form they took.
+
+    The IAM grammar allows ``Statement`` to be **either** a single statement
+    object **or** an array of them ("The Statement element can contain a single
+    statement or an array of individual statements" —
+    https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_statement.html).
+    Iterating the single-object form directly would yield its *keys*, silently
+    replacing an operator's statement with the strings ``"Sid"``, ``"Effect"``,
+    … — so normalize before touching it.
+
+    Kept in sync with ``idp_sdk._core.s3_security.statement_list``; this module
+    is deliberately self-contained (boto3 only, no idp_sdk dependency), so the
+    logic is duplicated rather than imported. Fix both copies together.
+    """
+    if not policy:
+        return []
+    raw = policy.get("Statement", [])
+    if isinstance(raw, dict):
+        return [raw]
+    if isinstance(raw, list):
+        return list(raw)
+    raise ValueError(
+        f"Unsupported S3 bucket-policy Statement type {type(raw).__name__!r}: "
+        f"expected an object or a list of objects."
+    )
+
+
 def apply_enforce_ssl_only(
     s3: Any,
     bucket: str,
@@ -671,7 +699,7 @@ def apply_enforce_ssl_only(
         if existing:
             statements = [
                 s
-                for s in existing.get("Statement", [])
+                for s in _statement_list(existing)
                 if not (isinstance(s, dict) and s.get("Sid") == _ENFORCE_SSL_SID)
             ]
             statements.append(desired)
@@ -904,10 +932,14 @@ def apply_public_artifacts_policy(
     try:
         existing_resp = s3.get_bucket_policy(Bucket=bucket)
         existing = json.loads(existing_resp["Policy"])
-        existing_stmts = existing.get("Statement", [])
+        # Normalize first — Statement may legally be a single object, and
+        # iterating that would yield its keys rather than the statement.
+        existing_stmts = _statement_list(existing)
         # Drop any prior PackPublicArtifactsRead and append the fresh one.
         merged_stmts = [
-            s for s in existing_stmts if s.get("Sid") != "PackPublicArtifactsRead"
+            s
+            for s in existing_stmts
+            if not (isinstance(s, dict) and s.get("Sid") == "PackPublicArtifactsRead")
         ]
         merged_stmts.extend(desired["Statement"])
         merged = {"Version": "2012-10-17", "Statement": merged_stmts}

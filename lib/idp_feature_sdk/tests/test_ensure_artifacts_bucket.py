@@ -132,6 +132,89 @@ def test_enforce_ssl_only_preserves_operator_statements(aws_credentials):
         _assert_enforce_ssl_only(s3, bucket)
 
 
+def test_enforce_ssl_only_handles_single_object_statement(aws_credentials):
+    """``Statement`` may legally be a single object rather than an array — the
+    IAM grammar allows both. Iterating the object form naively yields its
+    *keys*, which would replace the operator's statement with the strings
+    "Sid", "Effect", … and produce an invalid policy."""
+    with mock_aws():
+        s3 = boto3.client("s3", region_name=REGION)
+        bucket = _bucket_name()
+        s3.create_bucket(
+            Bucket=bucket,
+            CreateBucketConfiguration={"LocationConstraint": REGION},
+        )
+        s3.put_bucket_policy(
+            Bucket=bucket,
+            Policy=json.dumps(
+                {
+                    "Version": "2012-10-17",
+                    "Statement": {
+                        "Sid": "OperatorOwnGrant",
+                        "Effect": "Allow",
+                        "Principal": {"AWS": "123456789012"},
+                        "Action": "s3:GetObject",
+                        "Resource": f"arn:aws:s3:::{bucket}/*",
+                    },
+                }
+            ),
+        )
+
+        ensure_artifacts_bucket(region=REGION)
+
+        policy = json.loads(s3.get_bucket_policy(Bucket=bucket)["Policy"])
+        assert all(isinstance(s, dict) for s in policy["Statement"]), (
+            f"non-dict statement written: {policy['Statement']}"
+        )
+        assert {s["Sid"] for s in policy["Statement"]} == {
+            "OperatorOwnGrant",
+            "EnforceSSLOnly",
+        }
+        operator = next(
+            s for s in policy["Statement"] if s["Sid"] == "OperatorOwnGrant"
+        )
+        assert operator["Action"] == "s3:GetObject"
+        _assert_enforce_ssl_only(s3, bucket)
+
+
+def test_public_artifacts_policy_handles_single_object_statement(aws_credentials):
+    """The same normalization applies to the public-read merge path, which had
+    the identical latent flaw."""
+    with mock_aws():
+        s3 = boto3.client("s3", region_name=REGION)
+        bucket = "explicit-single-stmt-us-west-2"
+        s3.create_bucket(
+            Bucket=bucket,
+            CreateBucketConfiguration={"LocationConstraint": REGION},
+        )
+        s3.put_bucket_policy(
+            Bucket=bucket,
+            Policy=json.dumps(
+                {
+                    "Version": "2012-10-17",
+                    "Statement": {
+                        "Sid": "OperatorOwnGrant",
+                        "Effect": "Allow",
+                        "Principal": {"AWS": "123456789012"},
+                        "Action": "s3:GetObject",
+                        "Resource": f"arn:aws:s3:::{bucket}/*",
+                    },
+                }
+            ),
+        )
+
+        apply_public_artifacts_policy(s3, bucket)
+
+        policy = json.loads(s3.get_bucket_policy(Bucket=bucket)["Policy"])
+        assert all(isinstance(s, dict) for s in policy["Statement"]), (
+            f"non-dict statement written: {policy['Statement']}"
+        )
+        assert {s["Sid"] for s in policy["Statement"]} == {
+            "OperatorOwnGrant",
+            "PackPublicArtifactsRead",
+        }
+
+
 def test_enforce_ssl_only_uses_govcloud_partition(aws_credentials):
     """A GovCloud region yields arn:aws-us-gov ARNs, not arn:aws."""
     gov_region = "us-gov-west-1"

@@ -12,6 +12,13 @@ the API — that's what this module does.
 The statement is the same shape as the CloudFormation one: deny ``s3:*`` for
 every principal when ``aws:SecureTransport`` is false, on both the bucket ARN
 and its objects.
+
+.. note::
+   ``idp_feature_sdk.pack`` carries a **duplicate** of this logic
+   (``_partition`` / ``_enforce_ssl_statement`` / ``_statement_list`` /
+   ``apply_enforce_ssl_only``) because that module is deliberately
+   self-contained — boto3 only, no ``idp_sdk`` dependency. Fix both copies
+   together; a bug fixed in only one has already happened once.
 """
 
 from __future__ import annotations
@@ -69,19 +76,47 @@ def enforce_ssl_only_policy(bucket: str, region: Optional[str] = None) -> Dict:
     }
 
 
+def statement_list(policy: Optional[Dict]) -> list:
+    """Return ``policy``'s statements as a list, whatever form they took.
+
+    The IAM grammar allows ``Statement`` to be **either** a single statement
+    object **or** an array of them ("The Statement element can contain a single
+    statement or an array of individual statements" —
+    https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_statement.html).
+    Iterating the single-object form directly would yield its *keys*, silently
+    replacing an operator's statement with the strings ``"Sid"``, ``"Effect"``,
+    … — so normalize before touching it.
+    """
+    if not policy:
+        return []
+    raw = policy.get("Statement", [])
+    if isinstance(raw, dict):
+        return [raw]
+    if isinstance(raw, list):
+        return list(raw)
+    # A malformed Statement (string, None, …). Don't guess at its meaning and
+    # don't drop it silently — refuse, so the caller reports rather than
+    # writing a policy that discards whatever was there.
+    raise ValueError(
+        f"Unsupported S3 bucket-policy Statement type {type(raw).__name__!r}: "
+        f"expected an object or a list of objects."
+    )
+
+
 def merge_enforce_ssl_only(existing: Optional[Dict], bucket: str, region: str) -> Dict:
     """Return ``existing`` with a fresh ``EnforceSSLOnly`` statement.
 
     Any statement already carrying that Sid is replaced (so re-running is
     idempotent and picks up ARN fixes); every other statement is preserved
-    verbatim, so this never removes an operator's own grants.
+    verbatim, so this never removes an operator's own grants. Handles both
+    forms the IAM grammar allows for ``Statement`` — see :func:`statement_list`.
     """
     desired = enforce_ssl_only_statement(bucket, region)
     if not existing:
         return {"Version": "2012-10-17", "Statement": [desired]}
     statements = [
         s
-        for s in existing.get("Statement", [])
+        for s in statement_list(existing)
         if not (isinstance(s, dict) and s.get("Sid") == ENFORCE_SSL_SID)
     ]
     statements.append(desired)
