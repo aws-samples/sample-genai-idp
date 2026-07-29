@@ -119,6 +119,8 @@ def enrich_assessment_with_thresholds(
     """
     from idp_common.config.schema_constants import (
         SCHEMA_PROPERTIES,
+        SCHEMA_TYPE,
+        TYPE_ARRAY,
         X_AWS_IDP_CONFIDENCE_THRESHOLD,
     )
 
@@ -157,6 +159,22 @@ def enrich_assessment_with_thresholds(
             ]
         return node
 
+    def _enrich_leaf_with_field_thresholds(
+        node: Any, field_thresholds: dict[str, float], fallback: float, path: str
+    ) -> Any:
+        """Enrich a list-item dict using per-sub-field thresholds."""
+        if not isinstance(node, dict):
+            return _enrich_leaf_container(node, fallback, path)
+        if "confidence" in node:
+            # Shouldn't happen at item level, but safety
+            return _enrich_leaf_container(node, fallback, path)
+        result = {}
+        for k, v in node.items():
+            sub_threshold = field_thresholds.get(k, fallback)
+            sub_path = f"{path}.{k}" if path else k
+            result[k] = _enrich_leaf_container(v, sub_threshold, sub_path)
+        return result
+
     enriched: dict[str, Any] = {}
     for attr_name, attr_assessment in assessment.items():
         prop_schema = properties.get(attr_name, {}) or {}
@@ -166,9 +184,36 @@ def enrich_assessment_with_thresholds(
             ),
             default_confidence_threshold,
         )
-        enriched[attr_name] = _enrich_leaf_container(
-            attr_assessment, threshold, attr_name
-        )
+
+        # For array-type fields, resolve per-sub-field thresholds from $ref/$defs.
+        # ``type`` may be a union list (e.g. ["array", "null"]), so normalize.
+        raw_type = prop_schema.get(SCHEMA_TYPE)
+        declared_types = raw_type if isinstance(raw_type, list) else [raw_type]
+        is_array = TYPE_ARRAY in declared_types or isinstance(attr_assessment, list)
+        if is_array and isinstance(attr_assessment, list):
+            from idp_common.assessment.threshold_resolver import (
+                resolve_array_item_thresholds,
+            )
+
+            item_thresholds = resolve_array_item_thresholds(
+                prop_schema, class_schema, threshold
+            )
+            if item_thresholds:
+                enriched[attr_name] = [
+                    _enrich_leaf_with_field_thresholds(
+                        item, item_thresholds, threshold, f"{attr_name}[{i}]"
+                    )
+                    for i, item in enumerate(attr_assessment)
+                ]
+            else:
+                # No per-sub-field thresholds resolved — use uniform threshold
+                enriched[attr_name] = _enrich_leaf_container(
+                    attr_assessment, threshold, attr_name
+                )
+        else:
+            enriched[attr_name] = _enrich_leaf_container(
+                attr_assessment, threshold, attr_name
+            )
     return enriched, alerts
 
 
