@@ -87,7 +87,9 @@ F1099R_SCHEMA = {
 def _resolve_class_schema(doc_class: str, config_classes: list) -> dict:
     """Mimics the BDA function's class schema lookup."""
     for schema in config_classes:
-        if (schema.get("x-aws-idp-document-type", "") or "").lower() == doc_class.lower():
+        if (
+            schema.get("x-aws-idp-document-type", "") or ""
+        ).lower() == doc_class.lower():
             return schema
     return {}
 
@@ -120,7 +122,10 @@ class TestBDASchemaAwareThresholdPattern:
         )
 
         # Per-sub-field thresholds from $defs/W2CopyItem
-        assert enriched["w2_copies"][0]["w2_box_a_employee_ssn"]["confidence_threshold"] == 0.8
+        assert (
+            enriched["w2_copies"][0]["w2_box_a_employee_ssn"]["confidence_threshold"]
+            == 0.8
+        )
         assert enriched["w2_copies"][0]["w2_box_1_wages"]["confidence_threshold"] == 0.9
         # No explicit threshold on w2_form_year -> default 0.0
         assert enriched["w2_copies"][0]["w2_form_year"]["confidence_threshold"] == 0.0
@@ -165,13 +170,33 @@ class TestBDASchemaAwareThresholdPattern:
         assert enriched["f1099r_form_year"]["confidence_threshold"] == 0.85
 
         # Row 0: state_tax_withheld 0.7 < 0.8, state_payer_state_no 0.85 >= 0.8 ok
-        assert enriched["f1099r_state_local_tax_rows"][0]["state_tax_withheld"]["confidence_threshold"] == 0.8
-        assert enriched["f1099r_state_local_tax_rows"][0]["state_payer_state_no"]["confidence_threshold"] == 0.8
+        assert (
+            enriched["f1099r_state_local_tax_rows"][0]["state_tax_withheld"][
+                "confidence_threshold"
+            ]
+            == 0.8
+        )
+        assert (
+            enriched["f1099r_state_local_tax_rows"][0]["state_payer_state_no"][
+                "confidence_threshold"
+            ]
+            == 0.8
+        )
         # local_tax_withheld has no explicit threshold -> default 0.0
-        assert enriched["f1099r_state_local_tax_rows"][0]["local_tax_withheld"]["confidence_threshold"] == 0.0
+        assert (
+            enriched["f1099r_state_local_tax_rows"][0]["local_tax_withheld"][
+                "confidence_threshold"
+            ]
+            == 0.0
+        )
 
         # Row 1: state_payer_state_no 0.4 < 0.8 -> alert
-        assert enriched["f1099r_state_local_tax_rows"][1]["state_payer_state_no"]["confidence_threshold"] == 0.8
+        assert (
+            enriched["f1099r_state_local_tax_rows"][1]["state_payer_state_no"][
+                "confidence_threshold"
+            ]
+            == 0.8
+        )
 
         # Count alerts:
         # Row 0: state_tax_withheld (0.7 < 0.8), state_distribution (0.6 < 0.8) = 2
@@ -220,7 +245,10 @@ class TestBDASchemaAwareThresholdPattern:
         )
 
         # THE FIX: SSN now shows 0.8 threshold (from schema), NOT 0.0%
-        assert enriched["w2_copies"][0]["w2_box_a_employee_ssn"]["confidence_threshold"] == 0.8
+        assert (
+            enriched["w2_copies"][0]["w2_box_a_employee_ssn"]["confidence_threshold"]
+            == 0.8
+        )
         # And it triggers an alert (0.75 < 0.8)
         assert len(alerts) == 1
         assert alerts[0]["confidence_threshold"] == 0.8
@@ -269,7 +297,9 @@ class TestResolveThresholdForPath:
 
     def test_broken_ref_returns_default(self):
         schema = {
-            "properties": {"items": {"type": "array", "items": {"$ref": "#/$defs/Missing"}}},
+            "properties": {
+                "items": {"type": "array", "items": {"$ref": "#/$defs/Missing"}}
+            },
             "$defs": {},
         }
         assert resolve_threshold_for_path(["items", "_0", "f"], schema, 0.66) == 0.66
@@ -397,9 +427,7 @@ class TestBDAAlertBuildingUsesPerEntryThreshold:
         assert alerts[0]["confidence_threshold"] == 0.8
 
     def test_missing_entry_threshold_uses_fallback(self):
-        details = {
-            "key_value_details": {"1": [{"key": "f", "confidence": 0.5}]}
-        }
+        details = {"key_value_details": {"1": [{"key": "f", "confidence": 0.5}]}}
         alerts = self._build_alerts(details, 0.9)
         assert len(alerts) == 1
         assert alerts[0]["confidence_threshold"] == 0.9

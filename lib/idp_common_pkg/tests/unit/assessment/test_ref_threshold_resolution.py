@@ -130,9 +130,7 @@ class TestResolveArrayItemThresholds:
     def test_broken_ref_returns_empty(self):
         """Unresolvable $ref returns empty dict (fallback to uniform threshold)."""
         prop_schema = BROKEN_REF_SCHEMA["properties"]["items"]
-        thresholds = resolve_array_item_thresholds(
-            prop_schema, BROKEN_REF_SCHEMA, 0.9
-        )
+        thresholds = resolve_array_item_thresholds(prop_schema, BROKEN_REF_SCHEMA, 0.9)
         assert thresholds == {}
 
     def test_no_items_schema_returns_empty(self):
@@ -179,9 +177,15 @@ class TestEnrichAssessmentWithThresholdsRef:
         )
 
         # SSN has threshold 0.8; confidence 0.75 < 0.8 -> should alert
-        assert enriched["w2_copies"][0]["w2_box_a_employee_ssn"]["confidence_threshold"] == 0.8
+        assert (
+            enriched["w2_copies"][0]["w2_box_a_employee_ssn"]["confidence_threshold"]
+            == 0.8
+        )
         # EIN has threshold 0.85; confidence 0.9 >= 0.85 -> no alert
-        assert enriched["w2_copies"][0]["w2_box_b_employer_ein"]["confidence_threshold"] == 0.85
+        assert (
+            enriched["w2_copies"][0]["w2_box_b_employer_ein"]["confidence_threshold"]
+            == 0.85
+        )
         # form_year has no explicit threshold -> uses default (0.5)
         assert enriched["w2_copies"][0]["w2_form_year"]["confidence_threshold"] == 0.5
 
@@ -214,11 +218,17 @@ class TestEnrichAssessmentWithThresholdsRef:
         )
 
         # Row 0: SSN 0.95 >= 0.8 ok; wages 0.7 < 0.9 alert
-        assert enriched["w2_copies"][0]["w2_box_a_employee_ssn"]["confidence_threshold"] == 0.8
+        assert (
+            enriched["w2_copies"][0]["w2_box_a_employee_ssn"]["confidence_threshold"]
+            == 0.8
+        )
         assert enriched["w2_copies"][0]["w2_box_1_wages"]["confidence_threshold"] == 0.9
 
         # Row 1: SSN 0.5 < 0.8 alert; wages 0.95 >= 0.9 ok
-        assert enriched["w2_copies"][1]["w2_box_a_employee_ssn"]["confidence_threshold"] == 0.8
+        assert (
+            enriched["w2_copies"][1]["w2_box_a_employee_ssn"]["confidence_threshold"]
+            == 0.8
+        )
         assert enriched["w2_copies"][1]["w2_box_1_wages"]["confidence_threshold"] == 0.9
 
         # Should have 2 alerts total: row[0].wages and row[1].ssn
@@ -306,7 +316,10 @@ class TestEnrichAssessmentWithThresholdsRef:
         )
 
         # SSN should use its explicit 0.8 threshold, NOT the 0.0 default
-        assert enriched["w2_copies"][0]["w2_box_a_employee_ssn"]["confidence_threshold"] == 0.8
+        assert (
+            enriched["w2_copies"][0]["w2_box_a_employee_ssn"]["confidence_threshold"]
+            == 0.8
+        )
         # form_year has no explicit threshold -> uses default 0.0
         assert enriched["w2_copies"][0]["w2_form_year"]["confidence_threshold"] == 0.0
 

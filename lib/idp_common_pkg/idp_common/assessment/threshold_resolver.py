@@ -133,9 +133,7 @@ def _deref(schema: dict[str, Any], class_schema: dict[str, Any]) -> dict[str, An
     def_name = schema[REF_FIELD].split("/")[-1]
     resolved = (class_schema or {}).get(DEFS_FIELD, {}).get(def_name)
     if not resolved:
-        logger.warning(
-            "Could not resolve $ref '%s' against $defs", schema[REF_FIELD]
-        )
+        logger.warning("Could not resolve $ref '%s' against $defs", schema[REF_FIELD])
         return {}
     return resolved
 
@@ -180,11 +178,7 @@ def resolve_threshold_for_path(
     def _is_index(part: Any) -> bool:
         if isinstance(part, int):
             return True
-        return (
-            isinstance(part, str)
-            and part.startswith("_")
-            and part[1:].isdigit()
-        )
+        return isinstance(part, str) and part.startswith("_") and part[1:].isdigit()
 
     def _own(node: dict[str, Any]) -> float | None:
         raw = (node or {}).get(X_AWS_IDP_CONFIDENCE_THRESHOLD)

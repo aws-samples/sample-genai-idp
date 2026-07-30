@@ -11,8 +11,9 @@ from unittest.mock import MagicMock
 
 import click
 import pytest
-from idp_cli.cli import _parse_tags
 from idp_sdk._core.stack import StackDeployer, build_parameters
+
+from idp_cli.cli import _parse_tags
 
 
 class TestParameterPreservation:
