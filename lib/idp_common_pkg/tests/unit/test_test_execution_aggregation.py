@@ -222,32 +222,76 @@ class TestAggregation:
         assert "accuracy_breakdown" in metrics
 
     def test_calculate_false_alarm_rate(self, mock_env):
-        """Test false alarm rate calculation."""
+        """Test false alarm rate calculation.
+
+        FAR = FA / (FA + TN), using Stickler's false-alarm count rather than the
+        combined ``fp``. Since ``fp == fa + fd``, using ``fp`` here would fold
+        false discoveries into the false-alarm rate.
+        """
         index = import_test_module()
 
-        # FP / (FP + TN)
-        metrics = {"fp": 2, "tn": 8}
+        # FA / (FA + TN) — fd present and must NOT contribute.
+        metrics = {"fa": 2, "fd": 5, "fp": 7, "tn": 8}
         rate = index._calculate_false_alarm_rate(metrics)
-        assert rate == 0.2  # 2 / (2 + 8)
+        assert rate == 0.2  # 2 / (2 + 8), not 7 / (7 + 8)
 
         # Zero denominator
-        metrics = {"fp": 0, "tn": 0}
+        metrics = {"fa": 0, "tn": 0}
         rate = index._calculate_false_alarm_rate(metrics)
         assert rate is None
 
     def test_calculate_false_discovery_rate(self, mock_env):
-        """Test false discovery rate calculation."""
+        """Test false discovery rate calculation.
+
+        FDR = FD / (FD + TP), using Stickler's false-discovery count rather than
+        the combined ``fp`` (see ``test_calculate_false_alarm_rate``).
+        """
         index = import_test_module()
 
-        # FP / (FP + TP)
-        metrics = {"fp": 3, "tp": 7}
+        # FD / (FD + TP) — fa present and must NOT contribute.
+        metrics = {"fd": 3, "fa": 4, "fp": 7, "tp": 7}
         rate = index._calculate_false_discovery_rate(metrics)
-        assert rate == 0.3  # 3 / (3 + 7)
+        assert rate == 0.3  # 3 / (3 + 7), not 7 / (7 + 7)
 
         # Zero denominator
-        metrics = {"fp": 0, "tp": 0}
+        metrics = {"fd": 0, "tp": 0}
         rate = index._calculate_false_discovery_rate(metrics)
         assert rate is None
+
+    def test_far_fdr_match_per_doc_evaluation_service_formulas(self, mock_env):
+        """Run-level FAR/FDR must equal the per-doc formulas on the same counts.
+
+        The per-doc path
+        (``idp_common.evaluation.stickler_backend.results.transform_stickler_result``)
+        derives FAR from ``fa``/``tn`` and FDR from ``fd``/``tp``. This Lambda
+        previously used the combined ``fp`` for both, so the per-document detail
+        view and the run-level dashboard reported different error rates for the
+        same document whenever both ``fa`` and ``fd`` were non-zero. Pin the
+        agreement so the two paths can't drift apart again.
+        """
+        index = import_test_module()
+
+        # Counts with BOTH error classes present — the case where fp-based and
+        # fa/fd-based formulas diverge. Respects Stickler's fp == fa + fd.
+        counts = {"tp": 5, "fa": 2, "fd": 3, "fp": 5, "tn": 4, "fn": 1}
+
+        # Per-doc formulas, transcribed from stickler_backend/results.py.
+        expected_far = counts["fa"] / (counts["fa"] + counts["tn"])
+        expected_fdr = counts["fd"] / (counts["fd"] + counts["tp"])
+
+        assert index._calculate_false_alarm_rate(counts) == pytest.approx(expected_far)
+        assert index._calculate_false_discovery_rate(counts) == pytest.approx(
+            expected_fdr
+        )
+
+        # And confirm the old fp-based formulas really would have disagreed,
+        # so this test fails loudly if someone reverts to them.
+        assert expected_far != pytest.approx(
+            counts["fp"] / (counts["fp"] + counts["tn"])
+        )
+        assert expected_fdr != pytest.approx(
+            counts["fp"] / (counts["fp"] + counts["tp"])
+        )
 
     def test_load_s3_json(self, mock_env):
         """Test loading JSON from S3."""

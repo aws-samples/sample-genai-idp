@@ -18,9 +18,17 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-FIXTURE_DIR = (
-    REPO_ROOT / "lib" / "idp_common_pkg" / "tests" / "unit" / "evaluation" / "fixtures"
-)
+PKG_ROOT = REPO_ROOT / "lib" / "idp_common_pkg"
+FIXTURE_DIR = PKG_ROOT / "tests" / "unit" / "evaluation" / "fixtures"
+
+# ``_section_result_to_dict`` below imports the golden helper from
+# ``tests.unit.evaluation.*``, which is only importable with the package root on
+# sys.path. Add it here so the documented invocation
+# (``python scripts/regenerate_evaluation_goldens.py``) works from any cwd —
+# this script is the sanctioned way to update goldens, so it must not itself
+# require a PYTHONPATH incantation to run.
+if str(PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(PKG_ROOT))
 
 
 def _sanitize(obj):

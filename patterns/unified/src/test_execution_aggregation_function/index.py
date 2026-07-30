@@ -482,17 +482,33 @@ def _transform_stickler_metrics(
 
 
 def _calculate_false_alarm_rate(metrics: Dict[str, Any]) -> Optional[float]:
-    """Calculate false alarm rate (FP / (FP + TN))."""
-    fp = metrics.get("fp", 0)
+    """Calculate false alarm rate (FA / (FA + TN)).
+
+    Uses Stickler's ``fa`` (false alarm — predicted when the value should be
+    absent) rather than the combined ``fp``. Stickler's invariant is
+    ``fp == fa + fd``, so the combined count double-counts false *discoveries*
+    (predicted-but-wrong) as false *alarms* and inflates this rate whenever
+    both error classes are present. The per-doc path in
+    ``idp_common.evaluation.stickler_backend.results`` uses the same ``fa``
+    formula, so per-doc and run-level dashboards now agree by construction.
+    """
+    fa = metrics.get("fa", 0)
     tn = metrics.get("tn", 0)
-    return fp / (fp + tn) if (fp + tn) > 0 else None
+    return fa / (fa + tn) if (fa + tn) > 0 else None
 
 
 def _calculate_false_discovery_rate(metrics: Dict[str, Any]) -> Optional[float]:
-    """Calculate false discovery rate (FP / (FP + TP))."""
-    fp = metrics.get("fp", 0)
+    """Calculate false discovery rate (FD / (FD + TP)).
+
+    Uses Stickler's ``fd`` (false discovery — predicted a wrong value) rather
+    than the combined ``fp``, for the same reason as
+    ``_calculate_false_alarm_rate``: ``fp == fa + fd``, so the combined count
+    would fold false alarms into this rate. Matches the per-doc formula in
+    ``stickler_backend.results``.
+    """
+    fd = metrics.get("fd", 0)
     tp = metrics.get("tp", 0)
-    return fp / (fp + tp) if (fp + tp) > 0 else None
+    return fd / (fd + tp) if (fd + tp) > 0 else None
 
 
 class _IndexCollapsingConfidenceAccumulator:
