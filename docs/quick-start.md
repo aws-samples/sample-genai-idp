@@ -164,7 +164,7 @@ upload your own documents instead.
   **Extensions** page (Feature Platform). The Quick Start agent discovers it at
   runtime and offers generation only when it's present.
 - **Locally**, install the generator alongside the library:
-  `pip install "idp_common[synthesis]"`.
+  `pip install -e "lib/idp_common_pkg[synthesis]"`.
 
 Generation is slow (minutes) and costs money — roughly a few dollars and several
 minutes per document at the default quality threshold, more at higher thresholds
