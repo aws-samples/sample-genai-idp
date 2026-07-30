@@ -7,9 +7,13 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
+- **Evaluation: stickler integration cleanup + package reorganization.** End-to-end overhaul of the evaluation package's use of `stickler-eval==0.5.0`. Fixes several silent correctness bugs (NUMERIC_EXACT tolerance and Hungarian `match_threshold` never reached Stickler; `matched`/counts diverged between per-doc and run-level dashboards). Adopts Stickler as the single scoring source of truth — verdicts, counts, and derived metrics all come from `confusion_matrix` directly. New `stickler_backend/` subpackage is now the only code path allowed to `import stickler`; a new `contract.py` formalizes the cross-Lambda `results.json` payload with a `STICKLER_RESULT_VERSION` stamp. Adopts new Stickler features that were previously not surfaced: `DateComparator`, graded packet metrics (`final_score`, `clustering_score`, `v_measure`, `rand_index`, `avg_ordering_score` on `DocSplitMetrics`), confidence accumulator with index-collapsing (`LineItems[N].Rate → LineItems.Rate`), weight-aware document-level rollup, and `clip-under-threshold` / `aggregate` per-field pass-throughs. Deletes ~1,700 lines of code that duplicated Stickler functionality (the local `DocSplitClassificationMetrics` fork, `metrics.py`, the legacy fields-config mapper path, `verify_stickler.py`, `ConfidenceMetricsCalculator`, non-null default injection) and drops the `munkres` dep. New golden-fixture regression suite (`test_golden_fixture_stickler.py`) gates every future scoring-behavior change against real unmocked Stickler; `scripts/regenerate_evaluation_goldens.py` is the sanctioned way to update goldens deliberately. Docs sweep across both tiers (`docs/evaluation.md`, `evaluation-enhanced-reporting.md`, `test-studio.md`, `evaluation/README.md`, `step7_evaluation.ipynb`). Live-validated on `idp-dev-qs`: 50/50 single-section docs (OmniAI OCR benchmark, accuracy 0.788) and 50/50 multi-section docs (DocSplit-Poly-Seq, 214 sections, accuracy 0.409).
+
 - **Pipeline hooks can now modify the Document, not just observe it.** Post-step hooks were structurally read-only: the dispatcher extracted only the `halt` flag from a hook's response and discarded the rest, and each hook state wrote to a `$.HookResults` side branch while the next step went on reading the *pre-hook* document path — so a hook could rewrite the S3 objects a document pointed at, but could not relabel a section, add or drop one, correct an extracted attribute, adjust confidence alerts, or append metering. A hook may now return its modified document under `updatedDocument` (inline, or as a compressed reference it wrote itself for unbounded size) and the workflow will consume it: the dispatcher validates the update, threads it through any later hooks at the same point (so chained hooks compose in `order` instead of clobbering each other), and returns it under a stable `document` key that a new `Apply<Point>HookDocument` Pass state copies into the path the next step reads. Available at all six extension points, with scope set by the point — `postClassification` reaches the section Map fan-out and everything after it, while `postExtraction` runs *inside* that Map and is therefore section-scoped. New `idp_common.hooks` helpers (`load_hook_document`, `updated_document_result`) make the load → mutate → return round-trip two calls and avoid the trap of hand-building a Document (which silently drops `metering`, `errors`, `hitl_metadata`, and `processing_issues`). Guardrails: document identity (`id`/`input_key`/`input_bucket`/`output_bucket`) is immutable, a compressed reference's `s3_uri` must name an object under `compressed_documents/` in the stack's own working bucket (`Document.decompress()` discards the URI's bucket and reads the key against the consumer's working bucket, so an unconstrained URI would be a key-injection vector rather than merely a cross-bucket read), the `sections` list the Map iterates must stay well-formed, `config_version` is preserved, and inline documents are capped at 5 MB — a violation is refused and reported in `documentUpdateRejected` while the pre-hook document continues, never failing the workflow. Fields the state machine reads by JSONPath but that are not `Document` model fields (`use_bda`, `bda_project_arn`, and the wrapper's `num_pages`/`status`/`sections`) are back-filled from the inbound document, since a dropped one fails the execution outright instead of degrading. Hooks should make mutations idempotent — a retried dispatch re-invokes the hook. **Fully backward compatible**: a hook that omits `updatedDocument` passes the document through byte-identical, an inert stack behaves exactly as before, and existing hook failure paths still bypass the new state entirely. Set `allowDocumentUpdate: false` on a hook entry to pin it to observe-only. See [docs/feature-platform.md](docs/feature-platform.md#pipeline-hooks) and the [developer guide](docs/feature-platform-developer-guide.md).
 
 ### Changed
+
+- **Evaluation: stickler integration cleanup + package reorganization (see `### Added` for the summary).** Restructured behind a single Stickler import boundary — new `stickler_backend/` subpackage (`mapper.py`, `comparators.py`, `model_factory.py`, `results.py`, `doc_split.py`) is the only code path allowed to `import stickler`; `service.py` demoted to orchestration only; old top-level modules kept as re-export shims. New `contract.py` formalizes the cross-Lambda `results.json` API with a `STICKLER_RESULT_VERSION` stamp. Aggregation Lambda's confidence post-pass (~170 lines of sklearn + regex path-collapse) replaced with an `_IndexCollapsingConfidenceAccumulator` subclass wired via Stickler's `accumulators=[...]` API. Verdicts and counts now sourced from `confusion_matrix.{fields,aggregate}` and `derived.cm_*` (per-doc FAR/FDR was previously re-derived from IDP's `fp1`/`fp2` counts and diverged from the run-level Stickler numbers); the aggregation Lambda's `_calculate_false_alarm_rate` / `_calculate_false_discovery_rate` now read `fa` / `fd` instead of the combined `fp`, so both sides use one formula. LLM comparator registered via Stickler's public `register_comparator` API (was `_global_registry._registry[...] = ...`) and its config is now passed per-service via `x-aws-stickler-comparator-config` on the field schema instead of a module-level singleton. `stickler_version.STICKLER_VERSION` derived at import time from `importlib.metadata.version("stickler-eval")`; hand-maintained `STICKLER_FEATURES` list removed. Numpy pin relaxed to `>=1.26,<3` in `evaluation`/`test` extras to match stickler-eval. Docs sweep across `docs/evaluation.md`, `evaluation-enhanced-reporting.md`, `test-studio.md`, `evaluation/README.md`, and `notebooks/examples/step7_evaluation.ipynb` (stale versions and "sticker-eval" typo dropped). `EvaluationMethod` enum gained `LEVENSHTEIN`; markdown-report appendix now uses `x-aws-idp-evaluation-weight` and documents DATE.
 
 - 🔒 **The CLI's PyPI distribution name is now `idp-accelerator-cli` (the `idp-cli` command is unchanged).** The name `idp-cli` on public PyPI belongs to an unrelated legitimate project — an "Internal Developer Platform CLI" with its own releases and users — so we could never publish under it, and a user who guessed `pip install idp-cli` got somebody else's tool. Unlike `idp-common` and `idp-sdk`, this is a genuine name collision rather than a squat, so no takedown applies; the fix is to move. Renaming the *distribution* is a contained change because three other identifiers deliberately keep the old spelling: the import name (`import idp_cli`), the console command (`idp-cli`, so all documented invocations remain correct), and the `"idp-cli"` string literals used as an S3 artifact prefix, the CloudFormation `CreatedBy` tag and the Test Studio test-set name — those are persisted data, and changing them would orphan existing artifacts. `idp-accelerator-cli` is also registered on PyPI as a non-functional placeholder (`scripts/pypi-placeholders/`), so the name we now depend on cannot be taken by anyone else. **Action:** nothing is required — `make setup` picks the new name up automatically and the command you type does not change. Note that renaming a distribution does not remove the old one, so `pip list` in an existing environment will show both `idp-cli` and `idp-accelerator-cli` pointing at the same source tree; `scripts/check_first_party_deps.py` now reports the retired name and prints the `pip uninstall -y idp-cli` needed to clear it (a warning, not a failure). See [Installing First-Party Packages Safely](docs/dependency-confusion.md).
 - **Removed the "Files" column from the document Version History panel.** It showed `FileCount` — the number of output S3 objects the run's manifest pinned (`sections/*/result.json`, page text/images, reports) — an internal storage-plumbing detail that reads as "how many files were in my document" (that's the adjacent **Pages** column) and offers no action. The attribute is still recorded on each run record and returned by `listDocumentVersions`/`getDocumentVersion`, and `idp-cli list-versions` still displays it. See [docs/document-versions.md](docs/document-versions.md).
@@ -17,6 +21,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Fixed
 
+- **Evaluation: stickler integration cleanup + package reorganization (see `### Added` for the summary).** NUMERIC_EXACT tolerance and Hungarian `match_threshold` now actually reach Stickler in the production path (both were silently dropped — the tolerance gate was a no-op because `NumericComparator.compare` is binary, and `match_threshold` was written to the array property instead of the items schema so Stickler's element-class builder kept its default of 0.7); per-doc FAR/FDR now matches the run-level dashboard — both sides derive FAR from Stickler's `fa` and FDR from `fd` rather than the combined `fp` (since `fp == fa + fd`, the old run-level formulas folded false discoveries into the false-alarm rate and vice versa, so the same document reported different error rates in the per-document view and the Test Studio dashboard).
 - 🔒 **Dependency confusion on first-party packages: `make setup` could install a third-party `idp-sdk` from public PyPI instead of the one in `lib/`.** The first-party packages depend on their siblings by bare name (`lib/idp_cli_pkg` requires `"idp-sdk"`, `lib/idp_sdk` requires `"idp_common"`), and neither is published to PyPI — but both names **are** registered there by an unrelated third party. Because setup installed the packages one `pip install` at a time and installed `idp_cli_pkg` *before* `idp_sdk`, pip resolved the not-yet-installed sibling from the public index and silently installed the squatted package into the environment that holds AWS deployment credentials. The observed payloads were inert (they print a banner; no install hooks, no network), but the name owner can publish a new version at any time. Six fixes: (1) `make setup` / `make setup-venv` now install all first-party packages in a **single** pip invocation, so pip satisfies the sibling names from the local checkout; (2) the same consolidation in CI, which additionally (3) runs a new tripwire, `scripts/check_first_party_deps.py`, that uses [PEP 610](https://peps.python.org/pep-0610/) `direct_url.json` (written for local/VCS installs, absent for index installs) to fail the build if any installed first-party package came from an index — it works for editable and non-editable installs alike, and skips packages that simply aren't installed; (4) the two still-unclaimed names, `idp-feature-sdk` and `idp-mcp-connector`, are registered defensively on PyPI as deliberately non-functional placeholders that raise on import (`scripts/pypi-placeholders/`) so nobody else can take them; (5) every install instruction in the docs and in runtime error messages now uses a local path (`pip install -e "lib/idp_common_pkg[...]"`) — previously several, including the `idp-cli` error text, told users to `pip install idp-sdk`, i.e. to install the squat; and (6) `cli.py` no longer masks the failure. The squatted `idp_sdk` imports fine but exports nothing, so `from idp_sdk import IDPClient` raised `ImportError`, which a blanket `except ImportError` swallowed into `click = None`, surfacing much later as an unrelated `AttributeError: 'NoneType' object has no attribute 'group'` — imports are now split by how they're used (module-level requirements report and exit; sdk-dependent names are stubbed and the original error is reported by `main()`), with regression tests. **Action:** if you have an existing dev environment, run `python scripts/check_first_party_deps.py`; if it fails, `pip uninstall -y idp_common idp-sdk idp-cli idp_feature_sdk idp_mcp_connector && make setup`. See the new [Dependency Confusion](docs/dependency-confusion.md) guide.
 - **S3 buckets created by the CLIs and by the sample notebooks had no `EnforceSSLOnly` bucket policy, so they accepted plain-HTTP requests.** All 13 buckets in `template.yaml` (plus the SDLC pipeline's `ArtifactBucket`) carry an `AWS::S3::BucketPolicy` denying `s3:*` when `aws:SecureTransport` is false — but the buckets created *imperatively* outside CloudFormation never got the equivalent, leaving them without the in-transit-encryption control their CloudFormation-managed peers enforce. Three code paths are fixed via a new shared `idp_sdk._core.s3_security` helper: the `idp-cli publish` artifacts bucket (`idp-accelerator-artifacts-<account>-<region>`), the `idp-cli deploy` config-staging bucket (`idp-cli-config-<account>-<region>-<suffix>`), and `idp-feature-cli`'s `ensure_artifacts_bucket` (which keeps its deliberate no-`idp_sdk`-dependency isolation with a local copy). Two more gaps closed alongside: `scripts/sdlc/cfn/s3-sourcecode.yml`'s `InitialInstallBucket` gains an `InitialInstallBucketPolicy` (its `cfn_nag` W51 "bucket policy not required" suppression is dropped), and the 11 sample notebooks' `ensure_bucket_exists` helper now applies the policy to buckets it creates. The statement is applied **additively**: existing statements are preserved (so the opt-in `PackPublicArtifactsRead` public-read grant coexists with the TLS denial, and an operator's own grants survive), a stale `EnforceSSLOnly` is replaced rather than duplicated so re-running is idempotent, and ARNs use the region's real partition (`arn:aws-us-gov:` in GovCloud) mirroring `arn:${AWS::Partition}:` in the templates. The merge handles **both** forms the IAM grammar allows for `Statement` — a single statement object as well as an array ([IAM JSON policy elements: Statement](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_statement.html)) — since iterating the single-object form would yield its *keys* and replace an operator's statement with the strings `"Sid"`, `"Effect"`, …; the pre-existing `PackPublicArtifactsRead` merge path is corrected for the same latent flaw. Unlike Block Public Access — which the publisher deliberately never touches on a bucket it didn't create, so a manual remediation can't be reverted — this only ever *tightens* access and so is also applied to pre-existing buckets, best-effort there (a `PutBucketPolicy` denial warns and continues rather than failing the publish, since the operator may own that bucket's policy; on a bucket we just created it is fatal). The `idp-cli deploy` config-staging bucket is hardened on **reuse** as well as creation, since `get_or_create_config_bucket` returns early on a prefix match and is the only code that touches those buckets — otherwise the ones left unhardened by an older `idp-cli` would stay that way. **Note:** running the sample notebooks now requires `s3:PutBucketPolicy` on the buckets they create. See [lib/idp_sdk/README.md](lib/idp_sdk/README.md#buckets-the-cli-creates) and [lib/idp_feature_sdk/README.md](lib/idp_feature_sdk/README.md#artifacts-bucket-security).
 - **Changing a UI-affecting CloudFormation parameter on an existing stack had no effect, because the Web UI was never rebuilt.** Reported as: adding `AllowedSignUpEmailDomain` to a running stack correctly flipped the backend — `UserPool.AdminCreateUserConfig.AllowAdminCreateUserOnly` went to `false` and the `PreSignUp`/`PreAuthentication` domain-verify Lambda was created, so self-service signup really was permitted — yet the Cognito login screen still hid the **Sign Up** tab, which a *new* stack with the same parameter offers. The cause is a build-time/runtime split: the UI reads these settings as `import.meta.env.VITE_*`, which Vite substitutes **textually at `npm run build`** and freezes into the JS bundle in `WebUIBucket`. On a parameter change CloudFormation dutifully updated `UICodeBuildProject`'s `VITE_SHOULD_HIDE_SIGN_UP` env var — but mutating a CodeBuild *project definition* does not run a build. The only thing that runs one is the `CodeBuildRun` custom resource, and its properties (`BuildProjectName`, `SettingsParameter`, `CodeLocation`) are all derived from names and the source-zip filename, none of which depend on any parameter. With no property diff, CloudFormation skipped the resource entirely — no Update event, no `start_build` — and the stale bundle stayed deployed. (A fresh stack *create* always runs the build once, which is exactly why this gate was invisible to create-only end-to-end testing; and a version upgrade changes `CodeLocation`, which is why it never showed up there either.) `CodeBuildRun` now carries a `UIBuildInputs` property joining every parameter that Vite bakes in — `AllowedSignUpEmailDomain`, `ExternalIdPType`, `ExternalIdPName`, `ExternalIdPAutoLogin`, `EnableQuickStartWidget`, `WebUIHosting`, `CustomDomainUrl` — so a parameter-only update produces a diff and rebuilds the UI. **The same latent bug affected all seven**, not just signup: the external-IdP sign-in button, IdP auto-login, the Quick Start widget, and the asset base path / OAuth redirect origin all silently failed to take effect on an update-only change. Deliberately *not* listed are values the UI resolves at runtime from the SSM settings parameter (`ConsoleTitle`, `DefaultFeatureId`, and the `AllowedSignUpEmailDomains` the User Management screen reads) — those already apply on the next page load, and forcing a ~30-minute UI rebuild for them would be a regression. A new static test derives the baked-parameter set from the template itself (following `!If` through condition definitions, since `VITE_SHOULD_HIDE_SIGN_UP` never names its parameter directly) and asserts every member is a rebuild trigger, so a newly-added baked parameter fails CI rather than quietly regressing. See [docs/web-ui.md](docs/web-ui.md#parameters-baked-into-the-ui-at-build-time) for the parameter list and the manual-rebuild recovery command.
@@ -117,7 +122,6 @@ SPDX-License-Identifier: MIT-0
 
 - **Feature Platform stack now honors `PermissionsBoundaryArn`, fixing rollback in SCP-enforced accounts.** When `EnableFeaturePlatform=true`, the main template did not forward `PermissionsBoundaryArn` to the Feature Platform nested stack (`feature-platform/main-stack-extensions`), and that nested template neither declared the parameter nor attached a boundary to its `FeaturePlatformLambdaRole` — so in accounts whose SCP requires a permissions boundary on every IAM role, `iam:CreateRole` was denied and the nested stack rolled back on creation. The parameter is now declared in the nested template, attached to the role, and forwarded from the main stack. The same gap on the SAM-auto-role Lambda functions in the installable feature templates (`feature-template`, `sample-feature`, `sample-health-insurance-review`) and on the conditional `BastionRole` / AgentCore roles/function in the main template is fixed as well. A static regression test (`lib/idp_sdk/tests/unit/test_permissions_boundary_coverage.py`) now asserts every deployed-stack template attaches the boundary to each role it creates and forwards the parameter to every nested stack that accepts it. (#521)
 
-
 - **A failed stack update no longer wedges the automatic rollback on the config custom resource.** When an in-place update from a pre-0.6 release (e.g. 0.5.16) to 0.6.x failed for any reason and CloudFormation rolled back, the rollback itself got stuck in `UPDATE_ROLLBACK_FAILED`. The config custom resource (`UpdateConfigurationFunction`) had already migrated the stored config to the 0.6 shape; on rollback CloudFormation reverts that Lambda to the *older* release's code and re-invokes it, which then re-read the now-0.6 config and crashed — a bare `int(None)` `TypeError` on fields 0.6 stores as `null` (e.g. `max_tokens` = "request model max"), and a `gt=0` `ValidationError` on fields 0.6 stores as `0` (e.g. `extraction.agentic.shard_token_budget` = "auto-size"). Two fixes: (1) the DynamoDB serializer now **omits scalar fields whose value equals their default and is `None` or integer `0`** — behavior-neutral for the current model (absent == default on read) but sparing the reverted older model from values it cannot parse (verified: every bundled config now parses cleanly under the 0.5.16 model, with a lossless 0.6 round-trip); and (2) the custom resource now **detects a rollback** (a stored `config_format_version` newer than the running code's) and returns SUCCESS instead of FAILED on a parse error, letting the rollback complete rather than wedging the stack — while a genuine forward bad-config still fails loudly. Note: only managed/default config records are rewritten at deploy time; user Custom and named config versions are untouched. See the [config module README](lib/idp_common_pkg/idp_common/config/README.md).
 
 - **OpenAI (bedrock-mantle) metering no longer double-counts cached tokens.** OpenAI's Responses `usage.input_tokens` is the *total* prompt count and already **includes** the cached / cache-write tokens as a subset — unlike Bedrock Converse, where `inputTokens` is the disjoint uncached count. The mantle usage mapper reported that total as `inputTokens` while *also* emitting `cacheReadInputTokens` / `cacheWriteInputTokens`, so the cost calculator billed cached tokens twice (full input rate **and** cache rate) — turning the cache discount into a ~64% overcharge on warm calls. `inputTokens` is now the disjoint fresh count (`input_tokens − cached − cache_write`), so `inputTokens + cacheReadInputTokens` reconciles to the true prompt size. Affects all GPT-5.x models (5.4 / 5.5 / 5.6). Verified live end-to-end. See the [bedrock module README](lib/idp_common_pkg/idp_common/bedrock/README.md#openai-gpt-5x-models-bedrock-mantle-responses-api). (#519)
@@ -151,8 +155,6 @@ are migrated automatically on read — no manual edit is required.** See the
 [AppSync → REST migration guide](docs/migration-appsync-to-rest.md).
 
 ### Added
-
-
 
 - **Integrated confidence — per-field confidence produced inside extraction, no separate assessment pass.** `confidence.mode: integrated` emits each value's confidence in the extraction inference itself (then enriches with per-field thresholds/alerts, grounds geometry, and writes the same `explainability_info` contract, so downstream evaluation/reporting/UI/HITL are unchanged and the standalone Assessment step auto-skips). On Simple mode this uses a single **1S-TopK** call that asks the model for its top-K guesses with probabilities — better-calibrated than single-value self-assessment — halving extraction-workflow LLM calls. Works on both the Advanced (agentic) and Simple paths. See the [Extraction & Confidence guide](docs/extraction-and-confidence.md#confidence-mode-separate-vs-integrated-vs-off).
 
@@ -363,7 +365,6 @@ are migrated automatically on read — no manual edit is required.** See the
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.15.yaml`
    - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.15.yaml`
 
-
 ## [0.5.14]
 
 ### Added
@@ -440,7 +441,6 @@ are migrated automatically on read — no manual edit is required.** See the
 
 - **`LambdaSecurityGroupId` parameter on the ALB nested stack** — when supplied, the ALB S3 VPC Endpoint security group allows inbound 443 from the app Lambda SG so VPC-resident Lambdas can reach S3 through the same endpoint as ALB. Fixes a 5-minute hang in `ConfigurationCopyFunction` caused by SG mismatch.
 
-
 ### Changed
 
 - **ALB nested stack S3 VPC endpoint policy scoped to same-account operations** — the endpoint policy allows a finite set of S3 actions on `arn:${AWS::Partition}:s3:::*` conditioned on `aws:PrincipalAccount` / `aws:ResourceAccount` matching the deployment account. Wildcard resource is necessary to avoid cyclic dependencies on parent-stack buckets; authorization is additionally enforced at the network (SG) and IAM (role + bucket policy) layers. See `docs/deployment-private-network.md`.
@@ -475,7 +475,6 @@ are migrated automatically on read — no manual edit is required.** See the
   - **Default chat model is `us.anthropic.claude-opus-4-7:1m`** — 1M-context by default so typical multi-hundred-page packets fit without hitting input-token limits. EU and GovCloud presets use their region-appropriate inference profiles.
   - **First-class support for Bedrock model-ID suffixes** — `:1m` (1M-context beta), `:priority` and `:flex` (service tiers) all work end-to-end when selected in the Chat panel dropdown.
 
-
 ### Changed
 
 ### Fixed
@@ -490,7 +489,6 @@ are migrated automatically on read — no manual edit is required.** See the
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.11.yaml`
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.11.yaml`
    - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.11.yaml`
-
 
 ## [0.5.10]
 
@@ -509,11 +507,9 @@ are migrated automatically on read — no manual edit is required.** See the
   - **Web UI visibility & admin controls** — document list header shows a live status badge (green/blue/red with `lastError` tooltip) via an AppSync subscription; clicking opens a details panel. Admin-group users additionally get **Pause / Resume / Probe** buttons (each requires a reason, persisted and broadcast). All automatic transitions publish to the subscription so the badge updates within ~1s. Hidden entirely when `CircuitBreakerEnabled=false`. Backed by new AppSync ops (`getCircuitBreakerStatus`, `pause/resume/probeCircuitBreaker`, `onCircuitBreakerStatusChange`) and a new resolver Lambda that enforces Admin authorization at both the schema and resolver layers.
   - Docs: `docs/circuit-breaker.md` and `src/lambda/circuit_breaker_manager/README.md`.
 
-
 ### Changed
 
 - **Replaced DSR with open-source SRT security scanning tool** — Migrated from the deprecated internal DSR tool to the open-source [Sample Security Review Tool (SRT)](https://github.com/aws-samples/sample-security-review-tool). GitLab CI/CD now runs SRT on MRs targeting `develop` and fails the pipeline on findings. New Makefile targets: `make srt`, `make srt-setup`, `make srt-scan`, `make srt-fix`.
-
 
 ### Fixed
 
@@ -526,8 +522,6 @@ are migrated automatically on read — no manual edit is required.** See the
 - **Web UI "View Source" failed for PDFs and other docs after the v0.5.9 CSP hardening** — three fixes in `FileViewer`: (1) pass an `s3://bucket/key` URI to `getFileContents` instead of relying on the build-time `VITE_AWS_REGION` env var; (2) render PDFs in an `<iframe>` instead of `<object>` so they're allowed under the hardened `object-src 'none'` CSP; (3) drop the `sandbox` attribute on the PDF iframe only (Chrome's built-in PDF viewer is blocked when sandboxed; non-PDF iframes keep their sandbox). Added a fallback "Open PDF in a new tab" link.
 
 - **Private ALB deployment broken when stack name had uppercase characters** — the ALB DNS name is case-preserving, but browser `Origin` headers, Cognito `redirect_uri` matching, and the ALB url-rewrite regex all expected lowercase, so CORS preflights, OAuth callbacks, and the `/` → `/index.html` rewrite all failed. Fixed by lowercasing the ALB URL in every CFN consumer (new `GetLowercaseAlbUrl` custom resource reusing the existing `GetDomainLambda`), lowercasing the Amplify redirect URL in `aws-exports.js`, and broadening the ALB rewrite regex from `^/$` to `^/` so OAuth query strings don't break the match. CloudFront deployments unaffected. ([#303](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/303))
-
-
 
 ## Templates
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.10.yaml`
@@ -550,7 +544,6 @@ are migrated automatically on read — no manual edit is required.** See the
   - **Download Predictions (ZIP)** — all section result JSONs plus a self-describing `manifest.json`.
   - **Download Baselines (ZIP)** — all baseline section result JSONs (shown only when an evaluation baseline is available).
   - **Bucket-mirrored ZIP layout** — files are organised under top-level `output/`, `baseline/`, and `input/` folders that preserve the real S3 key structure, so the archive can be diffed with a direct `aws s3 sync` of the same buckets.
-
 
 - **Headless REST API mode with VPC-secured deployment for GovCloud** — a first-party Jobs REST API for programmatic document submission and status tracking, plus an optional VPC-secured deployment that keeps the API off the public internet. Makes end-to-end GovCloud deployment viable without the UI/AppSync stack, and gives Commercial customers a supported alternative to direct S3 uploads for machine-to-machine integrations.
   - **Jobs REST API** (new `src/lambda/api_handler/`, `src/lambda/job_tracker/`, `src/lambda/batch_pre_processor/`):
@@ -657,7 +650,6 @@ Hardening response to security review - Highlights:
   
 
 ## [0.5.8]
-
 
 ### Added
 
@@ -917,7 +909,6 @@ Hardening response to security review - Highlights:
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.3.yaml`
    - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.3.yaml`
 
-
 ## [0.5.2]
 
 ### Added
@@ -987,9 +978,7 @@ Hardening response to security review - Highlights:
 
 - **MCP Server** — Added additional tool to MCP Server for retrieving results of the processed document from the IDP system.
 
-
 ### Changed
-
 
 - **OCR Benchmark Config Optimization** — Optimized `config_library/unified/ocr-benchmark` configuration with targeted field descriptions, explicit model/prompt/OCR settings, and corrected date format (YYYY-MM-DD to match ground truth). Improved overall extraction accuracy from 51.5% to 75.2% on the full 293-document benchmark at equivalent cost (~$2.62). Classification remains 100% across all 9 document classes. ([#220](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/pull/220))
 
@@ -1024,7 +1013,6 @@ Hardening response to security review - Highlights:
 
 - **Added Replace/Merge sync modes for BDA synchronization** — Both "Sync from BDA" and "Sync to BDA" now support two modes: **Replace** (default) aligns the target to match the source exactly, removing items not in the source; **Merge** adds source items to the target without removing existing items. The UI modal now always shows a mode selection and ARN input (pre-filled for linked projects).
 
-
 ### Deprecated
 
 - **Pattern-1 (BDA) and Pattern-2 (Pipeline) separate deployments** — Replaced by the Unified Pattern. Existing stacks are automatically upgraded. See the [Migration Guide](./docs/migration-v04-to-v05.md) for details.
@@ -1032,7 +1020,6 @@ Hardening response to security review - Highlights:
 - **Pattern-3 (UDOP + Bedrock)** — Pattern-3 is no longer available as a deployment option. If you are currently using Pattern-3 with a SageMaker UDOP endpoint, do not upgrade to v0.5.x without first testing in a non-production environment. You can use the [Lambda Inference Hooks](./docs/lambda-hook-inference.md) feature (introduced in v0.4.15) to call your existing SageMaker UDOP endpoint from the unified pattern's classification step via a custom Lambda function.
 
 ### Changed
-
 
 - **Switched `idp_sdk` pyproject.toml to auto-discovery** — Replaced explicit subpackage listing with `setuptools.packages.find` using `include = ["idp_sdk*"]` so new subpackages are automatically included without manual pyproject.toml updates.
 
@@ -1128,7 +1115,6 @@ Hardening response to security review - Highlights:
 - **Schema Builder Few-Shot Examples Input Focus Loss** - [GitHub Issue #174](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/174)
   - Fixed cursor jumping out of input fields after each keystroke when editing few-shot examples in the Schema Builder
 
-
 - **Code Intelligence Agent - DeepWiki MCP Transport Migration**
   - Fixed "client initialization failed" error when using Code Intelligence Agent in Agent Companion Chat
   - **Root Cause**: DeepWiki deprecated their SSE transport endpoint (`/sse`) and now returns HTTP 410 Gone
@@ -1139,7 +1125,6 @@ Hardening response to security review - Highlights:
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.4.15.yaml`
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.4.15.yaml`
    - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.4.15.yaml`
-
 
 ## [0.4.14]
 
@@ -1169,7 +1154,6 @@ Hardening response to security review - Highlights:
   - **Use Cases**: Correct extraction errors, add baseline data for evaluation comparison, re-run evaluation after data corrections, update document summaries
 
 ### Changed
-
 
 - **HITL Decoupled from Step Functions**: HITL review operations now update document status directly in DynamoDB without triggering workflow reprocessing, improving reliability and reducing unintended side effects
 
@@ -1239,7 +1223,6 @@ Hardening response to security review - Highlights:
   - **Scalability**: Eliminates DynamoDB throttling for very large documents by avoiding full-document read-modify-write cycles
   - **Real-time Updates**: Both new mutations now trigger `onUpdateDocument` subscription for UI synchronization
   - **Pattern-2/3 Integration**: Extraction and assessment functions now use section-level updates instead of full document rewrites
-
 
 ### Fixed
 
@@ -1312,9 +1295,7 @@ Hardening response to security review - Highlights:
   - Added `idp-cli remove-deleted-stack-resources` command for discovering and removing orphaned resources (CloudFront distributions, response header policies, CloudWatch log groups, AppSync APIs, IAM policies, S3 buckets, DynamoDB tables) left behind after IDP stacks are deleted, with multi-region stack discovery, interactive confirmation with "yes/skip all of type" options, and configurable `--check-stack-regions` option
   - Comprehensive unit tests added for all new CLI modules
 
-
 ### Changed
-
 
 - **Scripts Directory Reorganization**
   - Consolidated development environment setup scripts into `scripts/setup/` subdirectory
@@ -1375,7 +1356,6 @@ Hardening response to security review - Highlights:
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.4.12.yaml`
    - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.4.12.yaml`
 
-
 ## [0.4.11]
 
 ### Added
@@ -1410,9 +1390,7 @@ Hardening response to security review - Highlights:
   - Corresponding configs available in Configuration Library
   - Ideal for evaluating document splitting and classification accuracy in complex multi-document scenarios
 
-
 ### Changed
-
 
 - **HITL Configuration**
   - HITL is now disabled by default in the configuration
@@ -1426,9 +1404,7 @@ Hardening response to security review - Highlights:
   - Removed A2I-related Lambda functions (`create_a2i_resources`, `get-workforce-url`)
   - Removed `EnableHITL` and `PrivateWorkteamArn` CloudFormation parameters
 
-
 ### Changed
-
 
 - **Lambda Layers Architecture for Improved Build Efficiency**
   - Replaced bundled `idp_common` package dependencies in individual Lambda functions with three shared Lambda Layers
@@ -1466,7 +1442,6 @@ Hardening response to security review - Highlights:
   - Updated build system to build only two categories concurrently (nested + patterns) instead of three (nested + patterns + options)
   - **Breaking Change**: Directory paths changed - `options/` → `nested/`. Existing work-in-progress branches will have merge conflicts in directory structure.
 
-
 ### Fixed
 
 - **Fixed page_indices Reset Bug in Multi-Section Documents**
@@ -1477,7 +1452,6 @@ Hardening response to security review - Highlights:
   
 - **IDP CLI Stack Parameter Preservation During Updates**
   - Fixed bug where `idp-cli deploy` command was resetting ALL stack parameters to their default values during updates, even when users only intended to change specific parameters
-
 
 ### Upgrade Notes
 
@@ -1490,8 +1464,6 @@ Hardening response to security review - Highlights:
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.4.11.yaml`
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.4.11.yaml`
    - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.4.11.yaml`
-
-
 
 ## [0.4.10]
 
@@ -1587,7 +1559,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - **Test Studio UI Enhancements for Improved Table Layouts and User Experience**
   - Added resizable columns and CollectionPreferences with wrap lines for all tables in TestComparison and TestResults
   - Combined accuracy and split classification metrics into collapsible "Average Accuracy and Split Metrics" section with expandable "Additional Metrics" for comprehensive review
@@ -1614,7 +1585,6 @@ Hardening response to security review - Highlights:
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.4.9.yaml`
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.4.9.yaml`
    - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.4.9.yaml`
-
 
 ## [0.4.8]
 
@@ -1696,12 +1666,10 @@ Hardening response to security review - Highlights:
   - **EnableMCP Default Changed**: Set `EnableMCP` parameter default to 'false' for GovCloud since MCP integration requires Cognito authentication infrastructure
   - **Impact**: GovCloud templates now deploy successfully without dependency errors, maintaining core document processing functionality in headless mode
 
-
 ### Templates
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.4.7.yaml`
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.4.7.yaml`
    - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.4.7.yaml`
-
 
 ## [0.4.6]
 
@@ -1741,7 +1709,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - **Improved Temperature and Top_P Parameter Logic for Deterministic Output**
   - Changed inference parameter selection logic to allow `temperature=0.0` for deterministic output (recommended by Anthropic and other model providers)
   - **New Logic**: Uses `top_p` only when it has a positive value (> 0); otherwise uses `temperature` including `temperature=0.0`
@@ -1776,7 +1743,6 @@ Hardening response to security review - Highlights:
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.4.6.yaml`
    - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.4.6.yaml`
 
-
 ## [0.4.5]
 
 ### Added
@@ -1800,7 +1766,6 @@ Hardening response to security review - Highlights:
   - Defaults to main extraction model if not specified
   - Configurable through Web UI extraction settings
 
-
 ### Fixed
 
 - **Evaluation Output URI Fields Lost Across All Patterns - causing (a) missing Page Text Confidence content in UI, (2) failed Assessment step when reprocessing document after editing classes (No module named 'fitz')**
@@ -1822,7 +1787,6 @@ Hardening response to security review - Highlights:
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.4.5.yaml`
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.4.5.yaml`
    - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.4.5.yaml`
-
 
 ## [0.4.4]
 
@@ -1847,7 +1811,6 @@ Hardening response to security review - Highlights:
 - **IDP Agent Companion Chat UX improvements**
   - Improved speed of rendering chat response by buffering the agent tool responses.
   - Displaying agent tool queries and results in a modal with formatted results.
-
 
 ### Templates
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.4.4.yaml`
@@ -1901,7 +1864,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - **Containerized Pattern-1 and Pattern-3 Deployment Pipelines**
   - Migrated Pattern-1 and Pattern-3 Lambda functions to Docker image deployments (following Pattern-2 approach from v0.3.20)
   - Builds and pushes all Lambda images via CodeBuild with automated ECR cleanup
@@ -1925,7 +1887,6 @@ Hardening response to security review - Highlights:
 - **Example Notebook error fixed**
   - Example notebooks updated to work with new v0.4.0+ JSON schema
 
-
 ### Templates
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.4.2.yaml`
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.4.2.yaml`
@@ -1934,7 +1895,6 @@ Hardening response to security review - Highlights:
 ## [0.4.1]
 
 ### Changed
-
 
 - **Configuration Library Updates with JSON Schema Support**
   - Updated configuration library with JSON schema format for lending package, bank statement, and RVL-CDIP package samples
@@ -2026,7 +1986,6 @@ Hardening response to security review - Highlights:
   - Provided tools access to agent
   - Updated system prompt
 
-
 ### Fixed
 
 - **UI Robustness for Orphaned List Entries** - [#102](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/102)
@@ -2068,7 +2027,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - **Migrated Evaluation from EventBridge Trigger to Step Functions Workflow**
   - Moved evaluation processing from external EventBridge-triggered Lambda to integrated Step Functions workflow step
   - **Race Condition Eliminated**: Evaluation now runs inside state machine before WorkflowTracker marks documents COMPLETE, preventing premature completion status when evaluation is still running
@@ -2076,7 +2034,6 @@ Hardening response to security review - Highlights:
   - **Enhanced Status Tracking**: Added EVALUATING status to document processing pipeline for better visibility of evaluation progress
   - **UI Improvements**: Added support for displaying EVALUATING status in processing flow viewer and "NOT ENABLED" badge when evaluation is disabled in configuration
   - **Consistent Pattern**: Aligns evaluation with summarization and assessment patterns for unified feature control approach
-
 
 - **Migrated UI Build System from Create React App to Vite**
   - Upgraded to Vite 7 for faster build times
@@ -2123,7 +2080,6 @@ Hardening response to security review - Highlights:
   - **Benefits**: Context-aware summaries referencing extracted values, improved accuracy and quality, better extraction-summary alignment
 
 ### Changed
-
 
 - **Containerized Pattern-2 deployment pipeline** that builds and pushes all Lambda images via CodeBuild using the new Dockerfile, plus automated ECR cleanup and tests.
   - Lambda docker image deployments have a 10 GB image size limit compared to the 250 MB zip limit of regular deployment. This however doesn't allow for viewing the code in the AWS console.
@@ -2220,7 +2176,6 @@ Hardening response to security review - Highlights:
   - **Faster Time-to-Query**: Agent has immediate access to table overview and can proceed directly to detailed schema loading for relevant tables
 
 ### Changed
-
 
 - Add UI code lint/validation to publish.py script
 
@@ -2398,7 +2353,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - **Reverted to python3.12 runtime to resolve build package dependency problems**
 
 ### Fixed
@@ -2474,7 +2428,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - **Updated Python Lambda Runtime to 3.13**
 
 ### Fixed
@@ -2544,7 +2497,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - Updated lending_package.pdf sample with more realistic driver's license image
 
 ### Fixed
@@ -2573,7 +2525,6 @@ Hardening response to security review - Highlights:
   - Configurable through Web UI without requiring code changes or redeployment
 
 ### Changed
-
 
 - **Converted text confidence data format from JSON to markdown table for improved readability and reduced token usage**
   - Removed unnecessary "page_count" field
@@ -2671,7 +2622,6 @@ Hardening response to security review - Highlights:
   - Resolves "size exceeding the maximum number of bytes service limit" errors for documents with 500+ pages
 
 ### Changed
-
 
 - **Default behavior for image attachment in Pattern-2 and Pattern3**
   - If the prompt contains a `{DOCUMENT_IMAGE}` placeholder, keep the current behavior (insert image at placeholder)
@@ -2841,7 +2791,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - Pin packages to tested versions to avoid vulnerability from incompatible new package versions.
 - Updated reporting data to use document's queued_time for consistent timestamps
 - Create new extensible SaveReportingData class in idp_common package for saving evaluation results to Parquet format
@@ -3004,7 +2953,6 @@ Hardening response to security review - Highlights:
 
 ### Changed
 
-
 - **Simplified Model Configuration Architecture**
   - Removed individual model parameters from main template: `Pattern1SummarizationModel`, `Pattern2ClassificationModel`, `Pattern2ExtractionModel`, `Pattern2SummarizationModel`, `Pattern3ExtractionModel`, `Pattern3SummarizationModel`, `EvaluationLLMModelId`
   - Model selection now handled through enum constraints in UpdateSchemaConfig sections within each pattern template
@@ -3049,7 +2997,6 @@ Hardening response to security review - Highlights:
 - Added document reprocessing capability to the UI - New "Reprocess" button with confirmation dialog
 
 ### Changed
-
 
 - Refactored code for better maintainability
 - Updated UI components to support markdown table viewing
