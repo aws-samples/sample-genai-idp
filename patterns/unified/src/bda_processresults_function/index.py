@@ -451,7 +451,8 @@ def resolve_class_schema(doc_class, config):
     for schema in config.classes or []:
         if not isinstance(schema, dict):
             continue
-        if (schema.get("x-aws-idp-document-type", "") or "").lower() == doc_class.lower():
+        dt = schema.get("x-aws-idp-document-type", "")
+        if isinstance(dt, str) and dt.lower() == doc_class.lower():
             return schema
     return None
 
@@ -499,19 +500,17 @@ def add_confidence_thresholds_to_explainability_schema_aware(
         )
         return enriched
 
-    # explainability_info is typically a list where [0] is the assessment dict
+    # explainability_info is typically a list of assessment dicts — enrich ALL of them
     if isinstance(explainability_data, list) and len(explainability_data) > 0:
-        inner = explainability_data[0]
-        if isinstance(inner, dict):
-            try:
-                return [_enrich(inner)] + explainability_data[1:]
-            except Exception as e:
-                logger.warning(
-                    f"Schema-aware threshold enrichment failed, falling back to flat: {e}"
-                )
-        return add_confidence_thresholds_to_explainability(
-            explainability_data, default_confidence_threshold
-        )
+        try:
+            return [_enrich(item) if isinstance(item, dict) else item for item in explainability_data]
+        except Exception as e:
+            logger.warning(
+                f"Schema-aware threshold enrichment failed, falling back to flat: {e}"
+            )
+            return add_confidence_thresholds_to_explainability(
+                explainability_data, default_confidence_threshold
+            )
     if isinstance(explainability_data, dict):
         # Direct dict (no wrapping list) — enrich directly
         try:

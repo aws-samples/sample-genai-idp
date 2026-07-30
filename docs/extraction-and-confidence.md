@@ -992,6 +992,8 @@ analysis rather than named schema fields, so it uses `hitl.confidence_threshold`
 > `x-aws-idp-confidence-threshold` is effectively never flagged. Set a meaningful
 > default (e.g. `0.8`) so unannotated fields still get reviewed.
 
+> **Note:** The path-based resolver (`resolve_threshold_for_path`, used by the BDA HITL alert path) supports arbitrary nesting (objects inside array items, nested arrays). The enrichment function (`enrich_assessment_with_thresholds`, used by the pipeline assessment and BDA result.json paths) currently resolves only one level of array item sub-fields. Nested objects within array items fall back to the default threshold in the enrichment path. For the common case (flat array items with per-field thresholds), both paths produce identical results.
+
 ### UI visual feedback
 
 
