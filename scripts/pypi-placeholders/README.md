@@ -39,10 +39,17 @@ placeholders by accident, they should be told immediately and precisely.
 Nothing in this repo should ever install from these directories. They exist only
 to be uploaded to PyPI. The real packages live in `lib/`:
 
-| Placeholder name    | Real package               |
-| ------------------- | -------------------------- |
-| `idp-feature-sdk`   | `lib/idp_feature_sdk`      |
-| `idp-mcp-connector` | `lib/idp_mcp_connector_pkg`|
+| Placeholder name      | Real package                |
+| --------------------- | --------------------------- |
+| `idp-feature-sdk`     | `lib/idp_feature_sdk`       |
+| `idp-mcp-connector`   | `lib/idp_mcp_connector_pkg` |
+| `idp-accelerator-cli` | `lib/idp_cli_pkg`           |
+
+`idp-accelerator-cli` is a slightly different case from the other two. It is not
+a name we already used — it is the **new** distribution name for our CLI, adopted
+because `idp-cli` on PyPI belongs to an unrelated legitimate project. We register
+it here for the same reason as the others: so the name we now depend on cannot be
+taken by someone else. The command users type is still `idp-cli`.
 
 ## Publishing
 

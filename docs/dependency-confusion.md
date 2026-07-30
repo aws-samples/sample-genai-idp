@@ -34,7 +34,29 @@ third party before we thought to claim them:
 | ------------- | ---------------------------------------------------------------- |
 | `idp-common`  | Registered by a third party ("Poneglyph Security Research"), 0.1.0 |
 | `idp-sdk`     | Registered by the same third party, 0.1.0                          |
-| `idp-cli`     | Registered by an unrelated legitimate project, 1.0.0               |
+| `idp-cli`     | Registered by an unrelated **legitimate** project, 1.0.0 — not a squat |
+
+A note on `idp-cli`: unlike the first two, that name belongs to a real,
+unrelated project (an "Internal Developer Platform CLI" with several releases and
+its own users). No takedown is possible or appropriate — we simply lost the name.
+Our CLI's **distribution** is therefore published as `idp-accelerator-cli`, while
+the **command** users type is still `idp-cli`. Nothing depended on `idp-cli` by
+bare name, so this was a naming collision rather than an exploitable hole.
+
+### Distribution names vs. everything else
+
+Four separate identifiers are easy to confuse. Only the first is a
+dependency-confusion concern:
+
+| Identifier | Example | Squattable? |
+| --- | --- | --- |
+| **Distribution name** (what pip resolves) | `idp-accelerator-cli` | **Yes** — this is the attack surface |
+| Import name (what Python sees) | `import idp_cli` | No — local to the installed code |
+| Console command | `idp-cli` | No — created by whatever package installs it |
+| Runtime string literals | the `"idp-cli"` S3 prefix / CFN tag | No — persisted data, not package identity |
+
+A distribution can be renamed without touching any of the other three, which is
+exactly what we did.
 
 The packages under those first two names are currently inert — they print a
 banner and contain no install hooks or network calls. But the name owner can
@@ -82,6 +104,9 @@ nobody else can take them. See `scripts/pypi-placeholders/`. Each placeholder
 raises `RuntimeError` on import explaining what happened and how to install the
 real package — deliberately loud, because a silent stub reproduces the very
 failure mode described above.
+
+Registered so far: `idp-feature-sdk`, `idp-mcp-connector`, and
+`idp-accelerator-cli`.
 
 Registration is strictly better than detection: a tripwire finds the wrong
 package after it is installed, whereas owning the name means there is nothing
@@ -133,7 +158,8 @@ Lambda `requirements.txt` files already use relative paths, which are immune:
 3. **Clean up** and reinstall in one pass:
 
    ```bash
-   pip uninstall -y idp_common idp-sdk idp-cli idp_feature_sdk idp_mcp_connector
+   pip uninstall -y idp_common idp-sdk idp-accelerator-cli idp_feature_sdk \
+       idp_mcp_connector
    make setup
    ```
 
