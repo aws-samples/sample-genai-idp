@@ -49,19 +49,69 @@ because `idp-cli` on PyPI belongs to an unrelated legitimate project. We registe
 it here for the same reason as the others: so the name we now depend on cannot be
 taken by someone else. The command users type is still `idp-cli`.
 
+## Status
+
+| Name                  | Uploaded | Yanked |
+| --------------------- | -------- | ------ |
+| `idp-feature-sdk`     | ✅ 2026-07-29 | ☐ |
+| `idp-mcp-connector`   | ✅ 2026-07-29 | ☐ |
+| `idp-accelerator-cli` | ☐        | ☐ |
+
+Both columns must be ticked for a name to be fully handled — see why below.
+
 ## Publishing
 
-Only needs doing once per name. Each placeholder is version `0.0.0`, and the
-release is **yanked** immediately after upload: yanking keeps the name reserved
-while telling pip never to resolve it for an unpinned requirement, so a
-placeholder can never satisfy a real dependency.
+Only needs doing once per name. Two steps: upload, then yank.
+
+### 1. Upload
+
+Needs a PyPI API token (username `__token__`). `uvx` avoids installing twine into
+your environment:
 
 ```bash
 cd scripts/pypi-placeholders/<name>
 python3 -m build
-python3 -m twine check dist/*
-python3 -m twine upload dist/*        # requires a PyPI API token
+uvx twine check dist/*
+uvx twine upload dist/*
 ```
 
-After upload, **yank** the release (`0.0.0`) on PyPI. Yanking keeps the name
-reserved while telling pip never to resolve it for an unpinned requirement.
+Consider `uvx twine upload --repository testpypi dist/*` first to check the
+metadata and README rendering — a filename can never be reused on PyPI, even
+after deletion.
+
+### 2. Yank the release — **do not skip this**
+
+Each placeholder is version `0.0.0` *and* must be yanked. The version number
+alone does not protect anything: an un-yanked `0.0.0` is still the only release,
+so pip resolves it happily for a bare requirement:
+
+```
+$ pip install idp-feature-sdk        # while un-yanked
+Would install idp-feature-sdk-0.0.0  # ← resolves, defeating the purpose
+```
+
+Yanking ([PEP 592][pep592]) keeps the name reserved — nobody else can claim it —
+while telling pip to ignore the release for any unpinned requirement. That is the
+combination we want: name held, never installed by accident.
+
+There is **no API for this**; `twine` supports only `check`, `upload` and
+`register`. It must be done in the web UI:
+
+1. Sign in to <https://pypi.org/manage/projects/>
+2. Pick the project → **Manage** → **Releases**
+3. On `0.0.0`, open **Options** → **Yank**
+4. Reason: `Reserved-name placeholder — not a functional package`
+
+Yanking is reversible and does **not** delete the release or free the name.
+
+Verify afterwards:
+
+```bash
+curl -s https://pypi.org/pypi/<name>/json \
+  | python3 -c "import json,sys; d=json.load(sys.stdin); \
+print([(f['filename'], f['yanked']) for fs in d['releases'].values() for f in fs])"
+```
+
+Both files should report `True`.
+
+[pep592]: https://peps.python.org/pep-0592/
