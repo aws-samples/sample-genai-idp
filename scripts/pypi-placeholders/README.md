@@ -51,13 +51,19 @@ taken by someone else. The command users type is still `idp-cli`.
 
 ## Status
 
-| Name                  | Uploaded | Yanked |
-| --------------------- | -------- | ------ |
-| `idp-feature-sdk`     | ✅ 2026-07-29 | ☐ |
-| `idp-mcp-connector`   | ✅ 2026-07-29 | ☐ |
-| `idp-accelerator-cli` | ☐        | ☐ |
+| Name                  | Uploaded      | Yanked        |
+| --------------------- | ------------- | ------------- |
+| `idp-feature-sdk`     | ✅ 2026-07-29 | ✅ 2026-07-30 |
+| `idp-mcp-connector`   | ✅ 2026-07-29 | ✅ 2026-07-30 |
+| `idp-accelerator-cli` | ✅ 2026-07-30 | ✅ 2026-07-30 |
 
-Both columns must be ticked for a name to be fully handled — see why below.
+Both columns must be ticked for a name to be fully handled — see why below. All
+three are complete: the names are held by AWS, and a bare `pip install <name>`
+finds no installable version (verified — pip reports "Could not find a version",
+where an un-yanked placeholder would have resolved).
+
+Nothing further is needed here unless a **new** first-party distribution name is
+added, in which case follow the two steps below for it.
 
 ## Publishing
 
