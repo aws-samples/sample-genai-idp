@@ -251,8 +251,9 @@ See `lib/idp_common_pkg/idp_common/extraction/README.md` for detailed documentat
 - Core shared library powering the accelerator
 - Modular installation: Install only needed components to minimize Lambda package size
   - ⚠️ Always install first-party packages **from the local checkout**, never by
-    bare name — `idp-common` / `idp-sdk` on public PyPI are third-party squats.
-    See `docs/dependency-confusion.md`.
+    bare name — those names on public PyPI belong to unrelated parties, so a bare
+    `pip install` fetches someone else's code. See
+    `docs/dependency-confusion.md`.
   - `pip install -e "lib/idp_common_pkg[core]"` - minimal dependencies
   - `pip install -e "lib/idp_common_pkg[ocr]"` - OCR support
   - `pip install -e "lib/idp_common_pkg[classification]"` - Classification support

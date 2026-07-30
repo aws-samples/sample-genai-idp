@@ -46,10 +46,19 @@ from importlib.metadata import PackageNotFoundError, distribution
 FIRST_PARTY = [
     "idp_common",
     "idp-sdk",
-    "idp-cli",
+    "idp-accelerator-cli",  # console command is still `idp-cli`
     "idp_feature_sdk",
     "idp_mcp_connector",
 ]
+
+# Distribution names we USED to publish under, mapped to their replacement.
+# Renaming a distribution does not uninstall the old one: pip keeps the previous
+# dist-info, so `pip list` shows both names pointing at the same source tree. That
+# is harmless but confusing, and a stale record could later be satisfied from an
+# index. Report it so the user can clean up.
+RETIRED_NAMES = {
+    "idp-cli": "idp-accelerator-cli",
+}
 
 # Git hosts/repos that legitimately serve this source (installs that track the
 # public accelerator repo are fine — they are the same first-party code).
@@ -132,7 +141,28 @@ def main() -> int:
             print(f"  ✗ {name}: see error below")
             failures.append(f"{name}: {detail}")
 
+    # A leftover install under a retired distribution name is not a failure — the
+    # code is the same — but it is stale and worth clearing.
+    stale = []
+    for old, new in RETIRED_NAMES.items():
+        try:
+            distribution(old)
+        except PackageNotFoundError:
+            continue
+        stale.append((old, new))
+        print(f"  ! {old}: retired distribution name (renamed to {new})")
+
     sys.stdout.flush()
+
+    if stale:
+        names = " ".join(old for old, _ in stale)
+        print(
+            "\nNOTE: a retired distribution name is still installed. Renaming a\n"
+            "distribution does not remove the old dist-info, so pip lists both\n"
+            f"names for the same source tree. Harmless, but clear it with:\n\n"
+            f"  pip uninstall -y {names}\n",
+            file=sys.stderr,
+        )
 
     if failures:
         print(
@@ -149,8 +179,8 @@ def main() -> int:
         print(
             "\nTo fix, reinstall ALL first-party packages in ONE pip invocation so\n"
             "pip resolves the sibling names from the local checkout:\n\n"
-            "  pip uninstall -y idp_common idp-sdk idp-cli idp_feature_sdk "
-            "idp_mcp_connector\n"
+            "  pip uninstall -y idp_common idp-sdk idp-accelerator-cli "
+            "idp_feature_sdk idp_mcp_connector\n"
             "  make setup        # or: make setup-venv\n",
             file=sys.stderr,
         )
