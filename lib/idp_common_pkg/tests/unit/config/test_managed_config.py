@@ -13,6 +13,7 @@ Verifies:
 from unittest.mock import Mock, patch
 
 import pytest
+
 from idp_common.config.models import ConfigMetadata, ConfigurationRecord, IDPConfig
 
 

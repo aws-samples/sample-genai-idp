@@ -123,6 +123,7 @@ class ConfigOperation:
         from pathlib import Path
 
         import yaml
+
         from idp_common.config.merge_utils import load_yaml_file, validate_config
 
         try:

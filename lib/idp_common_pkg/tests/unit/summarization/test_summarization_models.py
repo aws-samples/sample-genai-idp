@@ -6,6 +6,7 @@ Unit tests for the summarization models module.
 """
 
 import pytest
+
 from idp_common.summarization.models import DocumentSummarizationResult, DocumentSummary
 
 

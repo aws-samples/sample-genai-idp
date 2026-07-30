@@ -24,6 +24,7 @@ not enabled.
 import io
 
 import pytest
+
 from idp_common.bedrock.client import BedrockClient
 
 # Errors that mean "the model/endpoint isn't available to this account/region"

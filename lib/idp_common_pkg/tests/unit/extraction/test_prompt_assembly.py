@@ -4,6 +4,7 @@
 """Unit tests for settings-aware prompt template selection (v0.6)."""
 
 import pytest
+
 from idp_common.config.models import ExtractionConfig
 from idp_common.extraction.prompt_assembly import (
     geometry_requires_llm_boxes,

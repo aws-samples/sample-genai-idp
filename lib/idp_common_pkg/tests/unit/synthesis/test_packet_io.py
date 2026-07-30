@@ -8,6 +8,7 @@ import os
 from unittest.mock import Mock
 
 import pytest
+
 from idp_common.synthesis import packet_io
 
 pytestmark = pytest.mark.unit

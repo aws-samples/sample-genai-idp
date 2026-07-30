@@ -10,8 +10,9 @@ from unittest.mock import Mock, patch
 
 import boto3
 import pytest
-from idp_common.models import Document, Page, Section, Status
 from moto import mock_aws
+
+from idp_common.models import Document, Page, Section, Status
 
 
 class TestDocumentCompression:

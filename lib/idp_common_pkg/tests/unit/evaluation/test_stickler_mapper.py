@@ -12,6 +12,7 @@ arrays of free-form objects.
 import copy
 
 import pytest
+
 from idp_common.evaluation.stickler_mapper import SticklerConfigMapper
 
 

@@ -8,6 +8,7 @@ import base64
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from idp_common.model_finetuning.training_data_utils import (
     convert_pdf_to_images,
     format_baseline_for_training,

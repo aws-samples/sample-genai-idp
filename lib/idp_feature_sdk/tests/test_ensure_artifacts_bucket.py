@@ -16,8 +16,9 @@ import json
 
 import boto3
 import pytest
-from idp_feature_sdk.pack import apply_public_artifacts_policy, ensure_artifacts_bucket
 from moto import mock_aws
+
+from idp_feature_sdk.pack import apply_public_artifacts_policy, ensure_artifacts_bucket
 
 REGION = "us-west-2"
 

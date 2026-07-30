@@ -13,6 +13,8 @@ library primitives that both the in-process and SFN backends share.
 import asyncio
 
 import pytest
+from pydantic import BaseModel
+
 from idp_common.config.models import IDPConfig
 from idp_common.extraction.runtime import (
     InProcessRuntime,
@@ -27,7 +29,6 @@ from idp_common.extraction.runtime import (
     select_runtime,
     shard_result_key,
 )
-from pydantic import BaseModel
 
 pytestmark = pytest.mark.unit
 

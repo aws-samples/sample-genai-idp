@@ -7,8 +7,9 @@ Unit tests for idp_common.monitoring.stack_utils
 
 from unittest.mock import MagicMock, patch
 
-import idp_common.monitoring.stack_utils as stack_module
 import pytest
+
+import idp_common.monitoring.stack_utils as stack_module
 from idp_common.monitoring.stack_utils import (
     extract_stack_name_from_arn,
     get_lambda_function_names,

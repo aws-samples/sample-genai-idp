@@ -18,6 +18,7 @@ import json
 import os
 
 import pytest
+
 from idp_sdk._core.publish import IDPPublisher
 
 

@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+
 from idp_common.config.merge_utils import merge_config_with_defaults
 from idp_common.config.migrations.v05_to_v06 import migrate_v05_to_v06
 from idp_common.config.models import CONFIG_FORMAT_VERSION, IDPConfig

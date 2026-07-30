@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+
 from idp_common.discovery.embedding_service import EmbeddingResult, EmbeddingService
 
 

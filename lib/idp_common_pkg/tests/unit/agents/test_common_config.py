@@ -9,6 +9,7 @@ import os
 from unittest.mock import patch
 
 import pytest
+
 from idp_common.agents.common.config import (
     get_environment_config,
     validate_aws_credentials,

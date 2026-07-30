@@ -18,6 +18,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from idp_common.hooks import (
     UPDATED_DOCUMENT_KEY,
     load_hook_document,

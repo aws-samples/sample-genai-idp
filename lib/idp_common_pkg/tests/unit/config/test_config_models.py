@@ -6,6 +6,7 @@ Tests for configuration Pydantic models.
 """
 
 import pytest
+
 from idp_common.config.models import (
     AgenticConfig,
     ChatConfig,

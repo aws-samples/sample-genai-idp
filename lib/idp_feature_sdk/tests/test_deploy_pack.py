@@ -18,9 +18,10 @@ import json
 
 import boto3
 import pytest
-from idp_feature_sdk.pack import deploy_pack
 from moto import mock_aws
 from rich.console import Console
+
+from idp_feature_sdk.pack import deploy_pack
 
 _STACK = "my-claims"
 _BUCKET = "wrapper-bucket"

@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import yaml
+
 from idp_common.config.merge_utils import (
     _load_valid_bedrock_models,
     _validate_agentic_openai,

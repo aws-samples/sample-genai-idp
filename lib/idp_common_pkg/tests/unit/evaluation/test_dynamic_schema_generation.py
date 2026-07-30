@@ -8,6 +8,7 @@ Tests for dynamic schema generation in evaluation service.
 from unittest.mock import patch
 
 import pytest
+
 from idp_common.evaluation.service import EvaluationService
 from idp_common.models import Section
 

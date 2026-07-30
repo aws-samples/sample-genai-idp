@@ -8,6 +8,7 @@ from xml.etree.ElementTree import (  # nosec B405 - constructing XML in-memory f
 )
 
 import pytest
+
 from idp_common.ocr.document_converter import DocumentConverter
 
 

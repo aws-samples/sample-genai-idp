@@ -24,8 +24,9 @@ from typing import Any
 
 import pytest
 import yaml
-from idp_common.config.models import ConfigurationRecord, IDPConfig
 from pydantic import BaseModel, Field, field_validator
+
+from idp_common.config.models import ConfigurationRecord, IDPConfig
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 _CONFIG_DIR = _REPO_ROOT / "config_library" / "unified"

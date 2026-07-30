@@ -8,6 +8,7 @@ Unit tests for Stack operations (mocked).
 from unittest.mock import Mock, patch
 
 import pytest
+
 from idp_sdk import IDPClient
 
 

@@ -9,11 +9,12 @@ Run with: pytest -m agentic tests/unit/extraction/agentic_idp/
 """
 
 import pytest
+from pydantic import BaseModel
+
 from idp_common.extraction.agentic_idp import (
     _is_context_overflow_error,
     _merge_shard_results,
 )
-from pydantic import BaseModel
 
 pytestmark = pytest.mark.agentic
 

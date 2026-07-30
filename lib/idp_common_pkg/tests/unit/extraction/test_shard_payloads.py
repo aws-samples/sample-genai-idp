@@ -8,6 +8,7 @@ or Strands (pure prompt construction), so they run as plain unit tests.
 """
 
 import pytest
+
 from idp_common.extraction.service import ExtractionService
 
 pytestmark = pytest.mark.unit

@@ -8,6 +8,7 @@ Additional unit tests for the BdaService class.
 from unittest.mock import MagicMock, call, patch
 
 import pytest
+
 from idp_common.bda.bda_service import BdaService
 
 

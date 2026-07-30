@@ -8,6 +8,7 @@ Unit tests for cost calculation functionality
 from datetime import datetime
 
 import pytest
+
 from idp_common.config.models import IDPConfig
 from idp_common.models import Document
 from idp_common.reporting.save_reporting_data import SaveReportingData

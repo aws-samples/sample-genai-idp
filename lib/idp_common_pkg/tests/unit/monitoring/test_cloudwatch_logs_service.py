@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from idp_common.monitoring.cloudwatch_logs_service import (
     _build_filter_pattern,
     _extract_function_type,
