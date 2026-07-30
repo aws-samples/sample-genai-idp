@@ -54,7 +54,7 @@ This README provides a high-level overview of the package. For detailed document
 > PyPI**. The name `idp-common` on public PyPI is registered by an unrelated
 > third party, so `pip install idp_common` installs *someone else's package*.
 > Every command below therefore uses a path (`./` or `-e`). See
-> [Dependency confusion](../../docs/dependency-confusion.md).
+> [Installing First-Party Packages Safely](../../docs/dependency-confusion.md).
 
 To minimize Lambda package size, install only the components you need. Run these
 from the repository root:

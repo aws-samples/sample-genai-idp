@@ -262,7 +262,7 @@ export default defineConfig({
             },
             { label: "Dependency Mirroring", slug: "dependency-mirroring" },
             {
-              label: "Dependency Confusion",
+              label: "Installing First-Party Packages",
               slug: "dependency-confusion",
             },
           ],

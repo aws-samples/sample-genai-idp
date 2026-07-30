@@ -6,7 +6,19 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "idp-cli"
+# DISTRIBUTION name. Deliberately not "idp-cli": that name on public PyPI belongs
+# to an unrelated third-party project ("Internal Developer Platform CLI"), so we
+# could never publish under it, and `pip install idp-cli` gets a user someone
+# else's tool. This name is registered to us as a placeholder.
+#
+# Distinct from three other identifiers that intentionally keep the old spelling:
+#   - the import name `idp_cli`            (see [tool.setuptools] below)
+#   - the console command `idp-cli`        (see [project.scripts] below)
+#   - runtime string literals "idp-cli"    (S3 artifact prefixes, the CFN
+#     `CreatedBy` tag, the Test Studio test-set name) — those are persisted data;
+#     changing them would orphan existing artifacts.
+# See docs/dependency-confusion.md.
+name = "idp-accelerator-cli"
 version = "0.6.2"
 description = "Command-line interface for IDP Accelerator batch document processing"
 authors = [{name = "AWS"}]
@@ -42,6 +54,8 @@ test = [
 ]
 
 [project.scripts]
+# The user-facing command stays `idp-cli` — unchanged by the distribution rename
+# above, and referenced that way throughout the docs.
 idp-cli = "idp_cli.cli:main"
 
 [tool.setuptools]

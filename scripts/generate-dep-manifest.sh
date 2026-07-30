@@ -41,7 +41,8 @@ output_file = Path(sys.argv[2])
 # Keep in sync with FIRST_PARTY in scripts/check_first_party_deps.py.
 # See docs/dependency-confusion.md.
 INTERNAL_PACKAGES = {
-    "idp-common", "idp-sdk", "idp-cli", "idp-mcp-connector", "idp-feature-sdk",
+    "idp-common", "idp-sdk", "idp-accelerator-cli", "idp-mcp-connector",
+    "idp-feature-sdk",
 }
 
 SKIP_DIRS = {".aws-sam", ".venv", "node_modules", ".git", "deps"}
