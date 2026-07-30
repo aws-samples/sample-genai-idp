@@ -2528,6 +2528,9 @@ STDERR:
                     "<w2_dataset_deployer_HASH_TOKEN>": self.get_directory_checksum(
                         "src/lambda/w2_dataset_deployer"
                     )[:16],
+                    "<CONFBENCH_DEPLOYER_HASH_TOKEN>": self.get_directory_checksum(
+                        "src/lambda/confbench_deployer"
+                    )[:16],
                     # BuildHash is the ONLY meaningful property of the
                     # DockerBuildRun custom resource, so it is the sole thing
                     # that re-triggers the container build on a stack update: if

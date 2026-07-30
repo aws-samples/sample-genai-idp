@@ -3313,6 +3313,7 @@ Resources:
       docsplit: !Sub "s3://${ConfigurationBucket}/config_library/managed_config/docsplit/config.yaml"
       ocr-benchmark: !Sub "s3://${ConfigurationBucket}/config_library/managed_config/ocr-benchmark/config.yaml"
       realkie-fcc-verified: !Sub "s3://${ConfigurationBucket}/config_library/managed_config/realkie-fcc-verified/config.yaml"
+      confbench: !Sub "s3://${ConfigurationBucket}/config_library/managed_config/confbench/config.yaml"
 
 
   ##########################################################################

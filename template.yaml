@@ -3763,6 +3763,97 @@ Resources:
       SourceCodeHash: <FCC_DATASET_DEPLOYER_HASH_TOKEN>
 
   ##########################################################################
+  # ConfBench Deployer - Automatically deploys ConfBench dataset (augmented FCC invoices)
+  ##########################################################################
+
+  ConfbenchDeployerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  ConfbenchDeployerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      FunctionName: !Sub "${AWS::StackName}-ConfbenchDeployer"
+      CodeUri: src/lambda/confbench_deployer/
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 2048
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
+      LoggingConfig:
+        LogGroup: !Ref ConfbenchDeployerLogGroup
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TESTSET_BUCKET: !Ref TestSetBucket
+          TRACKING_TABLE: !Ref TrackingTable
+          S3_ENDPOINT_URL: !If
+            - HasS3VpcEndpointAndVpc
+            - !Sub
+              - "https://bucket.${VpceDnsName}"
+              # Only the BYO override provides an S3 VPC endpoint now (APIGateway
+              # hosting uses API Gateway's internal S3 integration, no VPCE). The
+              # S3PresignedUrlViaVpcEndpointRequiresEndpoint rule guarantees the
+              # override is set whenever UseS3VpcEndpointForPresigner is true.
+              - VpceDnsName: !Ref S3VpcEndpointDnsNameOverride
+            - !Ref AWS::NoValue
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref TestSetBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-ConfbenchDeployer"
+
+  ConfbenchDeployment:
+    Type: Custom::ConfbenchDeployer
+    DependsOn:
+      - TestSetBucket
+      - TrackingTable
+    Properties:
+      ServiceToken: !GetAtt ConfbenchDeployerFunction.Arn
+      DatasetVersion: "1.0"
+      DatasetName: "ConfBench"
+      DatasetDescription: "An augmentation of FCC Invoices Verified, each document degraded by up to 18 distinct pipelines to support confidence calibration research, OCR robustness evaluation, and key information extraction (KIE) under realistic noise conditions."
+      SourceCodeHash: <CONFBENCH_DEPLOYER_HASH_TOKEN>
+
+  ##########################################################################
   # OCR Benchmark Deployer - Automatically deploys OmniAI OCR Benchmark dataset
   ##########################################################################
 

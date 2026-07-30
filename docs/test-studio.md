@@ -39,6 +39,7 @@ The accelerator automatically deploys **four benchmark datasets** from HuggingFa
 2. **OmniAI-OCR-Benchmark**: 293 diverse document images across 9 formats
 3. **DocSplit-Poly-Seq**: 500 multi-page packets with 13 document types
 4. **Fake-W2-Tax-Forms**: 2,000 synthetic US W-2 tax form images with 45-field ground truth
+5. **ConfBench**: 1,346 FCC invoice documents with noise augmentation (75 originals × up to 18 degradation variants)
 
 All datasets are deployed automatically with zero manual steps required. Each test set has a corresponding **managed configuration version** (e.g., `fake-w2`, `docsplit`) that is auto-selected in Test Studio when the test set is chosen. See [Configuration — Managed Configuration Versions](configuration.md#managed-configuration-versions) for details.
 
@@ -75,6 +76,62 @@ During stack deployment, the system automatically:
 #### Corresponding Config
 
 Use with: `config_library/unified/realkie-fcc-verified/config.yaml`
+
+---
+
+### ConfBench
+
+**Source**: https://huggingface.co/datasets/amazon/ConfBench
+
+ConfBench extends the 75 verified FCC invoice documents from RealKIE-FCC-Verified with up to 18 noise-augmented variants per document, producing 1,346 (document, noise\_variant) pairs. It is designed for confidence calibration research, OCR robustness evaluation, and key information extraction (KIE) benchmarking under realistic document degradation conditions.
+
+#### Noise Variants
+
+Each original document is augmented using the [Augraphy](https://github.com/sparkfish/augraphy) library with OCR-safe parameter settings. Variants include:
+
+| Variant | Description |
+|---------|-------------|
+| `original` | Clean source document (no augmentation) |
+| `default` | Default Augraphy pipeline |
+| `archetype3`–`archetype11` | Named archetype degradation pipelines |
+| `custom12`–`custom23` | Custom noise configurations |
+
+#### Dataset Schema
+
+Each row in the Parquet file represents one `(document, noise_variant)` pair:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | string | `{doc_hash}__{noise_variant}.pdf` — unique key and PDF filename |
+| `noise_variant` | string | Noise pipeline name (e.g., `original`, `default`, `archetype3`) |
+| `page_count` | int | Number of pages in the document |
+| `json_response` | struct | Ground truth matching the RealKIE-FCC-Verified invoice schema |
+
+Ground truth fields: `Agency`, `Advertiser`, `GrossTotal`, `PaymentTerms`, `AgencyCommission`, `NetAmountDue`, `LineItems[]`.
+
+#### Deployment Details
+
+During stack deployment, the system automatically:
+
+1. **Downloads Dataset Metadata** from HuggingFace parquet file (1,346 rows)
+2. **Downloads PDFs** directly from HuggingFace's `pdfs/` directory
+3. **Uploads PDFs** to `s3://TestSetBucket/confbench/input/`
+4. **Extracts Ground Truth** from `json_response` field
+5. **Uploads Baselines** to `s3://TestSetBucket/confbench/baseline/`
+6. **Registers Test Set** in DynamoDB with metadata
+
+Due to the volume (1,346 files), deployment uses a chunked self-invocation pattern — the Lambda processes 100 files per invocation and chains itself asynchronously until all files are deployed. Transient CDN errors are retried up to 3 times with exponential backoff. A deployment report is written to `s3://TestSetBucket/confbench/_deploy_state/{version}/failed_files.json`.
+
+#### Key Features
+
+- **Scale**: 1,346 documents covering 75 unique invoices × up to 18 noise levels
+- **Robustness Testing**: Evaluate model performance across degradation severity
+- **Confidence Calibration**: Assess extraction confidence under realistic noise conditions
+- **Consistent Schema**: Same ground truth format as RealKIE-FCC-Verified for direct comparison
+
+#### Corresponding Config
+
+Use with: `config_library/managed_config/confbench/config.yaml`
 
 ---
 
@@ -147,6 +204,7 @@ All test sets are immediately available after stack deployment:
    - "OmniAI-OCR-Benchmark" for multi-format document testing
    - "DocSplit-Poly-Seq" for document splitting and classification testing
    - "Fake-W2-Tax-Forms" for W-2 tax form extraction testing
+   - "ConfBench" for noise-augmented invoice robustness testing
 3. Enter a description in the **Context** field
 4. Click **Run Test** to start processing
 5. Monitor progress and view results when complete
