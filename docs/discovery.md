@@ -408,7 +408,7 @@ When a `page_range` is specified for a PDF, the system uses `pypdfium2` to extra
 
 While the other discovery methods analyze a single document at a time, **Multi-Document Collection Discovery** discovers document classes from a *collection* of documents using embedding-based clustering. Given a folder of mixed documents (e.g., invoices, W-2s, bank statements), it automatically groups similar documents together and generates a JSON Schema and classification for each group.
 
-> **Requires extra dependencies:** `pip install "idp_common[multi_document_discovery]"` or `make setup` from the project root. This installs scikit-learn, scipy, numpy, strands-agents, and pypdfium2.
+> **Requires extra dependencies:** `pip install -e "lib/idp_common_pkg[multi_document_discovery]"` or `make setup` from the project root. This installs scikit-learn, scipy, numpy, strands-agents, and pypdfium2.
 
 > **Minimum 2 documents per class:** Clusters with fewer than 2 documents are filtered as noise. Ensure you provide at least 2 documents for each expected document type.
 

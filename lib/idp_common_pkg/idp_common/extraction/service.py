@@ -2795,7 +2795,7 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
             if not AGENTIC_AVAILABLE:
                 raise ImportError(
                     "Agentic extraction requires Python 3.12+ and strands-agents dependencies. "
-                    "Install with: pip install 'idp_common[agents]' or use agentic=False"
+                    "Install with: pip install -e 'lib/idp_common_pkg[agents]' or use agentic=False"
                 )
 
             # Pre-flight analysis: Detect large tables and assess tool requirements

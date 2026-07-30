@@ -6,8 +6,10 @@
 # host stack by MainStackName — the AutoTune / sample-health-insurance-review
 # pattern. Built at install via CodeBuild -> ECR -> Custom::AgentCoreRuntime.
 #
-# Published with the accelerator's Feature Platform SDK:
-#   pip install idp-feature-sdk
+# Published with the accelerator's Feature Platform SDK. The SDK is first-party
+# (lib/idp_feature_sdk) and is NOT on PyPI — install it from the local checkout
+# (see docs/dependency-confusion.md):
+#   pip install -e lib/idp_feature_sdk                  # (run from the repo root)
 #   idp-feature-cli publish --feature-bucket <bucket>   # (run from this dir)
 #
 # STAGED DRAFT — not yet deploy-verified end-to-end on this branch. The image
