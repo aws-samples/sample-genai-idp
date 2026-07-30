@@ -13,15 +13,13 @@ repo and are installed from the local checkout — but a bare requirement is
 satisfiable from public PyPI whenever the sibling is not already installed. If
 an attacker owns the name, pip installs their code.
 
-That already happened to us. `idp-common` and `idp-sdk` were registered by a
-third party ("Poneglyph Security Research") before we thought to claim them; see
-`docs/dependency-confusion.md`. For those two, registration is no longer
-available and the remedy is a PyPI takedown request.
+Two of our names were already taken by the time we looked, so registration is no
+longer available for those and the remedy is a name-reclamation request to PyPI.
 
-`idp-feature-sdk` and `idp-mcp-connector` were still unclaimed, so we register
-them ourselves. Prevention beats detection: the tripwire
-(`scripts/check_first_party_deps.py`) catches a wrong package after the fact,
-but owning the name means there is nothing wrong to install.
+The names in this directory were still unclaimed, so we hold them ourselves.
+Prevention beats detection: the tripwire (`scripts/check_first_party_deps.py`)
+catches a wrong package after the fact, but owning the name means there is
+nothing wrong to install in the first place.
 
 ## Why these stubs fail loudly
 
@@ -53,9 +51,10 @@ taken by someone else. The command users type is still `idp-cli`.
 
 ## Publishing
 
-Only needs doing once per name. See `docs/dependency-confusion.md` for the full
-procedure, including the version strategy (`0.0.0`, yanked after upload) that
-keeps a placeholder from ever satisfying a real requirement.
+Only needs doing once per name. Each placeholder is version `0.0.0`, and the
+release is **yanked** immediately after upload: yanking keeps the name reserved
+while telling pip never to resolve it for an unpinned requirement, so a
+placeholder can never satisfy a real dependency.
 
 ```bash
 cd scripts/pypi-placeholders/<name>
