@@ -173,7 +173,7 @@ class TestAggregation:
             with patch.object(index, "_load_s3_json") as mock_load_s3:
                 mock_load_s3.return_value = mock_s3_results
 
-                results, scores = index._load_comparison_results(
+                results, scores, graded = index._load_comparison_results(
                     "test-run-123", "test-table"
                 )
 
@@ -182,6 +182,8 @@ class TestAggregation:
                 assert "doc1.pdf" in scores
                 assert "doc2.pdf" in scores
                 assert scores["doc1.pdf"] == 0.95
+                # No doc_split_metrics in this fixture → empty graded map.
+                assert graded == {}
 
     def test_load_comparison_results_skips_incomplete(self, mock_env):
         """Test that incomplete evaluations are skipped."""
@@ -202,12 +204,13 @@ class TestAggregation:
         with patch.object(index, "dynamodb") as mock_dynamodb:
             mock_dynamodb.Table.return_value = incomplete_table
 
-            results, scores = index._load_comparison_results(
+            results, scores, graded = index._load_comparison_results(
                 "test-run-123", "test-table"
             )
 
             assert len(results) == 0
             assert len(scores) == 0
+            assert graded == {}
 
     def test_empty_metrics(self, mock_env):
         """Test empty metrics structure."""
@@ -220,6 +223,10 @@ class TestAggregation:
         assert metrics["average_confidence"] is None
         assert metrics["document_count"] == 0
         assert "accuracy_breakdown" in metrics
+        # graded_packet_metrics is always present in the empty shape so the
+        # resolver's DynamoDB write never misses the key (the stale-cache
+        # guard in test_results_resolver keys on its presence).
+        assert metrics["graded_packet_metrics"] == {}
 
     def test_calculate_false_alarm_rate(self, mock_env):
         """Test false alarm rate calculation.
@@ -292,6 +299,115 @@ class TestAggregation:
         assert expected_fdr != pytest.approx(
             counts["fp"] / (counts["fp"] + counts["tp"])
         )
+
+    def test_aggregate_graded_packet_metrics_empty(self, mock_env):
+        """Empty per-doc map → empty bundle so the UI can skip the panel."""
+        index = import_test_module()
+        assert index._aggregate_graded_packet_metrics({}) == {}
+
+    def test_aggregate_graded_packet_metrics_all_present(self, mock_env):
+        """Simple unweighted mean across documents, matching weighted_overall_scores."""
+        index = import_test_module()
+        per_doc = {
+            "doc1.pdf": {
+                "final_score": 0.9,
+                "clustering_score": 1.0,
+                "v_measure": 1.0,
+                "rand_index": 1.0,
+                "avg_ordering_score": 0.8,
+            },
+            "doc2.pdf": {
+                "final_score": 0.7,
+                "clustering_score": 0.8,
+                "v_measure": 0.6,
+                "rand_index": 0.9,
+                "avg_ordering_score": 0.5,
+            },
+        }
+        result = index._aggregate_graded_packet_metrics(per_doc)
+        assert result["document_count"] == 2
+        assert result["per_document"] == per_doc
+        assert result["mean"]["final_score"] == pytest.approx(0.8)
+        assert result["mean"]["clustering_score"] == pytest.approx(0.9)
+        assert result["mean"]["v_measure"] == pytest.approx(0.8)
+        assert result["mean"]["rand_index"] == pytest.approx(0.95)
+        assert result["mean"]["avg_ordering_score"] == pytest.approx(0.65)
+
+    def test_aggregate_graded_packet_metrics_partial_coverage(self, mock_env):
+        """Docs missing a given key are excluded from that key's mean, not
+        treated as zero. Otherwise older payloads (pre-R14, missing all fields)
+        would drag the mean down for the newer docs in the same run."""
+        index = import_test_module()
+        per_doc = {
+            "doc_new.pdf": {"final_score": 0.9, "v_measure": 0.85},
+            # Missing v_measure — must not zero-fill.
+            "doc_partial.pdf": {"final_score": 0.7},
+            # Entirely absent (old payload). Present as a key with an empty
+            # dict because _load_comparison_results filters non-numeric values.
+            "doc_old.pdf": {},
+        }
+        result = index._aggregate_graded_packet_metrics(per_doc)
+        # per_document is the full map — the UI decides what to render per doc.
+        assert result["document_count"] == 3
+        # Means average over docs that actually reported the key.
+        assert result["mean"]["final_score"] == pytest.approx(0.8)  # (0.9 + 0.7) / 2
+        assert result["mean"]["v_measure"] == pytest.approx(0.85)  # (0.85) / 1
+        # Keys no doc reported are omitted rather than emitting null.
+        assert "clustering_score" not in result["mean"]
+        assert "rand_index" not in result["mean"]
+        assert "avg_ordering_score" not in result["mean"]
+
+    def test_load_comparison_results_reads_graded_packet_metrics(self, mock_env):
+        """When ``doc_split_metrics`` is present in results.json, the graded
+        packet fields flow into ``doc_graded_packet_scores`` keyed by doc.
+        Non-numeric / null values are filtered so a partial payload doesn't
+        crash aggregation downstream.
+        """
+        index = import_test_module()
+
+        table = MagicMock()
+        table.scan.return_value = {
+            "Items": [
+                {
+                    "PK": "doc#test-run-123#doc1.pdf",
+                    "ObjectKey": "doc1.pdf",
+                    "EvaluationStatus": "COMPLETED",
+                },
+            ]
+        }
+        payload = {
+            "overall_metrics": {"weighted_overall_score": 0.9},
+            "section_results": [
+                {"section_id": "1", "stickler_comparison_result": {"tp": 1}}
+            ],
+            "doc_split_metrics": {
+                # Numeric — forwarded.
+                "final_score": 0.85,
+                "v_measure": 0.9,
+                # Non-numeric — dropped (defensive, in case older Python code
+                # ever emits a serialized None for these).
+                "clustering_score": None,
+                "rand_index": "bad",
+                "avg_ordering_score": 0.75,
+                # Extraneous field — ignored (whitelist by _GRADED_PACKET_KEYS).
+                "page_level_accuracy": 0.99,
+            },
+        }
+        with patch.object(index, "dynamodb") as mock_dynamodb:
+            mock_dynamodb.Table.return_value = table
+            with patch.object(index, "_load_s3_json", return_value=payload):
+                _, _, graded = index._load_comparison_results(
+                    "test-run-123", "test-table"
+                )
+
+        assert set(graded) == {"doc1.pdf"}
+        # Only the three numeric graded fields make it in; the non-numeric
+        # ones are filtered and page_level_accuracy is not a graded field.
+        assert graded["doc1.pdf"] == {
+            "final_score": 0.85,
+            "v_measure": 0.9,
+            "avg_ordering_score": 0.75,
+        }
 
     def test_load_s3_json(self, mock_env):
         """Test loading JSON from S3."""

@@ -677,6 +677,7 @@ export const getTestRun = /* GraphQL */ `
       confusionMatrix
       fieldMetrics
       splitClassificationMetrics
+      gradedPacketMetrics
       totalCost
       costBreakdown
       createdAt

@@ -189,6 +189,9 @@ def handle_cache_update_request(event, context):
                 "splitClassificationMetrics": aggregated_metrics.get(
                     "split_classification_metrics", {}
                 ),
+                "gradedPacketMetrics": aggregated_metrics.get(
+                    "graded_packet_metrics", {}
+                ),
                 "totalCost": aggregated_metrics.get("total_cost", 0),
                 "costBreakdown": aggregated_metrics.get("cost_breakdown", {}),
             }
@@ -372,6 +375,7 @@ def get_test_results(test_run_id):
             "splitClassificationMetrics" not in cached_metrics
             or "confusionMatrix" not in cached_metrics
             or "fieldMetrics" not in cached_metrics
+            or "gradedPacketMetrics" not in cached_metrics
             or isinstance(cached_scores, list)
         ):
             logger.info(
@@ -425,6 +429,7 @@ def get_test_results(test_run_id):
                 "splitClassificationMetrics": cached_metrics.get(
                     "splitClassificationMetrics", {}
                 ),
+                "gradedPacketMetrics": cached_metrics.get("gradedPacketMetrics", {}),
                 "totalCost": cached_metrics.get("totalCost", 0),
                 "costBreakdown": cached_metrics.get("costBreakdown", {}),
                 "createdAt": _format_datetime(metadata.get("CreatedAt")),
