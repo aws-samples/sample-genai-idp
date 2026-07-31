@@ -6,6 +6,7 @@ from datetime import datetime
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import ClientError
 from idp_common.dynamodb import DynamoDBClient  # type: ignore
 from idp_common.s3 import find_matching_files  # type: ignore
 
@@ -458,7 +459,29 @@ def publish_test_set_version(args, event=None):
     if not meta:
         raise Exception(f"Test set '{test_set_id}' not found")
 
-    next_version = int(meta.get('latestVersion', 0)) + 1
+    # Reserve the version number by atomically incrementing the counter on the
+    # metadata item, and only then write the version item. Computing
+    # latestVersion + 1 from the read above and writing it back would be a
+    # read-modify-write race: two concurrent publishes both read N and both
+    # write version N+1, so the second silently overwrites the first's
+    # "immutable" version. ADD serializes the allocation in DynamoDB, so each
+    # caller gets a distinct number. attribute_exists(PK) keeps update_item
+    # from upserting a metadata row for a set deleted since the read above.
+    tracking_table = boto3.resource('dynamodb').Table(os.environ['TRACKING_TABLE'])
+    try:
+        reserve = tracking_table.update_item(
+            Key={'PK': f'testset#{test_set_id}', 'SK': 'metadata'},
+            UpdateExpression='ADD latestVersion :one',
+            ExpressionAttributeValues={':one': 1},
+            ConditionExpression='attribute_exists(PK)',
+            ReturnValues='UPDATED_NEW',
+        )
+    except ClientError as e:
+        if e.response['Error']['Code'] == 'ConditionalCheckFailedException':
+            raise Exception(f"Test set '{test_set_id}' not found")
+        raise
+    next_version = int(reserve['Attributes']['latestVersion'])
+
     now = datetime.utcnow().isoformat() + 'Z'
     created_by = None
     if event:
@@ -486,19 +509,39 @@ def publish_test_set_version(args, event=None):
         'createdAt': now,
         'createdBy': created_by,
     }
-    db_client.put_item(version_item)
+    # Belt-and-braces: never overwrite an existing version item, even if the
+    # counter were ever reset or rewound by hand.
+    db_client.put_item(version_item, condition_expression='attribute_not_exists(SK)')
 
-    # Update the mutable pointer.
-    tracking_table = boto3.resource('dynamodb').Table(os.environ['TRACKING_TABLE'])
-    update_expr = 'SET latestVersion = :v, publishedVersion = :v'
-    expr_values = {':v': next_version}
+    # Publish the pointers now that the version item exists. Kept separate from
+    # the reservation so a failed version write leaves a gap in the numbering
+    # rather than a publishedVersion pointing at a version that isn't there.
+    #
+    # Only ever advance the pointers. Concurrent publishes can reach this write
+    # out of order (v2 before v1), and an unconditional SET would leave the
+    # newest version published but the pointers referring to an older one.
+    # A failed condition just means a newer publish already won, so it is not
+    # an error for this caller — its version item is written either way.
+    pointer_expr = 'SET publishedVersion = :v'
+    pointer_values = {':v': next_version}
     if set_active:
-        update_expr += ', activeReference = :v'
-    tracking_table.update_item(
-        Key={'PK': f'testset#{test_set_id}', 'SK': 'metadata'},
-        UpdateExpression=update_expr,
-        ExpressionAttributeValues=expr_values,
-    )
+        pointer_expr += ', activeReference = :v'
+    try:
+        tracking_table.update_item(
+            Key={'PK': f'testset#{test_set_id}', 'SK': 'metadata'},
+            UpdateExpression=pointer_expr,
+            ExpressionAttributeValues=pointer_values,
+            ConditionExpression=(
+                'attribute_not_exists(publishedVersion) OR publishedVersion < :v'
+            ),
+        )
+    except ClientError as e:
+        if e.response['Error']['Code'] != 'ConditionalCheckFailedException':
+            raise
+        logger.info(
+            f"Test set '{test_set_id}' pointers already at a version newer than "
+            f"{next_version}; leaving them unchanged"
+        )
 
     logger.info(
         f"Published test set '{test_set_id}' version {next_version} "

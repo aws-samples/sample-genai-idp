@@ -2,7 +2,9 @@ import importlib.util
 import os
 from unittest.mock import MagicMock, Mock, patch
 
+import boto3
 import pytest
+from moto import mock_aws
 
 # Mock environment variables and dependencies before importing
 with patch.dict(
@@ -35,6 +37,64 @@ with patch.dict(
 _ADMIN_IDENTITY = {
     "claims": {"cognito:groups": ["Admin"], "email": "admin@example.com"}
 }
+
+
+def _seed_test_set(table, test_set_id, **extra):
+    """Write a minimal, never-published test-set metadata item."""
+    item = {"PK": f"testset#{test_set_id}", "SK": "metadata", "id": test_set_id}
+    item.update(extra)
+    table.put_item(Item=item)
+
+
+@pytest.fixture
+def publish_table():
+    """A real (moto) tracking table wired into the resolver's db_client.
+
+    Version allocation depends on DynamoDB's atomic ADD, which a MagicMock
+    cannot express — a mocked table would report whatever the test told it to
+    and the concurrency guarantee would go untested. The module-level
+    db_client is a mock (patched at import), so point its get_item/put_item at
+    the real table for the duration of the test.
+    """
+    # The resolver builds its own boto3 resource with no explicit region, so it
+    # picks up the ambient one. Pin the region for both here — other tests in
+    # the suite mutate AWS_DEFAULT_REGION, and a mismatch makes the moto table
+    # invisible to the resolver (ResourceNotFoundException on UpdateItem).
+    region_env = {
+        "AWS_DEFAULT_REGION": "us-east-1",
+        "AWS_REGION": "us-east-1",
+        "TRACKING_TABLE": "test-table",
+    }
+    with mock_aws(), patch.dict(os.environ, region_env):
+        ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        table = ddb.create_table(
+            TableName="test-table",
+            KeySchema=[
+                {"AttributeName": "PK", "KeyType": "HASH"},
+                {"AttributeName": "SK", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "PK", "AttributeType": "S"},
+                {"AttributeName": "SK", "AttributeType": "S"},
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+
+        def _get_item(key):
+            return table.get_item(Key=key).get("Item")
+
+        def _put_item(item, condition_expression=None):
+            kwargs = {"Item": item}
+            if condition_expression:
+                kwargs["ConditionExpression"] = condition_expression
+            return table.put_item(**kwargs)
+
+        with patch.object(
+            test_set_index.db_client, "get_item", side_effect=_get_item
+        ), patch.object(
+            test_set_index.db_client, "put_item", side_effect=_put_item
+        ):
+            yield table
 
 
 @pytest.mark.unit
@@ -595,68 +655,147 @@ class TestTestSetResolver:
 
     # -- Versioning -------------------------------------------------------
 
-    @patch.dict(os.environ, {"TRACKING_TABLE": "test-table"})
-    def test_publish_first_version_sets_active_reference(self):
+    def test_publish_first_version_sets_active_reference(self, publish_table):
         """Publishing with no prior versions creates v1 and makes it active."""
-        with patch.object(test_set_index.db_client, "get_item") as mock_get, patch.object(
-            test_set_index.db_client, "put_item"
-        ) as mock_put, patch.object(test_set_index, "boto3") as mock_boto3:
-            mock_get.return_value = {
-                "id": "ts1",
-                "name": "TS One",
-                "source": "uploaded",
-                "fileCount": 10,
-            }
-            mock_table = MagicMock()
-            mock_boto3.resource.return_value.Table.return_value = mock_table
+        _seed_test_set(publish_table, "ts1", source="uploaded", fileCount=10)
 
-            result = test_set_index.publish_test_set_version(
-                {"input": {"testSetId": "ts1", "label": "first"}}
-            )
+        result = test_set_index.publish_test_set_version(
+            {"input": {"testSetId": "ts1", "label": "first"}}
+        )
 
-            assert result["version"] == 1
-            assert result["label"] == "first"
-            assert result["activeReference"] == 1
-            # An immutable version item was written under SK=version#000001
-            written = mock_put.call_args[0][0]
-            assert written["SK"] == "version#000001"
-            assert written["ItemType"] == "testset_version"
-            assert written["versionNumber"] == 1
-            # The metadata pointer was advanced and active reference set
-            update_kwargs = mock_table.update_item.call_args.kwargs
-            assert update_kwargs["ExpressionAttributeValues"][":v"] == 1
-            assert "activeReference" in update_kwargs["UpdateExpression"]
+        assert result["version"] == 1
+        assert result["label"] == "first"
+        assert result["activeReference"] == 1
+        # An immutable version item was written under SK=version#000001
+        written = publish_table.get_item(
+            Key={"PK": "testset#ts1", "SK": "version#000001"}
+        )["Item"]
+        assert written["ItemType"] == "testset_version"
+        assert written["versionNumber"] == 1
+        # The metadata pointers were advanced and the active reference set
+        meta = publish_table.get_item(
+            Key={"PK": "testset#ts1", "SK": "metadata"}
+        )["Item"]
+        assert meta["latestVersion"] == 1
+        assert meta["publishedVersion"] == 1
+        assert meta["activeReference"] == 1
 
-    @patch.dict(os.environ, {"TRACKING_TABLE": "test-table"})
-    def test_publish_increments_and_can_skip_active(self):
+    def test_publish_increments_and_can_skip_active(self, publish_table):
         """Second publish is v2; setAsActiveReference=false leaves active alone."""
-        with patch.object(test_set_index.db_client, "get_item") as mock_get, patch.object(
-            test_set_index.db_client, "put_item"
-        ), patch.object(test_set_index, "boto3") as mock_boto3:
-            mock_get.return_value = {
-                "id": "ts1",
-                "name": "TS One",
-                "latestVersion": 1,
-                "activeReference": 1,
-            }
-            mock_table = MagicMock()
-            mock_boto3.resource.return_value.Table.return_value = mock_table
+        _seed_test_set(publish_table, "ts1")
+        test_set_index.publish_test_set_version({"input": {"testSetId": "ts1"}})
 
-            result = test_set_index.publish_test_set_version(
-                {"input": {"testSetId": "ts1", "setAsActiveReference": False}}
+        result = test_set_index.publish_test_set_version(
+            {"input": {"testSetId": "ts1", "setAsActiveReference": False}}
+        )
+
+        assert result["version"] == 2
+        # active reference unchanged (still 1)
+        assert result["activeReference"] == 1
+        meta = publish_table.get_item(
+            Key={"PK": "testset#ts1", "SK": "metadata"}
+        )["Item"]
+        assert meta["latestVersion"] == 2
+        assert meta["publishedVersion"] == 2
+        assert meta["activeReference"] == 1
+
+    def test_concurrent_publishes_get_distinct_versions(self, publish_table):
+        """Two interleaved publishes must not collide on one version number.
+
+        Guards the read-modify-write race: allocating from a previously-read
+        latestVersion let both callers write version#000001, so the second
+        silently overwrote the first's supposedly immutable version. The
+        version number is now reserved by an atomic ADD, so interleaving the
+        two reads still yields distinct versions and two surviving items.
+        """
+        _seed_test_set(publish_table, "ts1")
+
+        real_get_item = test_set_index.db_client.get_item
+        second_result = {}
+        reentered = []
+
+        def publish_other_first(key):
+            """On the first caller's metadata read, run a whole second publish.
+
+            This forces the worst-case interleaving — the first caller now
+            holds a metadata snapshot taken before the second publish landed.
+            The reentry flag is set *before* recursing so the nested publish's
+            own metadata read doesn't trigger another one.
+            """
+            meta = real_get_item(key)
+            if not reentered:
+                reentered.append(True)
+                second_result["r"] = test_set_index.publish_test_set_version(
+                    {"input": {"testSetId": "ts1"}}
+                )
+            return meta
+
+        with patch.object(
+            test_set_index.db_client, "get_item", side_effect=publish_other_first
+        ):
+            first_result = test_set_index.publish_test_set_version(
+                {"input": {"testSetId": "ts1"}}
             )
 
-            assert result["version"] == 2
-            # active reference unchanged (still 1)
-            assert result["activeReference"] == 1
-            update_kwargs = mock_table.update_item.call_args.kwargs
-            assert "activeReference" not in update_kwargs["UpdateExpression"]
+        versions = {second_result["r"]["version"], first_result["version"]}
+        assert versions == {1, 2}, f"expected distinct versions, got {versions}"
+        # Both immutable items survive — neither overwrote the other.
+        stored = test_set_index.get_test_set_versions({"testSetId": "ts1"})
+        assert [v["version"] for v in stored] == [1, 2]
 
-    def test_publish_nonexistent_test_set_raises(self):
-        with patch.object(test_set_index.db_client, "get_item") as mock_get:
-            mock_get.return_value = None
-            with pytest.raises(Exception, match="Test set 'ghost' not found"):
-                test_set_index.publish_test_set_version({"input": {"testSetId": "ghost"}})
+    def test_publish_pointers_only_move_forward(self, publish_table):
+        """An out-of-order publish must not rewind publishedVersion.
+
+        Concurrent publishes can reach the pointer write in either order; the
+        older version landing second must leave the pointers on the newer one.
+        Seeding pointers ahead of the counter reproduces that end state: the
+        reservation hands out v1 while the pointers already say v5.
+        """
+        _seed_test_set(
+            publish_table, "ts1", publishedVersion=5, activeReference=5, latestVersion=0
+        )
+
+        result = test_set_index.publish_test_set_version({"input": {"testSetId": "ts1"}})
+
+        # The version item is still written — this caller's work is not lost.
+        assert result["version"] == 1
+        assert (
+            publish_table.get_item(Key={"PK": "testset#ts1", "SK": "version#000001"})[
+                "Item"
+            ]["versionNumber"]
+            == 1
+        )
+        # But the pointers were NOT rewound to 1.
+        meta = publish_table.get_item(Key={"PK": "testset#ts1", "SK": "metadata"})[
+            "Item"
+        ]
+        assert meta["publishedVersion"] == 5
+        assert meta["activeReference"] == 5
+
+    def test_publish_nonexistent_test_set_raises(self, publish_table):
+        with pytest.raises(Exception, match="Test set 'ghost' not found"):
+            test_set_index.publish_test_set_version({"input": {"testSetId": "ghost"}})
+
+    def test_publish_race_on_deleted_test_set_raises(self, publish_table):
+        """A set deleted between the metadata read and the reservation must not
+        be resurrected by update_item's upsert semantics."""
+        _seed_test_set(publish_table, "ts1")
+        real_get_item = test_set_index.db_client.get_item
+
+        def delete_after_read(key):
+            meta = real_get_item(key)
+            publish_table.delete_item(Key={"PK": "testset#ts1", "SK": "metadata"})
+            return meta
+
+        with patch.object(
+            test_set_index.db_client, "get_item", side_effect=delete_after_read
+        ):
+            with pytest.raises(Exception, match="Test set 'ts1' not found"):
+                test_set_index.publish_test_set_version({"input": {"testSetId": "ts1"}})
+
+        assert "Item" not in publish_table.get_item(
+            Key={"PK": "testset#ts1", "SK": "metadata"}
+        )
 
     @patch.dict(os.environ, {"TRACKING_TABLE": "test-table"})
     def test_get_test_set_versions_maps_and_sorts(self):
