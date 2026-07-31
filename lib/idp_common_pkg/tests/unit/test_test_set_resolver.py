@@ -203,6 +203,50 @@ class TestTestSetResolver:
                 mock_table.query.assert_called_once()
                 assert len(result) == 1
                 assert result[0]["id"] == "test-id"
+                # 'source' maps through; absent on this record -> None (back-compat)
+                assert result[0]["source"] is None
+
+    @patch.dict(
+        os.environ, {"INPUT_BUCKET": "test-bucket", "TRACKING_TABLE": "test-table"}
+    )
+    def test_get_test_sets_maps_source_when_present(self):
+        """A record's 'source' attribute is returned in the mapped result."""
+        with patch.object(test_set_index, "find_matching_files") as mock_find_files:
+            mock_find_files.return_value = []
+            with patch.object(test_set_index, "boto3") as mock_boto3:
+                mock_table = MagicMock()
+                mock_table.query.return_value = {
+                    "Items": [{"PK": "testset#syn-id", "SK": "metadata"}]
+                }
+                mock_boto3.resource.return_value.Table.return_value = mock_table
+                mock_boto3.resource.return_value.batch_get_item.return_value = {
+                    "Responses": {
+                        "test-table": [
+                            {
+                                "PK": "testset#syn-id",
+                                "SK": "metadata",
+                                "id": "syn-id",
+                                "name": "syn-name",
+                                "source": "synthetic",
+                                "createdAt": "2025-10-17T16:00:00Z",
+                            }
+                        ]
+                    }
+                }
+                result = test_set_index.get_test_sets()
+                assert result[0]["source"] == "synthetic"
+
+    def test_get_test_set_source_reads_marker(self):
+        """_get_test_set_source returns 'synthetic' iff a '.source' marker exists."""
+        s3 = MagicMock()
+        # marker present -> synthetic
+        s3.head_object.return_value = {}
+        assert (
+            test_set_index._get_test_set_source(s3, "bucket", "prefix") == "synthetic"
+        )
+        # marker absent (head_object raises) -> uploaded
+        s3.head_object.side_effect = Exception("404")
+        assert test_set_index._get_test_set_source(s3, "bucket", "prefix") == "uploaded"
 
     @patch.dict("os.environ", {"INPUT_BUCKET": "test-bucket"})
     def test_list_input_bucket_files(self):
@@ -548,3 +592,153 @@ class TestTestSetResolver:
 
             with pytest.raises(Exception, match="Test set 'nonexistent-id' not found"):
                 test_set_index.update_test_set(args)
+
+    # -- Versioning -------------------------------------------------------
+
+    @patch.dict(os.environ, {"TRACKING_TABLE": "test-table"})
+    def test_publish_first_version_sets_active_reference(self):
+        """Publishing with no prior versions creates v1 and makes it active."""
+        with patch.object(test_set_index.db_client, "get_item") as mock_get, patch.object(
+            test_set_index.db_client, "put_item"
+        ) as mock_put, patch.object(test_set_index, "boto3") as mock_boto3:
+            mock_get.return_value = {
+                "id": "ts1",
+                "name": "TS One",
+                "source": "uploaded",
+                "fileCount": 10,
+            }
+            mock_table = MagicMock()
+            mock_boto3.resource.return_value.Table.return_value = mock_table
+
+            result = test_set_index.publish_test_set_version(
+                {"input": {"testSetId": "ts1", "label": "first"}}
+            )
+
+            assert result["version"] == 1
+            assert result["label"] == "first"
+            assert result["activeReference"] == 1
+            # An immutable version item was written under SK=version#000001
+            written = mock_put.call_args[0][0]
+            assert written["SK"] == "version#000001"
+            assert written["ItemType"] == "testset_version"
+            assert written["versionNumber"] == 1
+            # The metadata pointer was advanced and active reference set
+            update_kwargs = mock_table.update_item.call_args.kwargs
+            assert update_kwargs["ExpressionAttributeValues"][":v"] == 1
+            assert "activeReference" in update_kwargs["UpdateExpression"]
+
+    @patch.dict(os.environ, {"TRACKING_TABLE": "test-table"})
+    def test_publish_increments_and_can_skip_active(self):
+        """Second publish is v2; setAsActiveReference=false leaves active alone."""
+        with patch.object(test_set_index.db_client, "get_item") as mock_get, patch.object(
+            test_set_index.db_client, "put_item"
+        ), patch.object(test_set_index, "boto3") as mock_boto3:
+            mock_get.return_value = {
+                "id": "ts1",
+                "name": "TS One",
+                "latestVersion": 1,
+                "activeReference": 1,
+            }
+            mock_table = MagicMock()
+            mock_boto3.resource.return_value.Table.return_value = mock_table
+
+            result = test_set_index.publish_test_set_version(
+                {"input": {"testSetId": "ts1", "setAsActiveReference": False}}
+            )
+
+            assert result["version"] == 2
+            # active reference unchanged (still 1)
+            assert result["activeReference"] == 1
+            update_kwargs = mock_table.update_item.call_args.kwargs
+            assert "activeReference" not in update_kwargs["UpdateExpression"]
+
+    def test_publish_nonexistent_test_set_raises(self):
+        with patch.object(test_set_index.db_client, "get_item") as mock_get:
+            mock_get.return_value = None
+            with pytest.raises(Exception, match="Test set 'ghost' not found"):
+                test_set_index.publish_test_set_version({"input": {"testSetId": "ghost"}})
+
+    @patch.dict(os.environ, {"TRACKING_TABLE": "test-table"})
+    def test_get_test_set_versions_maps_and_sorts(self):
+        with patch.object(test_set_index, "boto3") as mock_boto3:
+            mock_table = MagicMock()
+            mock_table.query.return_value = {
+                "Items": [
+                    {
+                        "testSetId": "ts1",
+                        "versionNumber": 2,
+                        "label": "v2",
+                        "fileCount": 12,
+                        "createdAt": "2026-01-02T00:00:00Z",
+                    },
+                    {
+                        "testSetId": "ts1",
+                        "versionNumber": 1,
+                        "label": "v1",
+                        "fileCount": 10,
+                        "createdAt": "2026-01-01T00:00:00Z",
+                    },
+                ]
+            }
+            mock_boto3.resource.return_value.Table.return_value = mock_table
+
+            result = test_set_index.get_test_set_versions({"testSetId": "ts1"})
+
+            assert [r["version"] for r in result] == [1, 2]  # ascending
+            assert result[0]["label"] == "v1"
+            assert result[1]["fileCount"] == 12
+
+    # -- Membership editing: remove ---------------------------------------
+
+    @patch.dict(os.environ, {"TRACKING_TABLE": "test-table", "TEST_SET_BUCKET": "ts-bucket"})
+    def test_remove_documents_deletes_input_and_baseline_and_recounts(self):
+        with patch.object(test_set_index.db_client, "get_item") as mock_get, patch.object(
+            test_set_index, "boto3"
+        ) as mock_boto3, patch.object(
+            test_set_index, "_validate_test_set_files"
+        ) as mock_validate:
+            mock_get.return_value = {
+                "id": "ts1",
+                "name": "TS One",
+                "status": "COMPLETED",
+                "createdAt": "2026-01-01T00:00:00Z",
+            }
+            s3 = MagicMock()
+            # baseline folder for doc.pdf has one nested result.json
+            paginator = MagicMock()
+            paginator.paginate.return_value = [
+                {"Contents": [{"Key": "ts1/baseline/doc.pdf/sections/1/result.json"}]}
+            ]
+            s3.get_paginator.return_value = paginator
+            mock_table = MagicMock()
+
+            def _resource(name):
+                return MagicMock(Table=MagicMock(return_value=mock_table))
+
+            mock_boto3.client.return_value = s3
+            mock_boto3.resource.side_effect = _resource
+            mock_validate.return_value = {"valid": True, "input_count": 4}
+
+            result = test_set_index.remove_documents_from_test_set(
+                {"testSetId": "ts1", "fileNames": ["doc.pdf"]}
+            )
+
+            # Deleted both the input object and the baseline result
+            deleted_keys = set()
+            for call in s3.delete_objects.call_args_list:
+                for obj in call.kwargs["Delete"]["Objects"]:
+                    deleted_keys.add(obj["Key"])
+            assert "ts1/input/doc.pdf" in deleted_keys
+            assert "ts1/baseline/doc.pdf/sections/1/result.json" in deleted_keys
+            # fileCount updated to the recounted value
+            assert result["fileCount"] == 4
+            update_kwargs = mock_table.update_item.call_args.kwargs
+            assert update_kwargs["ExpressionAttributeValues"][":c"] == 4
+
+    def test_remove_documents_nonexistent_test_set_raises(self):
+        with patch.object(test_set_index.db_client, "get_item") as mock_get:
+            mock_get.return_value = None
+            with pytest.raises(Exception, match="Test set 'ghost' not found"):
+                test_set_index.remove_documents_from_test_set(
+                    {"testSetId": "ghost", "fileNames": ["a.pdf"]}
+                )

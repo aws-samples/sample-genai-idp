@@ -310,6 +310,13 @@ operations:
     enforced_in: nested/api-resolvers/src/lambda/test_runner/index.py
     # schema: startTestRun(input: TestRunInput!) — wrapped input object
     args: { input: {} }
+  sendTestRunToReview:
+    groups: [Admin, Author]
+    kind: mutation
+    # Shares TestRunnerFunction with startTestRun; the resolver branches on
+    # fieldName after the Admin/Author group check.
+    enforced_in: nested/api-resolvers/src/lambda/test_runner/index.py
+    args: { testRunId: "__nope__" }
   getTestRun:
     groups: [Admin, Author]
     kind: read
@@ -351,6 +358,22 @@ operations:
     kind: read
     enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
     args: { testSetId: "nonexistent-test-set" }
+  getTestSetVersions:
+    groups: [Admin, Author]
+    kind: read
+    enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
+    args: { testSetId: "nonexistent-test-set" }
+  publishTestSetVersion:
+    groups: [Admin, Author]
+    kind: mutation
+    enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
+    # schema: publishTestSetVersion(input: PublishTestSetVersionInput!)
+    args: { input: {} }
+  removeDocumentsFromTestSet:
+    groups: [Admin, Author]
+    kind: mutation
+    enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
+    args: { testSetId: "__nope__", fileNames: ["__nope__"] }
   addTestSet:
     groups: [Admin, Author]
     kind: mutation

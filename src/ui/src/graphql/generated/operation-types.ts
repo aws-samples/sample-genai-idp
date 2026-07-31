@@ -675,6 +675,7 @@ export type Mutation = {
   probeCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   processChanges: ProcessChangesResponse;
   publishCircuitBreakerStatus?: Maybe<CircuitBreakerStatus>;
+  publishTestSetVersion?: Maybe<TestSetVersion>;
   /** Called by a feature stack's RegisterFeature custom resource once the stack has deployed. */
   registerFeature: InstalledFeature;
   /**
@@ -690,6 +691,7 @@ export type Mutation = {
    */
   registerFeatureHooks: FeatureHooksRegistration;
   releaseReview?: Maybe<Document>;
+  removeDocumentsFromTestSet?: Maybe<TestSet>;
   /**
    * Delete all of a feature's preset config versions on uninstall. A
    * version that is currently ACTIVE is preserved (never yank the running
@@ -702,6 +704,7 @@ export type Mutation = {
   resumeCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   sendAgentChatMessage?: Maybe<AgentChatMessage>;
   sendChatDocumentMessage?: Maybe<ChatDocumentMessage>;
+  sendTestRunToReview?: Maybe<SendTestRunToReviewResult>;
   setActiveVersion?: Maybe<UpdateConfigurationResponse>;
   skipAllSectionsReview?: Maybe<Document>;
   startMultiDocDiscovery?: Maybe<MultiDocDiscoveryJob>;
@@ -914,6 +917,11 @@ export type MutationPublishCircuitBreakerStatusArgs = {
 };
 
 
+export type MutationPublishTestSetVersionArgs = {
+  input: PublishTestSetVersionInput;
+};
+
+
 export type MutationRegisterFeatureArgs = {
   input: RegisterFeatureInput;
 };
@@ -926,6 +934,12 @@ export type MutationRegisterFeatureHooksArgs = {
 
 export type MutationReleaseReviewArgs = {
   objectKey: Scalars['String']['input'];
+};
+
+
+export type MutationRemoveDocumentsFromTestSetArgs = {
+  fileNames: Array<Scalars['String']['input']>;
+  testSetId: Scalars['String']['input'];
 };
 
 
@@ -965,6 +979,11 @@ export type MutationSendChatDocumentMessageArgs = {
   sessionId: Scalars['String']['input'];
   status?: InputMaybe<Scalars['String']['input']>;
   timestamp?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type MutationSendTestRunToReviewArgs = {
+  testRunId: Scalars['String']['input'];
 };
 
 
@@ -1219,6 +1238,13 @@ export type ProcessingIssue = {
   stage?: Maybe<Scalars['String']['output']>;
 };
 
+export type PublishTestSetVersionInput = {
+  label?: InputMaybe<Scalars['String']['input']>;
+  notes?: InputMaybe<Scalars['String']['input']>;
+  setAsActiveReference?: InputMaybe<Scalars['Boolean']['input']>;
+  testSetId: Scalars['String']['input'];
+};
+
 export type Query = {
   calculateCapacity?: Maybe<CapacityResult>;
   /**
@@ -1256,6 +1282,7 @@ export type Query = {
   getTestRunStatus?: Maybe<TestRunStatus>;
   getTestRuns?: Maybe<Array<Maybe<TestRun>>>;
   getTestSetDocuments?: Maybe<TestSetDocumentsPage>;
+  getTestSetVersions?: Maybe<Array<Maybe<TestSetVersion>>>;
   getTestSets?: Maybe<Array<Maybe<TestSet>>>;
   listAgentJobs?: Maybe<AgentJobConnection>;
   listAvailableAgents?: Maybe<Array<Maybe<Agent>>>;
@@ -1413,6 +1440,11 @@ export type QueryGetTestSetDocumentsArgs = {
   limit?: InputMaybe<Scalars['Int']['input']>;
   nextToken?: InputMaybe<Scalars['String']['input']>;
   objectKey?: InputMaybe<Scalars['String']['input']>;
+  testSetId: Scalars['String']['input'];
+};
+
+
+export type QueryGetTestSetVersionsArgs = {
   testSetId: Scalars['String']['input'];
 };
 
@@ -1589,6 +1621,13 @@ export type SectionInput = {
   PageIds?: InputMaybe<Array<InputMaybe<Scalars['Int']['input']>>>;
 };
 
+export type SendTestRunToReviewResult = {
+  queuedCount?: Maybe<Scalars['Int']['output']>;
+  skippedCount?: Maybe<Scalars['Int']['output']>;
+  testRunId: Scalars['String']['output'];
+  testSetId?: Maybe<Scalars['String']['output']>;
+};
+
 export type StepFunctionExecutionResponse = {
   error?: Maybe<Scalars['String']['output']>;
   executionArn: Scalars['String']['output'];
@@ -1680,6 +1719,7 @@ export type TestRun = {
   testRunId: Scalars['String']['output'];
   testSetId?: Maybe<Scalars['String']['output']>;
   testSetName?: Maybe<Scalars['String']['output']>;
+  testSetVersion?: Maybe<Scalars['Int']['output']>;
   totalCost?: Maybe<Scalars['Float']['output']>;
   weightedOverallScores?: Maybe<Scalars['AWSJSON']['output']>;
 };
@@ -1707,6 +1747,7 @@ export type TestRunStatus = {
 };
 
 export type TestSet = {
+  activeReference?: Maybe<Scalars['Int']['output']>;
   createdAt: Scalars['AWSDateTime']['output'];
   description?: Maybe<Scalars['String']['output']>;
   documentClassType?: Maybe<DocumentClassType>;
@@ -1715,7 +1756,9 @@ export type TestSet = {
   filePattern?: Maybe<Scalars['String']['output']>;
   id: Scalars['String']['output'];
   lastAddResult?: Maybe<Scalars['String']['output']>;
+  latestVersion?: Maybe<Scalars['Int']['output']>;
   name: Scalars['String']['output'];
+  source?: Maybe<Scalars['String']['output']>;
   status?: Maybe<Scalars['String']['output']>;
 };
 
@@ -1770,6 +1813,17 @@ export type TestSetValidationResult = {
   trainCount: Scalars['Int']['output'];
   validationCount: Scalars['Int']['output'];
   warnings?: Maybe<Array<Scalars['String']['output']>>;
+};
+
+export type TestSetVersion = {
+  activeReference?: Maybe<Scalars['Int']['output']>;
+  createdAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  createdBy?: Maybe<Scalars['String']['output']>;
+  fileCount?: Maybe<Scalars['Int']['output']>;
+  label?: Maybe<Scalars['String']['output']>;
+  notes?: Maybe<Scalars['String']['output']>;
+  testSetId: Scalars['String']['output'];
+  version: Scalars['Int']['output'];
 };
 
 export type ToolMetadata = {
@@ -2072,12 +2126,27 @@ export type ProcessChangesMutationVariables = Exact<{
 
 export type ProcessChangesMutation = { processChanges: { success: boolean, message?: string | null, processingJobId?: string | null } };
 
+export type PublishTestSetVersionMutationVariables = Exact<{
+  input: PublishTestSetVersionInput;
+}>;
+
+
+export type PublishTestSetVersionMutation = { publishTestSetVersion?: { testSetId: string, version: number, label?: string | null, notes?: string | null, fileCount?: number | null, activeReference?: number | null, createdAt?: string | null, createdBy?: string | null } | null };
+
 export type ReleaseReviewMutationVariables = Exact<{
   objectKey: Scalars['String']['input'];
 }>;
 
 
 export type ReleaseReviewMutation = { releaseReview?: { ObjectKey?: string | null, ObjectStatus?: string | null, HITLStatus?: string | null, HITLReviewOwner?: string | null, HITLReviewOwnerEmail?: string | null } | null };
+
+export type RemoveDocumentsFromTestSetMutationVariables = Exact<{
+  testSetId: Scalars['String']['input'];
+  fileNames: Array<Scalars['String']['input']> | Scalars['String']['input'];
+}>;
+
+
+export type RemoveDocumentsFromTestSetMutation = { removeDocumentsFromTestSet?: { id: string, name: string, fileCount?: number | null, status?: string | null, createdAt: string, lastAddResult?: string | null } | null };
 
 export type ReprocessDocumentMutationVariables = Exact<{
   objectKeys: Array<Scalars['String']['input']> | Scalars['String']['input'];
@@ -2443,10 +2512,17 @@ export type GetTestSetDocumentsQueryVariables = Exact<{
 
 export type GetTestSetDocumentsQuery = { getTestSetDocuments?: { nextToken?: string | null, documents: Array<{ objectKey: string, inputKey: string, size?: number | null, lastModified?: string | null, sections: Array<{ sectionId: string, baselineKey: string }> }> } | null };
 
+export type GetTestSetVersionsQueryVariables = Exact<{
+  testSetId: Scalars['String']['input'];
+}>;
+
+
+export type GetTestSetVersionsQuery = { getTestSetVersions?: Array<{ testSetId: string, version: number, label?: string | null, notes?: string | null, fileCount?: number | null, createdAt?: string | null, createdBy?: string | null } | null> | null };
+
 export type GetTestSetsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetTestSetsQuery = { getTestSets?: Array<{ id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, status?: string | null, createdAt: string, error?: string | null, lastAddResult?: string | null, documentClassType?: DocumentClassType | null } | null> | null };
+export type GetTestSetsQuery = { getTestSets?: Array<{ id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, source?: string | null, latestVersion?: number | null, activeReference?: number | null, status?: string | null, createdAt: string, error?: string | null, lastAddResult?: string | null, documentClassType?: DocumentClassType | null } | null> | null };
 
 export type ListAgentJobsQueryVariables = Exact<{
   limit?: InputMaybe<Scalars['Int']['input']>;

@@ -662,6 +662,7 @@ type TestRun @aws_cognito_user_pools @aws_iam {
   completedAt: AWSDateTime
   context: String
   configVersion: String
+  testSetVersion: Int
   config: AWSJSON
 }
 
@@ -692,6 +693,9 @@ type TestSet @aws_cognito_user_pools @aws_iam {
   description: String
   filePattern: String
   fileCount: Int
+  source: String
+  latestVersion: Int
+  activeReference: Int
   status: String
   createdAt: AWSDateTime!
   error: String
@@ -715,6 +719,31 @@ type TestSetDocument @aws_cognito_user_pools @aws_iam {
 type TestSetDocumentsPage @aws_cognito_user_pools @aws_iam {
   documents: [TestSetDocument!]!
   nextToken: String
+}
+
+type TestSetVersion @aws_cognito_user_pools @aws_iam {
+  testSetId: String!
+  version: Int!
+  label: String
+  notes: String
+  fileCount: Int
+  activeReference: Int
+  createdAt: AWSDateTime
+  createdBy: String
+}
+
+input PublishTestSetVersionInput {
+  testSetId: String!
+  label: String
+  notes: String
+  setAsActiveReference: Boolean
+}
+
+type SendTestRunToReviewResult @aws_cognito_user_pools @aws_iam {
+  testRunId: String!
+  testSetId: String
+  queuedCount: Int
+  skippedCount: Int
 }
 
 input TestSetUploadInput {
@@ -1007,6 +1036,12 @@ type Mutation {
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   deleteTestSets(testSetIds: [String!]!): Boolean!
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  publishTestSetVersion(input: PublishTestSetVersionInput!): TestSetVersion
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  removeDocumentsFromTestSet(testSetId: String!, fileNames: [String!]!): TestSet
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  sendTestRunToReview(testRunId: String!): SendTestRunToReviewResult
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   # Fine-Tuning (Admin + Author)
   createFinetuningJob(input: CreateFinetuningJobInput!): FinetuningJob
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
@@ -1272,6 +1307,8 @@ type Query @aws_cognito_user_pools @aws_iam {
   getTestSets: [TestSet]
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   getTestSetDocuments(testSetId: String!, limit: Int, nextToken: String, objectKey: String): TestSetDocumentsPage
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  getTestSetVersions(testSetId: String!): [TestSetVersion]
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   listBucketFiles(bucketType: String!, filePattern: String!, modifiedAfter: String): [String]
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])

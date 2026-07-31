@@ -765,6 +765,17 @@
         }
       ]
     },
+    "getTestSetVersions": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "testSetId",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
     "getTestSets": {
       "args": []
     },
@@ -1055,6 +1066,17 @@
         }
       ]
     },
+    "publishTestSetVersion": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "input",
+          "non_null": true,
+          "type": "PublishTestSetVersionInput"
+        }
+      ]
+    },
     "queryKnowledgeBase": {
       "args": [
         {
@@ -1101,6 +1123,24 @@
           "elem_non_null": false,
           "is_list": false,
           "name": "objectKey",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "removeDocumentsFromTestSet": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "testSetId",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": true,
+          "is_list": true,
+          "name": "fileNames",
           "non_null": true,
           "type": "String"
         }
@@ -1262,6 +1302,17 @@
           "name": "isProcessing",
           "non_null": false,
           "type": "Boolean"
+        }
+      ]
+    },
+    "sendTestRunToReview": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "testRunId",
+          "non_null": true,
+          "type": "String"
         }
       ]
     },
@@ -2285,6 +2336,36 @@
         "name": "onError",
         "non_null": false,
         "type": "String"
+      }
+    ],
+    "PublishTestSetVersionInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "testSetId",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "label",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "notes",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "setAsActiveReference",
+        "non_null": false,
+        "type": "Boolean"
       }
     ],
     "RegisterFeatureHooksInput": [

@@ -83,7 +83,10 @@ FIELD_ALIASES: Dict[str, str] = {
     "deleteTestSets": "addDocumentsToTestSet",
     "getTestSetDocuments": "addDocumentsToTestSet",
     "getTestSets": "addDocumentsToTestSet",
+    "getTestSetVersions": "addDocumentsToTestSet",
     "listBucketFiles": "addDocumentsToTestSet",
+    "publishTestSetVersion": "addDocumentsToTestSet",
+    "removeDocumentsFromTestSet": "addDocumentsToTestSet",
     "updateTestSet": "addDocumentsToTestSet",
     "validateTestFileName": "addDocumentsToTestSet",
     # compareDocumentVersions (DocumentVersionsResolverFunction)
@@ -130,6 +133,8 @@ FIELD_ALIASES: Dict[str, str] = {
     "deleteFinetuningJob": "createFinetuningJob",
     "getFinetuningJob": "createFinetuningJob",
     "listFinetuningJobs": "createFinetuningJob",
+    # sendTestRunToReview (TestRunnerFunction)
+    "sendTestRunToReview": "startTestRun",
 }
 
 

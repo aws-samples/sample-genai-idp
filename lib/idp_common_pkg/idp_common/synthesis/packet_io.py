@@ -159,6 +159,18 @@ def upload_packet_to_test_set(
     import boto3
 
     client = s3_client or boto3.client("s3")
+
+    # Mark this test set as synthetic. The API's get_test_sets auto-discovers
+    # test-set folders in S3 and defaults them to 'uploaded'; this marker lets
+    # discovery tag generated sets as 'synthetic' without the runtime-agnostic
+    # synthesis module needing DynamoDB access.
+    client.put_object(
+        Bucket=bucket,
+        Key=f"{test_set_id}/.source",
+        Body=b"synthetic",
+        ContentType="text/plain",
+    )
+
     uploaded = 0
     for doc in documents:
         pdf_name = f"{name_prefix}{os.path.basename(doc.pdf_path)}"

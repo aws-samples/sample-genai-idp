@@ -21,6 +21,7 @@ sqs_client = boto3.client("sqs")
 
 TRACKING_TABLE_NAME = os.environ.get("TRACKING_TABLE_NAME", "")
 OUTPUT_BUCKET = os.environ.get("OUTPUT_BUCKET", "")
+TEST_SET_BUCKET = os.environ.get("TEST_SET_BUCKET", "")
 
 
 def handler(event, context):
@@ -122,6 +123,10 @@ def complete_section_review(
                 f"'{object_key}' has no output URI to write to"
             )
         save_edited_data_to_s3(section_output_uri, edited_data)
+        # Test-set HITL: if this doc belongs to a test set, also write the
+        # corrected labels back to the test set's baseline so a later
+        # publishTestSetVersion captures the human annotation as ground truth.
+        write_correction_to_test_set_baseline(object_key, section_id, edited_data)
 
     # Get current pending and completed sections from document model
     pending = set(document.hitl_sections_pending or [])
@@ -235,6 +240,49 @@ def save_edited_data_to_s3(s3_uri, edited_data):
     except Exception as e:
         logger.error(f"Failed to save edited data to S3: {str(e)}")
         raise
+
+
+def write_correction_to_test_set_baseline(object_key, section_id, edited_data):
+    """Persist a HITL correction to the owning test set's baseline (ground truth).
+
+    A test-set review document is keyed ``{test_run_id}/{filename}`` and carries
+    ``TestSetId`` (written when it was sent to review). The test-set baseline
+    layout is ``{test_set_id}/baseline/{filename}/sections/{section_id}/result.json``.
+    Writing here (not just the doc's own output) is what turns HITL review into
+    reusable, versionable golden-dataset annotation. Best-effort: never fail the
+    review if the doc isn't part of a test set or the write hiccups.
+    """
+    if not TEST_SET_BUCKET:
+        return
+    try:
+        table = dynamodb.Table(TRACKING_TABLE_NAME)
+        doc = table.get_item(
+            Key={"PK": f"doc#{object_key}", "SK": "none"}
+        ).get("Item", {})
+        test_set_id = doc.get("TestSetId")
+        if not test_set_id:
+            return  # Not a test-set review document — nothing to do.
+
+        # object_key is "{test_run_id}/{filename}"; the baseline is keyed by filename.
+        filename = object_key.split("/", 1)[1] if "/" in object_key else object_key
+        baseline_key = (
+            f"{test_set_id}/baseline/{filename}/sections/{section_id}/result.json"
+        )
+        data = json.loads(edited_data) if isinstance(edited_data, str) else edited_data
+        s3_client.put_object(
+            Bucket=TEST_SET_BUCKET,
+            Key=baseline_key,
+            Body=json.dumps(data, indent=2),
+            ContentType="application/json",
+        )
+        logger.info(
+            f"Wrote HITL correction to test-set baseline "
+            f"s3://{TEST_SET_BUCKET}/{baseline_key}"
+        )
+    except Exception as e:  # noqa: BLE001 — best-effort; must not break the review
+        logger.error(
+            f"Failed to write correction to test-set baseline for {object_key}: {e}"
+        )
 
 
 def trigger_reprocessing(object_key):
