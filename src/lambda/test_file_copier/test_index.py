@@ -62,7 +62,7 @@ class TestFileCap:
     the UI shows "85/10 completed"-style bogus progress.
     """
 
-    def test_caps_at_files_to_process_when_s3_has_more(self):
+    def test_caps_at_files_to_process_when_s3_has_more(self, caplog):
         """filesToProcess=10 + 85 files in S3 → 10 files copied, sorted."""
         index = import_index()
 
@@ -84,7 +84,11 @@ class TestFileCap:
             # Simulate every copy succeeding.
             copy_files.side_effect = lambda *a, **kw: list(a[4])  # 5th positional = files
 
-            index.handler(_make_event(files_to_process=10), None)
+            # Attach caplog to the Lambda's logger — root propagation is
+            # off by default when a module owns its own logger via
+            # ``logging.getLogger()`` at module scope.
+            with caplog.at_level("WARNING", logger=index.logger.name):
+                index.handler(_make_event(files_to_process=10), None)
 
             # Files list written to DynamoDB is capped to 10 — matches
             # FilesCount in the runner's metadata write.
@@ -94,6 +98,23 @@ class TestFileCap:
             )
             # Deterministic: exactly the lexicographically first 10.
             assert files_written == [f"file_{i:03d}.pdf" for i in range(10)]
+
+            # The drift-warning log line is the operator-facing signal that an
+            # S3 test-set folder has grown past the test set's declared
+            # fileCount. Pinning it here so a future refactor that silently
+            # drops the WARNING (making the drift invisible) fails a test
+            # instead of shipping.
+            drift_warnings = [
+                r for r in caplog.records
+                if r.levelname == "WARNING" and "scoped to 10" in r.message
+            ]
+            assert len(drift_warnings) == 1, (
+                f"expected 1 drift-warning log line, got {len(drift_warnings)}: "
+                f"{[r.message for r in caplog.records]}"
+            )
+            # Cross-check the warning names the actual size and cap so a
+            # future off-by-one in the log-formatting doesn't slip through.
+            assert "contains 85 input files" in drift_warnings[0].message
 
             # The two copy_files_to_bucket calls (input + baseline) both
             # received capped file lists. Baselines were filtered to match

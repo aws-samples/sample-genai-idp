@@ -59,6 +59,16 @@ def handler(event, context):
             # from run to run and mask baseline drift. Log the drift so an
             # operator whose S3 folder outgrew the test set's fileCount notices
             # instead of silently getting a subset.
+            #
+            # Sort order note: Python's default ``.sort()`` compares strings by
+            # Unicode code point. S3's ``list_objects_v2`` also returns keys in
+            # UTF-8 binary sort order, so for ASCII filenames (every test set
+            # in this repo today) the pre-fix legacy ``numberOfFiles`` path and
+            # the post-fix sorted path select the same subset. For test sets
+            # whose filenames contain non-ASCII characters, Python's default
+            # sort and S3's binary sort diverge above U+007F — future test
+            # sets should either stick to ASCII filenames or move to
+            # ``key=lambda s: s.encode('utf-8')`` here to match S3 exactly.
             input_files.sort()
             baseline_files.sort()
             if files_to_process is not None and len(input_files) > files_to_process:
