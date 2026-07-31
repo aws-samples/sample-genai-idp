@@ -12,9 +12,16 @@
 // IN THE REAL IMPLEMENTATION THIS COMPONENT IS NOT BUILT: these screens open
 // the actual VisualEditorModal unchanged. This file exists only so the
 // prototype can show that experience with dummy data.
-import React from 'react';
-import { Badge, Box, Button, Container, Header, SpaceBetween } from '@cloudscape-design/components';
+import React, { useState } from 'react';
+import { Badge, Box, Button, Container, Header, Input, SpaceBetween } from '@cloudscape-design/components';
 import { PREVIEW_FIELDS } from './fixtures';
+
+// Cloudscape Input is controlled, so each editable predicted value owns its own
+// state — same as the real VisualEditorModal's per-field inputs.
+const PredictedValueInput = ({ fieldName, initialValue }: { fieldName: string; initialValue: string }): React.JSX.Element => {
+  const [value, setValue] = useState(initialValue);
+  return <Input value={value} onChange={({ detail }) => setValue(detail.value)} ariaLabel={`${fieldName} predicted value`} />;
+};
 
 interface Props {
   docName: string;
@@ -131,18 +138,7 @@ const MockVisualDocumentEditor = ({
                     Confidence: {(f.confidence * 100).toFixed(1)}% / Threshold: {(f.threshold * 100).toFixed(1)}%
                   </div>
                   <div style={{ fontSize: 12, color: '#5f6b7a', margin: '2px 0' }}>Predicted:</div>
-                  <input
-                    defaultValue={f.value}
-                    aria-label={`${f.name} predicted value`}
-                    style={{
-                      width: '100%',
-                      padding: '7px 10px',
-                      background: '#eef0f2',
-                      border: '1px solid #e9ebed',
-                      borderRadius: 6,
-                      fontSize: 13,
-                    }}
-                  />
+                  <PredictedValueInput fieldName={f.name} initialValue={f.value} />
                 </div>
               ))}
             </div>
