@@ -16,6 +16,12 @@ from idp_common.evaluation.confidence_curve import (  # type: ignore
 )
 from idp_common.evaluation.curve_store import CurveStore  # type: ignore
 from idp_common.s3 import find_matching_files  # type: ignore
+from idp_common.test_set_scope import (  # type: ignore
+    TestSetAccessDenied,
+    assert_can_access_test_set,
+    caller_email,
+    visible_test_sets,
+)
 
 # Constants
 MAX_ZIP_SIZE_BYTES = 1073741824  # 1 GB
@@ -68,21 +74,39 @@ def _caller_in_groups(event, allowed):
     return bool(set(allowed).intersection(groups))
 
 
+# Operations a scoped Annotator may reach. Everything else in this resolver is
+# test-set *management* (create, publish, delete, run configs) and stays
+# Admin/Author only, so an annotator onboarded for one labeling effort has no
+# route to it. Each of these enforces per-set scope internally via
+# assert_can_access_test_set — reaching the operation is not the same as being
+# allowed to see a given set.
+ANNOTATOR_ALLOWED_FIELDS = ("getAnnotationQueue", "getTestSetDocuments")
+
+
 def handler(event, context):
     field_name = event["info"]["fieldName"]
     logger.info(f"Test set resolver invoked with field_name: {field_name}")
 
-    # Defense-in-depth: all Test Studio test-set operations are Admin+Author.
+    # Defense-in-depth: Test Studio test-set operations are Admin+Author, plus a
+    # narrow allowlist an Annotator may reach for their own queue.
     # Allow direct Lambda invocations (no 'identity' field or identity=None) for CI/automation.
     # AppSync invocations always have 'identity' with non-None value, so RBAC is still enforced for UI users.
     # Security: Direct invocation path is gated by IAM (lambda:InvokeFunction permission on this ARN),
     # not Cognito groups. CI/automation uses IAM credentials; UI users go through AppSync + Cognito.
     is_appsync_invoke = event.get("identity") is not None
-    if is_appsync_invoke and not _caller_in_groups(event, ("Admin", "Author")):
-        logger.warning(
-            f"Forbidden: caller attempted '{field_name}' without Admin/Author group"
-        )
-        raise Exception(f"Unauthorized: '{field_name}' requires Admin or Author group")
+    if is_appsync_invoke:
+        allowed_groups = ["Admin", "Author"]
+        if field_name in ANNOTATOR_ALLOWED_FIELDS:
+            allowed_groups.append("Annotator")
+        if not _caller_in_groups(event, tuple(allowed_groups)):
+            logger.warning(
+                f"Forbidden: caller attempted '{field_name}' without "
+                f"{'/'.join(allowed_groups)} group"
+            )
+            raise Exception(
+                f"Unauthorized: '{field_name}' requires "
+                f"{' or '.join(allowed_groups)} group"
+            )
 
     if field_name == "addTestSet":
         return add_test_set(event["arguments"])
@@ -101,6 +125,10 @@ def handler(event, context):
     elif field_name == "getTestSets":
         return get_test_sets()
     elif field_name == "getTestSetDocuments":
+        # Annotators reach this to render their queue's documents, so it must
+        # verify per-set scope — group membership alone would let one annotator
+        # read another effort's documents.
+        assert_can_access_test_set(event, event["arguments"].get("testSetId") or "")
         return get_test_set_documents(event["arguments"])
     elif field_name == "publishTestSetVersion":
         return publish_test_set_version(event["arguments"], event)
@@ -112,6 +140,8 @@ def handler(event, context):
         return get_draft_label_job(event["arguments"])
     elif field_name == "estimateReviewEffort":
         return estimate_review_effort(event["arguments"])
+    elif field_name == "getAnnotationQueue":
+        return get_annotation_queue(event["arguments"], event)
     elif field_name == "listBucketFiles":
         return list_bucket_files(event["arguments"])
     elif field_name == "validateTestFileName":
@@ -782,6 +812,157 @@ def _confidence_threshold(explainability_info):
 # confidences, and returns the review depth, implied cutoff, effort, audit
 # sample and — crucially — how much the numbers can be trusted.
 # ---------------------------------------------------------------------------
+
+
+def get_annotation_queue(args, event=None):
+    """The worst-first annotation queue for one test set.
+
+    Returns the set's documents ordered lowest-confidence first — so each review
+    removes the most expected error — annotated with claim state so several
+    annotators can work the same set in parallel without colliding. Documents
+    already claimed by someone else, or already reviewed, are marked so they drop
+    out of everyone else's "next in queue"; claim-to-lock (``claimReview``) is
+    what actually enforces exclusivity, this query just reflects it.
+
+    Access is scoped server-side: an ``Annotator`` may only read the queue for a
+    test set in their ``allowedTestSets``. The shareable queue link is therefore
+    a navigation aid, not a credential.
+    """
+    test_set_id = args["testSetId"]
+    limit = max(1, min(int(args.get("limit") or 50), 200))
+    include_completed = bool(args.get("includeCompleted"))
+
+    if not validate_test_set_name(test_set_id):
+        raise Exception("Invalid test set id")
+
+    # Enforce test-set scope before reading anything about the set, so an
+    # unauthorized caller learns nothing (not even whether the set exists).
+    assert_can_access_test_set(event, test_set_id)
+
+    meta = db_client.get_item({"PK": f"testset#{test_set_id}", "SK": "metadata"})
+    if not meta:
+        raise Exception(f"Test set '{test_set_id}' not found")
+
+    documents = _collect_queue_documents(test_set_id)
+    claims = _claim_state_for_documents(test_set_id, meta, documents)
+
+    caller = caller_email(event)
+    entries = []
+    for doc in documents:
+        state = claims.get(doc["objectKey"], {})
+        owner = state.get("owner") or ""
+        status = state.get("status") or ""
+        reviewed = doc.get("labelSource") == LABEL_SOURCE_HUMAN or status in (
+            "Review Completed",
+            "Completed",
+            "Review Skipped",
+            "Skipped",
+        )
+        # "Available" means this caller could claim it next: unreviewed and
+        # either unclaimed or already theirs.
+        claimed_by_other = bool(owner) and owner != caller
+        entries.append(
+            {
+                "objectKey": doc["objectKey"],
+                "inputKey": doc["inputKey"],
+                "minConfidence": doc.get("minConfidence"),
+                "confidenceThreshold": doc.get("confidenceThreshold"),
+                "labelSource": doc.get("labelSource"),
+                "sectionCount": len(doc.get("sections") or []),
+                "claimedBy": owner or None,
+                "claimedByMe": bool(owner) and owner == caller,
+                "reviewStatus": status or None,
+                "reviewed": reviewed,
+                "available": not reviewed and not claimed_by_other,
+            }
+        )
+
+    # Worst-first. Documents with no confidence sort first: an unlabeled document
+    # is the least trustworthy thing in the set, not the most.
+    entries.sort(
+        key=lambda e: (
+            e["minConfidence"] if e["minConfidence"] is not None else -1.0,
+            e["objectKey"],
+        )
+    )
+
+    reviewed_count = sum(1 for e in entries if e["reviewed"])
+    total = len(entries)
+    queue = [e for e in entries if include_completed or not e["reviewed"]]
+
+    result = {
+        "testSetId": test_set_id,
+        "totalDocs": total,
+        "reviewedDocs": reviewed_count,
+        "remainingDocs": total - reviewed_count,
+        "claimedByOthers": sum(
+            1
+            for e in entries
+            if not e["reviewed"] and e["claimedBy"] and not e["claimedByMe"]
+        ),
+        "documents": queue[:limit],
+        # The next document this caller should open — the whole point of
+        # "Save & next". None when the queue is drained for them.
+        "nextObjectKey": next((e["objectKey"] for e in queue if e["available"]), None),
+    }
+    logger.info(
+        f"getAnnotationQueue({test_set_id}) for {caller or 'service'}: "
+        f"{result['remainingDocs']}/{total} remaining, "
+        f"{result['claimedByOthers']} claimed by others"
+    )
+    return result
+
+
+def _collect_queue_documents(test_set_id):
+    """All documents in the set with their label metadata, up to the queue cap."""
+    documents = []
+    next_token = None
+    while len(documents) < MAX_DOCS_FOR_ESTIMATE:
+        page = get_test_set_documents(
+            {
+                "testSetId": test_set_id,
+                "limit": min(200, MAX_DOCS_FOR_ESTIMATE - len(documents)),
+                "nextToken": next_token,
+            }
+        )
+        documents.extend(page.get("documents") or [])
+        next_token = page.get("nextToken")
+        if not next_token:
+            break
+    return documents
+
+
+def _claim_state_for_documents(test_set_id, meta, documents):
+    """Map objectKey → claim/review state from the HITL document records.
+
+    Review happens against the *pipeline* copy of a document (keyed
+    ``doc#{testRunId}/{filename}``), not the test-set copy, because that is what
+    sendTestRunToReview puts into the review hopper. The set's most recent
+    labeling/scoring run therefore supplies the run prefix; without one there is
+    nothing claimed yet and every document reads as available.
+    """
+    run_id = meta.get("labelJobId")
+    if not run_id:
+        return {}
+
+    tracking_table = boto3.resource("dynamodb").Table(os.environ["TRACKING_TABLE"])
+    state = {}
+    for doc in documents:
+        object_key = doc["objectKey"]
+        try:
+            item = tracking_table.get_item(
+                Key={"PK": f"doc#{run_id}/{object_key}", "SK": "none"}
+            ).get("Item")
+        except Exception as e:  # noqa: BLE001 — a missing claim is not an error
+            logger.warning(f"Could not read claim state for {object_key}: {e}")
+            continue
+        if not item:
+            continue
+        state[object_key] = {
+            "owner": item.get("HITLReviewOwner") or "",
+            "status": item.get("HITLStatus") or "",
+        }
+    return state
 
 
 def estimate_review_effort(args):

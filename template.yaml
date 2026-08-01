@@ -9196,12 +9196,24 @@ Resources:
       Precedence: 2
       UserPoolId: !Ref UserPool
 
+  AnnotatorGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      Description: >-
+        Ground-truth Annotators for Test Studio. Least-privilege: scoped by the
+        user's allowedTestSets to the test set(s) they were onboarded for, and
+        can only read and annotate those documents — not list other test sets,
+        run configurations, or publish versions.
+      GroupName: Annotator
+      Precedence: 3
+      UserPoolId: !Ref UserPool
+
   ViewerGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
       Description: Viewers - read-only access to documents and configuration
       GroupName: Viewer
-      Precedence: 3
+      Precedence: 4
       UserPoolId: !Ref UserPool
 
   AdminUserToGroupAttachment:
@@ -10935,6 +10947,9 @@ Resources:
           # publishTestSetVersion captures the human annotations as ground truth.
           TEST_SET_BUCKET: !Ref TestSetBucket
           QUEUE_URL: !Ref DocumentQueue
+          # Annotator scope: review operations verify the document's test set is
+          # in the caller's allowedTestSets, which is stored on the user record.
+          USERS_TABLE_NAME: !Ref UsersTable
       LoggingConfig:
         LogGroup: !Ref CompleteSectionReviewFunctionLogGroup
       Policies:
@@ -10948,6 +10963,17 @@ Resources:
             BucketName: !Ref TestSetBucket
         - SQSSendMessagePolicy:
             QueueName: !GetAtt DocumentQueue.QueueName
+        # Read-only on UsersTable + EmailIndex to resolve the caller's
+        # allowedTestSets. An Annotator whose scope cannot be resolved is denied,
+        # so a missing grant blocks annotation rather than widening access.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+              Resource:
+                - !GetAtt UsersTable.Arn
+                - !Sub "${UsersTable.Arn}/index/*"
         - Statement:
             - Effect: Allow
               Action:

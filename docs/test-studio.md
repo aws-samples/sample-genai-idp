@@ -728,6 +728,53 @@ effort rather than excluded to make the headline number smaller.
 > field complexity or individual annotator speed, so treat the time figure as
 > coarser than the document count.
 
+## Team annotation: the scoped queue
+
+Once a test set has draft labels, several people can review it in parallel from a
+shared **worst-first queue**. The queue is a view over the existing HITL review
+machinery, so annotation uses the same ground-truth editor, the same claim-to-lock
+behavior, and the same audit trail as production review.
+
+### The Annotator role
+
+`Annotator` is a least-privilege role for exactly this job — typically someone
+onboarded for a single labeling effort, often external. An annotator is scoped by
+**`allowedTestSets`**: the test set(s) they may read and annotate. They cannot
+list other test sets, run configurations, publish versions, or review production
+documents.
+
+Create one from **User Management**: set the persona to `Annotator` and assign the
+test set(s), then share the queue link
+(`#/test-studio/sets/<test-set-id>/annotate`).
+
+> **The link is not a credential.** It only navigates; access is gated by the
+> annotator's scoped Cognito session and re-checked server-side on every
+> operation. A leaked link is useless without a scoped login, and revoking access
+> is a user-management change rather than a URL rotation.
+
+`allowedTestSets` is a separate axis from `allowedConfigVersions` (which restricts
+*which config versions'* documents a user sees). A user can carry both.
+
+### Working the queue collaboratively
+
+- **One shared queue per set.** Every annotator pulls from the same worst-first
+  list; there is no manual assignment.
+- **Claim to lock.** Opening a document claims it. A document claimed by someone
+  else drops out of everyone else's "next in queue", so parallel annotators
+  self-partition without colliding — and the work self-balances, since whoever
+  finishes first takes the next worst document.
+- **Resume your own work.** A document you already claimed stays available *to
+  you*, so an interrupted session picks up where it left off.
+- **Shared progress.** The queue reports set-level counts (reviewed, remaining,
+  claimed by others) across all annotators, so everyone sees the same picture.
+- **Reviewed documents drop out** of the queue but still count toward progress.
+
+Documents with no labels at all sort **first** — an unlabeled document is the
+least trustworthy thing in the set, not the most.
+
+Not yet supported: explicit per-annotator assignment, multi-reviewer agreement
+and adjudication, and review time-boxes.
+
 ### Upload Methods
 1. **UI Zip Upload**: S3 event → Lambda extraction → Validation → Status update
 2. **Direct S3 Upload**: Detected via refresh button or automatic polling

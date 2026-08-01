@@ -354,7 +354,14 @@ operations:
     enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
     args: {}
   getTestSetDocuments:
-    groups: [Admin, Author]
+    # Annotator reads its scoped queue's documents; the resolver additionally
+    # enforces allowedTestSets per set.
+    groups: [Admin, Author, Annotator]
+    kind: read
+    enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
+    args: { testSetId: "nonexistent-test-set" }
+  getAnnotationQueue:
+    groups: [Admin, Author, Annotator]
     kind: read
     enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
     args: { testSetId: "nonexistent-test-set" }
@@ -443,17 +450,23 @@ operations:
     enforced_in: nested/api-resolvers/src/lambda/process_changes_resolver/index.py
     args: { objectKey: "__x__", modifiedSections: [] }
   completeSectionReview:
-    groups: [Admin, Reviewer]
+    # Annotator annotates test-set ground truth; the resolver additionally
+    # requires the document's test set to be in their allowedTestSets.
+    groups: [Admin, Reviewer, Annotator]
     kind: mutation
     enforced_in: src/lambda/complete_section_review/index.py
     args: { objectKey: "__x__", sectionId: "1" }
   claimReview:
-    groups: [Admin, Reviewer]
+    # Annotator annotates test-set ground truth; the resolver additionally
+    # requires the document's test set to be in their allowedTestSets.
+    groups: [Admin, Reviewer, Annotator]
     kind: mutation
     enforced_in: src/lambda/complete_section_review/index.py
     args: { objectKey: "__x__" }
   releaseReview:
-    groups: [Admin, Reviewer]
+    # Annotator annotates test-set ground truth; the resolver additionally
+    # requires the document's test set to be in their allowedTestSets.
+    groups: [Admin, Reviewer, Annotator]
     kind: mutation
     enforced_in: src/lambda/complete_section_review/index.py
     args: { objectKey: "__x__" }

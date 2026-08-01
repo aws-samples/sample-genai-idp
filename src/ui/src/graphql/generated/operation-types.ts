@@ -67,6 +67,30 @@ export type AgentJobConnection = {
   nextToken?: Maybe<Scalars['String']['output']>;
 };
 
+export type AnnotationQueue = {
+  claimedByOthers: Scalars['Int']['output'];
+  documents: Array<AnnotationQueueItem>;
+  nextObjectKey?: Maybe<Scalars['String']['output']>;
+  remainingDocs: Scalars['Int']['output'];
+  reviewedDocs: Scalars['Int']['output'];
+  testSetId: Scalars['String']['output'];
+  totalDocs: Scalars['Int']['output'];
+};
+
+export type AnnotationQueueItem = {
+  available: Scalars['Boolean']['output'];
+  claimedBy?: Maybe<Scalars['String']['output']>;
+  claimedByMe: Scalars['Boolean']['output'];
+  confidenceThreshold?: Maybe<Scalars['Float']['output']>;
+  inputKey: Scalars['String']['output'];
+  labelSource?: Maybe<Scalars['String']['output']>;
+  minConfidence?: Maybe<Scalars['Float']['output']>;
+  objectKey: Scalars['String']['output'];
+  reviewStatus?: Maybe<Scalars['String']['output']>;
+  reviewed: Scalars['Boolean']['output'];
+  sectionCount: Scalars['Int']['output'];
+};
+
 /**
  * Input for applyFeatureConfigPreset. `config` is the parsed preset
  * document (JSON-encoded); metadata fields (IsActive, Managed, …) are
@@ -867,6 +891,7 @@ export type MutationCreateFinetuningJobArgs = {
 
 export type MutationCreateUserArgs = {
   allowedConfigVersions?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
+  allowedTestSets?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
   email: Scalars['String']['input'];
   persona: Scalars['String']['input'];
 };
@@ -1167,6 +1192,7 @@ export type MutationUpdateTestSetArgs = {
 
 export type MutationUpdateUserArgs = {
   allowedConfigVersions?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
+  allowedTestSets?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
   userId: Scalars['ID']['input'];
 };
 
@@ -1290,6 +1316,7 @@ export type Query = {
   estimateReviewEffort?: Maybe<ReviewEffortEstimate>;
   getAgentChatMessages?: Maybe<Array<Maybe<AgentChatMessage>>>;
   getAgentJobStatus?: Maybe<AgentJob>;
+  getAnnotationQueue?: Maybe<AnnotationQueue>;
   getChatMessages?: Maybe<Array<Maybe<AgentChatMessage>>>;
   getCircuitBreakerStatus?: Maybe<CircuitBreakerStatus>;
   getConfigVersion?: Maybe<ConfigurationResponse>;
@@ -1391,6 +1418,13 @@ export type QueryGetAgentChatMessagesArgs = {
 
 export type QueryGetAgentJobStatusArgs = {
   jobId: Scalars['ID']['input'];
+};
+
+
+export type QueryGetAnnotationQueueArgs = {
+  includeCompleted?: InputMaybe<Scalars['Boolean']['input']>;
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  testSetId: Scalars['String']['input'];
 };
 
 
@@ -2003,6 +2037,7 @@ export type UpdateTestSetInput = {
 
 export type User = {
   allowedConfigVersions?: Maybe<Array<Maybe<Scalars['String']['output']>>>;
+  allowedTestSets?: Maybe<Array<Maybe<Scalars['String']['output']>>>;
   createdAt?: Maybe<Scalars['AWSDateTime']['output']>;
   email: Scalars['String']['output'];
   persona: Scalars['String']['output'];

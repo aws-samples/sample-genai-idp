@@ -256,3 +256,124 @@ class TestRecordCurveObservations:
             module.record_curve_observations(
                 "ts1", DRAFTED_LABEL, {"inference_result": {"vendor": "Acme"}}
             )
+
+
+class TestAnnotatorReviewScope:
+    """An Annotator may only review documents in their assigned test set.
+
+    Group membership gets them to the operation; these tests cover the second
+    gate, which is what stops an annotator onboarded for one labeling effort from
+    reviewing production documents or another customer's set.
+    """
+
+    @pytest.fixture
+    def scoped_env(self, review_env):
+        module, table, s3 = review_env
+        # A users table so scope can be resolved.
+        ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        users = ddb.create_table(
+            TableName="users",
+            KeySchema=[
+                {"AttributeName": "PK", "KeyType": "HASH"},
+                {"AttributeName": "SK", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "PK", "AttributeType": "S"},
+                {"AttributeName": "SK", "AttributeType": "S"},
+                {"AttributeName": "email", "AttributeType": "S"},
+            ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "EmailIndex",
+                    "KeySchema": [{"AttributeName": "email", "KeyType": "HASH"}],
+                    "Projection": {"ProjectionType": "ALL"},
+                }
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        users.put_item(
+            Item={
+                "PK": "USER#ann",
+                "SK": "USER#ann",
+                "userId": "ann",
+                "email": "ann@example.com",
+                "persona": "Annotator",
+                "allowedTestSets": ["ts1"],
+            }
+        )
+        from idp_common import test_set_scope
+
+        test_set_scope.clear_scope_cache()
+        with patch.dict(os.environ, {"USERS_TABLE_NAME": "users"}):
+            yield module, table, s3
+        test_set_scope.clear_scope_cache()
+
+    def _annotator_event(self, field, object_key):
+        return {
+            "info": {"fieldName": field},
+            "arguments": {"objectKey": object_key},
+            "identity": {
+                "claims": {
+                    "cognito:groups": ["Annotator"],
+                    "email": "ann@example.com",
+                },
+                "username": "ann@example.com",
+            },
+        }
+
+    def test_annotator_can_claim_a_document_in_their_set(self, scoped_env):
+        module, table, s3 = scoped_env
+        _seed_review_doc(table, s3, object_key="run1/a.pdf", test_set_id="ts1")
+
+        # Reaches claim_review (which then fails on the document lookup, proving
+        # authorization passed rather than the operation being refused).
+        try:
+            module.handler(self._annotator_event("claimReview", "run1/a.pdf"), None)
+        except Exception as e:
+            assert "Unauthorized" not in str(e), e
+
+    def test_annotator_cannot_claim_a_document_in_another_set(self, scoped_env):
+        """The escalation attempt that matters."""
+        module, table, s3 = scoped_env
+        _seed_review_doc(table, s3, object_key="run2/b.pdf", test_set_id="ts-other")
+
+        with pytest.raises(ValueError, match="Unauthorized"):
+            module.handler(self._annotator_event("claimReview", "run2/b.pdf"), None)
+
+    def test_annotator_cannot_review_a_production_document(self, scoped_env):
+        """A document with no TestSetId is production HITL work, not annotation."""
+        module, table, s3 = scoped_env
+        table.put_item(Item={"PK": "doc#prod/x.pdf", "SK": "none"})
+
+        with pytest.raises(ValueError, match="only review test-set documents"):
+            module.handler(self._annotator_event("claimReview", "prod/x.pdf"), None)
+
+    def test_annotator_cannot_skip_all_sections(self, scoped_env):
+        """Skipping accepts labels unseen — a set-owner call, not an annotator's."""
+        module, table, s3 = scoped_env
+        _seed_review_doc(table, s3, object_key="run1/a.pdf", test_set_id="ts1")
+
+        with pytest.raises(ValueError, match="administrators and reviewers"):
+            module.handler(
+                self._annotator_event("skipAllSectionsReview", "run1/a.pdf"), None
+            )
+
+    def test_viewer_still_cannot_reach_review_operations(self, scoped_env):
+        module, table, s3 = scoped_env
+        event = self._annotator_event("claimReview", "run1/a.pdf")
+        event["identity"]["claims"]["cognito:groups"] = ["Viewer"]
+
+        with pytest.raises(ValueError, match="Unauthorized"):
+            module.handler(event, None)
+
+    def test_reviewer_is_unaffected_by_test_set_scope(self, scoped_env):
+        """Production reviewers keep working exactly as before."""
+        module, table, s3 = scoped_env
+        table.put_item(Item={"PK": "doc#prod/x.pdf", "SK": "none"})
+        event = self._annotator_event("claimReview", "prod/x.pdf")
+        event["identity"]["claims"]["cognito:groups"] = ["Reviewer"]
+
+        try:
+            module.handler(event, None)
+        except Exception as e:
+            assert "Unauthorized" not in str(e), e

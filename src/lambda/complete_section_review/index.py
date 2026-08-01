@@ -43,32 +43,43 @@ def handler(event, context):
         user_groups = [user_groups]
     is_admin = "Admin" in user_groups
 
-    # Defense-in-depth RBAC: all HITL review operations are Admin+Reviewer. The
-    # schema enforces this via @aws_cognito_user_pools(cognito_groups), but we
-    # also gate it server-side so a Viewer/Author can never reach these
-    # operations even if the schema directive is missing or misconfigured (e.g.
-    # the prior @aws_auth directive, which AppSync silently ignores on a
-    # multi-auth API).
-    if not ({"Admin", "Reviewer"}.intersection(user_groups)):
+    # Defense-in-depth RBAC: HITL review operations are Admin+Reviewer, plus
+    # Annotator for test-set ground-truth annotation. The schema enforces this via
+    # @aws_cognito_user_pools(cognito_groups), but we also gate it server-side so
+    # a Viewer/Author can never reach these operations even if the schema
+    # directive is missing or misconfigured (e.g. the prior @aws_auth directive,
+    # which AppSync silently ignores on a multi-auth API).
+    #
+    # An Annotator's reach is narrower than a Reviewer's: group membership only
+    # gets them to the operation, and _assert_annotator_scope below then requires
+    # the document to belong to a test set in their allowedTestSets. So an
+    # annotator onboarded for one labeling effort cannot review production
+    # documents or another effort's set.
+    if not ({"Admin", "Reviewer", "Annotator"}.intersection(user_groups)):
         logger.warning(
             f"Forbidden: caller {user_email} (groups={user_groups}) "
             f"attempted HITL operation '{field_name}'"
         )
         raise ValueError(
-            "Unauthorized: review operations require Admin or Reviewer group"
+            "Unauthorized: review operations require Admin, Reviewer or Annotator group"
         )
 
     if field_name == "claimReview":
         if not object_key:
             raise ValueError("objectKey is required")
+        _assert_annotator_scope(event, object_key)
         return claim_review(object_key, username, user_email)
 
     if field_name == "releaseReview":
         if not object_key:
             raise ValueError("objectKey is required")
+        _assert_annotator_scope(event, object_key)
         return release_review(object_key, username, user_email, is_admin)
 
     if field_name == "skipAllSectionsReview":
+        # Deliberately not extended to Annotator: skipping marks a document
+        # reviewed without looking at it, which is a set-owner decision about
+        # how much ground truth to accept, not an annotator's.
         is_reviewer = "Reviewer" in user_groups
         if not is_admin and not is_reviewer:
             raise ValueError(
@@ -81,9 +92,48 @@ def handler(event, context):
     if not object_key or not section_id:
         raise ValueError("objectKey and sectionId are required")
 
+    _assert_annotator_scope(event, object_key)
     return complete_section_review(
         object_key, section_id, edited_data, username, user_email
     )
+
+
+def _assert_annotator_scope(event, object_key):
+    """Verify a scoped Annotator may touch this document's test set.
+
+    A review document carries the test set it came from (``TestSetId``, written
+    when the run was sent to review). Annotators are checked against that;
+    Admin/Reviewer are unaffected, and a document with no test set is production
+    HITL work that an Annotator has no business in.
+    """
+    groups = (event.get("identity") or {}).get("claims", {}).get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [groups]
+    if "Annotator" not in groups or {"Admin", "Reviewer"}.intersection(groups):
+        return
+
+    from idp_common.test_set_scope import (
+        TestSetAccessDenied,
+        assert_can_access_test_set,
+    )
+
+    table = dynamodb.Table(TRACKING_TABLE_NAME)
+    doc = (
+        table.get_item(Key={"PK": f"doc#{object_key}", "SK": "none"}).get("Item") or {}
+    )
+    test_set_id = doc.get("TestSetId")
+    if not test_set_id:
+        logger.warning(
+            f"Forbidden: annotator attempted review of non-test-set document "
+            f"{object_key}"
+        )
+        raise ValueError("Unauthorized: annotators may only review test-set documents")
+    try:
+        assert_can_access_test_set(event, test_set_id)
+    except TestSetAccessDenied as e:
+        # Surface as ValueError so the dispatcher maps it the same way as the
+        # other authorization failures in this handler.
+        raise ValueError(str(e)) from e
 
 
 def complete_section_review(

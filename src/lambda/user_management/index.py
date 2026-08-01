@@ -3,8 +3,18 @@
 
 """Lambda function for user management operations with DynamoDB storage and Cognito sync.
 
-Supports four roles (Cognito groups): Admin, Author, Reviewer, Viewer.
+Supports five roles (Cognito groups): Admin, Author, Reviewer, Annotator, Viewer.
 Users can optionally have allowedConfigVersions for config-version scoping.
+
+**Annotator** is a least-privilege role for ground-truth annotation, typically
+someone onboarded for a single labeling effort (often external). It is scoped by
+``allowedTestSets`` — the test set(s) that user may annotate — and is the axis
+that makes a shareable queue link safe: the link only deep-links, while access is
+gated by the scoped Cognito session, so a leaked URL is useless on its own.
+
+``allowedTestSets`` is a *different* axis from ``allowedConfigVersions``, not a
+replacement: the former restricts which test set's documents a user may touch,
+the latter which config versions' documents they may see. A user can carry both.
 """
 
 import logging
@@ -27,6 +37,7 @@ USER_POOL_ID = os.environ.get("USER_POOL_ID", "")
 ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
 AUTHOR_GROUP = os.environ.get("AUTHOR_GROUP", "Author")
 REVIEWER_GROUP = os.environ.get("REVIEWER_GROUP", "Reviewer")
+ANNOTATOR_GROUP = os.environ.get("ANNOTATOR_GROUP", "Annotator")
 VIEWER_GROUP = os.environ.get("VIEWER_GROUP", "Viewer")
 ALLOWED_SIGNUP_EMAIL_DOMAINS = os.environ.get("ALLOWED_SIGNUP_EMAIL_DOMAINS", "")
 
@@ -35,6 +46,7 @@ VALID_PERSONAS = {
     "Admin": ADMIN_GROUP,
     "Author": AUTHOR_GROUP,
     "Reviewer": REVIEWER_GROUP,
+    "Annotator": ANNOTATOR_GROUP,
     "Viewer": VIEWER_GROUP,
 }
 
@@ -101,6 +113,7 @@ def create_user(args):
     email = args["email"]
     persona = args["persona"]
     allowed_config_versions = args.get("allowedConfigVersions")
+    allowed_test_sets = args.get("allowedTestSets")
     user_id = str(uuid.uuid4())
 
     # Validate email format
@@ -111,7 +124,9 @@ def create_user(args):
     # Validate email domain if restrictions are configured
     if ALLOWED_SIGNUP_EMAIL_DOMAINS and ALLOWED_SIGNUP_EMAIL_DOMAINS.strip():
         allowed_domains = [
-            d.strip().lower() for d in ALLOWED_SIGNUP_EMAIL_DOMAINS.split(",") if d.strip()
+            d.strip().lower()
+            for d in ALLOWED_SIGNUP_EMAIL_DOMAINS.split(",")
+            if d.strip()
         ]
         if allowed_domains:  # Only validate if there are actual domains configured
             if "@" not in email:
@@ -123,7 +138,7 @@ def create_user(args):
                     f"Allowed domains: {', '.join(allowed_domains)}"
                 )
 
-    # Validate persona - support all four roles
+    # Validate persona - support all five roles
     if persona not in VALID_PERSONAS:
         raise ValueError(
             f"Invalid persona: {persona}. Must be one of: {', '.join(VALID_PERSONAS.keys())}"
@@ -156,6 +171,8 @@ def create_user(args):
     # Store allowedConfigVersions if provided
     if allowed_config_versions is not None:
         user_record["allowedConfigVersions"] = allowed_config_versions
+    if allowed_test_sets is not None:
+        user_record["allowedTestSets"] = allowed_test_sets
 
     table.put_item(Item=user_record)
 
@@ -178,15 +195,31 @@ def create_user(args):
     }
     if allowed_config_versions is not None:
         result["allowedConfigVersions"] = allowed_config_versions
+    if allowed_test_sets is not None:
+        result["allowedTestSets"] = allowed_test_sets
     return result
 
 
 def update_user(args):
-    """Update user's allowedConfigVersions in DynamoDB. Admin-only operation."""
-    user_id = args["userId"]
-    allowed_config_versions = args.get("allowedConfigVersions")
+    """Update a user's scope (config versions and/or test sets). Admin-only.
 
-    logger.info(f"Updating user {user_id} scope: {allowed_config_versions}")
+    Each axis is only touched when the caller *mentions* it, so updating test-set
+    scope does not silently clear config-version scope. Presence in ``args`` is
+    what counts, not truthiness: the UI clears a scope by passing an explicit
+    ``null``/empty list, which must still mean "remove the restriction" — reading
+    these with a plain ``.get()`` would make clearing indistinguishable from
+    omitting and silently strand users on their old scope.
+    """
+    user_id = args["userId"]
+    config_versions_given = "allowedConfigVersions" in args
+    test_sets_given = "allowedTestSets" in args
+    allowed_config_versions = args.get("allowedConfigVersions")
+    allowed_test_sets = args.get("allowedTestSets")
+
+    logger.info(
+        f"Updating user {user_id} scope: configVersions={allowed_config_versions} "
+        f"testSets={allowed_test_sets}"
+    )
 
     table = dynamodb.Table(USERS_TABLE_NAME)
 
@@ -201,16 +234,28 @@ def update_user(args):
     if user_record.get("persona") == "Admin":
         raise ValueError("Cannot set config version scope for Admin users")
 
-    # Update the allowedConfigVersions field
-    update_expr = "SET updatedAt = :now"
+    set_parts = ["updatedAt = :now"]
+    remove_parts = []
     expr_values = {":now": datetime.utcnow().isoformat() + "Z"}
 
-    if allowed_config_versions is not None and len(allowed_config_versions) > 0:
-        update_expr += ", allowedConfigVersions = :acv"
-        expr_values[":acv"] = allowed_config_versions
-    else:
-        # Remove scope restriction (unrestricted access)
-        update_expr += " REMOVE allowedConfigVersions"
+    if config_versions_given:
+        if allowed_config_versions:
+            set_parts.append("allowedConfigVersions = :acv")
+            expr_values[":acv"] = allowed_config_versions
+        else:
+            # null or [] = remove the restriction (unrestricted access).
+            remove_parts.append("allowedConfigVersions")
+
+    if test_sets_given:
+        if allowed_test_sets:
+            set_parts.append("allowedTestSets = :ats")
+            expr_values[":ats"] = allowed_test_sets
+        else:
+            remove_parts.append("allowedTestSets")
+
+    update_expr = f"SET {', '.join(set_parts)}"
+    if remove_parts:
+        update_expr += f" REMOVE {', '.join(remove_parts)}"
 
     table.update_item(
         Key={"PK": f"USER#{user_id}", "SK": f"USER#{user_id}"},
@@ -231,6 +276,8 @@ def update_user(args):
     }
     if "allowedConfigVersions" in item:
         result["allowedConfigVersions"] = item["allowedConfigVersions"]
+    if "allowedTestSets" in item:
+        result["allowedTestSets"] = item["allowedTestSets"]
     return result
 
 
@@ -301,6 +348,8 @@ def get_my_profile(event):
     }
     if "allowedConfigVersions" in item:
         result["allowedConfigVersions"] = item["allowedConfigVersions"]
+    if "allowedTestSets" in item:
+        result["allowedTestSets"] = item["allowedTestSets"]
     return result
 
 
@@ -322,6 +371,11 @@ def _determine_persona_from_groups(groups):
         return "Author"
     if REVIEWER_GROUP in group_names:
         return "Reviewer"
+    # Annotator outranks Viewer: it can annotate its allowed test sets, whereas
+    # Viewer is read-only. Ordering these wrong would report an annotator as a
+    # Viewer and the UI would hide the queue they were onboarded for.
+    if ANNOTATOR_GROUP in group_names:
+        return "Annotator"
     if VIEWER_GROUP in group_names:
         return "Viewer"
     return "Viewer"
@@ -335,6 +389,8 @@ def _determine_persona_from_cognito_groups(group_list):
         return "Author"
     if "Reviewer" in group_list:
         return "Reviewer"
+    if "Annotator" in group_list:
+        return "Annotator"
     if "Viewer" in group_list:
         return "Viewer"
     return "Viewer"
@@ -472,9 +528,13 @@ def sync_user_to_cognito(user_id, email, persona, operation):
             cognito.admin_add_user_to_group(
                 UserPoolId=USER_POOL_ID, Username=email, GroupName=group_name
             )
-            logger.info(f"User {email} synced to Cognito and added to group {group_name}")
+            logger.info(
+                f"User {email} synced to Cognito and added to group {group_name}"
+            )
         else:
-            logger.warning(f"Unknown persona '{persona}' - user created without group assignment")
+            logger.warning(
+                f"Unknown persona '{persona}' - user created without group assignment"
+            )
 
     elif operation == "delete":
         # Delete user from Cognito

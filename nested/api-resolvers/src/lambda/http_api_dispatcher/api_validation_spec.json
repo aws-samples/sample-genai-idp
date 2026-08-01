@@ -345,6 +345,13 @@
           "name": "allowedConfigVersions",
           "non_null": false,
           "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": true,
+          "name": "allowedTestSets",
+          "non_null": false,
+          "type": "String"
         }
       ]
     },
@@ -520,6 +527,31 @@
           "name": "jobId",
           "non_null": true,
           "type": "ID"
+        }
+      ]
+    },
+    "getAnnotationQueue": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "testSetId",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "limit",
+          "non_null": false,
+          "type": "Int"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "includeCompleted",
+          "non_null": false,
+          "type": "Boolean"
         }
       ]
     },
@@ -1888,6 +1920,13 @@
           "elem_non_null": false,
           "is_list": true,
           "name": "allowedConfigVersions",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": true,
+          "name": "allowedTestSets",
           "non_null": false,
           "type": "String"
         }

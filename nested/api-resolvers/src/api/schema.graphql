@@ -213,6 +213,9 @@ type User @aws_cognito_user_pools {
   status: String
   createdAt: AWSDateTime
   allowedConfigVersions: [String]
+  # Test sets a scoped Annotator may read and annotate. A different axis from
+  # allowedConfigVersions, not a replacement; a user may carry both.
+  allowedTestSets: [String]
 }
 
 type UserList @aws_cognito_user_pools {
@@ -824,6 +827,38 @@ type ReviewEffortEstimate @aws_cognito_user_pools @aws_iam {
   reliabilityTable: [ReliabilityBin!]!
 }
 
+# One document in an annotator's worst-first queue.
+type AnnotationQueueItem @aws_cognito_user_pools @aws_iam {
+  objectKey: String!
+  inputKey: String!
+  minConfidence: Float
+  confidenceThreshold: Float
+  labelSource: String
+  sectionCount: Int!
+  # Claim state, so several annotators can work one set without colliding.
+  # claimReview is what enforces exclusivity; this only reflects it.
+  claimedBy: String
+  claimedByMe: Boolean!
+  reviewStatus: String
+  reviewed: Boolean!
+  # True when this caller could claim it next (unreviewed, and unclaimed or
+  # already theirs).
+  available: Boolean!
+}
+
+type AnnotationQueue @aws_cognito_user_pools @aws_iam {
+  testSetId: String!
+  totalDocs: Int!
+  # Shared progress across every annotator working this set.
+  reviewedDocs: Int!
+  remainingDocs: Int!
+  claimedByOthers: Int!
+  documents: [AnnotationQueueItem!]!
+  # The next document this caller should open ("Save & next"); null when the
+  # queue is drained for them.
+  nextObjectKey: String
+}
+
 input GenerateDraftLabelsInput {
   testSetId: String!
   # Defaults to the deployment's active config when omitted.
@@ -1023,9 +1058,9 @@ type Mutation {
   # Admin-only operations
   deleteConfigVersion(versionName: String!): UpdateConfigurationResponse
     @aws_cognito_user_pools(cognito_groups: ["Admin"])
-  createUser(email: String!, persona: String!, allowedConfigVersions: [String]): User
+  createUser(email: String!, persona: String!, allowedConfigVersions: [String], allowedTestSets: [String]): User
     @aws_cognito_user_pools(cognito_groups: ["Admin"])
-  updateUser(userId: ID!, allowedConfigVersions: [String]): User
+  updateUser(userId: ID!, allowedConfigVersions: [String], allowedTestSets: [String]): User
     @aws_cognito_user_pools(cognito_groups: ["Admin"])
   deleteUser(userId: ID!): Boolean
     @aws_cognito_user_pools(cognito_groups: ["Admin"])
@@ -1152,13 +1187,13 @@ type Mutation {
   ): ProcessChangesResponse!
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Reviewer"])
   completeSectionReview(objectKey: String!, sectionId: String!, editedData: AWSJSON): Document
-    @aws_cognito_user_pools(cognito_groups: ["Admin", "Reviewer"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Reviewer", "Annotator"])
   skipAllSectionsReview(objectKey: String!): Document
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Reviewer"])
   claimReview(objectKey: String!): Document
-    @aws_cognito_user_pools(cognito_groups: ["Admin", "Reviewer"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Reviewer", "Annotator"])
   releaseReview(objectKey: String!): Document
-    @aws_cognito_user_pools(cognito_groups: ["Admin", "Reviewer"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Reviewer", "Annotator"])
 
   # All authenticated users (creates state but read-like operations)
   deleteAgentJob(jobId: ID!): Boolean @aws_cognito_user_pools
@@ -1402,14 +1437,21 @@ type Query @aws_cognito_user_pools @aws_iam {
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   getTestSets: [TestSet]
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  # Annotator included so the queue can render its documents; the resolver
+  # enforces per-test-set scope on top of the group check.
   getTestSetDocuments(testSetId: String!, limit: Int, nextToken: String, objectKey: String): TestSetDocumentsPage
-    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Annotator"])
   getTestSetVersions(testSetId: String!): [TestSetVersion]
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   getDraftLabelJob(testSetId: String!, jobId: String!): DraftLabelJob
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   estimateReviewEffort(testSetId: String!, targetAccuracy: Float, configVersion: String): ReviewEffortEstimate
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  # Annotator is included so a scoped annotator can read their own queue; the
+  # resolver additionally requires the test set to be in their allowedTestSets,
+  # so group membership alone grants nothing.
+  getAnnotationQueue(testSetId: String!, limit: Int, includeCompleted: Boolean): AnnotationQueue
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Annotator"])
   listBucketFiles(bucketType: String!, filePattern: String!, modifiedAfter: String): [String]
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   validateTestFileName(fileName: String!): TestSetValidationResponse

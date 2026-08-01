@@ -2340,6 +2340,10 @@ Resources:
           # generateDraftLabels delegates run creation (config capture + version
           # pinning) to the test runner rather than duplicating it.
           TEST_RUNNER_FUNCTION_ARN: !GetAtt TestRunnerFunction.Arn
+          # getAnnotationQueue enforces per-user allowedTestSets scope, which is
+          # stored on the user record. Without this the scope lookup returns
+          # "unrestricted" and a scoped Annotator would be denied everything.
+          USERS_TABLE_NAME: !Ref UsersTableName
           BASELINE_BUCKET: !If
             - ShouldCreateEvaluationBaselineBucket
             - !Ref EvaluationBaselineBucketName
@@ -2381,6 +2385,20 @@ Resources:
             - Effect: Allow
               Action: lambda:InvokeFunction
               Resource: !GetAtt TestRunnerFunction.Arn
+        # Read-only access on UsersTable + EmailIndex so the resolver can look up
+        # the caller's allowedTestSets and enforce per-test-set annotation scope.
+        # Unlike the config-version scope elsewhere, a failed lookup here denies a
+        # scoped Annotator rather than granting unrestricted access (an Annotator
+        # with no resolvable scope is refused), so a missing grant breaks the
+        # annotation queue loudly instead of silently widening access.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+              Resource:
+                - !Ref UsersTableArn
+                - !Sub "${UsersTableArn}/index/*"
   UploadResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:

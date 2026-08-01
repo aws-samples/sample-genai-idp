@@ -1480,3 +1480,184 @@ class TestTestSetResolver:
         result = test_set_index.estimate_review_effort({"testSetId": "ts1"})
         assert len(result["reliabilityTable"]) == 10
         assert "burndown" in result
+
+    # -- Annotation queue --------------------------------------------------
+
+    def test_annotation_queue_is_worst_first(self, labeling_env):
+        """Lowest confidence first — each review removes the most error."""
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=3)
+        for name, conf in (("a.pdf", 0.95), ("b.pdf", 0.20), ("c.pdf", 0.60)):
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+            s3.put_object(
+                Bucket="test-set-bucket",
+                Key=f"ts1/baseline/{name}/sections/1/result.json",
+                Body=json.dumps(
+                    {
+                        "labelSource": "draft-machine",
+                        "explainability_info": [{"f": {"confidence": conf}}],
+                    }
+                ).encode(),
+            )
+
+        result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, None)
+
+        order = [d["objectKey"] for d in result["documents"]]
+        assert order == ["b.pdf", "c.pdf", "a.pdf"], order
+        assert result["nextObjectKey"] == "b.pdf"
+        assert result["totalDocs"] == 3
+        assert result["remainingDocs"] == 3
+
+    def test_annotation_queue_puts_unlabeled_documents_first(self, labeling_env):
+        """An unlabeled document is the least trustworthy, not the most."""
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=2)
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/labeled.pdf", Body=b"x")
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/labeled.pdf/sections/1/result.json",
+            Body=json.dumps(
+                {
+                    "labelSource": "draft-machine",
+                    "explainability_info": [{"f": {"confidence": 0.1}}],
+                }
+            ).encode(),
+        )
+        # No baseline at all for this one.
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/bare.pdf", Body=b"x")
+
+        result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, None)
+        assert result["documents"][0]["objectKey"] == "bare.pdf"
+
+    def test_annotation_queue_excludes_reviewed_documents(self, labeling_env):
+        """Reviewed work drops out of the queue but still counts as progress."""
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=2)
+        for name, source in (
+            ("done.pdf", "reviewed-human"),
+            ("todo.pdf", "draft-machine"),
+        ):
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+            s3.put_object(
+                Bucket="test-set-bucket",
+                Key=f"ts1/baseline/{name}/sections/1/result.json",
+                Body=json.dumps(
+                    {
+                        "labelSource": source,
+                        "explainability_info": [{"f": {"confidence": 0.4}}],
+                    }
+                ).encode(),
+            )
+
+        result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, None)
+        assert [d["objectKey"] for d in result["documents"]] == ["todo.pdf"]
+        assert result["reviewedDocs"] == 1
+        assert result["remainingDocs"] == 1
+
+        # ...and can be included explicitly for a progress view.
+        withall = test_set_index.get_annotation_queue(
+            {"testSetId": "ts1", "includeCompleted": True}, None
+        )
+        assert len(withall["documents"]) == 2
+
+    def test_annotation_queue_reflects_another_annotators_claim(self, labeling_env):
+        """A claimed doc must drop out of everyone else's 'next in queue'."""
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=2, labelJobId="run1")
+        for name, conf in (("claimed.pdf", 0.1), ("free.pdf", 0.5)):
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+            s3.put_object(
+                Bucket="test-set-bucket",
+                Key=f"ts1/baseline/{name}/sections/1/result.json",
+                Body=json.dumps(
+                    {
+                        "labelSource": "draft-machine",
+                        "explainability_info": [{"f": {"confidence": conf}}],
+                    }
+                ).encode(),
+            )
+        # Someone else holds the lowest-confidence document.
+        table.put_item(
+            Item={
+                "PK": "doc#run1/claimed.pdf",
+                "SK": "none",
+                "HITLReviewOwner": "other@example.com",
+                "HITLStatus": "InProgress",
+            }
+        )
+
+        event = {
+            "identity": {
+                "claims": {"cognito:groups": ["Admin"], "email": "me@example.com"}
+            }
+        }
+        result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, event)
+
+        by_key = {d["objectKey"]: d for d in result["documents"]}
+        assert by_key["claimed.pdf"]["claimedBy"] == "other@example.com"
+        assert by_key["claimed.pdf"]["available"] is False
+        assert by_key["claimed.pdf"]["claimedByMe"] is False
+        # Still worst-first in the listing, but "next" skips to what I can take.
+        assert result["nextObjectKey"] == "free.pdf"
+        assert result["claimedByOthers"] == 1
+
+    def test_annotation_queue_marks_my_own_claim_as_available(self, labeling_env):
+        """Resuming my own in-progress document must not be blocked."""
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1, labelJobId="run1")
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/mine.pdf", Body=b"x")
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/mine.pdf/sections/1/result.json",
+            Body=json.dumps(
+                {
+                    "labelSource": "draft-machine",
+                    "explainability_info": [{"f": {"confidence": 0.3}}],
+                }
+            ).encode(),
+        )
+        table.put_item(
+            Item={
+                "PK": "doc#run1/mine.pdf",
+                "SK": "none",
+                "HITLReviewOwner": "me@example.com",
+                "HITLStatus": "InProgress",
+            }
+        )
+
+        event = {
+            "identity": {
+                "claims": {"cognito:groups": ["Admin"], "email": "me@example.com"}
+            }
+        }
+        result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, event)
+        item = result["documents"][0]
+        assert item["claimedByMe"] is True
+        assert item["available"] is True
+        assert result["nextObjectKey"] == "mine.pdf"
+
+    def test_annotation_queue_denies_an_out_of_scope_annotator(self, labeling_env):
+        """Scope is checked before the set is read, so nothing leaks."""
+        from idp_common import test_set_scope
+
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        test_set_scope.clear_scope_cache()
+
+        event = {
+            "identity": {
+                "claims": {
+                    "cognito:groups": ["Annotator"],
+                    "email": "ann@example.com",
+                }
+            }
+        }
+        # No users table configured -> annotator has no resolvable scope -> denied.
+        with pytest.raises(Exception, match="Unauthorized"):
+            test_set_index.get_annotation_queue({"testSetId": "ts1"}, event)
+        test_set_scope.clear_scope_cache()
+
+    def test_annotation_queue_validates_the_test_set_id(self, labeling_env):
+        table, _ = labeling_env
+        with pytest.raises(Exception, match="Invalid test set id"):
+            test_set_index.get_annotation_queue({"testSetId": "../etc/passwd"}, None)
