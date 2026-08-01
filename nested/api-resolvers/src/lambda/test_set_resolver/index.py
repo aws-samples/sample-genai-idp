@@ -619,6 +619,10 @@ def publish_test_set_version(args, event=None):
 
 LABEL_SOURCE_DRAFT = "draft-machine"
 LABEL_SOURCE_HUMAN = "reviewed-human"
+# Ground truth supplied with the test set rather than produced or reviewed here.
+# Authoritative (draft labeling will not overwrite it) but not review *work*, so
+# it must not count toward annotation progress.
+LABEL_SOURCE_UPLOADED = "uploaded"
 
 
 def _label_job_sk(test_run_id):
@@ -887,14 +891,21 @@ def get_annotation_queue(args, event=None):
     )
 
     reviewed_count = sum(1 for e in entries if e["reviewed"])
-    total = len(entries)
+    inspected = len(entries)
+    # The set's real size. Counting only the inspected page would report a
+    # 2008-document set as 500 (the queue cap) and show "0 remaining" once the
+    # first page was reviewed, while most of the set was still untouched.
+    total = int(meta.get("fileCount", 0) or 0) or inspected
     queue = [e for e in entries if include_completed or not e["reviewed"]]
 
     result = {
         "testSetId": test_set_id,
         "totalDocs": total,
+        "inspectedDocs": inspected,
         "reviewedDocs": reviewed_count,
-        "remainingDocs": total - reviewed_count,
+        # Documents beyond the inspected page have not been reviewed, so they
+        # count as remaining.
+        "remainingDocs": max(0, total - reviewed_count),
         "claimedByOthers": sum(
             1
             for e in entries
@@ -907,7 +918,8 @@ def get_annotation_queue(args, event=None):
     }
     logger.info(
         f"getAnnotationQueue({test_set_id}) for {caller or 'service'}: "
-        f"{result['remainingDocs']}/{total} remaining, "
+        f"{result['remainingDocs']}/{total} remaining "
+        f"({inspected} inspected), "
         f"{result['claimedByOthers']} claimed by others"
     )
     return result
@@ -1892,8 +1904,16 @@ def _attach_label_metadata(test_set_bucket, documents):
             if not result:
                 continue
             bucket_for_doc = per_doc[id(doc)]
+            # A baseline with no labelSource was supplied as ground truth when the
+            # set was created (zip upload, pattern-based, or synthetic) — it is
+            # authoritative, but nobody reviewed it *here*. Reporting it as
+            # LABEL_SOURCE_UPLOADED rather than reviewed-human keeps that
+            # distinction: overwrite safety still protects it (see
+            # _existing_label_is_human, which only replaces explicit drafts),
+            # while the annotation queue does not count it as completed review
+            # work and claim 100% progress on a set nobody has annotated.
             bucket_for_doc["sources"].append(
-                result.get("labelSource") or LABEL_SOURCE_HUMAN
+                result.get("labelSource") or LABEL_SOURCE_UPLOADED
             )
             confidence = result.get("minConfidence")
             if confidence is None:

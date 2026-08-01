@@ -70,6 +70,7 @@ export type AgentJobConnection = {
 export type AnnotationQueue = {
   claimedByOthers: Scalars['Int']['output'];
   documents: Array<AnnotationQueueItem>;
+  inspectedDocs?: Maybe<Scalars['Int']['output']>;
   nextObjectKey?: Maybe<Scalars['String']['output']>;
   remainingDocs: Scalars['Int']['output'];
   reviewedDocs: Scalars['Int']['output'];

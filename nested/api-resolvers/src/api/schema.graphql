@@ -853,6 +853,10 @@ type AnnotationQueueItem @aws_cognito_user_pools @aws_iam {
 type AnnotationQueue @aws_cognito_user_pools @aws_iam {
   testSetId: String!
   totalDocs: Int!
+  # How many documents were actually examined for this response. Below totalDocs
+  # on large sets, where the queue reads a bounded page — so the UI can say the
+  # ordering covers the inspected documents rather than the whole set.
+  inspectedDocs: Int
   # Shared progress across every annotator working this set.
   reviewedDocs: Int!
   remainingDocs: Int!

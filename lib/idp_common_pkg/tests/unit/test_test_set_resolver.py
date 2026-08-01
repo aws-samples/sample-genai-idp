@@ -1707,3 +1707,71 @@ class TestTestSetResolver:
         result = test_set_index.estimate_review_effort({"testSetId": "ts1"})
         assert result["totalDocs"] == 2
         assert result["sampledDocs"] == 2
+
+    def test_uploaded_ground_truth_is_not_counted_as_review_work(self, labeling_env):
+        """Regression: a set that arrived with labels is not 100% annotated.
+
+        Found live: a 500-document uploaded set reported reviewedDocs=500,
+        remainingDocs=0 and an empty queue, because baselines with no labelSource
+        defaulted to reviewed-human. Uploaded ground truth is authoritative — draft
+        labeling still won't overwrite it — but nobody reviewed it *here*, so it
+        must not claim completed annotation progress.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=2)
+        for name in ("a.pdf", "b.pdf"):
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+            # No labelSource key at all — how an uploaded baseline arrives.
+            s3.put_object(
+                Bucket="test-set-bucket",
+                Key=f"ts1/baseline/{name}/sections/1/result.json",
+                Body=json.dumps({"inference_result": {"f": "v"}}).encode(),
+            )
+
+        result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, None)
+
+        assert result["reviewedDocs"] == 0
+        assert result["remainingDocs"] == 2
+        assert len(result["documents"]) == 2
+        assert result["nextObjectKey"] is not None
+        # Reported as uploaded, distinct from a label a human reviewed here.
+        assert result["documents"][0]["labelSource"] == "uploaded"
+        assert result["documents"][0]["reviewed"] is False
+
+    def test_uploaded_ground_truth_is_still_protected_from_overwrite(
+        self, labeling_env
+    ):
+        """The relabel guard must not weaken just because progress changed.
+
+        Overwrite safety keys on the label being an explicit draft, not on it
+        being reviewed-human, so an untagged uploaded baseline stays protected.
+        """
+        _, s3 = labeling_env
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/a.pdf/sections/1/result.json",
+            Body=json.dumps({"inference_result": {"f": "uploaded gt"}}).encode(),
+        )
+        assert (
+            test_set_index._existing_label_is_human(
+                "test-set-bucket", "ts1/baseline/a.pdf/sections/1/result.json"
+            )
+            is True
+        )
+
+    def test_queue_reports_the_real_set_size_not_the_inspected_page(self, labeling_env):
+        """Regression: the queue cap must not be reported as the set size.
+
+        Same conflation as the estimator had: a 2008-document set showed
+        totalDocs=500, so reviewing the first page would have read as
+        "0 remaining" with most of the set untouched.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=2008)
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/a.pdf", Body=b"x")
+
+        result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, None)
+
+        assert result["totalDocs"] == 2008
+        assert result["inspectedDocs"] == 1
+        assert result["remainingDocs"] == 2008
