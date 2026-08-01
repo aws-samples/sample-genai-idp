@@ -835,10 +835,18 @@ type ReviewEffortEstimate @aws_cognito_user_pools @aws_iam {
 type AnnotationQueueItem @aws_cognito_user_pools @aws_iam {
   objectKey: String!
   inputKey: String!
+  # The key claimReview / completeSectionReview expect — the pipeline copy of this
+  # document ("{runId}/{filename}"). Null when the set has no labeling run, in
+  # which case there is nothing to claim yet. Returned so clients never rebuild
+  # this shape themselves.
+  reviewObjectKey: String
   minConfidence: Float
   confidenceThreshold: Float
   labelSource: String
   sectionCount: Int!
+  # Ground-truth sections, so the queue can hand them straight to the editor
+  # without a second round-trip per document.
+  sections: [TestSetDocumentSection!]
   # Claim state, so several annotators can work one set without colliding.
   # claimReview is what enforces exclusivity; this only reflects it.
   claimedBy: String

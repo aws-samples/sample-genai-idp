@@ -87,9 +87,11 @@ export type AnnotationQueueItem = {
   labelSource?: Maybe<Scalars['String']['output']>;
   minConfidence?: Maybe<Scalars['Float']['output']>;
   objectKey: Scalars['String']['output'];
+  reviewObjectKey?: Maybe<Scalars['String']['output']>;
   reviewStatus?: Maybe<Scalars['String']['output']>;
   reviewed: Scalars['Boolean']['output'];
   sectionCount: Scalars['Int']['output'];
+  sections?: Maybe<Array<TestSetDocumentSection>>;
 };
 
 /**
@@ -2152,10 +2154,11 @@ export type CreateUserMutationVariables = Exact<{
   email: Scalars['String']['input'];
   persona: Scalars['String']['input'];
   allowedConfigVersions?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>> | InputMaybe<Scalars['String']['input']>>;
+  allowedTestSets?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>> | InputMaybe<Scalars['String']['input']>>;
 }>;
 
 
-export type CreateUserMutation = { createUser?: { userId: string, email: string, persona: string, status?: string | null, createdAt?: string | null, allowedConfigVersions?: Array<string | null> | null } | null };
+export type CreateUserMutation = { createUser?: { userId: string, email: string, persona: string, status?: string | null, createdAt?: string | null, allowedConfigVersions?: Array<string | null> | null, allowedTestSets?: Array<string | null> | null } | null };
 
 export type DeleteAgentJobMutationVariables = Exact<{
   jobId: Scalars['ID']['input'];
@@ -2417,10 +2420,11 @@ export type UpdateTestSetMutation = { updateTestSet?: { id: string, name: string
 export type UpdateUserMutationVariables = Exact<{
   userId: Scalars['ID']['input'];
   allowedConfigVersions?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>> | InputMaybe<Scalars['String']['input']>>;
+  allowedTestSets?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>> | InputMaybe<Scalars['String']['input']>>;
 }>;
 
 
-export type UpdateUserMutation = { updateUser?: { userId: string, email: string, persona: string, status?: string | null, createdAt?: string | null, allowedConfigVersions?: Array<string | null> | null } | null };
+export type UpdateUserMutation = { updateUser?: { userId: string, email: string, persona: string, status?: string | null, createdAt?: string | null, allowedConfigVersions?: Array<string | null> | null, allowedTestSets?: Array<string | null> | null } | null };
 
 export type UploadDiscoveryDocumentMutationVariables = Exact<{
   fileName: Scalars['String']['input'];
@@ -2598,7 +2602,7 @@ export type GetModelConfigLimitsQuery = { getModelConfigLimits?: { success: bool
 export type GetMyProfileQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetMyProfileQuery = { getMyProfile?: { userId: string, email: string, persona: string, status?: string | null, createdAt?: string | null, allowedConfigVersions?: Array<string | null> | null } | null };
+export type GetMyProfileQuery = { getMyProfile?: { userId: string, email: string, persona: string, status?: string | null, createdAt?: string | null, allowedConfigVersions?: Array<string | null> | null, allowedTestSets?: Array<string | null> | null } | null };
 
 export type GetPricingQueryVariables = Exact<{ [key: string]: never; }>;
 
@@ -2766,7 +2770,7 @@ export type ListSampleDocumentsQuery = { listSampleDocuments?: { success: boolea
 export type ListUsersQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type ListUsersQuery = { listUsers?: { users?: Array<{ userId: string, email: string, persona: string, status?: string | null, createdAt?: string | null, allowedConfigVersions?: Array<string | null> | null } | null> | null } | null };
+export type ListUsersQuery = { listUsers?: { users?: Array<{ userId: string, email: string, persona: string, status?: string | null, createdAt?: string | null, allowedConfigVersions?: Array<string | null> | null, allowedTestSets?: Array<string | null> | null } | null> | null } | null };
 
 export type QueryKnowledgeBaseQueryVariables = Exact<{
   input: Scalars['String']['input'];

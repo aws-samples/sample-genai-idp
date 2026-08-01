@@ -851,6 +851,12 @@ def get_annotation_queue(args, event=None):
     claims = _claim_state_for_documents(test_set_id, meta, documents)
 
     caller = caller_email(event)
+    # Review operations (claimReview / completeSectionReview) key on the *pipeline*
+    # copy of a document, "{runId}/{filename}", not the test-set key. Return it so
+    # the UI never has to reconstruct that shape itself — the key layout is a
+    # backend detail, and a client rebuilding it would break silently the moment
+    # it changed.
+    run_id = meta.get("labelJobId")
     entries = []
     for doc in documents:
         state = claims.get(doc["objectKey"], {})
@@ -869,10 +875,14 @@ def get_annotation_queue(args, event=None):
             {
                 "objectKey": doc["objectKey"],
                 "inputKey": doc["inputKey"],
+                # None when the set has no labeling run: there is no pipeline copy
+                # to review yet, so the UI must not offer to claim it.
+                "reviewObjectKey": f"{run_id}/{doc['objectKey']}" if run_id else None,
                 "minConfidence": doc.get("minConfidence"),
                 "confidenceThreshold": doc.get("confidenceThreshold"),
                 "labelSource": doc.get("labelSource"),
                 "sectionCount": len(doc.get("sections") or []),
+                "sections": doc.get("sections") or [],
                 "claimedBy": owner or None,
                 "claimedByMe": bool(owner) and owner == caller,
                 "reviewStatus": status or None,
@@ -957,23 +967,40 @@ def _claim_state_for_documents(test_set_id, meta, documents):
     if not run_id:
         return {}
 
-    tracking_table = boto3.resource("dynamodb").Table(os.environ["TRACKING_TABLE"])
+    table_name = os.environ["TRACKING_TABLE"]
+    resource = boto3.resource("dynamodb")
     state = {}
-    for doc in documents:
-        object_key = doc["objectKey"]
+
+    # BatchGetItem rather than one GetItem per document: a 500-document queue was
+    # 500 sequential round-trips, which dominated the response time. Batches cap
+    # at 100 keys.
+    keys_by_pk = {
+        f"doc#{run_id}/{doc['objectKey']}": doc["objectKey"] for doc in documents
+    }
+    all_keys = list(keys_by_pk)
+    for start in range(0, len(all_keys), 100):
+        batch = [{"PK": pk, "SK": "none"} for pk in all_keys[start : start + 100]]
         try:
-            item = tracking_table.get_item(
-                Key={"PK": f"doc#{run_id}/{object_key}", "SK": "none"}
-            ).get("Item")
+            pending = {table_name: {"Keys": batch}}
+            # UnprocessedKeys is normal under throttling; retry what came back
+            # short rather than silently reporting those documents as unclaimed.
+            for _ in range(4):
+                response = resource.batch_get_item(RequestItems=pending)
+                for item in response.get("Responses", {}).get(table_name, []):
+                    object_key = keys_by_pk.get(item.get("PK", ""))
+                    if not object_key:
+                        continue
+                    state[object_key] = {
+                        "owner": item.get("HITLReviewOwner") or "",
+                        "status": item.get("HITLStatus") or "",
+                    }
+                pending = response.get("UnprocessedKeys") or {}
+                if not pending:
+                    break
         except Exception as e:  # noqa: BLE001 — a missing claim is not an error
-            logger.warning(f"Could not read claim state for {object_key}: {e}")
-            continue
-        if not item:
-            continue
-        state[object_key] = {
-            "owner": item.get("HITLReviewOwner") or "",
-            "status": item.get("HITLStatus") or "",
-        }
+            logger.warning(
+                f"Could not read claim state for {len(batch)} document(s): {e}"
+            )
     return state
 
 

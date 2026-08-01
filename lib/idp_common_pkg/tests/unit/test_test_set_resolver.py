@@ -1775,3 +1775,57 @@ class TestTestSetResolver:
         assert result["totalDocs"] == 2008
         assert result["inspectedDocs"] == 1
         assert result["remainingDocs"] == 2008
+
+    def test_queue_returns_the_review_object_key(self, labeling_env):
+        """The UI must not rebuild the pipeline key shape itself.
+
+        claimReview/completeSectionReview key on "{runId}/{filename}", not the
+        test-set key. Returning it keeps that layout a backend detail.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1, labelJobId="ts1-run-1")
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/a.pdf", Body=b"x")
+
+        result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, None)
+        assert result["documents"][0]["reviewObjectKey"] == "ts1-run-1/a.pdf"
+
+    def test_queue_review_key_is_null_without_a_labeling_run(self, labeling_env):
+        """No pipeline copy exists yet, so there is nothing to claim."""
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)  # no labelJobId
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/a.pdf", Body=b"x")
+
+        result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, None)
+        assert result["documents"][0]["reviewObjectKey"] is None
+
+    def test_queue_batches_claim_reads(self, labeling_env):
+        """Claim state must not cost one round-trip per document.
+
+        Batched reads have to preserve per-document attribution, so this checks
+        the claim lands on the right document across a multi-batch (>100) read.
+        """
+        table, s3 = labeling_env
+        names = [f"doc_{i:04d}.pdf" for i in range(120)]
+        _seed_test_set(table, "ts1", fileCount=len(names), labelJobId="run1")
+        for name in names:
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+        # Claim one document in the second batch.
+        claimed = names[110]
+        table.put_item(
+            Item={
+                "PK": f"doc#run1/{claimed}",
+                "SK": "none",
+                "HITLReviewOwner": "other@example.com",
+                "HITLStatus": "InProgress",
+            }
+        )
+
+        result = test_set_index.get_annotation_queue(
+            {"testSetId": "ts1", "limit": 200}, None
+        )
+        by_key = {d["objectKey"]: d for d in result["documents"]}
+        assert by_key[claimed]["claimedBy"] == "other@example.com"
+        assert by_key[claimed]["available"] is False
+        # Every other document is untouched.
+        assert result["claimedByOthers"] == 1
+        assert by_key[names[0]]["claimedBy"] is None

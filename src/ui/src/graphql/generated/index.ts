@@ -205,14 +205,15 @@ export const createFinetuningJob = /* GraphQL */ `
 ` as GeneratedMutation<CreateFinetuningJobMutationVariables, CreateFinetuningJobMutation>;
 
 export const createUser = /* GraphQL */ `
-  mutation CreateUser($email: String!, $persona: String!, $allowedConfigVersions: [String]) {
-    createUser(email: $email, persona: $persona, allowedConfigVersions: $allowedConfigVersions) {
+  mutation CreateUser($email: String!, $persona: String!, $allowedConfigVersions: [String], $allowedTestSets: [String]) {
+    createUser(email: $email, persona: $persona, allowedConfigVersions: $allowedConfigVersions, allowedTestSets: $allowedTestSets) {
       userId
       email
       persona
       status
       createdAt
       allowedConfigVersions
+      allowedTestSets
     }
   }
 ` as GeneratedMutation<CreateUserMutationVariables, CreateUserMutation>;
@@ -629,6 +630,7 @@ export const getMyProfile = /* GraphQL */ `
       status
       createdAt
       allowedConfigVersions
+      allowedTestSets
     }
   }
 ` as GeneratedQuery<GetMyProfileQueryVariables, GetMyProfileQuery>;
@@ -1085,6 +1087,7 @@ export const listUsers = /* GraphQL */ `
         status
         createdAt
         allowedConfigVersions
+        allowedTestSets
       }
     }
   }
@@ -1601,14 +1604,15 @@ export const updateTestSet = /* GraphQL */ `
 ` as GeneratedMutation<UpdateTestSetMutationVariables, UpdateTestSetMutation>;
 
 export const updateUser = /* GraphQL */ `
-  mutation UpdateUser($userId: ID!, $allowedConfigVersions: [String]) {
-    updateUser(userId: $userId, allowedConfigVersions: $allowedConfigVersions) {
+  mutation UpdateUser($userId: ID!, $allowedConfigVersions: [String], $allowedTestSets: [String]) {
+    updateUser(userId: $userId, allowedConfigVersions: $allowedConfigVersions, allowedTestSets: $allowedTestSets) {
       userId
       email
       persona
       status
       createdAt
       allowedConfigVersions
+      allowedTestSets
     }
   }
 ` as GeneratedMutation<UpdateUserMutationVariables, UpdateUserMutation>;

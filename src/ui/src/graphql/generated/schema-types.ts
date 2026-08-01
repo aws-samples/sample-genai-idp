@@ -87,9 +87,11 @@ export type AnnotationQueueItem = {
   labelSource?: Maybe<Scalars['String']['output']>;
   minConfidence?: Maybe<Scalars['Float']['output']>;
   objectKey: Scalars['String']['output'];
+  reviewObjectKey?: Maybe<Scalars['String']['output']>;
   reviewStatus?: Maybe<Scalars['String']['output']>;
   reviewed: Scalars['Boolean']['output'];
   sectionCount: Scalars['Int']['output'];
+  sections?: Maybe<Array<TestSetDocumentSection>>;
 };
 
 /**
