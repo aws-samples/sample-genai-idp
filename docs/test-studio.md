@@ -413,20 +413,43 @@ components/
 ## Test Sets
 
 ### Creating Test Sets
-1. **Pattern-based**: Define file patterns (e.g., `*.pdf`) with bucket type selection
-   - **Input Bucket**: Scan main processing bucket for matching files
-   - **Test Set Bucket**: Scan dedicated test set bucket for matching files
-   - **Description**: Optional description field (max 500 characters) to document the test set purpose
-   - **Document Classification Type**: Optional metadata to categorize test set classification characteristics:
-     - **Unspecified**: No classification type specified (default)
-     - **Single Class**: All documents in test set belong to same document class
-     - **Multi Class**: Documents span multiple document classes
-     - **Packet Splitting**: Test set designed for document splitting evaluation (packets containing multiple sub-documents)
-   - **Modified after filter**: Optional time filter to include only recently modified files — choose a preset (Last 1 hour, 24 hours, 7 days, etc.) or pick a custom date/time (useful for incremental workflows)
-2. **Zip Upload**: Upload zip containing `input/` and `baseline/` folders
-   - **Description**: Optional description field (max 500 characters) to document the test set purpose
-   - **Document Classification Type**: Optional metadata (same values as pattern-based creation)
-3. **Direct Upload**: Files uploaded directly to TestSetBucket are auto-detected
+
+Click **Create test set** on the Test Sets tab. A three-step wizard asks what you
+are starting from, because each source leaves the set in a materially different
+state:
+
+| Source | What you provide | What you have afterwards |
+|---|---|---|
+| **Upload documents with ground truth** | A zip with `input/` and matching `baseline/` folders | Ready to publish |
+| **Upload documents only** | A zip with just `input/` | Needs labeling — run [draft labeling](#draft-labeling-unlabeled-documents--ground-truth) next |
+| **From files already in a bucket** | A file pattern (e.g. `*.pdf`) over the input or test set bucket | Labeled where baselines exist |
+| **Generate synthetic documents** | A configuration or a description | Synthetic, labeled |
+
+The last option requires the synthetic data generator extension; it is hidden when
+the extension isn't installed.
+
+Every source shares three optional fields:
+
+- **Name** — letters, numbers, spaces, hyphens and underscores (max 50). Becomes
+  the test set id.
+- **Description** — max 500 characters.
+- **Document classification type** — metadata describing the mix of documents:
+  *Unspecified* (default), *Single Class*, *Multi Class*, or *Packet Splitting*
+  (packets containing multiple sub-documents).
+
+The **From files already in a bucket** step adds a **Modified after** filter —
+a preset (last hour, 24 hours, 7 days, …) or a custom date and time, which makes
+it easy to pick up only recently reviewed documents — and a **Check matching
+files** button that reports the match count before you commit. When reading from
+the input bucket, documents with no ground truth in the evaluation baseline bucket
+are skipped rather than failing, so a broad pattern is safe.
+
+**Direct upload** still works as an alternative to the wizard: files placed
+directly into the TestSetBucket under `<set-name>/input/…` are auto-detected.
+
+Once a set exists, select it and use **Actions** to browse its documents, annotate
+its ground truth, add more documents, publish a version, edit its details, or
+delete it.
 
 ### Browsing Test Set Documents and Ground Truth
 
@@ -745,7 +768,35 @@ documents.
 
 Create one from **User Management**: set the persona to `Annotator` and assign the
 test set(s), then share the queue link
-(`#/test-studio/sets/<test-set-id>/annotate`).
+(`#/test-studio/sets/<test-set-id>/annotate`). You can copy that link from the
+**Copy queue link** button on the queue itself, or open the queue for any set via
+**Actions → Annotate ground truth**.
+
+An annotator must be assigned at least one test set — an account with none is
+denied every set by the scope check, so the create form refuses to submit without
+one. Assignments can be changed later from **Edit scope** without recreating the
+account.
+
+### What an annotator sees
+
+Signing in, an annotator lands directly in their queue; if they have several
+assigned sets they get a list to choose from. Their navigation contains that one
+link and nothing else — no document list, no configuration, no other test sets.
+
+The queue page shows:
+
+- **Team progress** — reviewed / total for the whole set, shared across everyone
+  working it, plus how many documents are currently claimed by other people.
+- **Review queue** — the documents, worst-confidence first. Each card shows the
+  document's lowest field confidence and its label source. A document claimed by
+  someone else is greyed out and names who has it.
+- **The ground-truth editor** — the same editor used everywhere else in Test
+  Studio, with the page images, per-field confidence, and the JSON tab.
+- **Save & next in queue** — saves the correction, marks the document reviewed,
+  and moves to the next available document.
+
+On large sets the queue is read a page at a time, and the page says so rather than
+implying the whole set has been ranked.
 
 > **The link is not a credential.** It only navigates; access is gated by the
 > annotator's scoped Cognito session and re-checked server-side on every

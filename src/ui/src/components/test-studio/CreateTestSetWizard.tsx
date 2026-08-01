@@ -1,0 +1,491 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: MIT-0
+
+/**
+ * CreateTestSetWizard — one guided path for creating a test set.
+ *
+ * Replaces four separate modals reached from two similarly-named dropdowns
+ * ("Add Test Set" → Existing Files / New Upload, and "Add Documents" → From
+ * Existing Files / From Upload). Those options were named for their *mechanism*
+ * rather than their *outcome*, so choosing between them required knowing the
+ * implementation. The wizard names what you end up with instead, and the source
+ * choice is a single explicit step.
+ *
+ * Uploads use Cloudscape FileUpload (drag-and-drop, size/type display, built-in
+ * error slots) rather than the raw <input type="file"> the old modals used.
+ */
+
+import React, { useState } from 'react';
+import {
+  Alert,
+  Box,
+  Button,
+  ColumnLayout,
+  ExpandableSection,
+  FileUpload,
+  FormField,
+  Input,
+  KeyValuePairs,
+  Modal,
+  Select,
+  SpaceBetween,
+  StatusIndicator,
+  Tiles,
+  Wizard,
+} from '@cloudscape-design/components';
+import type { SelectProps } from '@cloudscape-design/components';
+import { ConsoleLogger } from 'aws-amplify/utils';
+import { generateClient } from '../../api/client-shim';
+import { addTestSet, addTestSetFromUpload, listBucketFiles, validateTestFileName } from '../../graphql/generated';
+import { getErrorMessage } from '../../utils/errorUtils';
+import {
+  BUCKET_OPTIONS,
+  CREATE_SOURCES,
+  DOCUMENT_CLASS_TYPE_OPTIONS,
+  TIME_FILTER_OPTIONS,
+  validateDescription,
+  validateTestSetName,
+} from './testSetOptions';
+import type { CreateSource } from './testSetOptions';
+
+const client = generateClient();
+const logger = new ConsoleLogger('CreateTestSetWizard');
+
+type DocumentClassType = 'SINGLE_CLASS' | 'MULTI_CLASS' | 'PACKET_SPLITTING';
+
+interface CreateTestSetWizardProps {
+  visible: boolean;
+  onDismiss: () => void;
+  /** Called with a human-readable summary after a successful create. */
+  onCreated: (message: string) => void;
+  /** True when the synthetic-data generator extension is installed. */
+  generatorAvailable: boolean;
+  /** Opens the existing synthetic-generation modal (owned by TestSets). */
+  onChooseGenerate: () => void;
+}
+
+const REQUIRED_STRUCTURE = `my-test-set.zip
+├── input/
+│   ├── document1.pdf
+│   └── document2.pdf
+└── baseline/                    (omit for "documents only")
+    ├── document1.pdf/
+    │   └── sections/1/result.json
+    └── document2.pdf/
+        └── sections/1/result.json`;
+
+const CreateTestSetWizard = ({
+  visible,
+  onDismiss,
+  onCreated,
+  generatorAvailable,
+  onChooseGenerate,
+}: CreateTestSetWizardProps): React.JSX.Element => {
+  const [activeStep, setActiveStep] = useState(0);
+  const [source, setSource] = useState<CreateSource>('upload-labeled');
+
+  // Shared fields
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [documentClassType, setDocumentClassType] = useState<SelectProps.Option>(DOCUMENT_CLASS_TYPE_OPTIONS[0]);
+
+  // Upload fields
+  const [files, setFiles] = useState<File[]>([]);
+
+  // Pattern fields
+  const [filePattern, setFilePattern] = useState('');
+  const [bucket, setBucket] = useState<SelectProps.Option>(BUCKET_OPTIONS[0]);
+  const [timeFilter, setTimeFilter] = useState<SelectProps.Option>(TIME_FILTER_OPTIONS[0]);
+  const [customDate, setCustomDate] = useState('');
+  const [customTime, setCustomTime] = useState('00:00:00');
+  const [fileCount, setFileCount] = useState(0);
+  const [isChecking, setIsChecking] = useState(false);
+
+  const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const isUpload = source === 'upload-labeled' || source === 'upload-documents';
+
+  /** One place to clear everything — the old modals repeated this per handler. */
+  const reset = () => {
+    setActiveStep(0);
+    setSource('upload-labeled');
+    setName('');
+    setDescription('');
+    setDocumentClassType(DOCUMENT_CLASS_TYPE_OPTIONS[0]);
+    setFiles([]);
+    setFilePattern('');
+    setBucket(BUCKET_OPTIONS[0]);
+    setTimeFilter(TIME_FILTER_OPTIONS[0]);
+    setCustomDate('');
+    setCustomTime('00:00:00');
+    setFileCount(0);
+    setError('');
+  };
+
+  const close = () => {
+    reset();
+    onDismiss();
+  };
+
+  const getModifiedAfter = (): string | undefined => {
+    if (!timeFilter.value) return undefined;
+    if (timeFilter.value === 'custom') {
+      return customDate ? new Date(`${customDate}T${customTime}`).toISOString() : undefined;
+    }
+    const hours = parseInt(timeFilter.value, 10);
+    return new Date(Date.now() - hours * 3600 * 1000).toISOString();
+  };
+
+  const handleCheckFiles = async () => {
+    if (!filePattern.trim()) {
+      setError('Enter a file pattern first');
+      return;
+    }
+    setIsChecking(true);
+    setError('');
+    try {
+      const result = await client.graphql({
+        query: listBucketFiles,
+        variables: {
+          bucketType: bucket.value ?? '',
+          filePattern: filePattern.trim(),
+          modifiedAfter: getModifiedAfter(),
+        },
+      });
+      const matched = (result.data?.listBucketFiles ?? []).filter((f): f is string => f !== null);
+      setFileCount(matched.length);
+      if (matched.length === 0) setError('No files matched that pattern');
+    } catch (err) {
+      logger.error('Error checking files:', err);
+      setError(`Could not check files: ${getErrorMessage(err)}`);
+    } finally {
+      setIsChecking(false);
+    }
+  };
+
+  /** Server-side name check; returns false when the caller should stop. */
+  const nameIsFree = async (): Promise<boolean> => {
+    try {
+      const result = await client.graphql({
+        query: validateTestFileName,
+        variables: { fileName: name.trim() },
+      });
+      const validation = result.data.validateTestFileName;
+      if (validation?.exists) {
+        setError(
+          `A test set with the id "${validation.testSetId}" already exists. Choose a different name, or delete the existing set first.`,
+        );
+        return false;
+      }
+      return true;
+    } catch (err) {
+      logger.error('Error validating test set name:', err);
+      setError(`Could not validate the name: ${getErrorMessage(err)}`);
+      return false;
+    }
+  };
+
+  const submitUpload = async () => {
+    const zip = files[0];
+    if (!zip) {
+      setError('Choose a zip file');
+      return;
+    }
+    const input: {
+      fileName: string;
+      fileSize: number;
+      description: string;
+      documentClassType?: DocumentClassType;
+    } = { fileName: zip.name, fileSize: zip.size, description: description.trim() };
+    if (documentClassType.value) {
+      input.documentClassType = documentClassType.value as DocumentClassType;
+    }
+
+    const result = await client.graphql({ query: addTestSetFromUpload, variables: { input } });
+    const response = result.data.addTestSetFromUpload;
+    if (!response?.presignedUrl) throw new Error('The server did not return an upload URL');
+
+    const presigned = JSON.parse(response.presignedUrl);
+    const formData = new FormData();
+    Object.entries(presigned.fields as Record<string, string>).forEach(([key, value]) => formData.append(key, value));
+    formData.append('file', zip);
+    const uploadResponse = await fetch(presigned.url, { method: 'POST', body: formData });
+    if (!uploadResponse.ok) {
+      throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
+    }
+
+    onCreated(
+      source === 'upload-documents'
+        ? `Test set "${name.trim()}" created. Once the zip is processed, use "Generate draft labels" to label it.`
+        : `Test set "${name.trim()}" created. The zip is being processed.`,
+    );
+  };
+
+  const submitPattern = async () => {
+    const variables: {
+      name: string;
+      description: string;
+      filePattern: string;
+      bucketType: string;
+      fileCount: number;
+      modifiedAfter: string | undefined;
+      documentClassType?: DocumentClassType;
+    } = {
+      name: name.trim(),
+      description: description.trim(),
+      filePattern: filePattern.trim(),
+      bucketType: bucket.value ?? '',
+      fileCount,
+      modifiedAfter: getModifiedAfter(),
+    };
+    if (documentClassType.value) {
+      variables.documentClassType = documentClassType.value as DocumentClassType;
+    }
+    await client.graphql({ query: addTestSet, variables });
+    onCreated(`Test set "${name.trim()}" created from ${fileCount} matching file(s).`);
+  };
+
+  const handleSubmit = async () => {
+    setError('');
+    if (!name.trim()) {
+      setError('A name is required');
+      return;
+    }
+    if (!validateTestSetName(name.trim())) {
+      setError('Name can only contain letters, numbers, spaces, hyphens and underscores (max 50 characters)');
+      return;
+    }
+    if (description && !validateDescription(description.trim())) {
+      setError('Description cannot exceed 500 characters');
+      return;
+    }
+    if (!(await nameIsFree())) return;
+
+    setIsSubmitting(true);
+    try {
+      if (isUpload) await submitUpload();
+      else await submitPattern();
+      close();
+    } catch (err) {
+      logger.error('Error creating test set:', err);
+      setError(`Could not create the test set: ${getErrorMessage(err)}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const sourceMeta = CREATE_SOURCES.find((s) => s.value === source);
+
+  const sourceStep = (
+    <SpaceBetween size="l">
+      <FormField label="How do you want to create this test set?" stretch>
+        <Tiles
+          value={source}
+          onChange={({ detail }) => {
+            const next = detail.value as CreateSource;
+            // Synthetic generation is a different flow entirely (an async job with
+            // its own cost estimate), so hand off to the existing modal rather
+            // than pretending it fits these steps.
+            if (next === 'generate') {
+              close();
+              onChooseGenerate();
+              return;
+            }
+            setSource(next);
+            setError('');
+          }}
+          items={CREATE_SOURCES.filter((s) => s.value !== 'generate' || generatorAvailable).map((s) => ({
+            value: s.value,
+            label: s.label,
+            description: `${s.description} → ${s.outcome}`,
+          }))}
+        />
+      </FormField>
+      {!generatorAvailable && (
+        <Box fontSize="body-s" color="text-body-secondary">
+          Synthetic generation needs the data-generator extension installed.
+        </Box>
+      )}
+    </SpaceBetween>
+  );
+
+  const configureStep = (
+    <SpaceBetween size="l">
+      {error && <Alert type="error">{error}</Alert>}
+
+      <FormField
+        label="Name"
+        description="Letters, numbers, spaces, hyphens and underscores. Becomes the test set id."
+        errorText={name && !validateTestSetName(name) ? 'Invalid name' : ''}
+      >
+        <Input value={name} onChange={({ detail }) => setName(detail.value)} placeholder="my-invoices-benchmark" />
+      </FormField>
+
+      <FormField label="Description — optional" errorText={description && !validateDescription(description) ? 'Too long' : ''}>
+        <Input value={description} onChange={({ detail }) => setDescription(detail.value)} placeholder="What this set covers" />
+      </FormField>
+
+      <FormField label="Document classification type — optional" description="Metadata describing the mix of documents in this set.">
+        <Select
+          selectedOption={documentClassType}
+          onChange={({ detail }) => setDocumentClassType(detail.selectedOption)}
+          options={DOCUMENT_CLASS_TYPE_OPTIONS}
+        />
+      </FormField>
+
+      {isUpload && (
+        <FormField
+          label="Zip file"
+          description={
+            source === 'upload-documents'
+              ? 'A zip with an input/ folder. No baseline/ folder is needed — you will generate draft labels next.'
+              : 'A zip with input/ and matching baseline/ folders.'
+          }
+        >
+          <SpaceBetween size="s">
+            <FileUpload
+              onChange={({ detail }) => {
+                setFiles(detail.value);
+                setError('');
+              }}
+              value={files}
+              accept=".zip"
+              showFileSize
+              constraintText="Single .zip file"
+              i18nStrings={{
+                uploadButtonText: () => 'Choose zip file',
+                dropzoneText: () => 'Drop a zip file to upload',
+                removeFileAriaLabel: (i: number) => `Remove file ${i + 1}`,
+                errorIconAriaLabel: 'Error',
+                warningIconAriaLabel: 'Warning',
+              }}
+            />
+            <ExpandableSection headerText="Required zip structure" variant="footer">
+              <Box variant="code">
+                <pre style={{ margin: 0, fontSize: 12, whiteSpace: 'pre-wrap' }}>{REQUIRED_STRUCTURE}</pre>
+              </Box>
+            </ExpandableSection>
+          </SpaceBetween>
+        </FormField>
+      )}
+
+      {source === 'existing-files' && (
+        <>
+          <FormField label="Bucket" description="Where to look for the documents.">
+            <Select selectedOption={bucket} onChange={({ detail }) => setBucket(detail.selectedOption)} options={BUCKET_OPTIONS} />
+          </FormField>
+          <FormField label="File pattern" description="For example *.pdf, or invoices/2024-*.pdf">
+            <Input value={filePattern} onChange={({ detail }) => setFilePattern(detail.value)} placeholder="*.pdf" />
+          </FormField>
+          <FormField label="Modified after — optional" description="Useful for picking up only recently reviewed documents.">
+            <Select
+              selectedOption={timeFilter}
+              onChange={({ detail }) => setTimeFilter(detail.selectedOption)}
+              options={TIME_FILTER_OPTIONS}
+            />
+          </FormField>
+          {timeFilter.value === 'custom' && (
+            <ColumnLayout columns={2}>
+              <FormField label="Date">
+                <Input value={customDate} onChange={({ detail }) => setCustomDate(detail.value)} placeholder="YYYY-MM-DD" />
+              </FormField>
+              <FormField label="Time">
+                <Input value={customTime} onChange={({ detail }) => setCustomTime(detail.value)} placeholder="00:00:00" />
+              </FormField>
+            </ColumnLayout>
+          )}
+          <SpaceBetween direction="horizontal" size="xs" alignItems="center">
+            <Button onClick={handleCheckFiles} loading={isChecking}>
+              Check matching files
+            </Button>
+            {fileCount > 0 && <StatusIndicator type="success">{fileCount} file(s) match</StatusIndicator>}
+          </SpaceBetween>
+          {bucket.value === 'input' && (
+            <Alert type="info">
+              Documents without ground truth in the evaluation baseline bucket are skipped rather than failing, so a broad pattern is safe.
+            </Alert>
+          )}
+        </>
+      )}
+    </SpaceBetween>
+  );
+
+  const reviewStep = (
+    <SpaceBetween size="l">
+      {error && <Alert type="error">{error}</Alert>}
+      <KeyValuePairs
+        columns={2}
+        items={[
+          { label: 'Source', value: sourceMeta?.label ?? source },
+          { label: 'You will have', value: sourceMeta?.outcome ?? '' },
+          { label: 'Name', value: name || '—' },
+          { label: 'Description', value: description || '—' },
+          { label: 'Classification type', value: documentClassType.label ?? 'Unspecified' },
+          ...(isUpload
+            ? [{ label: 'Zip file', value: files[0]?.name ?? '—' }]
+            : [
+                { label: 'Bucket', value: bucket.label ?? '' },
+                { label: 'Pattern', value: filePattern || '—' },
+                { label: 'Matching files', value: fileCount > 0 ? String(fileCount) : 'not checked' },
+              ]),
+        ]}
+      />
+      {source === 'upload-documents' && (
+        <Alert type="info" header="Next step after this">
+          This set arrives without ground truth. Open it and choose <strong>Generate draft labels</strong> to label it with the active
+          configuration, then review the least confident documents.
+        </Alert>
+      )}
+    </SpaceBetween>
+  );
+
+  return (
+    <Modal visible={visible} onDismiss={close} header="Create test set" size="large">
+      <Wizard
+        activeStepIndex={activeStep}
+        onNavigate={({ detail }) => {
+          // Block forward navigation on incomplete input rather than failing at
+          // submit, which is where the old modals surfaced these.
+          if (detail.requestedStepIndex > activeStep) {
+            if (activeStep === 1) {
+              if (!name.trim() || !validateTestSetName(name.trim())) {
+                setError('Enter a valid name to continue');
+                return;
+              }
+              if (isUpload && files.length === 0) {
+                setError('Choose a zip file to continue');
+                return;
+              }
+              if (source === 'existing-files' && !filePattern.trim()) {
+                setError('Enter a file pattern to continue');
+                return;
+              }
+            }
+          }
+          setError('');
+          setActiveStep(detail.requestedStepIndex);
+        }}
+        onCancel={close}
+        onSubmit={handleSubmit}
+        isLoadingNextStep={isSubmitting}
+        i18nStrings={{
+          stepNumberLabel: (n) => `Step ${n}`,
+          collapsedStepsLabel: (n, total) => `Step ${n} of ${total}`,
+          cancelButton: 'Cancel',
+          previousButton: 'Previous',
+          nextButton: 'Next',
+          submitButton: 'Create test set',
+          optional: 'optional',
+        }}
+        steps={[
+          { title: 'Choose a source', content: sourceStep },
+          { title: 'Configure', content: configureStep },
+          { title: 'Review and create', content: reviewStep },
+        ]}
+      />
+    </Modal>
+  );
+};
+
+export default CreateTestSetWizard;
