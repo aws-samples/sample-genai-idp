@@ -71,7 +71,9 @@ def handler(event, context):
     if field_name == "skipAllSectionsReview":
         is_reviewer = "Reviewer" in user_groups
         if not is_admin and not is_reviewer:
-            raise ValueError("Only administrators and reviewers can skip sections review")
+            raise ValueError(
+                "Only administrators and reviewers can skip sections review"
+            )
         if not object_key:
             raise ValueError("objectKey is required")
         return skip_all_sections_review(object_key, username, user_email)
@@ -93,9 +95,9 @@ def complete_section_review(
     )
 
     # Load document using document service
-    document_service = create_document_service(mode='dynamodb')
+    document_service = create_document_service(mode="dynamodb")
     document = document_service.get_document(object_key)
-    
+
     if not document:
         raise ValueError(f"Document {object_key} not found")
 
@@ -131,7 +133,7 @@ def complete_section_review(
     # Get current pending and completed sections from document model
     pending = set(document.hitl_sections_pending or [])
     completed = set(document.hitl_sections_completed or [])
-    
+
     # Get skipped from DynamoDB (not in document model)
     table = dynamodb.Table(TRACKING_TABLE_NAME)
     response = table.get_item(Key={"PK": f"doc#{object_key}", "SK": "none"})
@@ -140,7 +142,9 @@ def complete_section_review(
 
     # If HITLSectionsPending was never initialized, initialize it from all sections
     if not pending and not completed and not skipped:
-        all_section_ids = {section.section_id for section in document.sections if section.section_id}
+        all_section_ids = {
+            section.section_id for section in document.sections if section.section_id
+        }
         pending = all_section_ids - {section_id}
         logger.info(f"Initialized HITLSectionsPending from sections: {pending}")
 
@@ -163,7 +167,7 @@ def complete_section_review(
     document.hitl_status = new_hitl_status
     document.hitl_sections_pending = list(pending)
     document.hitl_sections_completed = list(completed)
-    
+
     # Update via document service
     document_service.update_document(document)
     logger.info(
@@ -183,7 +187,7 @@ def complete_section_review(
 
     update_expr = "SET HITLReviewHistory = :history"
     expr_values = {":history": review_history}
-    
+
     if all_completed:
         update_expr += ", HITLCompleted = :hitlCompleted"
         expr_values[":hitlCompleted"] = True
@@ -195,7 +199,9 @@ def complete_section_review(
         ExpressionAttributeValues=expr_values,
     )
 
-    logger.info(f"Section {section_id} marked complete. Remaining: {len(pending)}. All done: {all_completed}")
+    logger.info(
+        f"Section {section_id} marked complete. Remaining: {len(pending)}. All done: {all_completed}"
+    )
 
     # If all sections are completed, trigger reprocessing for summarization/evaluation
     if all_completed:
@@ -256,9 +262,9 @@ def write_correction_to_test_set_baseline(object_key, section_id, edited_data):
         return
     try:
         table = dynamodb.Table(TRACKING_TABLE_NAME)
-        doc = table.get_item(
-            Key={"PK": f"doc#{object_key}", "SK": "none"}
-        ).get("Item", {})
+        doc = table.get_item(Key={"PK": f"doc#{object_key}", "SK": "none"}).get(
+            "Item", {}
+        )
         test_set_id = doc.get("TestSetId")
         if not test_set_id:
             return  # Not a test-set review document — nothing to do.
@@ -269,6 +275,17 @@ def write_correction_to_test_set_baseline(object_key, section_id, edited_data):
             f"{test_set_id}/baseline/{filename}/sections/{section_id}/result.json"
         )
         data = json.loads(edited_data) if isinstance(edited_data, str) else edited_data
+
+        # Read the label being replaced *before* overwriting it: comparing it to
+        # what the reviewer saved is what tells the confidence curve whether the
+        # model was right, and after the write that evidence is gone.
+        previous = _read_json(TEST_SET_BUCKET, baseline_key)
+
+        # Mark the label as human-reviewed so draft labeling never overwrites it
+        # (the harvester only replaces labels tagged draft-machine).
+        if isinstance(data, dict):
+            data["labelSource"] = "reviewed-human"
+
         s3_client.put_object(
             Bucket=TEST_SET_BUCKET,
             Key=baseline_key,
@@ -279,65 +296,126 @@ def write_correction_to_test_set_baseline(object_key, section_id, edited_data):
             f"Wrote HITL correction to test-set baseline "
             f"s3://{TEST_SET_BUCKET}/{baseline_key}"
         )
+
+        record_curve_observations(test_set_id, previous, data)
     except Exception as e:  # noqa: BLE001 — best-effort; must not break the review
         logger.error(
             f"Failed to write correction to test-set baseline for {object_key}: {e}"
         )
 
 
+def _read_json(bucket, key):
+    """Read a JSON object from S3, or None if absent/unreadable."""
+    try:
+        body = s3_client.get_object(Bucket=bucket, Key=key)["Body"].read()
+        return json.loads(body)
+    except Exception:  # noqa: BLE001 — absence is normal (first review of a doc)
+        return None
+
+
+def record_curve_observations(test_set_id, previous, saved):
+    """Teach the confidence→accuracy curve from what this reviewer just did.
+
+    A field the reviewer left alone was predicted correctly; a field they changed
+    was not. Paired with the confidence the model had claimed, that is exactly
+    the ``(confidence, correct)`` observation the review-effort estimator's curve
+    is built from — and because review is worst-first, these observations land in
+    the low-confidence bins where the estimate is most sensitive.
+
+    Best-effort by design: the curve is an optimization, and failing to record an
+    observation must never fail a reviewer's save.
+    """
+    if not previous:
+        return  # Nothing was predicted, so there is no verdict to record.
+    try:
+        from idp_common.evaluation.curve_store import (
+            CurveStore,
+            observations_from_baseline_review,
+        )
+
+        observations = observations_from_baseline_review(previous, saved)
+        if not observations:
+            return
+
+        table = dynamodb.Table(TRACKING_TABLE_NAME)
+        # Key the curve by the config that produced these labels, so a later
+        # config change doesn't inherit a curve measured under different
+        # confidence semantics.
+        config_version = (previous.get("metadata") or {}).get("config_version")
+        accepted = CurveStore(table).add_observations(
+            test_set_id,
+            observations,
+            config_version=config_version,
+            source="review",
+        )
+        logger.info(
+            f"Recorded {accepted} confidence-curve observation(s) for test set "
+            f"{test_set_id} from review"
+        )
+    except Exception as e:  # noqa: BLE001 — never break a review over the curve
+        logger.warning(
+            f"Could not record confidence-curve observations for {test_set_id}: {e}"
+        )
+
+
 def trigger_reprocessing(object_key):
     """Trigger reprocessing via SQS queue after HITL completion.
-    
+
     Uses the same pattern as processChanges - sends document to queue,
     workflow runs with intelligent skip logic (OCR/Classification/Extraction/Assessment
     are skipped since data exists), only Summarization and Evaluation re-run.
     """
     try:
         # Load document from DynamoDB
-        dynamodb_service = create_document_service(mode='dynamodb')
+        dynamodb_service = create_document_service(mode="dynamodb")
         document = dynamodb_service.get_document(object_key)
-        
+
         if not document:
             logger.error(f"Document {object_key} not found for reprocessing")
             return
-        
+
         # Set bucket names from environment
-        document.input_bucket = os.environ.get('INPUT_BUCKET')
-        document.output_bucket = os.environ.get('OUTPUT_BUCKET')
-        
+        document.input_bucket = os.environ.get("INPUT_BUCKET")
+        document.output_bucket = os.environ.get("OUTPUT_BUCKET")
+
         # Reset status for reprocessing
         document.status = Status.QUEUED
         document.start_time = None
         document.completion_time = None
         document.workflow_execution_arn = None
-        
+
         # Compress and send to queue (same pattern as processChanges)
-        working_bucket = os.environ.get('WORKING_BUCKET')
+        working_bucket = os.environ.get("WORKING_BUCKET")
         if working_bucket:
-            sqs_message = document.serialize_document(working_bucket, "hitl_complete", logger)
+            sqs_message = document.serialize_document(
+                working_bucket, "hitl_complete", logger
+            )
         else:
             sqs_message = document.to_dict()
-        
-        queue_url = os.environ.get('QUEUE_URL')
+
+        queue_url = os.environ.get("QUEUE_URL")
         if queue_url:
             sqs_client.send_message(
-                QueueUrl=queue_url,
-                MessageBody=json.dumps(sqs_message, default=str)
+                QueueUrl=queue_url, MessageBody=json.dumps(sqs_message, default=str)
             )
-            logger.info(f"Queued document {object_key} for reprocessing after HITL completion")
+            logger.info(
+                f"Queued document {object_key} for reprocessing after HITL completion"
+            )
         else:
             logger.warning("QUEUE_URL not configured, skipping reprocessing trigger")
-            
+
     except Exception as e:
         logger.error(f"Failed to trigger reprocessing for {object_key}: {str(e)}")
 
 
 def skip_all_sections_review(object_key, username="", user_email=""):
     """Skip all pending section reviews and mark document as complete (Admin only)."""
-    logger.info(f"Skipping all sections review for document {object_key} by admin {username}")
+    logger.info(
+        f"Skipping all sections review for document {object_key} by admin {username}"
+    )
 
     # Load document using document service to verify it exists
-    document_service = create_document_service(mode='dynamodb')
+    document_service = create_document_service(mode="dynamodb")
     document = document_service.get_document(object_key)
 
     if not document:
@@ -352,7 +430,9 @@ def skip_all_sections_review(object_key, username="", user_email=""):
     existing_skipped = set(doc.get("HITLSectionsSkipped", []) or [])
 
     # Get all section IDs from the document
-    all_section_ids = {section.section_id for section in document.sections if section.section_id}
+    all_section_ids = {
+        section.section_id for section in document.sections if section.section_id
+    }
 
     # Sections to skip = all sections that are not already completed
     sections_to_skip = all_section_ids - completed - existing_skipped
@@ -384,7 +464,9 @@ def skip_all_sections_review(object_key, username="", user_email=""):
         },
     )
 
-    logger.info(f"All sections skipped for document {object_key}. Skipped: {all_skipped}, Completed: {list(completed)}")
+    logger.info(
+        f"All sections skipped for document {object_key}. Skipped: {all_skipped}, Completed: {list(completed)}"
+    )
 
     # Skipping all reviews resolves every pending section, so the document is now
     # fully reviewed — exactly like completing the final section via
@@ -406,9 +488,9 @@ def claim_review(object_key, username="", user_email=""):
     logger.info(f"Claiming review for document {object_key} by {username}")
 
     # Load document using document service to verify it exists
-    document_service = create_document_service(mode='dynamodb')
+    document_service = create_document_service(mode="dynamodb")
     document = document_service.get_document(object_key)
-    
+
     if not document:
         raise ValueError(f"Document {object_key} not found")
 
@@ -432,7 +514,9 @@ def claim_review(object_key, username="", user_email=""):
         },
     )
 
-    logger.info(f"Review claimed for document {object_key} by {username}, HITLStatus set to InProgress")
+    logger.info(
+        f"Review claimed for document {object_key} by {username}, HITLStatus set to InProgress"
+    )
     return build_document_response(object_key)
 
 
@@ -441,9 +525,9 @@ def release_review(object_key, username="", user_email="", is_admin=False):
     logger.info(f"Releasing review for document {object_key} by {username}")
 
     # Load document using document service to verify it exists
-    document_service = create_document_service(mode='dynamodb')
+    document_service = create_document_service(mode="dynamodb")
     document = document_service.get_document(object_key)
-    
+
     if not document:
         raise ValueError(f"Document {object_key} not found")
 
@@ -463,13 +547,16 @@ def release_review(object_key, username="", user_email="", is_admin=False):
         ExpressionAttributeValues={":status": "Review Pending", ":pending": "true"},
     )
 
-    logger.info(f"Review released for document {object_key}, HITLStatus set to Review Pending")
+    logger.info(
+        f"Review released for document {object_key}, HITLStatus set to Review Pending"
+    )
     return build_document_response(object_key)
 
 
 def _convert_decimals(obj):
     """Recursively convert Decimal values to int/float for JSON serialization."""
     from decimal import Decimal
+
     if isinstance(obj, Decimal):
         return int(obj) if obj % 1 == 0 else float(obj)
     elif isinstance(obj, dict):

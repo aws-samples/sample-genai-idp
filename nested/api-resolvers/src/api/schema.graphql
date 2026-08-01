@@ -767,6 +767,63 @@ type DraftLabelJob @aws_cognito_user_pools @aws_iam {
   completedAt: AWSDateTime
 }
 
+# One point on the error-burndown curve: residual error after reviewing N of the
+# lowest-confidence documents.
+type ReviewBurndownPoint @aws_cognito_user_pools @aws_iam {
+  docsReviewed: Int!
+  residualErrorPct: Float!
+  cutoff: Float
+}
+
+# One confidence bin of the measured reliability table (the curve itself).
+type ReliabilityBin @aws_cognito_user_pools @aws_iam {
+  binStart: Float!
+  binEnd: Float!
+  observations: Int!
+  observedAccuracy: Float
+  blendedAccuracy: Float
+}
+
+# Whether confidence can be trusted to rank correctness on this set. When this
+# is not reliable, a small worst-first review sample is not defensible and the
+# estimate says so via recommendReviewAll.
+type CalibrationHealth @aws_cognito_user_pools @aws_iam {
+  # Expected Calibration Error. Null until something has been measured.
+  ece: Float
+  # Populated confidence bins. Low coverage means confidence barely varies, so
+  # there is no worst-first signal — ECE alone does NOT detect this.
+  binCoverage: Int!
+  totalObservations: Int!
+  degenerate: Boolean!
+  overconfident: Boolean!
+  reliable: Boolean!
+}
+
+type ReviewEffortEstimate @aws_cognito_user_pools @aws_iam {
+  testSetId: String!
+  targetAccuracy: Float!
+  configVersion: String
+  docsToReview: Int!
+  # Range, not a point: a prior-driven estimate should not imply precision.
+  docsToReviewLow: Int!
+  docsToReviewHigh: Int!
+  totalDocs: Int!
+  # Confidence value at the boundary of the reviewed set.
+  impliedCutoff: Float
+  residualError: Float!
+  baselineError: Float!
+  effortMinutes: Float!
+  # prior | partially-measured | measured | unreliable
+  estimateConfidence: String!
+  # Random sample of the high-confidence zone to spot-check. Worst-first review
+  # is blind to confident errors, so this is the only way to catch them.
+  auditSampleSize: Int!
+  recommendReviewAll: Boolean!
+  calibration: CalibrationHealth!
+  burndown: [ReviewBurndownPoint!]!
+  reliabilityTable: [ReliabilityBin!]!
+}
+
 input GenerateDraftLabelsInput {
   testSetId: String!
   # Defaults to the deployment's active config when omitted.
@@ -1350,6 +1407,8 @@ type Query @aws_cognito_user_pools @aws_iam {
   getTestSetVersions(testSetId: String!): [TestSetVersion]
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   getDraftLabelJob(testSetId: String!, jobId: String!): DraftLabelJob
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  estimateReviewEffort(testSetId: String!, targetAccuracy: Float, configVersion: String): ReviewEffortEstimate
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   listBucketFiles(bucketType: String!, filePattern: String!, modifiedAfter: String): [String]
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])

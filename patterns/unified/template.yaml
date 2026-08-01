@@ -5394,7 +5394,13 @@ Resources:
         LogGroup: !Ref TestExecutionAggregationFunctionLogGroup
       Policies:
         - AWSLambdaBasicExecutionRole
-        - DynamoDBReadPolicy:
+        # Crud, not Read: besides reading the run's documents this function folds
+        # the run's measured calibration into the test set's confidence curve
+        # (the review-effort estimator's highest-fidelity input). With read-only
+        # access that write fails with AccessDenied, and because the curve update
+        # is deliberately best-effort it would fail *silently* — the estimator
+        # would stay prior-driven forever with nothing in the logs to explain it.
+        - DynamoDBCrudPolicy:
             TableName: !Ref TrackingTable
         - S3ReadPolicy:
             BucketName: !Ref OutputBucket

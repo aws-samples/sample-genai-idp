@@ -69,6 +69,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             f"avg_weighted_score={avg_weighted_score_str}"
         )
 
+        _record_confidence_curve(test_run_id, tracking_table_name, result)
+
         return {"statusCode": 200, "body": json.dumps(result)}
 
     except Exception as e:
@@ -77,6 +79,62 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "statusCode": 500,
             "body": json.dumps({"error": str(e), "metrics": _empty_metrics()}),
         }
+
+
+def _record_confidence_curve(
+    test_run_id: str, tracking_table_name: str, result: Dict[str, Any]
+) -> None:
+    """Fold this scoring run's calibration into the test set's confidence curve.
+
+    A scoring run is the highest-fidelity source the review-effort estimator has:
+    it measures correctness across the *whole* confidence range, including the
+    high-confidence zone that worst-first human review never reaches. Only after
+    such a run can the estimate honestly report itself as "measured".
+
+    The ECE bins computed above already are the reliability table the curve
+    stores, so this reuses them rather than recomputing anything.
+
+    Best-effort: the curve is an optimization for a different feature, and
+    failing to update it must not fail the aggregation the dashboard depends on.
+    """
+    try:
+        bins = (
+            ((result or {}).get("confidence_metrics") or {})
+            .get("overall", {})
+            .get("ece", {})
+            .get("bins")
+        )
+        if not bins:
+            logger.info(
+                "No ECE bins in aggregation result; skipping confidence-curve update"
+            )
+            return
+
+        table = dynamodb.Table(tracking_table_name)
+        run = (
+            table.get_item(Key={"PK": f"testrun#{test_run_id}", "SK": "metadata"}).get(
+                "Item"
+            )
+            or {}
+        )
+        test_set_id = run.get("TestSetId")
+        if not test_set_id:
+            return  # Not a test-set run — nothing to attribute the curve to.
+
+        from idp_common.evaluation.curve_store import CurveStore
+
+        accepted = CurveStore(table).add_ece_bins(
+            test_set_id, bins, config_version=run.get("ConfigVersion")
+        )
+        logger.info(
+            f"Recorded {accepted} confidence-curve observation(s) for test set "
+            f"{test_set_id} from scoring run {test_run_id}"
+        )
+    except Exception as e:  # noqa: BLE001 — must not fail aggregation
+        logger.warning(
+            f"Could not update confidence curve for test run {test_run_id}: {e}",
+            exc_info=True,
+        )
 
 
 def aggregate_test_run_with_stickler(

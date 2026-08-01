@@ -94,6 +94,15 @@ export type CalculationDetails = {
   quotasUsed?: Maybe<QuotasUsed>;
 };
 
+export type CalibrationHealth = {
+  binCoverage: Scalars['Int']['output'];
+  degenerate: Scalars['Boolean']['output'];
+  ece?: Maybe<Scalars['Float']['output']>;
+  overconfident: Scalars['Boolean']['output'];
+  reliable: Scalars['Boolean']['output'];
+  totalObservations: Scalars['Int']['output'];
+};
+
 export type CapacityMetric = {
   label: Scalars['String']['output'];
   value: Scalars['String']['output'];
@@ -1278,6 +1287,7 @@ export type Query = {
   checkFeatureEntitlement?: Maybe<FeatureEntitlement>;
   compareDocumentVersions?: Maybe<Scalars['AWSJSON']['output']>;
   compareTestRuns?: Maybe<TestRunComparison>;
+  estimateReviewEffort?: Maybe<ReviewEffortEstimate>;
   getAgentChatMessages?: Maybe<Array<Maybe<AgentChatMessage>>>;
   getAgentJobStatus?: Maybe<AgentJob>;
   getChatMessages?: Maybe<Array<Maybe<AgentChatMessage>>>;
@@ -1364,6 +1374,13 @@ export type QueryCompareDocumentVersionsArgs = {
 
 export type QueryCompareTestRunsArgs = {
   testRunIds: Array<Scalars['String']['input']>;
+};
+
+
+export type QueryEstimateReviewEffortArgs = {
+  configVersion?: InputMaybe<Scalars['String']['input']>;
+  targetAccuracy?: InputMaybe<Scalars['Float']['input']>;
+  testSetId: Scalars['String']['input'];
 };
 
 
@@ -1602,6 +1619,40 @@ export type RegisterFeatureInput = {
   stackName: Scalars['String']['input'];
   stackRegion: Scalars['String']['input'];
   uiBundlePath: Scalars['String']['input'];
+};
+
+export type ReliabilityBin = {
+  binEnd: Scalars['Float']['output'];
+  binStart: Scalars['Float']['output'];
+  blendedAccuracy?: Maybe<Scalars['Float']['output']>;
+  observations: Scalars['Int']['output'];
+  observedAccuracy?: Maybe<Scalars['Float']['output']>;
+};
+
+export type ReviewBurndownPoint = {
+  cutoff?: Maybe<Scalars['Float']['output']>;
+  docsReviewed: Scalars['Int']['output'];
+  residualErrorPct: Scalars['Float']['output'];
+};
+
+export type ReviewEffortEstimate = {
+  auditSampleSize: Scalars['Int']['output'];
+  baselineError: Scalars['Float']['output'];
+  burndown: Array<ReviewBurndownPoint>;
+  calibration: CalibrationHealth;
+  configVersion?: Maybe<Scalars['String']['output']>;
+  docsToReview: Scalars['Int']['output'];
+  docsToReviewHigh: Scalars['Int']['output'];
+  docsToReviewLow: Scalars['Int']['output'];
+  effortMinutes: Scalars['Float']['output'];
+  estimateConfidence: Scalars['String']['output'];
+  impliedCutoff?: Maybe<Scalars['Float']['output']>;
+  recommendReviewAll: Scalars['Boolean']['output'];
+  reliabilityTable: Array<ReliabilityBin>;
+  residualError: Scalars['Float']['output'];
+  targetAccuracy: Scalars['Float']['output'];
+  testSetId: Scalars['String']['output'];
+  totalDocs: Scalars['Int']['output'];
 };
 
 export type SampleDocument = {

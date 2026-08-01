@@ -643,6 +643,91 @@ Reviewing a draft label is the same **Edit Ground Truth** flow described above;
 saving flips the label to *Reviewed (human)*. Once enough of the set is
 reviewed, publish a version to freeze it as a benchmark.
 
+## How much review is enough?
+
+Reviewing every document in a large set is expensive, and most of that effort is
+spent confirming labels that were already right. The **review-effort estimate**
+answers the practical question instead: *how many documents must a human review
+to reach a target accuracy?*
+
+It works by measuring a **confidence→accuracy curve** for your test set — the
+probability that a field labeled at a given confidence is actually correct. From
+that curve it derives:
+
+| Output | Meaning |
+|---|---|
+| **Documents to review** | Fewest lowest-confidence documents that reach the target |
+| **Implied cutoff** | The confidence value at the boundary of that set |
+| **Residual error** | Expected error remaining after that review |
+| **Effort** | Estimated review time, including the audit sample below |
+| **Audit sample** | Random spot-check of the *high-confidence* documents |
+| **Burndown** | Residual error at every review depth |
+
+### The curve is measured, and it improves
+
+The curve comes from three sources of increasing fidelity:
+
+1. **A prior**, before anything has been measured on your set — carried over from
+   other sets so a cold start still gets an answer.
+2. **Your reviewers' verdicts.** Every time someone saves a reviewed document,
+   each field they *changed* is recorded as a case where the model was wrong and
+   each field they *left alone* as a case where it was right. Because review is
+   worst-first, these observations land exactly in the low-confidence range the
+   estimate is most sensitive to. This is what "self-corrects as your team
+   reviews" means concretely.
+3. **A scoring run.** Running the test set measures correctness across the
+   *whole* confidence range, including the high-confidence documents review never
+   opens. This is the only source that can fully validate the estimate.
+
+Curves are kept per **configuration version**, because confidence means
+different things across models and prompts — a curve measured under one config is
+not reused after a change that shifts those semantics.
+
+### Every estimate states how much to trust it
+
+A docs-to-review number computed from a generic prior looks identical to one
+measured on your data, which makes it easy to over-trust. Each estimate therefore
+carries an **estimate-confidence** state:
+
+| State | What it means |
+|---|---|
+| **Prior** | Nothing measured on this set yet. Treat as a rough planning figure. |
+| **Partially measured** | Some review observations, but the high-confidence range is still unmeasured. |
+| **Measured** | A scoring run has measured the full confidence range. |
+| **Unreliable** | Confidence does not predict correctness here — see below. |
+
+Prior-driven estimates are reported as a **range** rather than a point value, and
+the range tightens as observations accumulate.
+
+### When confidence can't be trusted
+
+The whole approach rests on an assumption: lower confidence means a likelier
+error. That is usually true, but not guaranteed, and two failure modes would
+otherwise let the estimate certify a set that isn't actually accurate:
+
+- **Overconfident model** — wrong *and* confident, so errors sit in the
+  high-confidence documents that worst-first review never opens. This is the
+  dangerous case: the estimate would report the target as met while real accuracy
+  is lower.
+- **Degenerate confidence** — every field scores about the same, so there is no
+  worst-first signal at all and the review order is effectively arbitrary.
+
+Both are detected. When either is present the estimate reports
+**Unreliable** and recommends reviewing everything instead of a small sample,
+rather than returning a number that looks actionable but isn't.
+
+The **audit sample** is the standing mitigation for the first case: a small
+random sample of the high-confidence, auto-accepted documents. It is the only
+way to find confident errors, and it doubles as the only source of observations
+for the high-confidence end of the curve. Its cost is included in the reported
+effort rather than excluded to make the headline number smaller.
+
+> **Note on the effort model.** Review time is currently estimated from the
+> number of fields and sections per document using fixed per-field and per-page
+> rates, measured from the test set where possible. It does not yet account for
+> field complexity or individual annotator speed, so treat the time figure as
+> coarser than the document count.
+
 ### Upload Methods
 1. **UI Zip Upload**: S3 event → Lambda extraction → Validation → Status update
 2. **Direct S3 Upload**: Detected via refresh button or automatic polling

@@ -1405,3 +1405,78 @@ class TestTestSetResolver:
         assert documents[1]["labelSource"] is None
         assert documents[1]["minConfidence"] is None
         assert documents[1]["confidenceThreshold"] is None
+
+    # -- Review-effort estimator -------------------------------------------
+
+    def test_estimate_review_effort_reports_prior_on_a_cold_set(self, labeling_env):
+        """With no curve and no labels, the estimate must not look measured."""
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=2)
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/a.pdf", Body=b"x")
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/b.pdf", Body=b"x")
+
+        result = test_set_index.estimate_review_effort(
+            {"testSetId": "ts1", "targetAccuracy": 99.0}
+        )
+
+        assert result["estimateConfidence"] == "prior"
+        assert result["totalDocs"] == 2
+        # A prior-driven estimate reports a range, not a bare point value.
+        assert result["docsToReviewLow"] <= result["docsToReview"]
+        assert result["docsToReviewHigh"] >= result["docsToReview"]
+        assert result["calibration"]["totalObservations"] == 0
+
+    def test_estimate_review_effort_uses_the_stored_curve(self, labeling_env):
+        """Observations recorded from review must change the estimate."""
+        from idp_common.evaluation.curve_store import CurveStore
+
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/a.pdf", Body=b"x")
+
+        # A review pass found the 0.3-confidence band is mostly wrong.
+        CurveStore(table).add_observations("ts1", [(0.3, False)] * 40)
+
+        result = test_set_index.estimate_review_effort({"testSetId": "ts1"})
+        assert result["calibration"]["totalObservations"] == 40
+        assert result["estimateConfidence"] in (
+            "partially-measured",
+            "unreliable",
+        )
+
+    def test_estimate_review_effort_recommends_reviewing_everything_when_overconfident(
+        self, labeling_env
+    ):
+        """The dangerous quadrant must not yield a small, confident-looking number."""
+        from idp_common.evaluation.curve_store import CurveStore
+
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/a.pdf", Body=b"x")
+        # Confident and wrong.
+        CurveStore(table).add_observations("ts1", [(0.95, False)] * 60)
+
+        result = test_set_index.estimate_review_effort({"testSetId": "ts1"})
+        assert result["recommendReviewAll"] is True
+        assert result["estimateConfidence"] == "unreliable"
+        assert result["calibration"]["overconfident"] is True
+
+    def test_estimate_review_effort_validates_its_inputs(self, labeling_env):
+        table, _ = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        with pytest.raises(Exception, match="targetAccuracy"):
+            test_set_index.estimate_review_effort(
+                {"testSetId": "ts1", "targetAccuracy": 150}
+            )
+        with pytest.raises(Exception, match="not found"):
+            test_set_index.estimate_review_effort({"testSetId": "ghost"})
+
+    def test_estimate_review_effort_includes_the_reliability_table(self, labeling_env):
+        """The curve must be inspectable, not just a number."""
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/a.pdf", Body=b"x")
+
+        result = test_set_index.estimate_review_effort({"testSetId": "ts1"})
+        assert len(result["reliabilityTable"]) == 10
+        assert "burndown" in result

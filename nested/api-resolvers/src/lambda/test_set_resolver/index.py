@@ -9,6 +9,12 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 from idp_common.dynamodb import DynamoDBClient  # type: ignore
+from idp_common.evaluation.confidence_curve import (  # type: ignore
+    DEFAULT_FIELDS_PER_DOC,
+    DEFAULT_PAGES_PER_DOC,
+    estimate_for_target,
+)
+from idp_common.evaluation.curve_store import CurveStore  # type: ignore
 from idp_common.s3 import find_matching_files  # type: ignore
 
 # Constants
@@ -104,6 +110,8 @@ def handler(event, context):
         return generate_draft_labels(event["arguments"], event)
     elif field_name == "getDraftLabelJob":
         return get_draft_label_job(event["arguments"])
+    elif field_name == "estimateReviewEffort":
+        return estimate_review_effort(event["arguments"])
     elif field_name == "listBucketFiles":
         return list_bucket_files(event["arguments"])
     elif field_name == "validateTestFileName":
@@ -765,6 +773,165 @@ def _confidence_threshold(explainability_info):
         return None
     # Tie to the same field minConfidence reports.
     return min(found, key=lambda pair: pair[0])[1]
+
+
+# ---------------------------------------------------------------------------
+# Review-effort estimator: "how many documents must a human review to reach a
+# target accuracy?" Reads the measured confidence→accuracy curve for this test
+# set (see idp_common.evaluation.confidence_curve) and the set's per-document
+# confidences, and returns the review depth, implied cutoff, effort, audit
+# sample and — crucially — how much the numbers can be trusted.
+# ---------------------------------------------------------------------------
+
+
+def estimate_review_effort(args):
+    """Server-side estimate for the "set up team annotation" flow.
+
+    Replaces the prototype's fixture interpolation with the stored curve. The
+    estimate always reports its own trustworthiness (``estimateConfidence`` plus
+    the calibration block), because on a cold or miscalibrated set a bare
+    docs-to-review number is actively misleading — it looks measured when it is a
+    prior, and it understates effort when confidence hides errors in the
+    auto-accepted zone.
+    """
+    test_set_id = args["testSetId"]
+    target_accuracy = float(args.get("targetAccuracy") or 99.0)
+    config_version = args.get("configVersion")
+
+    if not validate_test_set_name(test_set_id):
+        raise Exception("Invalid test set id")
+    if not (0.0 < target_accuracy <= 100.0):
+        raise Exception("targetAccuracy must be between 0 and 100")
+
+    meta = db_client.get_item({"PK": f"testset#{test_set_id}", "SK": "metadata"})
+    if not meta:
+        raise Exception(f"Test set '{test_set_id}' not found")
+
+    # Default to the config the set is bound to, so the curve matches the
+    # confidence semantics that produced these labels.
+    if not config_version:
+        config_version = meta.get("boundConfigVersion")
+
+    tracking_table = boto3.resource("dynamodb").Table(os.environ["TRACKING_TABLE"])
+    store = CurveStore(tracking_table)
+    curve = store.get_curve(test_set_id, config_version)
+    prior = store.get_global_prior()
+
+    doc_confidences, fields_per_doc, pages_per_doc = _collect_doc_confidences(
+        test_set_id
+    )
+    total_docs = len(doc_confidences) or int(meta.get("fileCount", 0) or 0)
+
+    estimate = estimate_for_target(
+        curve,
+        target_accuracy,
+        total_docs,
+        doc_confidences=doc_confidences or None,
+        prior=prior,
+        fields_per_doc=fields_per_doc,
+        pages_per_doc=pages_per_doc,
+    )
+
+    result = estimate.to_dict()
+    result["testSetId"] = test_set_id
+    result["targetAccuracy"] = target_accuracy
+    result["configVersion"] = config_version
+    result["reliabilityTable"] = curve.reliability_table(prior)
+    logger.info(
+        f"estimateReviewEffort({test_set_id}, target={target_accuracy}): "
+        f"{estimate.docs_to_review}/{total_docs} docs, "
+        f"confidence={estimate.estimate_confidence.value}"
+    )
+    return result
+
+
+# Cap on how many documents the estimator will read confidences for. The
+# estimate is a planning number, not an audit: past this many documents the
+# sample is more than enough to shape the curve, and reading every section of a
+# 5,000-document set would blow the resolver's timeout.
+MAX_DOCS_FOR_ESTIMATE = 500
+
+
+def _collect_doc_confidences(test_set_id):
+    """Per-document minimum confidence, plus observed doc shape for the effort model.
+
+    Reuses the same baseline read the document list uses, so the estimator orders
+    documents exactly as the reviewer will see them — an estimate computed from a
+    different ordering than the one the UI presents would not describe the work
+    the user is actually about to do.
+
+    Returns ``(confidences, fields_per_doc, pages_per_doc)``. The two shape
+    figures fall back to the module defaults when the baseline carries nothing to
+    measure them from.
+    """
+    test_set_bucket = os.environ["TEST_SET_BUCKET"]
+    documents = []
+    next_token = None
+
+    while len(documents) < MAX_DOCS_FOR_ESTIMATE:
+        page = get_test_set_documents(
+            {
+                "testSetId": test_set_id,
+                "limit": min(200, MAX_DOCS_FOR_ESTIMATE - len(documents)),
+                "nextToken": next_token,
+            }
+        )
+        documents.extend(page.get("documents") or [])
+        next_token = page.get("nextToken")
+        if not next_token:
+            break
+
+    confidences = [doc.get("minConfidence") for doc in documents]
+
+    # Effort model inputs, measured rather than assumed where possible: the
+    # number of fields a reviewer actually has to check drives the time far more
+    # than a global average does.
+    field_counts = []
+    for doc in documents:
+        for section in doc.get("sections") or []:
+            key = section.get("baselineKey")
+            if not key:
+                continue
+            count = _count_baseline_fields(test_set_bucket, key)
+            if count:
+                field_counts.append(count)
+        if len(field_counts) >= 20:
+            break  # A sample is enough to characterise the set.
+
+    fields_per_doc = (
+        sum(field_counts) / len(field_counts)
+        if field_counts
+        else DEFAULT_FIELDS_PER_DOC
+    )
+    # Sections stand in for pages: a section is the unit a reviewer opens, and
+    # the baseline records sections, not page counts.
+    section_counts = [len(doc.get("sections") or []) for doc in documents]
+    pages_per_doc = (
+        sum(section_counts) / len(section_counts)
+        if section_counts
+        else DEFAULT_PAGES_PER_DOC
+    )
+    return confidences, fields_per_doc, max(1.0, pages_per_doc)
+
+
+def _count_baseline_fields(bucket, key):
+    """Number of leaf fields in a baseline section result, or None if unreadable."""
+    try:
+        body = s3_client.get_object(Bucket=bucket, Key=key)["Body"].read()
+        result = json.loads(body)
+    except Exception as e:  # noqa: BLE001 — effort model input is best-effort
+        logger.warning(f"Could not read baseline for field count {key}: {e}")
+        return None
+
+    def count(node):
+        if isinstance(node, dict):
+            return sum(count(v) for v in node.values()) or len(node)
+        if isinstance(node, list):
+            return sum(count(v) for v in node)
+        return 1
+
+    inference = result.get("inference_result")
+    return count(inference) if inference else None
 
 
 def _harvest_label_job(job):
