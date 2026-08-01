@@ -332,8 +332,8 @@ class TestTestRunnerRBAC:
         table = MagicMock()
         # run metadata with two files
         run_item = {"TestSetId": "ts1", "Files": ["a.pdf", "b.pdf"]}
-        doc_a = {"ConfidenceAlertCount": 3, "HITLStatus": ""}      # should queue
-        doc_b = {"ConfidenceAlertCount": 0, "HITLStatus": ""}      # no alerts -> skip
+        doc_a = {"ConfidenceAlertCount": 3, "HITLStatus": ""}  # should queue
+        doc_b = {"ConfidenceAlertCount": 0, "HITLStatus": ""}  # no alerts -> skip
 
         def _get_item(Key):
             sk_pk = Key["PK"]

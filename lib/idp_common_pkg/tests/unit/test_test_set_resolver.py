@@ -785,9 +785,9 @@ class TestTestSetResolver:
         assert written["ItemType"] == "testset_version"
         assert written["versionNumber"] == 1
         # The metadata pointers were advanced and the active reference set
-        meta = publish_table.get_item(
-            Key={"PK": "testset#ts1", "SK": "metadata"}
-        )["Item"]
+        meta = publish_table.get_item(Key={"PK": "testset#ts1", "SK": "metadata"})[
+            "Item"
+        ]
         assert meta["latestVersion"] == 1
         assert meta["publishedVersion"] == 1
         assert meta["activeReference"] == 1
@@ -804,9 +804,9 @@ class TestTestSetResolver:
         assert result["version"] == 2
         # active reference unchanged (still 1)
         assert result["activeReference"] == 1
-        meta = publish_table.get_item(
-            Key={"PK": "testset#ts1", "SK": "metadata"}
-        )["Item"]
+        meta = publish_table.get_item(Key={"PK": "testset#ts1", "SK": "metadata"})[
+            "Item"
+        ]
         assert meta["latestVersion"] == 2
         assert meta["publishedVersion"] == 2
         assert meta["activeReference"] == 1
@@ -867,7 +867,9 @@ class TestTestSetResolver:
             publish_table, "ts1", publishedVersion=5, activeReference=5, latestVersion=0
         )
 
-        result = test_set_index.publish_test_set_version({"input": {"testSetId": "ts1"}})
+        result = test_set_index.publish_test_set_version(
+            {"input": {"testSetId": "ts1"}}
+        )
 
         # The version item is still written — this caller's work is not lost.
         assert result["version"] == 1
@@ -941,13 +943,15 @@ class TestTestSetResolver:
 
     # -- Membership editing: remove ---------------------------------------
 
-    @patch.dict(os.environ, {"TRACKING_TABLE": "test-table", "TEST_SET_BUCKET": "ts-bucket"})
+    @patch.dict(
+        os.environ, {"TRACKING_TABLE": "test-table", "TEST_SET_BUCKET": "ts-bucket"}
+    )
     def test_remove_documents_deletes_input_and_baseline_and_recounts(self):
-        with patch.object(test_set_index.db_client, "get_item") as mock_get, patch.object(
-            test_set_index, "boto3"
-        ) as mock_boto3, patch.object(
-            test_set_index, "_validate_test_set_files"
-        ) as mock_validate:
+        with (
+            patch.object(test_set_index.db_client, "get_item") as mock_get,
+            patch.object(test_set_index, "boto3") as mock_boto3,
+            patch.object(test_set_index, "_validate_test_set_files") as mock_validate,
+        ):
             mock_get.return_value = {
                 "id": "ts1",
                 "name": "TS One",
@@ -1022,9 +1026,7 @@ class TestTestSetResolver:
         s3.get_paginator.return_value.paginate.side_effect = lambda **kw: (
             [{"Contents": [{"Key": "ts1/input/a.pdf"}, {"Key": "ts1/input/b.pdf"}]}]
             if "input" in kw["Prefix"]
-            else [
-                {"Contents": [{"Key": "ts1/baseline/a.pdf/sections/1/result.json"}]}
-            ]
+            else [{"Contents": [{"Key": "ts1/baseline/a.pdf/sections/1/result.json"}]}]
         )
         result = test_set_index._validate_test_set_files(
             s3, "bucket", "ts1", allow_unlabeled=True
@@ -1088,9 +1090,9 @@ class TestTestSetResolver:
         assert payload["arguments"]["input"]["testSetId"] == "ts1"
         assert "identity" not in payload
         # Job item recorded under the test set, and the set marked as labeling.
-        job = table.get_item(
-            Key={"PK": "testset#ts1", "SK": "labeljob#ts1-run"}
-        )["Item"]
+        job = table.get_item(Key={"PK": "testset#ts1", "SK": "labeljob#ts1-run"})[
+            "Item"
+        ]
         assert job["startedBy"] == "me@example.com"
         meta = table.get_item(Key={"PK": "testset#ts1", "SK": "metadata"})["Item"]
         assert meta["labelJobStatus"] == "RUNNING"
@@ -1333,8 +1335,14 @@ class TestTestSetResolver:
             {
                 "objectKey": "a.pdf",
                 "sections": [
-                    {"sectionId": "1", "baselineKey": "ts1/baseline/a.pdf/sections/1/result.json"},
-                    {"sectionId": "2", "baselineKey": "ts1/baseline/a.pdf/sections/2/result.json"},
+                    {
+                        "sectionId": "1",
+                        "baselineKey": "ts1/baseline/a.pdf/sections/1/result.json",
+                    },
+                    {
+                        "sectionId": "2",
+                        "baselineKey": "ts1/baseline/a.pdf/sections/2/result.json",
+                    },
                 ],
             },
             {"objectKey": "b.pdf", "sections": []},

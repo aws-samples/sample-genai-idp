@@ -178,16 +178,18 @@ def test_failed_baseline_copies_still_fail_the_run(copier_env, monkeypatch):
     monkeypatch.setattr(
         copier,
         "_list_test_set_files",
-        lambda bucket, tsid, folder: ["a.pdf"]
-        if folder == "input"
-        else ["a.pdf/sections/1/result.json"],
+        lambda bucket, tsid, folder: (
+            ["a.pdf"] if folder == "input" else ["a.pdf/sections/1/result.json"]
+        ),
     )
     monkeypatch.setattr(copier, "_update_tracking_in_progress", lambda *a, **k: None)
     monkeypatch.setattr(
         copier,
         "_copy_files_to_bucket",
         # Input copies fine; every baseline copy fails.
-        lambda src, sp, dst, dp, files, cv=None: [] if "baseline" in sp else list(files),
+        lambda src, sp, dst, dp, files, cv=None: (
+            [] if "baseline" in sp else list(files)
+        ),
     )
     monkeypatch.setattr(
         copier,
