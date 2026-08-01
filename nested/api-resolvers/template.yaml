@@ -2337,6 +2337,9 @@ Resources:
           INPUT_BUCKET: !Ref InputBucketName
           TEST_SET_BUCKET: !Ref TestSetBucketName
           TEST_SET_COPY_QUEUE_URL: !Ref TestSetFileCopyQueueUrl
+          # generateDraftLabels delegates run creation (config capture + version
+          # pinning) to the test runner rather than duplicating it.
+          TEST_RUNNER_FUNCTION_ARN: !GetAtt TestRunnerFunction.Arn
           BASELINE_BUCKET: !If
             - ShouldCreateEvaluationBaselineBucket
             - !Ref EvaluationBaselineBucketName
@@ -2358,6 +2361,11 @@ Resources:
               - !Ref EvaluationBaselineBucketName
         - SQSSendMessagePolicy:
             QueueName: !Ref TestSetFileCopyQueueName
+        # The draft-label harvester reads the pipeline's section extraction
+        # results (Sections[].OutputJSONUri) out of the output bucket and writes
+        # them into the test set's baseline/ prefix as draft labels.
+        - S3ReadPolicy:
+            BucketName: !Ref OutputBucketName
         - Statement:
             - Effect: Allow
               Action:
@@ -2367,6 +2375,12 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
+        # generateDraftLabels invokes the test runner synchronously to start the
+        # labeling run.
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt TestRunnerFunction.Arn
   UploadResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:

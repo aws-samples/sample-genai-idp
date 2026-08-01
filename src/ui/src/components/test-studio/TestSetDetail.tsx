@@ -15,6 +15,7 @@ import { useParams } from 'react-router-dom';
 import {
   Alert,
   AppLayout,
+  Badge,
   Box,
   BreadcrumbGroup,
   Button,
@@ -23,12 +24,13 @@ import {
   Link,
   Pagination,
   SpaceBetween,
+  StatusIndicator,
   Table,
   TextFilter,
 } from '@cloudscape-design/components';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from '../../api/client-shim';
-import { getTestSetDocuments } from '../../graphql/generated';
+import { getTestSetDocuments, generateDraftLabels, getDraftLabelJob } from '../../graphql/generated';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import Navigation from '../genaiidp-layout/navigation';
@@ -48,7 +50,39 @@ export interface TestSetDocumentItem {
   size?: number | null;
   lastModified?: string | null;
   sections: TestSetDocumentSectionRef[];
+  labelSource?: string | null;
+  minConfidence?: number | null;
 }
+
+/**
+ * Label provenance is the trust axis of the whole review loop, so machine-drafted
+ * labels must never look like human-verified ones. One vocabulary, used here and
+ * anywhere else labels surface.
+ */
+export const LABEL_SOURCE_BADGES: Record<string, { color: 'blue' | 'green' | 'grey' | 'severity-neutral'; text: string }> = {
+  'draft-machine': { color: 'blue', text: 'Draft (machine)' },
+  'reviewed-human': { color: 'green', text: 'Reviewed (human)' },
+  synthetic: { color: 'grey', text: 'Synthetic' },
+  uploaded: { color: 'grey', text: 'Uploaded' },
+};
+
+export const renderLabelSource = (labelSource?: string | null): React.JSX.Element => {
+  if (!labelSource) return <Badge color="severity-neutral">Unlabeled</Badge>;
+  const badge = LABEL_SOURCE_BADGES[labelSource];
+  return badge ? <Badge color={badge.color}>{badge.text}</Badge> : <Badge color="grey">{labelSource}</Badge>;
+};
+
+/** Confidence as a percentage, colored by band: red below 80%, amber below 95%. */
+export const renderConfidence = (value?: number | null): React.JSX.Element | string => {
+  if (value === null || value === undefined) return '-';
+  const pct = value <= 1 ? value * 100 : value;
+  const color = pct < 80 ? 'text-status-error' : pct < 95 ? 'text-status-warning' : 'text-status-success';
+  return (
+    <Box color={color} fontWeight={pct < 95 ? 'bold' : 'normal'}>
+      {pct.toFixed(1)}%
+    </Box>
+  );
+};
 
 export const formatSize = (size?: number | null): string => {
   if (size === null || size === undefined) return '-';
@@ -71,6 +105,11 @@ const TestSetDetail = (): React.JSX.Element => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filterText, setFilterText] = useState('');
+  const [labelJob, setLabelJob] = useState<{ jobId: string; status: string; total: number; labeled: number } | null>(null);
+  const [isStartingLabels, setIsStartingLabels] = useState(false);
+  // Default to worst-first once any document carries confidence — the whole point
+  // of draft labels is to review the least trustworthy ones first.
+  const [worstFirst, setWorstFirst] = useState(true);
 
   const fetchPage = useCallback(
     async (pageIndex: number, tokens: (string | null)[]) => {
@@ -115,7 +154,78 @@ const TestSetDetail = (): React.JSX.Element => {
     fetchPage(pageIndex, pageTokens);
   };
 
+  const handleGenerateDraftLabels = async () => {
+    if (!testSetId) return;
+    setIsStartingLabels(true);
+    setError(null);
+    try {
+      const response = await client.graphql({
+        query: generateDraftLabels,
+        variables: { input: { testSetId } },
+      });
+      const job = response.data?.generateDraftLabels;
+      if (job) {
+        setLabelJob({
+          jobId: job.jobId,
+          status: job.status,
+          total: job.total ?? 0,
+          labeled: job.labeled ?? 0,
+        });
+      }
+    } catch (err) {
+      logger.error('Error starting draft labeling:', err);
+      setError('Failed to start draft labeling. Please try again.');
+    } finally {
+      setIsStartingLabels(false);
+    }
+  };
+
+  // Poll the labeling job while it runs. The resolver harvests finished
+  // documents on read, so polling is what advances the job — and each tick also
+  // refreshes the table so labels appear as they land.
+  useEffect(() => {
+    if (!testSetId || !labelJob || labelJob.status !== 'RUNNING') return undefined;
+    const timer = setTimeout(async () => {
+      try {
+        const response = await client.graphql({
+          query: getDraftLabelJob,
+          variables: { testSetId, jobId: labelJob.jobId },
+        });
+        const job = response.data?.getDraftLabelJob;
+        if (!job) return;
+        setLabelJob({
+          jobId: job.jobId,
+          status: job.status,
+          total: job.total ?? 0,
+          labeled: job.labeled ?? 0,
+        });
+        if (job.labeled !== labelJob.labeled || job.status !== 'RUNNING') {
+          fetchPage(currentPageIndex, pageTokens);
+        }
+        if (job.status === 'FAILED') {
+          setError(job.error ? `Draft labeling failed: ${job.error}` : 'Draft labeling failed.');
+        }
+      } catch (err) {
+        logger.error('Error polling draft label job:', err);
+      }
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [testSetId, labelJob, currentPageIndex, pageTokens, fetchPage]);
+
   const filteredDocs = filterText ? documents.filter((d) => d.objectKey.toLowerCase().includes(filterText.toLowerCase())) : documents;
+
+  const hasConfidence = documents.some((d) => d.minConfidence !== null && d.minConfidence !== undefined);
+  // Sort in place on the current page: pagination is server-side and opaque, so
+  // this orders what the reviewer can actually see rather than implying a
+  // set-wide ranking it can't deliver.
+  const visibleDocs =
+    worstFirst && hasConfidence
+      ? [...filteredDocs].sort((a, b) => {
+          const av = a.minConfidence ?? Number.POSITIVE_INFINITY;
+          const bv = b.minConfidence ?? Number.POSITIVE_INFINITY;
+          return av - bv;
+        })
+      : filteredDocs;
 
   return (
     <AppLayout
@@ -144,14 +254,46 @@ const TestSetDetail = (): React.JSX.Element => {
           <SpaceBetween size="l">
             {error && <Alert type="error">{error}</Alert>}
 
+            {labelJob && labelJob.status === 'RUNNING' && (
+              <Alert type="info">
+                <StatusIndicator type="in-progress">
+                  Draft labeling in progress — {labelJob.labeled} of {labelJob.total} document(s) labeled. Labels appear here as they
+                  complete.
+                </StatusIndicator>
+              </Alert>
+            )}
+
+            {labelJob && labelJob.status === 'COMPLETED' && (
+              <Alert type="success" dismissible onDismiss={() => setLabelJob(null)}>
+                Draft labeling complete — {labelJob.labeled} document(s) labeled. Review the lowest-confidence documents first, then publish
+                a version to freeze them as ground truth.
+              </Alert>
+            )}
+
             <Table
               header={
                 <Header
                   counter={`(${filteredDocs.length})`}
+                  description={
+                    hasConfidence ? 'Confidence is the lowest per-field score in each document — review the weakest first.' : undefined
+                  }
                   actions={
-                    <Button iconName="refresh" onClick={() => fetchPage(currentPageIndex, pageTokens)} disabled={isLoading}>
-                      Refresh
-                    </Button>
+                    <SpaceBetween direction="horizontal" size="xs">
+                      {hasConfidence && (
+                        <Button onClick={() => setWorstFirst((prev) => !prev)}>{worstFirst ? 'Sort by name' : 'Sort worst-first'}</Button>
+                      )}
+                      <Button
+                        iconName="gen-ai"
+                        onClick={handleGenerateDraftLabels}
+                        loading={isStartingLabels}
+                        disabled={isLoading || labelJob?.status === 'RUNNING'}
+                      >
+                        Generate draft labels
+                      </Button>
+                      <Button iconName="refresh" onClick={() => fetchPage(currentPageIndex, pageTokens)} disabled={isLoading}>
+                        Refresh
+                      </Button>
+                    </SpaceBetween>
                   }
                 >
                   Documents
@@ -174,6 +316,18 @@ const TestSetDetail = (): React.JSX.Element => {
                   sortingField: 'objectKey',
                 },
                 {
+                  id: 'labelSource',
+                  header: 'Labels',
+                  cell: (item: TestSetDocumentItem) => renderLabelSource(item.labelSource),
+                  sortingField: 'labelSource',
+                },
+                {
+                  id: 'minConfidence',
+                  header: 'Confidence',
+                  cell: (item: TestSetDocumentItem) => renderConfidence(item.minConfidence),
+                  sortingField: 'minConfidence',
+                },
+                {
                   id: 'size',
                   header: 'Size',
                   cell: (item: TestSetDocumentItem) => formatSize(item.size),
@@ -189,7 +343,7 @@ const TestSetDetail = (): React.JSX.Element => {
                   cell: (item: TestSetDocumentItem) => item.sections.length,
                 },
               ]}
-              items={filteredDocs}
+              items={visibleDocs}
               loading={isLoading}
               loadingText="Loading documents"
               trackBy="inputKey"

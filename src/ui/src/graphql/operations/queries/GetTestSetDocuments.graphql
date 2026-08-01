@@ -9,6 +9,8 @@ query GetTestSetDocuments($testSetId: String!, $limit: Int, $nextToken: String, 
         sectionId
         baselineKey
       }
+      labelSource
+      minConfidence
     }
     nextToken
   }

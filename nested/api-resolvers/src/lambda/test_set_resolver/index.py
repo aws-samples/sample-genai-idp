@@ -1,3 +1,4 @@
+import concurrent.futures
 import json
 import logging
 import os
@@ -97,6 +98,10 @@ def handler(event, context):
         return publish_test_set_version(event['arguments'], event)
     elif field_name == 'getTestSetVersions':
         return get_test_set_versions(event['arguments'])
+    elif field_name == 'generateDraftLabels':
+        return generate_draft_labels(event['arguments'], event)
+    elif field_name == 'getDraftLabelJob':
+        return get_draft_label_job(event['arguments'])
     elif field_name == 'listBucketFiles':
         return list_bucket_files(event['arguments'])
     elif field_name == 'validateTestFileName':
@@ -552,6 +557,363 @@ def publish_test_set_version(args, event=None):
     return result
 
 
+# ---------------------------------------------------------------------------
+# Draft labeling: run the active config over a test set's documents to produce
+# machine-generated ground-truth candidates ("draft labels") with per-field
+# confidence, which a human then reviews and confirms.
+#
+# This deliberately reuses the *scoring* pipeline rather than a second
+# extraction path: startTestRun already copies the set's inputs into the
+# pipeline, and the pipeline already emits inference_result plus per-field
+# confidence in explainability_info. Reimplementing OCR/classify/extract/assess
+# here would duplicate that orchestration and let the confidence semantics
+# drift from the ones real scoring runs (and the estimator) rely on. So a
+# labeling job is an ordinary test run whose results are harvested back into the
+# test set's baseline/ prefix as draft labels.
+#
+# The job item is SK='labeljob#<testRunId>' under the test set's PK, so jobs are
+# listable per set and expire with it.
+# ---------------------------------------------------------------------------
+
+LABEL_SOURCE_DRAFT = 'draft-machine'
+LABEL_SOURCE_HUMAN = 'reviewed-human'
+
+
+def _label_job_sk(test_run_id):
+    return f"labeljob#{test_run_id}"
+
+
+def generate_draft_labels(args, event=None):
+    """Start a labeling job: run the active config over a test set's documents.
+
+    Returns immediately with a jobId (the underlying test run id); the caller
+    polls getDraftLabelJob, which harvests results as documents finish. Existing
+    labels are only replaced when they are themselves machine drafts, so
+    re-running never clobbers reviewed or hand-uploaded ground truth.
+    """
+    input_data = args.get('input', args)
+    test_set_id = input_data['testSetId']
+    config_version = input_data.get('configVersion')
+    object_keys = input_data.get('objectKeys') or []
+
+    if not validate_test_set_name(test_set_id):
+        raise Exception("Invalid test set id")
+
+    meta = db_client.get_item({'PK': f'testset#{test_set_id}', 'SK': 'metadata'})
+    if not meta:
+        raise Exception(f"Test set '{test_set_id}' not found")
+
+    file_count = int(meta.get('fileCount', 0) or 0)
+    if file_count <= 0:
+        raise Exception(
+            f"Test set '{test_set_id}' has no documents to label"
+        )
+
+    # Delegate the run itself to the test runner (single owner of run creation,
+    # config capture and version pinning) via a direct Lambda invoke.
+    #
+    # objectKeys is NOT translated into the runner's numberOfFiles: that takes the
+    # *first* N files of the set, which are not necessarily the ones asked for, so
+    # it would label the wrong documents. The run therefore covers the whole set
+    # and the harvest filters to the requested keys — correct, at the cost of
+    # processing documents whose labels are then discarded. Genuine per-document
+    # labeling needs a runner that accepts an explicit file list.
+    runner_arn = os.environ['TEST_RUNNER_FUNCTION_ARN']
+    run_input = {'testSetId': test_set_id, 'context': 'Draft labeling run'}
+    if config_version:
+        run_input['configVersion'] = config_version
+
+    lambda_client = boto3.client('lambda')
+    response = lambda_client.invoke(
+        FunctionName=runner_arn,
+        InvocationType='RequestResponse',
+        # No 'identity' key: this is a trusted service-to-service invoke, and the
+        # caller was already authorized for generateDraftLabels above.
+        Payload=json.dumps(
+            {'info': {'fieldName': 'startTestRun'}, 'arguments': {'input': run_input}}
+        ).encode('utf-8'),
+    )
+    payload = json.loads(response['Payload'].read() or b'{}')
+    if response.get('FunctionError'):
+        raise Exception(f"Failed to start labeling run: {payload}")
+
+    test_run_id = payload['testRunId']
+    now = datetime.utcnow().isoformat() + 'Z'
+    started_by = None
+    if event:
+        started_by = (
+            (event.get('identity') or {}).get('claims', {}).get('email')
+        )
+
+    job_item = {
+        'PK': f'testset#{test_set_id}',
+        'SK': _label_job_sk(test_run_id),
+        'ItemType': 'testset_label_job',
+        'testSetId': test_set_id,
+        'jobId': test_run_id,
+        'status': 'RUNNING',
+        'configVersion': config_version,
+        'total': len(object_keys) or file_count,
+        'labeled': 0,
+        'objectKeys': object_keys,
+        'createdAt': now,
+        'startedBy': started_by,
+    }
+    db_client.put_item(job_item)
+
+    # Mark the set as actively being labeled so the UI can show progress even if
+    # the user navigates away and comes back.
+    db_client.update_item(
+        key={'PK': f'testset#{test_set_id}', 'SK': 'metadata'},
+        update_expression='SET labelJobId = :j, labelJobStatus = :s',
+        expression_attribute_values={':j': test_run_id, ':s': 'RUNNING'},
+    )
+
+    logger.info(
+        f"Started draft-labeling job {test_run_id} for test set {test_set_id} "
+        f"({job_item['total']} document(s), configVersion={config_version})"
+    )
+    return _label_job_to_result(job_item)
+
+
+def _label_job_to_result(item):
+    return {
+        'jobId': item.get('jobId'),
+        'testSetId': item.get('testSetId'),
+        'status': item.get('status'),
+        'total': int(item.get('total', 0) or 0),
+        'labeled': int(item.get('labeled', 0) or 0),
+        'configVersion': item.get('configVersion'),
+        'error': item.get('error'),
+        'createdAt': item.get('createdAt'),
+        'completedAt': item.get('completedAt'),
+    }
+
+
+def get_draft_label_job(args):
+    """Poll a labeling job, harvesting any newly-finished documents.
+
+    Progress is computed by harvesting on read rather than from a subscription:
+    test-run completion in this system is already poll-based (the results
+    resolver recounts doc items on read), so there is no completion event to
+    hook. Harvesting here keeps the primitive self-contained and idempotent.
+    """
+    test_set_id = args['testSetId']
+    job_id = args['jobId']
+
+    job = db_client.get_item(
+        {'PK': f'testset#{test_set_id}', 'SK': _label_job_sk(job_id)}
+    )
+    if not job:
+        raise Exception(f"Labeling job '{job_id}' not found")
+
+    if job.get('status') in ('COMPLETED', 'FAILED'):
+        return _label_job_to_result(job)
+
+    return _label_job_to_result(_harvest_label_job(job))
+
+
+def _min_confidence(explainability_info):
+    """Lowest per-field confidence in an explainability_info payload.
+
+    The shape is nested and irregular — ``{field: {"confidence": 0.9}}`` for
+    scalars, lists of such dicts for tables — so walk it and collect every
+    ``confidence`` leaf rather than assuming a depth. Returns None when the
+    payload carries no confidence at all (e.g. assessment disabled), so callers
+    can distinguish "no confidence data" from "confidence 0".
+    """
+    found = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            value = node.get('confidence')
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                found.append(float(value))
+            for key, child in node.items():
+                if key != 'confidence':
+                    walk(child)
+        elif isinstance(node, list):
+            for child in node:
+                walk(child)
+
+    walk(explainability_info)
+    return min(found) if found else None
+
+
+def _harvest_label_job(job):
+    """Copy finished pipeline results into the test set's baseline as drafts.
+
+    For each of the run's documents whose processing has completed, read the
+    section extraction results the pipeline wrote and store them at
+    ``{test_set_id}/baseline/<doc>/sections/<n>/result.json`` — the same layout
+    the ground-truth editor and scoring already read — tagged
+    ``labelSource=draft-machine`` with the per-field confidence preserved.
+
+    Idempotent and non-destructive: a document already carrying a human-reviewed
+    label is skipped, so re-harvesting (or re-running a job) never overwrites
+    confirmed ground truth.
+    """
+    test_set_id = job['testSetId']
+    job_id = job['jobId']
+    test_set_bucket = os.environ['TEST_SET_BUCKET']
+    tracking_table = boto3.resource('dynamodb').Table(os.environ['TRACKING_TABLE'])
+
+    run = tracking_table.get_item(
+        Key={'PK': f'testrun#{job_id}', 'SK': 'metadata'}
+    ).get('Item')
+    if not run:
+        return _fail_label_job(job, f"Labeling run '{job_id}' not found")
+    if run.get('Status') == 'FAILED':
+        return _fail_label_job(job, run.get('Error') or 'Labeling run failed')
+
+    wanted = set(job.get('objectKeys') or [])
+    files = [f for f in (run.get('Files') or []) if not wanted or f in wanted]
+
+    labeled = 0
+    pending = 0
+    for file_name in files:
+        doc = tracking_table.get_item(
+            Key={'PK': f'doc#{job_id}/{file_name}', 'SK': 'none'}
+        ).get('Item')
+        if not doc or doc.get('ObjectStatus') != 'COMPLETED':
+            pending += 1
+            continue
+
+        try:
+            if _write_draft_labels_for_doc(
+                test_set_bucket, test_set_id, file_name, doc.get('Sections') or []
+            ):
+                labeled += 1
+        except Exception as e:  # noqa: BLE001 — one bad doc must not fail the job
+            logger.error(
+                f"Draft labeling: failed to harvest '{file_name}' "
+                f"for job {job_id}: {e}"
+            )
+
+    status = 'RUNNING' if pending else 'COMPLETED'
+    now = datetime.utcnow().isoformat() + 'Z'
+    update_expr = 'SET #st = :s, labeled = :n'
+    expr_values = {':s': status, ':n': labeled}
+    if status == 'COMPLETED':
+        update_expr += ', completedAt = :c'
+        expr_values[':c'] = now
+
+    db_client.update_item(
+        key={'PK': f'testset#{test_set_id}', 'SK': _label_job_sk(job_id)},
+        update_expression=update_expr,
+        expression_attribute_names={'#st': 'status'},
+        expression_attribute_values=expr_values,
+    )
+
+    meta_expr = 'SET labelJobStatus = :s'
+    meta_values = {':s': status}
+    if status == 'COMPLETED':
+        # The set now carries machine labels; publishing freezes them as-is and
+        # flags them as unreviewed.
+        meta_expr += ', labelState = :ls'
+        meta_values[':ls'] = 'draft'
+    db_client.update_item(
+        key={'PK': f'testset#{test_set_id}', 'SK': 'metadata'},
+        update_expression=meta_expr,
+        expression_attribute_values=meta_values,
+    )
+
+    logger.info(
+        f"Draft labeling job {job_id}: labeled={labeled} pending={pending} "
+        f"status={status}"
+    )
+    updated = dict(job)
+    updated.update({'status': status, 'labeled': labeled})
+    if status == 'COMPLETED':
+        updated['completedAt'] = now
+    return updated
+
+
+def _write_draft_labels_for_doc(test_set_bucket, test_set_id, file_name, sections):
+    """Write one document's sections into the test-set baseline as draft labels.
+
+    Returns True if anything was written. Sections already reviewed by a human
+    are left untouched.
+    """
+    wrote = False
+    for section in sections:
+        section_id = str(section.get('Id') or section.get('SectionId') or '')
+        output_uri = section.get('OutputJSONUri') or ''
+        if not section_id or not output_uri.startswith('s3://'):
+            continue
+
+        baseline_key = (
+            f"{test_set_id}/baseline/{file_name}/sections/{section_id}/result.json"
+        )
+        if _existing_label_is_human(test_set_bucket, baseline_key):
+            logger.info(
+                f"Draft labeling: keeping reviewed label at {baseline_key}"
+            )
+            continue
+
+        src_bucket, src_key = output_uri[len('s3://'):].split('/', 1)
+        body = s3_client.get_object(Bucket=src_bucket, Key=src_key)['Body'].read()
+        result = json.loads(body)
+
+        explainability = result.get('explainability_info')
+        min_conf = _min_confidence(explainability)
+        result['labelSource'] = LABEL_SOURCE_DRAFT
+        if min_conf is not None:
+            result['minConfidence'] = min_conf
+
+        s3_client.put_object(
+            Bucket=test_set_bucket,
+            Key=baseline_key,
+            Body=json.dumps(result, indent=2).encode('utf-8'),
+            ContentType='application/json',
+        )
+        wrote = True
+
+    return wrote
+
+
+def _existing_label_is_human(bucket, key):
+    """True if an existing baseline label must not be overwritten by a draft.
+
+    Anything already present counts as human-owned **unless** it is explicitly
+    tagged as a machine draft. A hand-uploaded baseline carries no labelSource at
+    all, and treating that as writable would let draft labeling silently destroy
+    the ground truth a user supplied — so absence of the tag is protective, not
+    permissive. Only a prior draft-machine label is safe to replace.
+    """
+    try:
+        body = s3_client.get_object(Bucket=bucket, Key=key)['Body'].read()
+    except Exception:
+        return False  # No existing label (or unreadable) — safe to write.
+    try:
+        return json.loads(body).get('labelSource') != LABEL_SOURCE_DRAFT
+    except Exception:
+        # Existing but unparseable: leave it alone rather than clobbering data we
+        # can't inspect.
+        return True
+
+
+def _fail_label_job(job, message):
+    db_client.update_item(
+        key={
+            'PK': f"testset#{job['testSetId']}",
+            'SK': _label_job_sk(job['jobId']),
+        },
+        update_expression='SET #st = :s, #er = :e',
+        expression_attribute_names={'#st': 'status', '#er': 'error'},
+        expression_attribute_values={':s': 'FAILED', ':e': message},
+    )
+    db_client.update_item(
+        key={'PK': f"testset#{job['testSetId']}", 'SK': 'metadata'},
+        update_expression='SET labelJobStatus = :s',
+        expression_attribute_values={':s': 'FAILED'},
+    )
+    logger.error(f"Draft labeling job {job['jobId']} failed: {message}")
+    updated = dict(job)
+    updated.update({'status': 'FAILED', 'error': message})
+    return updated
+
+
 def remove_documents_from_test_set(args):
     """Remove named documents from a test set (delete input + baseline objects).
 
@@ -593,8 +955,11 @@ def remove_documents_from_test_set(args):
                 )
             removed += 1
 
-    # Recount remaining inputs and update the metadata pointer.
-    validation = _validate_test_set_files(s3_client, test_set_bucket, test_set_id)
+    # Recount remaining inputs and update the metadata pointer. Only the count
+    # is used here, and an unlabeled set must still recount correctly.
+    validation = _validate_test_set_files(
+        s3_client, test_set_bucket, test_set_id, allow_unlabeled=True
+    )
     new_count = validation.get('input_count', 0)
     tracking_table = boto3.resource('dynamodb').Table(os.environ['TRACKING_TABLE'])
     tracking_table.update_item(
@@ -822,6 +1187,9 @@ def get_test_sets():
             'source': item.get('source'),  # 'uploaded' | 'synthetic'; None for pre-existing records
             'latestVersion': item.get('latestVersion'),  # highest published version (None if never published)
             'activeReference': item.get('activeReference'),  # version scoring runs compare against
+            'labelState': item.get('labelState'),  # 'unlabeled' | 'draft' | 'labeled'; None for pre-existing records
+            'labelJobId': item.get('labelJobId'),
+            'labelJobStatus': item.get('labelJobStatus'),
             'status': item.get('status'),
             'createdAt': item['createdAt'],
             'error': item.get('error'),  # Include error message for failed test sets
@@ -854,15 +1222,20 @@ def get_test_sets():
                 if prefix in existing_test_sets:
                     continue
                 
-                # Check if this looks like a test set (has input/ and baseline/ folders)
+                # Check if this looks like a test set (has an input/ folder)
                 if _is_valid_test_set_structure(s3_client, test_set_bucket, prefix):
                     logger.info(f"Found direct upload test set: {prefix}")
 
                     # Get creation timestamp from first file in the test set
                     created_at = _get_test_set_creation_time(s3_client, test_set_bucket, prefix)
 
-                    # Validate file matching and get counts
-                    validation_result = _validate_test_set_files(s3_client, test_set_bucket, prefix)
+                    # Validate file matching and get counts. A set with no
+                    # baseline at all is valid-but-unlabeled (the
+                    # upload-documents-only on-ramp), so it registers and can be
+                    # draft-labeled rather than being rejected as FAILED.
+                    validation_result = _validate_test_set_files(
+                        s3_client, test_set_bucket, prefix, allow_unlabeled=True
+                    )
 
                     # Source: synthetic generator drops a '.source' marker; otherwise a user upload
                     source = _get_test_set_source(s3_client, test_set_bucket, prefix)
@@ -870,6 +1243,9 @@ def get_test_sets():
                     # Create tracking entry
                     status = 'COMPLETED' if validation_result['valid'] else 'FAILED'
                     error_message = validation_result.get('error')
+                    label_state = (
+                        'labeled' if validation_result.get('labeled') else 'unlabeled'
+                    )
 
                     _create_test_set_tracking_entry(
                         prefix,
@@ -878,7 +1254,8 @@ def get_test_sets():
                         status,
                         error_message,
                         created_at,
-                        source
+                        source,
+                        label_state,
                     )
 
                     # Add to results
@@ -889,6 +1266,7 @@ def get_test_sets():
                         'filePattern': '',
                         'fileCount': validation_result['input_count'],
                         'source': source,
+                        'labelState': label_state,
                         'status': status,
                         'createdAt': created_at,
                         'documentClassType': None
@@ -1035,6 +1413,8 @@ def get_test_set_documents(args):
                 else (1, s['sectionId'])
             )
 
+        _attach_label_metadata(test_set_bucket, documents)
+
     result = {
         'documents': documents,
         'nextToken': response.get('NextContinuationToken'),
@@ -1046,13 +1426,86 @@ def get_test_set_documents(args):
     return result
 
 
+def _attach_label_metadata(test_set_bucket, documents):
+    """Add labelSource + minConfidence to each document on a page.
+
+    The label state lives inside each section's baseline result.json, so this
+    reads them — bounded to one page of documents (<=1000 sections) and fetched
+    concurrently, since the calls are pure I/O and would otherwise serialize
+    into a slow page load. A document's confidence is the *minimum* across its
+    sections' fields: worst-first review should surface a document because of
+    its weakest field, not an average that hides it.
+
+    Best-effort per section: an unreadable result.json leaves that section out
+    rather than failing the whole listing.
+    """
+    tasks = []
+    for doc in documents:
+        for section in doc['sections']:
+            tasks.append((doc, section['baselineKey']))
+    if not tasks:
+        for doc in documents:
+            doc['labelSource'] = None
+            doc['minConfidence'] = None
+        return
+
+    def read(key):
+        try:
+            body = s3_client.get_object(Bucket=test_set_bucket, Key=key)['Body'].read()
+            return json.loads(body)
+        except Exception as e:  # noqa: BLE001 — best-effort enrichment
+            logger.warning(f"Could not read baseline label {key}: {e}")
+            return None
+
+    per_doc = {id(doc): {'sources': [], 'confidences': []} for doc, _ in tasks}
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(len(tasks), 16)
+    ) as executor:
+        results = executor.map(lambda t: (t[0], read(t[1])), tasks)
+        for doc, result in results:
+            if not result:
+                continue
+            bucket_for_doc = per_doc[id(doc)]
+            bucket_for_doc['sources'].append(
+                result.get('labelSource') or LABEL_SOURCE_HUMAN
+            )
+            confidence = result.get('minConfidence')
+            if confidence is None:
+                confidence = _min_confidence(result.get('explainability_info'))
+            if confidence is not None:
+                bucket_for_doc['confidences'].append(float(confidence))
+
+    for doc in documents:
+        collected = per_doc.get(id(doc), {'sources': [], 'confidences': []})
+        sources = collected['sources']
+        confidences = collected['confidences']
+        # A document counts as reviewed only when every section is.
+        if not sources:
+            doc['labelSource'] = None
+        elif all(s == LABEL_SOURCE_HUMAN for s in sources):
+            doc['labelSource'] = LABEL_SOURCE_HUMAN
+        elif any(s == LABEL_SOURCE_DRAFT for s in sources):
+            doc['labelSource'] = LABEL_SOURCE_DRAFT
+        else:
+            doc['labelSource'] = sources[0]
+        doc['minConfidence'] = min(confidences) if confidences else None
+
+
 def _is_valid_test_set_structure(s3_client, bucket, prefix):
-    """Check if prefix contains input/ and baseline/ folders.
-    
+    """Check if prefix contains an input/ folder (baseline/ optional).
+
     Also checks for a .uploading marker file which indicates the CLI is still
     uploading files. This prevents a race condition where the resolver auto-detects
     and validates a test set before all files (especially baselines) are uploaded.
     See: https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/193
+
+    baseline/ is NOT required: a set uploaded as documents-only is a legitimate
+    unlabeled set awaiting generateDraftLabels. Requiring it here made such sets
+    invisible to discovery entirely. The .uploading marker (written by the CLI
+    and the UI upload path) is what protects against reading a half-done upload,
+    so dropping the baseline requirement doesn't reintroduce that race. A
+    partially-labeled set is still reported as FAILED by
+    _validate_test_set_files.
     """
     try:
         # Check for upload-in-progress marker
@@ -1069,29 +1522,27 @@ def _is_valid_test_set_structure(s3_client, bucket, prefix):
             Prefix=f"{prefix}/input/",
             MaxKeys=1
         )
-        
-        # Check for baseline/ folder  
-        baseline_response = s3_client.list_objects_v2(
-            Bucket=bucket,
-            Prefix=f"{prefix}/baseline/",
-            MaxKeys=1
-        )
-        
-        has_input = input_response.get('KeyCount', 0) > 0
-        has_baseline = baseline_response.get('KeyCount', 0) > 0
-        
-        return has_input and has_baseline
-        
+
+        return input_response.get('KeyCount', 0) > 0
+
+
     except Exception as e:
         logger.error(f"Error checking test set structure for {prefix}: {str(e)}")
         return False
 
-def _validate_test_set_files(s3_client, bucket, prefix):
+def _validate_test_set_files(s3_client, bucket, prefix, allow_unlabeled=False):
     """Validate that input and baseline files match.
-    
+
     Each input file must have a corresponding baseline folder with the exact same name
     (including extension). For example, input file 'doc.png' requires baseline folder 'doc.png/'.
     Any file extension is supported, and mixed extensions within a test set are allowed.
+
+    ``allow_unlabeled=True`` permits a set with **no** baseline files at all —
+    the "upload documents only, then draft-label them" on-ramp. Such a set is
+    valid but unlabeled: generateDraftLabels runs the active config over it to
+    produce machine labels, which a human then reviews. A *partially* labeled
+    set is still an error either way, since that indicates a botched upload
+    rather than a deliberate label-later flow.
     """
     try:
         input_files = set()
@@ -1124,6 +1575,12 @@ def _validate_test_set_files(s3_client, bucket, prefix):
             return {'valid': False, 'error': 'No input files found', 'input_count': 0}
         
         if len(baseline_files) == 0:
+            if allow_unlabeled:
+                return {
+                    'valid': True,
+                    'input_count': len(input_files),
+                    'labeled': False,
+                }
             return {'valid': False, 'error': 'No baseline files found', 'input_count': len(input_files)}
         
         missing_baselines = input_files - baseline_files
@@ -1142,8 +1599,8 @@ def _validate_test_set_files(s3_client, bucket, prefix):
                 'input_count': len(input_files)
             }
         
-        return {'valid': True, 'input_count': len(input_files)}
-        
+        return {'valid': True, 'input_count': len(input_files), 'labeled': True}
+
     except Exception as e:
         logger.error(f"Error validating test set files for {prefix}: {str(e)}")
         return {'valid': False, 'error': f'Validation error: {str(e)}', 'input_count': 0}
@@ -1174,7 +1631,7 @@ def _get_test_set_source(s3_client, bucket, prefix):
         return 'uploaded'
 
 
-def _create_test_set_tracking_entry(test_set_id, name, file_count, status, error=None, created_at=None, source=None):
+def _create_test_set_tracking_entry(test_set_id, name, file_count, status, error=None, created_at=None, source=None, label_state=None):
     """Create tracking table entry for direct upload test set"""
     try:
         now = datetime.utcnow().isoformat() + 'Z'
@@ -1194,6 +1651,8 @@ def _create_test_set_tracking_entry(test_set_id, name, file_count, status, error
 
         if source:
             item['source'] = source
+        if label_state:
+            item['labelState'] = label_state
         if error:
             item['error'] = error
 

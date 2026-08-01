@@ -80,3 +80,124 @@ def test_path_extraction_edge_cases():
         dest_key = f"{test_set_id}/input/{file_key}"
 
     assert dest_key == "test-set-1/input/malformed/path.pdf"
+
+
+# --- Unlabeled test sets (the draft-labeling on-ramp) ----------------------
+#
+# The copier is invoked for every test run, including a draft-labeling run over
+# a set that has no baseline yet. It used to raise "All baseline files failed to
+# copy" whenever zero baseline files were copied, which made any unlabeled run
+# fail before the pipeline ever started.
+
+
+def _load_copier():
+    """Import the copier lambda by path (it lives outside the package)."""
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve()
+    for parent in root.parents:
+        if (parent / "src" / "lambda" / "test_file_copier").is_dir():
+            path = parent / "src" / "lambda" / "test_file_copier" / "index.py"
+            break
+    else:
+        raise RuntimeError("Could not locate src/lambda/test_file_copier")
+
+    spec = importlib.util.spec_from_file_location("test_file_copier_index", path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["test_file_copier_index"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.fixture
+def copier_env(monkeypatch):
+    monkeypatch.setenv("TEST_SET_BUCKET", "test-set-bucket")
+    monkeypatch.setenv("INPUT_BUCKET", "input-bucket")
+    monkeypatch.setenv("BASELINE_BUCKET", "baseline-bucket")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    return _load_copier()
+
+
+def _copier_event():
+    import json
+
+    return {
+        "Records": [
+            {
+                "body": json.dumps(
+                    {
+                        "testRunId": "ts1-run",
+                        "testSetId": "ts1",
+                        "trackingTable": "test-table",
+                    }
+                )
+            }
+        ]
+    }
+
+
+@pytest.mark.unit
+def test_unlabeled_set_does_not_fail_the_run(copier_env, monkeypatch):
+    """A set with no baseline is being labeled, not failing."""
+    copier = copier_env
+    statuses = []
+
+    monkeypatch.setattr(
+        copier,
+        "_list_test_set_files",
+        lambda bucket, tsid, folder: ["a.pdf"] if folder == "input" else [],
+    )
+    monkeypatch.setattr(copier, "_update_tracking_in_progress", lambda *a, **k: None)
+    monkeypatch.setattr(
+        copier,
+        "_copy_files_to_bucket",
+        lambda src, sp, dst, dp, files, cv=None: list(files),
+    )
+    monkeypatch.setattr(
+        copier,
+        "_update_test_run_status",
+        lambda table, run, status, error=None, failed_count=None: statuses.append(
+            (status, error)
+        ),
+    )
+
+    copier.handler(_copier_event(), None)
+
+    assert statuses == [], f"unlabeled run should not be marked failed: {statuses}"
+
+
+@pytest.mark.unit
+def test_failed_baseline_copies_still_fail_the_run(copier_env, monkeypatch):
+    """When baselines exist but none copy, that is still a real failure."""
+    copier = copier_env
+    statuses = []
+
+    monkeypatch.setattr(
+        copier,
+        "_list_test_set_files",
+        lambda bucket, tsid, folder: ["a.pdf"]
+        if folder == "input"
+        else ["a.pdf/sections/1/result.json"],
+    )
+    monkeypatch.setattr(copier, "_update_tracking_in_progress", lambda *a, **k: None)
+    monkeypatch.setattr(
+        copier,
+        "_copy_files_to_bucket",
+        # Input copies fine; every baseline copy fails.
+        lambda src, sp, dst, dp, files, cv=None: [] if "baseline" in sp else list(files),
+    )
+    monkeypatch.setattr(
+        copier,
+        "_update_test_run_status",
+        lambda table, run, status, error=None, failed_count=None: statuses.append(
+            (status, error)
+        ),
+    )
+
+    copier.handler(_copier_event(), None)
+
+    assert statuses and statuses[0][0] == "FAILED"
+    assert "baseline" in statuses[0][1]

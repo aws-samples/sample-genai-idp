@@ -427,6 +427,18 @@ export type DocumentVersionFile = {
   VersionId?: Maybe<Scalars['String']['output']>;
 };
 
+export type DraftLabelJob = {
+  completedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  configVersion?: Maybe<Scalars['String']['output']>;
+  createdAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  error?: Maybe<Scalars['String']['output']>;
+  jobId: Scalars['String']['output'];
+  labeled?: Maybe<Scalars['Int']['output']>;
+  status: Scalars['String']['output'];
+  testSetId: Scalars['String']['output'];
+  total?: Maybe<Scalars['Int']['output']>;
+};
+
 export type DynamoDbBase = {
   ExpiresAfter?: Maybe<Scalars['AWSTimestamp']['output']>;
   PK: Scalars['ID']['output'];
@@ -533,6 +545,12 @@ export type FinetuningJobStatus =
   | 'STOPPING'
   | 'TRAINING'
   | 'VALIDATING';
+
+export type GenerateDraftLabelsInput = {
+  configVersion?: InputMaybe<Scalars['String']['input']>;
+  objectKeys?: InputMaybe<Array<Scalars['String']['input']>>;
+  testSetId: Scalars['String']['input'];
+};
 
 /**
  * A feature installed in this IDP stack via AWS Marketplace (or the simulator).
@@ -671,6 +689,7 @@ export type Mutation = {
   deleteTestSets: Scalars['Boolean']['output'];
   deleteTests: Scalars['Boolean']['output'];
   deleteUser?: Maybe<Scalars['Boolean']['output']>;
+  generateDraftLabels?: Maybe<DraftLabelJob>;
   pauseCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   probeCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   processChanges: ProcessChangesResponse;
@@ -892,6 +911,11 @@ export type MutationDeleteTestsArgs = {
 
 export type MutationDeleteUserArgs = {
   userId: Scalars['ID']['input'];
+};
+
+
+export type MutationGenerateDraftLabelsArgs = {
+  input: GenerateDraftLabelsInput;
 };
 
 
@@ -1264,6 +1288,7 @@ export type Query = {
   getDocument?: Maybe<Document>;
   getDocumentCount?: Maybe<DocumentCount>;
   getDocumentVersion?: Maybe<DocumentVersion>;
+  getDraftLabelJob?: Maybe<DraftLabelJob>;
   /**
    * Admin-only: get a CloudFormation Console quick-create URL for installing or updating a feature.
    * Returns null when EnableFeaturePlatform=false (no resolver attached).
@@ -1383,6 +1408,12 @@ export type QueryGetDocumentCountArgs = {
 export type QueryGetDocumentVersionArgs = {
   objectKey: Scalars['ID']['input'];
   runId: Scalars['String']['input'];
+};
+
+
+export type QueryGetDraftLabelJobArgs = {
+  jobId: Scalars['String']['input'];
+  testSetId: Scalars['String']['input'];
 };
 
 
@@ -1755,6 +1786,9 @@ export type TestSet = {
   fileCount?: Maybe<Scalars['Int']['output']>;
   filePattern?: Maybe<Scalars['String']['output']>;
   id: Scalars['String']['output'];
+  labelJobId?: Maybe<Scalars['String']['output']>;
+  labelJobStatus?: Maybe<Scalars['String']['output']>;
+  labelState?: Maybe<Scalars['String']['output']>;
   lastAddResult?: Maybe<Scalars['String']['output']>;
   latestVersion?: Maybe<Scalars['Int']['output']>;
   name: Scalars['String']['output'];
@@ -1764,7 +1798,9 @@ export type TestSet = {
 
 export type TestSetDocument = {
   inputKey: Scalars['String']['output'];
+  labelSource?: Maybe<Scalars['String']['output']>;
   lastModified?: Maybe<Scalars['AWSDateTime']['output']>;
+  minConfidence?: Maybe<Scalars['Float']['output']>;
   objectKey: Scalars['String']['output'];
   sections: Array<TestSetDocumentSection>;
   size?: Maybe<Scalars['Int']['output']>;

@@ -427,6 +427,18 @@ export type DocumentVersionFile = {
   VersionId?: Maybe<Scalars['String']['output']>;
 };
 
+export type DraftLabelJob = {
+  completedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  configVersion?: Maybe<Scalars['String']['output']>;
+  createdAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  error?: Maybe<Scalars['String']['output']>;
+  jobId: Scalars['String']['output'];
+  labeled?: Maybe<Scalars['Int']['output']>;
+  status: Scalars['String']['output'];
+  testSetId: Scalars['String']['output'];
+  total?: Maybe<Scalars['Int']['output']>;
+};
+
 export type DynamoDbBase = {
   ExpiresAfter?: Maybe<Scalars['AWSTimestamp']['output']>;
   PK: Scalars['ID']['output'];
@@ -533,6 +545,12 @@ export type FinetuningJobStatus =
   | 'STOPPING'
   | 'TRAINING'
   | 'VALIDATING';
+
+export type GenerateDraftLabelsInput = {
+  configVersion?: InputMaybe<Scalars['String']['input']>;
+  objectKeys?: InputMaybe<Array<Scalars['String']['input']>>;
+  testSetId: Scalars['String']['input'];
+};
 
 /**
  * A feature installed in this IDP stack via AWS Marketplace (or the simulator).
@@ -671,6 +689,7 @@ export type Mutation = {
   deleteTestSets: Scalars['Boolean']['output'];
   deleteTests: Scalars['Boolean']['output'];
   deleteUser?: Maybe<Scalars['Boolean']['output']>;
+  generateDraftLabels?: Maybe<DraftLabelJob>;
   pauseCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   probeCircuitBreaker?: Maybe<CircuitBreakerStatus>;
   processChanges: ProcessChangesResponse;
@@ -892,6 +911,11 @@ export type MutationDeleteTestsArgs = {
 
 export type MutationDeleteUserArgs = {
   userId: Scalars['ID']['input'];
+};
+
+
+export type MutationGenerateDraftLabelsArgs = {
+  input: GenerateDraftLabelsInput;
 };
 
 
@@ -1264,6 +1288,7 @@ export type Query = {
   getDocument?: Maybe<Document>;
   getDocumentCount?: Maybe<DocumentCount>;
   getDocumentVersion?: Maybe<DocumentVersion>;
+  getDraftLabelJob?: Maybe<DraftLabelJob>;
   /**
    * Admin-only: get a CloudFormation Console quick-create URL for installing or updating a feature.
    * Returns null when EnableFeaturePlatform=false (no resolver attached).
@@ -1383,6 +1408,12 @@ export type QueryGetDocumentCountArgs = {
 export type QueryGetDocumentVersionArgs = {
   objectKey: Scalars['ID']['input'];
   runId: Scalars['String']['input'];
+};
+
+
+export type QueryGetDraftLabelJobArgs = {
+  jobId: Scalars['String']['input'];
+  testSetId: Scalars['String']['input'];
 };
 
 
@@ -1755,6 +1786,9 @@ export type TestSet = {
   fileCount?: Maybe<Scalars['Int']['output']>;
   filePattern?: Maybe<Scalars['String']['output']>;
   id: Scalars['String']['output'];
+  labelJobId?: Maybe<Scalars['String']['output']>;
+  labelJobStatus?: Maybe<Scalars['String']['output']>;
+  labelState?: Maybe<Scalars['String']['output']>;
   lastAddResult?: Maybe<Scalars['String']['output']>;
   latestVersion?: Maybe<Scalars['Int']['output']>;
   name: Scalars['String']['output'];
@@ -1764,7 +1798,9 @@ export type TestSet = {
 
 export type TestSetDocument = {
   inputKey: Scalars['String']['output'];
+  labelSource?: Maybe<Scalars['String']['output']>;
   lastModified?: Maybe<Scalars['AWSDateTime']['output']>;
+  minConfidence?: Maybe<Scalars['Float']['output']>;
   objectKey: Scalars['String']['output'];
   sections: Array<TestSetDocumentSection>;
   size?: Maybe<Scalars['Int']['output']>;
@@ -2103,6 +2139,13 @@ export type DeleteUserMutationVariables = Exact<{
 
 export type DeleteUserMutation = { deleteUser?: boolean | null };
 
+export type GenerateDraftLabelsMutationVariables = Exact<{
+  input: GenerateDraftLabelsInput;
+}>;
+
+
+export type GenerateDraftLabelsMutation = { generateDraftLabels?: { jobId: string, testSetId: string, status: string, total?: number | null, labeled?: number | null, configVersion?: string | null, error?: string | null, createdAt?: string | null, completedAt?: string | null } | null };
+
 export type PauseCircuitBreakerMutationVariables = Exact<{
   reason: Scalars['String']['input'];
 }>;
@@ -2422,6 +2465,14 @@ export type GetDocumentVersionQueryVariables = Exact<{
 
 export type GetDocumentVersionQuery = { getDocumentVersion?: { RunId: string, ObjectKey?: string | null, CompletionTime?: string | null, QueuedTime?: string | null, WorkflowStartTime?: string | null, WorkflowExecutionArn?: string | null, ConfigVersion?: string | null, PageCount?: number | null, FileCount?: number | null, ManifestUri?: string | null, SummaryReportUri?: string | null, EvaluationReportUri?: string | null, Metering?: string | null, Sections?: Array<{ Id?: string | null, PageIds?: Array<number | null> | null, Class?: string | null, OutputJSONUri?: string | null, ConfidenceThresholdAlerts?: Array<{ attributeName?: string | null, confidence?: number | null, confidenceThreshold?: number | null } | null> | null, ProcessingIssues?: Array<{ stage?: string | null, severity?: string | null, code?: string | null, message?: string | null, rootCause?: string | null } | null> | null } | null> | null, Pages?: Array<{ Id?: number | null, Class?: string | null, ImageUri?: string | null, TextUri?: string | null, OcrPageDataUri?: string | null } | null> | null, Files?: Array<{ Key?: string | null, VersionId?: string | null, Size?: number | null } | null> | null } | null };
 
+export type GetDraftLabelJobQueryVariables = Exact<{
+  testSetId: Scalars['String']['input'];
+  jobId: Scalars['String']['input'];
+}>;
+
+
+export type GetDraftLabelJobQuery = { getDraftLabelJob?: { jobId: string, testSetId: string, status: string, total?: number | null, labeled?: number | null, configVersion?: string | null, error?: string | null, createdAt?: string | null, completedAt?: string | null } | null };
+
 export type GetFileContentsQueryVariables = Exact<{
   s3Uri: Scalars['String']['input'];
   versionId?: InputMaybe<Scalars['String']['input']>;
@@ -2510,7 +2561,7 @@ export type GetTestSetDocumentsQueryVariables = Exact<{
 }>;
 
 
-export type GetTestSetDocumentsQuery = { getTestSetDocuments?: { nextToken?: string | null, documents: Array<{ objectKey: string, inputKey: string, size?: number | null, lastModified?: string | null, sections: Array<{ sectionId: string, baselineKey: string }> }> } | null };
+export type GetTestSetDocumentsQuery = { getTestSetDocuments?: { nextToken?: string | null, documents: Array<{ objectKey: string, inputKey: string, size?: number | null, lastModified?: string | null, labelSource?: string | null, minConfidence?: number | null, sections: Array<{ sectionId: string, baselineKey: string }> }> } | null };
 
 export type GetTestSetVersionsQueryVariables = Exact<{
   testSetId: Scalars['String']['input'];
@@ -2522,7 +2573,7 @@ export type GetTestSetVersionsQuery = { getTestSetVersions?: Array<{ testSetId: 
 export type GetTestSetsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetTestSetsQuery = { getTestSets?: Array<{ id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, source?: string | null, latestVersion?: number | null, activeReference?: number | null, status?: string | null, createdAt: string, error?: string | null, lastAddResult?: string | null, documentClassType?: DocumentClassType | null } | null> | null };
+export type GetTestSetsQuery = { getTestSets?: Array<{ id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, source?: string | null, latestVersion?: number | null, activeReference?: number | null, labelState?: string | null, labelJobId?: string | null, labelJobStatus?: string | null, status?: string | null, createdAt: string, error?: string | null, lastAddResult?: string | null, documentClassType?: DocumentClassType | null } | null> | null };
 
 export type ListAgentJobsQueryVariables = Exact<{
   limit?: InputMaybe<Scalars['Int']['input']>;

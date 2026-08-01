@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 from unittest.mock import MagicMock, Mock, patch
 
@@ -80,21 +81,132 @@ def publish_table():
             BillingMode="PAY_PER_REQUEST",
         )
 
-        def _get_item(key):
-            return table.get_item(Key=key).get("Item")
-
-        def _put_item(item, condition_expression=None):
-            kwargs = {"Item": item}
-            if condition_expression:
-                kwargs["ConditionExpression"] = condition_expression
-            return table.put_item(**kwargs)
-
-        with patch.object(
-            test_set_index.db_client, "get_item", side_effect=_get_item
-        ), patch.object(
-            test_set_index.db_client, "put_item", side_effect=_put_item
-        ):
+        with _db_client_on(table):
             yield table
+
+
+def _db_client_on(table):
+    """Point the resolver's mocked db_client at a real moto table."""
+
+    def _get_item(key):
+        return table.get_item(Key=key).get("Item")
+
+    def _put_item(item, condition_expression=None):
+        kwargs = {"Item": item}
+        if condition_expression:
+            kwargs["ConditionExpression"] = condition_expression
+        return table.put_item(**kwargs)
+
+    def _update_item(
+        key,
+        update_expression,
+        expression_attribute_names=None,
+        expression_attribute_values=None,
+        return_values="ALL_NEW",
+    ):
+        kwargs = {
+            "Key": key,
+            "UpdateExpression": update_expression,
+            "ReturnValues": return_values,
+        }
+        if expression_attribute_names:
+            kwargs["ExpressionAttributeNames"] = expression_attribute_names
+        if expression_attribute_values:
+            kwargs["ExpressionAttributeValues"] = expression_attribute_values
+        return table.update_item(**kwargs)
+
+    return _MultiPatch(
+        patch.object(test_set_index.db_client, "get_item", side_effect=_get_item),
+        patch.object(test_set_index.db_client, "put_item", side_effect=_put_item),
+        patch.object(test_set_index.db_client, "update_item", side_effect=_update_item),
+    )
+
+
+class _MultiPatch:
+    """Enter/exit several patches as one context manager."""
+
+    def __init__(self, *patches):
+        self._patches = patches
+
+    def __enter__(self):
+        for p in self._patches:
+            p.start()
+        return self
+
+    def __exit__(self, *exc):
+        for p in reversed(self._patches):
+            p.stop()
+        return False
+
+
+@pytest.fixture
+def labeling_env():
+    """Real (moto) DynamoDB + S3 for the draft-labeling primitive.
+
+    The harvester's whole job is moving JSON between real S3 keys and deciding
+    what to overwrite, so mocked S3 clients would assert on call shapes instead
+    of the actual outcome. Yields (table, s3_client).
+    """
+    region_env = {
+        "AWS_DEFAULT_REGION": "us-east-1",
+        "AWS_REGION": "us-east-1",
+        "TRACKING_TABLE": "test-table",
+        "TEST_SET_BUCKET": "test-set-bucket",
+        "TEST_RUNNER_FUNCTION_ARN": "arn:aws:lambda:us-east-1:123456789012:function:runner",
+    }
+    with mock_aws(), patch.dict(os.environ, region_env):
+        ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        table = ddb.create_table(
+            TableName="test-table",
+            KeySchema=[
+                {"AttributeName": "PK", "KeyType": "HASH"},
+                {"AttributeName": "SK", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "PK", "AttributeType": "S"},
+                {"AttributeName": "SK", "AttributeType": "S"},
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket="test-set-bucket")
+        s3.create_bucket(Bucket="output-bucket")
+
+        with _db_client_on(table), patch.object(test_set_index, "s3_client", s3):
+            yield table, s3
+
+
+def _seed_pipeline_result(s3, key, inference, explainability=None):
+    """Write a pipeline section extraction result to the output bucket."""
+    body = {"inference_result": inference}
+    if explainability is not None:
+        body["explainability_info"] = explainability
+    s3.put_object(
+        Bucket="output-bucket", Key=key, Body=json.dumps(body).encode("utf-8")
+    )
+    return f"s3://output-bucket/{key}"
+
+
+def _seed_completed_run(table, job_id, test_set_id, files, sections_by_file):
+    """Write a finished test run plus its per-document items."""
+    table.put_item(
+        Item={
+            "PK": f"testrun#{job_id}",
+            "SK": "metadata",
+            "TestSetId": test_set_id,
+            "Files": files,
+            "Status": "RUNNING",
+        }
+    )
+    for file_name in files:
+        table.put_item(
+            Item={
+                "PK": f"doc#{job_id}/{file_name}",
+                "SK": "none",
+                "ObjectStatus": "COMPLETED",
+                "Sections": sections_by_file.get(file_name, []),
+            }
+        )
 
 
 @pytest.mark.unit
@@ -881,3 +993,358 @@ class TestTestSetResolver:
                 test_set_index.remove_documents_from_test_set(
                     {"testSetId": "ghost", "fileNames": ["a.pdf"]}
                 )
+
+    # -- Unlabeled sets (the draft-labeling on-ramp) -----------------------
+
+    def test_validation_allows_a_set_with_no_baseline_when_opted_in(self):
+        """'Upload documents only' is a valid set awaiting draft labels."""
+        s3 = Mock()
+        s3.get_paginator.return_value.paginate.side_effect = lambda **kw: (
+            [{"Contents": [{"Key": "ts1/input/a.pdf"}, {"Key": "ts1/input/b.pdf"}]}]
+            if "input" in kw["Prefix"]
+            else [{}]
+        )
+
+        strict = test_set_index._validate_test_set_files(s3, "bucket", "ts1")
+        assert strict["valid"] is False
+        assert strict["error"] == "No baseline files found"
+
+        relaxed = test_set_index._validate_test_set_files(
+            s3, "bucket", "ts1", allow_unlabeled=True
+        )
+        assert relaxed["valid"] is True
+        assert relaxed["labeled"] is False
+        assert relaxed["input_count"] == 2
+
+    def test_validation_still_rejects_a_partially_labeled_set(self):
+        """A missing baseline for *some* docs is a botched upload, not a flow."""
+        s3 = Mock()
+        s3.get_paginator.return_value.paginate.side_effect = lambda **kw: (
+            [{"Contents": [{"Key": "ts1/input/a.pdf"}, {"Key": "ts1/input/b.pdf"}]}]
+            if "input" in kw["Prefix"]
+            else [
+                {"Contents": [{"Key": "ts1/baseline/a.pdf/sections/1/result.json"}]}
+            ]
+        )
+        result = test_set_index._validate_test_set_files(
+            s3, "bucket", "ts1", allow_unlabeled=True
+        )
+        assert result["valid"] is False
+        assert "b.pdf" in result["error"]
+
+    def test_structure_check_no_longer_requires_a_baseline_folder(self):
+        """Discovery must see documents-only sets, not skip them entirely."""
+        s3 = Mock()
+        s3.head_object.side_effect = Exception("no .uploading marker")
+        s3.list_objects_v2.return_value = {"KeyCount": 1}
+        assert test_set_index._is_valid_test_set_structure(s3, "bucket", "ts1") is True
+        # Only the input/ prefix is consulted now.
+        prefixes = [c.kwargs["Prefix"] for c in s3.list_objects_v2.call_args_list]
+        assert prefixes == ["ts1/input/"]
+
+    # -- Draft labeling ---------------------------------------------------
+
+    def test_min_confidence_walks_nested_explainability(self):
+        """Confidence leaves are nested irregularly; take the true minimum."""
+        payload = [
+            {
+                "vendor": {"confidence": 0.95},
+                "line_items": [
+                    {"amount": {"confidence": 0.71}},
+                    {"amount": {"confidence": 0.88}},
+                ],
+            }
+        ]
+        assert test_set_index._min_confidence(payload) == 0.71
+        # No confidence anywhere is distinct from confidence 0.
+        assert test_set_index._min_confidence({"vendor": {}}) is None
+        assert test_set_index._min_confidence(None) is None
+
+    def test_min_confidence_ignores_booleans(self):
+        """A bool is an int in Python; it must not be read as a score."""
+        assert test_set_index._min_confidence({"f": {"confidence": True}}) is None
+
+    def test_generate_draft_labels_delegates_to_the_test_runner(self, labeling_env):
+        table, _ = labeling_env
+        _seed_test_set(table, "ts1", fileCount=2)
+
+        lambda_client = MagicMock()
+        lambda_client.invoke.return_value = {
+            "Payload": Mock(read=lambda: json.dumps({"testRunId": "ts1-run"}).encode())
+        }
+        with patch.object(test_set_index.boto3, "client", return_value=lambda_client):
+            result = test_set_index.generate_draft_labels(
+                {"input": {"testSetId": "ts1"}},
+                {"identity": {"claims": {"email": "me@example.com"}}},
+            )
+
+        assert result["jobId"] == "ts1-run"
+        assert result["status"] == "RUNNING"
+        assert result["total"] == 2
+        # The run is created by the test runner (one owner of config capture and
+        # version pinning), invoked without an identity as a trusted service call.
+        payload = json.loads(lambda_client.invoke.call_args.kwargs["Payload"])
+        assert payload["info"]["fieldName"] == "startTestRun"
+        assert payload["arguments"]["input"]["testSetId"] == "ts1"
+        assert "identity" not in payload
+        # Job item recorded under the test set, and the set marked as labeling.
+        job = table.get_item(
+            Key={"PK": "testset#ts1", "SK": "labeljob#ts1-run"}
+        )["Item"]
+        assert job["startedBy"] == "me@example.com"
+        meta = table.get_item(Key={"PK": "testset#ts1", "SK": "metadata"})["Item"]
+        assert meta["labelJobStatus"] == "RUNNING"
+
+    def test_generate_draft_labels_rejects_an_empty_test_set(self, labeling_env):
+        table, _ = labeling_env
+        _seed_test_set(table, "ts1", fileCount=0)
+        with pytest.raises(Exception, match="no documents to label"):
+            test_set_index.generate_draft_labels({"input": {"testSetId": "ts1"}})
+
+    def test_harvest_writes_draft_labels_with_confidence(self, labeling_env):
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        uri = _seed_pipeline_result(
+            s3,
+            "ts1-run/a.pdf/sections/1/result.json",
+            {"vendor": "Acme"},
+            [{"vendor": {"confidence": 0.42}}],
+        )
+        _seed_completed_run(
+            table,
+            "ts1-run",
+            "ts1",
+            ["a.pdf"],
+            {"a.pdf": [{"Id": "1", "OutputJSONUri": uri}]},
+        )
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#ts1-run",
+                "testSetId": "ts1",
+                "jobId": "ts1-run",
+                "status": "RUNNING",
+                "total": 1,
+                "labeled": 0,
+            }
+        )
+
+        result = test_set_index.get_draft_label_job(
+            {"testSetId": "ts1", "jobId": "ts1-run"}
+        )
+
+        assert result["status"] == "COMPLETED"
+        assert result["labeled"] == 1
+        # Written to the baseline layout the GT editor and scoring already read.
+        body = json.loads(
+            s3.get_object(
+                Bucket="test-set-bucket",
+                Key="ts1/baseline/a.pdf/sections/1/result.json",
+            )["Body"].read()
+        )
+        assert body["inference_result"] == {"vendor": "Acme"}
+        assert body["labelSource"] == "draft-machine"
+        assert body["minConfidence"] == 0.42
+        meta = table.get_item(Key={"PK": "testset#ts1", "SK": "metadata"})["Item"]
+        assert meta["labelState"] == "draft"
+
+    def test_harvest_never_overwrites_a_human_reviewed_label(self, labeling_env):
+        """Re-running draft labeling must not destroy confirmed ground truth."""
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        reviewed = {
+            "inference_result": {"vendor": "Corrected By Human"},
+            "labelSource": "reviewed-human",
+        }
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/a.pdf/sections/1/result.json",
+            Body=json.dumps(reviewed).encode(),
+        )
+        uri = _seed_pipeline_result(
+            s3, "ts1-run/a.pdf/sections/1/result.json", {"vendor": "Machine Guess"}
+        )
+        _seed_completed_run(
+            table,
+            "ts1-run",
+            "ts1",
+            ["a.pdf"],
+            {"a.pdf": [{"Id": "1", "OutputJSONUri": uri}]},
+        )
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#ts1-run",
+                "testSetId": "ts1",
+                "jobId": "ts1-run",
+                "status": "RUNNING",
+                "total": 1,
+                "labeled": 0,
+            }
+        )
+
+        test_set_index.get_draft_label_job({"testSetId": "ts1", "jobId": "ts1-run"})
+
+        body = json.loads(
+            s3.get_object(
+                Bucket="test-set-bucket",
+                Key="ts1/baseline/a.pdf/sections/1/result.json",
+            )["Body"].read()
+        )
+        assert body["inference_result"] == {"vendor": "Corrected By Human"}
+        assert body["labelSource"] == "reviewed-human"
+
+    def test_harvest_treats_an_uploaded_baseline_as_human_owned(self, labeling_env):
+        """A hand-uploaded baseline has no labelSource; never silently replace it."""
+        table, s3 = labeling_env
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/a.pdf/sections/1/result.json",
+            Body=json.dumps({"inference_result": {"vendor": "Uploaded GT"}}).encode(),
+        )
+        assert (
+            test_set_index._existing_label_is_human(
+                "test-set-bucket", "ts1/baseline/a.pdf/sections/1/result.json"
+            )
+            is True
+        )
+        # But a missing label is fair game.
+        assert (
+            test_set_index._existing_label_is_human("test-set-bucket", "ts1/nope.json")
+            is False
+        )
+        # And a previous machine draft is replaceable, so re-running picks up a
+        # newer config.
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/b.pdf/sections/1/result.json",
+            Body=json.dumps({"labelSource": "draft-machine"}).encode(),
+        )
+        assert (
+            test_set_index._existing_label_is_human(
+                "test-set-bucket", "ts1/baseline/b.pdf/sections/1/result.json"
+            )
+            is False
+        )
+
+    def test_harvest_stays_running_while_documents_are_pending(self, labeling_env):
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=2)
+        uri = _seed_pipeline_result(
+            s3, "ts1-run/a.pdf/sections/1/result.json", {"vendor": "Acme"}
+        )
+        _seed_completed_run(
+            table,
+            "ts1-run",
+            "ts1",
+            ["a.pdf", "b.pdf"],
+            {"a.pdf": [{"Id": "1", "OutputJSONUri": uri}]},
+        )
+        # b.pdf hasn't finished processing yet.
+        table.put_item(
+            Item={
+                "PK": "doc#ts1-run/b.pdf",
+                "SK": "none",
+                "ObjectStatus": "RUNNING",
+                "Sections": [],
+            }
+        )
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#ts1-run",
+                "testSetId": "ts1",
+                "jobId": "ts1-run",
+                "status": "RUNNING",
+                "total": 2,
+                "labeled": 0,
+            }
+        )
+
+        result = test_set_index.get_draft_label_job(
+            {"testSetId": "ts1", "jobId": "ts1-run"}
+        )
+        assert result["status"] == "RUNNING"
+        assert result["labeled"] == 1
+
+    def test_harvest_marks_the_job_failed_when_the_run_fails(self, labeling_env):
+        table, _ = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        table.put_item(
+            Item={
+                "PK": "testrun#ts1-run",
+                "SK": "metadata",
+                "TestSetId": "ts1",
+                "Files": ["a.pdf"],
+                "Status": "FAILED",
+                "Error": "pipeline exploded",
+            }
+        )
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#ts1-run",
+                "testSetId": "ts1",
+                "jobId": "ts1-run",
+                "status": "RUNNING",
+                "total": 1,
+                "labeled": 0,
+            }
+        )
+
+        result = test_set_index.get_draft_label_job(
+            {"testSetId": "ts1", "jobId": "ts1-run"}
+        )
+        assert result["status"] == "FAILED"
+        assert result["error"] == "pipeline exploded"
+        meta = table.get_item(Key={"PK": "testset#ts1", "SK": "metadata"})["Item"]
+        assert meta["labelJobStatus"] == "FAILED"
+
+    def test_get_draft_label_job_unknown_job_raises(self, labeling_env):
+        table, _ = labeling_env
+        _seed_test_set(table, "ts1")
+        with pytest.raises(Exception, match="Labeling job 'nope' not found"):
+            test_set_index.get_draft_label_job({"testSetId": "ts1", "jobId": "nope"})
+
+    def test_attach_label_metadata_takes_the_worst_field_and_source(self, labeling_env):
+        """A document's confidence is its weakest field, across all sections."""
+        _, s3 = labeling_env
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/a.pdf/sections/1/result.json",
+            Body=json.dumps(
+                {
+                    "labelSource": "reviewed-human",
+                    "explainability_info": [{"f": {"confidence": 0.99}}],
+                }
+            ).encode(),
+        )
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/a.pdf/sections/2/result.json",
+            Body=json.dumps(
+                {
+                    "labelSource": "draft-machine",
+                    "explainability_info": [{"f": {"confidence": 0.31}}],
+                }
+            ).encode(),
+        )
+        documents = [
+            {
+                "objectKey": "a.pdf",
+                "sections": [
+                    {"sectionId": "1", "baselineKey": "ts1/baseline/a.pdf/sections/1/result.json"},
+                    {"sectionId": "2", "baselineKey": "ts1/baseline/a.pdf/sections/2/result.json"},
+                ],
+            },
+            {"objectKey": "b.pdf", "sections": []},
+        ]
+
+        test_set_index._attach_label_metadata("test-set-bucket", documents)
+
+        # Any draft section means the document is not fully reviewed.
+        assert documents[0]["labelSource"] == "draft-machine"
+        assert documents[0]["minConfidence"] == 0.31
+        # No sections at all = unlabeled, not "confident".
+        assert documents[1]["labelSource"] is None
+        assert documents[1]["minConfidence"] is None

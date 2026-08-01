@@ -76,11 +76,14 @@ def handler(event, context):
             # Check if all files failed to copy
             if len(successful_input_files) == 0:
                 raise ValueError("All input files failed to copy")
-            
-            # Check if all baseline files failed to copy
-            if len(successful_baseline_files) == 0:
+
+            # A set with no baseline at all is an unlabeled set being run to
+            # produce draft labels — nothing to copy, so this is not a failure.
+            # Only treat it as one when baselines existed but every copy failed.
+            if baseline_files and len(successful_baseline_files) == 0:
                 raise ValueError("All baseline files failed to copy")
-            
+
+
             # Update failed files count
             input_failed_count = len(input_files) - len(successful_input_files)
             

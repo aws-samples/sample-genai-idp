@@ -465,6 +465,17 @@
         }
       ]
     },
+    "generateDraftLabels": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "input",
+          "non_null": true,
+          "type": "GenerateDraftLabelsInput"
+        }
+      ]
+    },
     "getAgentChatMessages": {
       "args": [
         {
@@ -582,6 +593,24 @@
           "elem_non_null": false,
           "is_list": false,
           "name": "runId",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
+    "getDraftLabelJob": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "testSetId",
+          "non_null": true,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "jobId",
           "non_null": true,
           "type": "String"
         }
@@ -2187,6 +2216,29 @@
         "is_list": false,
         "name": "contentType",
         "non_null": true,
+        "type": "String"
+      }
+    ],
+    "GenerateDraftLabelsInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "testSetId",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "configVersion",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": true,
+        "is_list": true,
+        "name": "objectKeys",
+        "non_null": false,
         "type": "String"
       }
     ],

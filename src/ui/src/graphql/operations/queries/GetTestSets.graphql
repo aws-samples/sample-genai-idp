@@ -8,6 +8,9 @@ query GetTestSets {
     source
     latestVersion
     activeReference
+    labelState
+    labelJobId
+    labelJobStatus
     status
     createdAt
     error
