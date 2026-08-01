@@ -713,14 +713,13 @@ def get_draft_label_job(args):
     return _label_job_to_result(_harvest_label_job(job))
 
 
-def _min_confidence(explainability_info):
-    """Lowest per-field confidence in an explainability_info payload.
+def _walk_confidence(explainability_info):
+    """Collect (confidence, confidence_threshold) pairs from explainability_info.
 
     The shape is nested and irregular — ``{field: {"confidence": 0.9}}`` for
-    scalars, lists of such dicts for tables — so walk it and collect every
-    ``confidence`` leaf rather than assuming a depth. Returns None when the
-    payload carries no confidence at all (e.g. assessment disabled), so callers
-    can distinguish "no confidence data" from "confidence 0".
+    scalars, nested dicts for compound fields (``PayPeriod.StartDate``), lists of
+    such dicts for tables — so walk it and collect every ``confidence`` leaf
+    rather than assuming a depth.
     """
     found = []
 
@@ -728,7 +727,12 @@ def _min_confidence(explainability_info):
         if isinstance(node, dict):
             value = node.get('confidence')
             if isinstance(value, (int, float)) and not isinstance(value, bool):
-                found.append(float(value))
+                threshold = node.get('confidence_threshold')
+                if not isinstance(threshold, (int, float)) or isinstance(
+                    threshold, bool
+                ):
+                    threshold = None
+                found.append((float(value), threshold))
             for key, child in node.items():
                 if key != 'confidence':
                     walk(child)
@@ -737,7 +741,33 @@ def _min_confidence(explainability_info):
                 walk(child)
 
     walk(explainability_info)
-    return min(found) if found else None
+    return found
+
+
+def _min_confidence(explainability_info):
+    """Lowest per-field confidence in an explainability_info payload.
+
+    Returns None when the payload carries no confidence at all (e.g. assessment
+    disabled), so callers can distinguish "no confidence data" from
+    "confidence 0".
+    """
+    found = _walk_confidence(explainability_info)
+    return min(c for c, _ in found) if found else None
+
+
+def _confidence_threshold(explainability_info):
+    """The configured alert threshold for the weakest field, if it carries one.
+
+    Reported alongside minConfidence so the UI can color against the *config's*
+    threshold instead of hardcoded bands — a 0.85 confidence is failing under a
+    0.9 threshold and passing under 0.8, and inventing constants in the UI would
+    contradict the assessment config on both.
+    """
+    found = _walk_confidence(explainability_info)
+    if not found:
+        return None
+    # Tie to the same field minConfidence reports.
+    return min(found, key=lambda pair: pair[0])[1]
 
 
 def _harvest_label_job(job):
@@ -860,6 +890,9 @@ def _write_draft_labels_for_doc(test_set_bucket, test_set_id, file_name, section
         result['labelSource'] = LABEL_SOURCE_DRAFT
         if min_conf is not None:
             result['minConfidence'] = min_conf
+            threshold = _confidence_threshold(explainability)
+            if threshold is not None:
+                result['confidenceThreshold'] = threshold
 
         s3_client.put_object(
             Bucket=test_set_bucket,
@@ -1447,6 +1480,7 @@ def _attach_label_metadata(test_set_bucket, documents):
         for doc in documents:
             doc['labelSource'] = None
             doc['minConfidence'] = None
+            doc['confidenceThreshold'] = None
         return
 
     def read(key):
@@ -1473,7 +1507,14 @@ def _attach_label_metadata(test_set_bucket, documents):
             if confidence is None:
                 confidence = _min_confidence(result.get('explainability_info'))
             if confidence is not None:
-                bucket_for_doc['confidences'].append(float(confidence))
+                threshold = result.get('confidenceThreshold')
+                if threshold is None:
+                    threshold = _confidence_threshold(
+                        result.get('explainability_info')
+                    )
+                bucket_for_doc['confidences'].append(
+                    (float(confidence), threshold)
+                )
 
     for doc in documents:
         collected = per_doc.get(id(doc), {'sources': [], 'confidences': []})
@@ -1488,7 +1529,13 @@ def _attach_label_metadata(test_set_bucket, documents):
             doc['labelSource'] = LABEL_SOURCE_DRAFT
         else:
             doc['labelSource'] = sources[0]
-        doc['minConfidence'] = min(confidences) if confidences else None
+        if confidences:
+            worst, threshold = min(confidences, key=lambda pair: pair[0])
+            doc['minConfidence'] = worst
+            doc['confidenceThreshold'] = threshold
+        else:
+            doc['minConfidence'] = None
+            doc['confidenceThreshold'] = None
 
 
 def _is_valid_test_set_structure(s3_client, bucket, prefix):

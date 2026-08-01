@@ -1797,6 +1797,7 @@ export type TestSet = {
 };
 
 export type TestSetDocument = {
+  confidenceThreshold?: Maybe<Scalars['Float']['output']>;
   inputKey: Scalars['String']['output'];
   labelSource?: Maybe<Scalars['String']['output']>;
   lastModified?: Maybe<Scalars['AWSDateTime']['output']>;

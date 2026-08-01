@@ -1797,6 +1797,7 @@ export type TestSet = {
 };
 
 export type TestSetDocument = {
+  confidenceThreshold?: Maybe<Scalars['Float']['output']>;
   inputKey: Scalars['String']['output'];
   labelSource?: Maybe<Scalars['String']['output']>;
   lastModified?: Maybe<Scalars['AWSDateTime']['output']>;
@@ -2561,7 +2562,7 @@ export type GetTestSetDocumentsQueryVariables = Exact<{
 }>;
 
 
-export type GetTestSetDocumentsQuery = { getTestSetDocuments?: { nextToken?: string | null, documents: Array<{ objectKey: string, inputKey: string, size?: number | null, lastModified?: string | null, labelSource?: string | null, minConfidence?: number | null, sections: Array<{ sectionId: string, baselineKey: string }> }> } | null };
+export type GetTestSetDocumentsQuery = { getTestSetDocuments?: { nextToken?: string | null, documents: Array<{ objectKey: string, inputKey: string, size?: number | null, lastModified?: string | null, labelSource?: string | null, minConfidence?: number | null, confidenceThreshold?: number | null, sections: Array<{ sectionId: string, baselineKey: string }> }> } | null };
 
 export type GetTestSetVersionsQueryVariables = Exact<{
   testSetId: Scalars['String']['input'];

@@ -725,6 +725,9 @@ type TestSetDocument @aws_cognito_user_pools @aws_iam {
   # across the document's sections, for worst-first review ordering.
   labelSource: String
   minConfidence: Float
+  # The assessment config's alert threshold for the weakest field, so the UI can
+  # color confidence against the configured bar rather than hardcoded bands.
+  confidenceThreshold: Float
 }
 
 type TestSetDocumentsPage @aws_cognito_user_pools @aws_iam {

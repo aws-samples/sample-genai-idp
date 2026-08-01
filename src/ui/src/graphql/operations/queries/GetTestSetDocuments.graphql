@@ -11,6 +11,7 @@ query GetTestSetDocuments($testSetId: String!, $limit: Int, $nextToken: String, 
       }
       labelSource
       minConfidence
+      confidenceThreshold
     }
     nextToken
   }

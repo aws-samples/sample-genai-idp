@@ -1066,6 +1066,47 @@ class TestTestSetResolver:
         """A bool is an int in Python; it must not be read as a score."""
         assert test_set_index._min_confidence({"f": {"confidence": True}}) is None
 
+    def test_min_confidence_handles_the_real_pipeline_shape(self):
+        """Compound fields nest another level (PayPeriod.StartDate on a payslip).
+
+        Shape captured from a live stack's explainability_info, where confidence
+        sits beside confidence_threshold/geometry/ocr_confidence — none of which
+        may be mistaken for the score.
+        """
+        payload = [
+            {
+                "EmployeeName": {
+                    "confidence": 0.999,
+                    "confidence_threshold": 0.8,
+                    "geometry": [{"boundingBox": {"left": 0.07}, "page": 1}],
+                    "geometry_source": "ocr",
+                    "ocr_confidence": 0.999,
+                },
+                "PayPeriod": {
+                    "StartDate": {"confidence": 0.994, "confidence_threshold": 0.8},
+                    "EndDate": {"confidence": 0.998, "confidence_threshold": 0.8},
+                },
+            }
+        ]
+        assert test_set_index._min_confidence(payload) == 0.994
+        assert test_set_index._confidence_threshold(payload) == 0.8
+
+    def test_confidence_threshold_tracks_the_weakest_field(self):
+        """The reported threshold must belong to the field minConfidence reports."""
+        payload = [
+            {
+                "a": {"confidence": 0.99, "confidence_threshold": 0.5},
+                "b": {"confidence": 0.60, "confidence_threshold": 0.9},
+            }
+        ]
+        assert test_set_index._min_confidence(payload) == 0.60
+        assert test_set_index._confidence_threshold(payload) == 0.9
+        # Absent thresholds stay absent rather than defaulting server-side.
+        assert (
+            test_set_index._confidence_threshold([{"a": {"confidence": 0.6}}]) is None
+        )
+        assert test_set_index._confidence_threshold(None) is None
+
     def test_generate_draft_labels_delegates_to_the_test_runner(self, labeling_env):
         table, _ = labeling_env
         _seed_test_set(table, "ts1", fileCount=2)
@@ -1110,7 +1151,7 @@ class TestTestSetResolver:
             s3,
             "ts1-run/a.pdf/sections/1/result.json",
             {"vendor": "Acme"},
-            [{"vendor": {"confidence": 0.42}}],
+            [{"vendor": {"confidence": 0.42, "confidence_threshold": 0.8}}],
         )
         _seed_completed_run(
             table,
@@ -1147,6 +1188,7 @@ class TestTestSetResolver:
         assert body["inference_result"] == {"vendor": "Acme"}
         assert body["labelSource"] == "draft-machine"
         assert body["minConfidence"] == 0.42
+        assert body["confidenceThreshold"] == 0.8
         meta = table.get_item(Key={"PK": "testset#ts1", "SK": "metadata"})["Item"]
         assert meta["labelState"] == "draft"
 
@@ -1317,7 +1359,9 @@ class TestTestSetResolver:
             Body=json.dumps(
                 {
                     "labelSource": "reviewed-human",
-                    "explainability_info": [{"f": {"confidence": 0.99}}],
+                    "explainability_info": [
+                        {"f": {"confidence": 0.99, "confidence_threshold": 0.9}}
+                    ],
                 }
             ).encode(),
         )
@@ -1327,7 +1371,9 @@ class TestTestSetResolver:
             Body=json.dumps(
                 {
                     "labelSource": "draft-machine",
-                    "explainability_info": [{"f": {"confidence": 0.31}}],
+                    "explainability_info": [
+                        {"f": {"confidence": 0.31, "confidence_threshold": 0.7}}
+                    ],
                 }
             ).encode(),
         )
@@ -1353,6 +1399,9 @@ class TestTestSetResolver:
         # Any draft section means the document is not fully reviewed.
         assert documents[0]["labelSource"] == "draft-machine"
         assert documents[0]["minConfidence"] == 0.31
+        # The threshold reported is the weakest field's (section 2), not section 1's.
+        assert documents[0]["confidenceThreshold"] == 0.7
         # No sections at all = unlabeled, not "confident".
         assert documents[1]["labelSource"] is None
         assert documents[1]["minConfidence"] is None
+        assert documents[1]["confidenceThreshold"] is None

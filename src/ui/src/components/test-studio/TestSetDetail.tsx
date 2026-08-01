@@ -52,6 +52,7 @@ export interface TestSetDocumentItem {
   sections: TestSetDocumentSectionRef[];
   labelSource?: string | null;
   minConfidence?: number | null;
+  confidenceThreshold?: number | null;
 }
 
 /**
@@ -72,13 +73,26 @@ export const renderLabelSource = (labelSource?: string | null): React.JSX.Elemen
   return badge ? <Badge color={badge.color}>{badge.text}</Badge> : <Badge color="grey">{labelSource}</Badge>;
 };
 
-/** Confidence as a percentage, colored by band: red below 80%, amber below 95%. */
-export const renderConfidence = (value?: number | null): React.JSX.Element | string => {
+/**
+ * Confidence as a percentage, colored against the *configured* alert threshold:
+ * red below it, amber within 10 points above it, otherwise plain. Hardcoded bands
+ * would contradict the assessment config — with a 0.8 threshold a 0.85 field is
+ * passing, and with a 0.9 threshold it is failing. Falls back to 80% only when
+ * the result carries no threshold at all.
+ */
+const DEFAULT_CONFIDENCE_THRESHOLD_PCT = 80;
+const NEAR_THRESHOLD_MARGIN_PCT = 10;
+
+export const renderConfidence = (value?: number | null, threshold?: number | null): React.JSX.Element | string => {
   if (value === null || value === undefined) return '-';
   const pct = value <= 1 ? value * 100 : value;
-  const color = pct < 80 ? 'text-status-error' : pct < 95 ? 'text-status-warning' : 'text-status-success';
+  const rawThreshold = threshold ?? null;
+  const thresholdPct = rawThreshold === null ? DEFAULT_CONFIDENCE_THRESHOLD_PCT : rawThreshold <= 1 ? rawThreshold * 100 : rawThreshold;
+  const below = pct < thresholdPct;
+  const near = !below && pct < thresholdPct + NEAR_THRESHOLD_MARGIN_PCT;
+  const color = below ? 'text-status-error' : near ? 'text-status-warning' : 'text-status-success';
   return (
-    <Box color={color} fontWeight={pct < 95 ? 'bold' : 'normal'}>
+    <Box color={color} fontWeight={below ? 'bold' : 'normal'}>
       {pct.toFixed(1)}%
     </Box>
   );
@@ -324,7 +338,7 @@ const TestSetDetail = (): React.JSX.Element => {
                 {
                   id: 'minConfidence',
                   header: 'Confidence',
-                  cell: (item: TestSetDocumentItem) => renderConfidence(item.minConfidence),
+                  cell: (item: TestSetDocumentItem) => renderConfidence(item.minConfidence, item.confidenceThreshold),
                   sortingField: 'minConfidence',
                 },
                 {

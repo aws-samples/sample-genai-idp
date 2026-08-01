@@ -764,6 +764,7 @@ export const getTestSetDocuments = /* GraphQL */ `
         }
         labelSource
         minConfidence
+        confidenceThreshold
       }
       nextToken
     }
