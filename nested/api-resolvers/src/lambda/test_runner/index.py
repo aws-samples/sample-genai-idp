@@ -11,9 +11,9 @@ import boto3
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-s3 = boto3.client('s3')
-dynamodb = boto3.resource('dynamodb')
-sqs = boto3.client('sqs')
+s3 = boto3.client("s3")
+dynamodb = boto3.resource("dynamodb")
+sqs = boto3.client("sqs")
 
 # --- inline log sanitizer ---------------------------------------------------
 # Minimal inline redactor. Kept here rather than importing from idp_common to
@@ -21,8 +21,16 @@ sqs = boto3.client('sqs')
 # to need idp_common anyway, promote to
 # `from idp_common.utils.log_sanitizer import sanitize_event_for_logging`.
 _LOG_SENSITIVE_KEYS = (
-    "password", "secret", "token", "authorization", "apikey", "api_key",
-    "cookie", "credential", "claims", "identity",
+    "password",
+    "secret",
+    "token",
+    "authorization",
+    "apikey",
+    "api_key",
+    "cookie",
+    "credential",
+    "claims",
+    "identity",
 )
 
 
@@ -57,7 +65,9 @@ def _caller_in_groups(event, allowed):
 
 
 def handler(event, context):
-    logger.info(f"Test runner invoked with event: {json.dumps(_sanitize_for_log(event))}")
+    logger.info(
+        f"Test runner invoked with event: {json.dumps(_sanitize_for_log(event))}"
+    )
 
     try:
         # Defense-in-depth: startTestRun is an Admin+Author operation.
@@ -65,98 +75,127 @@ def handler(event, context):
         # AppSync invocations always have 'identity' with non-None value, so RBAC is still enforced for UI users.
         # Security: Direct invocation path is gated by IAM (lambda:InvokeFunction permission on this ARN),
         # not Cognito groups. CI/automation uses IAM credentials; UI users go through AppSync + Cognito.
-        is_appsync_invoke = event.get('identity') is not None
+        is_appsync_invoke = event.get("identity") is not None
         if is_appsync_invoke and not _caller_in_groups(event, ("Admin", "Author")):
             raise Exception(
                 "Unauthorized: this operation requires Admin or Author group"
             )
 
         # Route by GraphQL field. startTestRun is the default/legacy path.
-        field_name = event.get('info', {}).get('fieldName', 'startTestRun')
-        if field_name == 'sendTestRunToReview':
-            return send_test_run_to_review(event['arguments'])
+        field_name = event.get("info", {}).get("fieldName", "startTestRun")
+        if field_name == "sendTestRunToReview":
+            return send_test_run_to_review(event["arguments"])
 
-        input_data = event['arguments']['input']
-        test_set_id = input_data['testSetId']
-        test_context = input_data.get('context', '')
-        
+        input_data = event["arguments"]["input"]
+        test_set_id = input_data["testSetId"]
+        test_context = input_data.get("context", "")
+
         # Validate context length
         if test_context and len(test_context) > 500:
             raise Exception("Context cannot exceed 500 characters")
-        
-        number_of_files = input_data.get('numberOfFiles')
-        config_version = input_data.get('configVersion')
-        tracking_table = os.environ['TRACKING_TABLE']
-        config_table = os.environ['CONFIG_TABLE']
-        
+
+        number_of_files = input_data.get("numberOfFiles")
+        # Optional explicit document list. Unlike numberOfFiles (first N files of
+        # the set), this names exactly which documents to process — what draft
+        # labeling a subset requires.
+        object_keys = input_data.get("objectKeys") or []
+        config_version = input_data.get("configVersion")
+        tracking_table = os.environ["TRACKING_TABLE"]
+        config_table = os.environ["CONFIG_TABLE"]
+
         # Get test set
         test_set = _get_test_set(tracking_table, test_set_id)
         if not test_set:
             raise ValueError(f"Test set with ID '{test_set_id}' not found")
-        
+
         # Determine actual file count to process
-        test_set_file_count = test_set['fileCount']
+        test_set_file_count = test_set["fileCount"]
         files_to_process = test_set_file_count
-        
+
+        if object_keys:
+            if len(object_keys) > test_set_file_count:
+                raise ValueError(
+                    f"objectKeys ({len(object_keys)}) cannot exceed test set file "
+                    f"count ({test_set_file_count})"
+                )
+            files_to_process = len(object_keys)
+
         if number_of_files is not None:
             if number_of_files <= 0:
                 raise ValueError("numberOfFiles must be greater than 0")
             if number_of_files > test_set_file_count:
-                raise ValueError(f"numberOfFiles ({number_of_files}) cannot exceed test set file count ({test_set_file_count})")
-            files_to_process = number_of_files
-        
+                raise ValueError(
+                    f"numberOfFiles ({number_of_files}) cannot exceed test set file count ({test_set_file_count})"
+                )
+            files_to_process = min(number_of_files, files_to_process)
+
         # Create test run identifier using test set name
-        timestamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+        timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
         test_run_id = f"{test_set['name']}-{timestamp}"
-        
+
         # Capture config for the specified version or current active config
         config = _capture_config(config_table, config_version)
 
         # Pin the test set's active reference version this run scored against
         # (symmetric to ConfigVersion). None for sets that were never published,
         # so comparisons can distinguish config drift from ground-truth drift.
-        test_set_version = test_set.get('activeReference')
+        test_set_version = test_set.get("activeReference")
 
         # Store initial test run metadata
-        _store_test_run_metadata(tracking_table, test_run_id, test_set_id, test_set['name'], config, [], test_context, files_to_process, config_version, test_set_version)
-        
+        _store_test_run_metadata(
+            tracking_table,
+            test_run_id,
+            test_set_id,
+            test_set["name"],
+            config,
+            [],
+            test_context,
+            files_to_process,
+            config_version,
+            test_set_version,
+        )
+
         # Send file copying job to SQS queue
-        queue_url = os.environ['FILE_COPY_QUEUE_URL']
-        
+        queue_url = os.environ["FILE_COPY_QUEUE_URL"]
+
         message_body = {
-            'testRunId': test_run_id,
-            'testSetId': test_set_id,
-            'trackingTable': tracking_table
+            "testRunId": test_run_id,
+            "testSetId": test_set_id,
+            "trackingTable": tracking_table,
         }
-        
+
         # Only include numberOfFiles if it was specified
         if number_of_files is not None:
-            message_body['numberOfFiles'] = number_of_files
-            
+            message_body["numberOfFiles"] = number_of_files
+
+        # Explicit document list, when the caller named specific documents
+        if object_keys:
+            message_body["objectKeys"] = object_keys
+
         # Include configVersion if specified
         if config_version is not None:
-            message_body['configVersion'] = config_version
-        
-        sqs.send_message(
-            QueueUrl=queue_url,
-            MessageBody=json.dumps(message_body)
+            message_body["configVersion"] = config_version
+
+        sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps(message_body))
+
+        logger.info(
+            f"Queued test run {test_run_id} for test set {test_set_id} with {files_to_process} files"
         )
-        
-        logger.info(f"Queued test run {test_run_id} for test set {test_set_id} with {files_to_process} files")
-        
+
         # Return immediately
         return {
-            'testRunId': test_run_id,
-            'testSetName': test_set['name'],
-            'status': 'QUEUED',
-            'filesCount': files_to_process,
-            'completedFiles': 0,
-            'createdAt': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+            "testRunId": test_run_id,
+            "testSetName": test_set["name"],
+            "status": "QUEUED",
+            "filesCount": files_to_process,
+            "completedFiles": 0,
+            "createdAt": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ"),
         }
-        
+
     except Exception as e:
         logger.error(f"Error in test runner: {str(e)}")
         raise
+
 
 def send_test_run_to_review(args):
     """Mark a completed test run's documents for HITL review, on demand.
@@ -168,47 +207,48 @@ def send_test_run_to_review(args):
     confidence-only auto-trigger — the entry point for annotating a test set's
     ground truth. Only docs that actually have confidence alerts are queued.
     """
-    test_run_id = args['testRunId']
-    tracking_table = os.environ['TRACKING_TABLE']
+    test_run_id = args["testRunId"]
+    tracking_table = os.environ["TRACKING_TABLE"]
     table = dynamodb.Table(tracking_table)  # type: ignore[attr-defined]
 
-    run = table.get_item(
-        Key={'PK': f'testrun#{test_run_id}', 'SK': 'metadata'}
-    ).get('Item')
+    run = table.get_item(Key={"PK": f"testrun#{test_run_id}", "SK": "metadata"}).get(
+        "Item"
+    )
     if not run:
         raise ValueError(f"Test run '{test_run_id}' not found")
 
-    files = run.get('Files') or []
+    files = run.get("Files") or []
     queued = 0
     skipped = 0
     for file_name in files:
         object_key = f"{test_run_id}/{file_name}"
-        doc = table.get_item(
-            Key={'PK': f'doc#{object_key}', 'SK': 'none'}
-        ).get('Item')
+        doc = table.get_item(Key={"PK": f"doc#{object_key}", "SK": "none"}).get("Item")
         if not doc:
             skipped += 1
             continue
 
         # Only queue docs with confidence alerts, and never clobber a review
         # that's already completed/skipped.
-        alert_count = int(doc.get('ConfidenceAlertCount', 0) or 0)
-        status = doc.get('HITLStatus', '')
+        alert_count = int(doc.get("ConfidenceAlertCount", 0) or 0)
+        status = doc.get("HITLStatus", "")
         if alert_count <= 0 or status in (
-            'Review Completed', 'Review Skipped', 'Completed', 'Skipped'
+            "Review Completed",
+            "Review Skipped",
+            "Completed",
+            "Skipped",
         ):
             skipped += 1
             continue
 
         table.update_item(
-            Key={'PK': f'doc#{object_key}', 'SK': 'none'},
+            Key={"PK": f"doc#{object_key}", "SK": "none"},
             UpdateExpression=(
-                'SET HITLTriggered = :t, HITLStatus = :s, TestSetId = :tsid'
+                "SET HITLTriggered = :t, HITLStatus = :s, TestSetId = :tsid"
             ),
             ExpressionAttributeValues={
-                ':t': True,
-                ':s': 'PendingReview',
-                ':tsid': run.get('TestSetId'),
+                ":t": True,
+                ":s": "PendingReview",
+                ":tsid": run.get("TestSetId"),
             },
         )
         queued += 1
@@ -217,28 +257,26 @@ def send_test_run_to_review(args):
         f"send_test_run_to_review: run={test_run_id} queued={queued} skipped={skipped}"
     )
     return {
-        'testRunId': test_run_id,
-        'testSetId': run.get('TestSetId'),
-        'queuedCount': queued,
-        'skippedCount': skipped,
+        "testRunId": test_run_id,
+        "testSetId": run.get("TestSetId"),
+        "queuedCount": queued,
+        "skippedCount": skipped,
     }
 
 
 def _get_test_set(tracking_table, test_set_id):
     """Get test set by ID"""
     table = dynamodb.Table(tracking_table)  # type: ignore[attr-defined]
-    
+
     try:
         response = table.get_item(
-            Key={
-                'PK': f'testset#{test_set_id}',
-                'SK': 'metadata'
-            }
+            Key={"PK": f"testset#{test_set_id}", "SK": "metadata"}
         )
-        return response.get('Item')
+        return response.get("Item")
     except Exception as e:
         logger.error(f"Error getting test set {test_set_id}: {e}")
         return None
+
 
 def _decompress_config_item(item):
     """
@@ -247,23 +285,33 @@ def _decompress_config_item(item):
     """
     import gzip as _gzip
 
-    if item.get('_config_storage') != 'compressed':
+    if item.get("_config_storage") != "compressed":
         return item  # Legacy inline format — return as-is
 
-    compressed_data = item.get('_compressed_config')
+    compressed_data = item.get("_compressed_config")
     if compressed_data is None:
         return item
 
-    raw_bytes = bytes(compressed_data) if not isinstance(compressed_data, bytes) else compressed_data
+    raw_bytes = (
+        bytes(compressed_data)
+        if not isinstance(compressed_data, bytes)
+        else compressed_data
+    )
 
     try:
-        config_data = json.loads(_gzip.decompress(raw_bytes).decode('utf-8'))
+        config_data = json.loads(_gzip.decompress(raw_bytes).decode("utf-8"))
     except Exception as e:
         logger.error(f"Failed to decompress config data: {e}")
         return item
 
     # Reconstruct: metadata fields + decompressed config data
-    metadata_fields = {'Configuration', 'CreatedAt', 'UpdatedAt', 'IsActive', 'Description'}
+    metadata_fields = {
+        "Configuration",
+        "CreatedAt",
+        "UpdatedAt",
+        "IsActive",
+        "Description",
+    }
     full_item = {k: v for k, v in item.items() if k in metadata_fields}
     full_item.update(config_data)
     return full_item
@@ -272,17 +320,17 @@ def _decompress_config_item(item):
 def _capture_config(config_table, config_version=None):
     """Capture configuration - specific version or current active config"""
     table = dynamodb.Table(config_table)  # type: ignore[attr-defined]
-    
+
     config = {}
-    
+
     # Get Config (versioned) - this is what's used for comparisons
     try:
         if config_version:
             # Get specific config version
             key = f"Config#{config_version}"
-            response = table.get_item(Key={'Configuration': key})
-            if 'Item' in response:
-                config['Config'] = _decompress_config_item(response['Item'])
+            response = table.get_item(Key={"Configuration": key})
+            if "Item" in response:
+                config["Config"] = _decompress_config_item(response["Item"])
             else:
                 logger.warning(f"Config version {config_version} not found")
         else:
@@ -291,49 +339,61 @@ def _capture_config(config_table, config_version=None):
                 FilterExpression="begins_with(Configuration, :config_prefix) AND IsActive = :active",
                 ExpressionAttributeValues={
                     ":config_prefix": "Config#",
-                    ":active": True
-                }
+                    ":active": True,
+                },
             )
-            items = scan_response.get('Items', [])
+            items = scan_response.get("Items", [])
             if items:
-                config['Config'] = _decompress_config_item(items[0])
-            
+                config["Config"] = _decompress_config_item(items[0])
+
     except Exception as e:
         logger.warning(f"Could not retrieve Config: {e}")
-    
+
     return config
 
-def _store_test_run_metadata(tracking_table, test_run_id, test_set_id, test_set_name, config, files, context=None, file_count=0, config_version=None, test_set_version=None):
+
+def _store_test_run_metadata(
+    tracking_table,
+    test_run_id,
+    test_set_id,
+    test_set_name,
+    config,
+    files,
+    context=None,
+    file_count=0,
+    config_version=None,
+    test_set_version=None,
+):
     """Store test run metadata in tracking table"""
     table = dynamodb.Table(tracking_table)  # type: ignore[attr-defined]
-    
+
     try:
-        created_at = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+        created_at = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
         item = {
-            'PK': f'testrun#{test_run_id}',
-            'SK': 'metadata',
-            'ItemType': 'testrun',
-            'InitialEventTime': created_at,
-            'TestSetId': test_set_id,
-            'TestSetName': test_set_name,
-            'TestRunId': test_run_id,
-            'Status': 'QUEUED',
-            'FilesCount': file_count,
-            'CompletedFiles': 0,
-            'FailedFiles': 0,
-            'Files': files,
-            'Config': config,
-            'CreatedAt': created_at
+            "PK": f"testrun#{test_run_id}",
+            "SK": "metadata",
+            "ItemType": "testrun",
+            "InitialEventTime": created_at,
+            "TestSetId": test_set_id,
+            "TestSetName": test_set_name,
+            "TestRunId": test_run_id,
+            "Status": "QUEUED",
+            "FilesCount": file_count,
+            "CompletedFiles": 0,
+            "FailedFiles": 0,
+            "Files": files,
+            "Config": config,
+            "CreatedAt": created_at,
         }
-        
+
         if context:
-            item['Context'] = context
-            
+            item["Context"] = context
+
         if config_version:
-            item['ConfigVersion'] = config_version
+            item["ConfigVersion"] = config_version
 
         if test_set_version is not None:
-            item['TestSetVersion'] = test_set_version
+            item["TestSetVersion"] = test_set_version
 
         table.put_item(Item=item)
         logger.info(f"Stored test run metadata for {test_run_id}")

@@ -489,7 +489,7 @@ my-test-set/
 ├── input/
 │   ├── document1.pdf
 │   └── document2.pdf
-└── baseline/
+└── baseline/                      # optional — omit for an unlabeled test set
     ├── document1.pdf/
     │   └── [ground truth files]
     └── document2.pdf/
@@ -497,10 +497,151 @@ my-test-set/
 ```
 
 ### Validation Rules
-- Each input file must have corresponding baseline folder
+- Each input file must have a corresponding baseline folder, **or** the test set
+  must have no baseline folder at all
 - Baseline folder name must match input filename exactly
+- A test set with **no** `baseline/` folder is valid but *unlabeled* — it is
+  waiting for [draft labels](#draft-labeling-unlabeled-documents--ground-truth).
+  A *partially* labeled set (baselines for some documents but not others) is
+  still a validation error, since that indicates an incomplete upload rather
+  than a deliberate label-later workflow.
 - When using Input Bucket as source, files without baselines are automatically excluded (not treated as an error)
 - Status: COMPLETED (valid), FAILED (validation errors), QUEUED/COPYING (creating), UPDATING (adding documents)
+
+### Label state
+
+Alongside `status` (does the test set's structure validate?), each test set
+carries a **label state** describing how much trustworthy ground truth it has:
+
+| Label state | Meaning |
+|---|---|
+| `unlabeled` | Documents only, no ground truth yet. Run **Generate draft labels**. |
+| `draft` | Machine-generated labels present, not yet reviewed by a human. |
+| `labeled` | Ground truth was supplied directly (upload or synthetic generation). |
+
+Label state is independent of publishing: you can publish a version of a `draft`
+set, and the unreviewed fields stay flagged as machine-generated.
+
+### Removing documents from a test set
+
+Select a test set and use **Remove documents** to drop documents from the
+working draft. For each named document this deletes its `input/` object and its
+entire `baseline/<file>/` folder, then recounts `fileCount` from S3.
+
+Removal edits the **mutable working draft**. Already-published versions are
+unaffected as metadata records; see the storage caveat under
+[Versioning](#versioning-test-sets).
+
+### Source provenance
+
+Each test set records where its documents came from, shown as a **Source** column:
+
+- **Uploaded** — supplied by a user (zip upload, pattern-based, or direct S3 upload)
+- **Synthetic** — produced by the synthetic data generator, which writes a
+  `.source` marker into the test set prefix
+- **Mixed** — both
+
+## Versioning test sets
+
+A test set is a **versioned benchmark object**, not just a folder of files. It
+has one mutable working draft plus zero or more immutable published versions —
+the same model as a version-control system: the draft is the working tree,
+publishing is a commit, and the *active reference* is the tag that scoring
+follows.
+
+### Publishing a version
+
+Select a COMPLETED test set and click **Publish version**. This freezes the
+current document and label state into a numbered version (`v1`, `v2`, …) and, by
+default, marks it the **active reference** — the version that test runs record
+themselves as having scored against. Publishing does not require every document
+to be reviewed; unreviewed fields keep their machine labels and remain flagged
+as such, which supports time-boxed "first pass" golden sets.
+
+The **Version** column shows the active reference, and notes when the latest
+published version is ahead of it.
+
+Concurrency: version numbers are allocated atomically, so two people publishing
+at the same moment get distinct versions rather than one silently overwriting
+the other. Published version items are also write-protected, and the
+active-reference pointer only ever moves forward.
+
+### Run pinning
+
+When a test run starts, it records the test set's active reference alongside the
+configuration version it captured. This is symmetric to config pinning and
+makes results interpretable later: comparing two runs, you can tell whether a
+metric moved because the *configuration* changed or because the *ground truth*
+did. A run against a never-published test set records no version.
+
+> **Storage caveat (known limitation).** A published version snapshots the test
+> set's *metadata* — document count, source, label state, config version — not
+> the document and label **bytes**. All versions share the one `baseline/`
+> prefix, so editing ground truth in the working draft also changes what an
+> already-published version resolves to. True byte-level immutability requires
+> either an S3 object-version manifest per published version or copying content
+> on publish; the choice is coupled to the `DataRetentionInDays` retention
+> setting and is not yet implemented.
+
+## Draft labeling: unlabeled documents → ground truth
+
+Creating a test set normally requires ground truth up front, which is the
+expensive part. Draft labeling inverts that: upload documents **only**, run the
+active configuration over them to produce machine-generated ground-truth
+candidates with per-field confidence, then review the least trustworthy ones.
+
+### Generating draft labels
+
+1. Create a test set with documents but no `baseline/` folder (it registers with
+   label state `unlabeled`)
+2. Open the test set and click **Generate draft labels**
+3. Progress is reported as documents complete; labels appear in the table as
+   they land
+
+Under the hood a labeling job is an ordinary test run: the documents go through
+the same OCR → classification → extraction → assessment pipeline that scoring
+runs use, and the results are harvested back into the test set's `baseline/`
+prefix. This is deliberate — it means the confidence numbers attached to draft
+labels are produced the same way as the ones a real evaluation reports, rather
+than by a parallel code path that could drift.
+
+By default the job labels every document in the set using the deployment's
+active configuration; you can specify a different configuration version.
+
+### Label provenance
+
+Every label records where it came from, shown as a chip in the document table:
+
+| Chip | Meaning |
+|---|---|
+| **Draft (machine)** | Generated by draft labeling; unreviewed |
+| **Reviewed (human)** | Confirmed or corrected by a person in the ground-truth editor |
+| **Uploaded** / **Synthetic** | Supplied as ground truth when the set was created |
+| **Unlabeled** | No label yet |
+
+Machine-drafted labels are never styled like human-verified ones — the
+distinction is what makes the review loop trustworthy.
+
+**Re-running is safe.** Draft labeling replaces a label only when that label is
+itself a machine draft. Human-reviewed labels and hand-uploaded ground truth are
+left untouched, so re-running with a newer configuration refreshes the drafts
+without destroying confirmed work.
+
+### Confidence-guided review
+
+Each document shows the **lowest** per-field confidence across its sections —
+the weakest field, not an average that would hide it. Confidence is colored
+against the *configured* alert threshold from your assessment configuration
+(red below the threshold, amber just above it), so the colors agree with the
+confidence alerts elsewhere in the app instead of using fixed cutoffs.
+
+The table defaults to **worst-first** ordering whenever confidence data is
+present, so review starts where the labels are least trustworthy. Sorting
+applies to the current page (document listing is paginated server-side).
+
+Reviewing a draft label is the same **Edit Ground Truth** flow described above;
+saving flips the label to *Reviewed (human)*. Once enough of the set is
+reviewed, publish a version to freeze it as a benchmark.
 
 ### Upload Methods
 1. **UI Zip Upload**: S3 event → Lambda extraction → Validation → Status update

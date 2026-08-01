@@ -78,6 +78,9 @@ interface TestSetItem {
   source?: string | null;
   latestVersion?: number | null;
   activeReference?: number | null;
+  labelState?: string | null;
+  labelJobId?: string | null;
+  labelJobStatus?: string | null;
   status?: string | null;
   createdAt: string;
   error?: string | null;
@@ -899,6 +902,28 @@ const TestSets = (): React.JSX.Element => {
         return badges[item.source] || item.source;
       },
       sortingField: 'source',
+    },
+    {
+      id: 'labelState',
+      header: 'Labels',
+      cell: (item: TestSetItem) => {
+        // A running labeling job outranks the stored state — it's the live one.
+        if (item.labelJobStatus === 'RUNNING') {
+          return <StatusIndicator type="in-progress">Labeling</StatusIndicator>;
+        }
+        if (item.labelJobStatus === 'FAILED' && item.labelState !== 'labeled') {
+          return <StatusIndicator type="error">Labeling failed</StatusIndicator>;
+        }
+        const badges: Record<string, React.JSX.Element> = {
+          unlabeled: <Badge color="severity-neutral">Unlabeled</Badge>,
+          draft: <Badge color="blue">Draft (machine)</Badge>,
+          labeled: <Badge color="green">Labeled</Badge>,
+        };
+        // Pre-existing sets carry no labelState; they were created with ground
+        // truth, so don't imply they need labeling.
+        return item.labelState ? badges[item.labelState] || item.labelState : '-';
+      },
+      sortingField: 'labelState',
     },
     {
       id: 'version',

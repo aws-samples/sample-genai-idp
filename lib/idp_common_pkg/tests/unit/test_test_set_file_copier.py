@@ -221,3 +221,105 @@ def test_copy_files_to_bucket_handles_an_empty_file_list(copier_env):
         )
         == []
     )
+
+
+@pytest.mark.unit
+def test_object_keys_restricts_to_the_named_documents(copier_env, monkeypatch):
+    """objectKeys must select those exact documents, not the first N.
+
+    numberOfFiles takes a prefix of the file list, so it cannot express "label
+    these specific documents" — the case draft-labeling a subset needs.
+    """
+    import json
+
+    copier = copier_env
+    copied = {}
+
+    monkeypatch.setattr(
+        copier,
+        "_list_test_set_files",
+        lambda bucket, tsid, folder: (
+            ["a.pdf", "b.pdf", "c.pdf"]
+            if folder == "input"
+            else [
+                "a.pdf/sections/1/result.json",
+                "c.pdf/sections/1/result.json",
+            ]
+        ),
+    )
+    monkeypatch.setattr(copier, "_update_tracking_in_progress", lambda *a, **k: None)
+
+    def _copy(src, sp, dst, dp, files, cv=None):
+        copied["baseline" if "baseline" in sp else "input"] = list(files)
+        return list(files)
+
+    monkeypatch.setattr(copier, "_copy_files_to_bucket", _copy)
+    monkeypatch.setattr(copier, "_update_test_run_status", lambda *a, **k: None)
+
+    event = {
+        "Records": [
+            {
+                "body": json.dumps(
+                    {
+                        "testRunId": "ts1-run",
+                        "testSetId": "ts1",
+                        "trackingTable": "test-table",
+                        "objectKeys": ["c.pdf"],
+                    }
+                )
+            }
+        ]
+    }
+    copier.handler(event, None)
+
+    # 'c.pdf' — not 'a.pdf', which is what numberOfFiles=1 would have picked.
+    assert copied["input"] == ["c.pdf"]
+    # Baselines follow the same selection.
+    assert copied["baseline"] == ["c.pdf/sections/1/result.json"]
+
+
+@pytest.mark.unit
+def test_object_keys_rejects_documents_not_in_the_test_set(copier_env, monkeypatch):
+    """A typo'd document name must fail loudly, not silently label nothing."""
+    import json
+
+    copier = copier_env
+    statuses = []
+
+    monkeypatch.setattr(
+        copier,
+        "_list_test_set_files",
+        lambda bucket, tsid, folder: ["a.pdf"] if folder == "input" else [],
+    )
+    monkeypatch.setattr(copier, "_update_tracking_in_progress", lambda *a, **k: None)
+    monkeypatch.setattr(
+        copier,
+        "_copy_files_to_bucket",
+        lambda *a, **k: list(a[4]) if len(a) > 4 else [],
+    )
+    monkeypatch.setattr(
+        copier,
+        "_update_test_run_status",
+        lambda table, run, status, error=None, failed_count=None: statuses.append(
+            (status, error)
+        ),
+    )
+
+    event = {
+        "Records": [
+            {
+                "body": json.dumps(
+                    {
+                        "testRunId": "ts1-run",
+                        "testSetId": "ts1",
+                        "trackingTable": "test-table",
+                        "objectKeys": ["typo.pdf"],
+                    }
+                )
+            }
+        ]
+    }
+    copier.handler(event, None)
+
+    assert statuses and statuses[0][0] == "FAILED"
+    assert "typo.pdf" in statuses[0][1]

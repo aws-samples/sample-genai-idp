@@ -31,6 +31,8 @@ def handler(event, context):
             test_set_id = message["testSetId"]
             number_of_files = message.get("numberOfFiles")  # Optional parameter
             config_version = message.get("configVersion")  # Optional parameter
+            # Optional explicit document list (draft labeling a subset)
+            object_keys = message.get("objectKeys") or []
             tracking_table = message["trackingTable"]
 
             # Get environment variables
@@ -49,10 +51,30 @@ def handler(event, context):
             if not input_files:
                 raise ValueError(f"No input files found for test set: {test_set_id}")
 
+            # Restrict to an explicit set of documents, if one was requested.
+            # Distinct from numberOfFiles, which takes the *first* N files of the
+            # set — that can't express "these specific documents", which is what
+            # labeling or re-labeling a subset needs.
+            if object_keys:
+                requested = set(object_keys)
+                missing = requested - set(input_files)
+                if missing:
+                    raise ValueError(
+                        f"Requested documents not in test set {test_set_id}: "
+                        f"{', '.join(sorted(missing)[:5])}"
+                        f"{'...' if len(missing) > 5 else ''}"
+                    )
+                input_files = [f for f in input_files if f in requested]
+                logger.info(
+                    f"Restricted to {len(input_files)} explicitly requested document(s)"
+                )
+
             # Limit files if numberOfFiles is specified
             if number_of_files is not None:
                 input_files = input_files[:number_of_files]
-                # Filter baseline files to match the selected input files in one pass
+
+            # Keep baselines aligned with whatever input selection survived above.
+            if object_keys or number_of_files is not None:
                 input_file_set = set(input_file + "/" for input_file in input_files)
                 baseline_files = [
                     bf
@@ -60,7 +82,8 @@ def handler(event, context):
                     if any(bf.startswith(prefix) for prefix in input_file_set)
                 ]
                 logger.info(
-                    f"Limited to first {number_of_files} input files with {len(baseline_files)} corresponding baseline files"
+                    f"Selected {len(input_files)} input files with "
+                    f"{len(baseline_files)} corresponding baseline files"
                 )
 
             logger.info(

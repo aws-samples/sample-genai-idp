@@ -32,6 +32,21 @@ https://github.com/user-attachments/assets/d5e0d590-ce8b-4e14-b2b7-8bde31e57ec2
   accuracy           from samples        configuration       in the UI editor    register set       configurations
 ```
 
+> **Shortcut: let the pipeline draft the labels for you.** The six steps below
+> process documents *before* the test set exists, then register the corrected
+> results as its ground truth. If you would rather start from the test set, you
+> can instead create one from your documents alone — no `baseline/` folder — and
+> click **Generate draft labels** on it. That runs the active configuration over
+> the set, writes machine-generated ground truth with per-field confidence, and
+> sorts the documents worst-first so you review the least trustworthy ones
+> first. The manual path in this guide gives you more control over the
+> intermediate steps (notably Discovery and per-document review before anything
+> is registered); the shortcut gets you to a reviewable draft in two actions.
+> See [Draft labeling](./test-studio.md#draft-labeling-unlabeled-documents--ground-truth).
+>
+> Either way, finish by **publishing a version** so runs pin the ground truth
+> they scored against — see [Versioning test sets](./test-studio.md#versioning-test-sets).
+
 ## Step 1: Configure for Maximum Accuracy
 
 The goal of this initial run is to produce predictions that are as accurate as possible, minimizing the amount of manual editing you'll need to do later. Use the best available model for both classification and extraction.
@@ -185,6 +200,23 @@ You don't have to create your entire test set in one go. As you process and revi
 Files without matching baseline data are automatically excluded, so you can use a broad pattern — only documents you've reviewed and saved as evaluation baselines will be added. The test set's file count is updated automatically.
 
 https://github.com/user-attachments/assets/bcd18e62-4795-44ea-9554-637062fd21d7
+
+## Publishing a Version
+
+Once the ground truth is in the shape you want, **publish a version** of the
+test set. This freezes the current documents and labels as a numbered version
+and makes it the *active reference*, so every subsequent test run records which
+ground truth it scored against — which is what lets you tell later whether a
+metric moved because your configuration changed or because the labels did.
+
+1. Go to **Test Studio** → **Test Sets** tab
+2. Select the test set and click **Publish version**
+
+You don't need every document reviewed first: unreviewed fields keep their
+machine labels and stay flagged as such, so a time-boxed "first pass" benchmark
+is a legitimate thing to publish. Publish again whenever the set changes
+materially. See [Versioning test sets](./test-studio.md#versioning-test-sets)
+for the storage caveat on what a version does and does not freeze.
 
 ## Next Steps
 

@@ -771,7 +771,8 @@ input GenerateDraftLabelsInput {
   testSetId: String!
   # Defaults to the deployment's active config when omitted.
   configVersion: String
-  # Optional subset; omit to label every document in the set.
+  # Optional subset; omit to label every document in the set. Only these
+  # documents are processed, and each must exist in the test set.
   objectKeys: [String!]
 }
 
