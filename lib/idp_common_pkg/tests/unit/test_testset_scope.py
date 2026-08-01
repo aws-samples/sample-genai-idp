@@ -13,8 +13,8 @@ implementation would fail open (no scope recorded, lookup error, unknown role).
 
 import boto3
 import pytest
-from idp_common import test_set_scope
-from idp_common.test_set_scope import (
+from idp_common import testset_scope
+from idp_common.testset_scope import (
     TestSetAccessDenied,
     assert_can_access_test_set,
     get_allowed_test_sets,
@@ -38,9 +38,9 @@ def _event(groups, email="user@example.com"):
 @pytest.fixture(autouse=True)
 def _clear_cache():
     """Scope is cached per container; a stale entry would mask a test's setup."""
-    test_set_scope.clear_scope_cache()
+    testset_scope.clear_scope_cache()
     yield
-    test_set_scope.clear_scope_cache()
+    testset_scope.clear_scope_cache()
 
 
 @pytest.fixture
@@ -219,7 +219,7 @@ class TestScopeLookup:
         _seed_user(users_table, "ann@example.com", allowed=["ts-beta"])
         assert get_allowed_test_sets("ann@example.com", users_table) == ["ts-alpha"]
 
-        test_set_scope.clear_scope_cache()
+        testset_scope.clear_scope_cache()
         assert get_allowed_test_sets("ann@example.com", users_table) == ["ts-beta"]
 
     def test_missing_email_returns_no_scope(self, users_table):

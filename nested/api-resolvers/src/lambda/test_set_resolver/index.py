@@ -16,7 +16,7 @@ from idp_common.evaluation.confidence_curve import (  # type: ignore
 )
 from idp_common.evaluation.curve_store import CurveStore  # type: ignore
 from idp_common.s3 import find_matching_files  # type: ignore
-from idp_common.test_set_scope import (  # type: ignore
+from idp_common.testset_scope import (  # type: ignore
     TestSetAccessDenied,
     assert_can_access_test_set,
     caller_email,

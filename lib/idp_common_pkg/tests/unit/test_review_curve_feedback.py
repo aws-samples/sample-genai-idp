@@ -301,12 +301,12 @@ class TestAnnotatorReviewScope:
                 "allowedTestSets": ["ts1"],
             }
         )
-        from idp_common import test_set_scope
+        from idp_common import testset_scope
 
-        test_set_scope.clear_scope_cache()
+        testset_scope.clear_scope_cache()
         with patch.dict(os.environ, {"USERS_TABLE_NAME": "users"}):
             yield module, table, s3
-        test_set_scope.clear_scope_cache()
+        testset_scope.clear_scope_cache()
 
     def _annotator_event(self, field, object_key):
         return {

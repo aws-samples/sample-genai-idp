@@ -1638,11 +1638,11 @@ class TestTestSetResolver:
 
     def test_annotation_queue_denies_an_out_of_scope_annotator(self, labeling_env):
         """Scope is checked before the set is read, so nothing leaks."""
-        from idp_common import test_set_scope
+        from idp_common import testset_scope
 
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=1)
-        test_set_scope.clear_scope_cache()
+        testset_scope.clear_scope_cache()
 
         event = {
             "identity": {
@@ -1655,7 +1655,7 @@ class TestTestSetResolver:
         # No users table configured -> annotator has no resolvable scope -> denied.
         with pytest.raises(Exception, match="Unauthorized"):
             test_set_index.get_annotation_queue({"testSetId": "ts1"}, event)
-        test_set_scope.clear_scope_cache()
+        testset_scope.clear_scope_cache()
 
     def test_annotation_queue_validates_the_test_set_id(self, labeling_env):
         table, _ = labeling_env

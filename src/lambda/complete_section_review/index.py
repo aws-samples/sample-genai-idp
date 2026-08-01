@@ -112,7 +112,7 @@ def _assert_annotator_scope(event, object_key):
     if "Annotator" not in groups or {"Admin", "Reviewer"}.intersection(groups):
         return
 
-    from idp_common.test_set_scope import (
+    from idp_common.testset_scope import (
         TestSetAccessDenied,
         assert_can_access_test_set,
     )
