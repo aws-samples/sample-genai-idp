@@ -2502,6 +2502,15 @@ export type GetAgentJobStatusQueryVariables = Exact<{
 
 export type GetAgentJobStatusQuery = { getAgentJobStatus?: { jobId: string, status: string, query: string, agentIds?: string | null, createdAt: string, completedAt?: string | null, result?: string | null, error?: string | null, agent_messages?: string | null } | null };
 
+export type GetAnnotationQueueQueryVariables = Exact<{
+  testSetId: Scalars['String']['input'];
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  includeCompleted?: InputMaybe<Scalars['Boolean']['input']>;
+}>;
+
+
+export type GetAnnotationQueueQuery = { getAnnotationQueue?: { testSetId: string, totalDocs: number, inspectedDocs?: number | null, reviewedDocs: number, remainingDocs: number, claimedByOthers: number, nextObjectKey?: string | null, documents: Array<{ objectKey: string, inputKey: string, reviewObjectKey?: string | null, minConfidence?: number | null, confidenceThreshold?: number | null, labelSource?: string | null, sectionCount: number, claimedBy?: string | null, claimedByMe: boolean, reviewStatus?: string | null, reviewed: boolean, available: boolean, sections?: Array<{ sectionId: string, baselineKey: string }> | null }> } | null };
+
 export type GetChatMessagesQueryVariables = Exact<{
   sessionId: Scalars['ID']['input'];
 }>;

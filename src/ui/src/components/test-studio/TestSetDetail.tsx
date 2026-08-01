@@ -35,7 +35,7 @@ import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import Navigation from '../genaiidp-layout/navigation';
 import { appLayoutLabels } from '../common/labels';
-import { TEST_STUDIO_PATH, testSetDocumentHref } from '../../routes/constants';
+import { TEST_STUDIO_PATH, testSetDocumentHref, testSetAnnotateHref } from '../../routes/constants';
 import TestDocThumbnail from './TestDocThumbnail';
 import type { TestSetDocumentSectionRef } from './GroundTruthVisualEditor';
 
@@ -303,6 +303,12 @@ const TestSetDetail = (): React.JSX.Element => {
                         disabled={isLoading || labelJob?.status === 'RUNNING'}
                       >
                         Generate draft labels
+                      </Button>
+                      {/* Owners reach the worst-first queue from here rather than
+                          hand-building the URL; it is also the link they share
+                          with an assigned annotator. */}
+                      <Button href={testSetAnnotateHref(testSetId ?? '')} iconName="user-profile">
+                        Annotate
                       </Button>
                       <Button iconName="refresh" onClick={() => fetchPage(currentPageIndex, pageTokens)} disabled={isLoading}>
                         Refresh

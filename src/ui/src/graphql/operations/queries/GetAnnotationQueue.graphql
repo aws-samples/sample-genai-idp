@@ -1,0 +1,29 @@
+query GetAnnotationQueue($testSetId: String!, $limit: Int, $includeCompleted: Boolean) {
+  getAnnotationQueue(testSetId: $testSetId, limit: $limit, includeCompleted: $includeCompleted) {
+    testSetId
+    totalDocs
+    inspectedDocs
+    reviewedDocs
+    remainingDocs
+    claimedByOthers
+    nextObjectKey
+    documents {
+      objectKey
+      inputKey
+      reviewObjectKey
+      minConfidence
+      confidenceThreshold
+      labelSource
+      sectionCount
+      sections {
+        sectionId
+        baselineKey
+      }
+      claimedBy
+      claimedByMe
+      reviewStatus
+      reviewed
+      available
+    }
+  }
+}

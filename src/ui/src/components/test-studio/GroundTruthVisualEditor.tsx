@@ -44,6 +44,22 @@ interface GroundTruthVisualEditorProps {
   isReadOnly: boolean;
   /** Called after a successful save (e.g. to show a flash message). */
   onSaved?: (baselineKey: string) => void;
+  /**
+   * Optional replacement for how a save is persisted.
+   *
+   * By default the editor writes the baseline object straight to S3 via a
+   * presigned POST. That is right for an owner editing ground truth directly, but
+   * it bypasses the HITL review API — so it never claims a lock, never tags the
+   * label `reviewed-human`, and never feeds the confidence curve that the
+   * review-effort estimator learns from.
+   *
+   * The annotation workspace supplies this to route saves through
+   * `completeSectionReview` instead, which engages all of the above. When absent
+   * the direct-S3 path is unchanged, so existing callers keep their behaviour.
+   */
+  onSave?: (sectionId: string, data: Record<string, unknown>) => Promise<void>;
+  /** Label for the save button (the queue uses "Save & next in queue"). */
+  saveButtonText?: string;
 }
 
 const getSectionLabel = (sectionId: string, data: Record<string, unknown> | null): string => {
@@ -58,6 +74,8 @@ const GroundTruthVisualEditor = ({
   sections,
   isReadOnly,
   onSaved,
+  onSave,
+  saveButtonText,
 }: GroundTruthVisualEditorProps): React.JSX.Element => {
   const { user } = useAppContext();
   const { pages, isLoading: pagesLoading, error: pagesError, previewUnavailable } = useTestDocPages(bucket, inputKey);
@@ -195,6 +213,18 @@ const GroundTruthVisualEditor = ({
       const editedContent = JSON.stringify(dataToSave, null, 2);
 
       const fullPath = selectedSection.baselineKey;
+
+      // Caller-supplied persistence (the annotation workspace routes through the
+      // review API so the save claims, tags and teaches the confidence curve).
+      if (onSave) {
+        await onSave(selectedSection.sectionId, dataToSave);
+        setLocalData(dataToSave);
+        setOriginalJson(editedContent);
+        logger.info('Saved ground truth via caller-supplied handler for', fullPath);
+        if (onSaved) onSaved(fullPath);
+        return;
+      }
+
       const fileName = fullPath.split('/').pop() ?? fullPath;
       const prefix = fullPath.substring(0, fullPath.lastIndexOf('/'));
 
@@ -271,7 +301,7 @@ const GroundTruthVisualEditor = ({
                 Discard changes
               </Button>
               <Button variant="primary" onClick={handleSave} loading={isSaving} disabled={!hasChanges}>
-                Save changes
+                {saveButtonText ?? 'Save changes'}
               </Button>
             </SpaceBetween>
           )
