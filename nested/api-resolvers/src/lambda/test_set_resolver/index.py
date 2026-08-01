@@ -1222,6 +1222,19 @@ def _harvest_label_job(job):
                 test_set_bucket, test_set_id, file_name, doc.get("Sections") or []
             ):
                 labeled += 1
+            # Stamp the owning test set onto the pipeline document. Without this
+            # the HITL review Lambda cannot tell that a reviewed document belongs
+            # to a test set, so completeSectionReview silently skips the baseline
+            # write-back, the reviewed-human tag, and the confidence-curve
+            # observation — the save reports success while none of it happens.
+            # Only sendTestRunToReview set this field before, and draft labeling
+            # never goes through that path.
+            if not doc.get("TestSetId"):
+                tracking_table.update_item(
+                    Key={"PK": f"doc#{job_id}/{file_name}", "SK": "none"},
+                    UpdateExpression="SET TestSetId = :tsid",
+                    ExpressionAttributeValues={":tsid": test_set_id},
+                )
         except Exception as e:  # noqa: BLE001 — one bad doc must not fail the job
             logger.error(
                 f"Draft labeling: failed to harvest '{file_name}' for job {job_id}: {e}"

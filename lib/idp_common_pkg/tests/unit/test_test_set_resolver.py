@@ -1829,3 +1829,86 @@ class TestTestSetResolver:
         # Every other document is untouched.
         assert result["claimedByOthers"] == 1
         assert by_key[names[0]]["claimedBy"] is None
+
+    def test_harvest_stamps_the_test_set_onto_the_pipeline_document(self, labeling_env):
+        """Without TestSetId, a reviewer's save silently loses everything.
+
+        Found live: completeSectionReview reported success and marked the section
+        complete, but the baseline was untouched — still draft-machine with the
+        correction discarded. write_correction_to_test_set_baseline keys on the
+        doc item's TestSetId to find the owning set, and only sendTestRunToReview
+        ever set it; draft labeling never goes through that path. So the
+        write-back, the reviewed-human tag, and the confidence-curve observation
+        were all skipped without an error anywhere.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        uri = _seed_pipeline_result(
+            s3, "ts1-run/a.pdf/sections/1/result.json", {"vendor": "Acme"}
+        )
+        _seed_completed_run(
+            table,
+            "ts1-run",
+            "ts1",
+            ["a.pdf"],
+            {"a.pdf": [{"Id": "1", "OutputJSONUri": uri}]},
+        )
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#ts1-run",
+                "testSetId": "ts1",
+                "jobId": "ts1-run",
+                "status": "RUNNING",
+                "total": 1,
+                "labeled": 0,
+            }
+        )
+        # Precondition: the pipeline doc has no TestSetId yet.
+        doc_before = table.get_item(Key={"PK": "doc#ts1-run/a.pdf", "SK": "none"})[
+            "Item"
+        ]
+        assert "TestSetId" not in doc_before
+
+        test_set_index.get_draft_label_job({"testSetId": "ts1", "jobId": "ts1-run"})
+
+        doc_after = table.get_item(Key={"PK": "doc#ts1-run/a.pdf", "SK": "none"})[
+            "Item"
+        ]
+        assert doc_after["TestSetId"] == "ts1"
+
+    def test_harvest_does_not_overwrite_an_existing_test_set_stamp(self, labeling_env):
+        """A doc already routed via sendTestRunToReview keeps its attribution."""
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        uri = _seed_pipeline_result(
+            s3, "ts1-run/a.pdf/sections/1/result.json", {"vendor": "Acme"}
+        )
+        _seed_completed_run(
+            table,
+            "ts1-run",
+            "ts1",
+            ["a.pdf"],
+            {"a.pdf": [{"Id": "1", "OutputJSONUri": uri}]},
+        )
+        table.update_item(
+            Key={"PK": "doc#ts1-run/a.pdf", "SK": "none"},
+            UpdateExpression="SET TestSetId = :t",
+            ExpressionAttributeValues={":t": "original-set"},
+        )
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#ts1-run",
+                "testSetId": "ts1",
+                "jobId": "ts1-run",
+                "status": "RUNNING",
+                "total": 1,
+                "labeled": 0,
+            }
+        )
+
+        test_set_index.get_draft_label_job({"testSetId": "ts1", "jobId": "ts1-run"})
+
+        doc = table.get_item(Key={"PK": "doc#ts1-run/a.pdf", "SK": "none"})["Item"]
+        assert doc["TestSetId"] == "original-set"
