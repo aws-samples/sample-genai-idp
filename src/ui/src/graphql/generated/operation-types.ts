@@ -1684,6 +1684,7 @@ export type ReviewEffortEstimate = {
   recommendReviewAll: Scalars['Boolean']['output'];
   reliabilityTable: Array<ReliabilityBin>;
   residualError: Scalars['Float']['output'];
+  sampledDocs?: Maybe<Scalars['Int']['output']>;
   targetAccuracy: Scalars['Float']['output'];
   testSetId: Scalars['String']['output'];
   totalDocs: Scalars['Int']['output'];

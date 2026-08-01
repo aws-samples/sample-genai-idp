@@ -811,6 +811,10 @@ type ReviewEffortEstimate @aws_cognito_user_pools @aws_iam {
   docsToReviewLow: Int!
   docsToReviewHigh: Int!
   totalDocs: Int!
+  # How many documents' confidences were actually read. Below totalDocs on large
+  # sets, where the estimate extrapolates from a sample — surfaced so the UI can
+  # say so instead of implying every document was inspected.
+  sampledDocs: Int
   # Confidence value at the boundary of the reviewed set.
   impliedCutoff: Float
   residualError: Float!

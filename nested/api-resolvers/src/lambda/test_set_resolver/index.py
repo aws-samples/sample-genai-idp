@@ -1001,7 +1001,28 @@ def estimate_review_effort(args):
     doc_confidences, fields_per_doc, pages_per_doc = _collect_doc_confidences(
         test_set_id
     )
-    total_docs = len(doc_confidences) or int(meta.get("fileCount", 0) or 0)
+
+    # The set's real size, which may exceed the number of documents sampled for
+    # confidences. These must not be conflated: reporting the sample size as the
+    # total understates the work (and the effort, and the audit pool) by whatever
+    # factor the set exceeds MAX_DOCS_FOR_ESTIMATE.
+    total_docs = int(meta.get("fileCount", 0) or 0) or len(doc_confidences)
+    sampled_docs = len(doc_confidences)
+
+    # When only a sample was read, treat it as representative and extrapolate its
+    # confidence distribution across the whole set, so the ordering the estimator
+    # walks has one entry per real document. Repeating the sample preserves its
+    # shape, which is what the estimate depends on — the alternative (estimating
+    # from the sample and scaling the answer) would also have to scale the
+    # residual-error curve, and would silently assume the untouched documents
+    # look like the sampled ones anyway.
+    if doc_confidences and sampled_docs < total_docs:
+        repeats = -(-total_docs // sampled_docs)  # ceil
+        doc_confidences = (doc_confidences * repeats)[:total_docs]
+        logger.info(
+            f"estimateReviewEffort({test_set_id}): extrapolating {sampled_docs} "
+            f"sampled confidences across {total_docs} documents"
+        )
 
     estimate = estimate_for_target(
         curve,
@@ -1018,6 +1039,9 @@ def estimate_review_effort(args):
     result["targetAccuracy"] = target_accuracy
     result["configVersion"] = config_version
     result["reliabilityTable"] = curve.reliability_table(prior)
+    # Surfaced so a caller can say "estimated from a 500-document sample" rather
+    # than implying every document was inspected.
+    result["sampledDocs"] = sampled_docs
     logger.info(
         f"estimateReviewEffort({test_set_id}, target={target_accuracy}): "
         f"{estimate.docs_to_review}/{total_docs} docs, "

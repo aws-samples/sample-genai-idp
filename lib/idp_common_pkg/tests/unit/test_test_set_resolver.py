@@ -1661,3 +1661,49 @@ class TestTestSetResolver:
         table, _ = labeling_env
         with pytest.raises(Exception, match="Invalid test set id"):
             test_set_index.get_annotation_queue({"testSetId": "../etc/passwd"}, None)
+
+    def test_estimate_reports_the_real_set_size_not_the_sample_size(
+        self, labeling_env, monkeypatch
+    ):
+        """Regression: a large set must not report its sampling cap as its size.
+
+        Found on a live stack: a 2008-document test set reported totalDocs=500
+        (MAX_DOCS_FOR_ESTIMATE), which understated the review work, the effort,
+        and the audit pool by 4x. fileCount is the set's size; the sampled
+        confidences are only how much of it we inspected.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=2008)
+        # Only three documents actually exist in S3 to sample from.
+        for name in ("a.pdf", "b.pdf", "c.pdf"):
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+            s3.put_object(
+                Bucket="test-set-bucket",
+                Key=f"ts1/baseline/{name}/sections/1/result.json",
+                Body=json.dumps(
+                    {
+                        "labelSource": "draft-machine",
+                        "explainability_info": [{"f": {"confidence": 0.5}}],
+                    }
+                ).encode(),
+            )
+
+        result = test_set_index.estimate_review_effort({"testSetId": "ts1"})
+
+        assert result["totalDocs"] == 2008
+        assert result["sampledDocs"] == 3
+        # Review depth and audit pool are bounded by the real size, not the sample.
+        assert result["docsToReview"] <= 2008
+        assert result["docsToReviewHigh"] <= 2008
+        assert len(result["burndown"]) == 2009  # 0..N inclusive
+
+    def test_estimate_sampled_equals_total_for_a_small_set(self, labeling_env):
+        """No extrapolation when every document was inspected."""
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=2)
+        for name in ("a.pdf", "b.pdf"):
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+
+        result = test_set_index.estimate_review_effort({"testSetId": "ts1"})
+        assert result["totalDocs"] == 2
+        assert result["sampledDocs"] == 2
