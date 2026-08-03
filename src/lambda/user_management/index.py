@@ -186,18 +186,7 @@ def create_user(args):
         raise e
 
     logger.info(f"User {email} created successfully")
-    result = {
-        "userId": user_id,
-        "email": email,
-        "persona": persona,
-        "status": "active",
-        "createdAt": user_record["createdAt"],
-    }
-    if allowed_config_versions is not None:
-        result["allowedConfigVersions"] = allowed_config_versions
-    if allowed_test_sets is not None:
-        result["allowedTestSets"] = allowed_test_sets
-    return result
+    return user_response_from_item(user_record)
 
 
 def update_user(args):
@@ -265,20 +254,7 @@ def update_user(args):
 
     # Return updated user
     updated = table.get_item(Key={"PK": f"USER#{user_id}", "SK": f"USER#{user_id}"})
-    item = updated["Item"]
-
-    result = {
-        "userId": item["userId"],
-        "email": item["email"],
-        "persona": item["persona"],
-        "status": item.get("status", "active"),
-        "createdAt": format_datetime(item.get("createdAt")),
-    }
-    if "allowedConfigVersions" in item:
-        result["allowedConfigVersions"] = item["allowedConfigVersions"]
-    if "allowedTestSets" in item:
-        result["allowedTestSets"] = item["allowedTestSets"]
-    return result
+    return user_response_from_item(updated["Item"])
 
 
 def delete_user(args):
@@ -338,7 +314,18 @@ def get_my_profile(event):
             "status": "active",
         }
 
-    item = items[0]
+    return user_response_from_item(items[0])
+
+
+_SCOPE_ATTRIBUTES = ("allowedConfigVersions", "allowedTestSets")
+
+
+def user_response_from_item(item):
+    """Build the GraphQL ``User`` shape from a DynamoDB user item.
+
+    Every read path must go through this so the scope axes cannot drift between
+    them. Absent axes are omitted rather than returned empty.
+    """
     result = {
         "userId": item["userId"],
         "email": item["email"],
@@ -346,10 +333,9 @@ def get_my_profile(event):
         "status": item.get("status", "active"),
         "createdAt": format_datetime(item.get("createdAt")),
     }
-    if "allowedConfigVersions" in item:
-        result["allowedConfigVersions"] = item["allowedConfigVersions"]
-    if "allowedTestSets" in item:
-        result["allowedTestSets"] = item["allowedTestSets"]
+    for attr in _SCOPE_ATTRIBUTES:
+        if attr in item:
+            result[attr] = item[attr]
     return result
 
 
@@ -419,19 +405,7 @@ def list_users(event):
         ExpressionAttributeValues={":pk_prefix": "USER#"},
     )
 
-    users = []
-    for item in response.get("Items", []):
-        user = {
-            "userId": item["userId"],
-            "email": item["email"],
-            "persona": item["persona"],
-            "status": item.get("status", "active"),
-            "createdAt": format_datetime(item.get("createdAt")),
-        }
-        # Include allowedConfigVersions if present
-        if "allowedConfigVersions" in item:
-            user["allowedConfigVersions"] = item["allowedConfigVersions"]
-        users.append(user)
+    users = [user_response_from_item(item) for item in response.get("Items", [])]
 
     # Sort by creation date (newest first)
     users.sort(key=lambda x: x.get("createdAt") or "", reverse=True)

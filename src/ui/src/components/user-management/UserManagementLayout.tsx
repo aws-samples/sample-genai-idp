@@ -253,6 +253,11 @@ const UserManagementLayout = (): React.JSX.Element => {
   const saveEditScope = async () => {
     if (!editingUser || !awsConfig) return;
 
+    if (editingUser.persona === 'Annotator' && editScopeTestSets.length === 0) {
+      setError('Assign at least one test set — an annotator with no assigned set cannot access anything');
+      return;
+    }
+
     setLoading(true);
     setError('');
     setSuccess('');

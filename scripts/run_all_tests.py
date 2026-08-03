@@ -93,6 +93,7 @@ RUN_ROOTS = [
     "src/lambda/queue_processor",
     "src/lambda/queue_sender",
     "src/lambda/save_reporting_data",
+    "src/lambda/user_management",
     "src/lambda/version_check_resolver",
     "src/lambda/workflow_tracker",
     "config_library",
