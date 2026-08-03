@@ -1830,6 +1830,128 @@ class TestTestSetResolver:
         assert result["claimedByOthers"] == 1
         assert by_key[names[0]]["claimedBy"] is None
 
+    def test_queue_harvests_the_running_label_job(self, labeling_env):
+        """Found live: the queue never advanced draft labeling.
+
+        Labels are harvested on read, so whoever polls drives the harvest. Only
+        the owner-facing detail page polled — a page an Annotator cannot open —
+        so an annotator who opened the workspace mid-run watched an empty queue
+        that never filled, with the job frozen at 0 labeled.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1, labelJobId="ts1-run")
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/a.pdf", Body=b"x")
+        uri = _seed_pipeline_result(
+            s3,
+            "ts1-run/a.pdf/sections/1/result.json",
+            {"vendor": "Acme"},
+            [{"vendor": {"confidence": 0.42, "confidence_threshold": 0.8}}],
+        )
+        _seed_completed_run(
+            table,
+            "ts1-run",
+            "ts1",
+            ["a.pdf"],
+            {"a.pdf": [{"Id": "1", "OutputJSONUri": uri}]},
+        )
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#ts1-run",
+                "testSetId": "ts1",
+                "jobId": "ts1-run",
+                "status": "RUNNING",
+                "total": 1,
+                "labeled": 0,
+            }
+        )
+
+        result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, None)
+
+        assert result["labelJobStatus"] == "COMPLETED"
+        assert result["labelJobLabeled"] == 1
+        assert result["labelJobTotal"] == 1
+        body = json.loads(
+            s3.get_object(
+                Bucket="test-set-bucket",
+                Key="ts1/baseline/a.pdf/sections/1/result.json",
+            )["Body"].read()
+        )
+        assert body["labelSource"] == "draft-machine"
+
+    def test_queue_reports_a_still_running_label_job(self, labeling_env):
+        """An empty queue must distinguish "still labeling" from "nothing to do".
+
+        Without this the workspace showed "Queue complete — every document has
+        been reviewed" while labeling was still producing the documents.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=2, labelJobId="ts1-run")
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/a.pdf", Body=b"x")
+        _seed_completed_run(table, "ts1-run", "ts1", ["a.pdf", "pending.pdf"], {})
+        table.put_item(
+            Item={
+                "PK": "doc#ts1-run/pending.pdf",
+                "SK": "none",
+                "ObjectStatus": "RUNNING",
+                "Sections": [],
+            }
+        )
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#ts1-run",
+                "testSetId": "ts1",
+                "jobId": "ts1-run",
+                "status": "RUNNING",
+                "total": 2,
+                "labeled": 0,
+            }
+        )
+
+        result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, None)
+        assert result["labelJobStatus"] == "RUNNING"
+        assert result["labelJobTotal"] == 2
+
+    def test_queue_survives_a_failing_harvest(self, labeling_env):
+        """A harvest failure must not take down the queue.
+
+        Documents already labeled are still reviewable, so degrade to serving
+        them rather than failing the whole page.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1, labelJobId="ts1-run")
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/a.pdf", Body=b"x")
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#ts1-run",
+                "testSetId": "ts1",
+                "jobId": "ts1-run",
+                "status": "RUNNING",
+                "total": 1,
+                "labeled": 0,
+            }
+        )
+
+        with patch.object(
+            test_set_index, "_harvest_label_job", side_effect=RuntimeError("boom")
+        ):
+            result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, None)
+
+        assert result["documents"][0]["objectKey"] == "a.pdf"
+        assert result["labelJobStatus"] == "RUNNING"
+
+    def test_queue_reports_no_job_fields_when_none_ran(self, labeling_env):
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/a.pdf", Body=b"x")
+
+        result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, None)
+        assert result["labelJobStatus"] is None
+        assert result["labelJobLabeled"] is None
+        assert result["labelJobTotal"] is None
+
     def test_harvest_stamps_the_test_set_onto_the_pipeline_document(self, labeling_env):
         """Without TestSetId, a reviewer's save silently loses everything.
 

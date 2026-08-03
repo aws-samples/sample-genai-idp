@@ -629,6 +629,46 @@ def _label_job_sk(test_run_id):
     return f"labeljob#{test_run_id}"
 
 
+def _as_int(value):
+    """Coerce a DynamoDB number (Decimal) to int; None stays None."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _harvest_active_label_job(test_set_id, meta):
+    """Advance the set's most recent labeling job and return its current state.
+
+    Labels are harvested on read, so whoever is polling has to drive the harvest.
+    Without this an annotator who opens the workspace while labeling is running
+    sees an empty queue that never fills: the job only advanced while someone
+    watched the owner-facing detail page, which an annotator cannot open.
+
+    Best-effort — a harvest failure must not fail the queue, which is still
+    usable for any documents already labeled.
+    """
+    job_id = meta.get("labelJobId")
+    if not job_id:
+        return None
+
+    job = db_client.get_item(
+        {"PK": f"testset#{test_set_id}", "SK": _label_job_sk(job_id)}
+    )
+    if not job:
+        return None
+    if job.get("status") in ("COMPLETED", "FAILED"):
+        return job
+
+    try:
+        return _harvest_label_job(job)
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Queue harvest failed for labeling job {job_id}: {e}")
+        return job
+
+
 def generate_draft_labels(args, event=None):
     """Start a labeling job: run the active config over a test set's documents.
 
@@ -847,6 +887,8 @@ def get_annotation_queue(args, event=None):
     if not meta:
         raise Exception(f"Test set '{test_set_id}' not found")
 
+    label_job = _harvest_active_label_job(test_set_id, meta)
+
     documents = _collect_queue_documents(test_set_id)
     claims = _claim_state_for_documents(test_set_id, meta, documents)
 
@@ -925,6 +967,9 @@ def get_annotation_queue(args, event=None):
         # The next document this caller should open — the whole point of
         # "Save & next". None when the queue is drained for them.
         "nextObjectKey": next((e["objectKey"] for e in queue if e["available"]), None),
+        "labelJobStatus": (label_job or {}).get("status"),
+        "labelJobLabeled": _as_int((label_job or {}).get("labeled")),
+        "labelJobTotal": _as_int((label_job or {}).get("total")),
     }
     logger.info(
         f"getAnnotationQueue({test_set_id}) for {caller or 'service'}: "

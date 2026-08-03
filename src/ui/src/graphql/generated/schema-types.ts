@@ -71,6 +71,9 @@ export type AnnotationQueue = {
   claimedByOthers: Scalars['Int']['output'];
   documents: Array<AnnotationQueueItem>;
   inspectedDocs?: Maybe<Scalars['Int']['output']>;
+  labelJobLabeled?: Maybe<Scalars['Int']['output']>;
+  labelJobStatus?: Maybe<Scalars['String']['output']>;
+  labelJobTotal?: Maybe<Scalars['Int']['output']>;
   nextObjectKey?: Maybe<Scalars['String']['output']>;
   remainingDocs: Scalars['Int']['output'];
   reviewedDocs: Scalars['Int']['output'];

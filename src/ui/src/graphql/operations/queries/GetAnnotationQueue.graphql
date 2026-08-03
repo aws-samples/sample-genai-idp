@@ -7,6 +7,9 @@ query GetAnnotationQueue($testSetId: String!, $limit: Int, $includeCompleted: Bo
     remainingDocs
     claimedByOthers
     nextObjectKey
+    labelJobStatus
+    labelJobLabeled
+    labelJobTotal
     documents {
       objectKey
       inputKey

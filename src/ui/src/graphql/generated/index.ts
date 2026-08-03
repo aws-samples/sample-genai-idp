@@ -330,6 +330,9 @@ export const getAnnotationQueue = /* GraphQL */ `
       remainingDocs
       claimedByOthers
       nextObjectKey
+      labelJobStatus
+      labelJobLabeled
+      labelJobTotal
       documents {
         objectKey
         inputKey

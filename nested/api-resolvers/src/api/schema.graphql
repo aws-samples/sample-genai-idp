@@ -873,6 +873,13 @@ type AnnotationQueue @aws_cognito_user_pools @aws_iam {
   # The next document this caller should open ("Save & next"); null when the
   # queue is drained for them.
   nextObjectKey: String
+  # State of the set's most recent draft-labeling job, so the workspace can show
+  # progress and stop looking empty while labels are still being produced.
+  # RUNNING here also means polling this query advances the job, since labels are
+  # harvested on read.
+  labelJobStatus: String
+  labelJobLabeled: Int
+  labelJobTotal: Int
 }
 
 input GenerateDraftLabelsInput {

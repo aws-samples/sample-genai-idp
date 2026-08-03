@@ -87,12 +87,17 @@ interface QueueState {
   remainingDocs: number;
   claimedByOthers: number;
   nextObjectKey?: string | null;
+  labelJobStatus?: string | null;
+  labelJobLabeled?: number | null;
+  labelJobTotal?: number | null;
   documents: QueueItem[];
 }
 
 type DocView = 'ground-truth' | 'source';
 
 const QUEUE_PAGE_SIZE = 100;
+
+const LABEL_JOB_POLL_MS = 5000;
 
 const AnnotationWorkspace = (): React.JSX.Element => {
   const { testSetId } = useParams<{ testSetId: string }>();
@@ -153,6 +158,28 @@ const AnnotationWorkspace = (): React.JSX.Element => {
   useEffect(() => {
     loadQueue(false);
   }, [loadQueue]);
+
+  const labelJobRunning = queue?.labelJobStatus === 'RUNNING';
+  const [pollTick, setPollTick] = useState(0);
+
+  /**
+   * Poll while draft labeling runs. Labels are harvested on read, so polling is
+   * what advances the job — without this an annotator who opens the workspace
+   * mid-run watches an empty queue that never fills, because the only other
+   * poller is the owner-facing detail page they cannot open.
+   *
+   * Keyed on an explicit tick rather than the labeled count: a long run reports
+   * the same count for minutes at a time, so depending on the count would stop
+   * re-arming the timer and polling would die exactly when it is still needed.
+   */
+  useEffect(() => {
+    if (!labelJobRunning) return undefined;
+    const timer = setTimeout(async () => {
+      await loadQueue(true);
+      setPollTick((n) => n + 1);
+    }, LABEL_JOB_POLL_MS);
+    return () => clearTimeout(timer);
+  }, [labelJobRunning, pollTick, loadQueue]);
 
   const selected = useMemo(() => queue?.documents.find((d) => d.objectKey === selectedKey) ?? null, [queue, selectedKey]);
 
@@ -310,13 +337,29 @@ const AnnotationWorkspace = (): React.JSX.Element => {
           </Container>
         )}
 
+        {labelJobRunning && (
+          <Alert type="info" header="Draft labeling in progress">
+            <SpaceBetween size="xs">
+              <Box>
+                {queue?.labelJobLabeled ?? 0} of {queue?.labelJobTotal ?? 0} document(s) labeled. Documents appear in the queue as they
+                finish — this page refreshes itself, no need to reload.
+              </Box>
+              {queue?.documents.length === 0 && (
+                <Box fontSize="body-s" color="text-body-secondary">
+                  Nothing to annotate yet. The first documents usually take a couple of minutes.
+                </Box>
+              )}
+            </SpaceBetween>
+          </Alert>
+        )}
+
         {isLoading && !queue && (
           <Box textAlign="center" padding="xl">
             <Spinner /> Loading your queue…
           </Box>
         )}
 
-        {queue && queue.documents.length === 0 && !error && (
+        {queue && queue.documents.length === 0 && !error && !labelJobRunning && (
           <Alert type="success" header="Queue complete">
             Every document in this test set has been reviewed. Nothing left to annotate.
           </Alert>

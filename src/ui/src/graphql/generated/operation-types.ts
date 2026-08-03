@@ -71,6 +71,9 @@ export type AnnotationQueue = {
   claimedByOthers: Scalars['Int']['output'];
   documents: Array<AnnotationQueueItem>;
   inspectedDocs?: Maybe<Scalars['Int']['output']>;
+  labelJobLabeled?: Maybe<Scalars['Int']['output']>;
+  labelJobStatus?: Maybe<Scalars['String']['output']>;
+  labelJobTotal?: Maybe<Scalars['Int']['output']>;
   nextObjectKey?: Maybe<Scalars['String']['output']>;
   remainingDocs: Scalars['Int']['output'];
   reviewedDocs: Scalars['Int']['output'];
@@ -2509,7 +2512,7 @@ export type GetAnnotationQueueQueryVariables = Exact<{
 }>;
 
 
-export type GetAnnotationQueueQuery = { getAnnotationQueue?: { testSetId: string, totalDocs: number, inspectedDocs?: number | null, reviewedDocs: number, remainingDocs: number, claimedByOthers: number, nextObjectKey?: string | null, documents: Array<{ objectKey: string, inputKey: string, reviewObjectKey?: string | null, minConfidence?: number | null, confidenceThreshold?: number | null, labelSource?: string | null, sectionCount: number, claimedBy?: string | null, claimedByMe: boolean, reviewStatus?: string | null, reviewed: boolean, available: boolean, sections?: Array<{ sectionId: string, baselineKey: string }> | null }> } | null };
+export type GetAnnotationQueueQuery = { getAnnotationQueue?: { testSetId: string, totalDocs: number, inspectedDocs?: number | null, reviewedDocs: number, remainingDocs: number, claimedByOthers: number, nextObjectKey?: string | null, labelJobStatus?: string | null, labelJobLabeled?: number | null, labelJobTotal?: number | null, documents: Array<{ objectKey: string, inputKey: string, reviewObjectKey?: string | null, minConfidence?: number | null, confidenceThreshold?: number | null, labelSource?: string | null, sectionCount: number, claimedBy?: string | null, claimedByMe: boolean, reviewStatus?: string | null, reviewed: boolean, available: boolean, sections?: Array<{ sectionId: string, baselineKey: string }> | null }> } | null };
 
 export type GetChatMessagesQueryVariables = Exact<{
   sessionId: Scalars['ID']['input'];
