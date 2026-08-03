@@ -38,6 +38,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from '../../api/client-shim';
 import { addTestSet, addTestSetFromUpload, listBucketFiles, validateTestFileName } from '../../graphql/generated';
 import { getErrorMessage } from '../../utils/errorUtils';
+import useGenerateSyntheticForm from './useGenerateSyntheticForm';
 import {
   BUCKET_OPTIONS,
   CREATE_SOURCES,
@@ -60,8 +61,12 @@ interface CreateTestSetWizardProps {
   onCreated: (message: string) => void;
   /** True when the synthetic-data generator extension is installed. */
   generatorAvailable: boolean;
-  /** Opens the existing synthetic-generation modal (owned by TestSets). */
-  onChooseGenerate: () => void;
+  /**
+   * Called when a generation job starts. Generation is async, so the wizard
+   * hands the job back for the caller's progress banner rather than reporting a
+   * finished test set.
+   */
+  onGenerationStarted: (jobId: string, label: string, testSetId: string) => void;
 }
 
 const REQUIRED_STRUCTURE = `my-test-set.zip
@@ -79,7 +84,7 @@ const CreateTestSetWizard = ({
   onDismiss,
   onCreated,
   generatorAvailable,
-  onChooseGenerate,
+  onGenerationStarted,
 }: CreateTestSetWizardProps): React.JSX.Element => {
   const [activeStep, setActiveStep] = useState(0);
   const [source, setSource] = useState<CreateSource>('upload-labeled');
@@ -105,6 +110,12 @@ const CreateTestSetWizard = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const isUpload = source === 'upload-labeled' || source === 'upload-documents';
+  const isGenerate = source === 'generate';
+
+  // Synthetic generation shares its form (and its submit) with the standalone
+  // deep-link modal, so the two entry points cannot drift. Only active on its own
+  // branch so it doesn't fetch estimates or test sets for the other sources.
+  const generateForm = useGenerateSyntheticForm({ active: visible && isGenerate });
 
   /** One place to clear everything — the old modals repeated this per handler. */
   const reset = () => {
@@ -248,6 +259,14 @@ const CreateTestSetWizard = ({
 
   const handleSubmit = async () => {
     setError('');
+    if (isGenerate) {
+      const started = await generateForm.submit();
+      if (started) {
+        onGenerationStarted(started.jobId, started.label, started.testSetId);
+        close();
+      }
+      return;
+    }
     if (!name.trim()) {
       setError('A name is required');
       return;
@@ -283,16 +302,7 @@ const CreateTestSetWizard = ({
         <Tiles
           value={source}
           onChange={({ detail }) => {
-            const next = detail.value as CreateSource;
-            // Synthetic generation is a different flow entirely (an async job with
-            // its own cost estimate), so hand off to the existing modal rather
-            // than pretending it fits these steps.
-            if (next === 'generate') {
-              close();
-              onChooseGenerate();
-              return;
-            }
-            setSource(next);
+            setSource(detail.value as CreateSource);
             setError('');
           }}
           items={CREATE_SOURCES.filter((s) => s.value !== 'generate' || generatorAvailable).map((s) => ({
@@ -310,7 +320,11 @@ const CreateTestSetWizard = ({
     </SpaceBetween>
   );
 
-  const configureStep = (
+  // Generation collects its own name (as a destination, which may also be an
+  // existing set), so it skips the shared name/description/class fields entirely.
+  const configureStep = isGenerate ? (
+    generateForm.fields
+  ) : (
     <SpaceBetween size="l">
       {error && <Alert type="error">{error}</Alert>}
 
@@ -411,7 +425,20 @@ const CreateTestSetWizard = ({
     </SpaceBetween>
   );
 
-  const reviewStep = (
+  const reviewStep = isGenerate ? (
+    <SpaceBetween size="l">
+      {generateForm.error && (
+        <Alert type="error" header="Generation failed">
+          {generateForm.error}
+        </Alert>
+      )}
+      <KeyValuePairs columns={2} items={generateForm.summary} />
+      <Alert type="info" header="This starts a background job">
+        Generation runs on Amazon Bedrock and takes a few minutes. The test set appears in the list when it completes; you can close this
+        and keep working.
+      </Alert>
+    </SpaceBetween>
+  ) : (
     <SpaceBetween size="l">
       {error && <Alert type="error">{error}</Alert>}
       <KeyValuePairs
@@ -448,7 +475,12 @@ const CreateTestSetWizard = ({
           // Block forward navigation on incomplete input rather than failing at
           // submit, which is where the old modals surfaced these.
           if (detail.requestedStepIndex > activeStep) {
-            if (activeStep === 1) {
+            if (activeStep === 1 && isGenerate) {
+              if (!generateForm.canSubmit) {
+                setError('Complete the required fields to continue');
+                return;
+              }
+            } else if (activeStep === 1) {
               if (!name.trim() || !validateTestSetName(name.trim())) {
                 setError('Enter a valid name to continue');
                 return;
@@ -468,14 +500,14 @@ const CreateTestSetWizard = ({
         }}
         onCancel={close}
         onSubmit={handleSubmit}
-        isLoadingNextStep={isSubmitting}
+        isLoadingNextStep={isSubmitting || generateForm.submitting}
         i18nStrings={{
           stepNumberLabel: (n) => `Step ${n}`,
           collapsedStepsLabel: (n, total) => `Step ${n} of ${total}`,
           cancelButton: 'Cancel',
           previousButton: 'Previous',
           nextButton: 'Next',
-          submitButton: 'Create test set',
+          submitButton: isGenerate ? 'Generate documents' : 'Create test set',
           optional: 'optional',
         }}
         steps={[

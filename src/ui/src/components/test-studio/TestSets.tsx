@@ -883,7 +883,14 @@ const TestSets = (): React.JSX.Element => {
           loadTestSets();
         }}
         generatorAvailable={generatorAvailable}
-        onChooseGenerate={() => setShowGenerateModal(true)}
+        onGenerationStarted={(jobId, label, testSetId) => {
+          setShowCreateWizard(false);
+          setSuccessMessage(`Synthetic data generation started for "${label}". It will appear in the list when it completes.`);
+          setGenJobs((prev) => ({
+            ...prev,
+            [jobId]: { name: label, status: 'GENERATING', message: 'Starting generation', testSetId },
+          }));
+        }}
       />
 
       <Modal
