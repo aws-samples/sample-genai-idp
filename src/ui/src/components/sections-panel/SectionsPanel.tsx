@@ -27,7 +27,6 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import FileViewer from '../document-viewer/JSONViewer';
 import { getSectionConfidenceAlertCount, getSectionConfidenceAlerts } from '../common/confidence-alerts-utils';
 import { getSectionIssueStatus, type ProcessingIssue } from '../common/processing-issues-utils';
-import useConfiguration from '../../hooks/use-configuration';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
 import { useDocumentVersion } from '../../contexts/document-version';
@@ -418,7 +417,7 @@ const EditableClassCell = ({
   item: SectionItem;
   validationErrors: Record<string, string[]>;
   updateSection: (id: string, field: string, value: string) => void;
-  getAvailableClasses: () => { value: string; label: string }[];
+  getAvailableClasses: () => { value: string; label: string; description?: string }[];
 }): React.JSX.Element => (
   <FormField errorText={validationErrors[item.Id]?.find((err) => err.includes('class'))}>
     <Select
@@ -427,6 +426,8 @@ const EditableClassCell = ({
       options={getAvailableClasses()}
       placeholder="Select class/type"
       invalid={validationErrors[item.Id]?.some((err) => err.includes('class'))}
+      filteringType="auto"
+      expandToViewport
     />
   </FormField>
 );
@@ -822,7 +823,12 @@ const SectionsPanel = ({ sections, pages = [], documentItem, mergedConfig, onDoc
   const [isSkipping, setIsSkipping] = useState(false);
   // Track which section's viewer is open for navigation
   const [openViewerSectionIndex, setOpenViewerSectionIndex] = useState<number | null>(null);
-  const { mergedConfig: configuration } = useConfiguration();
+  // `mergedConfig` is the config VERSION the document was processed with
+  // (see DocumentPanel: it fetches `documentVersionConfig` from the doc's
+  // `configVersion` and passes it in here). Using the current live config
+  // instead would show the wrong class vocabulary in Edit Mode for docs
+  // processed under a previous or different config version.
+  const configuration = mergedConfig;
   const { settings: settings2 } = useSettingsContext();
   const { isReviewerOnly, canWrite, canReview } = useUserRole();
   // When viewing a past document version, all edits are disabled — the panels
@@ -958,7 +964,9 @@ const SectionsPanel = ({ sections, pages = [], documentItem, mergedConfig, onDoc
     }
   }, [isEditMode, sections]);
 
-  // Get available classes from configuration
+  // Get available classes from the document's config version (passed in as
+  // `mergedConfig`). Each option surfaces the class description so users can
+  // pick the correct class without leaving the dropdown.
   const getAvailableClasses = () => {
     if (!configuration?.classes) return [];
     return (configuration.classes as Record<string, unknown>[])
@@ -967,10 +975,12 @@ const SectionsPanel = ({ sections, pages = [], documentItem, mergedConfig, onDoc
         // JSON Schema: $id or x-aws-idp-document-type
         // Legacy: name
         const className = String(cls.$id || cls['x-aws-idp-document-type'] || cls.name || '');
+        const description = typeof cls.description === 'string' ? cls.description.trim() : '';
 
         return {
           label: className,
           value: className,
+          description: description || undefined,
         };
       })
       .filter((option) => option.value); // Remove any undefined entries

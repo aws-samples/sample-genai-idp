@@ -1000,7 +1000,13 @@ export const DocumentPanel = ({
             sections: displayedItem.sections,
             pages: displayedItem.pages,
             documentItem: displayedItem,
-            mergedConfig,
+            // Use the config version the document was processed with, not the
+            // stack's current live config. This drives the Edit Mode class
+            // dropdown (so users see the classes the doc was actually
+            // classified against) and section confidence-alert thresholds.
+            // Falls back to `mergedConfig` when the doc's version is
+            // 'default'/unset — see `documentVersionConfig` above.
+            mergedConfig: documentVersionConfig,
             // Editing is disabled for a historical snapshot; the panels also
             // gate their own edit affordances via useDocumentVersion().isHistorical.
             onDocumentUpdate: viewingRunId ? undefined : setLocalItem,
