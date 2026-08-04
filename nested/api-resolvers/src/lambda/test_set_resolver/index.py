@@ -823,18 +823,89 @@ def _walk_confidence(explainability_info):
     return found
 
 
-def _min_confidence(explainability_info):
-    """Lowest per-field confidence in an explainability_info payload.
+def _absent_field_paths(inference_result):
+    """Leaf names whose extracted value is absent (null / "" / empty container).
+
+    A field the document genuinely does not contain gets confidence 0.0 with a
+    reason like "No employer EIN found in OCR results". That is a *correct*
+    reading of a blank box, not a low-quality extraction — but it is
+    indistinguishable from real uncertainty once reduced to a number.
+    """
+    absent = set()
+
+    def walk(node, name=None):
+        if isinstance(node, dict):
+            for key, child in node.items():
+                walk(child, key)
+        elif isinstance(node, list):
+            if not node and name:
+                absent.add(name)
+            for child in node:
+                walk(child, name)
+        elif name and (node is None or node == ""):
+            absent.add(name)
+
+    walk(inference_result)
+    return absent
+
+
+def _min_confidence(explainability_info, inference_result=None):
+    """Lowest confidence among fields the document actually *has* a value for.
 
     Returns None when the payload carries no confidence at all (e.g. assessment
     disabled), so callers can distinguish "no confidence data" from
     "confidence 0".
+
+    Fields whose extracted value is absent are excluded. Scoring a blank W-2 box
+    as 0.0 confidence dragged whole documents to "0.0%" in the browser even when
+    every populated field scored >0.99 — the number described the emptiest box on
+    the form rather than the quality of the extraction, and it made every
+    generated set look worthless. Those fields keep their 0.0 in
+    explainability_info (the per-field detail is still true); they just no longer
+    define the document's headline score.
     """
     found = _walk_confidence(explainability_info)
-    return min(c for c, _ in found) if found else None
+    if not found:
+        return None
+    if inference_result is not None:
+        absent = _absent_field_paths(inference_result)
+        populated = [
+            (c, t) for c, t, name in _walk_confidence_named(explainability_info)
+            if name not in absent
+        ]
+        # Fall back to the unfiltered minimum when *every* field is absent, so a
+        # genuinely empty extraction still reports 0 rather than "no data".
+        if populated:
+            return min(c for c, _ in populated)
+    return min(c for c, _ in found)
 
 
-def _confidence_threshold(explainability_info):
+def _walk_confidence_named(explainability_info):
+    """As :func:`_walk_confidence`, plus the field name each score belongs to."""
+    found = []
+
+    def walk(node, name=None):
+        if isinstance(node, dict):
+            value = node.get("confidence")
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                threshold = node.get("confidence_threshold")
+                if not isinstance(threshold, (int, float)) or isinstance(
+                    threshold, bool
+                ):
+                    threshold = None
+                found.append((float(value), threshold, name))
+            for key, child in node.items():
+                if key != "confidence":
+                    walk(child, key)
+        elif isinstance(node, list):
+            for child in node:
+                walk(child, name)
+
+    walk(explainability_info)
+    return found
+
+
+def _confidence_threshold(explainability_info, inference_result=None):
     """The configured alert threshold for the weakest field, if it carries one.
 
     Reported alongside minConfidence so the UI can color against the *config's*
@@ -842,11 +913,16 @@ def _confidence_threshold(explainability_info):
     0.9 threshold and passing under 0.8, and inventing constants in the UI would
     contradict the assessment config on both.
     """
-    found = _walk_confidence(explainability_info)
+    found = _walk_confidence_named(explainability_info)
     if not found:
         return None
+    if inference_result is not None:
+        absent = _absent_field_paths(inference_result)
+        populated = [f for f in found if f[2] not in absent]
+        if populated:
+            found = populated
     # Tie to the same field minConfidence reports.
-    return min(found, key=lambda pair: pair[0])[1]
+    return min(found, key=lambda triple: triple[0])[1]
 
 
 # ---------------------------------------------------------------------------
@@ -1349,11 +1425,12 @@ def _write_draft_labels_for_doc(test_set_bucket, test_set_id, file_name, section
         result = json.loads(body)
 
         explainability = result.get("explainability_info")
-        min_conf = _min_confidence(explainability)
+        inference = result.get("inference_result")
+        min_conf = _min_confidence(explainability, inference)
         result["labelSource"] = LABEL_SOURCE_DRAFT
         if min_conf is not None:
             result["minConfidence"] = min_conf
-            threshold = _confidence_threshold(explainability)
+            threshold = _confidence_threshold(explainability, inference)
             if threshold is not None:
                 result["confidenceThreshold"] = threshold
 
@@ -2000,13 +2077,22 @@ def _attach_label_metadata(test_set_bucket, documents):
             bucket_for_doc["sources"].append(
                 result.get("labelSource") or LABEL_SOURCE_UPLOADED
             )
-            confidence = result.get("minConfidence")
+            inference = result.get("inference_result")
+            # Recompute rather than trusting a stored minConfidence: labels
+            # written before absent fields were excluded carry a 0.0 that came
+            # from a blank box, and reading it back would keep reporting "0.0%"
+            # for documents whose populated fields all score >0.99. Recomputing
+            # repairs those in place; the stored value is only a fallback for
+            # payloads with no explainability_info to recompute from.
+            confidence = _min_confidence(result.get("explainability_info"), inference)
             if confidence is None:
-                confidence = _min_confidence(result.get("explainability_info"))
+                confidence = result.get("minConfidence")
             if confidence is not None:
-                threshold = result.get("confidenceThreshold")
+                threshold = _confidence_threshold(
+                    result.get("explainability_info"), inference
+                )
                 if threshold is None:
-                    threshold = _confidence_threshold(result.get("explainability_info"))
+                    threshold = result.get("confidenceThreshold")
                 bucket_for_doc["confidences"].append((float(confidence), threshold))
 
     for doc in documents:

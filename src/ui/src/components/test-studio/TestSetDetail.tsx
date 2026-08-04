@@ -11,7 +11,7 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
   AppLayout,
@@ -37,6 +37,7 @@ import Navigation from '../genaiidp-layout/navigation';
 import { appLayoutLabels } from '../common/labels';
 import { TEST_STUDIO_PATH, testSetDocumentHref, testSetAnnotateHref } from '../../routes/constants';
 import TestDocThumbnail from './TestDocThumbnail';
+import ReviewEffortModal from './ReviewEffortModal';
 import type { TestSetDocumentSectionRef } from './GroundTruthVisualEditor';
 
 const client = generateClient();
@@ -107,6 +108,7 @@ export const formatSize = (size?: number | null): string => {
 
 const TestSetDetail = (): React.JSX.Element => {
   const { testSetId } = useParams<{ testSetId: string }>();
+  const navigate = useNavigate();
   const { navigationOpen, setNavigationOpen } = useAppContext();
   const { settings } = useSettingsContext();
   const testSetBucket = (settings as Record<string, unknown>).TestSetBucket as string | undefined;
@@ -121,6 +123,7 @@ const TestSetDetail = (): React.JSX.Element => {
   const [filterText, setFilterText] = useState('');
   const [labelJob, setLabelJob] = useState<{ jobId: string; status: string; total: number; labeled: number } | null>(null);
   const [isStartingLabels, setIsStartingLabels] = useState(false);
+  const [showEffortModal, setShowEffortModal] = useState(false);
   // Default to worst-first once any document carries confidence — the whole point
   // of draft labels is to review the least trustworthy ones first.
   const [worstFirst, setWorstFirst] = useState(true);
@@ -306,8 +309,10 @@ const TestSetDetail = (): React.JSX.Element => {
                       </Button>
                       {/* Owners reach the worst-first queue from here rather than
                           hand-building the URL; it is also the link they share
-                          with an assigned annotator. */}
-                      <Button href={testSetAnnotateHref(testSetId ?? '')} iconName="user-profile">
+                          with an assigned annotator. Routed through the effort
+                          estimate so the decision "how much to review" is made
+                          before committing a team, not discovered mid-queue. */}
+                      <Button onClick={() => setShowEffortModal(true)} iconName="user-profile">
                         Annotate
                       </Button>
                       <Button iconName="refresh" onClick={() => fetchPage(currentPageIndex, pageTokens)} disabled={isLoading}>
@@ -390,6 +395,16 @@ const TestSetDetail = (): React.JSX.Element => {
                   </Box>
                 </Box>
               }
+            />
+
+            <ReviewEffortModal
+              visible={showEffortModal}
+              testSetId={testSetId ?? ''}
+              onDismiss={() => setShowEffortModal(false)}
+              onContinue={() => {
+                setShowEffortModal(false);
+                navigate(testSetAnnotateHref(testSetId ?? '').replace(/^#/, ''));
+              }}
             />
           </SpaceBetween>
         </ContentLayout>

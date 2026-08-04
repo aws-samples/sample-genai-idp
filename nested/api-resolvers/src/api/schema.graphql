@@ -793,12 +793,22 @@ type ReliabilityBin @aws_cognito_user_pools @aws_iam {
 type CalibrationHealth @aws_cognito_user_pools @aws_iam {
   # Expected Calibration Error. Null until something has been measured.
   ece: Float
+  # P(a wrong field scores lower than a correct one) — whether confidence can
+  # *rank* correctness, which is the only thing worst-first review needs. Null
+  # until both correct and incorrect observations exist. A separate axis from
+  # ECE: measured live, one grader scored ECE 0.032 / AUROC 0.480 and another
+  # ECE 0.054 / AUROC 0.878 — better calibration, useless ranking.
+  auroc: Float
   # Populated confidence bins. Low coverage means confidence barely varies, so
   # there is no worst-first signal — ECE alone does NOT detect this.
   binCoverage: Int!
   totalObservations: Int!
   degenerate: Boolean!
   overconfident: Boolean!
+  # Confidence ranks correctness no better than chance. Distinct from
+  # degenerate: scores may spread across many bins and still put every error in
+  # the high-confidence end, where worst-first review never looks.
+  undiscriminating: Boolean!
   reliable: Boolean!
 }
 

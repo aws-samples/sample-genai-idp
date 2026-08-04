@@ -125,12 +125,14 @@ export type CalculationDetails = {
 };
 
 export type CalibrationHealth = {
+  auroc?: Maybe<Scalars['Float']['output']>;
   binCoverage: Scalars['Int']['output'];
   degenerate: Scalars['Boolean']['output'];
   ece?: Maybe<Scalars['Float']['output']>;
   overconfident: Scalars['Boolean']['output'];
   reliable: Scalars['Boolean']['output'];
   totalObservations: Scalars['Int']['output'];
+  undiscriminating: Scalars['Boolean']['output'];
 };
 
 export type CapacityMetric = {
@@ -2497,6 +2499,15 @@ export type CompareTestRunsQueryVariables = Exact<{
 
 
 export type CompareTestRunsQuery = { compareTestRuns?: { metrics: string, configs?: Array<{ setting: string, values: string } | null> | null } | null };
+
+export type EstimateReviewEffortQueryVariables = Exact<{
+  testSetId: Scalars['String']['input'];
+  targetAccuracy?: InputMaybe<Scalars['Float']['input']>;
+  configVersion?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type EstimateReviewEffortQuery = { estimateReviewEffort?: { testSetId: string, targetAccuracy: number, configVersion?: string | null, docsToReview: number, docsToReviewLow: number, docsToReviewHigh: number, totalDocs: number, sampledDocs?: number | null, impliedCutoff?: number | null, residualError: number, baselineError: number, effortMinutes: number, estimateConfidence: string, auditSampleSize: number, recommendReviewAll: boolean, calibration: { ece?: number | null, auroc?: number | null, binCoverage: number, totalObservations: number, degenerate: boolean, overconfident: boolean, undiscriminating: boolean, reliable: boolean }, burndown: Array<{ docsReviewed: number, residualErrorPct: number, cutoff?: number | null }>, reliabilityTable: Array<{ binStart: number, binEnd: number, observations: number, observedAccuracy?: number | null, blendedAccuracy?: number | null }> } | null };
 
 export type GetAgentJobStatusQueryVariables = Exact<{
   jobId: Scalars['ID']['input'];

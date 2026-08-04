@@ -1107,6 +1107,72 @@ class TestTestSetResolver:
         )
         assert test_set_index._confidence_threshold(None) is None
 
+    def test_min_confidence_ignores_fields_the_document_does_not_have(self):
+        """Found live: whole documents reported "0.0%" because a box was blank.
+
+        A W-2 with no locality gets confidence 0.0 on locality_name with the
+        reason "No locality name found in OCR results" — a correct reading of an
+        empty box, not a bad extraction. Taking the raw minimum made every
+        generated set look worthless in the browser: 8 of 29 fields were null, so
+        the document scored 0.0 while every populated field scored >0.99.
+        """
+        explainability = [
+            {
+                "employer_name": {"confidence": 0.997},
+                "locality_name": {
+                    "confidence": 0.0,
+                    "confidence_reason": "No locality name found in OCR results",
+                },
+                "allocated_tips": {"confidence": 0.0},
+            }
+        ]
+        inference = {
+            "employer_name": "CloudNest Technologies, Inc.",
+            "locality_name": None,
+            "allocated_tips": None,
+        }
+
+        # Without the values there is no way to tell absent from uncertain.
+        assert test_set_index._min_confidence(explainability) == 0.0
+        # With them, the score describes the fields that actually carry data.
+        assert test_set_index._min_confidence(explainability, inference) == 0.997
+
+    def test_min_confidence_still_counts_populated_low_confidence_fields(self):
+        """Exclusion must not hide genuine uncertainty — only absence."""
+        explainability = [
+            {
+                "good": {"confidence": 0.99},
+                "shaky": {"confidence": 0.42},
+                "blank": {"confidence": 0.0},
+            }
+        ]
+        inference = {"good": "yes", "shaky": "maybe", "blank": None}
+        assert test_set_index._min_confidence(explainability, inference) == 0.42
+
+    def test_min_confidence_reports_zero_when_everything_is_absent(self):
+        """An entirely empty extraction is genuinely bad — don't report "no data"."""
+        explainability = [{"a": {"confidence": 0.0}, "b": {"confidence": 0.0}}]
+        assert (
+            test_set_index._min_confidence(explainability, {"a": None, "b": ""}) == 0.0
+        )
+
+    def test_min_confidence_treats_empty_containers_as_absent(self):
+        explainability = [{"rows": {"confidence": 0.0}, "name": {"confidence": 0.95}}]
+        inference = {"rows": [], "name": "Acme"}
+        assert test_set_index._min_confidence(explainability, inference) == 0.95
+
+    def test_confidence_threshold_follows_the_same_exclusion(self):
+        """The threshold must belong to the field the score now reports."""
+        explainability = [
+            {
+                "blank": {"confidence": 0.0, "confidence_threshold": 0.5},
+                "real": {"confidence": 0.8, "confidence_threshold": 0.9},
+            }
+        ]
+        inference = {"blank": None, "real": "x"}
+        assert test_set_index._min_confidence(explainability, inference) == 0.8
+        assert test_set_index._confidence_threshold(explainability, inference) == 0.9
+
     def test_generate_draft_labels_delegates_to_the_test_runner(self, labeling_env):
         table, _ = labeling_env
         _seed_test_set(table, "ts1", fileCount=2)

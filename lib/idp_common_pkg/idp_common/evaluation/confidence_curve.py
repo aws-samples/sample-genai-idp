@@ -74,6 +74,24 @@ MIN_BINS_FOR_SIGNAL = 3
 # and recommend reviewing everything instead of a small worst-first sample.
 ECE_UNRELIABLE_THRESHOLD = 0.15
 
+# AUROC below which confidence cannot usefully *rank* correctness, which is the
+# only thing worst-first review needs from it. 0.5 is chance; anything at or
+# under this is no better than reviewing at random.
+#
+# This is a separate gate from ECE because the two measure different things and
+# can disagree completely. Measured on a 100-document W-2 set: one grader scored
+# ECE 0.032 / AUROC 0.480 and another ECE 0.054 / AUROC 0.878 — the *worse* ECE
+# had the far better ranking, and the ECE-only gate called the useless one
+# reliable. Calibration says "is 0.9 really 90%?"; discrimination says "are the
+# wrong answers the ones with low scores?". Only the latter justifies reviewing a
+# subset.
+AUROC_UNRELIABLE_THRESHOLD = 0.55
+
+# Enough observations to trust an AUROC estimate at all. Below this the ranking
+# statistic is noise and the gate would fire on small samples that are simply
+# thin rather than genuinely undiscriminating.
+MIN_OBSERVATIONS_FOR_AUROC = 100
+
 # Default effort model. Deliberately a flat heuristic: it ignores field
 # complexity, document variance and annotator speed. Real per-annotator timings
 # should replace this once claim→complete durations are being recorded.
@@ -133,20 +151,29 @@ class CalibrationHealth:
     # Set when confidence is present but useless for ordering.
     degenerate: bool = False
     overconfident: bool = False
+    # Ranking power: P(a wrong field scores lower than a correct one). None until
+    # there are enough observations to estimate it.
+    auroc: Optional[float] = None
+    # Set when confidence ranks correctness no better than chance. Distinct from
+    # `degenerate`: confidence may vary across many bins (so coverage looks
+    # healthy) and still put the errors in the wrong places.
+    undiscriminating: bool = False
 
     @property
     def reliable(self) -> bool:
         if self.total_observations == 0:
             return True  # Nothing measured yet — not evidence of a problem.
-        return not (self.degenerate or self.overconfident)
+        return not (self.degenerate or self.overconfident or self.undiscriminating)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "ece": self.ece,
+            "auroc": self.auroc,
             "binCoverage": self.bin_coverage,
             "totalObservations": self.total_observations,
             "degenerate": self.degenerate,
             "overconfident": self.overconfident,
+            "undiscriminating": self.undiscriminating,
             "reliable": self.reliable,
         }
 
@@ -329,14 +356,62 @@ class ConfidenceCurve:
         overconfident = (
             error > ECE_UNRELIABLE_THRESHOLD and self._high_confidence_error() > 0.1
         )
+        # Undiscriminating: confidence does not rank correctness. This is the
+        # failure ECE and bin coverage both miss — spread-out, well-calibrated
+        # scores that nonetheless put the errors in the high-confidence end.
+        auroc = self.auroc()
+        undiscriminating = (
+            auroc is not None
+            and total >= MIN_OBSERVATIONS_FOR_AUROC
+            and auroc <= AUROC_UNRELIABLE_THRESHOLD
+        )
 
         return CalibrationHealth(
             ece=error,
+            auroc=auroc,
             bin_coverage=coverage,
             total_observations=int(total),
             degenerate=degenerate,
             overconfident=overconfident,
+            undiscriminating=undiscriminating,
         )
+
+    def auroc(self) -> Optional[float]:
+        """P(a wrong field scores lower than a correct one), from bin counts.
+
+        The probability that a randomly chosen incorrect field has lower
+        confidence than a randomly chosen correct one — exactly what worst-first
+        review depends on, and what ECE does not measure.
+
+        Computed from the binned counts we already store rather than raw pairs,
+        so it needs no extra state. Ties inside a bin contribute 0.5, which is the
+        standard treatment and the reason a single-bin curve scores 0.5 (chance)
+        instead of appearing perfect. Returns None when either class is absent —
+        with no errors, or nothing correct, ranking is undefined rather than good.
+
+        Binning discards within-bin ordering, so this reads *lower* than an AUROC
+        over raw confidences (measured: 0.742 here vs 0.878 from Stickler's
+        unbinned ``AUROCMetric`` on the same run). That bias is one-directional
+        and therefore safe for a reliability gate — it can call a good ranker
+        mediocre, but it will not call a chance-level ranker good. Use Stickler's
+        value when reporting AUROC as a metric; use this one for the gate.
+        """
+        correct_per_bin = [self.correct[i] for i in range(BIN_COUNT)]
+        wrong_per_bin = [self.total[i] - self.correct[i] for i in range(BIN_COUNT)]
+        n_correct = sum(correct_per_bin)
+        n_wrong = sum(wrong_per_bin)
+        if n_correct <= 0 or n_wrong <= 0:
+            return None
+
+        # Concordant pairs: wrong in a lower bin than correct. Ties count half.
+        concordant = 0.0
+        for w_index in range(BIN_COUNT):
+            w = wrong_per_bin[w_index]
+            if w <= 0:
+                continue
+            higher = sum(correct_per_bin[w_index + 1 :])
+            concordant += w * (higher + 0.5 * correct_per_bin[w_index])
+        return concordant / (n_correct * n_wrong)
 
     def _high_confidence_error(self) -> float:
         """Confidence-minus-accuracy gap in the top three bins (>=0.7).
@@ -519,6 +594,22 @@ def estimate_for_target(
     # most.
     if doc_confidences:
         confidences = sorted((-1.0 if c is None else float(c)) for c in doc_confidences)
+        # The set may be larger than the sample the caller could afford to read
+        # (the queue/estimator cap reads a bounded page). Extrapolate the observed
+        # distribution over the rest instead of leaving them unrepresented:
+        # without this a 2008-document set sampled at 500 padded the remaining
+        # 1508 with the "no confidence" sentinel, which sorts to the front and
+        # suppressed impliedCutoff and every burndown cutoff to null.
+        if len(confidences) < total_docs:
+            measured = [c for c in confidences if c >= 0]
+            if measured:
+                missing = total_docs - len(confidences)
+                # Quantile-preserving fill: repeat the measured distribution so
+                # the extrapolated documents share its shape.
+                confidences.extend(
+                    measured[int(i * len(measured) / missing)] for i in range(missing)
+                )
+                confidences.sort()
     else:
         # No per-doc confidence: assume documents spread across the curve.
         confidences = [bin_midpoint(i % BIN_COUNT) for i in range(total_docs)]

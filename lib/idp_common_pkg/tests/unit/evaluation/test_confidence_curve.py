@@ -131,6 +131,85 @@ class TestCalibrationHealth:
         assert health.degenerate
         assert not health.reliable
 
+    def test_undiscriminating_confidence_is_flagged_when_ece_looks_fine(self):
+        """The case ECE *and* bin coverage both miss.
+
+        Taken from a live 100-document W-2 A/B: one grader spread scores across 7
+        bins with ECE 0.032 — passing both existing gates — yet AUROC was 0.480,
+        i.e. worse than chance at ranking correctness. All 77 errors sat in the
+        top bin, so worst-first review reached none of them and reviewing 30%
+        found *fewer* errors than reviewing at random (ECARB 0.9x).
+
+        Reproduced here: every error hides in the >=0.9 bin while the flagged
+        low-confidence fields are all actually correct.
+        """
+        curve = ConfidenceCurve()
+        for index, (n, p_correct) in {
+            2: (1, 1.0),
+            4: (1, 1.0),
+            5: (1, 1.0),
+            6: (4, 1.0),
+            7: (7, 1.0),
+            8: (22, 1.0),
+            9: (3972, 0.9806),
+        }.items():
+            curve.total[index] = n
+            curve.correct[index] = round(n * p_correct)
+
+        health = curve.calibration_health()
+        assert health.ece is not None and health.ece < 0.05, health.ece
+        assert health.bin_coverage == 7  # passes the degenerate gate
+        assert not health.degenerate
+        assert not health.overconfident
+        assert health.auroc is not None and health.auroc <= 0.55, health.auroc
+        assert health.undiscriminating
+        assert not health.reliable
+
+    def test_good_ranker_is_reliable_despite_worse_ece(self):
+        """The other arm of the same A/B — worse ECE, far better ranking.
+
+        ECE 0.054 (higher than the undiscriminating arm's 0.032) but AUROC 0.878,
+        with 58% of errors reachable worst-first. Ranking power is what the
+        estimate depends on, so this must read as reliable.
+        """
+        curve = ConfidenceCurve()
+        for index, (n, p_correct) in {
+            4: (5, 0.4),
+            5: (41, 0.9756),
+            6: (40, 0.95),
+            7: (203, 0.9113),
+            8: (99, 0.8687),
+            9: (3652, 0.9926),
+        }.items():
+            curve.total[index] = n
+            curve.correct[index] = round(n * p_correct)
+
+        health = curve.calibration_health()
+        assert health.auroc is not None and health.auroc > 0.55, health.auroc
+        assert not health.undiscriminating
+        assert health.reliable
+
+    def test_auroc_is_chance_for_a_single_bin(self):
+        """A one-bin curve cannot rank anything, so it must not look perfect."""
+        curve = ConfidenceCurve.from_observations(
+            [(0.95, True)] * 980 + [(0.95, False)] * 20
+        )
+        assert curve.calibration_health().auroc == 0.5
+
+    def test_auroc_is_none_without_both_classes(self):
+        """With no errors (or nothing correct) ranking is undefined, not perfect."""
+        assert ConfidenceCurve.from_observations([(0.9, True)] * 50).auroc() is None
+        assert ConfidenceCurve.from_observations([(0.9, False)] * 50).auroc() is None
+
+    def test_auroc_gate_does_not_fire_on_thin_samples(self):
+        """Below the observation floor AUROC is noise, so the gate must hold off."""
+        curve = ConfidenceCurve.from_observations(
+            [(0.95, False)] * 5 + [(0.1, True)] * 5
+        )
+        health = curve.calibration_health()
+        assert health.auroc is not None and health.auroc < 0.55
+        assert not health.undiscriminating
+
     def test_well_calibrated_curve_is_reliable(self):
         health = _calibrated_curve().calibration_health()
         assert health.reliable
@@ -157,8 +236,14 @@ class TestEstimateConfidenceStates:
         zone the estimator auto-accepts — only a scoring run can.
         """
         rng = random.Random(5)
+        # Correctness must track confidence, or the curve is undiscriminating and
+        # correctly reports UNRELIABLE for that reason instead — which would test
+        # the ranking gate rather than this test's subject (provenance).
         curve = ConfidenceCurve.from_observations(
-            [(rng.uniform(0.0, 0.5), rng.random() < 0.5) for _ in range(200)]
+            [
+                (c, rng.random() < c + 0.4)
+                for c in (rng.uniform(0.0, 0.5) for _ in range(200))
+            ]
         )
         assert curve.scoring_observations == 0
         assert (

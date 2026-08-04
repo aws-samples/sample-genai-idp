@@ -1,0 +1,41 @@
+query EstimateReviewEffort($testSetId: String!, $targetAccuracy: Float, $configVersion: String) {
+  estimateReviewEffort(testSetId: $testSetId, targetAccuracy: $targetAccuracy, configVersion: $configVersion) {
+    testSetId
+    targetAccuracy
+    configVersion
+    docsToReview
+    docsToReviewLow
+    docsToReviewHigh
+    totalDocs
+    sampledDocs
+    impliedCutoff
+    residualError
+    baselineError
+    effortMinutes
+    estimateConfidence
+    auditSampleSize
+    recommendReviewAll
+    calibration {
+      ece
+      auroc
+      binCoverage
+      totalObservations
+      degenerate
+      overconfident
+      undiscriminating
+      reliable
+    }
+    burndown {
+      docsReviewed
+      residualErrorPct
+      cutoff
+    }
+    reliabilityTable {
+      binStart
+      binEnd
+      observations
+      observedAccuracy
+      blendedAccuracy
+    }
+  }
+}

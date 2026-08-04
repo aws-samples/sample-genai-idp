@@ -125,12 +125,14 @@ export type CalculationDetails = {
 };
 
 export type CalibrationHealth = {
+  auroc?: Maybe<Scalars['Float']['output']>;
   binCoverage: Scalars['Int']['output'];
   degenerate: Scalars['Boolean']['output'];
   ece?: Maybe<Scalars['Float']['output']>;
   overconfident: Scalars['Boolean']['output'];
   reliable: Scalars['Boolean']['output'];
   totalObservations: Scalars['Int']['output'];
+  undiscriminating: Scalars['Boolean']['output'];
 };
 
 export type CapacityMetric = {
