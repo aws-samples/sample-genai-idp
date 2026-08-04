@@ -669,6 +669,41 @@ def _harvest_active_label_job(test_set_id, meta):
         return job
 
 
+def _documents_needing_labels(test_set_id):
+    """Object keys with no ground truth of their own, worst-first order aside.
+
+    A document that already carries ground truth — uploaded, generated, or
+    human-reviewed — has nothing for a labeling run to add: the harvester would
+    process it and then decline to write, because only a prior machine draft is
+    replaceable. On a mixed set (some generated ground truth, some bare
+    documents) labeling everything therefore paid for inference on documents it
+    would discard.
+
+    Returns ``(needs_labels, already_labeled_count)``. An empty first element
+    means the whole set is already labeled.
+    """
+    needs = []
+    already = 0
+    next_token = None
+
+    while True:
+        page = get_test_set_documents(
+            {"testSetId": test_set_id, "limit": 200, "nextToken": next_token}
+        )
+        for doc in page.get("documents") or []:
+            # A draft is replaceable, so a previously drafted document is still a
+            # candidate — re-running to pick up a better config is legitimate.
+            if doc.get("labelSource") in (None, LABEL_SOURCE_DRAFT):
+                needs.append(doc["objectKey"])
+            else:
+                already += 1
+        next_token = page.get("nextToken")
+        if not next_token:
+            break
+
+    return needs, already
+
+
 def generate_draft_labels(args, event=None):
     """Start a labeling job: run the active config over a test set's documents.
 
@@ -676,6 +711,12 @@ def generate_draft_labels(args, event=None):
     polls getDraftLabelJob, which harvests results as documents finish. Existing
     labels are only replaced when they are themselves machine drafts, so
     re-running never clobbers reviewed or hand-uploaded ground truth.
+
+    Without an explicit ``objectKeys``, only documents that *need* labels are
+    processed. Labeling a whole mixed set would spend inference on documents
+    whose ground truth the harvester then refuses to overwrite — most visibly on
+    a fully generated set, where every document already has ground truth and the
+    run produced nothing but noise.
     """
     input_data = args.get("input", args)
     test_set_id = input_data["testSetId"]
@@ -692,6 +733,21 @@ def generate_draft_labels(args, event=None):
     file_count = int(meta.get("fileCount", 0) or 0)
     if file_count <= 0:
         raise Exception(f"Test set '{test_set_id}' has no documents to label")
+
+    already_labeled = 0
+    if not object_keys:
+        object_keys, already_labeled = _documents_needing_labels(test_set_id)
+        if not object_keys and already_labeled:
+            raise Exception(
+                f"Every document in '{test_set_id}' already has ground truth "
+                f"({already_labeled} document(s)) — there is nothing to draft-label. "
+                "Run a test to score the pipeline against it instead."
+            )
+        if already_labeled:
+            logger.info(
+                f"Draft labeling {len(object_keys)} document(s) in {test_set_id}; "
+                f"skipping {already_labeled} that already have ground truth"
+            )
 
     # Delegate the run itself to the test runner (single owner of run creation,
     # config capture and version pinning) via a direct Lambda invoke. objectKeys
@@ -735,6 +791,7 @@ def generate_draft_labels(args, event=None):
         "total": len(object_keys) or file_count,
         "labeled": 0,
         "objectKeys": object_keys,
+        "skippedAlreadyLabeled": already_labeled,
         "createdAt": now,
         "startedBy": started_by,
     }
@@ -766,6 +823,7 @@ def _label_job_to_result(item):
         "error": item.get("error"),
         "createdAt": item.get("createdAt"),
         "completedAt": item.get("completedAt"),
+        "skippedAlreadyLabeled": int(item.get("skippedAlreadyLabeled", 0) or 0),
     }
 
 
@@ -870,7 +928,8 @@ def _min_confidence(explainability_info, inference_result=None):
     if inference_result is not None:
         absent = _absent_field_paths(inference_result)
         populated = [
-            (c, t) for c, t, name in _walk_confidence_named(explainability_info)
+            (c, t)
+            for c, t, name in _walk_confidence_named(explainability_info)
             if name not in absent
         ]
         # Fall back to the unfiltered minimum when *every* field is absent, so a
@@ -1009,14 +1068,24 @@ def get_annotation_queue(args, event=None):
             }
         )
 
-    # Worst-first. Documents with no confidence sort first: an unlabeled document
-    # is the least trustworthy thing in the set, not the most.
-    entries.sort(
-        key=lambda e: (
-            e["minConfidence"] if e["minConfidence"] is not None else -1.0,
-            e["objectKey"],
-        )
-    )
+    def sort_key(entry):
+        """Worst-first. Unlabeled sorts first, authored ground truth last.
+
+        "No confidence" means two different things. An unlabeled document has had
+        nothing attempted, so it needs the most attention. Ground truth was
+        authored rather than predicted — there is no self-assessment to be low and
+        nothing to correct — so it needs the least. Collapsing both to one
+        sentinel pointed annotators at generated ground truth ahead of genuinely
+        uncertain drafts, inverting what worst-first is for.
+        """
+        confidence = entry["minConfidence"]
+        if confidence is not None:
+            return (0, confidence, entry["objectKey"])
+        if entry["labelSource"] in (None, LABEL_SOURCE_DRAFT):
+            return (-1, 0.0, entry["objectKey"])
+        return (1, 0.0, entry["objectKey"])
+
+    entries.sort(key=sort_key)
 
     reviewed_count = sum(1 for e in entries if e["reviewed"])
     inspected = len(entries)
@@ -1158,8 +1227,8 @@ def estimate_review_effort(args):
     curve = store.get_curve(test_set_id, config_version)
     prior = store.get_global_prior()
 
-    doc_confidences, fields_per_doc, pages_per_doc = _collect_doc_confidences(
-        test_set_id
+    doc_confidences, fields_per_doc, pages_per_doc, ground_truth_docs = (
+        _collect_doc_confidences(test_set_id)
     )
 
     # The set's real size, which may exceed the number of documents sampled for
@@ -1167,6 +1236,9 @@ def estimate_review_effort(args):
     # total understates the work (and the effort, and the audit pool) by whatever
     # factor the set exceeds MAX_DOCS_FOR_ESTIMATE.
     total_docs = int(meta.get("fileCount", 0) or 0) or len(doc_confidences)
+    # Ground truth is not reviewable work, so it comes off the total rather than
+    # counting as documents awaiting review.
+    total_docs = max(0, total_docs - ground_truth_docs)
     sampled_docs = len(doc_confidences)
 
     # When only a sample was read, treat it as representative and extrapolate its
@@ -1225,9 +1297,11 @@ def _collect_doc_confidences(test_set_id):
     different ordering than the one the UI presents would not describe the work
     the user is actually about to do.
 
-    Returns ``(confidences, fields_per_doc, pages_per_doc)``. The two shape
-    figures fall back to the module defaults when the baseline carries nothing to
-    measure them from.
+    Returns ``(confidences, fields_per_doc, pages_per_doc, ground_truth_docs)``.
+    The two shape figures fall back to the module defaults when the baseline
+    carries nothing to measure them from. ``ground_truth_docs`` is how many
+    inspected documents already carry ground truth and were therefore left out
+    of ``confidences``.
     """
     test_set_bucket = os.environ["TEST_SET_BUCKET"]
     documents = []
@@ -1246,7 +1320,16 @@ def _collect_doc_confidences(test_set_id):
         if not next_token:
             break
 
-    confidences = [doc.get("minConfidence") for doc in documents]
+    confidences = []
+    ground_truth_docs = 0
+    for doc in documents:
+        if doc.get("minConfidence") is not None or doc.get("labelSource") in (
+            None,
+            LABEL_SOURCE_DRAFT,
+        ):
+            confidences.append(doc.get("minConfidence"))
+        else:
+            ground_truth_docs += 1
 
     # Effort model inputs, measured rather than assumed where possible: the
     # number of fields a reviewer actually has to check drives the time far more
@@ -1276,7 +1359,7 @@ def _collect_doc_confidences(test_set_id):
         if section_counts
         else DEFAULT_PAGES_PER_DOC
     )
-    return confidences, fields_per_doc, max(1.0, pages_per_doc)
+    return confidences, fields_per_doc, max(1.0, pages_per_doc), ground_truth_docs
 
 
 def _count_baseline_fields(bucket, key):

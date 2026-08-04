@@ -121,7 +121,13 @@ const TestSetDetail = (): React.JSX.Element => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filterText, setFilterText] = useState('');
-  const [labelJob, setLabelJob] = useState<{ jobId: string; status: string; total: number; labeled: number } | null>(null);
+  const [labelJob, setLabelJob] = useState<{
+    jobId: string;
+    status: string;
+    total: number;
+    labeled: number;
+    skippedAlreadyLabeled?: number | null;
+  } | null>(null);
   const [isStartingLabels, setIsStartingLabels] = useState(false);
   const [showEffortModal, setShowEffortModal] = useState(false);
   // Default to worst-first once any document carries confidence — the whole point
@@ -187,6 +193,7 @@ const TestSetDetail = (): React.JSX.Element => {
           status: job.status,
           total: job.total ?? 0,
           labeled: job.labeled ?? 0,
+          skippedAlreadyLabeled: job.skippedAlreadyLabeled ?? 0,
         });
       }
     } catch (err) {
@@ -215,6 +222,7 @@ const TestSetDetail = (): React.JSX.Element => {
           status: job.status,
           total: job.total ?? 0,
           labeled: job.labeled ?? 0,
+          skippedAlreadyLabeled: job.skippedAlreadyLabeled ?? 0,
         });
         if (job.labeled !== labelJob.labeled || job.status !== 'RUNNING') {
           fetchPage(currentPageIndex, pageTokens);
@@ -276,14 +284,18 @@ const TestSetDetail = (): React.JSX.Element => {
                 <StatusIndicator type="in-progress">
                   Draft labeling in progress — {labelJob.labeled} of {labelJob.total} document(s) labeled. Labels appear here as they
                   complete.
+                  {labelJob.skippedAlreadyLabeled
+                    ? ` Skipping ${labelJob.skippedAlreadyLabeled} document(s) that already have ground truth.`
+                    : ''}
                 </StatusIndicator>
               </Alert>
             )}
 
             {labelJob && labelJob.status === 'COMPLETED' && (
               <Alert type="success" dismissible onDismiss={() => setLabelJob(null)}>
-                Draft labeling complete — {labelJob.labeled} document(s) labeled. Review the lowest-confidence documents first, then publish
-                a version to freeze them as ground truth.
+                Draft labeling complete — {labelJob.labeled} document(s) labeled
+                {labelJob.skippedAlreadyLabeled ? `, ${labelJob.skippedAlreadyLabeled} skipped (already had ground truth)` : ''}. Review the
+                lowest-confidence documents first, then publish a version to freeze them as ground truth.
               </Alert>
             )}
 

@@ -768,6 +768,10 @@ type DraftLabelJob @aws_cognito_user_pools @aws_iam {
   error: String
   createdAt: AWSDateTime
   completedAt: AWSDateTime
+  # Documents left out because they already carried ground truth (uploaded,
+  # generated, or reviewed). Surfaced so "40 of 100" reads as deliberate rather
+  # than a stalled job.
+  skippedAlreadyLabeled: Int
 }
 
 # One point on the error-burndown curve: residual error after reviewing N of the

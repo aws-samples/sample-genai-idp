@@ -344,6 +344,7 @@ export const generateDraftLabels = /* GraphQL */ `
       error
       createdAt
       completedAt
+      skippedAlreadyLabeled
     }
   }
 ` as GeneratedMutation<GenerateDraftLabelsMutationVariables, GenerateDraftLabelsMutation>;
@@ -619,6 +620,7 @@ export const getDraftLabelJob = /* GraphQL */ `
       error
       createdAt
       completedAt
+      skippedAlreadyLabeled
     }
   }
 ` as GeneratedQuery<GetDraftLabelJobQueryVariables, GetDraftLabelJobQuery>;

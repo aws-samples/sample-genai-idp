@@ -1896,6 +1896,148 @@ class TestTestSetResolver:
         assert result["claimedByOthers"] == 1
         assert by_key[names[0]]["claimedBy"] is None
 
+    def test_draft_labeling_skips_documents_that_already_have_ground_truth(
+        self, labeling_env
+    ):
+        """A mixed set must only label the documents that need it.
+
+        Generated and uploaded ground truth carries no labelSource, which the
+        overwrite guard treats as protected — so labeling them ran inference and
+        then discarded the result. On a mixed set that is wasted spend; on a fully
+        generated set the whole run produced nothing.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=3)
+        # Two documents already carry ground truth, one is bare.
+        for name in ("gt1.pdf", "gt2.pdf", "bare.pdf"):
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+        for name in ("gt1.pdf", "gt2.pdf"):
+            s3.put_object(
+                Bucket="test-set-bucket",
+                Key=f"ts1/baseline/{name}/sections/1/result.json",
+                Body=json.dumps({"inference_result": {"box_a": "authored"}}).encode(),
+            )
+
+        with patch.object(test_set_index, "boto3") as mock_boto3:
+            mock_lambda = MagicMock()
+            mock_lambda.invoke.return_value = {
+                "Payload": MagicMock(read=lambda: b'{"testRunId": "ts1-run"}')
+            }
+            mock_boto3.client.return_value = mock_lambda
+            result = test_set_index.generate_draft_labels({"testSetId": "ts1"})
+
+        payload = json.loads(mock_lambda.invoke.call_args.kwargs["Payload"])
+        requested = payload["arguments"]["input"]["objectKeys"]
+        assert requested == ["bare.pdf"], requested
+        assert result["total"] == 1
+        assert result["skippedAlreadyLabeled"] == 2
+
+    def test_draft_labeling_refuses_a_fully_labeled_set(self, labeling_env):
+        """Generated sets are already ground truth — say so instead of no-op'ing."""
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/gt.pdf", Body=b"x")
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/gt.pdf/sections/1/result.json",
+            Body=json.dumps({"inference_result": {"box_a": "authored"}}).encode(),
+        )
+
+        with pytest.raises(Exception, match="already has ground truth"):
+            test_set_index.generate_draft_labels({"testSetId": "ts1"})
+
+    def test_draft_labeling_still_relabels_prior_drafts(self, labeling_env):
+        """A machine draft is replaceable, so re-running on a better config works."""
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/a.pdf", Body=b"x")
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/a.pdf/sections/1/result.json",
+            Body=json.dumps(
+                {"labelSource": "draft-machine", "inference_result": {"f": 1}}
+            ).encode(),
+        )
+
+        with patch.object(test_set_index, "boto3") as mock_boto3:
+            mock_lambda = MagicMock()
+            mock_lambda.invoke.return_value = {
+                "Payload": MagicMock(read=lambda: b'{"testRunId": "ts1-run"}')
+            }
+            mock_boto3.client.return_value = mock_lambda
+            result = test_set_index.generate_draft_labels({"testSetId": "ts1"})
+
+        payload = json.loads(mock_lambda.invoke.call_args.kwargs["Payload"])
+        assert payload["arguments"]["input"]["objectKeys"] == ["a.pdf"]
+        assert result["skippedAlreadyLabeled"] == 0
+
+    def test_queue_sorts_ground_truth_last_and_unlabeled_first(self, labeling_env):
+        """Two kinds of "no confidence" must not sort the same.
+
+        Ground truth was authored, not predicted: there is no self-assessment to
+        be low and nothing for a reviewer to correct, so it belongs at the END.
+        A document with no label at all belongs at the FRONT. Both used to
+        collapse to the same sentinel, which pointed annotators at generated
+        ground truth ahead of the genuinely uncertain drafts.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=3)
+        for name in ("gt.pdf", "bare.pdf", "draft.pdf"):
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+        # Authored ground truth: no labelSource, no confidence.
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/gt.pdf/sections/1/result.json",
+            Body=json.dumps({"inference_result": {"box_a": "authored"}}).encode(),
+        )
+        # A drafted document with real (mid) confidence.
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/draft.pdf/sections/1/result.json",
+            Body=json.dumps(
+                {
+                    "labelSource": "draft-machine",
+                    "explainability_info": [{"f": {"confidence": 0.5}}],
+                    "inference_result": {"f": "v"},
+                }
+            ).encode(),
+        )
+        # bare.pdf has no baseline at all.
+
+        result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, None)
+        order = [d["objectKey"] for d in result["documents"]]
+        assert order == ["bare.pdf", "draft.pdf", "gt.pdf"], order
+        assert result["nextObjectKey"] == "bare.pdf"
+
+    def test_estimate_excludes_ground_truth_from_reviewable_work(self, labeling_env):
+        """Reviewing authored labels is not work the estimate should ask for."""
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=2)
+        for name in ("gt.pdf", "draft.pdf"):
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/gt.pdf/sections/1/result.json",
+            Body=json.dumps({"inference_result": {"box_a": "authored"}}).encode(),
+        )
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/draft.pdf/sections/1/result.json",
+            Body=json.dumps(
+                {
+                    "labelSource": "draft-machine",
+                    "explainability_info": [{"f": {"confidence": 0.5}}],
+                    "inference_result": {"f": "v"},
+                }
+            ).encode(),
+        )
+
+        result = test_set_index.estimate_review_effort({"testSetId": "ts1"})
+        # One of the two documents is authored ground truth, so only one is
+        # reviewable — reporting 2 would bill the owner for finished work.
+        assert result["totalDocs"] == 1
+        assert result["docsToReview"] <= 1
+
     def test_queue_harvests_the_running_label_job(self, labeling_env):
         """Found live: the queue never advanced draft labeling.
 

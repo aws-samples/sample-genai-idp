@@ -9,5 +9,6 @@ mutation GenerateDraftLabels($input: GenerateDraftLabelsInput!) {
     error
     createdAt
     completedAt
+    skippedAlreadyLabeled
   }
 }

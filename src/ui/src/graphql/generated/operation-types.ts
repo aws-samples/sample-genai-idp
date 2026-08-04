@@ -475,6 +475,7 @@ export type DraftLabelJob = {
   error?: Maybe<Scalars['String']['output']>;
   jobId: Scalars['String']['output'];
   labeled?: Maybe<Scalars['Int']['output']>;
+  skippedAlreadyLabeled?: Maybe<Scalars['Int']['output']>;
   status: Scalars['String']['output'];
   testSetId: Scalars['String']['output'];
   total?: Maybe<Scalars['Int']['output']>;
@@ -2241,7 +2242,7 @@ export type GenerateDraftLabelsMutationVariables = Exact<{
 }>;
 
 
-export type GenerateDraftLabelsMutation = { generateDraftLabels?: { jobId: string, testSetId: string, status: string, total?: number | null, labeled?: number | null, configVersion?: string | null, error?: string | null, createdAt?: string | null, completedAt?: string | null } | null };
+export type GenerateDraftLabelsMutation = { generateDraftLabels?: { jobId: string, testSetId: string, status: string, total?: number | null, labeled?: number | null, configVersion?: string | null, error?: string | null, createdAt?: string | null, completedAt?: string | null, skippedAlreadyLabeled?: number | null } | null };
 
 export type PauseCircuitBreakerMutationVariables = Exact<{
   reason: Scalars['String']['input'];
@@ -2587,7 +2588,7 @@ export type GetDraftLabelJobQueryVariables = Exact<{
 }>;
 
 
-export type GetDraftLabelJobQuery = { getDraftLabelJob?: { jobId: string, testSetId: string, status: string, total?: number | null, labeled?: number | null, configVersion?: string | null, error?: string | null, createdAt?: string | null, completedAt?: string | null } | null };
+export type GetDraftLabelJobQuery = { getDraftLabelJob?: { jobId: string, testSetId: string, status: string, total?: number | null, labeled?: number | null, configVersion?: string | null, error?: string | null, createdAt?: string | null, completedAt?: string | null, skippedAlreadyLabeled?: number | null } | null };
 
 export type GetFileContentsQueryVariables = Exact<{
   s3Uri: Scalars['String']['input'];

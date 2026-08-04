@@ -9,5 +9,6 @@ query GetDraftLabelJob($testSetId: String!, $jobId: String!) {
     error
     createdAt
     completedAt
+    skippedAlreadyLabeled
   }
 }

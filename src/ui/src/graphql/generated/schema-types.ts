@@ -475,6 +475,7 @@ export type DraftLabelJob = {
   error?: Maybe<Scalars['String']['output']>;
   jobId: Scalars['String']['output'];
   labeled?: Maybe<Scalars['Int']['output']>;
+  skippedAlreadyLabeled?: Maybe<Scalars['Int']['output']>;
   status: Scalars['String']['output'];
   testSetId: Scalars['String']['output'];
   total?: Maybe<Scalars['Int']['output']>;
