@@ -893,10 +893,15 @@ export const DocumentPanel = ({
     } as typeof localItem;
   }, [viewingRunId, versionDetail, localItem]);
 
-  // Create enhanced item with configuration
+  // Create enhanced item with configuration. Use the doc's own version
+  // config so the header Confidence Alerts badge reads the threshold the
+  // document was actually assessed against — otherwise the header count
+  // can disagree with per-section alerts (which use documentVersionConfig
+  // via SectionsPanel) whenever the stack's live threshold has drifted
+  // from the version-at-processing-time threshold.
   const enhancedItem = {
     ...displayedItem,
-    mergedConfig: mergedConfig ?? undefined,
+    mergedConfig: documentVersionConfig ?? undefined,
   };
 
   return (
