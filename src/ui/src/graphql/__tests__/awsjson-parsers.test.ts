@@ -9,6 +9,7 @@ import {
   parseTestRunConfig,
   parseWeightedOverallScores,
   parseSplitClassificationMetrics,
+  parseGradedPacketMetrics,
   parseComparisonMetrics,
   parseConfigSettingValues,
   parseConfigurationData,
@@ -192,6 +193,21 @@ describe('per-parser smoke tests', () => {
 
   it('parseSplitClassificationMetrics: returns {} for null', () => {
     expect(parseSplitClassificationMetrics(null)).toEqual({});
+  });
+
+  it('parseGradedPacketMetrics: parses valid input', () => {
+    const data = {
+      mean: { final_score: 0.87, clustering_score: 0.92, v_measure: 0.9 },
+      per_document: { 'doc1.pdf': { final_score: 0.9 }, 'doc2.pdf': { final_score: 0.84 } },
+      document_count: 2,
+    };
+    expect(parseGradedPacketMetrics(JSON.stringify(data))).toEqual(data);
+  });
+
+  it('parseGradedPacketMetrics: returns {} for null (matches empty-payload contract)', () => {
+    // The aggregation Lambda emits ``{}`` when no document reported graded
+    // metrics; the UI treats that identically to null via a truthy check.
+    expect(parseGradedPacketMetrics(null)).toEqual({});
   });
 
   it('parseComparisonMetrics: parses valid input', () => {

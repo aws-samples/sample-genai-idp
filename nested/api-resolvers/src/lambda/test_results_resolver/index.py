@@ -162,6 +162,32 @@ def handler(event, context):
     raise ValueError(f"Unknown field: {field_name}")
 
 
+def _queue_cache_update(test_run_id):
+    """Enqueue an async metrics (re-)aggregation for a test run.
+
+    Best-effort: a failure to enqueue must never fail the read that triggered
+    it — the caller still serves whatever cached metrics it has, and the next
+    view retries. Consumed by handle_cache_update_request in this same Lambda.
+    """
+    try:
+        queue_url = os.environ.get("TEST_RESULT_CACHE_UPDATE_QUEUE_URL")
+        if not queue_url:
+            logger.warning(
+                f"TEST_RESULT_CACHE_UPDATE_QUEUE_URL not set; cannot queue "
+                f"cache update for {test_run_id}"
+            )
+            return False
+        sqs.send_message(
+            QueueUrl=queue_url,
+            MessageBody=json.dumps({"testRunId": test_run_id}),
+        )
+        logger.info(f"Queued cache update for test run: {test_run_id}")
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to queue cache update for {test_run_id}: {e}")
+        return False
+
+
 def handle_cache_update_request(event, context):
     """Process SQS messages to calculate and cache test result metrics"""
 
@@ -188,6 +214,9 @@ def handle_cache_update_request(event, context):
                 "fieldMetrics": aggregated_metrics.get("field_metrics", {}),
                 "splitClassificationMetrics": aggregated_metrics.get(
                     "split_classification_metrics", {}
+                ),
+                "gradedPacketMetrics": aggregated_metrics.get(
+                    "graded_packet_metrics", {}
                 ),
                 "totalCost": aggregated_metrics.get("total_cost", 0),
                 "costBreakdown": aggregated_metrics.get("cost_breakdown", {}),
@@ -366,73 +395,98 @@ def get_test_results(test_run_id):
     if cached_metrics is not None:
         logger.info(f"Retrieved cached metrics for test run: {test_run_id}")
 
-        # Check if cached data needs recalculation
+        # Check if cached data is missing keys added by a later release (or was
+        # written in a superseded shape) and needs re-aggregation.
+        #
+        # This is a presence check, so any key added here is by definition
+        # absent from every cache written before that key existed — i.e. every
+        # historical test run goes stale exactly once when a new key lands.
+        # Re-aggregation therefore has to be *additive*: enqueue the recompute
+        # and still serve the cached values we do have. Returning nothing
+        # instead would resolve getTestRun to null (UI: "No test results
+        # found") and silently drop the run from compareTestRuns, permanently
+        # — nothing else re-enqueues a cache update for a run whose
+        # testRunResult is present but stale.
+        #
+        # Convergence: handle_cache_update_request always writes every key in
+        # metrics_to_cache (defaulting to {}), so one pass through the queue
+        # satisfies this guard for good — no re-enqueue loop, even for runs
+        # whose aggregation legitimately yields no graded metrics.
         cached_scores = cached_metrics.get("weightedOverallScores")
         if (
             "splitClassificationMetrics" not in cached_metrics
             or "confusionMatrix" not in cached_metrics
             or "fieldMetrics" not in cached_metrics
+            or "gradedPacketMetrics" not in cached_metrics
             or isinstance(cached_scores, list)
         ):
             logger.info(
-                f"Cached metrics incomplete or outdated, recalculating for test run: {test_run_id}"
+                f"Cached metrics incomplete or outdated, queueing re-aggregation "
+                f"for test run: {test_run_id} (serving cached values meanwhile)"
             )
-            # Force recalculation by falling through to aggregation logic
-        else:
-            # For ABORTED status, count completed files on first call and persist to DB
-            completed_files_count = metadata.get("CompletedFiles", 0)
-            completed_files_counted = metadata.get("CompletedFilesCounted", False)
+            # Recompute off the request path. Aggregation re-reads every
+            # document's results.json from S3 and can take minutes on a large
+            # run — far longer than the API's read timeout — so doing it
+            # inline here would turn a stale cache into a timed-out query.
+            _queue_cache_update(test_run_id)
 
-            # Only re-count if we haven't counted before (tracked by CompletedFilesCounted flag)
-            if current_status == "ABORTED" and not completed_files_counted:
-                files = metadata.get("Files", [])
-                if files:
-                    completed_files_count = _count_completed_documents(table, test_run_id, files)
-                    logger.info(f"Counted {completed_files_count} completed documents for aborted test run {test_run_id}")
+        # For ABORTED status, count completed files on first call and persist to DB
+        completed_files_count = metadata.get("CompletedFiles", 0)
+        completed_files_counted = metadata.get("CompletedFilesCounted", False)
 
-                    # Persist the count and flag to database
-                    try:
-                        table.update_item(
-                            Key={"PK": f"testrun#{test_run_id}", "SK": "metadata"},
-                            UpdateExpression="SET CompletedFiles = :completed_files, CompletedFilesCounted = :counted",
-                            ExpressionAttributeValues={
-                                ":completed_files": completed_files_count,
-                                ":counted": True
-                            }
-                        )
-                        logger.info(f"Updated CompletedFiles to {completed_files_count} and set CompletedFilesCounted=True for test run {test_run_id}")
-                    except Exception as e:
-                        logger.warning(f"Failed to update CompletedFiles for {test_run_id}: {str(e)}")
+        # Only re-count if we haven't counted before (tracked by CompletedFilesCounted flag)
+        if current_status == "ABORTED" and not completed_files_counted:
+            files = metadata.get("Files", [])
+            if files:
+                completed_files_count = _count_completed_documents(table, test_run_id, files)
+                logger.info(f"Counted {completed_files_count} completed documents for aborted test run {test_run_id}")
 
-            # Use cached metrics but get dynamic fields from current metadata
-            return {
-                "testRunId": test_run_id,
-                "testSetId": metadata.get("TestSetId"),
-                "testSetName": metadata.get("TestSetName"),
-                "status": current_status,
-                "filesCount": metadata.get("FilesCount", 0),
-                "completedFiles": completed_files_count,
-                "failedFiles": metadata.get("FailedFiles", 0),
-                "overallAccuracy": cached_metrics.get("overallAccuracy"),
-                "weightedOverallScores": cached_metrics.get(
-                    "weightedOverallScores", {}
-                ),
-                "averageConfidence": cached_metrics.get("averageConfidence"),
-                "confidenceMetrics": cached_metrics.get("confidenceMetrics"),
-                "accuracyBreakdown": cached_metrics.get("accuracyBreakdown", {}),
-                "confusionMatrix": cached_metrics.get("confusionMatrix", {}),
-                "fieldMetrics": cached_metrics.get("fieldMetrics", {}),
-                "splitClassificationMetrics": cached_metrics.get(
-                    "splitClassificationMetrics", {}
-                ),
-                "totalCost": cached_metrics.get("totalCost", 0),
-                "costBreakdown": cached_metrics.get("costBreakdown", {}),
-                "createdAt": _format_datetime(metadata.get("CreatedAt")),
-                "completedAt": _format_datetime(metadata.get("CompletedAt")),
-                "context": metadata.get("Context"),
-                "configVersion": metadata.get("ConfigVersion"),
-                "config": _get_test_run_config(test_run_id),
-            }
+                # Persist the count and flag to database
+                try:
+                    table.update_item(
+                        Key={"PK": f"testrun#{test_run_id}", "SK": "metadata"},
+                        UpdateExpression="SET CompletedFiles = :completed_files, CompletedFilesCounted = :counted",
+                        ExpressionAttributeValues={
+                            ":completed_files": completed_files_count,
+                            ":counted": True
+                        }
+                    )
+                    logger.info(f"Updated CompletedFiles to {completed_files_count} and set CompletedFilesCounted=True for test run {test_run_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to update CompletedFiles for {test_run_id}: {str(e)}")
+
+        # Use cached metrics but get dynamic fields from current metadata.
+        # Keys absent from an older cache default to {} / 0, which every
+        # consumer already treats as "no data for this panel".
+        return {
+            "testRunId": test_run_id,
+            "testSetId": metadata.get("TestSetId"),
+            "testSetName": metadata.get("TestSetName"),
+            "status": current_status,
+            "filesCount": metadata.get("FilesCount", 0),
+            "completedFiles": completed_files_count,
+            "failedFiles": metadata.get("FailedFiles", 0),
+            "overallAccuracy": cached_metrics.get("overallAccuracy"),
+            "weightedOverallScores": cached_metrics.get(
+                "weightedOverallScores", {}
+            ),
+            "averageConfidence": cached_metrics.get("averageConfidence"),
+            "confidenceMetrics": cached_metrics.get("confidenceMetrics"),
+            "accuracyBreakdown": cached_metrics.get("accuracyBreakdown", {}),
+            "confusionMatrix": cached_metrics.get("confusionMatrix", {}),
+            "fieldMetrics": cached_metrics.get("fieldMetrics", {}),
+            "splitClassificationMetrics": cached_metrics.get(
+                "splitClassificationMetrics", {}
+            ),
+            "gradedPacketMetrics": cached_metrics.get("gradedPacketMetrics", {}),
+            "totalCost": cached_metrics.get("totalCost", 0),
+            "costBreakdown": cached_metrics.get("costBreakdown", {}),
+            "createdAt": _format_datetime(metadata.get("CreatedAt")),
+            "completedAt": _format_datetime(metadata.get("CompletedAt")),
+            "context": metadata.get("Context"),
+            "configVersion": metadata.get("ConfigVersion"),
+            "config": _get_test_run_config(test_run_id),
+        }
     else:
         # No aggregate metrics have been cached yet. This happens when all
         # files finished processing but the evaluation aggregation step hasn't
@@ -785,20 +839,7 @@ def get_test_run_status(test_run_id):
                 if overall_status in ["COMPLETE", "PARTIAL_COMPLETE"] and not item.get(
                     "testRunResult"
                 ):
-                    try:
-                        queue_url = os.environ.get("TEST_RESULT_CACHE_UPDATE_QUEUE_URL")
-                        if queue_url:
-                            sqs.send_message(
-                                QueueUrl=queue_url,
-                                MessageBody=json.dumps({"testRunId": test_run_id}),
-                            )
-                            logger.info(
-                                f"Queued cache update for test run: {test_run_id}"
-                            )
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to queue cache update for {test_run_id}: {e}"
-                        )
+                    _queue_cache_update(test_run_id)
 
             except Exception as e:
                 logger.error(
