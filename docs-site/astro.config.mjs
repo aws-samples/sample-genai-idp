@@ -174,6 +174,10 @@ export default defineConfig({
                   slug: "extensions/idp-data-generator",
                 },
                 {
+                  label: "ConfBench Test Set",
+                  slug: "extensions/confbench-testset",
+                },
+                {
                   label: "Sample: Document Status (feature add-on)",
                   slug: "extensions/sample-document-status",
                 },

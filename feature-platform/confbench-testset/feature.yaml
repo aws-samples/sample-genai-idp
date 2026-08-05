@@ -1,0 +1,65 @@
+# ConfBench Test Set — Feature Platform extension.
+#
+# Packages the amazon/ConfBench benchmark dataset as an installable, on-demand
+# test set rather than a dataset the main stack downloads on every deployment.
+#
+# Why an extension: the full dataset is 32.71 GB across 1,346 PDFs — ~42x the
+# combined size of the four auto-deployed benchmark sets (RealKIE-FCC-Verified
+# 0.08 GB, OmniAI-OCR-Benchmark 0.39 GB, Fake-W2 0.31 GB, DocSplit). Every
+# deployment would pay that storage/transfer cost whether or not the team does
+# confidence-calibration research, and the ingest itself straddles
+# CloudFormation's 1-hour custom-resource deadline. As an extension the bytes
+# only move when an admin installs the feature AND starts an ingest job, and
+# they choose how much of the dataset to take (see docs/extensions/confbench-testset.md).
+#
+# Originally contributed as an always-on main-stack deployer in PR #583 by
+# @sujimart; reworked here as an opt-in extension.
+#
+# Published with the accelerator's Feature Platform SDK. The SDK is first-party
+# (lib/idp_feature_sdk) and is NOT on PyPI — install it from the local checkout
+# (see docs/dependency-confusion.md):
+#   pip install -e lib/idp_feature_sdk                  # (run from the repo root)
+featureId: confbench-testset
+displayName: "ConfBench Test Set"
+version: 0.1.0
+description: |
+  Deploy the amazon/ConfBench benchmark dataset — 75 verified FCC invoices with
+  up to 21 Augraphy noise-degradation variants each (1,346 documents, 32.71 GB
+  total) — into Test Studio on demand. Pick a size tier or individual noise
+  variants, so you ingest only the subset your evaluation needs. For confidence
+  calibration research, OCR robustness testing, and key information extraction
+  under realistic document degradation.
+docsUrl: extensions/confbench-testset
+# Specialist research dataset — discoverable via Browse catalog rather than
+# advertised in every deployment's nav until an admin installs it.
+showInNav: false
+template:
+  path: template.yaml
+  requiresMainStackName: true
+ui:
+  bundlePath: feature-ui/dist/ui-bundle.js
+  # Structured build steps: each argv runs without a shell (no metacharacter
+  # expansion); cwd replaces the `cd X && ...` idiom of the legacy buildCommand.
+  build:
+    - cwd: feature-ui
+      argv: ["npm", "ci"]
+    - cwd: feature-ui
+      argv: ["npm", "run", "build"]
+# Bundled config preset — the Invoice extraction schema ConfBench's ground
+# truth uses. Identical to the realkie-fcc-verified managed config (ConfBench
+# is a noise augmentation of that same source), so cross-set accuracy
+# comparisons are valid. Applied at install as a NON-ACTIVE config version;
+# the ui-deployer additionally publishes it under the `confbench` version name
+# so Test Studio's "test set id == config version name" auto-select works.
+configPreset:
+  path: config-preset/confbench-config.yaml
+defaultParameters:
+  LogLevel: INFO
+capabilities:
+  # writes-documents — the ingest job streams ConfBench PDFs into the host's
+  # TestSet bucket and registers test-set records Test Studio lists.
+  # custom-api — the variant catalog, ingest-job control, and job status.
+  # applies-config-preset — the Invoice schema above.
+  - custom-api
+  - writes-documents
+  - applies-config-preset
