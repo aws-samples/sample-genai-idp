@@ -4,14 +4,32 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 2.0 |
-| **Last Updated** | 2025-03-19 |
+| **Document Version** | 3.0 |
+| **Last Updated** | 2026-07-28 |
+| **Applies to release** | v0.6.3 |
 | **Classification** | Internal |
 | **Processing Mode** | BDA (`use_bda: true`) |
 
 ## 1. Overview
 
 BDA (Bedrock Data Automation) mode uses Amazon's integrated document processing service that combines OCR, classification, and extraction into a single managed API call. BDA mode reduces infrastructure complexity and provides a streamlined processing path, but trades granular configurability for simplicity.
+
+> **Two distinct uses of BDA (v0.6).** This document covers **whole-pipeline BDA
+> mode** (`use_bda: true`). Since v0.6.0 BDA can *also* be used as an
+> **OCR-only engine** (`ocr.backend: bda`) feeding the normal
+> classification/extraction pipeline — in that configuration the Pipeline Mode
+> threats apply (see [pipeline-mode.md](pipeline-mode.md)), with BDA.T01/T04/T05
+> additionally relevant for the OCR call itself.
+>
+> **Per-stack project scoping (v0.6.1).** The BDA-as-OCR standard-output project
+> was previously auto-created at runtime under one hardcoded, **account-global**
+> name (`GENAIIDP-OCR-StandardOutput`), so multiple stacks in an account shared
+> and interfered with a single project — one stack's project changes affected
+> another's processing. Each stack now provisions its own
+> `<stackname>_OCR_StdOutput` project via a `Custom::BDAOCRProject` custom
+> resource, created and deleted with the stack. This materially reduces BDA.T03's
+> blast radius (see that threat's mitigations). Pre-existing account-global
+> projects are orphaned and can be deleted once all stacks are upgraded.
 
 ## 2. Architecture Components
 
@@ -76,13 +94,13 @@ flowchart TD
 |-----------|-------|
 | **Threat ID** | BDA.T03 |
 | **Category** | STRIDE: Tampering, Elevation of Privilege |
-| **Description** | Modification of BDA project configuration (blueprints, extraction schemas) could alter processing behavior for all BDA-mode documents |
+| **Description** | Modification of BDA project configuration (blueprints, extraction schemas) could alter processing behavior for all BDA-mode documents. Historically amplified by project sharing: before v0.6.1 the BDA-as-OCR project was account-global under a hardcoded name, so a change made by (or a compromise of) **any** stack in the account altered every other stack's processing — a cross-stack tampering path that bypassed per-stack RBAC entirely. |
 | **Attack Vector** | Compromised admin account or direct AWS API access to modify BDA project settings |
 | **Impact** | Systematic misprocessing of documents, data extraction to wrong schemas |
 | **Likelihood** | Low |
 | **Severity** | High |
 | **Affected Components** | Amazon BDA project, BDA Invoke Lambda |
-| **Mitigations** | IAM policies restricting BDA project modification, RBAC (Admin only), CloudTrail logging of BDA API calls, BDA project versioning |
+| **Mitigations** | IAM policies restricting BDA project modification, RBAC (Admin only), CloudTrail logging of BDA API calls, BDA project versioning. **Per-stack project isolation (v0.6.1)**: the BDA-as-OCR project is now a stack-owned `Custom::BDAOCRProject` resource named `<stackname>_OCR_StdOutput`, created and deleted with the stack, so tampering is confined to the stack whose IAM boundary the actor already holds — cross-stack interference via a shared account-global project is eliminated. |
 
 ### BDA.T04: BDA Service Availability
 

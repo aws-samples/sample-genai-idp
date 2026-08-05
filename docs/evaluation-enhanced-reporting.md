@@ -1,14 +1,16 @@
 ---
-title: "Enhanced Evaluation Reporting (sticker-eval v0.1.4+)"
+title: "Enhanced Evaluation Reporting"
 ---
 
-# Enhanced Evaluation Reporting (sticker-eval v0.1.4+)
+# Enhanced Evaluation Reporting
 
-This document describes the enhanced evaluation reporting features available in IDP v0.4.9+ using sticker-eval v0.1.4.
+This document describes the enhanced evaluation reporting features surfaced
+by the evaluation module (running on `stickler-eval==0.5.0`).
 
 ## Overview
 
-The evaluation module now leverages sticker-eval v0.1.4's fine-grain field comparison feature (from [GitHub Issue #48](https://github.com/awslabs/stickler/issues/48) and [PR #51](https://github.com/awslabs/stickler/pull/51)) to provide:
+The evaluation module surfaces stickler-eval's fine-grain field comparison
+feature (introduced upstream in [GitHub Issue #48](https://github.com/awslabs/stickler/issues/48) / [PR #51](https://github.com/awslabs/stickler/pull/51)) to provide:
 
 1. **Detailed nested object match information** alongside aggregate scores
 2. **Interactive controls** to filter and explore evaluation results
@@ -192,7 +194,7 @@ with open('evaluation/report.md', 'r') as f:
 
 ## Configuration
 
-No additional configuration required! The enhancement automatically activates when using sticker-eval v0.1.4+.
+No additional configuration required! The enhancement automatically activates when using stickler-eval v0.1.4+.
 
 The feature is enabled in `lib/idp_common_pkg/idp_common/evaluation/service.py`:
 
@@ -272,18 +274,16 @@ The enhancement is fully backward compatible:
 
 ## Examples
 
-See `test_evaluation_enhancements.py` for complete working examples demonstrating:
-- Nested object comparisons
-- Array item comparisons
-- Aggregate score calculations
-- Interactive report generation
+Working examples of enhanced-reporting shapes live in the golden-fixture
+regression suite at
+`lib/idp_common_pkg/tests/unit/evaluation/test_golden_fixture_stickler.py`
+and its fixtures under `.../fixtures/` (in particular
+`nested_invoice.input.json`, which exercises arrays with nested field
+comparison details). Run:
 
-Run the test:
 ```bash
-python test_evaluation_enhancements.py
+cd lib/idp_common_pkg && python -m pytest tests/unit/evaluation/test_golden_fixture_stickler.py -v
 ```
-
-This generates `test_evaluation_report.md` demonstrating all features.
 
 ## Future Enhancements
 

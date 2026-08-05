@@ -104,10 +104,13 @@ def aggregate_test_run_with_stickler(
     # Use Stickler's bulk aggregator
     try:
         from stickler.structured_object_evaluator.bulk_structured_model_evaluator import (
-            aggregate_from_comparisons,
             BulkStructuredModelEvaluator,
+            aggregate_from_comparisons,
         )
         from stickler.structured_object_evaluator.models.confidence import (
+            AUROCMetric,
+            BrierScoreMetric,
+            ECEMetric,
             ErrorCaptureAtBudgetMetric,
         )
 
@@ -117,23 +120,59 @@ def aggregate_test_run_with_stickler(
             f"Stickler aggregation complete: document_count={process_eval.document_count}, comparison_results={len(comparison_results)}, weighted_scores={len(doc_weighted_scores)}"
         )
 
-        # Compute ECARB (Error Capture at Review Budget) metrics using BulkStructuredModelEvaluator
-        # This is "the business metric" - answers: if you review X% of data (sorted by
-        # confidence), how many errors do you catch vs random sampling?
-        ecab_metrics = None
+        # Replace the sklearn confidence post-pass with a Stickler accumulator
+        # subclass that collapses list-index paths (LineItems[0].Rate →
+        # LineItems.Rate) BEFORE Stickler's ConfidenceCalculator sees them.
+        # ECARB uses the SAME subclass in a second evaluator so its per-field
+        # keys collapse identically — otherwise the downstream merge (keyed
+        # on field_name) would land ECARB values under indexed buckets the UI
+        # never looks up. Two evaluators (not one with two accumulators)
+        # because both accumulators emit under the same ``confidence_metrics``
+        # name and would collide inside a single BulkStructuredModelEvaluator.
+        # Both passes are cheap — one iteration over
+        # ``update_from_comparison_result`` each.
+        confidence_metrics = None
         try:
             evaluator = BulkStructuredModelEvaluator(
-                confidence_metrics=[
-                    ErrorCaptureAtBudgetMetric(budgets=[0.30]),
+                accumulators=[
+                    _IndexCollapsingConfidenceAccumulator(
+                        metrics=[AUROCMetric(), ECEMetric(), BrierScoreMetric()]
+                    )
                 ]
             )
-
-            # Feed comparison results using JSONL round-trip pattern
             for comp_result in comparison_results:
                 evaluator.update_from_comparison_result(comp_result)
+            confidence_metrics = evaluator.compute().confidence_metrics
+            # Stickler's BrierScoreMetric emits under key ``brier_score``; the
+            # deleted sklearn post-pass wrote under ``brier`` and the Test Studio
+            # UI (TestResults.tsx, TestComparison.tsx) + awsjson-types.ts still
+            # read ``brier``. Rename in-place at the aggregation boundary so
+            # the UI keeps rendering Brier Score without touching 8 UI sites.
+            confidence_metrics = _rename_brier_score_key(confidence_metrics)
+        except Exception as e:
+            logger.warning(
+                f"Failed to compute pattern-collapsed confidence metrics: {e}",
+                exc_info=True,
+            )
 
-            ecab_result = evaluator.compute()
-            ecab_metrics = ecab_result.confidence_metrics
+        ecab_metrics = None
+        try:
+            # Use the SAME index-collapsing accumulator subclass so ECARB's
+            # per-field keys (LineItems[N].Rate → LineItems.Rate) match the
+            # primary confidence-metrics keys. Otherwise the ECARB merge in
+            # _transform_stickler_metrics — which keys on ``field_name`` —
+            # would land indexed keys under buckets the UI never looks up
+            # (UI reads pattern keys like ``LineItems.Rate``).
+            ecab_evaluator = BulkStructuredModelEvaluator(
+                accumulators=[
+                    _IndexCollapsingConfidenceAccumulator(
+                        metrics=[ErrorCaptureAtBudgetMetric(budgets=[0.30])]
+                    )
+                ]
+            )
+            for comp_result in comparison_results:
+                ecab_evaluator.update_from_comparison_result(comp_result)
+            ecab_metrics = ecab_evaluator.compute().confidence_metrics
 
             if ecab_metrics and "overall" in ecab_metrics:
                 ecab_30 = (
@@ -144,11 +183,17 @@ def aggregate_test_run_with_stickler(
                 )
                 if ecab_30:
                     logger.info(
-                        f"ECARB@30: catch {ecab_30.get('pct_errors_caught', 0)*100:.0f}% "
+                        f"ECARB@30: catch {ecab_30.get('pct_errors_caught', 0) * 100:.0f}% "
                         f"of errors with {ecab_30.get('gain', 0):.1f}x gain vs random"
                     )
         except Exception as e:
             logger.warning(f"Failed to compute ECAB metrics: {e}", exc_info=True)
+
+        # Replace process_eval.confidence_metrics with the pattern-collapsed
+        # version — process_eval only has per-doc metrics for scalar
+        # top-level fields.
+        if confidence_metrics is not None:
+            process_eval.confidence_metrics = confidence_metrics
 
         # Transform to IDP format (split metrics will be added by caller from Athena)
         return _transform_stickler_metrics(
@@ -228,13 +273,37 @@ def _load_comparison_results(
     def load_document_results(doc_key):
         """Load and parse a single document's evaluation results.
 
-        NOTE: Uses hardcoded /evaluation/results.json path. This must stay in sync
-        with EvaluationService path format (service.py:2077). If evaluation layout
-        changes, update this path accordingly.
+        Uses ``idp_common.evaluation.contract`` for both the S3 key template
+        and the ``STICKLER_RESULT_VERSION`` shape stamp — the writer
+        (EvaluationService) stamps the same constant into each payload, so a
+        future shape change fails loudly here rather than as wrong dashboard
+        numbers.
         """
-        eval_results_uri = f"s3://{output_bucket}/{doc_key}/evaluation/results.json"
+        from idp_common.evaluation.contract import (
+            STICKLER_RESULT_VERSION,
+            evaluation_results_key,
+        )
+
+        eval_results_uri = f"s3://{output_bucket}/{evaluation_results_key(doc_key)}"
         try:
             eval_data = _load_s3_json(eval_results_uri)
+
+            # Version-stamp check: the writer stamps STICKLER_RESULT_VERSION
+            # onto each results.json; if the payload carries a different
+            # version, log a warning so a shape change surfaces before it
+            # corrupts aggregation output. Missing stamp (old payload) is
+            # tolerated — this is a soft gate for now, not a hard block.
+            payload_version = eval_data.get("stickler_result_version")
+            if (
+                payload_version is not None
+                and payload_version != STICKLER_RESULT_VERSION
+            ):
+                logger.warning(
+                    f"stickler_result_version mismatch on {eval_results_uri}: "
+                    f"payload={payload_version!r} expected={STICKLER_RESULT_VERSION!r}. "
+                    f"Blob shape may have drifted."
+                )
+
             section_results = eval_data.get("section_results", [])
 
             # Extract comparison results from sections
@@ -255,7 +324,7 @@ def _load_comparison_results(
                 "doc_key": doc_key,
                 "comparisons": doc_comparisons,
                 "weighted_score": weighted_score,
-                "success": True
+                "success": True,
             }
         except Exception as e:
             logger.warning(
@@ -330,21 +399,24 @@ def _transform_stickler_metrics(
             get_average_confidence_from_metrics,
         )
 
-        # Enhance confidence metrics with pattern-based nested field aggregation
-        # Stickler only generates confidence metrics for top-level/scalar fields
-        # This adds pattern-based metrics for nested array fields (e.g., LineItems.Rate)
-        confidence_metrics = _enhance_confidence_metrics_with_patterns(
-            confidence_metrics, comparison_results, process_eval.field_metrics
-        )
+        # R7: pattern-collapsed confidence metrics already computed by
+        # ``_IndexCollapsingConfidenceAccumulator`` upstream — the caller
+        # replaced ``process_eval.confidence_metrics`` before invoking us.
+        # No post-pass enhancement required.
 
         # Merge ECARB (Error Capture at Review Budget) metrics from separate evaluation
         # ECARB requires custom confidence_metrics in BulkStructuredModelEvaluator
         if ecab_metrics and confidence_metrics:
             # Merge ECAB into overall metrics
-            if "overall" in ecab_metrics and "error_capture_at_budget" in ecab_metrics["overall"]:
+            if (
+                "overall" in ecab_metrics
+                and "error_capture_at_budget" in ecab_metrics["overall"]
+            ):
                 if "overall" not in confidence_metrics:
                     confidence_metrics["overall"] = {}
-                confidence_metrics["overall"]["error_capture_at_budget"] = ecab_metrics["overall"]["error_capture_at_budget"]
+                confidence_metrics["overall"]["error_capture_at_budget"] = ecab_metrics[
+                    "overall"
+                ]["error_capture_at_budget"]
 
             # Merge ECAB into per-field metrics
             if "fields" in ecab_metrics:
@@ -354,7 +426,9 @@ def _transform_stickler_metrics(
                     if "error_capture_at_budget" in field_ecab:
                         if field_name not in confidence_metrics["fields"]:
                             confidence_metrics["fields"][field_name] = {}
-                        confidence_metrics["fields"][field_name]["error_capture_at_budget"] = field_ecab["error_capture_at_budget"]
+                        confidence_metrics["fields"][field_name][
+                            "error_capture_at_budget"
+                        ] = field_ecab["error_capture_at_budget"]
 
         if confidence_metrics and confidence_metrics.get("fields"):
             # Extract average confidence for backward compatibility
@@ -407,179 +481,183 @@ def _transform_stickler_metrics(
     }
 
 
-def _enhance_confidence_metrics_with_patterns(
-    confidence_metrics: Optional[Dict[str, Any]],
-    comparison_results: List[Dict[str, Any]],
-    field_metrics: Optional[Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
-    """
-    Enhance Stickler's confidence_metrics with pattern-based nested field aggregation.
-
-    Stickler's bulk aggregator only generates confidence metrics for scalar/top-level fields.
-    This function aggregates path-based confidence keys (e.g., LineItems[0].Rate, LineItems[1].Rate)
-    into pattern-based keys (e.g., LineItems.Rate) to match field_metrics format.
-
-    Args:
-        confidence_metrics: Stickler's confidence_metrics (may be None or missing nested fields)
-        comparison_results: List of comparison results with prediction_confidences
-        field_metrics: Stickler's field_metrics for reference (pattern-based keys)
-
-    Returns:
-        Enhanced confidence_metrics with pattern-based nested field metrics, or None if no data
-    """
-    if not comparison_results or not field_metrics:
-        return confidence_metrics
-
-    try:
-        from collections import defaultdict
-
-        # Initialize confidence_metrics if None
-        if confidence_metrics is None:
-            confidence_metrics = {
-                "overall": {},
-                "fields": {},
-                "coverage": {
-                    "fields_with_confidence": 0,
-                    "fields_total": 0,
-                    "ratio": 0.0,
-                },
-            }
-
-        # Extract field_metrics keys to know what patterns we need
-        field_pattern_keys = set(field_metrics.keys())
-
-        # Collect confidence values and match results by pattern
-        # Pattern: LineItems[0].Rate -> LineItems.Rate
-        pattern_data = defaultdict(lambda: {"confidences": [], "matches": []})
-
-        for comp_result in comparison_results:
-            pred_confidences = comp_result.get("prediction_confidences", {})
-            field_comparisons = comp_result.get("field_comparisons", [])
-
-            # Build a map of field paths to match results
-            match_map = {}
-            for fc in field_comparisons:
-                field_path = fc.get("field_path") or fc.get("expected_key", "")
-                match_map[field_path] = fc.get("match", False)
-
-            # Process each confidence value
-            for path_key, conf_value in pred_confidences.items():
-                # Convert path-based key to pattern-based key
-                # LineItems[0].Rate -> LineItems.Rate
-                # LineItems[1].Description -> LineItems.Description
-                pattern_key = re.sub(r"\[\d+\]", "", path_key)
-
-                # Only aggregate if this pattern exists in field_metrics
-                if pattern_key in field_pattern_keys:
-                    # Find match result for this path
-                    # Try exact match first, then try parent object match
-                    matched = match_map.get(path_key)
-                    if matched is None:
-                        # Try parent object (e.g., LineItems[0] for LineItems[0].Rate)
-                        parent_path = (
-                            path_key.rsplit(".", 1)[0] if "." in path_key else path_key
-                        )
-                        matched = match_map.get(parent_path, False)
-
-                    pattern_data[pattern_key]["confidences"].append(conf_value)
-                    pattern_data[pattern_key]["matches"].append(bool(matched))
-
-        # Compute calibration metrics for each pattern
-        # IMPORTANT: We re-compute metrics on the combined (confidence, match) pairs,
-        # NOT by averaging pre-computed metrics. This is mathematically correct because
-        # AUROC, ECE, and Brier are not linearly aggregable.
-        fields = confidence_metrics.get("fields", {})
-
-        for pattern_key, data in pattern_data.items():
-            confidences = data["confidences"]
-            matches = data["matches"]
-
-            if len(confidences) < 2:
-                # Need at least 2 samples for calibration metrics
-                continue
-
-            # Compute AUROC and Brier on combined raw data (mathematically correct)
-            try:
-                from sklearn.metrics import roc_auc_score, brier_score_loss
-
-                # Check if we have both classes
-                if len(set(matches)) > 1:
-                    auroc = roc_auc_score(matches, confidences)
-                else:
-                    auroc = None  # Can't compute AUROC with single class
-
-                # Brier score (lower is better, range 0-1)
-                brier = brier_score_loss(matches, confidences)
-
-                # Add to fields
-                if pattern_key not in fields:
-                    fields[pattern_key] = {}
-
-                fields[pattern_key]["auroc"] = {"value": auroc}
-                fields[pattern_key]["brier"] = {"value": brier}
-                fields[pattern_key]["sample_count"] = len(confidences)
-                fields[pattern_key]["mean_confidence"] = sum(confidences) / len(
-                    confidences
-                )
-
-                logger.debug(
-                    f"Pattern {pattern_key}: AUROC={auroc}, Brier={brier}, "
-                    f"samples={len(confidences)}"
-                )
-
-            except Exception as e:
-                logger.warning(
-                    f"Failed to compute metrics for pattern {pattern_key}: {e}"
-                )
-                continue
-
-        # Update coverage
-        # Only count pattern-based keys (not index-based like LineItems[0].Rate)
-        # Pattern-based keys don't have [digits] in them
-        pattern_based_fields = {
-            k: v
-            for k, v in fields.items()
-            if not re.search(r"\[\d+\]", k)  # Exclude index-based keys
-        }
-
-        total_patterns_with_conf = len(
-            [f for f in pattern_based_fields.values() if f.get("auroc")]
-        )
-        total_patterns = len(field_pattern_keys)
-
-        confidence_metrics["fields"] = fields
-        confidence_metrics["coverage"] = {
-            "fields_with_confidence": total_patterns_with_conf,
-            "fields_total": total_patterns,
-            "ratio": total_patterns_with_conf / total_patterns
-            if total_patterns > 0
-            else 0.0,
-        }
-
-        logger.info(
-            f"Enhanced confidence metrics: {total_patterns_with_conf}/{total_patterns} "
-            f"patterns with confidence"
-        )
-
-        return confidence_metrics
-
-    except Exception as e:
-        logger.error(f"Failed to enhance confidence metrics: {e}", exc_info=True)
-        return confidence_metrics  # Return original if enhancement fails
-
-
 def _calculate_false_alarm_rate(metrics: Dict[str, Any]) -> Optional[float]:
-    """Calculate false alarm rate (FP / (FP + TN))."""
-    fp = metrics.get("fp", 0)
+    """Calculate false alarm rate (FA / (FA + TN)).
+
+    Uses Stickler's ``fa`` (false alarm — predicted when the value should be
+    absent) rather than the combined ``fp``. Stickler's invariant is
+    ``fp == fa + fd``, so the combined count double-counts false *discoveries*
+    (predicted-but-wrong) as false *alarms* and inflates this rate whenever
+    both error classes are present. The per-doc path in
+    ``idp_common.evaluation.stickler_backend.results`` uses the same ``fa``
+    formula, so per-doc and run-level dashboards now agree by construction.
+    """
+    fa = metrics.get("fa", 0)
     tn = metrics.get("tn", 0)
-    return fp / (fp + tn) if (fp + tn) > 0 else None
+    return fa / (fa + tn) if (fa + tn) > 0 else None
 
 
 def _calculate_false_discovery_rate(metrics: Dict[str, Any]) -> Optional[float]:
-    """Calculate false discovery rate (FP / (FP + TP))."""
-    fp = metrics.get("fp", 0)
+    """Calculate false discovery rate (FD / (FD + TP)).
+
+    Uses Stickler's ``fd`` (false discovery — predicted a wrong value) rather
+    than the combined ``fp``, for the same reason as
+    ``_calculate_false_alarm_rate``: ``fp == fa + fd``, so the combined count
+    would fold false alarms into this rate. Matches the per-doc formula in
+    ``stickler_backend.results``.
+    """
+    fd = metrics.get("fd", 0)
     tp = metrics.get("tp", 0)
-    return fp / (fp + tp) if (fp + tp) > 0 else None
+    return fd / (fd + tp) if (fd + tp) > 0 else None
+
+
+class _IndexCollapsingConfidenceAccumulator:
+    """R7: ``ConfidenceAccumulator`` subclass that collapses list-index paths
+    before Stickler's ``ConfidenceCalculator`` sees them.
+
+    Stickler's ``ConfidenceAccumulator`` keys pairs by the raw field path —
+    which means for a Hungarian-matched array, ``LineItems[0].Rate``,
+    ``LineItems[1].Rate``, ``LineItems[2].Rate`` are three separate entries
+    with sample-sizes of 1 each. Downstream metrics (AUROC, ECE, Brier) can't
+    be computed on N=1 series and the report either omits the field or fills
+    it with nulls.
+
+    This subclass rewrites every occurrence of ``[digits]`` to nothing before
+    feeding the extractor, aggregating all indices at a single pattern-based
+    key (``LineItems.Rate``). One pass over ``comparison_results``, all
+    Stickler-native math. Replaces the previous scikit-learn-based post-pass
+    (``_enhance_confidence_metrics_with_patterns``) that ran outside the
+    accumulator pipeline entirely.
+    """
+
+    _INDEX_RE = re.compile(r"\[\d+\]")
+    name = "confidence_metrics"
+
+    def __init__(self, metrics=None):
+        # Lazy-import Stickler so the module still parses when stickler-eval
+        # isn't installed (defensive — Lambda always has it).
+        from stickler.structured_object_evaluator.models.confidence.calculator import (
+            ConfidenceCalculator,
+        )
+
+        self._calculator = ConfidenceCalculator(metrics=metrics)
+        self.reset()
+
+    def reset(self):
+        self._keyed_pairs: Dict[str, list] = {}
+        self._fields_with = 0
+        self._fields_total = 0
+
+    @classmethod
+    def _collapse(cls, key: str) -> str:
+        """LineItems[0].Rate -> LineItems.Rate — strip every ``[digits]``."""
+        return cls._INDEX_RE.sub("", key)
+
+    def accumulate(self, comparison_result, prediction_raw):
+        """Rewrite indexed paths to pattern keys, then delegate to Stickler.
+
+        Mirrors the built-in ``ConfidenceAccumulator.accumulate`` layout so any
+        upstream refactor of the base class is a merge-conflict signal rather
+        than silent drift.
+        """
+        field_comparisons = comparison_result.get("field_comparisons", []) or []
+        if not field_comparisons:
+            return
+
+        # Feed raw indexed keys through extract_from_dicts (which joins each
+        # comparison's actual_key against the confidences dict — 1:1 match).
+        # Then collapse the resulting ``keyed_pairs`` into pattern buckets
+        # afterwards so all indices at ``LineItems[N].Rate`` land under a
+        # single ``LineItems.Rate`` pattern for AUROC/ECE/Brier computation
+        # over the full sample.
+        confidences = comparison_result.get("prediction_confidences") or {}
+        extraction = self._calculator.extract_from_dicts(field_comparisons, confidences)
+
+        if confidences:
+            for field_path, pairs in extraction.keyed_pairs.items():
+                pattern_key = (
+                    self._collapse(field_path)
+                    if isinstance(field_path, str)
+                    else field_path
+                )
+                self._keyed_pairs.setdefault(pattern_key, []).extend(pairs)
+
+        self._fields_with += extraction.fields_with_confidence
+        self._fields_total += extraction.fields_total
+
+    def compute(self):
+        if self._fields_total == 0:
+            return None
+        return self._calculator.compute_metrics(
+            self._keyed_pairs,
+            fields_with_confidence=self._fields_with,
+            fields_total=self._fields_total,
+        )
+
+    def get_state(self) -> Dict[str, Any]:
+        return {
+            "keyed_confidence_pairs": {
+                field_path: [p.model_dump() for p in pairs]
+                for field_path, pairs in self._keyed_pairs.items()
+            },
+            "confidence_fields_with": self._fields_with,
+            "confidence_fields_total": self._fields_total,
+        }
+
+    def load_state(self, state: Dict[str, Any]) -> None:
+        from stickler.structured_object_evaluator.models.confidence.metrics import (
+            ConfidencePair,
+        )
+
+        self._keyed_pairs = {
+            field_path: [ConfidencePair(**p) for p in pairs]
+            for field_path, pairs in state.get("keyed_confidence_pairs", {}).items()
+        }
+        self._fields_with = state.get("confidence_fields_with", 0)
+        self._fields_total = state.get("confidence_fields_total", 0)
+
+    def merge_state(self, other_state: Dict[str, Any]) -> None:
+        from stickler.structured_object_evaluator.models.confidence.metrics import (
+            ConfidencePair,
+        )
+
+        for field_path, pairs in other_state.get("keyed_confidence_pairs", {}).items():
+            self._keyed_pairs.setdefault(field_path, []).extend(
+                [ConfidencePair(**p) for p in pairs]
+            )
+        self._fields_with += other_state.get("confidence_fields_with", 0)
+        self._fields_total += other_state.get("confidence_fields_total", 0)
+
+
+def _rename_brier_score_key(
+    confidence_metrics: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Rename Stickler's ``brier_score`` key to ``brier`` in-place.
+
+    Stickler's ``BrierScoreMetric.name`` is ``brier_score``; the deleted
+    sklearn post-pass wrote ``brier``; the Test Studio UI + awsjson-types
+    still read ``brier``. Rename here at the aggregation boundary so the UI
+    keeps rendering Brier Score without a cross-repo change. Recurses through
+    ``overall`` + ``fields.<name>`` to catch both scopes.
+    """
+    if not confidence_metrics:
+        return confidence_metrics
+    overall = confidence_metrics.get("overall")
+    if (
+        isinstance(overall, dict)
+        and "brier_score" in overall
+        and "brier" not in overall
+    ):
+        overall["brier"] = overall.pop("brier_score")
+    fields = confidence_metrics.get("fields") or {}
+    for field_metrics in fields.values():
+        if (
+            isinstance(field_metrics, dict)
+            and "brier_score" in field_metrics
+            and "brier" not in field_metrics
+        ):
+            field_metrics["brier"] = field_metrics.pop("brier_score")
+    return confidence_metrics
 
 
 def _empty_metrics() -> Dict[str, Any]:

@@ -89,7 +89,7 @@ flowchart TD
 | **Impact** | Attacker gains authenticated access with victim's role permissions |
 | **Likelihood** | Medium |
 | **Severity** | High |
-| **Affected Components** | Web UI, SDK/CLI, AppSync API |
+| **Affected Components** | Web UI, SDK/CLI, API Gateway REST API |
 | **Mitigations** | Short-lived access tokens (1 hour default), secure token storage practices, Content Security Policy headers, XSS prevention in React app, HTTPS-only |
 
 ### AUTH.T03: Insufficient Authorization Granularity

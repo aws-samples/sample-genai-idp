@@ -786,7 +786,7 @@ classes:
 policy_classes:
   - $schema: https://json-schema.org/draft/2020-12/schema
     x-aws-idp-policy-type: global_periods
-    x-aws-idp-document-name-regex: "(?i).*(medicare|medicaid|pa_packet|prior_auth).*"
+    x-aws-idp-document-name-regex: "(?i).*(medicare|medicaid|pa[_ -]?packet|prior[_ -]?auth).*"
     type: object
     rule_properties:
       minor_surgery_000_010:
@@ -820,7 +820,7 @@ policy_classes:
     $id: global_periods
   - $schema: https://json-schema.org/draft/2020-12/schema
     x-aws-idp-policy-type: same_day_service_rules
-    x-aws-idp-document-name-regex: "(?i).*(medicare|medicaid|pa_packet|prior_auth).*"
+    x-aws-idp-document-name-regex: "(?i).*(medicare|medicaid|pa[_ -]?packet|prior[_ -]?auth).*"
     type: object
     rule_properties:
       service_rule:
@@ -835,7 +835,7 @@ policy_classes:
     $id: same_day_service_rules
   - $schema: https://json-schema.org/draft/2020-12/schema
     x-aws-idp-policy-type: postoperative_rules
-    x-aws-idp-document-name-regex: "(?i).*(medicare|medicaid|pa_packet|prior_auth).*"
+    x-aws-idp-document-name-regex: "(?i).*(medicare|medicaid|pa[_ -]?packet|prior[_ -]?auth).*"
     type: object
     rule_properties:
       postoperative_rule:
@@ -854,7 +854,7 @@ policy_classes:
     $id: postoperative_rules
   - $schema: https://json-schema.org/draft/2020-12/schema
     x-aws-idp-policy-type: bundling
-    x-aws-idp-document-name-regex: "(?i).*(medicare|medicaid|pa_packet|prior_auth).*"
+    x-aws-idp-document-name-regex: "(?i).*(medicare|medicaid|pa[_ -]?packet|prior[_ -]?auth).*"
     type: object
     rule_properties:
       bundling_31500:
@@ -941,7 +941,7 @@ policy_classes:
     $id: bundling
   - $schema: https://json-schema.org/draft/2020-12/schema
     x-aws-idp-policy-type: diagnostic_surgical
-    x-aws-idp-document-name-regex: "(?i).*(medicare|medicaid|pa_packet|prior_auth).*"
+    x-aws-idp-document-name-regex: "(?i).*(medicare|medicaid|pa[_ -]?packet|prior[_ -]?auth).*"
     type: object
     rule_properties:
       diagnostic_surgical_cpt_31622_31635:
@@ -997,7 +997,7 @@ policy_classes:
     $id: diagnostic_surgical
   - $schema: https://json-schema.org/draft/2020-12/schema
     x-aws-idp-policy-type: component_service
-    x-aws-idp-document-name-regex: "(?i).*(medicare|medicaid|pa_packet|prior_auth).*"
+    x-aws-idp-document-name-regex: "(?i).*(medicare|medicaid|pa[_ -]?packet|prior[_ -]?auth).*"
     type: object
     rule_properties:
       component_service:
@@ -1023,7 +1023,7 @@ policy_classes:
     $id: component_service
   - $schema: https://json-schema.org/draft/2020-12/schema
     x-aws-idp-policy-type: separate_procedure
-    x-aws-idp-document-name-regex: "(?i).*(medicare|medicaid|pa_packet|prior_auth).*"
+    x-aws-idp-document-name-regex: "(?i).*(medicare|medicaid|pa[_ -]?packet|prior[_ -]?auth).*"
     type: object
     rule_properties:
       separate_procedure_cpt_32551:

@@ -1679,7 +1679,7 @@ for r in result.results:
 
 Discover document classes from a collection of documents using embedding-based clustering and agentic analysis. Unlike `run()` (which analyzes one document at a time), this method analyzes a directory of mixed documents to automatically identify document types, cluster similar documents, and generate JSON Schemas for each discovered class.
 
-**Requires:** `pip install idp-common[multi_document_discovery]`
+**Requires:** `pip install -e "lib/idp_common_pkg[multi_document_discovery]"`
 
 **Note:** Requires at least **2 documents per expected class**. Clusters with fewer than 2 documents are filtered as noise. For discovering schemas from individual documents, use `discovery.run()` instead.
 

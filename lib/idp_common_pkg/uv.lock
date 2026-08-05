@@ -836,21 +836,21 @@ wheels = [
 
 [[package]]
 name = "datamodel-code-generator"
-version = "0.55.0"
+version = "0.64.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "argcomplete" },
-    { name = "black" },
+    { name = "black", marker = "sys_platform != 'emscripten'" },
     { name = "genson" },
     { name = "inflect" },
-    { name = "isort" },
+    { name = "isort", marker = "sys_platform != 'emscripten'" },
     { name = "jinja2" },
     { name = "pydantic" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/33/36/ec505ce62c143c0f045e82e2bb0360e2ede765c0cfe3a70bf32c5661b8a2/datamodel_code_generator-0.55.0.tar.gz", hash = "sha256:20ae7a4fbbb12be380f0bd02544db4abae96c5b644d4b3f2b9c3fc0bc9ee1184", size = 833828, upload-time = "2026-03-10T20:41:15.796Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9c/d2/86c94a2836ed42231653a7ddaefa0a5bc23418167a876bba7376c96b3a35/datamodel_code_generator-0.64.0.tar.gz", hash = "sha256:9c592900a00b20e416494273c22435f5a9aef6ea8c7b9190747522a60497a1cb", size = 1316440, upload-time = "2026-06-14T17:24:50.528Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/be/c6/2abc9d11adbbf689b6b4dfb7a136d57b9ccaa3b3f1ba83504462109e8dbb/datamodel_code_generator-0.55.0-py3-none-any.whl", hash = "sha256:efa5a925288ca2a135fdc3361c7d774ae5b24b4fd632868363e249d55ea2f137", size = 256860, upload-time = "2026-03-10T20:41:13.488Z" },
+    { url = "https://files.pythonhosted.org/packages/23/94/71338e2f0146ac10747a5537b3a1e45256e66b7c229869eb0ee787111b41/datamodel_code_generator-0.64.0-py3-none-any.whl", hash = "sha256:b7cd8bd41a312aa997aec6150670bad781847c5b674f17e4d70e78208a0fb990", size = 374698, upload-time = "2026-06-14T17:24:48.809Z" },
 ]
 
 [[package]]
@@ -1228,7 +1228,6 @@ all = [
     { name = "bedrock-agentcore" },
     { name = "genson" },
     { name = "jsonschema" },
-    { name = "munkres" },
     { name = "numpy" },
     { name = "openpyxl" },
     { name = "pandas" },
@@ -1271,7 +1270,6 @@ docs-service = [
 ]
 evaluation = [
     { name = "genson" },
-    { name = "munkres" },
     { name = "numpy" },
     { name = "ruamel-yaml" },
     { name = "stickler-eval" },
@@ -1320,7 +1318,6 @@ test = [
     { name = "graphql-core" },
     { name = "jsonpatch" },
     { name = "moto", extra = ["cloudformation", "s3"] },
-    { name = "munkres" },
     { name = "mypy-boto3-bedrock-runtime" },
     { name = "numpy" },
     { name = "openpyxl" },
@@ -1356,8 +1353,8 @@ requires-dist = [
     { name = "boto3", specifier = ">=1.42.86,<1.43.0" },
     { name = "build", marker = "extra == 'test'", specifier = "==1.3.0" },
     { name = "chardet", marker = "extra == 'code-intel'", specifier = ">=5.0.0" },
-    { name = "datamodel-code-generator", marker = "extra == 'agentic-extraction'", specifier = ">=0.25.0" },
-    { name = "datamodel-code-generator", marker = "extra == 'test'", specifier = ">=0.25.0" },
+    { name = "datamodel-code-generator", marker = "extra == 'agentic-extraction'", specifier = ">=0.64.0" },
+    { name = "datamodel-code-generator", marker = "extra == 'test'", specifier = ">=0.64.0" },
     { name = "deepdiff", specifier = ">=6.0.0" },
     { name = "deepdiff", marker = "extra == 'test'", specifier = ">=6.0.0" },
     { name = "email-validator", marker = "extra == 'agentic-extraction'", specifier = ">=2.3.0" },
@@ -1376,16 +1373,13 @@ requires-dist = [
     { name = "jupyter", marker = "extra == 'dev'", specifier = ">=1.1.1,<2.0.0" },
     { name = "moto", marker = "extra == 'test'", specifier = ">=5.1.8" },
     { name = "moto", extras = ["s3", "cloudformation"], marker = "extra == 'test'", specifier = "==5.1.8" },
-    { name = "munkres", marker = "extra == 'all'", specifier = ">=1.1.4" },
-    { name = "munkres", marker = "extra == 'evaluation'", specifier = ">=1.1.4" },
-    { name = "munkres", marker = "extra == 'test'", specifier = ">=1.1.4" },
     { name = "mypy-boto3-bedrock-runtime", marker = "extra == 'agentic-extraction'", specifier = ">=1.39.0" },
     { name = "mypy-boto3-bedrock-runtime", marker = "extra == 'test'", specifier = ">=1.39.0" },
     { name = "numpy", marker = "extra == 'all'", specifier = "==1.26.4" },
-    { name = "numpy", marker = "extra == 'evaluation'", specifier = "==1.26.4" },
+    { name = "numpy", marker = "extra == 'evaluation'", specifier = ">=1.26,<3" },
     { name = "numpy", marker = "extra == 'multi-document-discovery'", specifier = "==1.26.4" },
     { name = "numpy", marker = "extra == 'ocr'", specifier = "==1.26.4" },
-    { name = "numpy", marker = "extra == 'test'", specifier = "==1.26.4" },
+    { name = "numpy", marker = "extra == 'test'", specifier = ">=1.26,<3" },
     { name = "openpyxl", marker = "extra == 'all'", specifier = "==3.1.5" },
     { name = "openpyxl", marker = "extra == 'ocr'", specifier = "==3.1.5" },
     { name = "openpyxl", marker = "extra == 'test'", specifier = "==3.1.5" },
@@ -1428,7 +1422,7 @@ requires-dist = [
     { name = "requests", marker = "extra == 'test'", specifier = ">=2.32.3,<3.0.0" },
     { name = "rich", marker = "extra == 'test'", specifier = ">=13.0.0" },
     { name = "ruamel-yaml", marker = "python_full_version >= '3.10' and extra == 'evaluation'", specifier = ">=0.17.0,<0.19.0" },
-    { name = "ruff", marker = "extra == 'test'", specifier = ">=0.14.0" },
+    { name = "ruff", marker = "extra == 'test'", specifier = ">=0.14.0,<0.16" },
     { name = "scikit-learn", marker = "extra == 'multi-document-discovery'", specifier = ">=1.5.0" },
     { name = "scipy", marker = "extra == 'multi-document-discovery'", specifier = ">=1.14.0" },
     { name = "seed-data", marker = "extra == 'synthesis-generator'", specifier = ">=0.0.6" },
@@ -4114,7 +4108,7 @@ wheels = [
 
 [[package]]
 name = "svglib"
-version = "2.1.0"
+version = "2.0.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cssselect2" },
@@ -4123,9 +4117,9 @@ dependencies = [
     { name = "reportlab" },
     { name = "tinycss2" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d2/62/1abdf43581939a099339a320247d357620106ef3ff76306637f44d18e131/svglib-2.1.0.tar.gz", hash = "sha256:c079bc5fa9e12736b23e7855413320a78afdab54c9492de48ade7bf318187605", size = 1371234, upload-time = "2026-08-01T11:27:59.066Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4b/1f/e9dc8f16a834b6b0d5d7c0c20faeca614bcb31cbe67c54f61e3258978289/svglib-2.0.2.tar.gz", hash = "sha256:455e473dbe7066eea55c39de8194a6a3b646b6c37a255700257fd32115ddb218", size = 1341040, upload-time = "2026-06-18T07:12:50.84Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/07/96/53360b138938b2375e696870cbcc3b956218066d9c89e3956b658314698d/svglib-2.1.0-py3-none-any.whl", hash = "sha256:1c264ef21fe8840083e9c5a6033296d4c644e9d70c3ec42174be05fa5f8fbb9a", size = 49571, upload-time = "2026-08-01T11:27:57.723Z" },
+    { url = "https://files.pythonhosted.org/packages/de/de/eb6e07fb9fedba56921f8aa1dde4f5763b7abef1f962e6fea56a99092118/svglib-2.0.2-py3-none-any.whl", hash = "sha256:0fd04f1eb593802060427d6a59ab5127d65db6b8f5750d572f7df25097e36503", size = 45730, upload-time = "2026-06-18T07:12:49.221Z" },
 ]
 
 [[package]]

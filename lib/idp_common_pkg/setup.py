@@ -51,11 +51,13 @@ extras_require = {
         "Pillow==12.1.1",  # For image handling
     ],
     # Evaluation module dependencies
+    # Note: the ``[llm]`` extra (strands-based LLM comparator) is intentionally
+    # NOT installed — IDP provides its own Bedrock-backed comparator via
+    # ``idp_common.evaluation.llm_comparator.LLMComparator``.
     "evaluation": [
         "stickler-eval==0.5.0",
         "genson==1.3.0",
-        "munkres>=1.1.4",  # For Hungarian algorithm
-        "numpy==1.26.4",  # For numeric operations
+        "numpy>=1.26,<3",  # Match stickler-eval's numpy range
     ],
     # Reporting module dependencies
     "reporting": [
@@ -114,7 +116,6 @@ extras_require = {
         "Pillow==12.1.1",
         "pypdfium2>=5.5.0",
         "amazon-textract-textractor[pandas]==1.9.2",
-        "munkres>=1.1.4",
         "numpy==1.26.4",
         "pandas==2.2.3",
         "requests==2.32.4",

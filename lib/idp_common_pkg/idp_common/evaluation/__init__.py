@@ -10,9 +10,6 @@ using the Stickler library for structured object comparison.
 
 # Stickler integration components
 from idp_common.evaluation.llm_comparator import LLMComparator
-
-# Core evaluation components
-from idp_common.evaluation.metrics import calculate_metrics
 from idp_common.evaluation.models import (
     AttributeEvaluationResult,
     DocumentEvaluationResult,
@@ -37,6 +34,4 @@ __all__ = [
     # Stickler components
     "SticklerConfigMapper",
     "LLMComparator",
-    # Metrics
-    "calculate_metrics",
 ]

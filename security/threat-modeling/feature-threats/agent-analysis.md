@@ -4,8 +4,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 2.0 |
-| **Last Updated** | 2025-03-19 |
+| **Document Version** | 3.0 |
+| **Last Updated** | 2026-07-28 |
+| **Applies to release** | v0.6.3 |
 | **Feature** | Agent Analysis (Multi-Agent AI System) |
 | **Classification** | Internal |
 
@@ -18,14 +19,14 @@ Agent Analysis provides a multi-agent AI system for interactive document data an
 - **Error Analyzer Agent**: Diagnoses processing failures
 - **Code Intelligence Agent**: Provides codebase analysis
 
-Users interact via a conversational interface (Companion Chat) and receive real-time streaming responses via AppSync subscriptions.
+Users interact via a conversational interface (Companion Chat) and receive streaming responses as Server-Sent Events over a Lambda Function URL (`AuthType=AWS_IAM`). See [companion-chat.md](companion-chat.md) — CHAT.T03 covers the authorization gaps on that transport.
 
 ## 2. Architecture
 
 ```mermaid
 flowchart TD
-    User[User / Browser] --> AppSync[AppSync GraphQL]
-    AppSync --> ChatLambda[Chat Processor Lambda]
+    User[User / Browser] --> FURL[Lambda Function URL - SigV4]
+    FURL --> ChatLambda[Chat Stream Processor Lambda]
     ChatLambda --> Orchestrator[Orchestrator Agent]
     
     Orchestrator --> Analytics[Analytics Agent]
@@ -40,8 +41,8 @@ flowchart TD
     Athena --> S3Report[S3 Reporting Bucket]
     
     ChatLambda --> DDB[DynamoDB Conversations]
-    ChatLambda --> AppSyncSub[AppSync Subscriptions]
-    AppSyncSub --> User
+    ChatLambda --> SSE[SSE stream]
+    SSE --> User
 ```
 
 ## 3. Threat Analysis

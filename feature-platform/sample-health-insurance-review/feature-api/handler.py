@@ -13,6 +13,10 @@ GET /claims?window=7d              | Same, filtered to rows updated in the windo
 GET /claims/{docId}                | Claim row merged with the consolidated
                                    | rule-validation summary (per-rule details)
 GET /claims/{docId}/summary.md     | The markdown summary, proxied as text
+DELETE /claims/{docId}             | Delete a claim row (Admin/Author only) —
+                                   | removes the ClaimsStatus record; the
+                                   | document + rule-validation outputs in the
+                                   | host stack are untouched
 
 `{docId}` is the URL-encoded document id (the input S3 key, which may contain
 slashes — the UI must encodeURIComponent it).
@@ -144,6 +148,26 @@ def _get_claim_row(doc_id: str) -> Optional[Dict[str, Any]]:
     return table.get_item(Key={"documentId": doc_id}).get("Item")
 
 
+def _caller_groups(event: Dict[str, Any]) -> List[str]:
+    """Cognito groups from the HTTP API JWT authorizer claims.
+
+    The `cognito:groups` claim arrives as a string like "[Admin Author]"
+    (API GW stringifies the list) or occasionally a real list — handle both.
+    """
+    claims = (
+        event.get("requestContext", {})
+        .get("authorizer", {})
+        .get("jwt", {})
+        .get("claims", {})
+    )
+    raw = claims.get("cognito:groups")
+    if isinstance(raw, list):
+        return [str(g) for g in raw]
+    if isinstance(raw, str):
+        return raw.strip("[]").split()
+    return []
+
+
 def _get_claim_detail(doc_id: str) -> Optional[Dict[str, Any]]:
     """Claim row merged with the consolidated summary's per-rule details."""
     row = _get_claim_row(doc_id)
@@ -168,11 +192,35 @@ def _get_claim_detail(doc_id: str) -> Optional[Dict[str, Any]]:
 def lambda_handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     path = event.get("rawPath", "/")
     qs = event.get("queryStringParameters") or {}
-    logger.info(
-        "sample-health-insurance-review API %s %s",
-        event.get("requestContext", {}).get("http", {}).get("method"),
-        path,
-    )
+    method = event.get("requestContext", {}).get("http", {}).get("method") or "GET"
+    logger.info("sample-health-insurance-review API %s %s", method, path)
+
+    # DELETE /claims/{docId} — remove a claim row. Restricted to Admin/Author
+    # (Reviewer/Viewer roles are read-only across the accelerator). Deleting a
+    # claim only removes this feature's dashboard record; the document and its
+    # rule-validation outputs in the host stack are untouched, and reprocessing
+    # the document recreates the row.
+    if method == "DELETE":
+        m = re.match(r"^/claims/(.+)$", path)
+        if not m:
+            return _response(404, {"error": f"unknown path {path}"})
+        groups = _caller_groups(event)
+        if not ({"Admin", "Author"} & set(groups)):
+            return _response(
+                403,
+                {"error": "Deleting claims requires the Admin or Author role"},
+            )
+        doc_id = unquote(m.group(1))
+        try:
+            row = _get_claim_row(doc_id)
+            if not row:
+                return _response(404, {"error": f"no claim found for {doc_id!r}"})
+            _dynamodb.Table(_CLAIMS_TABLE).delete_item(Key={"documentId": doc_id})
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("delete claim failed")
+            return _response(500, {"error": str(exc)})
+        logger.info("Deleted claim %s (by groups=%s)", doc_id, groups)
+        return _response(200, {"deleted": doc_id})
 
     # GET /config — bootstrap blob the UI needs before it can drive the
     # host's Rules Discovery flow (the Discovery bucket name to pass to

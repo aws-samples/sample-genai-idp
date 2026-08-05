@@ -140,6 +140,52 @@ copy). The Lambda **must** be tagged `idp:feature-id=<featureId>` (the host's
 dispatcher only invokes tagged or `GENAIIDP-*`-named functions — the scaffold
 tags feature Lambdas for you).
 
+#### Writing a mutating hook
+
+A hook can also **change the document** for the next step to consume, which is
+how a feature injects business logic into the pipeline rather than just
+reacting to it. Return the modified document under `updatedDocument`; use
+`idp_common.hooks` so the round-trip is two calls:
+
+```python
+from idp_common.hooks import load_hook_document, updated_document_result
+
+def lambda_handler(event, context):
+    document = load_hook_document(event)      # resolves compressed refs for you
+
+    # Business logic: anything on the Document model is fair game.
+    for section in document.sections:
+        if section.classification == "Unknown":
+            section.classification = classify_with_my_rules(section)
+
+    return updated_document_result(document, rulesApplied=True)
+```
+
+Requires `idp_common[core]` in the hook's `requirements.txt`, plus the
+`WORKING_BUCKET` env var (import the host's `<MainStackName>-WorkingBucketName`
+export) so compressed documents resolve.
+
+Three things to know:
+
+- **Load, don't build.** Constructing a `Document` from scratch drops
+  `metering`, `errors`, `hitl_metadata`, and `processing_issues`. Always
+  load → mutate → return.
+- **Omitting `updatedDocument` changes nothing.** The document passes through
+  byte-identical, so read-only hooks need no changes.
+- **`postExtraction` is section-scoped** (it runs inside the section Map), so
+  only section-level changes propagate there. Use `postClassification` or
+  `postRuleValidation` for whole-document changes.
+- **Make mutations idempotent.** The workflow retries a hook dispatch on
+  transient Lambda faults, so a mutation that *appends* can apply twice while
+  one that *sets* is safe.
+
+The dispatcher refuses an update that changes the document's identity, breaks
+the `sections` list the Map iterates, or exceeds 5 MB inline — keeping the
+pre-hook document and recording the reason under
+`$.HookResults.<point>.Payload.results[].documentUpdateRejected` rather than
+failing the workflow. Full contract and the per-point propagation table:
+[Feature Platform → Pipeline hooks](feature-platform.md#pipeline-hooks).
+
 **2. Declare it in `template.yaml` + the manifest.** Add the hook Lambda to your
 feature's CloudFormation template, then map the hook point to that Lambda's
 logical resource name in `feature.yaml`:

@@ -49,27 +49,39 @@ This README provides a high-level overview of the package. For detailed document
 
 ### Installation
 
-To minimize Lambda package size, install only the components you need:
+> ⚠️ **Always install from a local checkout — never by bare name.**
+> `idp_common` is first-party: it lives in this repo and is **not published to
+> PyPI**. The name `idp-common` on public PyPI is registered by an unrelated
+> third party, so `pip install idp_common` installs *someone else's package*.
+> Every command below therefore uses a path (`./` or `-e`). See
+> [Installing First-Party Packages Safely](../../docs/dependency-confusion.md).
+
+To minimize Lambda package size, install only the components you need. Run these
+from the repository root:
 
 ```bash
 # Install core functionality only (minimal dependencies)
-pip install "idp_common[core]"
+pip install -e "lib/idp_common_pkg[core]"
 
 # Install with specific component support
-pip install "idp_common[ocr]"
-pip install "idp_common[classification]"
-pip install "idp_common[extraction]"
-pip install "idp_common[evaluation]"
-pip install "idp_common[reporting]"
-pip install "idp_common[appsync]"
-pip install "idp_common[image]"
+pip install -e "lib/idp_common_pkg[ocr]"
+pip install -e "lib/idp_common_pkg[classification]"
+pip install -e "lib/idp_common_pkg[extraction]"
+pip install -e "lib/idp_common_pkg[evaluation]"
+pip install -e "lib/idp_common_pkg[reporting]"
+pip install -e "lib/idp_common_pkg[appsync]"
+pip install -e "lib/idp_common_pkg[image]"
 
 # Install everything
-pip install "idp_common[all]"
+pip install -e "lib/idp_common_pkg[all]"
 
 # Install multiple components
-pip install "idp_common[ocr,classification]"
+pip install -e "lib/idp_common_pkg[ocr,classification]"
 ```
+
+To install every first-party package at once (the usual setup), use `make setup`
+— it installs them in a single pip invocation so the sibling names resolve
+locally rather than from an index.
 
 For Lambda functions, specify only the required components in requirements.txt:
 

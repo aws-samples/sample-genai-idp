@@ -1,0 +1,87 @@
+{
+  "description": "Nested invoice-style doc: top-level fields + LineItems array with configured match_threshold. Baseline: match_threshold at array level (R2 will move it to items schema).",
+  "section_id": "invoice-42",
+  "classification": "Invoice",
+  "page_ids": ["1", "2"],
+  "config": {
+    "classes": [
+      {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "invoice",
+        "x-aws-idp-document-type": "Invoice",
+        "x-aws-idp-evaluation-model-name": "Invoice",
+        "x-aws-idp-evaluation-match-threshold": 0.8,
+        "type": "object",
+        "properties": {
+          "invoice_number": {
+            "type": "string",
+            "description": "Invoice number",
+            "x-aws-idp-evaluation-method": "EXACT",
+            "x-aws-idp-evaluation-weight": 2.0
+          },
+          "customer_name": {
+            "type": "string",
+            "description": "Customer name",
+            "x-aws-idp-evaluation-method": "FUZZY",
+            "x-aws-idp-evaluation-threshold": 0.8,
+            "x-aws-idp-evaluation-weight": 1.0
+          },
+          "total": {
+            "type": "number",
+            "description": "Invoice total",
+            "x-aws-idp-evaluation-method": "NUMERIC_EXACT",
+            "x-aws-idp-evaluation-threshold": 0.01,
+            "x-aws-idp-evaluation-weight": 2.0
+          },
+          "LineItems": {
+            "type": "array",
+            "description": "Line items",
+            "x-aws-idp-evaluation-match-threshold": 0.6,
+            "items": {
+              "type": "object",
+              "properties": {
+                "sku": {
+                  "type": "string",
+                  "x-aws-idp-evaluation-method": "EXACT"
+                },
+                "description": {
+                  "type": "string",
+                  "x-aws-idp-evaluation-method": "FUZZY",
+                  "x-aws-idp-evaluation-threshold": 0.7
+                },
+                "quantity": {
+                  "type": "number",
+                  "x-aws-idp-evaluation-method": "NUMERIC_EXACT",
+                  "x-aws-idp-evaluation-threshold": 0.0
+                },
+                "price": {
+                  "type": "number",
+                  "x-aws-idp-evaluation-method": "NUMERIC_EXACT",
+                  "x-aws-idp-evaluation-threshold": 0.01
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "expected": {
+    "invoice_number": "INV-2023-001",
+    "customer_name": "Widget Buyer LLC",
+    "total": 342.50,
+    "LineItems": [
+      {"sku": "A100", "description": "Widget A", "quantity": 2, "price": 50.00},
+      {"sku": "B200", "description": "Widget B, blue", "quantity": 1, "price": 242.50}
+    ]
+  },
+  "actual": {
+    "invoice_number": "INV-2023-001",
+    "customer_name": "Widget Buyer, LLC",
+    "total": 342.50,
+    "LineItems": [
+      {"sku": "A100", "description": "Widget A", "quantity": 2, "price": 50.00},
+      {"sku": "B200", "description": "Widget B (blue)", "quantity": 1, "price": 242.50}
+    ]
+  }
+}
