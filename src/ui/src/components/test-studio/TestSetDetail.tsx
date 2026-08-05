@@ -198,7 +198,11 @@ const TestSetDetail = (): React.JSX.Element => {
       }
     } catch (err) {
       logger.error('Error starting draft labeling:', err);
-      setError('Failed to start draft labeling. Please try again.');
+      // Surface the server's message. Several are deliberate and actionable —
+      // "every document already has ground truth, run a test instead" tells the
+      // owner what to do, whereas "please try again" is advice that cannot work.
+      const message = (err as { errors?: { message?: string }[] })?.errors?.[0]?.message;
+      setError(message || 'Failed to start draft labeling. Please try again.');
     } finally {
       setIsStartingLabels(false);
     }
