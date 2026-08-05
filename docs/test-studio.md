@@ -661,6 +661,15 @@ Lambda knew about graded metrics re-aggregate once on next view — the stale-
 cache guard treats a missing `gradedPacketMetrics` key as "recalculate this
 run's cache." No manual migration required.
 
+The recompute is queued asynchronously (aggregation re-reads every document's
+`results.json` from S3 and can take minutes on a large run, well past the
+API's read timeout), so the **first** view of a pre-existing run still renders
+immediately from its cached metrics with the graded panel hidden; reload once
+the re-aggregation finishes to see the graded rows. Because the cache write
+always includes the `gradedPacketMetrics` key — `{}` when a run legitimately
+has no graded metrics, e.g. single-section documents — a run is re-queued at
+most once and never loops.
+
 ### Field-Level Metrics
 
 Test results include detailed per-field extraction performance metrics displayed in an interactive table with optional confidence calibration columns (Stickler v0.4.0+):

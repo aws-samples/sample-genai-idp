@@ -3,6 +3,7 @@
 
 
 import importlib.util
+import json
 import os
 from unittest.mock import Mock, patch
 
@@ -256,6 +257,152 @@ def test_get_test_results_missing_metrics_returns_partial_not_raises():
     assert result["configVersion"] == "v7"
     # Metric fields are absent (not yet computed) but must not be required.
     assert "overallAccuracy" not in result or result["overallAccuracy"] is None
+
+
+def _stale_cache_metadata(test_run_id, cached_metrics, status="COMPLETE"):
+    """Terminal test run whose testRunResult is present but may be stale."""
+    return {
+        "PK": f"testrun#{test_run_id}",
+        "SK": "metadata",
+        "Status": status,
+        "TestSetId": "set-1",
+        "TestSetName": "lending-test",
+        "FilesCount": 10,
+        "CompletedFiles": 10,
+        "FailedFiles": 0,
+        "CreatedAt": "2025-01-01T00:00:00Z",
+        "testRunResult": cached_metrics,
+    }
+
+
+# A cache written before gradedPacketMetrics existed: every key the guard knew
+# about at the time is present, so this is the exact shape of every historical
+# test run's cache.
+_PRE_GRADED_CACHE = {
+    "overallAccuracy": 0.85,
+    "weightedOverallScores": {"doc1.pdf": 0.9},
+    "averageConfidence": 0.77,
+    "accuracyBreakdown": {"precision": 0.9},
+    "confusionMatrix": {"tp": 5},
+    "fieldMetrics": {"Name": {"accuracy": 1.0}},
+    "splitClassificationMetrics": {"page_level_accuracy": 0.9},
+    "totalCost": 1.23,
+    "costBreakdown": {},
+}
+
+
+@pytest.mark.unit
+def test_stale_cache_serves_cached_metrics_and_queues_reaggregation():
+    """A cache missing a key added by a later release must still resolve.
+
+    The staleness check is a presence check, so every run cached before a new
+    key landed trips it exactly once. If that path returned nothing,
+    getTestRun would resolve to null — the UI renders "No test results found"
+    and compareTestRuns silently drops the run — permanently, since nothing
+    else re-enqueues a cache update for a run whose testRunResult exists.
+    So: serve what we have, and recompute asynchronously.
+    """
+    test_run_id = "run-pre-graded"
+    mock_table = Mock()
+    mock_table.get_item.return_value = {
+        "Item": _stale_cache_metadata(test_run_id, _PRE_GRADED_CACHE)
+    }
+    mock_sqs = Mock()
+
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "TRACKING_TABLE": "tracking",
+                "TEST_RESULT_CACHE_UPDATE_QUEUE_URL": "https://sqs.test/q",
+            },
+        ),
+        patch.object(index.dynamodb, "Table", return_value=mock_table),
+        patch.object(index, "sqs", mock_sqs),
+        patch.object(index, "_get_test_run_config", return_value={}),
+    ):
+        result = index.get_test_results(test_run_id)
+
+    # The regression this pins: must not be None.
+    assert result is not None
+    assert result["testRunId"] == test_run_id
+    # Metrics that WERE cached are still served, not discarded.
+    assert result["overallAccuracy"] == 0.85
+    assert result["splitClassificationMetrics"] == {"page_level_accuracy": 0.9}
+    assert result["fieldMetrics"] == {"Name": {"accuracy": 1.0}}
+    # The key the old cache lacks degrades to the "no data" shape the UI
+    # already treats as "hide this panel".
+    assert result["gradedPacketMetrics"] == {}
+    # And a re-aggregation was queued so the next view has real values.
+    mock_sqs.send_message.assert_called_once()
+    queued_body = json.loads(mock_sqs.send_message.call_args.kwargs["MessageBody"])
+    assert queued_body == {"testRunId": test_run_id}
+
+
+@pytest.mark.unit
+def test_fresh_cache_does_not_requeue_when_graded_metrics_legitimately_empty():
+    """Convergence guard: no infinite re-aggregation loop.
+
+    handle_cache_update_request always writes gradedPacketMetrics (defaulting
+    to {}), so a run whose aggregation legitimately produces no graded metrics
+    — single-section docs, or no gt/pred page overlap — must satisfy the
+    presence check after one pass and never be re-queued again.
+    """
+    test_run_id = "run-post-graded-empty"
+    fresh_cache = dict(_PRE_GRADED_CACHE, gradedPacketMetrics={})
+    mock_table = Mock()
+    mock_table.get_item.return_value = {
+        "Item": _stale_cache_metadata(test_run_id, fresh_cache)
+    }
+    mock_sqs = Mock()
+
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "TRACKING_TABLE": "tracking",
+                "TEST_RESULT_CACHE_UPDATE_QUEUE_URL": "https://sqs.test/q",
+            },
+        ),
+        patch.object(index.dynamodb, "Table", return_value=mock_table),
+        patch.object(index, "sqs", mock_sqs),
+        patch.object(index, "_get_test_run_config", return_value={}),
+    ):
+        result = index.get_test_results(test_run_id)
+
+    assert result is not None
+    assert result["gradedPacketMetrics"] == {}
+    mock_sqs.send_message.assert_not_called()
+
+
+@pytest.mark.unit
+def test_stale_cache_still_resolves_when_queueing_fails():
+    """Re-aggregation is best-effort — a broken/unconfigured queue must not
+    turn a readable (if stale) result into a failed query."""
+    test_run_id = "run-no-queue"
+    mock_table = Mock()
+    mock_table.get_item.return_value = {
+        "Item": _stale_cache_metadata(test_run_id, _PRE_GRADED_CACHE)
+    }
+    mock_sqs = Mock()
+    mock_sqs.send_message.side_effect = Exception("queue unavailable")
+
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "TRACKING_TABLE": "tracking",
+                "TEST_RESULT_CACHE_UPDATE_QUEUE_URL": "https://sqs.test/q",
+            },
+        ),
+        patch.object(index.dynamodb, "Table", return_value=mock_table),
+        patch.object(index, "sqs", mock_sqs),
+        patch.object(index, "_get_test_run_config", return_value={}),
+    ):
+        result = index.get_test_results(test_run_id)
+
+    assert result is not None
+    assert result["overallAccuracy"] == 0.85
 
 
 @pytest.mark.unit

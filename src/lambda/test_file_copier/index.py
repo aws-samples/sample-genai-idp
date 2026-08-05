@@ -30,10 +30,14 @@ def handler(event, context):
             test_set_id = message['testSetId']
             number_of_files = message.get('numberOfFiles')  # Optional parameter
             # filesToProcess is the runner's authoritative cap = min(user
-            # numberOfFiles, test_set.fileCount). Always honored when present;
-            # falls back to numberOfFiles for messages enqueued before the
-            # runner started sending it.
-            files_to_process = message.get('filesToProcess') or number_of_files
+            # numberOfFiles, test_set.fileCount). Always honored when present
+            # (checked with `is None`, not truthiness, so the cap is respected
+            # literally rather than reinterpreting a 0 as "unset"); falls back
+            # to numberOfFiles for messages enqueued before the runner started
+            # sending it.
+            files_to_process = message.get('filesToProcess')
+            if files_to_process is None:
+                files_to_process = number_of_files
             config_version = message.get('configVersion')  # Optional parameter
             tracking_table = message['trackingTable']
 
