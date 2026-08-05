@@ -211,38 +211,62 @@ const TestSetDetail = (): React.JSX.Element => {
     }
   };
 
-  // Poll the labeling job while it runs. The resolver harvests finished
-  // documents on read, so polling is what advances the job — and each tick also
-  // refreshes the table so labels appear as they land.
+  /**
+   * Poll the labeling job while it runs. The resolver harvests finished
+   * documents on read, so polling is what advances the job — and each tick also
+   * refreshes the table so labels appear as they land.
+   *
+   * Keyed on an explicit tick, and deliberately NOT on fetchPage/pageTokens. A
+   * tick calls fetchPage, which sets pageTokens; depending on those meant the
+   * effect tore itself down and re-armed mid-flight, so any tick that refreshed
+   * the table cancelled its own successor. Observed live: polling stopped ~30s
+   * into a run and the banner sat at "0 of 3" indefinitely while the documents
+   * had in fact all finished — the job only looked stuck because nothing was
+   * driving the harvest.
+   */
+  const [labelPollTick, setLabelPollTick] = useState(0);
+  const [documentsStale, setDocumentsStale] = useState(false);
+  const jobId = labelJob?.jobId;
+  const jobRunning = labelJob?.status === 'RUNNING';
+
   useEffect(() => {
-    if (!testSetId || !labelJob || labelJob.status !== 'RUNNING') return undefined;
+    if (!testSetId || !jobId || !jobRunning) return undefined;
     const timer = setTimeout(async () => {
       try {
         const response = await client.graphql({
           query: getDraftLabelJob,
-          variables: { testSetId, jobId: labelJob.jobId },
+          variables: { testSetId, jobId },
         });
         const job = response.data?.getDraftLabelJob;
-        if (!job) return;
-        setLabelJob({
-          jobId: job.jobId,
-          status: job.status,
-          total: job.total ?? 0,
-          labeled: job.labeled ?? 0,
-          skippedAlreadyLabeled: job.skippedAlreadyLabeled ?? 0,
-        });
-        if (job.labeled !== labelJob.labeled || job.status !== 'RUNNING') {
-          fetchPage(currentPageIndex, pageTokens);
-        }
-        if (job.status === 'FAILED') {
-          setError(job.error ? `Draft labeling failed: ${job.error}` : 'Draft labeling failed.');
+        if (job) {
+          setLabelJob({
+            jobId: job.jobId,
+            status: job.status,
+            total: job.total ?? 0,
+            labeled: job.labeled ?? 0,
+            skippedAlreadyLabeled: job.skippedAlreadyLabeled ?? 0,
+          });
+          setDocumentsStale(true);
+          if (job.status === 'FAILED') {
+            setError(job.error ? `Draft labeling failed: ${job.error}` : 'Draft labeling failed.');
+          }
         }
       } catch (err) {
         logger.error('Error polling draft label job:', err);
+      } finally {
+        setLabelPollTick((n) => n + 1);
       }
     }, 5000);
     return () => clearTimeout(timer);
-  }, [testSetId, labelJob, currentPageIndex, pageTokens, fetchPage]);
+  }, [testSetId, jobId, jobRunning, labelPollTick]);
+
+  // Refresh the table in a separate effect so the poll loop never depends on
+  // fetchPage — the dependency that was killing it.
+  useEffect(() => {
+    if (!documentsStale) return;
+    setDocumentsStale(false);
+    fetchPage(currentPageIndex, pageTokens);
+  }, [documentsStale, currentPageIndex, pageTokens, fetchPage]);
 
   const filteredDocs = filterText ? documents.filter((d) => d.objectKey.toLowerCase().includes(filterText.toLowerCase())) : documents;
 
