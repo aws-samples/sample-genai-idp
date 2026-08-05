@@ -1,5 +1,5 @@
 # ConfBench extraction configuration — bundled config preset for the
-# ConfBench Test Set extension (feature-platform/confbench-testset).
+# Test Set - ConfBench extension (feature-platform/confbench-testset).
 #
 # Applied at install as a NON-ACTIVE configuration version. Unlike the main
 # stack's managed_config/* presets this is NOT flagged `managed: true`: it is

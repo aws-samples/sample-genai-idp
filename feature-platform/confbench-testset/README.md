@@ -1,4 +1,4 @@
-# ConfBench Test Set — Feature Platform extension
+# Test Set - ConfBench — Feature Platform extension
 
 On-demand deployment of the [amazon/ConfBench](https://huggingface.co/datasets/amazon/ConfBench)
 benchmark (75 FCC invoices x up to 21 Augraphy noise variants = 1,346 documents,

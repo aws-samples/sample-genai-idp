@@ -33,7 +33,7 @@ installation.
 
 ## Deploying the ConfBench benchmark on demand
 
-The [ConfBench Test Set](extensions/confbench-testset.md) extension adds the
+The [Test Set - ConfBench](extensions/confbench-testset.md) extension adds the
 **amazon/ConfBench** benchmark — the same 75 FCC invoices as
 [RealKIE-FCC-Verified](#realkie-fcc-verified) below, each degraded by up to 21
 Augraphy noise pipelines (1,346 documents) — for confidence-calibration and OCR
@@ -44,7 +44,7 @@ the full dataset is **32.71 GB**, roughly 42x the combined size of the four sets
 below. After installing it you choose a size tier (from a 0.02 GB clean baseline
 up to the full 32.71 GB) or hand-pick individual noise variants, and the ingest
 runs as a background job. See the
-[ConfBench Test Set extension](extensions/confbench-testset.md).
+[Test Set - ConfBench extension](extensions/confbench-testset.md).
 
 
 ## Pre-Deployed Test Sets

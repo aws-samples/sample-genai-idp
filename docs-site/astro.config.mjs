@@ -170,12 +170,12 @@ export default defineConfig({
                   slug: "extensions/pii-anonymizer",
                 },
                 {
-                  label: "Test Set Generator",
-                  slug: "extensions/idp-data-generator",
+                  label: "Test Set - ConfBench",
+                  slug: "extensions/confbench-testset",
                 },
                 {
-                  label: "ConfBench Test Set",
-                  slug: "extensions/confbench-testset",
+                  label: "Test Set Generator",
+                  slug: "extensions/idp-data-generator",
                 },
                 {
                   label: "Sample: Document Status (feature add-on)",

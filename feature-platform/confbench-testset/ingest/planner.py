@@ -208,7 +208,7 @@ def _register_test_set(
         or (
             "ConfBench — FCC invoices with Augraphy noise degradation, for "
             "confidence calibration and OCR robustness evaluation. Deployed by "
-            "the ConfBench Test Set extension."
+            "the Test Set - ConfBench extension."
         ),
         ":source": f"huggingface:{HF_REPO_ID}",
     }

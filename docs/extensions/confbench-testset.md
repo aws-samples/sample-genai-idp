@@ -1,13 +1,13 @@
 ---
-title: "ConfBench Test Set"
+title: "Test Set - ConfBench"
 ---
 
 Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 SPDX-License-Identifier: MIT-0
 
-# ConfBench Test Set
+# Test Set - ConfBench
 
-The **ConfBench Test Set** is an installable [Feature Platform](../feature-platform.md)
+The **Test Set - ConfBench** extension is an installable [Feature Platform](../feature-platform.md)
 extension that deploys the [amazon/ConfBench](https://huggingface.co/datasets/amazon/ConfBench)
 benchmark into [Test Studio](../test-studio.md) **on demand**.
 
@@ -62,7 +62,7 @@ only when you start a job.
 
 ## Choosing what to ingest
 
-Open **ConfBench Test Set** in the Extensions nav. Pick a tier, or select
+Open **Test Set - ConfBench** in the Extensions nav. Pick a tier, or select
 individual variants:
 
 | Tier | Variants | Documents | Size | Test set id |

@@ -30,7 +30,7 @@ Parameters:
 
   FeatureDisplayName:
     Type: String
-    Default: "ConfBench Test Set"
+    Default: "Test Set - ConfBench"
 
   FeatureBucket:
     Type: String

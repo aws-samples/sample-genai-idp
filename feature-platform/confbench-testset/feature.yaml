@@ -1,4 +1,4 @@
-# ConfBench Test Set — Feature Platform extension.
+# Test Set - ConfBench — Feature Platform extension.
 #
 # Packages the amazon/ConfBench benchmark dataset as an installable, on-demand
 # test set rather than a dataset the main stack downloads on every deployment.
@@ -20,8 +20,12 @@
 # (see docs/dependency-confusion.md):
 #   pip install -e lib/idp_feature_sdk                  # (run from the repo root)
 featureId: confbench-testset
-displayName: "ConfBench Test Set"
-version: 0.1.0
+# "Test Set - " prefix so the test-set extensions (this and "Test Set
+# Generator") sort adjacently in the Extensions nav and catalog, which order
+# entries alphabetically by displayName. The featureId stays `confbench-testset`
+# — it is the stable identity used by IAM tags, registration, and artifact keys.
+displayName: "Test Set - ConfBench"
+version: 0.1.1
 description: |
   Deploy the amazon/ConfBench benchmark dataset — 75 verified FCC invoices with
   up to 21 Augraphy noise-degradation variants each (1,346 documents, 32.71 GB
