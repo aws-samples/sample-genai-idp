@@ -90,12 +90,22 @@ def lambda_handler(event, context):
                 logger.error(f"Failed to delete test run {test_run_id}: {e}")
                 continue
         
-        # Delete all documents in one call
+        # Delete all documents in one call.
+        #
+        # The caller's identity MUST be forwarded: deleteDocument enforces
+        # Admin/Author server-side (delete_document_resolver._caller_in_groups),
+        # so an invoke without it is rejected with PermissionError. Because this
+        # is an asynchronous InvocationType='Event' invoke, that rejection is
+        # invisible here -- deleteTests would still return True while every
+        # document silently leaked. Forwarding the identity we have already
+        # authorized above keeps the downstream check meaningful (it re-verifies
+        # the same Admin/Author membership) rather than bypassing it.
         if all_document_keys:
             lambda_client.invoke(
                 FunctionName=delete_document_function_name,
                 InvocationType='Event',
                 Payload=json.dumps({
+                    'identity': event.get('identity'),
                     'arguments': {'objectKeys': all_document_keys}
                 })
             )

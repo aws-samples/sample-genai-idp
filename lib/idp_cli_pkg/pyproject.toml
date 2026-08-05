@@ -6,7 +6,19 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "idp-cli"
+# DISTRIBUTION name. Deliberately not "idp-cli": that name on public PyPI belongs
+# to an unrelated third-party project ("Internal Developer Platform CLI"), so we
+# could never publish under it, and `pip install idp-cli` gets a user someone
+# else's tool. This name is registered to us as a placeholder.
+#
+# Distinct from three other identifiers that intentionally keep the old spelling:
+#   - the import name `idp_cli`            (see [tool.setuptools] below)
+#   - the console command `idp-cli`        (see [project.scripts] below)
+#   - runtime string literals "idp-cli"    (S3 artifact prefixes, the CFN
+#     `CreatedBy` tag, the Test Studio test-set name) — those are persisted data;
+#     changing them would orphan existing artifacts.
+# See docs/dependency-confusion.md.
+name = "idp-accelerator-cli"
 version = "0.6.2"
 description = "Command-line interface for IDP Accelerator batch document processing"
 authors = [{name = "AWS"}]
@@ -21,6 +33,14 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
+    # SECURITY: idp-sdk is a FIRST-PARTY package that lives in this repo at
+    # lib/idp_sdk. It is NOT published to PyPI, and the name `idp-sdk` on PyPI is
+    # squatted by a third party. A bare requirement here lets pip resolve it from
+    # public PyPI whenever it is not already installed (dependency confusion), so
+    # it must always be installed from the local checkout. Install all first-party
+    # packages in a SINGLE pip invocation so pip resolves this name locally:
+    #   pip install -e lib/idp_common_pkg -e lib/idp_sdk -e lib/idp_cli_pkg
+    # `make setup` / `make setup-venv` do this for you.
     "idp-sdk",
     "click>=8.1.0",
     "rich>=13.0.0",
@@ -34,6 +54,8 @@ test = [
 ]
 
 [project.scripts]
+# The user-facing command stays `idp-cli` — unchanged by the distribution rename
+# above, and referenced that way throughout the docs.
 idp-cli = "idp_cli.cli:main"
 
 [tool.setuptools]

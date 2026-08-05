@@ -545,3 +545,128 @@ class TestDateMethodMapping:
         assert model(d="2024-01-05").compare(model(d="January 5, 2024")) == 1.0
         # Genuinely different dates -> no match.
         assert model(d="2024-01-05").compare(model(d="2024-06-30")) == 0.0
+
+
+@pytest.mark.unit
+class TestNumericExactToleranceRouting:
+    """R1: NUMERIC_EXACT with evaluation-threshold must route to
+    comparator-config.tolerance, not x-aws-stickler-threshold (NumericComparator
+    is binary 1.0/0.0 so a score-threshold gate is a no-op)."""
+
+    def _build(self, threshold):
+        schema = {
+            "$id": "N",
+            "x-aws-idp-document-type": "N",
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number",
+                    "x-aws-idp-evaluation-method": "NUMERIC_EXACT",
+                    "x-aws-idp-evaluation-threshold": threshold,
+                }
+            },
+        }
+        return SticklerConfigMapper.build_stickler_model_config(schema)["schema"]
+
+    def test_small_tolerance_routed_to_comparator_config(self):
+        result = self._build(0.5)
+        prop = result["properties"]["amount"]
+        assert prop["x-aws-stickler-comparator"] == "NumericComparator"
+        assert prop["x-aws-stickler-comparator-config"] == {"tolerance": 0.5}
+        assert "x-aws-stickler-threshold" not in prop
+
+    def test_large_tolerance_over_one_routed_to_comparator_config(self):
+        """>1.0 tolerance (e.g. ±$5) would crash the 0.0–1.0 threshold
+        validator; comparator-config accepts any positive number."""
+        result = self._build(5.0)
+        prop = result["properties"]["amount"]
+        assert prop["x-aws-stickler-comparator-config"] == {"tolerance": 5.0}
+        assert "x-aws-stickler-threshold" not in prop
+
+    def test_numeric_exact_no_threshold_leaves_config_absent(self):
+        schema = {
+            "$id": "N",
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "number",
+                    "x-aws-idp-evaluation-method": "NUMERIC_EXACT",
+                }
+            },
+        }
+        result = SticklerConfigMapper.build_stickler_model_config(schema)["schema"]
+        prop = result["properties"]["amount"]
+        assert prop["x-aws-stickler-comparator"] == "NumericComparator"
+        assert "x-aws-stickler-comparator-config" not in prop
+        assert "x-aws-stickler-threshold" not in prop
+
+    def test_tolerance_reaches_comparator_end_to_end(self):
+        """A tolerance of 0.5 must actually make Stickler match values within
+        ±0.5 — the original bug was that the tolerance never reached the
+        comparator, so any nonzero diff scored 0.0."""
+        from pydantic import create_model
+        from stickler import StructuredModel
+        from stickler.structured_object_evaluator.models.json_schema_field_converter import (  # noqa: E501
+            JsonSchemaFieldConverter,
+        )
+
+        sch = self._build(0.5)
+        conv = JsonSchemaFieldConverter(sch)
+        fields = conv.convert_properties_to_fields(
+            sch.get("properties", {}), sch.get("required", [])
+        )
+        model = create_model(  # type: ignore
+            "N", **fields, __base__=StructuredModel
+        )
+        # diff 0.25 <= tolerance 0.5 -> match
+        assert model(amount=100.0).compare(model(amount=100.25)) == 1.0
+        # diff 1.0 > tolerance 0.5 -> no match
+        assert model(amount=100.0).compare(model(amount=101.0)) == 0.0
+
+
+@pytest.mark.unit
+class TestMatchThresholdOnItemsSchema:
+    """R2 (mapper part): match_threshold for structured arrays must land on
+    the items schema so Stickler's element-class builder picks it up."""
+
+    def test_match_threshold_copied_to_items(self):
+        schema = {
+            "$id": "I",
+            "x-aws-idp-document-type": "I",
+            "type": "object",
+            "properties": {
+                "LineItems": {
+                    "type": "array",
+                    "x-aws-idp-evaluation-match-threshold": 0.55,
+                    "items": {
+                        "type": "object",
+                        "properties": {"sku": {"type": "string"}},
+                    },
+                }
+            },
+        }
+        result = SticklerConfigMapper.build_stickler_model_config(schema)["schema"]
+        arr = result["properties"]["LineItems"]
+        assert arr["x-aws-stickler-match-threshold"] == 0.55
+        # Items schema now also carries the threshold so Stickler's
+        # element-class builder reads it (structured_model.py:594).
+        assert arr["items"]["x-aws-stickler-match-threshold"] == 0.55
+
+    def test_no_match_threshold_leaves_items_untouched(self):
+        schema = {
+            "$id": "I",
+            "type": "object",
+            "properties": {
+                "LineItems": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {"sku": {"type": "string"}},
+                    },
+                }
+            },
+        }
+        result = SticklerConfigMapper.build_stickler_model_config(schema)["schema"]
+        arr = result["properties"]["LineItems"]
+        assert "x-aws-stickler-match-threshold" not in arr
+        assert "x-aws-stickler-match-threshold" not in arr["items"]

@@ -9,6 +9,7 @@ import type {
   TestRunConfig,
   WeightedOverallScores,
   SplitClassificationMetrics,
+  GradedPacketMetrics,
   FieldMetrics,
   ConfusionMatrix,
   ConfidenceMetrics,
@@ -86,6 +87,10 @@ export function parseWeightedOverallScores(json: unknown): WeightedOverallScores
 
 export function parseSplitClassificationMetrics(json: unknown): SplitClassificationMetrics {
   return safeParse<SplitClassificationMetrics>(json, {});
+}
+
+export function parseGradedPacketMetrics(json: unknown): GradedPacketMetrics {
+  return safeParse<GradedPacketMetrics>(json, {});
 }
 
 export function parseFieldMetrics(json: unknown): FieldMetrics {

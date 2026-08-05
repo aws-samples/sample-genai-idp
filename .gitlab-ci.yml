@@ -138,12 +138,18 @@ code_checks:
     - uv pip install 'ruff==0.15.13'
     # Install dependencies needed by publish.py for test imports
     - uv pip install typer rich boto3
-    # Install test dependencies
-    - cd lib/idp_common_pkg && uv pip install -e ".[test,evaluation]" && cd ../..
-    # Install the other package suites run by `make test-packages-cicd`
-    - cd lib/idp_sdk && uv pip install -e ".[test]" && cd ../..
-    - cd lib/idp_cli_pkg && uv pip install -e ".[test]" && cd ../..
-    - cd lib/idp_feature_sdk && uv pip install -e ".[test]" && cd ../..
+    # Install ALL first-party packages in a SINGLE resolution pass.
+    # SECURITY — dependency confusion: these depend on each other by bare name
+    # (idp_cli_pkg -> "idp-sdk", idp_sdk -> "idp_common") and those names are
+    # squatted on public PyPI. Installing them one at a time lets a
+    # not-yet-installed sibling resolve from the index instead of the checkout.
+    # Do not split this into per-package calls. See docs/dependency-confusion.md.
+    - uv pip install -e "lib/idp_common_pkg[test,evaluation]"
+                     -e "lib/idp_sdk[test]"
+                     -e "lib/idp_cli_pkg[test]"
+                     -e "lib/idp_feature_sdk[test]"
+    # Fail the build if any first-party package came from an index, not source.
+    - python3 scripts/check_first_party_deps.py
 
   script:
     # SKIP_NPM_CI=1: UI deps already installed once in before_script, so the UI

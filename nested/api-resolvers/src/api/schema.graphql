@@ -656,6 +656,7 @@ type TestRun @aws_cognito_user_pools @aws_iam {
   confusionMatrix: AWSJSON
   fieldMetrics: AWSJSON
   splitClassificationMetrics: AWSJSON
+  gradedPacketMetrics: AWSJSON
   totalCost: Float
   costBreakdown: AWSJSON
   createdAt: AWSDateTime

@@ -250,12 +250,16 @@ See `lib/idp_common_pkg/idp_common/extraction/README.md` for detailed documentat
 **`idp_common_pkg`** (`lib/idp_common_pkg/`):
 - Core shared library powering the accelerator
 - Modular installation: Install only needed components to minimize Lambda package size
-  - `pip install "idp_common[core]"` - minimal dependencies
-  - `pip install "idp_common[ocr]"` - OCR support
-  - `pip install "idp_common[classification]"` - Classification support
-  - `pip install "idp_common[extraction]"` - Extraction support (includes optional agentic mode with deterministic table parsing tool)
-  - `pip install "idp_common[evaluation]"` - Evaluation support
-  - `pip install "idp_common[all]"` - everything
+  - ⚠️ Always install first-party packages **from the local checkout**, never by
+    bare name — those names on public PyPI belong to unrelated parties, so a bare
+    `pip install` fetches someone else's code. See
+    `docs/dependency-confusion.md`.
+  - `pip install -e "lib/idp_common_pkg[core]"` - minimal dependencies
+  - `pip install -e "lib/idp_common_pkg[ocr]"` - OCR support
+  - `pip install -e "lib/idp_common_pkg[classification]"` - Classification support
+  - `pip install -e "lib/idp_common_pkg[extraction]"` - Extraction support (includes optional agentic mode with deterministic table parsing tool)
+  - `pip install -e "lib/idp_common_pkg[evaluation]"` - Evaluation support
+  - `pip install -e "lib/idp_common_pkg[all]"` - everything
 - Components: OCR, Classification, Extraction (supports traditional and agentic modes with intelligent table parsing), Evaluation, Summarization, AppSync integration, Reporting, BDA integration
 - Configuration management via DynamoDB
 - Document models and data structures

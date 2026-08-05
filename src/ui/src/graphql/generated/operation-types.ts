@@ -1674,6 +1674,7 @@ export type TestRun = {
   failedFiles?: Maybe<Scalars['Int']['output']>;
   fieldMetrics?: Maybe<Scalars['AWSJSON']['output']>;
   filesCount: Scalars['Int']['output'];
+  gradedPacketMetrics?: Maybe<Scalars['AWSJSON']['output']>;
   overallAccuracy?: Maybe<Scalars['Float']['output']>;
   splitClassificationMetrics?: Maybe<Scalars['AWSJSON']['output']>;
   status: Scalars['String']['output'];
@@ -2415,7 +2416,7 @@ export type GetTestRunQueryVariables = Exact<{
 }>;
 
 
-export type GetTestRunQuery = { getTestRun?: { testRunId: string, testSetId?: string | null, testSetName?: string | null, status: string, filesCount: number, completedFiles?: number | null, failedFiles?: number | null, overallAccuracy?: number | null, weightedOverallScores?: string | null, averageConfidence?: number | null, confidenceMetrics?: string | null, accuracyBreakdown?: string | null, confusionMatrix?: string | null, fieldMetrics?: string | null, splitClassificationMetrics?: string | null, totalCost?: number | null, costBreakdown?: string | null, createdAt?: string | null, completedAt?: string | null, context?: string | null, configVersion?: string | null, config?: string | null } | null };
+export type GetTestRunQuery = { getTestRun?: { testRunId: string, testSetId?: string | null, testSetName?: string | null, status: string, filesCount: number, completedFiles?: number | null, failedFiles?: number | null, overallAccuracy?: number | null, weightedOverallScores?: string | null, averageConfidence?: number | null, confidenceMetrics?: string | null, accuracyBreakdown?: string | null, confusionMatrix?: string | null, fieldMetrics?: string | null, splitClassificationMetrics?: string | null, gradedPacketMetrics?: string | null, totalCost?: number | null, costBreakdown?: string | null, createdAt?: string | null, completedAt?: string | null, context?: string | null, configVersion?: string | null, config?: string | null } | null };
 
 export type GetTestRunStatusQueryVariables = Exact<{
   testRunId: Scalars['String']['input'];

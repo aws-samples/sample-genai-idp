@@ -39,12 +39,14 @@ import {
   calculateAvgCostPerPage,
   parseAccuracyBreakdown,
   parseSplitClassificationMetrics,
+  parseGradedPacketMetrics,
   parseFieldMetrics,
   parseConfusionMatrix,
   parseConfidenceMetrics,
   parseWeightedOverallScores,
   parseTestRunConfig,
 } from '../../graphql/awsjson-parsers';
+import type { GradedPacketMetrics } from '../../graphql/awsjson-types';
 import type { SelectProps } from '@cloudscape-design/components';
 
 const client = generateClient();
@@ -65,6 +67,7 @@ interface ComprehensiveBreakdownProps {
   costBreakdown: Record<string, Record<string, Record<string, unknown>>> | null;
   accuracyBreakdown: Record<string, number> | null;
   splitClassificationMetrics: Record<string, unknown> | null;
+  gradedPacketMetrics: GradedPacketMetrics | null;
   fieldMetrics: Record<string, unknown> | null;
   averageWeightedScore: number | null;
   confidenceMetrics: unknown;
@@ -74,18 +77,21 @@ const ComprehensiveBreakdown = ({
   costBreakdown,
   accuracyBreakdown,
   splitClassificationMetrics,
+  gradedPacketMetrics,
   fieldMetrics,
   averageWeightedScore,
   confidenceMetrics,
 }: ComprehensiveBreakdownProps): React.JSX.Element => {
-  if (!costBreakdown && !accuracyBreakdown && !splitClassificationMetrics && !fieldMetrics) {
+  const hasGradedPacketMetrics = !!gradedPacketMetrics?.mean && Object.keys(gradedPacketMetrics.mean).length > 0;
+
+  if (!costBreakdown && !accuracyBreakdown && !splitClassificationMetrics && !hasGradedPacketMetrics && !fieldMetrics) {
     return <Box>No breakdown data available</Box>;
   }
 
   return (
     <SpaceBetween direction="vertical" size="l">
       {/* Combined Accuracy and Split Classification Metrics */}
-      {(accuracyBreakdown || splitClassificationMetrics) && (
+      {(accuracyBreakdown || splitClassificationMetrics || hasGradedPacketMetrics) && (
         <Container header={<Header variant="h3">Average Accuracy and Split Metrics</Header>}>
           <SpaceBetween direction="vertical" size="m">
             {/* Main metrics */}
@@ -265,6 +271,25 @@ const ComprehensiveBreakdown = ({
 
                       return items;
                     })(),
+                    // Graded packet metrics (V-measure / Rand / ordering) —
+                    // R14 supplemental scores on top of the exact-match split
+                    // counters above. Mean across documents that reported
+                    // each key; skipped entirely when the panel has no data
+                    // (older test runs or classification runs with no page
+                    // overlap).
+                    ...(hasGradedPacketMetrics
+                      ? Object.entries(gradedPacketMetrics!.mean!).map(([key, value]) => {
+                          const displayName = key.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+                          return {
+                            metric: (
+                              <>
+                                <span style={{ color: '#687078' }}>Classification (graded):</span> {displayName}
+                              </>
+                            ),
+                            value: typeof value === 'number' ? value.toFixed(3) : String(value ?? '0'),
+                          };
+                        })
+                      : []),
                     // Remaining split classification metrics
                     ...(splitClassificationMetrics
                       ? Object.entries(splitClassificationMetrics)
@@ -1028,6 +1053,14 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
   const splitClassificationMetrics: any = results.splitClassificationMetrics
     ? parseSplitClassificationMetrics(results.splitClassificationMetrics as string)
     : null;
+  // Graded packet metrics (R14). Parse yields ``{}`` for absent/empty
+  // payloads; treat that as null so the panel's presence check works with
+  // ``||`` like the sibling metrics.
+  const parsedGradedPacketMetrics = results.gradedPacketMetrics ? parseGradedPacketMetrics(results.gradedPacketMetrics as string) : null;
+  const gradedPacketMetrics =
+    parsedGradedPacketMetrics && parsedGradedPacketMetrics.mean && Object.keys(parsedGradedPacketMetrics.mean).length > 0
+      ? parsedGradedPacketMetrics
+      : null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fieldMetrics: any = results.fieldMetrics ? parseFieldMetrics(results.fieldMetrics as string) : null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1586,11 +1619,12 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
         )}
 
         {/* Breakdown Tables */}
-        {(costBreakdown || accuracyBreakdown || splitClassificationMetrics || fieldMetrics) && (
+        {(costBreakdown || accuracyBreakdown || splitClassificationMetrics || gradedPacketMetrics || fieldMetrics) && (
           <ComprehensiveBreakdown
             costBreakdown={costBreakdown}
             accuracyBreakdown={accuracyBreakdown}
             splitClassificationMetrics={splitClassificationMetrics}
+            gradedPacketMetrics={gradedPacketMetrics}
             fieldMetrics={fieldMetrics}
             averageWeightedScore={averageWeightedScore}
             confidenceMetrics={results.confidenceMetrics}

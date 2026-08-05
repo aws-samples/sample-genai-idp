@@ -7,18 +7,36 @@ The Evaluation Service component provides functionality to evaluate document ext
 
 ## Backend Integration
 
-The evaluation service uses **[Stickler v0.4.0](https://github.com/awslabs/stickler)** as its backend evaluation engine. Stickler is an AWS open-source library that provides sophisticated comparison algorithms and flexible configuration options. The IDP evaluation service provides an abstraction layer through `SticklerConfigMapper` that:
+The evaluation service uses **[Stickler](https://github.com/awslabs/stickler)** as its backend evaluation engine (installed from PyPI; pinned in the top-level `pyproject.toml` — see `stickler_version.STICKLER_VERSION` for the resolved version). Stickler is an AWS open-source library that provides sophisticated comparison algorithms and flexible configuration options.
+
+### Package layout — single import boundary
+
+All code that touches `stickler.*` lives under `idp_common/evaluation/stickler_backend/`:
+
+- `mapper.py` — IDP → Stickler schema-extension translation (`SticklerConfigMapper`).
+- `model_factory.py` — build a `StructuredModel` subclass from an IDP config (`get_stickler_model`), including the two upstream-tagged shims (`make_model_fields_nullable`, `clean_null_descriptions`).
+- `comparators.py` — `LLMComparator` and `register_idp_comparators()` (public-API registration).
+- `results.py` — Stickler `compare_with` dict → IDP `SectionEvaluationResult` (no re-scoring; encodes R3).
+- `doc_split.py` — thin adapters over `stickler.doc_split` for `load_sections_for_doc_split` and `compute_graded_packet_metrics` (R14).
+
+Everything else — `service.py` (orchestration), `models.py` (dataclasses),
+`stickler_mapper.py` / `llm_comparator.py` (thin re-export shims for
+backward compatibility) — is backend-agnostic. A future Stickler upgrade is
+a one-package review, not a cross-cutting hunt.
+
+The cross-Lambda `results.json` contract (S3 key template, `compare_with`
+flag set, result-version stamp) is formalized in `contract.py` — bump
+`STICKLER_RESULT_VERSION` when the raw Stickler blob shape changes.
+
+The IDP evaluation service provides an abstraction layer through `SticklerConfigMapper` that:
 
 - Translates IDP evaluation extensions (`x-aws-idp-evaluation-*`) to Stickler format
 - Maintains backend-agnostic configuration in IDP
 - Enables seamless integration with Stickler's advanced evaluation capabilities
-- Tracks Stickler version information for compatibility and debugging
 
-For version information and features available in the current Stickler integration, see `stickler_version.py`.
+### Confidence Calibration Metrics
 
-### Confidence Calibration Metrics (v0.4.0+)
-
-Stickler v0.4.0 introduces enhanced confidence evaluation tooling through the `confidence_integration` module:
+Bulk evaluation surfaces the standard calibration metrics:
 
 - **ECE (Expected Calibration Error)**: Measures how well confidence scores match actual accuracy (0.0 = perfect calibration)
 - **Brier Score**: Mean squared error between confidence and outcome (lower is better; 0.0 = perfect, 0.25 = random)
@@ -26,7 +44,7 @@ Stickler v0.4.0 introduces enhanced confidence evaluation tooling through the `c
 - **Per-Field Metrics**: Field-level calibration analysis to identify poorly calibrated fields
 - **Coverage Tracking**: Ratio of fields with confidence data to total fields
 
-Use `ConfidenceMetricsCalculator` from `idp_common.evaluation.confidence_integration` for confidence analysis in bulk evaluations.
+These are computed in the aggregation Lambda via Stickler's `BulkStructuredModelEvaluator` (see `patterns/unified/src/test_execution_aggregation_function/index.py`).
 
 ## Features
 
@@ -611,29 +629,14 @@ The evaluation service provides specialized metrics for evaluating document spli
 
 ### Usage
 
-```python
-from idp_common.evaluation.doc_split_classification_metrics import DocSplitClassificationMetrics
-
-# Initialize calculator
-doc_split_calculator = DocSplitClassificationMetrics()
-
-# Load ground truth and predicted sections
-doc_split_calculator.load_sections(
-    ground_truth_sections=expected_document.sections,
-    predicted_sections=actual_document.sections
-)
-
-# Calculate all metrics
-metrics = doc_split_calculator.calculate_all_metrics()
-
-# Generate markdown report
-report = doc_split_calculator.generate_markdown_report(metrics)
-
-# Access individual metric types
-page_level = metrics["page_level_accuracy"]
-split_no_order = metrics["split_accuracy_without_order"]
-split_with_order = metrics["split_accuracy_with_order"]
-```
+Doc-split metrics are computed by `EvaluationService.evaluate_document` and
+surfaced through `DocumentEvaluationResult.doc_split_metrics` (see
+`models.DocSplitMetrics`); the markdown rendering is part of the
+service-owned `DocumentEvaluationResult.to_markdown` output. If you need the
+raw calculator (e.g. for a custom driver), it lives upstream at
+`stickler.doc_split.doc_split_classification_metrics.DocSplitClassificationMetrics`
+and accepts plain section dicts of the form
+`{"section_id": ..., "document_class": {...}, "split_document": {"page_indices": [...]}}`.
 
 ### Metrics Explained
 
@@ -747,49 +750,10 @@ split_with_order = {
 
 ### Visual Reporting
 
-The `generate_markdown_report()` method creates comprehensive visual reports with:
-
-#### Summary Dashboard
-```markdown
-## 🎯 Split Classification Summary
-
-- **Page Level Accuracy**: 🟢 19/20 pages [███████████████████░] 95%
-- **Split Accuracy (Without Order)**: 🟢 9/10 sections [██████████████████░░] 90%
-- **Split Accuracy (With Order)**: 🟡 8/10 sections [████████████████░░░░] 80%
-```
-
-#### Metrics Table
-```markdown
-| Metric | Accuracy | Rating | Correct/Total |
-| ------ | :------: | :----: | :-----------: |
-| Page Level Classification | 0.9500 | 🟢 Excellent | 19/20 pages |
-| Document Split (Without Page Order) | 0.9000 | 🟢 Excellent | 9/10 sections |
-| Document Split (With Page Order) | 0.8000 | 🟡 Good | 8/10 sections |
-```
-
-#### Combined Section Analysis
-```markdown
-| Section Match | Page Order Match | Section ID | Expected Class | Expected Pages | Pred Class | Pred Pages | Matched Section |
-| :-----------: | :--------------: | ---------- | -------------- | -------------- | ---------- | ---------- | --------------- |
-| ✅ | ✅ | section_1 | Invoice | [0, 1, 2] | Invoice | [0, 1, 2] | pred_section_1 |
-| ✅ | ❌ | section_2 | W2 | [3, 4] | W2 | [4, 3] | pred_section_2 |
-| ❌ | ❌ | section_3 | Receipt | [5, 6] | Invoice | [5] | N/A |
-| ❌ | ❌ | N/A | No Match | N/A | Receipt | [6, 7] | pred_section_4 |
-```
-
-**Column Definitions:**
-- **Section Match**: ✅ if pages match as a set with same class (order independent)
-- **Page Order Match**: ✅ if Section Match is true AND page order matches exactly
-- **Matched Section**: ID of the predicted section that corresponds to ground truth
-- **Unmatched Predicted Sections**: Rows with "N/A" for ground truth indicate over-segmentation
-
-#### Color-Coded Ratings
-
-The reports use visual indicators for quick assessment:
-- 🟢 **Excellent** (≥ 90% accuracy)
-- 🟡 **Good** (70-89% accuracy)
-- 🟠 **Fair** (50-69% accuracy)
-- 🔴 **Poor** (< 50% accuracy)
+Doc-split visualization is emitted as part of `DocumentEvaluationResult.to_markdown`
+(in `models.py`) — a single service-owned renderer that interleaves split
+metrics with extraction metrics and excluded-section annotations. The
+upstream calculator's `generate_markdown_report` is not called by IDP.
 
 ### Integration with Evaluation Service
 
@@ -842,38 +806,7 @@ The calculator gracefully handles missing or malformed data:
 
 ### Example: Complete Workflow
 
-```python
-from idp_common.evaluation.doc_split_classification_metrics import DocSplitClassificationMetrics
-
-# Initialize
-calculator = DocSplitClassificationMetrics()
-
-# Load sections (from Document objects)
-calculator.load_sections(
-    ground_truth_sections=baseline_document.sections,
-    predicted_sections=processed_document.sections
-)
-
-# Calculate all metrics
-all_metrics = calculator.calculate_all_metrics()
-
-# Generate and save report
-report = calculator.generate_markdown_report(all_metrics)
-with open("split_classification_report.md", "w") as f:
-    f.write(report)
-
-# Access specific metrics for analysis
-page_acc = all_metrics["page_level_accuracy"]["accuracy"]
-split_acc_no_order = all_metrics["split_accuracy_without_order"]["accuracy"]
-split_acc_with_order = all_metrics["split_accuracy_with_order"]["accuracy"]
-
-print(f"Page Classification: {page_acc:.2%}")
-print(f"Split Accuracy (no order): {split_acc_no_order:.2%}")
-print(f"Split Accuracy (with order): {split_acc_with_order:.2%}")
-
-# Check for errors
-if all_metrics.get("errors"):
-    print(f"\nWarnings/Errors: {len(all_metrics['errors'])}")
-    for error in all_metrics["errors"]:
-        print(f"  - {error}")
-```
+The standard workflow is via `EvaluationService.evaluate_document`, which
+calculates doc-split metrics automatically and surfaces them on the returned
+`DocumentEvaluationResult`. For direct use of the upstream calculator, see
+[Usage](#usage) above.
