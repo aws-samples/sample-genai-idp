@@ -277,6 +277,50 @@ class TestTestSetResolver:
                 mock_table.query.assert_called_once()
                 assert len(result) == 1
                 assert result[0]["id"] == "test-id"
+                # Absent on the record -> None, not a KeyError. Stack-managed
+                # benchmark sets don't set it; the UI falls back to matching a
+                # config version named after the test set id.
+                assert result[0]["configVersion"] is None
+
+    @patch.dict(
+        "os.environ", {"TRACKING_TABLE": "test-table", "INPUT_BUCKET": "test-bucket"}
+    )
+    def test_get_test_sets_passes_through_declared_config_version(self):
+        """A test set may DECLARE the config version Test Studio preselects.
+
+        Needed by extension-deployed test sets: the Feature Platform names their
+        config presets `<featureId>-v<version>`, which can never equal the test
+        set id, so the id-matching convention cannot reach them.
+        """
+        with patch.object(test_set_index, "find_matching_files") as mock_find_files:
+            mock_find_files.return_value = []
+
+            with patch.object(test_set_index, "boto3") as mock_boto3:
+                mock_table = MagicMock()
+                mock_table.query.return_value = {
+                    "Items": [{"PK": "testset#confbench-clean", "SK": "metadata"}]
+                }
+                mock_boto3.resource.return_value.Table.return_value = mock_table
+                mock_boto3.resource.return_value.batch_get_item.return_value = {
+                    "Responses": {
+                        "test-table": [
+                            {
+                                "PK": "testset#confbench-clean",
+                                "SK": "metadata",
+                                "id": "confbench-clean",
+                                "name": "ConfBench (clean baseline)",
+                                "fileCount": 75,
+                                "createdAt": "2026-08-05T16:00:00Z",
+                                "configVersion": "confbench-testset-v0.1.0",
+                            }
+                        ]
+                    }
+                }
+
+                result = test_set_index.get_test_sets()
+
+                assert len(result) == 1
+                assert result[0]["configVersion"] == "confbench-testset-v0.1.0"
 
     @patch.dict("os.environ", {"INPUT_BUCKET": "test-bucket"})
     def test_list_input_bucket_files(self):

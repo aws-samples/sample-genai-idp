@@ -1708,6 +1708,7 @@ export type TestRunStatus = {
 };
 
 export type TestSet = {
+  configVersion?: Maybe<Scalars['String']['output']>;
   createdAt: Scalars['AWSDateTime']['output'];
   description?: Maybe<Scalars['String']['output']>;
   documentClassType?: Maybe<DocumentClassType>;
@@ -2447,7 +2448,7 @@ export type GetTestSetDocumentsQuery = { getTestSetDocuments?: { nextToken?: str
 export type GetTestSetsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetTestSetsQuery = { getTestSets?: Array<{ id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, status?: string | null, createdAt: string, error?: string | null, lastAddResult?: string | null, documentClassType?: DocumentClassType | null } | null> | null };
+export type GetTestSetsQuery = { getTestSets?: Array<{ id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, status?: string | null, createdAt: string, error?: string | null, lastAddResult?: string | null, documentClassType?: DocumentClassType | null, configVersion?: string | null } | null> | null };
 
 export type ListAgentJobsQueryVariables = Exact<{
   limit?: InputMaybe<Scalars['Int']['input']>;

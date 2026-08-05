@@ -618,7 +618,11 @@ def get_test_sets():
             'createdAt': item['createdAt'],
             'error': item.get('error'),  # Include error message for failed test sets
             'lastAddResult': item.get('lastAddResult'),
-            'documentClassType': item.get('documentClassType')
+            'documentClassType': item.get('documentClassType'),
+            # Optional: a test set may declare which configuration version Test
+            # Studio should preselect for it. Absent for the stack-managed
+            # benchmark sets, which rely on the id==version-name convention.
+            'configVersion': item.get('configVersion')
         })
     
     # Scan TestSetBucket for direct uploads
