@@ -370,6 +370,9 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           TESTSET_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
           HOST_TRACKING_TABLE: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
+          # Config version the ui-deployer creates from the bundled preset;
+          # recorded on each test-set row so Test Studio preselects it.
+          CONFIG_VERSION_NAME: !Sub '${FeatureId}-v<FEATURE_VERSION_TOKEN>'
           JOB_TABLE: !Ref IngestJobTable
           S3_ENDPOINT_URL: !If
             - HasS3VpcEndpoint
@@ -428,6 +431,9 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           TESTSET_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
           HOST_TRACKING_TABLE: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
+          # Config version the ui-deployer creates from the bundled preset;
+          # recorded on each test-set row so Test Studio preselects it.
+          CONFIG_VERSION_NAME: !Sub '${FeatureId}-v<FEATURE_VERSION_TOKEN>'
           JOB_TABLE: !Ref IngestJobTable
           S3_ENDPOINT_URL: !If
             - HasS3VpcEndpoint
@@ -458,6 +464,9 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           TESTSET_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
           HOST_TRACKING_TABLE: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
+          # Config version the ui-deployer creates from the bundled preset;
+          # recorded on each test-set row so Test Studio preselects it.
+          CONFIG_VERSION_NAME: !Sub '${FeatureId}-v<FEATURE_VERSION_TOKEN>'
           JOB_TABLE: !Ref IngestJobTable
       Policies:
         - Statement:

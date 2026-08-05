@@ -29,15 +29,16 @@ convention serves the main stack's `managed_config/*` entries, whose version
 names are bare (`fake-w2`, `realkie-fcc-verified`).
 
 The platform resolver always derives `<featureId>-v<version>`, so this
-extension's preset lands as `confbench-testset-v0.1.0` and will NOT be
-auto-selected for the `confbench*` test sets. That is a deliberate trade:
-matching the convention would mean either patching the shared resolver or having
-the extension write raw rows into the host's ConfigurationTable behind the
-resolver's back, and neither is worth it for one dropdown default.
+extension's preset lands as `confbench-testset-v0.1.0`, which no `confbench*`
+test set id can equal.
 
-Instead the feature UI displays the exact config version name to pick, and the
-docs say the same. The admin selects it once per test run — the same number of
-clicks as choosing any non-default configuration.
+Rather than bend the naming, the host now lets a test set DECLARE its config
+version: the ingest planner writes `configVersion` onto each test-set record and
+Test Studio preselects it (falling back to the id-name convention, then to the
+active version). So the name derived here does not need to match anything — it
+just needs to be what the planner records, which is why the same
+`<featureId>-v<version>` string is computed in both places (see
+`config_version_name()` below and CONFIG_VERSION_NAME in the template).
 """
 
 from __future__ import annotations

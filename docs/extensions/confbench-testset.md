@@ -126,15 +126,15 @@ different document populations is not an apples-to-apples comparison.
 1. Wait for the ingest job to reach **Completed** (progress updates live; the job
    continues if you navigate away).
 2. Open **Test Studio → Run Test Set** and select the ConfBench test set.
-3. For **Configuration version**, select `confbench-testset-v<version>` — the
-   Invoice extraction schema this extension installed.
+3. **Configuration version** is preselected to `confbench-testset-v<version>` —
+   the Invoice extraction schema this extension installed. Override it to
+   evaluate a different configuration against the same documents.
 
-:::caution[Pick the configuration explicitly]
-Unlike the pre-deployed benchmark test sets, this configuration is **not**
-auto-selected. Test Studio matches a config version to a test set by name, and
-the Feature Platform names extension presets `<featureId>-v<version>`, which
-does not match `confbench*`. The feature UI displays the exact name to choose.
-:::
+Each ConfBench test set records that configuration on its own test-set record
+(the `configVersion` field), which is how Test Studio knows to preselect it. The
+stack-managed benchmark sets instead rely on their config version being *named*
+after the test set id; that convention can't reach extension presets, since the
+Feature Platform names them `<featureId>-v<version>`.
 
 ## How the ingest works
 

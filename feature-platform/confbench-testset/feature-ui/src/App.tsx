@@ -441,15 +441,16 @@ const App: React.FC<FeatureContext> = ({ featureApiEndpoint, getAuthToken, insta
         <SpaceBetween size="s">
           <Box variant="p">
             Once a job completes, open <b>Test Studio</b> and select the test set (for example{' '}
-            <Box variant="code">confbench-representative</Box>). For the <b>Configuration version</b>
-            , choose <Box variant="code">{configVersionName(installedVersion)}</Box> — the Invoice
-            extraction schema this extension installed.
+            <Box variant="code">confbench-representative</Box>). The <b>Configuration version</b> is
+            preselected to <Box variant="code">{configVersionName(installedVersion)}</Box> — the
+            Invoice extraction schema this extension installed — because each ConfBench test set
+            records that configuration on itself.
           </Box>
           <Alert type="info">
-            That configuration is <b>not</b> auto-selected the way the built-in benchmark test sets
-            are, so pick it explicitly. It uses the same Invoice schema as{' '}
-            <Box variant="code">realkie-fcc-verified</Box>, which is what makes accuracy on the
-            degraded variants directly comparable to the clean baseline.
+            That schema is identical to <Box variant="code">realkie-fcc-verified</Box>, which is what
+            makes accuracy on the degraded variants directly comparable to the clean baseline. You
+            can of course pick a different version to compare configurations against the same
+            documents — activate your own and select it here.
           </Alert>
         </SpaceBetween>
       </Container>

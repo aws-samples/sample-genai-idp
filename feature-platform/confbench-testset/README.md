@@ -126,11 +126,28 @@ idp-feature-cli deploy --from-code ./feature-platform/confbench-testset \
     --host-stack-name <stack>
 ```
 
-## Known gap
+## Config-version preselection
 
-The installed config version is `confbench-testset-v<version>`, which does not
-match Test Studio's "config version name == test set id" auto-select convention
-(the platform resolver always derives `<featureId>-v<version>`). Matching it
-would mean patching the shared resolver or writing raw rows into the host's
-ConfigurationTable behind its back; neither is worth one dropdown default. The
-feature UI and the docs both state the exact name to select.
+Test Studio preselects a configuration for a chosen test set in this order:
+
+1. `configVersion` **declared on the test-set record** — what this extension
+   writes (`confbench-testset-v<version>`).
+2. A config version whose name **equals the test set id** — the convention the
+   stack-managed benchmark sets (`fake-w2`, `docsplit`, …) rely on.
+3. The active version.
+
+Step 1 is a host change that landed with this extension (`TestSet.configVersion`
+in the GraphQL schema, passed through by `test_set_resolver`, consumed by
+`TestRunner.tsx`). It exists because step 2 structurally cannot serve extensions:
+the Feature Platform names every extension preset `<featureId>-v<version>`, which
+can never equal a test set id.
+
+The same `<featureId>-v<version>` string is therefore computed in two places —
+`config_version_name()` in `ui-deployer/handler.py` (which creates the config
+version) and `CONFIG_VERSION_NAME` in `template.yaml` (which the planner records
+on each test-set row). Both derive it from `FeatureId` + the publish-time version
+token, so they cannot drift on a version bump, but a rename of either half needs
+the other updated.
+
+The planner writes it with `if_not_exists`, so an admin who repoints a ConfBench
+test set at their own tuned configuration keeps that choice across re-ingests.

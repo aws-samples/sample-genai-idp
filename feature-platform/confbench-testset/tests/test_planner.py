@@ -216,6 +216,48 @@ class TestPlanner:
         assert result["plannedFiles"] == 1
         assert any("upstream" in r.message.lower() for r in caplog.records)
 
+    def test_declares_its_config_version_on_the_test_set(self, planner, monkeypatch):
+        """The row carries `configVersion` so Test Studio preselects this
+        extension's Invoice preset. Name matching can't do it: the Feature
+        Platform names presets `<featureId>-v<version>`, never the test set id.
+        """
+        planner_mod, state = planner
+        monkeypatch.setattr(
+            planner_mod, "CONFIG_VERSION_NAME", "confbench-testset-v0.1.0"
+        )
+        _fake_parquet(
+            monkeypatch, planner_mod, _rows([("a__original.pdf", "original")])
+        )
+        planner_mod.plan_handler(
+            {"jobId": "j", "testSetId": "confbench-clean", "variants": ["original"]},
+            None,
+        )
+        upd = state["tracking_updates"][0]
+        assert upd["ExpressionAttributeValues"][":configVersion"] == (
+            "confbench-testset-v0.1.0"
+        )
+        # if_not_exists: an admin who repoints the set at their own tuned config
+        # keeps that choice across re-ingests.
+        assert (
+            "#configVersion = if_not_exists(#configVersion, :configVersion)"
+            in (upd["UpdateExpression"])
+        )
+
+    def test_omits_config_version_when_unset(self, planner, monkeypatch):
+        """An older host without configVersion support must still register fine."""
+        planner_mod, state = planner
+        monkeypatch.setattr(planner_mod, "CONFIG_VERSION_NAME", "")
+        _fake_parquet(
+            monkeypatch, planner_mod, _rows([("a__original.pdf", "original")])
+        )
+        planner_mod.plan_handler(
+            {"jobId": "j", "testSetId": "confbench-clean", "variants": ["original"]},
+            None,
+        )
+        upd = state["tracking_updates"][0]
+        assert ":configVersion" not in upd["ExpressionAttributeValues"]
+        assert "configVersion" not in upd["UpdateExpression"]
+
     def test_preserves_admin_edited_metadata_on_re_ingest(self, planner, monkeypatch):
         """if_not_exists on the descriptive fields means re-ingesting updates
         status without clobbering a name or description an admin changed."""
