@@ -607,6 +607,124 @@ def create_or_update_stack(
 # default (unprefixed) auto-bucket case.
 _PACK_PUBLIC_PREFIXES = ("extensions/", "host/")
 
+# Sid of the deny-non-TLS statement every IDP-created bucket carries (the
+# CloudFormation-managed buckets in template.yaml use the same Sid).
+_ENFORCE_SSL_SID = "EnforceSSLOnly"
+
+
+def _partition(region: str) -> str:
+    """ARN partition for ``region`` — mirrors ``arn:${AWS::Partition}:`` in the
+    templates so GovCloud/China buckets get correct ARNs."""
+    try:
+        return boto3.Session().get_partition_for_region(region)
+    except Exception:
+        if region.startswith("us-gov-"):
+            return "aws-us-gov"
+        if region.startswith("cn-"):
+            return "aws-cn"
+        return "aws"
+
+
+def _enforce_ssl_statement(bucket: str, region: str) -> Dict[str, Any]:
+    """Deny every principal all S3 actions on ``bucket`` over plain HTTP."""
+    bucket_arn = f"arn:{_partition(region)}:s3:::{bucket}"
+    return {
+        "Sid": _ENFORCE_SSL_SID,
+        "Effect": "Deny",
+        "Principal": "*",
+        "Action": "s3:*",
+        "Resource": [bucket_arn, f"{bucket_arn}/*"],
+        "Condition": {"Bool": {"aws:SecureTransport": "false"}},
+    }
+
+
+def _statement_list(policy: Optional[Dict[str, Any]]) -> List[Any]:
+    """Return ``policy``'s statements as a list, whatever form they took.
+
+    The IAM grammar allows ``Statement`` to be **either** a single statement
+    object **or** an array of them ("The Statement element can contain a single
+    statement or an array of individual statements" —
+    https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_statement.html).
+    Iterating the single-object form directly would yield its *keys*, silently
+    replacing an operator's statement with the strings ``"Sid"``, ``"Effect"``,
+    … — so normalize before touching it.
+
+    Kept in sync with ``idp_sdk._core.s3_security.statement_list``; this module
+    is deliberately self-contained (boto3 only, no idp_sdk dependency), so the
+    logic is duplicated rather than imported. Fix both copies together.
+    """
+    if not policy:
+        return []
+    raw = policy.get("Statement", [])
+    if isinstance(raw, dict):
+        return [raw]
+    if isinstance(raw, list):
+        return list(raw)
+    raise ValueError(
+        f"Unsupported S3 bucket-policy Statement type {type(raw).__name__!r}: "
+        f"expected an object or a list of objects."
+    )
+
+
+def apply_enforce_ssl_only(
+    s3: Any,
+    bucket: str,
+    region: str,
+    *,
+    console: Optional[Console] = None,
+    raise_on_error: bool = True,
+) -> bool:
+    """Add (or refresh) the ``EnforceSSLOnly`` statement on ``bucket``'s policy.
+
+    Strictly additive: any other statement (including the opt-in
+    ``PackPublicArtifactsRead`` grant) is preserved, and re-running is
+    idempotent. Unlike Block Public Access — which we never touch on a bucket
+    we didn't create — this only ever *tightens* access, so it's safe to apply
+    to a pre-existing bucket.
+
+    Returns True when the statement is in place. With ``raise_on_error=False``
+    a failure logs a warning and returns False, for the pre-existing-bucket
+    case where the operator may own the bucket policy.
+    """
+    cons = console or Console()
+    try:
+        try:
+            existing = json.loads(s3.get_bucket_policy(Bucket=bucket)["Policy"])
+        except Exception as exc:
+            if "NoSuchBucketPolicy" not in str(exc):
+                raise
+            existing = None
+
+        desired = _enforce_ssl_statement(bucket, region)
+        if existing:
+            statements = [
+                s
+                for s in _statement_list(existing)
+                if not (isinstance(s, dict) and s.get("Sid") == _ENFORCE_SSL_SID)
+            ]
+            statements.append(desired)
+            merged = {
+                "Version": existing.get("Version", "2012-10-17"),
+                "Statement": statements,
+            }
+        else:
+            merged = {"Version": "2012-10-17", "Statement": [desired]}
+
+        if merged != existing:
+            s3.put_bucket_policy(Bucket=bucket, Policy=json.dumps(merged))
+            cons.log(f"[green]✓[/green] applied {_ENFORCE_SSL_SID} policy to {bucket}")
+        return True
+    except Exception as exc:
+        message = (
+            f"Could not apply the {_ENFORCE_SSL_SID} bucket policy to {bucket!r}: "
+            f"{exc}. This policy denies non-TLS requests to the bucket; add it "
+            f"manually if your account restricts s3:PutBucketPolicy."
+        )
+        if raise_on_error:
+            raise RuntimeError(message) from exc
+        cons.log(f"[yellow]⚠ {message}[/yellow]")
+        return False
+
 
 def _pack_public_bucket_policy(bucket: str) -> Dict[str, Any]:
     """Bucket policy granting `s3:GetObject` to anyone for the prefixes
@@ -655,6 +773,11 @@ def ensure_artifacts_bucket(
         bucket is left untouched — we NEVER weaken its BPA settings, so a
         manual security remediation can't be silently reverted by a
         publish run.
+      * Either way the ``EnforceSSLOnly`` bucket-policy statement (deny all
+        S3 actions when ``aws:SecureTransport`` is false) is applied — it is
+        purely additive hardening, so unlike BPA it's also applied to a
+        pre-existing bucket (best-effort there, since the operator may own
+        the bucket policy).
       * With ``make_public=True`` (opt-in, e.g. ``--make-public``), the
         bucket's ``BlockPublicPolicy``/``RestrictPublicBuckets`` flags are
         relaxed and a bucket policy granting public read on the
@@ -698,6 +821,12 @@ def ensure_artifacts_bucket(
             raise RuntimeError(
                 f"Cannot access artifacts bucket {bucket!r}: {exc}"
             ) from exc
+
+    # Deny non-TLS access. Additive, so safe on a pre-existing bucket too —
+    # but only fatal when we created the bucket (and therefore own its policy).
+    apply_enforce_ssl_only(
+        s3, bucket, region, console=cons, raise_on_error=bucket_created
+    )
 
     if not make_public:
         # Secure by default. Never weaken Block Public Access on a bucket
@@ -803,10 +932,14 @@ def apply_public_artifacts_policy(
     try:
         existing_resp = s3.get_bucket_policy(Bucket=bucket)
         existing = json.loads(existing_resp["Policy"])
-        existing_stmts = existing.get("Statement", [])
+        # Normalize first — Statement may legally be a single object, and
+        # iterating that would yield its keys rather than the statement.
+        existing_stmts = _statement_list(existing)
         # Drop any prior PackPublicArtifactsRead and append the fresh one.
         merged_stmts = [
-            s for s in existing_stmts if s.get("Sid") != "PackPublicArtifactsRead"
+            s
+            for s in existing_stmts
+            if not (isinstance(s, dict) and s.get("Sid") == "PackPublicArtifactsRead")
         ]
         merged_stmts.extend(desired["Statement"])
         merged = {"Version": "2012-10-17", "Statement": merged_stmts}

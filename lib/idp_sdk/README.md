@@ -119,6 +119,30 @@ The SDK organizes functionality into 9 operation namespaces:
 - **search**: Query processed documents with natural language
 - **testing**: Performance and load testing
 
+## Buckets the CLI creates
+
+Two S3 buckets are created imperatively (outside CloudFormation) and are
+hardened with the same `EnforceSSLOnly` bucket policy the stack's own buckets
+carry — deny `s3:*` when `aws:SecureTransport` is false, on the bucket and its
+objects:
+
+| Bucket | Created by | Purpose |
+|---|---|---|
+| `<basename>-<region>` (default `idp-accelerator-artifacts-<account>-<region>`) | `idp-cli publish` | Build artifacts, templates, Lambda zips |
+| `idp-cli-config-<account>-<region>-<suffix>` | `idp-cli deploy` | Staging a `--custom-config` upload (30-day lifecycle) |
+
+The policy is merged additively — your own statements survive, and a stale
+`EnforceSSLOnly` is replaced rather than duplicated, so re-running is
+idempotent. It is applied to **pre-existing** buckets too (unlike Block Public
+Access, which is never modified on a bucket the CLI didn't create, so a manual
+remediation can't be reverted); there it's best-effort, warning and continuing
+if the account restricts `s3:PutBucketPolicy`. ARNs use the region's real
+partition, so GovCloud gets `arn:aws-us-gov:`.
+
+To supply your own pre-hardened bucket (KMS CMK, access logging, tags), pass
+`--bucket-basename` — see
+[Enterprise artifact bucket hardening](../../docs/deployment-private-network.md).
+
 ## Common Patterns
 
 ### Batch Processing with Monitoring

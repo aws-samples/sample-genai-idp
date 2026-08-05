@@ -59,6 +59,71 @@ class TestListAndGet:
         assert out[0]["RunId"] == "20250707T141530Z-a"
         assert out[0]["Sections"][0]["Class"] == "W2"
 
+    def test_sections_carry_confidence_alerts_and_issues(self, mod):
+        """The UI's "Low Confidence Fields" count / section Status read these
+        off the snapshot — dropping them made every historical section look
+        clean (count 0, no issues)."""
+        mod.document_service = MagicMock()
+        mod.document_service.list_document_runs.return_value = [
+            {
+                "RunId": "r1",
+                "SK": "run#r1",
+                "ObjectKey": "k",
+                "Sections": [
+                    {
+                        "Id": "1",
+                        "Class": "W2",
+                        "OutputJSONUri": "s3://o/k",
+                        "ConfidenceThresholdAlerts": [
+                            {
+                                "attributeName": "WagesTips",
+                                "confidence": 0.42,
+                                "confidenceThreshold": 0.8,
+                            }
+                        ],
+                        "ProcessingIssues": [
+                            {
+                                "stage": "assessment",
+                                "severity": "warning",
+                                "code": "assessment_incomplete",
+                                "message": "some rows unscored",
+                                "rootCause": "truncation",
+                                # Stored-only blob: must not be returned (not
+                                # part of the GraphQL ProcessingIssue type).
+                                "details": '{"big": "blob"}',
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+        out = mod.handler(_event("listDocumentVersions", objectKey="k"), None)
+        section = out[0]["Sections"][0]
+        assert section["ConfidenceThresholdAlerts"][0]["attributeName"] == "WagesTips"
+        assert section["ConfidenceThresholdAlerts"][0]["confidence"] == 0.42
+        issue = section["ProcessingIssues"][0]
+        assert issue["code"] == "assessment_incomplete"
+        assert issue["rootCause"] == "truncation"
+        assert "details" not in issue
+
+    def test_sections_from_pre_snapshot_runs_default_to_empty_lists(self, mod):
+        """Runs recorded before the quality data was snapshotted have no such
+        keys; emit [] (not null) so the UI's Array.isArray() checks match the
+        live-document path."""
+        mod.document_service = MagicMock()
+        mod.document_service.list_document_runs.return_value = [
+            {
+                "RunId": "r1",
+                "SK": "run#r1",
+                "ObjectKey": "k",
+                "Sections": [{"Id": "1", "Class": "W2", "OutputJSONUri": "s3://o/k"}],
+            }
+        ]
+        out = mod.handler(_event("listDocumentVersions", objectKey="k"), None)
+        section = out[0]["Sections"][0]
+        assert section["ConfidenceThresholdAlerts"] == []
+        assert section["ProcessingIssues"] == []
+
     def test_get_document_version_includes_files(self, mod, monkeypatch):
         mod.document_service = MagicMock()
         mod.document_service.get_document_run.return_value = {

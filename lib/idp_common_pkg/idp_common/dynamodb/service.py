@@ -59,6 +59,55 @@ def convert_decimals_to_native(obj):
     return obj
 
 
+def serialize_confidence_threshold_alerts(section: Section) -> List[Dict[str, Any]]:
+    """
+    Serialize a Section's confidence threshold alerts to the DynamoDB/GraphQL
+    camelCase shape (``attributeName``/``confidence``/``confidenceThreshold``).
+
+    Shared by the doc item writers (update_document,
+    update_document_section) and the run-record writer (create_document_run) so
+    a version snapshot carries the same low-confidence data the live document
+    does — the UI's "Low Confidence Fields" count reads this field.
+    """
+    alerts_data: List[Dict[str, Any]] = []
+    for alert in section.confidence_threshold_alerts or []:
+        alerts_data.append(
+            convert_floats_to_decimal(
+                {
+                    "attributeName": alert.get("attribute_name"),
+                    "confidence": alert.get("confidence"),
+                    "confidenceThreshold": alert.get("confidence_threshold"),
+                }
+            )
+        )
+    return alerts_data
+
+
+def serialize_processing_issues(section: Section) -> List[Dict[str, Any]]:
+    """
+    Serialize a Section's structured processing issues to compact camelCase
+    dicts mirroring the GraphQL ``ProcessingIssue`` type. ``details`` is
+    JSON-stringified rather than stored as a nested map, keeping the attribute
+    to one scalar regardless of the blob's shape. Note no consumer reads
+    ``details`` back today (the API resolvers strip it — it is not part of the
+    GraphQL type); it is written for parity with the live doc item.
+    """
+    issues_data: List[Dict[str, Any]] = []
+    for issue in section.processing_issues or []:
+        issue_item: Dict[str, Any] = {
+            "stage": issue.stage,
+            "severity": issue.severity,
+            "code": issue.code,
+            "message": issue.message,
+        }
+        if issue.root_cause:
+            issue_item["rootCause"] = issue.root_cause
+        if issue.details:
+            issue_item["details"] = json.dumps(issue.details, default=str)
+        issues_data.append(issue_item)
+    return issues_data
+
+
 class DocumentDynamoDBService:
     """
     Service for interacting directly with DynamoDB to manage Documents.
@@ -254,41 +303,15 @@ class DocumentDynamoDBService:
 
                 # Convert confidence threshold alerts (matching current AppSync interface)
                 if section.confidence_threshold_alerts:
-                    alerts_data = []
-                    for alert in section.confidence_threshold_alerts:
-                        alert_data = convert_floats_to_decimal(
-                            {
-                                "attributeName": alert.get("attribute_name"),
-                                "confidence": alert.get("confidence"),
-                                "confidenceThreshold": alert.get(
-                                    "confidence_threshold"
-                                ),
-                            }
-                        )
-                        alerts_data.append(alert_data)
-                    section_data["ConfidenceThresholdAlerts"] = alerts_data
+                    section_data["ConfidenceThresholdAlerts"] = (
+                        serialize_confidence_threshold_alerts(section)
+                    )
 
                 # Persist structured processing issues (self-healing observability).
-                # Stored as compact camelCase dicts mirroring the GraphQL
-                # ProcessingIssue type; the (potentially large) details blob is
-                # JSON-stringified so it round-trips without exploding the item.
                 if section.processing_issues:
-                    issues_data = []
-                    for issue in section.processing_issues:
-                        issue_item: Dict[str, Any] = {
-                            "stage": issue.stage,
-                            "severity": issue.severity,
-                            "code": issue.code,
-                            "message": issue.message,
-                        }
-                        if issue.root_cause:
-                            issue_item["rootCause"] = issue.root_cause
-                        if issue.details:
-                            issue_item["details"] = json.dumps(
-                                issue.details, default=str
-                            )
-                        issues_data.append(issue_item)
-                    section_data["ProcessingIssues"] = issues_data
+                    section_data["ProcessingIssues"] = serialize_processing_issues(
+                        section
+                    )
 
                 sections_data.append(section_data)
 
@@ -338,6 +361,22 @@ class DocumentDynamoDBService:
             expression_values[":RuleValidationResult"] = json.dumps(
                 rule_validation_dict, default=str
             )
+            # Also persist the flat URI scalar the schema/UI read directly
+            # (getDocument returns RuleValidationResultUri, and the UI's
+            # DocumentViewers renders the Rule Validation tab only when it is
+            # present). Without this the report never appears in the doc detail
+            # page even though the nested RuleValidationResult is stored. This
+            # mirrors the pre-AppSync-removal behaviour, where appsync/service.py
+            # set RuleValidationResultUri = output_uri "for backward
+            # compatibility"; that line was lost in the move to DynamoDB writes.
+            if document.rule_validation_result.output_uri:
+                set_expressions.append(
+                    "#RuleValidationResultUri = :RuleValidationResultUri"
+                )
+                expression_names["#RuleValidationResultUri"] = "RuleValidationResultUri"
+                expression_values[":RuleValidationResultUri"] = (
+                    document.rule_validation_result.output_uri
+                )
 
         # Add trace_id if available
         if document.trace_id:
@@ -1027,17 +1066,9 @@ class DocumentDynamoDBService:
 
         # Convert confidence threshold alerts
         if section.confidence_threshold_alerts:
-            alerts_data = []
-            for alert in section.confidence_threshold_alerts:
-                alert_data = convert_floats_to_decimal(
-                    {
-                        "attributeName": alert.get("attribute_name"),
-                        "confidence": alert.get("confidence"),
-                        "confidenceThreshold": alert.get("confidence_threshold"),
-                    }
-                )
-                alerts_data.append(alert_data)
-            section_data["ConfidenceThresholdAlerts"] = alerts_data
+            section_data["ConfidenceThresholdAlerts"] = (
+                serialize_confidence_threshold_alerts(section)
+            )
 
         # Use SET Sections[index] = :value for atomic section update
         update_expression = f"SET #Sections[{section_index}] = :section"
@@ -1130,6 +1161,11 @@ class DocumentDynamoDBService:
             item["SummaryReportUri"] = document.summary_report_uri
         if document.evaluation_report_uri:
             item["EvaluationReportUri"] = document.evaluation_report_uri
+        if (
+            document.rule_validation_result
+            and document.rule_validation_result.output_uri
+        ):
+            item["RuleValidationResultUri"] = document.rule_validation_result.output_uri
 
         if document.sections:
             sections_data = []
@@ -1140,14 +1176,27 @@ class DocumentDynamoDBService:
                         page_ids.append(int(page_id))
                     except ValueError:
                         continue
-                sections_data.append(
-                    {
-                        "Id": section.section_id,
-                        "PageIds": page_ids,
-                        "Class": section.classification,
-                        "OutputJSONUri": section.extraction_result_uri or "",
-                    }
-                )
+                section_data: Dict[str, Any] = {
+                    "Id": section.section_id,
+                    "PageIds": page_ids,
+                    "Class": section.classification,
+                    "OutputJSONUri": section.extraction_result_uri or "",
+                }
+                # Snapshot the per-section quality data alongside the structure,
+                # exactly as update_document does for the live doc item. Without
+                # these, a historical version renders "Low Confidence Fields: 0"
+                # and an empty Status for every section, because the UI derives
+                # both from these attributes (there is no other source once the
+                # run's outputs have been overwritten).
+                if section.confidence_threshold_alerts:
+                    section_data["ConfidenceThresholdAlerts"] = (
+                        serialize_confidence_threshold_alerts(section)
+                    )
+                if section.processing_issues:
+                    section_data["ProcessingIssues"] = serialize_processing_issues(
+                        section
+                    )
+                sections_data.append(section_data)
             item["Sections"] = sections_data
 
         if document.pages:

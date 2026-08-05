@@ -1,0 +1,730 @@
+{
+  "attributes": [
+    {
+      "actual": [
+        {
+          "description": "Widget A",
+          "price": 50.0,
+          "quantity": 2.0,
+          "sku": "A100"
+        },
+        {
+          "description": "Widget B (blue)",
+          "price": 242.5,
+          "quantity": 1.0,
+          "sku": "B200"
+        }
+      ],
+      "comparator_type": null,
+      "confidence": null,
+      "confidence_threshold": null,
+      "error_details": null,
+      "evaluation_method": "Hungarian (threshold: 0.60)",
+      "evaluation_threshold": null,
+      "expected": [
+        {
+          "description": "Widget A",
+          "price": 50.0,
+          "quantity": 2.0,
+          "sku": "A100"
+        },
+        {
+          "description": "Widget B, blue",
+          "price": 242.5,
+          "quantity": 1.0,
+          "sku": "B200"
+        }
+      ],
+      "field_comparison_details": [
+        {
+          "actual_key": "LineItems[0].sku",
+          "actual_value": "A100",
+          "evaluation_method": "Exact",
+          "expected_key": "LineItems[0].sku",
+          "expected_value": "A100",
+          "field_path": "LineItems[0].sku",
+          "match": true,
+          "reason": "exact match",
+          "score": 1.0,
+          "weight": 1.0,
+          "weighted_score": 1.0
+        },
+        {
+          "actual_key": "LineItems[0].description",
+          "actual_value": "Widget A",
+          "evaluation_method": "Fuzzy (threshold: 0.70)",
+          "expected_key": "LineItems[0].description",
+          "expected_value": "Widget A",
+          "field_path": "LineItems[0].description",
+          "match": true,
+          "reason": "exact match",
+          "score": 1.0,
+          "weight": 1.0,
+          "weighted_score": 1.0
+        },
+        {
+          "actual_key": "LineItems[0].quantity",
+          "actual_value": 2.0,
+          "evaluation_method": "NumericExact",
+          "expected_key": "LineItems[0].quantity",
+          "expected_value": 2.0,
+          "field_path": "LineItems[0].quantity",
+          "match": true,
+          "reason": "exact match",
+          "score": 1.0,
+          "weight": 1.0,
+          "weighted_score": 1.0
+        },
+        {
+          "actual_key": "LineItems[0].price",
+          "actual_value": 50.0,
+          "evaluation_method": "NumericExact",
+          "expected_key": "LineItems[0].price",
+          "expected_value": 50.0,
+          "field_path": "LineItems[0].price",
+          "match": true,
+          "reason": "exact match",
+          "score": 1.0,
+          "weight": 1.0,
+          "weighted_score": 1.0
+        },
+        {
+          "actual_key": "LineItems[1].sku",
+          "actual_value": "B200",
+          "evaluation_method": "Exact",
+          "expected_key": "LineItems[1].sku",
+          "expected_value": "B200",
+          "field_path": "LineItems[1].sku",
+          "match": true,
+          "reason": "exact match",
+          "score": 1.0,
+          "weight": 1.0,
+          "weighted_score": 1.0
+        },
+        {
+          "actual_key": "LineItems[1].description",
+          "actual_value": "Widget B (blue)",
+          "evaluation_method": "Fuzzy (threshold: 0.70)",
+          "expected_key": "LineItems[1].description",
+          "expected_value": "Widget B, blue",
+          "field_path": "LineItems[1].description",
+          "match": true,
+          "reason": "above threshold (0.897 >= 0.7)",
+          "score": 0.896551724137931,
+          "weight": 1.0,
+          "weighted_score": 0.896551724137931
+        },
+        {
+          "actual_key": "LineItems[1].quantity",
+          "actual_value": 1.0,
+          "evaluation_method": "NumericExact",
+          "expected_key": "LineItems[1].quantity",
+          "expected_value": 1.0,
+          "field_path": "LineItems[1].quantity",
+          "match": true,
+          "reason": "exact match",
+          "score": 1.0,
+          "weight": 1.0,
+          "weighted_score": 1.0
+        },
+        {
+          "actual_key": "LineItems[1].price",
+          "actual_value": 242.5,
+          "evaluation_method": "NumericExact",
+          "expected_key": "LineItems[1].price",
+          "expected_value": 242.5,
+          "field_path": "LineItems[1].price",
+          "match": true,
+          "reason": "exact match",
+          "score": 1.0,
+          "weight": 1.0,
+          "weighted_score": 1.0
+        }
+      ],
+      "matched": true,
+      "name": "LineItems",
+      "reason": "Very close match (score: 0.99)",
+      "score": 0.9870689655172413,
+      "weight": null
+    },
+    {
+      "actual": "Widget Buyer, LLC",
+      "comparator_type": "FuzzyComparator",
+      "confidence": null,
+      "confidence_threshold": null,
+      "error_details": null,
+      "evaluation_method": "Fuzzy (threshold: 0.80)",
+      "evaluation_threshold": 0.8,
+      "expected": "Widget Buyer LLC",
+      "field_comparison_details": [
+        {
+          "actual_key": "customer_name",
+          "actual_value": "Widget Buyer, LLC",
+          "evaluation_method": "Fuzzy (threshold: 0.80)",
+          "expected_key": "customer_name",
+          "expected_value": "Widget Buyer LLC",
+          "field_path": "customer_name",
+          "match": true,
+          "reason": "above threshold (0.970 >= 0.8)",
+          "score": 0.9696969696969697,
+          "weight": 1.0,
+          "weighted_score": 0.9696969696969697
+        }
+      ],
+      "matched": true,
+      "name": "customer_name",
+      "reason": "Very close match (score: 0.97)",
+      "score": 0.9696969696969697,
+      "weight": 1.0
+    },
+    {
+      "actual": "INV-2023-001",
+      "comparator_type": "ExactComparator",
+      "confidence": null,
+      "confidence_threshold": null,
+      "error_details": null,
+      "evaluation_method": "Exact",
+      "evaluation_threshold": null,
+      "expected": "INV-2023-001",
+      "field_comparison_details": [
+        {
+          "actual_key": "invoice_number",
+          "actual_value": "INV-2023-001",
+          "evaluation_method": "Exact",
+          "expected_key": "invoice_number",
+          "expected_value": "INV-2023-001",
+          "field_path": "invoice_number",
+          "match": true,
+          "reason": "exact match",
+          "score": 1.0,
+          "weight": 2.0,
+          "weighted_score": 2.0
+        }
+      ],
+      "matched": true,
+      "name": "invoice_number",
+      "reason": "Exact match",
+      "score": 1.0,
+      "weight": 2.0
+    },
+    {
+      "actual": 342.5,
+      "comparator_type": "NumericComparator",
+      "confidence": null,
+      "confidence_threshold": null,
+      "error_details": null,
+      "evaluation_method": "NumericExact",
+      "evaluation_threshold": 0.01,
+      "expected": 342.5,
+      "field_comparison_details": [
+        {
+          "actual_key": "total",
+          "actual_value": 342.5,
+          "evaluation_method": "NumericExact",
+          "expected_key": "total",
+          "expected_value": 342.5,
+          "field_path": "total",
+          "match": true,
+          "reason": "exact match",
+          "score": 1.0,
+          "weight": 2.0,
+          "weighted_score": 2.0
+        }
+      ],
+      "matched": true,
+      "name": "total",
+      "reason": "Exact match",
+      "score": 1.0,
+      "weight": 2.0
+    }
+  ],
+  "document_class": "Invoice",
+  "metrics": {
+    "_stickler_counts": {
+      "fa": 0,
+      "fd": 0,
+      "fn": 0,
+      "fp": 0,
+      "tn": 0,
+      "tp": 11
+    },
+    "accuracy": 1.0,
+    "f1_score": 1.0,
+    "false_alarm_rate": 0.0,
+    "false_discovery_rate": 0.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "weighted_overall_score": 0.9927943225357018
+  },
+  "section_id": "invoice-42",
+  "stickler_comparison_result": {
+    "all_fields_matched": true,
+    "auroc_confidence_metric": 0.5,
+    "confidence_metrics": {
+      "coverage": {
+        "fields_total": 11,
+        "fields_with_confidence": 0,
+        "ratio": 0.0
+      },
+      "fields": {},
+      "overall": {
+        "auroc": {
+          "value": null
+        },
+        "brier_score": {
+          "value": null
+        },
+        "ece": {
+          "bins": [],
+          "value": null
+        }
+      }
+    },
+    "confusion_matrix": {
+      "aggregate": {
+        "derived": {
+          "cm_accuracy": 1.0,
+          "cm_f1": 1.0,
+          "cm_precision": 1.0,
+          "cm_recall": 1.0
+        },
+        "fa": 0,
+        "fd": 0,
+        "fn": 0,
+        "fp": 0,
+        "tn": 0,
+        "tp": 11
+      },
+      "fields": {
+        "LineItems": {
+          "aggregate": {
+            "derived": {
+              "cm_accuracy": 1.0,
+              "cm_f1": 1.0,
+              "cm_precision": 1.0,
+              "cm_recall": 1.0
+            },
+            "fa": 0,
+            "fd": 0,
+            "fn": 0,
+            "fp": 0,
+            "tn": 0,
+            "tp": 8
+          },
+          "fields": {
+            "description": {
+              "aggregate": {
+                "derived": {
+                  "cm_accuracy": 1.0,
+                  "cm_f1": 1.0,
+                  "cm_precision": 1.0,
+                  "cm_recall": 1.0
+                },
+                "fa": 0,
+                "fd": 0,
+                "fn": 0,
+                "fp": 0,
+                "tn": 0,
+                "tp": 2
+              },
+              "overall": {
+                "derived": {
+                  "cm_accuracy": 1.0,
+                  "cm_f1": 1.0,
+                  "cm_precision": 1.0,
+                  "cm_recall": 1.0
+                },
+                "fa": 0,
+                "fd": 0,
+                "fn": 0,
+                "fp": 0,
+                "tn": 0,
+                "tp": 2
+              }
+            },
+            "price": {
+              "aggregate": {
+                "derived": {
+                  "cm_accuracy": 1.0,
+                  "cm_f1": 1.0,
+                  "cm_precision": 1.0,
+                  "cm_recall": 1.0
+                },
+                "fa": 0,
+                "fd": 0,
+                "fn": 0,
+                "fp": 0,
+                "tn": 0,
+                "tp": 2
+              },
+              "overall": {
+                "derived": {
+                  "cm_accuracy": 1.0,
+                  "cm_f1": 1.0,
+                  "cm_precision": 1.0,
+                  "cm_recall": 1.0
+                },
+                "fa": 0,
+                "fd": 0,
+                "fn": 0,
+                "fp": 0,
+                "tn": 0,
+                "tp": 2
+              }
+            },
+            "quantity": {
+              "aggregate": {
+                "derived": {
+                  "cm_accuracy": 1.0,
+                  "cm_f1": 1.0,
+                  "cm_precision": 1.0,
+                  "cm_recall": 1.0
+                },
+                "fa": 0,
+                "fd": 0,
+                "fn": 0,
+                "fp": 0,
+                "tn": 0,
+                "tp": 2
+              },
+              "overall": {
+                "derived": {
+                  "cm_accuracy": 1.0,
+                  "cm_f1": 1.0,
+                  "cm_precision": 1.0,
+                  "cm_recall": 1.0
+                },
+                "fa": 0,
+                "fd": 0,
+                "fn": 0,
+                "fp": 0,
+                "tn": 0,
+                "tp": 2
+              }
+            },
+            "sku": {
+              "aggregate": {
+                "derived": {
+                  "cm_accuracy": 1.0,
+                  "cm_f1": 1.0,
+                  "cm_precision": 1.0,
+                  "cm_recall": 1.0
+                },
+                "fa": 0,
+                "fd": 0,
+                "fn": 0,
+                "fp": 0,
+                "tn": 0,
+                "tp": 2
+              },
+              "overall": {
+                "derived": {
+                  "cm_accuracy": 1.0,
+                  "cm_f1": 1.0,
+                  "cm_precision": 1.0,
+                  "cm_recall": 1.0
+                },
+                "fa": 0,
+                "fd": 0,
+                "fn": 0,
+                "fp": 0,
+                "tn": 0,
+                "tp": 2
+              }
+            }
+          },
+          "overall": {
+            "derived": {
+              "cm_accuracy": 1.0,
+              "cm_f1": 1.0,
+              "cm_precision": 1.0,
+              "cm_recall": 1.0
+            },
+            "fa": 0,
+            "fd": 0,
+            "fn": 0,
+            "fp": 0,
+            "tn": 0,
+            "tp": 2
+          },
+          "raw_similarity_score": 0.9870689655172413,
+          "similarity_score": 0.9870689655172413,
+          "threshold_applied_score": 0.9870689655172413,
+          "weight": 1.0
+        },
+        "customer_name": {
+          "aggregate": {
+            "derived": {
+              "cm_accuracy": 1.0,
+              "cm_f1": 1.0,
+              "cm_precision": 1.0,
+              "cm_recall": 1.0
+            },
+            "fa": 0,
+            "fd": 0,
+            "fn": 0,
+            "fp": 0,
+            "tn": 0,
+            "tp": 1
+          },
+          "overall": {
+            "derived": {
+              "cm_accuracy": 1.0,
+              "cm_f1": 1.0,
+              "cm_precision": 1.0,
+              "cm_recall": 1.0
+            },
+            "fa": 0,
+            "fd": 0,
+            "fn": 0,
+            "fp": 0,
+            "tn": 0,
+            "tp": 1
+          },
+          "raw_similarity_score": 0.9696969696969697,
+          "similarity_score": 0.9696969696969697,
+          "threshold_applied_score": 0.9696969696969697,
+          "weight": 1.0
+        },
+        "invoice_number": {
+          "aggregate": {
+            "derived": {
+              "cm_accuracy": 1.0,
+              "cm_f1": 1.0,
+              "cm_precision": 1.0,
+              "cm_recall": 1.0
+            },
+            "fa": 0,
+            "fd": 0,
+            "fn": 0,
+            "fp": 0,
+            "tn": 0,
+            "tp": 1
+          },
+          "overall": {
+            "derived": {
+              "cm_accuracy": 1.0,
+              "cm_f1": 1.0,
+              "cm_precision": 1.0,
+              "cm_recall": 1.0
+            },
+            "fa": 0,
+            "fd": 0,
+            "fn": 0,
+            "fp": 0,
+            "tn": 0,
+            "tp": 1
+          },
+          "raw_similarity_score": 1.0,
+          "similarity_score": 1.0,
+          "threshold_applied_score": 1.0,
+          "weight": 2.0
+        },
+        "total": {
+          "aggregate": {
+            "derived": {
+              "cm_accuracy": 1.0,
+              "cm_f1": 1.0,
+              "cm_precision": 1.0,
+              "cm_recall": 1.0
+            },
+            "fa": 0,
+            "fd": 0,
+            "fn": 0,
+            "fp": 0,
+            "tn": 0,
+            "tp": 1
+          },
+          "overall": {
+            "derived": {
+              "cm_accuracy": 1.0,
+              "cm_f1": 1.0,
+              "cm_precision": 1.0,
+              "cm_recall": 1.0
+            },
+            "fa": 0,
+            "fd": 0,
+            "fn": 0,
+            "fp": 0,
+            "tn": 0,
+            "tp": 1
+          },
+          "raw_similarity_score": 1.0,
+          "similarity_score": 1.0,
+          "threshold_applied_score": 1.0,
+          "weight": 2.0
+        }
+      },
+      "non_matches": [],
+      "overall": {
+        "all_fields_matched": true,
+        "derived": {
+          "cm_accuracy": 1.0,
+          "cm_f1": 1.0,
+          "cm_precision": 1.0,
+          "cm_recall": 1.0
+        },
+        "fa": 0,
+        "fd": 0,
+        "fn": 0,
+        "fp": 0,
+        "similarity_score": 0.9927943225357018,
+        "tn": 0,
+        "tp": 5
+      }
+    },
+    "field_comparisons": [
+      {
+        "actual_key": "invoice_number",
+        "actual_value": "INV-2023-001",
+        "evaluation_method": "Exact",
+        "expected_key": "invoice_number",
+        "expected_value": "INV-2023-001",
+        "field_path": "invoice_number",
+        "match": true,
+        "reason": "exact match",
+        "score": 1.0,
+        "weight": 2.0,
+        "weighted_score": 2.0
+      },
+      {
+        "actual_key": "customer_name",
+        "actual_value": "Widget Buyer, LLC",
+        "evaluation_method": "Fuzzy (threshold: 0.80)",
+        "expected_key": "customer_name",
+        "expected_value": "Widget Buyer LLC",
+        "field_path": "customer_name",
+        "match": true,
+        "reason": "above threshold (0.970 >= 0.8)",
+        "score": 0.9696969696969697,
+        "weight": 1.0,
+        "weighted_score": 0.9696969696969697
+      },
+      {
+        "actual_key": "total",
+        "actual_value": 342.5,
+        "evaluation_method": "NumericExact",
+        "expected_key": "total",
+        "expected_value": 342.5,
+        "field_path": "total",
+        "match": true,
+        "reason": "exact match",
+        "score": 1.0,
+        "weight": 2.0,
+        "weighted_score": 2.0
+      },
+      {
+        "actual_key": "LineItems[0].sku",
+        "actual_value": "A100",
+        "evaluation_method": "Exact",
+        "expected_key": "LineItems[0].sku",
+        "expected_value": "A100",
+        "field_path": "LineItems[0].sku",
+        "match": true,
+        "reason": "exact match",
+        "score": 1.0,
+        "weight": 1.0,
+        "weighted_score": 1.0
+      },
+      {
+        "actual_key": "LineItems[0].description",
+        "actual_value": "Widget A",
+        "evaluation_method": "Fuzzy (threshold: 0.70)",
+        "expected_key": "LineItems[0].description",
+        "expected_value": "Widget A",
+        "field_path": "LineItems[0].description",
+        "match": true,
+        "reason": "exact match",
+        "score": 1.0,
+        "weight": 1.0,
+        "weighted_score": 1.0
+      },
+      {
+        "actual_key": "LineItems[0].quantity",
+        "actual_value": 2.0,
+        "evaluation_method": "NumericExact",
+        "expected_key": "LineItems[0].quantity",
+        "expected_value": 2.0,
+        "field_path": "LineItems[0].quantity",
+        "match": true,
+        "reason": "exact match",
+        "score": 1.0,
+        "weight": 1.0,
+        "weighted_score": 1.0
+      },
+      {
+        "actual_key": "LineItems[0].price",
+        "actual_value": 50.0,
+        "evaluation_method": "NumericExact",
+        "expected_key": "LineItems[0].price",
+        "expected_value": 50.0,
+        "field_path": "LineItems[0].price",
+        "match": true,
+        "reason": "exact match",
+        "score": 1.0,
+        "weight": 1.0,
+        "weighted_score": 1.0
+      },
+      {
+        "actual_key": "LineItems[1].sku",
+        "actual_value": "B200",
+        "evaluation_method": "Exact",
+        "expected_key": "LineItems[1].sku",
+        "expected_value": "B200",
+        "field_path": "LineItems[1].sku",
+        "match": true,
+        "reason": "exact match",
+        "score": 1.0,
+        "weight": 1.0,
+        "weighted_score": 1.0
+      },
+      {
+        "actual_key": "LineItems[1].description",
+        "actual_value": "Widget B (blue)",
+        "evaluation_method": "Fuzzy (threshold: 0.70)",
+        "expected_key": "LineItems[1].description",
+        "expected_value": "Widget B, blue",
+        "field_path": "LineItems[1].description",
+        "match": true,
+        "reason": "above threshold (0.897 >= 0.7)",
+        "score": 0.896551724137931,
+        "weight": 1.0,
+        "weighted_score": 0.896551724137931
+      },
+      {
+        "actual_key": "LineItems[1].quantity",
+        "actual_value": 1.0,
+        "evaluation_method": "NumericExact",
+        "expected_key": "LineItems[1].quantity",
+        "expected_value": 1.0,
+        "field_path": "LineItems[1].quantity",
+        "match": true,
+        "reason": "exact match",
+        "score": 1.0,
+        "weight": 1.0,
+        "weighted_score": 1.0
+      },
+      {
+        "actual_key": "LineItems[1].price",
+        "actual_value": 242.5,
+        "evaluation_method": "NumericExact",
+        "expected_key": "LineItems[1].price",
+        "expected_value": 242.5,
+        "field_path": "LineItems[1].price",
+        "match": true,
+        "reason": "exact match",
+        "score": 1.0,
+        "weight": 1.0,
+        "weighted_score": 1.0
+      }
+    ],
+    "field_scores": {
+      "LineItems": 0.9870689655172413,
+      "customer_name": 0.9696969696969697,
+      "invoice_number": 1.0,
+      "total": 1.0
+    },
+    "non_matches": [],
+    "overall_score": 0.9927943225357018
+  }
+}

@@ -25,6 +25,22 @@ endif
 # the virtualenv is activated (picks up $(PYTHON) which prefers .venv).
 IDP_CLI := $(PYTHON) -m idp_cli.cli
 
+# First-party packages that live in THIS repo and are NOT published to PyPI.
+#
+# SECURITY — dependency confusion: these packages depend on each other by bare
+# name (idp_cli_pkg -> "idp-sdk", idp_sdk -> "idp_common"), and those names are
+# squatted by third parties on public PyPI. If they are installed one pip
+# invocation at a time, pip resolves a not-yet-installed sibling from PyPI and
+# silently pulls in the squatted package. Installing them all in a SINGLE pip
+# invocation lets pip satisfy those names from the local checkout instead.
+# Keep this list complete, and never split it across multiple pip calls.
+FIRST_PARTY_EDITABLES := \
+	-e "lib/idp_common_pkg[all,dev,test]" \
+	-e lib/idp_sdk \
+	-e lib/idp_cli_pkg \
+	-e lib/idp_mcp_connector_pkg \
+	-e lib/idp_feature_sdk
+
 ##@ General
 .PHONY: help
 help: ## Show this help message
@@ -57,16 +73,10 @@ setup: ## Install all packages into current Python environment (no venv)
 	echo ""; \
 	echo "Upgrading pip..."; \
 	$$SETUP_PIP install --upgrade pip && \
-	echo "Installing idp_common package with all dependencies (including test)..." && \
-	$$SETUP_PIP install -e "lib/idp_common_pkg[all,dev,test]" && \
-	echo "Installing idp-cli package..." && \
-	$$SETUP_PIP install -e lib/idp_cli_pkg && \
-	echo "Installing idp_sdk package..." && \
-	$$SETUP_PIP install -e lib/idp_sdk && \
-	echo "Installing idp_mcp_connector package..." && \
-	$$SETUP_PIP install -e lib/idp_mcp_connector_pkg && \
-	echo "Installing idp_feature_sdk package..." && \
-	$$SETUP_PIP install -e lib/idp_feature_sdk && \
+	echo "Installing all first-party packages (single resolution pass)..." && \
+	$$SETUP_PIP install $(FIRST_PARTY_EDITABLES) && \
+	echo "Verifying first-party packages resolved locally (not from PyPI)..." && \
+	$$SETUP_PYTHON scripts/check_first_party_deps.py && \
 	echo "Installing capacity planning test dependencies..." && \
 	$$SETUP_PIP install -r src/lambda/calculate_capacity/requirements-test.txt && \
 	echo "Installing cfn-lint for CloudFormation template validation..." && \
@@ -88,16 +98,10 @@ setup-venv: ## Create .venv and install all packages into it
 	$$BASE_PYTHON -m venv $(VENV_DIR)
 	@echo "Upgrading pip..."
 	$(VENV_DIR)/bin/pip install --upgrade pip
-	@echo "Installing idp_common package with all dependencies (including test)..."
-	$(VENV_DIR)/bin/pip install -e "lib/idp_common_pkg[all,dev,test]"
-	@echo "Installing idp-cli package..."
-	$(VENV_DIR)/bin/pip install -e lib/idp_cli_pkg
-	@echo "Installing idp_sdk package..."
-	$(VENV_DIR)/bin/pip install -e lib/idp_sdk
-	@echo "Installing idp_mcp_connector package..."
-	$(VENV_DIR)/bin/pip install -e lib/idp_mcp_connector_pkg
-	@echo "Installing idp_feature_sdk package..."
-	$(VENV_DIR)/bin/pip install -e lib/idp_feature_sdk
+	@echo "Installing all first-party packages (single resolution pass)..."
+	$(VENV_DIR)/bin/pip install $(FIRST_PARTY_EDITABLES)
+	@echo "Verifying first-party packages resolved locally (not from PyPI)..."
+	$(VENV_DIR)/bin/python scripts/check_first_party_deps.py
 	@echo "Installing capacity planning test dependencies..."
 	$(VENV_DIR)/bin/pip install -r src/lambda/calculate_capacity/requirements-test.txt
 	@echo "Installing cfn-lint for CloudFormation template validation..."

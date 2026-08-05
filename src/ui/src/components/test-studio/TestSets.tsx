@@ -108,7 +108,7 @@ const TestSets = (): React.JSX.Element => {
   // The synthetic-data generator is an optional extension; the button is only
   // shown when it's installed (available).
   const { available: generatorAvailable, getJobStatus, listActiveJobs } = useSyntheticDataGenerator();
-  const [genJobs, setGenJobs] = useState<Record<string, { name: string; status: string; message: string }>>({});
+  const [genJobs, setGenJobs] = useState<Record<string, { name: string; status: string; message: string; testSetId?: string }>>({});
   const [warningMessage, setWarningMessage] = useState('');
   const [confirmReplacement, setConfirmReplacement] = useState(false);
   const [showFileStructure, setShowFileStructure] = useState(() => {
@@ -235,9 +235,10 @@ const TestSets = (): React.JSX.Element => {
         for (const job of jobs) {
           if (!next[job.jobId]) {
             next[job.jobId] = {
-              name: job.configVersion || job.testSetId || 'Synthetic documents',
+              name: job.testSetId || job.configVersion || 'Synthetic documents',
               status: job.status,
               message: job.statusMessage || 'Generating…',
+              testSetId: job.testSetId,
             };
           }
         }
@@ -812,7 +813,7 @@ const TestSets = (): React.JSX.Element => {
   // id/name) shows up from getTestSets, to avoid a duplicate row.
   const realTestSetIds = new Set(testSets.map((ts) => ts.id));
   const generatingRows: TestSetItem[] = Object.entries(genJobs)
-    .filter(([, j]) => !realTestSetIds.has(j.name))
+    .filter(([, j]) => !realTestSetIds.has(j.testSetId || j.name))
     .map(([jobId, j]) => ({
       id: `gen:${jobId}`,
       name: j.name,
@@ -929,26 +930,35 @@ const TestSets = (): React.JSX.Element => {
           description="Manage test sets for document processing"
           actions={
             <SpaceBetween direction="horizontal" size="xs">
-              <Button iconName="refresh" loading={refreshing} onClick={handleRefresh}>
-                Refresh
-              </Button>
-              <Button
-                iconName="edit"
-                disabled={selectedItems.length !== 1 || loading}
-                onClick={() => {
-                  const selected = selectedItems[0];
-                  if (selected) {
-                    setEditDescription(selected.description || '');
-                    const classTypeOption =
-                      DOCUMENT_CLASS_TYPE_OPTIONS.find((opt) => opt.value === selected.documentClassType) || DOCUMENT_CLASS_TYPE_OPTIONS[0];
-                    setEditDocumentClassType(classTypeOption);
-                    setShowEditModal(true);
-                  }
-                }}
-              >
-                Edit
-              </Button>
-              <Button iconName="remove" disabled={selectedItems.length === 0 || loading} onClick={() => setShowDeleteModal(true)} />
+              <span title="Refresh test set list">
+                <Button iconName="refresh" loading={refreshing} onClick={handleRefresh} ariaLabel="Refresh" />
+              </span>
+              <span title="Edit selected test set">
+                <Button
+                  iconName="edit"
+                  disabled={selectedItems.length !== 1 || loading}
+                  onClick={() => {
+                    const selected = selectedItems[0];
+                    if (selected) {
+                      setEditDescription(selected.description || '');
+                      const classTypeOption =
+                        DOCUMENT_CLASS_TYPE_OPTIONS.find((opt) => opt.value === selected.documentClassType) ||
+                        DOCUMENT_CLASS_TYPE_OPTIONS[0];
+                      setEditDocumentClassType(classTypeOption);
+                      setShowEditModal(true);
+                    }
+                  }}
+                  ariaLabel="Edit"
+                />
+              </span>
+              <span title="Delete selected test sets">
+                <Button
+                  iconName="remove"
+                  disabled={selectedItems.length === 0 || loading}
+                  onClick={() => setShowDeleteModal(true)}
+                  ariaLabel="Delete"
+                />
+              </span>
               <ButtonDropdown
                 items={[
                   { id: 'docs-pattern', text: 'From Existing Files' },
@@ -1822,11 +1832,11 @@ const TestSets = (): React.JSX.Element => {
           setShowGenerateModal(false);
           setGenInitial({});
         }}
-        onStarted={(jobId, label) => {
+        onStarted={(jobId, label, testSetId) => {
           setShowGenerateModal(false);
           setGenInitial({});
           setSuccessMessage(`Synthetic data generation started for "${label}". It will appear in the list when it completes.`);
-          setGenJobs((prev) => ({ ...prev, [jobId]: { name: label, status: 'GENERATING', message: 'Starting generation' } }));
+          setGenJobs((prev) => ({ ...prev, [jobId]: { name: label, status: 'GENERATING', message: 'Starting generation', testSetId } }));
         }}
       />
     </Container>

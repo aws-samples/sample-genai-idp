@@ -4,8 +4,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 2.0 |
-| **Last Updated** | 2025-03-19 |
+| **Document Version** | 3.0 |
+| **Last Updated** | 2026-07-28 |
+| **Applies to release** | v0.6.3 |
 | **Feature** | IDP SDK & CLI (Programmatic Access) |
 | **Classification** | Internal |
 
@@ -16,7 +17,7 @@ The IDP SDK and CLI provide programmatic access to the IDP Accelerator for autom
 - **IDP SDK** (`idp_common` package): Python library with `IDPClient` entry point for document processing, configuration management, status monitoring, and evaluation
 - **IDP CLI** (`idp_cli` package): Command-line interface wrapping SDK functionality for shell/script usage
 - **Authentication**: Cognito-based (username/password → JWT tokens)
-- **Communication**: GraphQL via AppSync, S3 presigned URLs for document upload
+- **Communication**: API Gateway REST (`POST /op/{field}`) with a Cognito JWT; S3 presigned URLs for document upload; polling for status
 - **Features**: BDA sync mode, discovery, batch processing, configuration management, evaluation
 
 ## 2. Architecture
@@ -32,9 +33,9 @@ flowchart TD
     IDPClient -->|SRP Auth| Cognito[Cognito User Pool]
     Cognito -->|JWT| IDPClient
     
-    IDPClient -->|GraphQL + JWT| AppSync[AppSync API]
+    IDPClient -->|"POST /op/{field} + JWT"| APIGW[API Gateway REST]
     IDPClient -->|Presigned URL| S3[S3 Buckets]
-    IDPClient -->|Subscriptions| AppSync
+    IDPClient -->|Poll status| APIGW
 ```
 
 ## 3. Threat Analysis

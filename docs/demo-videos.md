@@ -81,19 +81,6 @@ These are the same files used in the video demonstration and can be deployed wit
 
 ---
 
-## Document Processing Patterns
-
-### Pattern 1: Bedrock Data Automation (BDA) Workflow
-Overview of BDA-based document processing with asynchronous job management and EventBridge integration.
-
-**Duration**: ~3 minutes
-
-https://github.com/user-attachments/assets/24547356-6d68-4935-b0fd-ddeed9c25ba8
-
-**Related Documentation**: [Pattern 1 Documentation](./pattern-1.md)
-
----
-
 ## Web User Interface
 
 ### Human-in-the-Loop (HITL) Review

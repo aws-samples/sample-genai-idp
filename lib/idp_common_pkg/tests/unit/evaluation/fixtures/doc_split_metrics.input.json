@@ -1,0 +1,13 @@
+{
+  "description": "Doc-split classification metrics: 3-section gt vs 3-section pred with one boundary error and one misclassification. Exercises page_level, split-without-order, split-with-order accuracy.",
+  "ground_truth_sections": [
+    {"section_id": "gt-1", "document_class": {"type": "invoice"}, "split_document": {"page_indices": [0, 1]}},
+    {"section_id": "gt-2", "document_class": {"type": "receipt"}, "split_document": {"page_indices": [2]}},
+    {"section_id": "gt-3", "document_class": {"type": "statement"}, "split_document": {"page_indices": [3, 4, 5]}}
+  ],
+  "predicted_sections": [
+    {"section_id": "pred-1", "document_class": {"type": "invoice"}, "split_document": {"page_indices": [0, 1]}},
+    {"section_id": "pred-2", "document_class": {"type": "receipt"}, "split_document": {"page_indices": [2, 3]}},
+    {"section_id": "pred-3", "document_class": {"type": "statement"}, "split_document": {"page_indices": [4, 5]}}
+  ]
+}

@@ -4,8 +4,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Document Version** | 2.0 |
-| **Last Updated** | 2025-03-19 |
+| **Document Version** | 3.0 |
+| **Last Updated** | 2026-07-28 |
+| **Applies to release** | v0.6.3 |
 | **Feature** | Model Context Protocol (MCP) Integration |
 | **Classification** | Internal |
 
@@ -52,7 +53,7 @@ flowchart TD
     CustomMCP --> ExtDB
     CustomMCP --> ExtService
     
-    ExtMCPClient -->|AppSync| Agent
+    ExtMCPClient -->|AgentCore Gateway| Agent
 ```
 
 ## 3. Threat Analysis
@@ -124,8 +125,8 @@ flowchart TD
 | **Impact** | Resource exhaustion, cost escalation, unauthorized data access |
 | **Likelihood** | Medium |
 | **Severity** | Medium |
-| **Affected Components** | AppSync API, Agent Processor Lambda |
-| **Mitigations** | Cognito authentication required for all external clients, AppSync rate limiting, RBAC-based capability restrictions, CloudWatch alarms on usage patterns |
+| **Affected Components** | AgentCore Gateway, MCP handler Lambda, Agent Processor Lambda |
+| **Mitigations** | Cognito authentication required for all external clients (dedicated `idp-mcp-connector` resource server with a `client_credentials` app client, separate from the Web UI app client), Lambda concurrency limits, RBAC-based capability restrictions, CloudWatch alarms on usage patterns |
 
 ### MCP.T06: AgentCore Gateway Lifecycle Attacks
 
@@ -152,5 +153,5 @@ flowchart TD
 | **Output sanitization** | Tool response validation and size limits | MCP.T03 |
 | **Input validation** | Parameter schema enforcement in MCP Lambdas | MCP.T04 |
 | **Authentication** | Cognito auth required for external clients | MCP.T05 |
-| **Rate limiting** | AppSync and Lambda concurrency limits | MCP.T05, MCP.T06 |
+| **Rate limiting** | Lambda concurrency limits + AgentCore Gateway throttling | MCP.T05, MCP.T06 |
 | **Gateway monitoring** | CloudWatch alarms on gateway status | MCP.T06 |

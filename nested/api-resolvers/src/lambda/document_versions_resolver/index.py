@@ -51,6 +51,25 @@ def _caller_groups(event) -> List[str]:
     return list(groups)
 
 
+def _shape_processing_issues(section: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Shape a run section's stored issues to the GraphQL ProcessingIssue type.
+
+    Only the displayed fields are returned; the stored ``details`` blob (a
+    JSON string that can be large) is intentionally dropped — it is not part of
+    the GraphQL type and the version panel never renders it.
+    """
+    return [
+        {
+            "stage": issue.get("stage"),
+            "severity": issue.get("severity"),
+            "code": issue.get("code"),
+            "message": issue.get("message"),
+            "rootCause": issue.get("rootCause"),
+        }
+        for issue in section.get("ProcessingIssues") or []
+    ]
+
+
 def _shape_version(item: Dict[str, Any]) -> Dict[str, Any]:
     """Shape a run item into the GraphQL DocumentVersion type."""
     sections = [
@@ -59,6 +78,14 @@ def _shape_version(item: Dict[str, Any]) -> Dict[str, Any]:
             "PageIds": s.get("PageIds", []),
             "Class": s.get("Class"),
             "OutputJSONUri": s.get("OutputJSONUri"),
+            # Per-section quality data snapshotted by create_document_run. The
+            # UI's "Low Confidence Fields" count and section Status read these,
+            # so dropping them here makes every historical section look clean.
+            # Runs recorded before these were snapshotted have no such keys —
+            # emit empty lists rather than null so the UI's Array.isArray()
+            # checks behave the same as on the live document.
+            "ConfidenceThresholdAlerts": s.get("ConfidenceThresholdAlerts") or [],
+            "ProcessingIssues": _shape_processing_issues(s),
         }
         for s in item.get("Sections", []) or []
     ]

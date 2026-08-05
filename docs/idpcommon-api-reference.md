@@ -10,19 +10,19 @@ The `idp_common` library (`lib/idp_common_pkg/`) is the core shared Python packa
 
 ```bash
 # Minimal installation
-pip install "idp_common[core]"
+pip install -e "lib/idp_common_pkg[core]"
 
 # Install specific modules
-pip install "idp_common[ocr]"
-pip install "idp_common[classification]"
-pip install "idp_common[extraction]"
-pip install "idp_common[evaluation]"
+pip install -e "lib/idp_common_pkg[ocr]"
+pip install -e "lib/idp_common_pkg[classification]"
+pip install -e "lib/idp_common_pkg[extraction]"
+pip install -e "lib/idp_common_pkg[evaluation]"
 
 # Install multi-document discovery (includes scikit-learn, scipy, numpy, strands-agents)
-pip install "idp_common[multi_document_discovery]"
+pip install -e "lib/idp_common_pkg[multi_document_discovery]"
 
 # Install everything
-pip install "idp_common[all]"
+pip install -e "lib/idp_common_pkg[all]"
 ```
 
 ## Quick Start
@@ -250,7 +250,7 @@ result = discovery.discovery_classes_with_document(
 
 Discovers document classes from a collection of documents using an embedding-based clustering pipeline: **embed → cluster → analyze → reflect**. Supports both S3-based processing (for Lambda/Step Functions) and local file processing (for CLI/SDK).
 
-> **Requires extra dependencies:** `pip install "idp_common[multi_document_discovery]"` or `make setup` from the project root. This installs scikit-learn, scipy, numpy, strands-agents, and pypdfium2.
+> **Requires extra dependencies:** `pip install -e "lib/idp_common_pkg[multi_document_discovery]"` or `make setup` from the project root. This installs scikit-learn, scipy, numpy, strands-agents, and pypdfium2.
 
 > **Minimum 2 documents per class:** Clusters with fewer than 2 documents are filtered as noise. Ensure you provide at least 2 documents for each expected document type.
 

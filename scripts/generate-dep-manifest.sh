@@ -35,8 +35,14 @@ from packaging.version import Version
 repo_root = Path(sys.argv[1])
 output_file = Path(sys.argv[2])
 
+# First-party packages that live in lib/ and are NOT published to PyPI. They must
+# never appear in a mirroring manifest: the manifest is fetched from a public
+# index, and several of these names are squatted by third parties on PyPI.
+# Keep in sync with FIRST_PARTY in scripts/check_first_party_deps.py.
+# See docs/dependency-confusion.md.
 INTERNAL_PACKAGES = {
-    "idp-common", "idp-sdk", "idp-cli", "idp-mcp-connector",
+    "idp-common", "idp-sdk", "idp-accelerator-cli", "idp-mcp-connector",
+    "idp-feature-sdk",
 }
 
 SKIP_DIRS = {".aws-sam", ".venv", "node_modules", ".git", "deps"}

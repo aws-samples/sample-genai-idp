@@ -16,8 +16,6 @@ Resources:
     Metadata:
       cfn_nag:
         rules_to_suppress:
-          - id: W51
-            reason: "This is a temporary bucket for initial deployment artifacts, bucket policy not required for this use case"
           - id: W35
             reason: "This is a deployment artifact bucket, access logging not required for this temporary resource"
       cdk_nag:
@@ -45,3 +43,21 @@ Resources:
       NotificationConfiguration:
         EventBridgeConfiguration:
           EventBridgeEnabled: true
+
+  InitialInstallBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref InitialInstallBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnforceSSLOnly
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt InitialInstallBucket.Arn
+              - !Sub "${InitialInstallBucket.Arn}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": false

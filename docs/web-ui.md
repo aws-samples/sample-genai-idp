@@ -517,6 +517,51 @@ The following parameters are configured during stack deployment:
 - `AdminEmail`: Email address for the admin user
 - `AllowedSignUpEmailDomain`: Optional comma-separated list of allowed email domains for self-service signup
 
+### Parameters baked into the UI at build time
+
+Some CloudFormation parameters are read by the UI as build-time constants
+(`import.meta.env.VITE_*`), which Vite substitutes into the JavaScript bundle
+when CodeBuild runs `npm run build`. Changing one of these therefore requires the
+UI to be rebuilt before it takes effect in the browser:
+
+| Parameter | Affects |
+|-----------|---------|
+| `AllowedSignUpEmailDomain` | Whether the login page offers the **Sign Up** tab |
+| `ExternalIdPType` / `ExternalIdPName` | The federated "Sign in with …" button and Amplify's OAuth configuration |
+| `ExternalIdPAutoLogin` | Automatic redirect to the external IdP |
+| `EnableQuickStartWidget` | The Quick Start widget |
+| `WebUIHosting` | The SPA's asset base path (`/` vs `/api/`) and the OAuth redirect origin |
+| `CustomDomainUrl` | The OAuth redirect origin |
+
+Changing any of these on an existing stack triggers the UI rebuild
+automatically, so no manual step is needed. (Before v0.6.3 it did not — see the
+note below.) Everything else the UI shows is resolved at runtime and takes
+effect on the next page load without a rebuild.
+
+If a UI-affecting parameter change ever appears not to have taken effect, you
+can rebuild manually:
+
+```bash
+STACK=<your-stack-name>
+aws codebuild start-build --project-name ${STACK}-webui-build
+# After the build succeeds, invalidate the CDN cache (CloudFront hosting only):
+DIST=$(aws cloudformation describe-stack-resources --stack-name "$STACK" \
+  --logical-resource-id CloudFrontDistribution \
+  --query 'StackResources[0].PhysicalResourceId' --output text)
+aws cloudfront create-invalidation --distribution-id "$DIST" --paths '/*'
+```
+
+Then hard-reload the page.
+
+> **Note for stacks updated before v0.6.3:** changing one of these parameters on
+> an existing stack used to leave the previously-built bundle in place, so the
+> change silently had no effect in the UI. Most visibly, adding
+> `AllowedSignUpEmailDomain` correctly enabled self-service signup in Cognito
+> while the login page went on hiding the **Sign Up** tab. No manual step is
+> needed to recover: upgrading to a new release changes the UI source location,
+> which rebuilds the bundle with your current parameter values. The manual
+> rebuild above is only needed if you want to fix it without upgrading.
+
 ## Security Considerations
 
 The web UI implementation includes several security features:
