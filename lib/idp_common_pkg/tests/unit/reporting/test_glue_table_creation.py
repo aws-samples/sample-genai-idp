@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pyarrow as pa
 import pytest
+
 from idp_common.models import Document, Section
 from idp_common.reporting.save_reporting_data import SaveReportingData
 

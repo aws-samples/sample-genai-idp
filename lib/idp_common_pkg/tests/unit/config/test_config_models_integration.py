@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+
 from idp_common.config.models import IDPConfig
 
 

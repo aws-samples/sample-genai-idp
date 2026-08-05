@@ -8,6 +8,7 @@ Unit tests for idp_common.monitoring.models
 from datetime import datetime, timezone
 
 import pytest
+
 from idp_common.monitoring.models import (
     DocumentRecord,
     MonitoringKPIs,

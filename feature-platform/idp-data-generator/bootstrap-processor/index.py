@@ -18,6 +18,7 @@ import tempfile
 import uuid
 
 import boto3
+
 from idp_common.synthesis import bootstrap as bootstrap_mod
 from idp_common.synthesis import engine, schema_bridge
 

@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from click.testing import CliRunner
+
 from idp_cli.cli import cli
 from idp_sdk.models import UseAsBaselineResult
 

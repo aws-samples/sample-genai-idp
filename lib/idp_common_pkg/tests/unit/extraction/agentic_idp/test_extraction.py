@@ -11,14 +11,16 @@ import boto3
 import pypdfium2 as pdfium
 import pytest
 import yaml
-from idp_common.models import Document, Page, Section
 from moto import mock_aws
 from PIL import Image
 from pydantic import BaseModel, Field, field_validator
 
+from idp_common.models import Document, Page, Section
+
 # Check if strands is actually available (not mocked)
 try:
     import strands  # noqa: F401
+
     from idp_common.extraction.agentic_idp import structured_output
     from idp_common.extraction.service import ExtractionService
 

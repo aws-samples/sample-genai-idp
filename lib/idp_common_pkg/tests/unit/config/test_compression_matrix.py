@@ -26,6 +26,7 @@ Run with `-s` flag to see the full matrix output:
 import json
 
 import pytest
+
 from idp_common.config.configuration_manager import (
     _COMPRESSED_DATA_FIELD,
     _DYNAMODB_ITEM_SIZE_LIMIT,

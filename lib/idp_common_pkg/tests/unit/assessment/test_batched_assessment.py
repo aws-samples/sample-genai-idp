@@ -14,6 +14,7 @@ reconciles the concatenated per-row assessments to full per-cell coverage.
 from __future__ import annotations
 
 import pytest
+
 from idp_common.assessment.batching import (
     assess_results_batched,
     format_split_stats_report,

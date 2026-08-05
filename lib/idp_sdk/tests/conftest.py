@@ -8,6 +8,7 @@ Pytest configuration and shared fixtures.
 import os
 
 import pytest
+
 from idp_sdk import IDPClient
 
 

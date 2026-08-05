@@ -8,6 +8,7 @@ Unit tests for Config operations (mocked).
 from unittest.mock import patch
 
 import pytest
+
 from idp_sdk import IDPClient
 from idp_sdk.models import ConfigCreateResult, ConfigValidationResult
 

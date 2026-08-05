@@ -13,6 +13,7 @@ from textwrap import dedent
 from unittest.mock import patch
 
 import pytest
+
 from idp_common.assessment import ocr_grounding as g
 from idp_common.assessment.service import AssessmentService
 from idp_common.models import Document, Page, Section, Status

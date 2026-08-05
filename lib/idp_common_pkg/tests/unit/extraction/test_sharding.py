@@ -4,6 +4,7 @@
 """Unit tests for token-budgeted page sharding (idp_common.extraction.sharding)."""
 
 import pytest
+
 from idp_common.extraction.sharding import (
     DEFAULT_MAX_PAGES_PER_SHARD,
     DEFAULT_SHARD_TOKEN_BUDGET,

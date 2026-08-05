@@ -121,6 +121,9 @@ QUARANTINE = {
     "samples/lambda-hook-inference/GENAIIDP-chandra-ocr-hook": (
         "test_local.py is a manual local-run script; collects zero pytest tests."
     ),
+    "samples/lambda-hook-inference/GENAIIDP-w2-copy-consistency": (
+        "test_local.py is a manual local-run script; collects zero pytest tests."
+    ),
     # Vendored/internal helper trees that contain test_*.py but are not suites.
     "lib/idp_sdk/idp_sdk/_core": (
         "Source tree, not a test root (contains helper modules named test_*)."

@@ -18,6 +18,7 @@ adaptive splitter recovered 0 rows.
 from __future__ import annotations
 
 import pytest
+
 from idp_common.assessment.batching import (
     assess_results_batched,
     compute_token_aware_batch_size,

@@ -19,6 +19,7 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from idp_common.bedrock.client import (
     LAMBDA_HOOK_MODEL_ID,
     BedrockClient,

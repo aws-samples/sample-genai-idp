@@ -6,12 +6,13 @@ Comprehensive tests for Pydantic model generation from JSON Schema.
 """
 
 import pytest
+from pydantic import BaseModel, ValidationError
+
 from idp_common.schema.pydantic_generator import (
     clean_schema_for_generation,
     create_pydantic_model_from_json_schema,
     validate_json_schema_for_pydantic,
 )
-from pydantic import BaseModel, ValidationError
 
 
 class TestCleanSchemaForGeneration:

@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 import yaml
+
 from idp_common.config.models import (
     IDPConfig,
 )

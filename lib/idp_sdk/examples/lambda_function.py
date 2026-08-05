@@ -228,6 +228,7 @@ def download_results(event, stack_name, region):
     import tempfile
 
     import boto3
+
     from idp_sdk import IDPClient
 
     if not stack_name:

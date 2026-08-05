@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, Mock
 
 import pytest
+
 from idp_common.document_versions import (
     build_run_id,
     delete_run_artifacts,

@@ -18,8 +18,9 @@ from pathlib import Path
 import boto3
 import pytest
 from click.testing import CliRunner
-from idp_feature_sdk.cli import main
 from moto import mock_aws
+
+from idp_feature_sdk.cli import main
 
 _HOST = "idp-main"
 _FEATURE_ID = "demo-feature"

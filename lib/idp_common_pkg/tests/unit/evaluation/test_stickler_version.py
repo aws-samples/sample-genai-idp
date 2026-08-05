@@ -13,6 +13,7 @@ agree so env drift or pin/constant drift fails loudly.
 from importlib.metadata import version
 
 import pytest
+
 from idp_common.evaluation.stickler_version import (
     STICKLER_INSTALLATION,
     STICKLER_VERSION,

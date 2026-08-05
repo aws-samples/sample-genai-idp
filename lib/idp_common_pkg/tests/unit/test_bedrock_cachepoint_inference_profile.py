@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from botocore.exceptions import ClientError
+
 from idp_common.bedrock.client import (
     _CACHEPOINT_BASE_MODELS,
     BedrockClient,

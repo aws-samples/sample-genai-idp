@@ -12,6 +12,7 @@ and CI-safe.
 """
 
 import pytest
+
 from idp_common.synthesis import schema_bridge
 
 pytestmark = pytest.mark.unit

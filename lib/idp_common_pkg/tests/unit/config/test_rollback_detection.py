@@ -17,8 +17,9 @@ from unittest.mock import MagicMock
 
 import boto3
 import pytest
-from idp_common.config.configuration_manager import ConfigurationManager
 from moto import mock_aws
+
+from idp_common.config.configuration_manager import ConfigurationManager
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 _LAMBDA_DIR = _REPO_ROOT / "src" / "lambda" / "update_configuration"

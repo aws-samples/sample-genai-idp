@@ -12,6 +12,7 @@ metadata. ``is_topk_response`` detects that shape.
 from __future__ import annotations
 
 import pytest
+
 from idp_common.extraction.topk_resolver import (
     is_topk_response,
     resolve_candidates,

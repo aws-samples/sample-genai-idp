@@ -6,6 +6,7 @@ Unit tests for the classification models module.
 """
 
 import pytest
+
 from idp_common.classification.models import (
     ClassificationResult,
     DocumentClassification,

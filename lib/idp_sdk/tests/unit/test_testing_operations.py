@@ -8,6 +8,7 @@ Unit tests for Testing operations (mocked).
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from idp_sdk import IDPClient
 from idp_sdk.models.testing import TestComparisonResult, TestRunResult
 from idp_sdk.operations.testing import TestingOperation
