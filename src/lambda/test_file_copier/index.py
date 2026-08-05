@@ -29,31 +29,67 @@ def handler(event, context):
             test_run_id = message['testRunId']
             test_set_id = message['testSetId']
             number_of_files = message.get('numberOfFiles')  # Optional parameter
+            # filesToProcess is the runner's authoritative cap = min(user
+            # numberOfFiles, test_set.fileCount). Always honored when present
+            # (checked with `is None`, not truthiness, so the cap is respected
+            # literally rather than reinterpreting a 0 as "unset"); falls back
+            # to numberOfFiles for messages enqueued before the runner started
+            # sending it.
+            files_to_process = message.get('filesToProcess')
+            if files_to_process is None:
+                files_to_process = number_of_files
             config_version = message.get('configVersion')  # Optional parameter
             tracking_table = message['trackingTable']
-            
+
             # Get environment variables
             test_set_bucket = os.environ['TEST_SET_BUCKET']
             input_bucket = os.environ['INPUT_BUCKET']
             baseline_bucket = os.environ['BASELINE_BUCKET']
-            
+
             logger.info(f"Processing test run {test_run_id} for test set {test_set_id}")
-            
+
             # List files from test set bucket
             input_files = _list_test_set_files(test_set_bucket, test_set_id, 'input')
             baseline_files = _list_test_set_files(test_set_bucket, test_set_id, 'baseline')
-            
+
             if not input_files:
                 raise ValueError(f"No input files found for test set: {test_set_id}")
-            
-            # Limit files if numberOfFiles is specified
-            if number_of_files is not None:
-                input_files = input_files[:number_of_files]
-                # Filter baseline files to match the selected input files in one pass
+
+            # Cap input_files at the runner's intended count. Sort first so the
+            # same N files are picked deterministically across repeat runs of
+            # the same test set — otherwise S3 list ordering (already
+            # lexicographic today, but not contractually stable) could swap
+            # which subset of an over-populated folder actually gets processed
+            # from run to run and mask baseline drift. Log the drift so an
+            # operator whose S3 folder outgrew the test set's fileCount notices
+            # instead of silently getting a subset.
+            #
+            # Sort order note: Python's default ``.sort()`` compares strings by
+            # Unicode code point. S3's ``list_objects_v2`` also returns keys in
+            # UTF-8 binary sort order, so for ASCII filenames (every test set
+            # in this repo today) the pre-fix legacy ``numberOfFiles`` path and
+            # the post-fix sorted path select the same subset. For test sets
+            # whose filenames contain non-ASCII characters, Python's default
+            # sort and S3's binary sort diverge above U+007F — future test
+            # sets should either stick to ASCII filenames or move to
+            # ``key=lambda s: s.encode('utf-8')`` here to match S3 exactly.
+            input_files.sort()
+            baseline_files.sort()
+            if files_to_process is not None and len(input_files) > files_to_process:
+                logger.warning(
+                    f"S3 test-set folder for {test_set_id} contains "
+                    f"{len(input_files)} input files but this run was scoped to "
+                    f"{files_to_process}; processing the first {files_to_process} "
+                    f"lexicographically. Update the test set's fileCount if the "
+                    f"extra files should be included."
+                )
+                input_files = input_files[:files_to_process]
+                # Filter baselines to match the (now-capped) selected inputs —
+                # same one-pass filter used when numberOfFiles was set.
                 input_file_set = set(input_file + '/' for input_file in input_files)
                 baseline_files = [bf for bf in baseline_files if any(bf.startswith(prefix) for prefix in input_file_set)]
-                logger.info(f"Limited to first {number_of_files} input files with {len(baseline_files)} corresponding baseline files")
-            
+                logger.info(f"Capped to {files_to_process} input files with {len(baseline_files)} corresponding baseline files")
+
             logger.info(f"Processing {len(input_files)} input files and {len(baseline_files)} baseline files")
             
             # Update test run with file list and set status to IN_PROGRESS

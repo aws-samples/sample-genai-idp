@@ -206,3 +206,46 @@ def test_lambda_handler_missing_env_vars():
     # Without environment variables, the Lambda handles gracefully
     result = index.lambda_handler(event, context)
     assert result is False
+
+
+@pytest.mark.unit
+@patch.dict(
+    os.environ,
+    {
+        "TRACKING_TABLE_NAME": "test-table",
+        "DELETE_DOCUMENT_FUNCTION_NAME": "delete-func",
+        "BASELINE_BUCKET": "test-baseline-bucket",
+    },
+)
+def test_document_cascade_forwards_caller_identity():
+    """The fan-out payload must carry the caller's identity.
+
+    Regression test. deleteDocument enforces Admin/Author on the identity in its
+    event, so a payload without one is rejected with PermissionError. The invoke
+    is asynchronous ('Event'), so that rejection never surfaces here: deleteTests
+    returned True while every document silently leaked. Asserting only on
+    objectKeys -- as test_lambda_handler_success does -- cannot catch that.
+    """
+    mock_table = Mock()
+    index.dynamodb.Table.return_value = mock_table
+    index.lambda_client.invoke.reset_mock()
+
+    mock_paginator = Mock()
+    index.s3.get_paginator.return_value = mock_paginator
+    mock_paginator.paginate.return_value = [{}]
+
+    mock_table.get_item.return_value = {"Item": {"Files": ["file1.pdf"]}}
+
+    identity = {"claims": {"cognito:groups": ["Admin"], "email": "admin@example.com"}}
+    result = index.lambda_handler(
+        {"identity": identity, "arguments": {"testRunIds": ["test1"]}}, Mock()
+    )
+
+    assert result is True
+    payload = json.loads(index.lambda_client.invoke.call_args[1]["Payload"])
+    assert payload["identity"] == identity, (
+        "fan-out payload dropped the caller identity; deleteDocument will reject it"
+    )
+    # The downstream check reads exactly this path -- assert its shape, not just presence.
+    assert payload["identity"]["claims"]["cognito:groups"] == ["Admin"]
+    assert payload["arguments"]["objectKeys"] == ["test1/file1.pdf"]
