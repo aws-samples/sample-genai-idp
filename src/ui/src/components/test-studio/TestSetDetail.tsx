@@ -38,6 +38,7 @@ import { appLayoutLabels } from '../common/labels';
 import { TEST_STUDIO_PATH, testSetDocumentHref, testSetAnnotateHref } from '../../routes/constants';
 import TestDocThumbnail from './TestDocThumbnail';
 import ReviewEffortModal from './ReviewEffortModal';
+import GenerateDraftLabelsModal from './GenerateDraftLabelsModal';
 import type { TestSetDocumentSectionRef } from './GroundTruthVisualEditor';
 
 const client = generateClient();
@@ -130,6 +131,7 @@ const TestSetDetail = (): React.JSX.Element => {
   } | null>(null);
   const [isStartingLabels, setIsStartingLabels] = useState(false);
   const [showEffortModal, setShowEffortModal] = useState(false);
+  const [showLabelModal, setShowLabelModal] = useState(false);
   // Default to worst-first once any document carries confidence — the whole point
   // of draft labels is to review the least trustworthy ones first.
   const [worstFirst, setWorstFirst] = useState(true);
@@ -177,14 +179,14 @@ const TestSetDetail = (): React.JSX.Element => {
     fetchPage(pageIndex, pageTokens);
   };
 
-  const handleGenerateDraftLabels = async () => {
+  const handleGenerateDraftLabels = async (configVersion?: string, objectKeys?: string[]) => {
     if (!testSetId) return;
     setIsStartingLabels(true);
     setError(null);
     try {
       const response = await client.graphql({
         query: generateDraftLabels,
-        variables: { input: { testSetId } },
+        variables: { input: { testSetId, configVersion, objectKeys } },
       });
       const job = response.data?.generateDraftLabels;
       if (job) {
@@ -195,6 +197,7 @@ const TestSetDetail = (): React.JSX.Element => {
           labeled: job.labeled ?? 0,
           skippedAlreadyLabeled: job.skippedAlreadyLabeled ?? 0,
         });
+        setShowLabelModal(false);
       }
     } catch (err) {
       logger.error('Error starting draft labeling:', err);
@@ -317,7 +320,7 @@ const TestSetDetail = (): React.JSX.Element => {
                       )}
                       <Button
                         iconName="gen-ai"
-                        onClick={handleGenerateDraftLabels}
+                        onClick={() => setShowLabelModal(true)}
                         loading={isStartingLabels}
                         disabled={isLoading || labelJob?.status === 'RUNNING'}
                       >
@@ -411,6 +414,15 @@ const TestSetDetail = (): React.JSX.Element => {
                   </Box>
                 </Box>
               }
+            />
+
+            <GenerateDraftLabelsModal
+              visible={showLabelModal}
+              testSetId={testSetId ?? ''}
+              documents={documents}
+              submitting={isStartingLabels}
+              onDismiss={() => setShowLabelModal(false)}
+              onSubmit={handleGenerateDraftLabels}
             />
 
             <ReviewEffortModal
