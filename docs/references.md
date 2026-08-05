@@ -70,8 +70,8 @@ Reference deployments showing measurable accuracy, cost, and throughput results.
 
 ## Research Papers
 
-Peer-reviewed work behind the accelerator's agentic and document-splitting
-approaches.
+Published and preprint work behind the accelerator's agentic, configuration
+optimization, and document-splitting approaches.
 
 - **[IDP Accelerator: Agentic Document Intelligence from Extraction to Compliance Validation](https://arxiv.org/abs/2602.23481)**
   *(ACL 2026)* — The research paper describing the accelerator itself: a
@@ -80,6 +80,19 @@ approaches.
   LLM-driven rule-validation module — reporting 98% classification accuracy, 80%
   lower processing latency, and 77% lower operational cost in a healthcare
   deployment.
+
+- **[IDP AutoOpt: Agent-Driven Optimization of Document Processing Pipeline Configurations](https://arxiv.org/abs/2607.26075)**
+  *(arXiv preprint, Jul 2026)* — The research paper behind the
+  [Auto Optimizer](./extensions/auto-optimizer.md): an autonomous LLM agent that
+  discovers high-performing pipeline configurations (prompts, models, OCR
+  settings, schemas) in a closed loop — scoring against a small labeled set,
+  diagnosing field-level errors, proposing targeted edits, and re-evaluating —
+  steered by human-authored domain skills. Reports matching or exceeding
+  human-expert accuracy at equal or lower cost (90.2% vs 81.6% at 4.6x lower
+  per-page cost on an extraction benchmark), cutting setup from weeks to under
+  two hours. Also finds a hard agent-capability threshold below which
+  optimization fails, and that curated domain skills beat raw source-code
+  access.
 
 - **[DocSplit: A Comprehensive Benchmark Dataset and Evaluation Approach for Document Packet Recognition and Splitting](https://www.amazon.science/publications/docsplit-a-comprehensive-benchmark-dataset-and-evaluation-approach-for-document-packet-recognition-and-splitting)**
   *(ACL 2026)* — Introduces the first benchmark and evaluation metrics for

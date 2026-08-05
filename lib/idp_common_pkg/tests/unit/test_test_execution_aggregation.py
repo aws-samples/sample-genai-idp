@@ -222,32 +222,76 @@ class TestAggregation:
         assert "accuracy_breakdown" in metrics
 
     def test_calculate_false_alarm_rate(self, mock_env):
-        """Test false alarm rate calculation."""
+        """Test false alarm rate calculation.
+
+        FAR = FA / (FA + TN), using Stickler's false-alarm count rather than the
+        combined ``fp``. Since ``fp == fa + fd``, using ``fp`` here would fold
+        false discoveries into the false-alarm rate.
+        """
         index = import_test_module()
 
-        # FP / (FP + TN)
-        metrics = {"fp": 2, "tn": 8}
+        # FA / (FA + TN) — fd present and must NOT contribute.
+        metrics = {"fa": 2, "fd": 5, "fp": 7, "tn": 8}
         rate = index._calculate_false_alarm_rate(metrics)
-        assert rate == 0.2  # 2 / (2 + 8)
+        assert rate == 0.2  # 2 / (2 + 8), not 7 / (7 + 8)
 
         # Zero denominator
-        metrics = {"fp": 0, "tn": 0}
+        metrics = {"fa": 0, "tn": 0}
         rate = index._calculate_false_alarm_rate(metrics)
         assert rate is None
 
     def test_calculate_false_discovery_rate(self, mock_env):
-        """Test false discovery rate calculation."""
+        """Test false discovery rate calculation.
+
+        FDR = FD / (FD + TP), using Stickler's false-discovery count rather than
+        the combined ``fp`` (see ``test_calculate_false_alarm_rate``).
+        """
         index = import_test_module()
 
-        # FP / (FP + TP)
-        metrics = {"fp": 3, "tp": 7}
+        # FD / (FD + TP) — fa present and must NOT contribute.
+        metrics = {"fd": 3, "fa": 4, "fp": 7, "tp": 7}
         rate = index._calculate_false_discovery_rate(metrics)
-        assert rate == 0.3  # 3 / (3 + 7)
+        assert rate == 0.3  # 3 / (3 + 7), not 7 / (7 + 7)
 
         # Zero denominator
-        metrics = {"fp": 0, "tp": 0}
+        metrics = {"fd": 0, "tp": 0}
         rate = index._calculate_false_discovery_rate(metrics)
         assert rate is None
+
+    def test_far_fdr_match_per_doc_evaluation_service_formulas(self, mock_env):
+        """Run-level FAR/FDR must equal the per-doc formulas on the same counts.
+
+        The per-doc path
+        (``idp_common.evaluation.stickler_backend.results.transform_stickler_result``)
+        derives FAR from ``fa``/``tn`` and FDR from ``fd``/``tp``. This Lambda
+        previously used the combined ``fp`` for both, so the per-document detail
+        view and the run-level dashboard reported different error rates for the
+        same document whenever both ``fa`` and ``fd`` were non-zero. Pin the
+        agreement so the two paths can't drift apart again.
+        """
+        index = import_test_module()
+
+        # Counts with BOTH error classes present — the case where fp-based and
+        # fa/fd-based formulas diverge. Respects Stickler's fp == fa + fd.
+        counts = {"tp": 5, "fa": 2, "fd": 3, "fp": 5, "tn": 4, "fn": 1}
+
+        # Per-doc formulas, transcribed from stickler_backend/results.py.
+        expected_far = counts["fa"] / (counts["fa"] + counts["tn"])
+        expected_fdr = counts["fd"] / (counts["fd"] + counts["tp"])
+
+        assert index._calculate_false_alarm_rate(counts) == pytest.approx(expected_far)
+        assert index._calculate_false_discovery_rate(counts) == pytest.approx(
+            expected_fdr
+        )
+
+        # And confirm the old fp-based formulas really would have disagreed,
+        # so this test fails loudly if someone reverts to them.
+        assert expected_far != pytest.approx(
+            counts["fp"] / (counts["fp"] + counts["tn"])
+        )
+        assert expected_fdr != pytest.approx(
+            counts["fp"] / (counts["fp"] + counts["tp"])
+        )
 
     def test_load_s3_json(self, mock_env):
         """Test loading JSON from S3."""
@@ -447,14 +491,28 @@ class TestAggregation:
 
     def test_pattern_aggregation_enhancement(self, mock_env):
         """
-        Test that pattern aggregation enhances Stickler's confidence metrics for nested fields.
+        Test that pattern aggregation collapses list-indexed confidence paths
+        into pattern keys and computes standard Stickler calibration metrics
+        on the pooled sample.
+
+        R7 replaced the old sklearn-based ``_enhance_confidence_metrics_with_patterns``
+        post-pass with ``_IndexCollapsingConfidenceAccumulator``. This test
+        drives the new accumulator directly (which is what the aggregation
+        Lambda's ``BulkStructuredModelEvaluator`` does internally).
 
         This validates:
-        1. Path-based keys (LineItems[0].Rate, LineItems[1].Rate) are aggregated to patterns (LineItems.Rate)
-        2. Confidence metrics match field_metrics key format
-        3. AUROC/Brier scores are computed for pattern-based keys
+        1. Path-based keys (``LineItems[0].Rate``, ``LineItems[1].Rate``) get
+           aggregated to the pattern key (``LineItems.Rate``).
+        2. AUROC / Brier / ECE are computed on the pooled per-pattern sample.
+        3. Sample counts are correct (all indices across all docs land in one
+           bucket).
         """
         index = import_test_module()
+        from stickler.structured_object_evaluator.models.confidence import (
+            AUROCMetric,
+            BrierScoreMetric,
+            ECEMetric,
+        )
 
         # Create comparison results with nested array fields
         comparison_results = [
@@ -690,100 +748,148 @@ class TestAggregation:
             },
         ]
 
-        # Aggregate with Stickler
-        from stickler.structured_object_evaluator.bulk_structured_model_evaluator import (
-            aggregate_from_comparisons,
+        # Reshape the fixture so field_comparisons carry the leaf-level
+        # ``actual_key`` that Stickler's extractor joins on (fixture originally
+        # had entries at the LineItems[N] object level for the old sklearn
+        # post-pass which walked its own match map).
+        for cr in comparison_results:
+            new_fcs = []
+            for fc in cr["field_comparisons"]:
+                key = fc.get("field_path") or fc.get("expected_key")
+                if key == "Agency":
+                    new_fcs.append(
+                        {
+                            **fc,
+                            "actual_key": key,
+                            "field_path": key,
+                            "expected_key": key,
+                            "score": 1.0 if fc["match"] else 0.0,
+                        }
+                    )
+                elif key and key.startswith("LineItems["):
+                    # Materialize as LineItems[N].Rate to match the confidence key.
+                    leaf = f"{key}.Rate"
+                    new_fcs.append(
+                        {
+                            **fc,
+                            "actual_key": leaf,
+                            "field_path": leaf,
+                            "expected_key": leaf,
+                            "score": 1.0 if fc["match"] else 0.0,
+                        }
+                    )
+                else:
+                    new_fcs.append(fc)
+            cr["field_comparisons"] = new_fcs
+
+        # Drive the new accumulator directly.
+        acc = index._IndexCollapsingConfidenceAccumulator(
+            metrics=[AUROCMetric(), ECEMetric(), BrierScoreMetric()]
         )
-
-        process_eval = aggregate_from_comparisons(comparison_results)
-
-        # Mock field_metrics with pattern-based keys (as Stickler would generate with schema)
-        # In production, this comes from Stickler's bulk aggregator when schema is provided
-        field_metrics = {
-            "Agency": {"cm_accuracy": 1.0, "tp": 10, "fp": 0, "fn": 0, "tn": 0},
-            "LineItems.Rate": {
-                "cm_accuracy": 0.80,
-                "tp": 16,
-                "fp": 0,
-                "fn": 4,
-                "tn": 0,
-            },
-        }
-
-        # Enhance with pattern aggregation
-        enhanced_confidence_metrics = index._enhance_confidence_metrics_with_patterns(
-            process_eval.confidence_metrics, comparison_results, field_metrics
-        )
+        for cr in comparison_results:
+            acc.accumulate(cr, None)
+        enhanced_confidence_metrics = acc.compute()
 
         assert enhanced_confidence_metrics is not None, (
-            "Should return enhanced confidence metrics"
+            "Should return aggregated confidence metrics"
         )
-
         fields = enhanced_confidence_metrics.get("fields", {})
 
-        # Should have pattern-based key
+        # Pattern-based key present (indices collapsed to the pattern).
         assert "LineItems.Rate" in fields, (
             "Should have pattern-based key LineItems.Rate"
         )
 
-        # Check metrics for LineItems.Rate
         line_items_rate = fields["LineItems.Rate"]
+        # Stickler emits AUROC / ECE / Brier under these keys.
         assert "auroc" in line_items_rate, "Should have AUROC"
-        assert "brier" in line_items_rate, "Should have Brier score"
-        assert "sample_count" in line_items_rate, "Should have sample count"
-        assert "mean_confidence" in line_items_rate, "Should have mean confidence"
+        assert "brier_score" in line_items_rate, "Should have Brier score"
+        assert "ece" in line_items_rate, "Should have ECE (with bins)"
 
-        # Validate sample count (20 total line items across 10 docs)
-        assert line_items_rate["sample_count"] == 20, (
-            f"Should have 20 samples, got {line_items_rate['sample_count']}"
-        )
-
-        # Validate mean confidence (sum of all 20 line item confidences / 20)
-        expected_mean = (
-            0.95
-            + 0.92
-            + 0.88
-            + 0.94
-            + 0.91
-            + 0.97
-            + 0.89
-            + 0.65
-            + 0.93
-            + 0.90
-            + 0.72
-            + 0.96
-            + 0.88
-            + 0.94
-            + 0.68
-            + 0.91
-            + 0.87
-            + 0.92
-            + 0.58
-            + 0.95
-        ) / 20
-        actual_mean = line_items_rate["mean_confidence"]
-        assert abs(actual_mean - expected_mean) < 0.01, (
-            f"Mean confidence should be ~{expected_mean}, got {actual_mean}"
-        )
-
-        # Validate AUROC (should be computable with mixed match results)
+        # AUROC / Brier in [0, 1] on a real sample.
         auroc = line_items_rate["auroc"]["value"]
         assert auroc is not None, "AUROC should be computed"
         assert 0 <= auroc <= 1, f"AUROC should be in [0,1], got {auroc}"
-
-        # Validate Brier score
-        brier = line_items_rate["brier"]["value"]
+        brier = line_items_rate["brier_score"]["value"]
         assert brier is not None, "Brier score should be computed"
         assert 0 <= brier <= 1, f"Brier score should be in [0,1], got {brier}"
+
+        # Sample count derives from ECE bins — 20 line items across 10 docs
+        # (matches the fixture).
+        total_from_bins = sum(b.get("count", 0) for b in line_items_rate["ece"]["bins"])
+        assert total_from_bins == 20, (
+            f"Should have 20 samples pooled across all LineItems indices, "
+            f"got {total_from_bins}"
+        )
 
         print("\n=== PATTERN AGGREGATION RESULTS ===")
         print("   LineItems.Rate:")
         print(f"     - AUROC: {auroc}")
         print(f"     - Brier: {brier}")
-        print(f"     - Sample count: {line_items_rate['sample_count']}")
-        print(f"     - Mean confidence: {actual_mean:.3f}")
+        print(f"     - Sample count: {total_from_bins}")
         print("\n✅ Pattern aggregation successfully enhanced confidence metrics")
 
         # ECARB computation test removed - Stickler v0.4.0 has specific requirements
         # for ECARB that are not satisfied by this test's mock data structure.
         # ECARB validation is covered by integration tests with real data.
+
+
+@pytest.mark.unit
+class TestBrierScoreKeyRename:
+    """Regression: Stickler's BrierScoreMetric emits under ``brier_score`` but
+    the Test Studio UI (TestResults.tsx, TestComparison.tsx) + awsjson-types
+    still read ``brier`` (matching the deleted sklearn post-pass's key).
+    ``_rename_brier_score_key`` maps the accumulator output to the UI-expected
+    key at the aggregation boundary.
+    """
+
+    def test_renames_overall_brier_score_to_brier(self, mock_env):
+        index = import_test_module()
+        cm = {
+            "overall": {
+                "auroc": {"value": 0.9},
+                "brier_score": {"value": 0.2},
+                "ece": {"value": 0.05},
+            },
+        }
+        out = index._rename_brier_score_key(cm)
+        assert "brier" in out["overall"]
+        assert out["overall"]["brier"] == {"value": 0.2}
+        assert "brier_score" not in out["overall"]
+
+    def test_renames_per_field_brier_score_to_brier(self, mock_env):
+        index = import_test_module()
+        cm = {
+            "fields": {
+                "LineItems.Rate": {
+                    "auroc": {"value": 0.8},
+                    "brier_score": {"value": 0.3},
+                },
+                "Agency": {
+                    "auroc": {"value": 0.95},
+                    "brier_score": {"value": 0.1},
+                },
+            },
+        }
+        out = index._rename_brier_score_key(cm)
+        for field_name in ("LineItems.Rate", "Agency"):
+            assert "brier" in out["fields"][field_name]
+            assert "brier_score" not in out["fields"][field_name]
+
+    def test_passthrough_on_none_or_empty(self, mock_env):
+        index = import_test_module()
+        assert index._rename_brier_score_key(None) is None
+        assert index._rename_brier_score_key({}) == {}
+
+    def test_preserves_existing_brier_key(self, mock_env):
+        """If the payload already has ``brier`` (e.g. from an older codepath),
+        don't clobber it with the (possibly stale) ``brier_score`` value."""
+        index = import_test_module()
+        cm = {
+            "overall": {
+                "brier": {"value": 0.5},
+                "brier_score": {"value": 0.9},  # would clobber if we didn't guard
+            },
+        }
+        out = index._rename_brier_score_key(cm)
+        assert out["overall"]["brier"] == {"value": 0.5}

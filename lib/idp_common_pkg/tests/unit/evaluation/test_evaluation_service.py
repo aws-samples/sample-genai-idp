@@ -192,26 +192,19 @@ class TestEvaluationService:
             {"tp": 1, "fp": 0, "fn": 0, "tn": 0, "fp1": 0, "fp2": 0},
         )
 
-        # Patch the calculate_metrics function
-        with patch("idp_common.evaluation.metrics.calculate_metrics") as mock_metrics:
-            mock_metrics.return_value = {
-                "precision": 1.0,
-                "recall": 1.0,
-                "f1_score": 1.0,
-            }
+        # Document-level metrics now come from Stickler counts (R10 removed
+        # the calculate_metrics module the previous test used to patch).
+        result = service.evaluate_document(
+            actual_document=sample_document, expected_document=expected_document
+        )
 
-            # Evaluate document
-            result = service.evaluate_document(
-                actual_document=sample_document, expected_document=expected_document
-            )
+        # Check result
+        assert result.evaluation_report_uri is not None
+        assert result.status == Status.COMPLETED
+        assert result.evaluation_result is not None
 
-            # Check result
-            assert result.evaluation_report_uri is not None
-            assert result.status == Status.COMPLETED
-            assert result.evaluation_result is not None
-
-            # Verify write_content was called twice (for JSON and Markdown)
-            assert mock_write_content.call_count == 2
+        # Verify write_content was called twice (for JSON and Markdown)
+        assert mock_write_content.call_count == 2
 
     @patch("idp_common.s3.get_json_content")
     @patch("idp_common.evaluation.service.EvaluationService._process_section")
@@ -415,7 +408,11 @@ class TestEvaluationService:
             },
         }
 
-        cleaned = service._clean_null_descriptions(schema)
+        from idp_common.evaluation.stickler_backend.model_factory import (
+            clean_null_descriptions,
+        )
+
+        cleaned = clean_null_descriptions(schema)
 
         # Null descriptions should be replaced with empty strings
         assert cleaned["properties"]["Agency"]["description"] == ""

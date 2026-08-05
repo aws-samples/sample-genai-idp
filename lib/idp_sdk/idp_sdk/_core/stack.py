@@ -18,6 +18,8 @@ from typing import Dict, List, Optional
 
 import boto3
 
+from .s3_security import apply_enforce_ssl_only
+
 logger = logging.getLogger(__name__)
 
 
@@ -2162,6 +2164,12 @@ def get_or_create_config_bucket(region: str) -> str:
             bucket_name = bucket["Name"]
             if bucket_name.startswith(bucket_prefix):
                 logger.info(f"Using existing config bucket: {bucket_name}")
+                # Harden a bucket left behind by an older idp-cli that created
+                # it without the policy. This function is the only code that
+                # touches these buckets, so without this the ones most likely
+                # to be unhardened would stay that way indefinitely. Additive,
+                # and non-fatal — reusing the bucket must not break on it.
+                apply_enforce_ssl_only(s3, bucket_name, region, raise_on_error=False)
                 return bucket_name
     except Exception as e:
         logger.warning(f"Error listing buckets: {e}")
@@ -2211,6 +2219,10 @@ def get_or_create_config_bucket(region: str) -> str:
                 ]
             },
         )
+
+        # Deny any non-TLS request (same EnforceSSLOnly statement the
+        # CloudFormation-managed buckets carry).
+        apply_enforce_ssl_only(s3, bucket_name, region)
 
         # Add tags
         s3.put_bucket_tagging(

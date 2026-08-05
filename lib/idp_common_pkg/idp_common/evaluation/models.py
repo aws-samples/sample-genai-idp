@@ -16,10 +16,13 @@ class EvaluationMethod(Enum):
     """Evaluation method types for different field comparison approaches."""
 
     EXACT = "EXACT"  # Exact string match after stripping punctuation and whitespace
-    NUMERIC_EXACT = "NUMERIC_EXACT"  # Exact numeric match after normalizing
+    NUMERIC_EXACT = (
+        "NUMERIC_EXACT"  # Exact numeric match, ±tolerance via evaluation-threshold
+    )
     SEMANTIC = "SEMANTIC"  # Semantic similarity comparison using embeddings
     HUNGARIAN = "HUNGARIAN"  # Bipartite matching for lists of values
     FUZZY = "FUZZY"  # Fuzzy string matching
+    LEVENSHTEIN = "LEVENSHTEIN"  # Levenshtein-distance-based string comparison
     DATE = "DATE"  # Semantic date comparison (format-insensitive, ranges)
     LLM = "LLM"  # LLM-based comparison using Bedrock models
 
@@ -99,6 +102,16 @@ class DocSplitMetrics:
         default_factory=list
     )  # All predicted sections for unmatched display
     errors: List[str] = field(default_factory=list)
+    # Graded packet metrics (R14, from stickler.doc_split.packet_evaluation_metrics.
+    # evaluate_packet — V-measure / Rand index / ordering score). Optional
+    # because the exact-match counters above already have meaning on their own
+    # and older results.json files won't carry these fields. All values are
+    # in [0.0, 1.0] where 1.0 is perfect.
+    final_score: Optional[float] = None
+    clustering_score: Optional[float] = None
+    v_measure: Optional[float] = None
+    rand_index: Optional[float] = None
+    avg_ordering_score: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation."""
@@ -116,6 +129,11 @@ class DocSplitMetrics:
             "section_details_with_order": self.section_details_with_order,
             "predicted_sections": self.predicted_sections,
             "errors": self.errors,
+            "final_score": self.final_score,
+            "clustering_score": self.clustering_score,
+            "v_measure": self.v_measure,
+            "rand_index": self.rand_index,
+            "avg_ordering_score": self.avg_ordering_score,
         }
 
 
@@ -677,6 +695,13 @@ class DocumentEvaluationResult:
                 # (rendered as a note above, not a scored metric)
                 if metric in ("evaluation_failed", "skipped_field_count"):
                     continue
+                # Section metrics can carry non-numeric internal state (e.g.
+                # ``_stickler_counts``, a nested dict of raw Stickler tp/fa/fd/
+                # fp/tn/fn used for the document-level rollup). Skip anything
+                # that can't be formatted as ``{:.4f}`` so a new internal
+                # metric doesn't crash ``to_markdown``.
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    continue
 
                 # Add a visual indicator based on metric value
                 if metric in [
@@ -888,8 +913,19 @@ class DocumentEvaluationResult:
             "   - Use for: Text where meaning matters more than exact wording"
         )
         sections.append("")
+        sections.append("6. **DATE** - Format-insensitive date / date-range comparison")
         sections.append(
-            "6. **LLM** - Advanced semantic evaluation using **AWS Bedrock LLMs**"
+            "   - Compares dates by resolved value, not surface form"
+            " (e.g. `2024-01-05` == `January 5, 2024`)"
+        )
+        sections.append(
+            "   - Optional per-field config via `x-aws-idp-evaluation-method-config`:"
+            " `dayfirst`, `range_mode`, `tolerance`"
+        )
+        sections.append("   - Use for: Dates in mixed formats, date ranges, birthdates")
+        sections.append("")
+        sections.append(
+            "7. **LLM** - Advanced semantic evaluation using **AWS Bedrock LLMs**"
         )
         sections.append("   - Configured via `evaluation.llm_method` section:")
         sections.append("     - `model`: Bedrock model ID (e.g., Claude Haiku, Sonnet)")
@@ -908,7 +944,7 @@ class DocumentEvaluationResult:
         sections.append("### Array-Level Matching")
         sections.append("")
         sections.append(
-            "7. **HUNGARIAN** - Bipartite graph matching for arrays of structured objects"
+            "8. **HUNGARIAN** - Bipartite graph matching for arrays of structured objects"
         )
         sections.append(
             "   - Finds optimal 1:1 mapping between expected and actual lists"
@@ -921,7 +957,7 @@ class DocumentEvaluationResult:
         )
         sections.append("")
         sections.append(
-            "8. **LLM for Arrays** - Semantic evaluation of entire list structures"
+            "9. **LLM for Arrays** - Semantic evaluation of entire list structures"
         )
         sections.append("   - Evaluates whether lists semantically match as a whole")
         sections.append(
@@ -931,7 +967,7 @@ class DocumentEvaluationResult:
         sections.append("### Field Weighting")
         sections.append("")
         sections.append(
-            "Fields can be assigned importance weights using `x-aws-stickler-weight` in the schema:"
+            "Fields can be assigned importance weights using `x-aws-idp-evaluation-weight` in the schema:"
         )
         sections.append("- **Default weight**: 1.0 (standard importance)")
         sections.append(
