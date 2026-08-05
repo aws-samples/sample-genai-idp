@@ -3,102 +3,54 @@
 
 """Direct tests for BDA processresults Lambda-local functions.
 
-These test the exact logic that lives in
+These exercise the REAL functions in
 ``patterns/unified/src/bda_processresults_function/index.py`` —
-specifically ``resolve_class_schema`` and
-``add_confidence_thresholds_to_explainability_schema_aware`` — without
-importing the Lambda module (which pulls Lambda-only deps like
-``aws_lambda_powertools``).
+``resolve_class_schema`` and
+``add_confidence_thresholds_to_explainability_schema_aware`` — by loading that
+module with ``importlib`` (the same approach as
+``tests/unit/test_mlflow_logger.py``), with its one Lambda-only dependency
+(``pypdfium2``) mocked out.
 
-The functions are re-implemented here to match the Lambda source so that
-regressions on the two MR-review blocking fixes are caught:
+Loading the shipped module rather than re-implementing it is deliberate: an
+earlier revision of these tests carried hand-written mirrors of both functions,
+and because the mirrors omitted the very guard that was missing in the Lambda,
+two real defects passed the suite. Testing the real thing removes that class of
+false green.
+
+Regressions guarded here:
   1. Multi-entry explainability_info must enrich ALL dict elements.
-  2. Boolean ``x-aws-idp-document-type`` must not crash.
+  2. Non-string ``x-aws-idp-document-type`` (legacy migration sets it to the
+     boolean ``True``) must not crash.
 """
 
 from __future__ import annotations
 
+import importlib.util
+import os
 from types import SimpleNamespace
-from typing import Any
+from unittest.mock import MagicMock, patch
 
-from idp_common.assessment.batching import enrich_assessment_with_thresholds
+_INDEX_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "../../../../../patterns/unified/src/bda_processresults_function/index.py",
+)
 
-# ---------------------------------------------------------------------------
-# Re-implementations matching the Lambda source (patterns/ is not importable)
-# ---------------------------------------------------------------------------
+# pypdfium2 is a Lambda-runtime dependency of the module (PDF page rendering)
+# and is not a test dependency of idp_common_pkg; nothing under test touches it.
+with patch.dict("sys.modules", {"pypdfium2": MagicMock()}):
+    _spec = importlib.util.spec_from_file_location("bda_processresults", _INDEX_PATH)
+    if _spec is None or _spec.loader is None:
+        raise ImportError(f"Could not load BDA processresults module at {_INDEX_PATH}")
+    bda_index = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(bda_index)
 
-
-def resolve_class_schema(doc_class: str, config: Any) -> dict | None:
-    """Mirror of bda_processresults_function/index.py::resolve_class_schema."""
-    if not doc_class or config is None or not hasattr(config, "classes"):
-        return None
-    for schema in config.classes or []:
-        if not isinstance(schema, dict):
-            continue
-        dt = schema.get("x-aws-idp-document-type", "")
-        if isinstance(dt, str) and dt.lower() == doc_class.lower():
-            return schema
-    return None
-
-
-def add_confidence_thresholds_to_explainability_flat(
-    explainability_data, confidence_threshold
-):
-    """Mirror of the flat-threshold recursive enrichment."""
-    if isinstance(explainability_data, dict):
-        result = explainability_data.copy()
-        if "confidence" in result and isinstance(result["confidence"], (int, float)):
-            result["confidence_threshold"] = confidence_threshold
-        for key, value in result.items():
-            result[key] = add_confidence_thresholds_to_explainability_flat(
-                value, confidence_threshold
-            )
-        return result
-    elif isinstance(explainability_data, list):
-        return [
-            add_confidence_thresholds_to_explainability_flat(item, confidence_threshold)
-            for item in explainability_data
-        ]
-    else:
-        return explainability_data
-
-
-def add_confidence_thresholds_to_explainability_schema_aware(
-    explainability_data, result_data, default_confidence_threshold, config
-):
-    """Mirror of bda_processresults_function/index.py::add_confidence_thresholds_to_explainability_schema_aware."""
-    doc_class = (result_data.get("document_class") or {}).get("type", "")
-    class_schema = resolve_class_schema(doc_class, config)
-
-    if not class_schema:
-        return add_confidence_thresholds_to_explainability_flat(
-            explainability_data, default_confidence_threshold
-        )
-
-    def _enrich(node):
-        enriched, _alerts = enrich_assessment_with_thresholds(
-            node, class_schema, default_confidence_threshold
-        )
-        return enriched
-
-    if isinstance(explainability_data, list) and len(explainability_data) > 0:
-        try:
-            return [
-                _enrich(item) if isinstance(item, dict) else item
-                for item in explainability_data
-            ]
-        except Exception:
-            return add_confidence_thresholds_to_explainability_flat(
-                explainability_data, default_confidence_threshold
-            )
-    if isinstance(explainability_data, dict):
-        try:
-            return _enrich(explainability_data)
-        except Exception:
-            return add_confidence_thresholds_to_explainability_flat(
-                explainability_data, default_confidence_threshold
-            )
-    return explainability_data
+resolve_class_schema = bda_index.resolve_class_schema
+add_confidence_thresholds_to_explainability_flat = (
+    bda_index.add_confidence_thresholds_to_explainability
+)
+add_confidence_thresholds_to_explainability_schema_aware = (
+    bda_index.add_confidence_thresholds_to_explainability_schema_aware
+)
 
 
 # ---------------------------------------------------------------------------

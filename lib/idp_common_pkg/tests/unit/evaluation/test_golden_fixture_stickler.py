@@ -128,10 +128,11 @@ def test_doc_split_metrics_match_golden():
     This test consumes ``DocSplitClassificationMetrics`` from stickler directly
     (not via the IDP fork) so the R8 fork deletion is a no-op for goldens.
     """
-    from idp_common.evaluation.service import _convert_numpy_types
     from stickler.doc_split.doc_split_classification_metrics import (
         DocSplitClassificationMetrics,
     )
+
+    from idp_common.evaluation.service import _convert_numpy_types
 
     input_path = FIXTURE_DIR / "doc_split_metrics.input.json"
     golden_path = DOC_SPLIT_GOLDEN_DIR / "doc_split_metrics.golden.json"
@@ -219,10 +220,11 @@ def test_graded_packet_metrics_computed_from_section_dicts():
     ``final_score`` / ``clustering_score`` / ``v_measure`` / ``rand_index`` /
     ``avg_ordering_score``. Exercised against the doc-split fixture to keep
     one input driving all doc-split-related tests."""
-    from idp_common.evaluation.stickler_backend import compute_graded_packet_metrics
     from stickler.doc_split.doc_split_classification_metrics import (
         DocSplitClassificationMetrics,
     )
+
+    from idp_common.evaluation.stickler_backend import compute_graded_packet_metrics
 
     spec = json.loads((FIXTURE_DIR / "doc_split_metrics.input.json").read_text())
     calc = DocSplitClassificationMetrics()

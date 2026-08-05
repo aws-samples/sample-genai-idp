@@ -445,16 +445,20 @@ def resolve_class_schema(doc_class, config):
 
     Returns:
         dict: The class schema, or None when not found.
+
+    Thin wrapper over ``idp_common.assessment.threshold_resolver.find_class_schema``
+    — the lookup itself (including the non-string ``x-aws-idp-document-type``
+    guard) lives there and is unit-tested, so this path and the standalone
+    assessment service cannot drift apart.
     """
-    if not doc_class or config is None or not hasattr(config, "classes"):
+    # Imported lazily: this Lambda installs idp_common[core,docs_service,image],
+    # not [assessment], so a module-level import would risk a cold-start failure
+    # if the assessment package ever grows a hard third-party dependency.
+    from idp_common.assessment.threshold_resolver import find_class_schema
+
+    if config is None or not hasattr(config, "classes"):
         return None
-    for schema in config.classes or []:
-        if not isinstance(schema, dict):
-            continue
-        dt = schema.get("x-aws-idp-document-type", "")
-        if isinstance(dt, str) and dt.lower() == doc_class.lower():
-            return schema
-    return None
+    return find_class_schema(doc_class, config.classes)
 
 
 def add_confidence_thresholds_to_explainability_schema_aware(

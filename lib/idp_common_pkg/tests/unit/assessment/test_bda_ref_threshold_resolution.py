@@ -375,6 +375,86 @@ class TestResolveThresholdForPath:
                 f"enrichment={via_enrichment} path={via_path}"
             )
 
+    def test_resolvers_diverge_on_nesting_below_array_items(self):
+        """Pin the DOCUMENTED divergence between the two resolvers.
+
+        ``resolve_threshold_for_path`` (BDA HITL alert path) walks arbitrary
+        nesting; ``enrich_assessment_with_thresholds`` (pipeline assessment and
+        BDA result.json paths) resolves only ONE level of array-item sub-fields,
+        so a threshold on a field nested *below* an array item — or inside an
+        array nested in an object group — falls back to the default there.
+
+        This is a deliberate, documented limitation (see the note in
+        docs/extraction-and-confidence.md, "Thresholds inside lists"). This test
+        exists so that changing either resolver is a visible decision rather than
+        a silent behavior change: if a future change unifies the two paths, this
+        test fails and should be updated to assert agreement.
+        """
+        schema = {
+            "properties": {
+                # threshold two levels down: array item -> object -> field
+                "w2_copies": {"type": "array", "items": {"$ref": "#/$defs/Item"}},
+                # array nested inside an object group
+                "employer": {
+                    "type": "object",
+                    "properties": {
+                        "contacts": {
+                            "type": "array",
+                            "items": {
+                                "properties": {
+                                    "email": {"x-aws-idp-confidence-threshold": "0.99"}
+                                }
+                            },
+                        }
+                    },
+                },
+            },
+            "$defs": {
+                "Item": {
+                    "type": "object",
+                    "properties": {
+                        "address": {
+                            "type": "object",
+                            "properties": {
+                                "zip": {"x-aws-idp-confidence-threshold": "0.99"}
+                            },
+                        }
+                    },
+                }
+            },
+        }
+        default = 0.5
+        assessment = {
+            "w2_copies": [{"address": {"zip": {"confidence": 0.4}}}],
+            "employer": {"contacts": [{"email": {"confidence": 0.4}}]},
+        }
+        enriched, _alerts = enrich_assessment_with_thresholds(
+            assessment, schema, default
+        )
+
+        # Path resolver reaches the nested declaration...
+        assert (
+            resolve_threshold_for_path(
+                ["w2_copies", "_0", "address", "zip"], schema, default
+            )
+            == 0.99
+        )
+        assert (
+            resolve_threshold_for_path(
+                ["employer", "contacts", "_0", "email"], schema, default
+            )
+            == 0.99
+        )
+        # ...while enrichment falls back to the default at that depth.
+        assert (
+            enriched["w2_copies"][0]["address"]["zip"]["confidence_threshold"]
+            == default
+        )
+        assert (
+            enriched["employer"]["contacts"][0]["email"]["confidence_threshold"]
+            == default
+        )
+
 
 class TestBDAAlertBuildingUsesPerEntryThreshold:
     """``create_confidence_threshold_alerts`` must compare each entry against its

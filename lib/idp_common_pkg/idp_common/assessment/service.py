@@ -31,7 +31,6 @@ from idp_common.config.schema_constants import (
     TYPE_OBJECT,
     TYPE_STRING,
     X_AWS_IDP_CONFIDENCE_THRESHOLD,
-    X_AWS_IDP_DOCUMENT_TYPE,
     X_AWS_IDP_LIST_ITEM_DESCRIPTION,
 )
 from idp_common.models import Document
@@ -157,12 +156,9 @@ class AssessmentService:
         Returns:
             JSON Schema dict for the class, or empty dict if not found
         """
-        # Type-safe access to classes
-        classes = self.config.classes
-        for schema in classes:
-            if schema.get(X_AWS_IDP_DOCUMENT_TYPE, "").lower() == class_label.lower():
-                return schema
-        return {}
+        from idp_common.assessment.threshold_resolver import find_class_schema
+
+        return find_class_schema(class_label, self.config.classes) or {}
 
     def _resolve_confidence_escalation_model(self, class_label: str) -> Optional[str]:
         """Pick the stronger confidence model the self-healing ladder escalates to.
@@ -363,7 +359,11 @@ class AssessmentService:
         if not isinstance(assessment_data, dict):
             return
 
-        # If this dict itself is a confidence leaf
+        # If this dict is itself a confidence leaf, alert on it — then still fall
+        # through to the sub-field scan below. A dict can carry BOTH its own
+        # ``confidence`` and nested per-field children; ``_check_confidence_alerts``
+        # reports both levels, so returning early here would silently drop the
+        # children's alerts relative to the uniform-threshold path.
         if "confidence" in assessment_data:
             confidence = _safe_float_conversion(
                 assessment_data.get("confidence", 0.0), 0.0
@@ -378,13 +378,27 @@ class AssessmentService:
                         ),
                     }
                 )
-            return
 
-        # If no per-field thresholds, fall back to uniform check
+        # If no per-field thresholds, fall back to uniform check for the
+        # sub-fields. Skip the leaf re-check (already handled above) by only
+        # delegating when this dict is not itself a leaf.
         if not field_thresholds:
-            self._check_confidence_alerts(
-                assessment_data, attr_name, default_threshold, alerts_list
-            )
+            if "confidence" not in assessment_data:
+                self._check_confidence_alerts(
+                    assessment_data, attr_name, default_threshold, alerts_list
+                )
+            else:
+                for sub_attr_name, sub_assessment in assessment_data.items():
+                    if (
+                        isinstance(sub_assessment, dict)
+                        and "confidence" in sub_assessment
+                    ):
+                        self._check_confidence_alerts(
+                            sub_assessment,
+                            f"{attr_name}.{sub_attr_name}",
+                            default_threshold,
+                            alerts_list,
+                        )
             return
 
         # Check each sub-field against its specific threshold

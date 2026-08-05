@@ -242,6 +242,7 @@ def test_enforce_ssl_only_failure_is_not_fatal_on_existing_bucket(aws_credential
         )
 
         import botocore.exceptions
+
         import idp_feature_sdk.pack as pack_mod
 
         real_client = boto3.client
