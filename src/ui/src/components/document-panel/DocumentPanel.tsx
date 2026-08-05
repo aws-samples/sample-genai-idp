@@ -893,10 +893,15 @@ export const DocumentPanel = ({
     } as typeof localItem;
   }, [viewingRunId, versionDetail, localItem]);
 
-  // Create enhanced item with configuration
+  // Create enhanced item with configuration. Use the doc's own version
+  // config so the header Confidence Alerts badge reads the threshold the
+  // document was actually assessed against — otherwise the header count
+  // can disagree with per-section alerts (which use documentVersionConfig
+  // via SectionsPanel) whenever the stack's live threshold has drifted
+  // from the version-at-processing-time threshold.
   const enhancedItem = {
     ...displayedItem,
-    mergedConfig: mergedConfig ?? undefined,
+    mergedConfig: documentVersionConfig ?? undefined,
   };
 
   return (
@@ -1000,7 +1005,13 @@ export const DocumentPanel = ({
             sections: displayedItem.sections,
             pages: displayedItem.pages,
             documentItem: displayedItem,
-            mergedConfig,
+            // Use the config version the document was processed with, not the
+            // stack's current live config. This drives the Edit Mode class
+            // dropdown (so users see the classes the doc was actually
+            // classified against) and section confidence-alert thresholds.
+            // Falls back to `mergedConfig` when the doc's version is
+            // 'default'/unset — see `documentVersionConfig` above.
+            mergedConfig: documentVersionConfig,
             // Editing is disabled for a historical snapshot; the panels also
             // gate their own edit affordances via useDocumentVersion().isHistorical.
             onDocumentUpdate: viewingRunId ? undefined : setLocalItem,
