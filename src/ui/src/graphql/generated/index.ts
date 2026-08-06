@@ -874,6 +874,7 @@ export const getTestSets = /* GraphQL */ `
       error
       lastAddResult
       documentClassType
+      configVersion
     }
   }
 ` as GeneratedQuery<GetTestSetsQueryVariables, GetTestSetsQuery>;

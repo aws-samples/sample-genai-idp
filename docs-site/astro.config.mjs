@@ -170,6 +170,10 @@ export default defineConfig({
                   slug: "extensions/pii-anonymizer",
                 },
                 {
+                  label: "Test Set - ConfBench",
+                  slug: "extensions/confbench-testset",
+                },
+                {
                   label: "Test Set Generator",
                   slug: "extensions/idp-data-generator",
                 },

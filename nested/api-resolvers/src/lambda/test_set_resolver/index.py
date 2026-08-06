@@ -1743,26 +1743,60 @@ def delete_test_sets(args):
     test_set_bucket = os.environ["TEST_SET_BUCKET"]
 
     for test_set_id in test_set_ids:
-        # Delete files from test set bucket
+        # Delete files from test set bucket.
+        #
+        # Both APIs used here are page-limited, so both must be looped:
+        #   * list_objects_v2 returns at most 1000 keys per call
+        #   * delete_objects accepts at most 1000 keys per call
+        # A single unpaginated pass silently orphaned every object past the
+        # first 1000 — the DynamoDB record disappeared from the UI while the
+        # files stayed in the bucket, invisible and still billed. Real test sets
+        # exceed this easily: Fake-W2-Tax-Forms is 2000 documents (~4000 objects
+        # counting baselines).
         try:
-            # List all objects with test_set_id prefix
-            response = s3_client.list_objects_v2(
-                Bucket=test_set_bucket, Prefix=f"{test_set_id}/"
-            )
+            deleted_count = 0
+            continuation_token = None
+            while True:
+                list_kwargs = {
+                    'Bucket': test_set_bucket,
+                    'Prefix': f"{test_set_id}/",
+                }
+                if continuation_token:
+                    list_kwargs['ContinuationToken'] = continuation_token
+                response = s3_client.list_objects_v2(**list_kwargs)
 
-            if "Contents" in response:
-                # Delete all objects in the test set folder
                 objects_to_delete = [
-                    {"Key": obj["Key"]} for obj in response["Contents"]
+                    {'Key': key}
+                    for key in (
+                        obj.get('Key') for obj in response.get('Contents', [])
+                    )
+                    if key
                 ]
-
-                if objects_to_delete:
+                # One list page is at most 1000 keys, which is also the
+                # delete_objects maximum, so this is a single batch in practice —
+                # the slice keeps it correct regardless.
+                for i in range(0, len(objects_to_delete), 1000):
+                    batch = objects_to_delete[i:i + 1000]
                     s3_client.delete_objects(
-                        Bucket=test_set_bucket, Delete={"Objects": objects_to_delete}
+                        Bucket=test_set_bucket,
+                        Delete={'Objects': batch}
                     )
-                    logger.info(
-                        f"Deleted {len(objects_to_delete)} files for test set {test_set_id}"
+                    deleted_count += len(batch)
+
+                if not response.get('IsTruncated'):
+                    break
+                continuation_token = response.get('NextContinuationToken')
+                if not continuation_token:
+                    # Defensive: a truncated response without a token would
+                    # otherwise loop forever.
+                    logger.warning(
+                        f"Truncated listing without a continuation token for "
+                        f"test set {test_set_id}; stopping after {deleted_count} objects"
                     )
+                    break
+
+            if deleted_count:
+                logger.info(f"Deleted {deleted_count} files for test set {test_set_id}")
 
         except Exception as e:
             logger.error(f"Failed to delete files for test set {test_set_id}: {str(e)}")
@@ -1863,9 +1897,12 @@ def get_test_sets():
                 ),  # Include error message for failed test sets
                 "lastAddResult": item.get("lastAddResult"),
                 "documentClassType": item.get("documentClassType"),
+                # Optional: a test set may declare which configuration version Test
+                # Studio should preselect for it. Absent for the stack-managed
+                # benchmark sets, which rely on the id==version-name convention.
+                "configVersion": item.get("configVersion"),
             }
         )
-
     # Scan TestSetBucket for direct uploads
     try:
         test_set_bucket = os.environ["TEST_SET_BUCKET"]

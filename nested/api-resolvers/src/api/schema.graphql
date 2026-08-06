@@ -710,6 +710,16 @@ type TestSet @aws_cognito_user_pools @aws_iam {
   error: String
   lastAddResult: String
   documentClassType: DocumentClassType
+  # Configuration version Test Studio should preselect when this test set is
+  # chosen for a run. Optional: when absent, the UI falls back to matching a
+  # config version whose name equals the test set id (the convention the
+  # stack-managed benchmark sets rely on), then to the active version.
+  #
+  # Lets a test set DECLARE its configuration instead of depending on a name
+  # coincidence — needed by extension-deployed test sets, whose config presets
+  # are named `<featureId>-v<version>` by the Feature Platform and so can never
+  # match their own test set id.
+  configVersion: String
 }
 
 type TestSetDocumentSection @aws_cognito_user_pools @aws_iam {

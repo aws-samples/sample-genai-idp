@@ -1,0 +1,7 @@
+# Lightweight HuggingFace file access (NOT the heavy `datasets` library — we
+# only need hf_hub_download for a single 76 KB parquet file; PDFs are streamed
+# straight from the CDN with urllib).
+huggingface-hub==0.20.0
+
+# Reading the dataset's parquet metadata.
+pyarrow==23.0.1

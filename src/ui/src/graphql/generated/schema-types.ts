@@ -1875,6 +1875,7 @@ export type TestRunStatus = {
 
 export type TestSet = {
   activeReference?: Maybe<Scalars['Int']['output']>;
+  configVersion?: Maybe<Scalars['String']['output']>;
   createdAt: Scalars['AWSDateTime']['output'];
   description?: Maybe<Scalars['String']['output']>;
   documentClassType?: Maybe<DocumentClassType>;

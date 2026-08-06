@@ -16,5 +16,6 @@ query GetTestSets {
     error
     lastAddResult
     documentClassType
+    configVersion
   }
 }

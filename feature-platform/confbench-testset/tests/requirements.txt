@@ -1,0 +1,12 @@
+# Test-only dependencies for the ConfBench Test Set extension.
+#
+#   pip install -r tests/requirements.txt
+#   python -m pytest            # from feature-platform/confbench-testset/
+#
+# The two runtime pins mirror ingest/requirements.txt. They are needed at
+# COLLECTION time because ingest/planner.py imports them at module scope (the
+# HF_HOME setup has to happen before huggingface_hub loads), so the tests import
+# the real libraries and stub only their call sites.
+huggingface-hub==0.20.0
+pyarrow==23.0.1
+pytest>=8.0
