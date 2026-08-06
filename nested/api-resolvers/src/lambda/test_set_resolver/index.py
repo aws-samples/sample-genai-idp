@@ -1053,13 +1053,21 @@ def get_annotation_queue(args, event=None):
         # "Available" means this caller could claim it next: unreviewed and
         # either unclaimed or already theirs.
         claimed_by_other = bool(owner) and owner != caller
+        # A pipeline copy only exists for documents the labeling run actually
+        # processed. Ground truth is skipped by draft labeling, so offering a
+        # review key for it produced "Document <runId>/<file> not found" the
+        # moment an annotator reached it in the queue.
+        has_pipeline_copy = bool(run_id) and state.get("exists", False)
         entries.append(
             {
                 "objectKey": doc["objectKey"],
                 "inputKey": doc["inputKey"],
-                # None when the set has no labeling run: there is no pipeline copy
-                # to review yet, so the UI must not offer to claim it.
-                "reviewObjectKey": f"{run_id}/{doc['objectKey']}" if run_id else None,
+                # None when this document has no pipeline copy to review: either
+                # the set has no labeling run, or the run skipped this document
+                # because it already carried ground truth.
+                "reviewObjectKey": (
+                    f"{run_id}/{doc['objectKey']}" if has_pipeline_copy else None
+                ),
                 "minConfidence": doc.get("minConfidence"),
                 "confidenceThreshold": doc.get("confidenceThreshold"),
                 "labelSource": doc.get("labelSource"),
@@ -1098,6 +1106,12 @@ def get_annotation_queue(args, event=None):
     # 2008-document set as 500 (the queue cap) and show "0 remaining" once the
     # first page was reviewed, while most of the set was still untouched.
     total = int(meta.get("fileCount", 0) or 0) or inspected
+    # Note: authored ground truth counts toward totalDocs but has no pipeline copy
+    # to claim, so a mixed set cannot currently reach 100% in the progress banner.
+    # Left as-is deliberately — excluding it would contradict
+    # test_uploaded_ground_truth_is_not_counted_as_review_work, which encodes a
+    # live-found regression (an uploaded set reporting itself fully annotated).
+    # Resolving this needs a product decision, not a quiet accounting change.
     queue = [e for e in entries if include_completed or not e["reviewed"]]
 
     result = {
@@ -1188,6 +1202,10 @@ def _claim_state_for_documents(test_set_id, meta, documents):
                     state[object_key] = {
                         "owner": item.get("HITLReviewOwner") or "",
                         "status": item.get("HITLStatus") or "",
+                        # Presence of the item is what proves the run actually
+                        # processed this document, which is a precondition for
+                        # claiming it.
+                        "exists": True,
                     }
                 pending = response.get("UnprocessedKeys") or {}
                 if not pending:

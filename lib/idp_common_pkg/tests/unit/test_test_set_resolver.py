@@ -1970,6 +1970,15 @@ class TestTestSetResolver:
         table, s3 = labeling_env
         _seed_test_set(table, "ts1", fileCount=1, labelJobId="ts1-run-1")
         s3.put_object(Bucket="test-set-bucket", Key="ts1/input/a.pdf", Body=b"x")
+        # The pipeline copy must exist: a review key is only offered for documents
+        # the run actually processed.
+        table.put_item(
+            Item={
+                "PK": "doc#ts1-run-1/a.pdf",
+                "SK": "none",
+                "ObjectStatus": "COMPLETED",
+            }
+        )
 
         result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, None)
         assert result["documents"][0]["reviewObjectKey"] == "ts1-run-1/a.pdf"
@@ -2333,6 +2342,48 @@ class TestTestSetResolver:
 
         page = test_set_index.get_test_set_documents({"testSetId": "ts1"})
         assert "activeLabelJobId" not in page
+
+    def test_queue_gives_no_review_key_to_documents_the_run_skipped(self, labeling_env):
+        """Found live: "Document <runId>/<file> not found" when claiming.
+
+        Draft labeling skips documents that already carry ground truth, so no
+        pipeline copy exists for them. The queue was handing out a review key for
+        every document whenever the set had *any* labeling run, so an annotator
+        reaching a ground-truth document got a claim failure.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=2, labelJobId="run1")
+        for name in ("drafted.pdf", "gt.pdf"):
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/gt.pdf/sections/1/result.json",
+            Body=json.dumps({"inference_result": {"box_a": "authored"}}).encode(),
+        )
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/drafted.pdf/sections/1/result.json",
+            Body=json.dumps(
+                {
+                    "labelSource": "draft-machine",
+                    "inference_result": {"f": "v"},
+                    "explainability_info": [{"f": {"confidence": 0.5}}],
+                }
+            ).encode(),
+        )
+        # Only the drafted document has a pipeline copy from the run.
+        table.put_item(
+            Item={
+                "PK": "doc#run1/drafted.pdf",
+                "SK": "none",
+                "ObjectStatus": "COMPLETED",
+            }
+        )
+
+        result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, None)
+        by_key = {d["objectKey"]: d for d in result["documents"]}
+        assert by_key["drafted.pdf"]["reviewObjectKey"] == "run1/drafted.pdf"
+        assert by_key["gt.pdf"]["reviewObjectKey"] is None
 
     def test_queue_harvests_the_running_label_job(self, labeling_env):
         """Found live: the queue never advanced draft labeling.

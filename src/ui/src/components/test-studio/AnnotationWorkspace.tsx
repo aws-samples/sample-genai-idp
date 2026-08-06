@@ -111,6 +111,7 @@ const AnnotationWorkspace = (): React.JSX.Element => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [claimWarning, setClaimWarning] = useState<string | null>(null);
+  const [isConfirming, setIsConfirming] = useState(false);
   const [docView, setDocView] = useState<DocView>('ground-truth');
   const [flashItems, setFlashItems] = useState<FlashbarProps.MessageDefinition[]>([]);
 
@@ -209,14 +210,24 @@ const AnnotationWorkspace = (): React.JSX.Element => {
     [loadQueue],
   );
 
-  // Claim whatever the queue landed us on.
+  /**
+   * Claim whatever the queue landed us on — once per document.
+   *
+   * `attemptedClaims` is load-bearing. A failed claim calls loadQueue, which
+   * produces a new `selected` object identity, which re-fires this effect, which
+   * fails again: an infinite retry loop whose only visible symptom was a warning
+   * alert flashing on and off. Recording the attempt breaks the cycle, so a
+   * document that cannot be claimed is reported once and left alone.
+   */
+  const [attemptedClaims, setAttemptedClaims] = useState<Set<string>>(new Set());
+
   useEffect(() => {
-    if (selected && !selected.claimedByMe && selected.available) {
-      claimAndSelect(selected);
-    }
-    // Keyed on the object key only: re-running on every `selected` identity
-    // change would re-claim the same document on each queue refresh.
-  }, [selected, claimAndSelect]);
+    if (!selected || selected.claimedByMe || !selected.available) return;
+    if (!selected.reviewObjectKey) return;
+    if (attemptedClaims.has(selected.objectKey)) return;
+    setAttemptedClaims((prev) => new Set(prev).add(selected.objectKey));
+    claimAndSelect(selected);
+  }, [selected, claimAndSelect, attemptedClaims]);
 
   /**
    * Persist a reviewed section through the review API. Replaces the editor's
@@ -251,6 +262,52 @@ const AnnotationWorkspace = (): React.JSX.Element => {
       return data;
     });
   }, [loadQueue, selectedKey]);
+
+  /**
+   * Confirm the draft labels are already correct, with no edits.
+   *
+   * This is the common case in review and it needs to be a first-class action:
+   * "no changes needed" is a *verdict*, not an absence of one. Submitting each
+   * section unchanged through completeSectionReview records it as reviewed, tags
+   * the labels reviewed-human so a later draft run cannot overwrite them, and —
+   * because the curve reads an unchanged field as "the model was right" — teaches
+   * the confidence curve the correct-at-this-confidence half of its signal, which
+   * only ever arrives from a reviewer agreeing.
+   */
+  const handleConfirmCorrect = useCallback(async () => {
+    if (!selected?.reviewObjectKey) return;
+    setIsConfirming(true);
+    setError(null);
+    try {
+      const sections = selected.sections ?? [];
+      for (const section of sections) {
+        // Sequential rather than parallel: these all mutate the same document
+        // record, and the review API is not written for concurrent section
+        // updates on one object.
+
+        await client.graphql({
+          query: completeSectionReview,
+          variables: { objectKey: selected.reviewObjectKey, sectionId: section.sectionId },
+        });
+      }
+      setFlashItems([
+        {
+          type: 'success',
+          content: `${selected.objectKey} confirmed as correct and marked reviewed.`,
+          dismissible: true,
+          onDismiss: () => setFlashItems([]),
+          id: 'annotation-confirmed',
+        },
+      ]);
+      await advanceToNext();
+    } catch (err) {
+      logger.error('Error confirming labels:', err);
+      const message = (err as { errors?: { message?: string }[] })?.errors?.[0]?.message;
+      setError(message || 'Could not mark this document reviewed. Please try again.');
+    } finally {
+      setIsConfirming(false);
+    }
+  }, [selected, advanceToNext]);
 
   const handleSaved = useCallback(
     (baselineKey: string) => {
@@ -406,6 +463,16 @@ const AnnotationWorkspace = (): React.JSX.Element => {
                         if (item.reviewed) return <StatusIndicator type="success">Reviewed</StatusIndicator>;
                         if (item.claimedByMe) return <Badge color="blue">You have this</Badge>;
                         if (item.claimedBy) return <StatusIndicator type="in-progress">{item.claimedBy}</StatusIndicator>;
+                        // Authored ground truth has no pipeline copy to review, so
+                        // it can be inspected but not annotated. Say so rather than
+                        // letting the reviewer discover it by clicking.
+                        if (!item.reviewObjectKey) {
+                          return (
+                            <Box fontSize="body-s" color="text-body-secondary">
+                              Ground truth — nothing to review
+                            </Box>
+                          );
+                        }
                         return null;
                       },
                     },
@@ -447,9 +514,24 @@ const AnnotationWorkspace = (): React.JSX.Element => {
               )}
               {selected && (
                 <Box textAlign="right">
-                  <Button onClick={advanceToNext} disabled={isLoading}>
-                    Skip to next document
-                  </Button>
+                  <SpaceBetween direction="horizontal" size="xs">
+                    <Button onClick={advanceToNext} disabled={isLoading}>
+                      Skip to next document
+                    </Button>
+                    {/* The common case: the draft labels are already right, so
+                        there is nothing to edit. Without this the reviewer could
+                        only "skip", which advances the cursor but never marks the
+                        document reviewed — so a correct document could never be
+                        completed and the queue never drained. */}
+                    <Button
+                      variant="primary"
+                      onClick={handleConfirmCorrect}
+                      loading={isConfirming}
+                      disabled={isLoading || !selected.reviewObjectKey}
+                    >
+                      Labels are correct — mark reviewed
+                    </Button>
+                  </SpaceBetween>
                 </Box>
               )}
             </SpaceBetween>
