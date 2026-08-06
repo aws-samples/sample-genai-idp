@@ -1723,6 +1723,22 @@
   },
   {
     "source": "security-matrix",
+    "path": "feature-platform/confbench-testset/template.yaml",
+    "resourceType": "AWS::DynamoDB::Table",
+    "resourceName": "IngestJobTable",
+    "issue": "DynamoDB data plane events are not captured by CloudTrail logging",
+    "fix": "Enable CloudTrail logging for DynamoDB data plane events for this table. Create a CloudTrail Trail if none exists. Add this table's ARN to an EventSelector with DataResources type 'AWS::DynamoDB::Table' \u2014 append to existing values array if one exists, otherwise create a new EventSelector. For CDK: use the L1 escape hatch (trail.node.defaultChild as CfnTrail).eventSelectors as DataResourceType.DYNAMODB_TABLE does not exist.\n\nIMPORTANT - S3 Bucket Logging Requirements:\nIf creating a new S3 bucket for CloudTrail logs:\n1. First check if the template already has an S3 bucket configured as a logging destination (look for buckets referenced in other buckets' LoggingConfiguration.DestinationBucketName)\n2. If a logging bucket exists, configure the new CloudTrail bucket's LoggingConfiguration to use it with LoggingPrefix 'cloudtrail-logs/'\n3. If no logging bucket exists, create a dedicated server access logging bucket first, then configure the CloudTrail bucket to log to it with LoggingPrefix 'cloudtrail-logs/'",
+    "priority": "HIGH",
+    "check_id": "DDB-002",
+    "status": "suppressed",
+    "isCustomResource": false,
+    "firstDetectedAt": "2026-08-06T00:00:00.000Z",
+    "assessmentCount": 1,
+    "suppressionReason": "Accepted: CloudTrail DynamoDB data-plane logging is an account-level control (trail + log bucket) owned by the deploying customer; the solution template cannot assume or create account-wide trails. Same disposition as every other DynamoDB table in this solution. This table holds only ingest-job metadata (job id, tier, variant list, progress counters) for the ConfBench Test Set extension - no document content and no customer data. Encryption at rest (SSESpecification) and point-in-time recovery are both enabled, and rows expire via TTL.",
+    "suppressedAt": "2026-07-24T16:30:00.000Z"
+  },
+  {
+    "source": "security-matrix",
     "path": "feature-platform/pii-anonymizer/template.yaml",
     "resourceType": "AWS::DynamoDB::Table",
     "resourceName": "RedactionMappingTable",
