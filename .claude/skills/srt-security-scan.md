@@ -40,6 +40,69 @@ false positives, and the two ways to make a HIGH finding go away: **mitigate**
   through `tail`, so you see nothing until it finishes. Run it in the background
   and wait — don't assume it hung.
 
+## The gate can break with NO repo change (SRT upgrade / semgrep `--config=auto`)
+
+Two moving parts outside the repo can fail the gate on an unchanged tree:
+
+1. **The registry rule set.** SRT invokes `semgrep scan --config=auto ... --json`,
+   and `auto` fetches rules from the semgrep registry at scan time, so new rules
+   ship continuously.
+2. **The SRT version.** `srt-setup` installs the *latest* release. **v1.0.2
+   passed `--exclude ".github"` to semgrep; v1.1.0 dropped it**, so all
+   `.github/workflows/**` findings appeared at once with zero code change.
+
+Symptom of both: HIGH-open findings in files whose `git log` shows no recent
+change. Don't hunt for the commit that "caused" it — diff the SRT version and
+check whether the rule is new.
+
+**Semgrep priority = `extra.metadata.impact`, NOT severity.** SRT's semgrep
+`mapResult` reads `priority: J.extra?.metadata?.impact || "Unknown"` (only
+Bandit/Checkov go through `mapSeverity`). So an `ERROR`-severity semgrep finding
+with `impact: LOW/MEDIUM` never blocks — which is why this repo can carry ~11
+ERROR findings (`subprocess-shell-true`, `tainted-sql-string`, …) with a green
+gate. When triaging, filter on impact:
+
+```bash
+python3 -c "import json;[print((r['extra'].get('metadata') or {}).get('impact'), \
+  r['check_id'].split('.')[-1], r['path'], r['start']['line']) \
+  for r in json.load(open('/tmp/sg.json'))['results']]"
+```
+
+Semgrep findings key on `(path, line, issue)` (Bandit keys on
+`(path, line, check_id)`), so a **new rule cannot be pre-suppressed** and a
+line-number shift re-opens a suppressed one.
+
+**Watch for a silently-skipped scanner.** `srt assess` logs a scanner crash to
+`.srt/logs/srt-tool.log.*` and carries on with an empty result — the printed
+table then looks clean for that source. On this dev box the venv `semgrep`
+re-execs `pysemgrep` **from `PATH`** and finds a stray
+`~/.local/bin/pysemgrep` (system python, no `semgrep` module), so every full
+scan died with `ModuleNotFoundError: No module named 'semgrep'` and produced no
+`.srt/semgrep-summary.json`. **Always confirm the summary files exist before
+trusting a clean result:**
+
+```bash
+ls .srt/semgrep-summary.json .srt/bandit-summary.json   # missing ⇒ scanner crashed
+grep -i error .srt/logs/srt-tool.log.*                  # why
+```
+
+To reproduce just the semgrep half in seconds instead of re-running the whole
+Bedrock-backed assess, invoke the binary directly with the venv **first** on
+`PATH` (this is what fixes the `pysemgrep` shadowing above):
+
+```bash
+PATH="$PWD/.srt/.venv/bin:$PATH" .srt/.venv/bin/semgrep scan \
+  --config=auto --json --output=/tmp/sg.json .github/workflows/
+python3 -c "import json;[print(r['extra']['severity'], r['check_id'].split('.')[-1], \
+  r['path'], r['start']['line']) for r in json.load(open('/tmp/sg.json'))['results']]"
+```
+
+Rules seen from this path (all were **real** issues, fixed not suppressed):
+`github-actions-mutable-action-tag` (pin `uses:` to a 40-char commit SHA),
+`run-shell-injection` (never interpolate `${{ github.* }}` into `run:` — pass
+via `env:` and quote `"${VAR}"`), `gha-curl-pipe-shell` (replace `curl … | sh`
+with a SHA-pinned first-party action).
+
 ## CRITICAL: local scans see more than CI
 
 CI runs on a **clean checkout of tracked files only**. Your working tree
@@ -139,10 +202,20 @@ Bandit honors an inline comment. Scope it to the exact test id and add a why:
 DEFAULTS = {"max_tokens": 10000, "shard_token_budget": 40000}  # nosec B105
 ```
 
-The `# nosec BXXX` must be on the flagged source line. Verify with:
-`python3 -m bandit <file>` — the count under "specifically being disabled"
-should increment and the issue disappears. This is preferred over a JSON
-suppression for Python because the justification lives next to the code.
+The `# nosec BXXX` must be on the flagged source line. Verify with
+`.srt/.venv/bin/python -m bandit <file>` — the count under "specifically being
+disabled" should increment and the issue disappears (Low-severity `B110`
+try/except/pass etc. can remain; only High/Medium reach the gate). This is
+preferred over a JSON suppression for Python because the justification lives
+next to the code.
+
+**Don't run `ruff format` on a file under `scripts/`** to tidy a `# nosec` edit:
+`ruff.toml` `extend-exclude`s `scripts/` (and `src/`, `patterns/`, `notebooks/`),
+so `make lint-cicd` never formats it — reformatting drags in unrelated cosmetic
+hunks that CI doesn't want. Repo-wide `ruff format --check .` passing while a
+single-file check fails is exactly this exclusion, not real drift. Also pin the
+local ruff to CI's version before believing a formatting diff (CI: `ruff==0.15.13`
+in `.gitlab-ci.yml` / `developer-tests.yml`).
 (Checkov findings similarly honor `# checkov:skip=CKV_AWS_NNN: "reason"`, and
 semgrep honors `# nosemgrep: <rule-id> - reason` — both already used in this
 repo, e.g. `scripts/srt/run.py`, the WAF WebACL in `nested/api-resolvers`.)

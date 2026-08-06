@@ -3570,8 +3570,13 @@ def validate_zap_dast(stack_name):
     # the container's non-root user can write the report. (Contents are a
     # throwaway OpenAPI seed + ZAP reports — no secrets; the token lives in a
     # separate options file, also 0o777 here but never uploaded.)
+    # nosec B103 - accepted: the report is written by the ZAP image's non-root
+    # `zap` user, whose uid we don't control, into this root-owned bind mount,
+    # so a narrower mask makes the scan fail (see the comment above). Scope is a
+    # throwaway per-run mkdtemp dir in a single-tenant, ephemeral CodeBuild
+    # container holding only an OpenAPI seed and ZAP reports.
     workdir = tempfile.mkdtemp(prefix="zap-")
-    os.chmod(workdir, 0o777)
+    os.chmod(workdir, 0o777)  # nosec B103
     email = "zap-dast@example.invalid"
     password = "Aa1!" + secrets.token_urlsafe(24)
     token = None
@@ -3581,7 +3586,11 @@ def validate_zap_dast(stack_name):
         rbac_common.enable_admin_auth(ctx)
         rbac_common.create_cognito_user(ctx, email, "Admin", password)
         token = rbac_common.get_id_token(ctx, email, password)
-        if not token or token == "None":
+        # nosec B105 - the "None" literal is the string the AWS CLI prints for a
+        # null `--query` result (`--output text`), i.e. the sentinel for "no
+        # token was minted", not a credential. Bandit's heuristic fires only
+        # because the compared variable is named `token`.
+        if not token or token == "None":  # nosec B105
             return {"success": False, "error": "Failed to mint Cognito ID token"}
 
         fields = _zap_op_fields()
