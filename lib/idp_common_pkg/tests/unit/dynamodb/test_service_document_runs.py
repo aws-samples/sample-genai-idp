@@ -8,6 +8,7 @@ from decimal import Decimal
 from unittest.mock import Mock
 
 import pytest
+
 from idp_common.dynamodb.service import DocumentDynamoDBService
 from idp_common.models import Document, RuleValidationResult, Section, Status
 

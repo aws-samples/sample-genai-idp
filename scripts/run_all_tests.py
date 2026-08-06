@@ -93,6 +93,7 @@ RUN_ROOTS = [
     "src/lambda/queue_processor",
     "src/lambda/queue_sender",
     "src/lambda/save_reporting_data",
+    "src/lambda/test_file_copier",
     "src/lambda/user_management",
     "src/lambda/version_check_resolver",
     "src/lambda/workflow_tracker",
@@ -119,6 +120,9 @@ QUARANTINE = {
         "Requires the Lambda-runtime-only 'cfnresponse' module."
     ),
     "samples/lambda-hook-inference/GENAIIDP-chandra-ocr-hook": (
+        "test_local.py is a manual local-run script; collects zero pytest tests."
+    ),
+    "samples/lambda-hook-inference/GENAIIDP-w2-copy-consistency": (
         "test_local.py is a manual local-run script; collects zero pytest tests."
     ),
     # Vendored/internal helper trees that contain test_*.py but are not suites.

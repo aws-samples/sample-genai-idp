@@ -162,6 +162,23 @@ def handler(event, context):
             "testRunId": test_run_id,
             "testSetId": test_set_id,
             "trackingTable": tracking_table,
+            # Always pass the intended file count (default = test_set.fileCount,
+            # override = user's numberOfFiles, or len(objectKeys) when the caller
+            # named specific documents). The copier must cap the S3 listing to
+            # this count so that Files (the actual copied list) stays aligned
+            # with FilesCount (the metadata denominator) even when the
+            # underlying S3 test-set folder has drifted past the test set's
+            # declared fileCount — e.g. a user uploaded extra samples without
+            # bumping fileCount. Without this cap the copier would ingest every
+            # object under testset#<id>/input/, poll would report "N/K
+            # completed" where N > K, and the run's "Files" list would include
+            # documents that were never part of this test set.
+            #
+            # int() cast is load-bearing: test_set['fileCount'] is a
+            # DynamoDB ``Decimal`` (DDB's only numeric type), which
+            # ``json.dumps`` rejects with "Object of type Decimal is not JSON
+            # serializable" when we serialize the message body.
+            "filesToProcess": int(files_to_process),
         }
 
         # Only include numberOfFiles if it was specified

@@ -6,6 +6,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+
 from idp_common.bedrock.client import BedrockClient
 
 

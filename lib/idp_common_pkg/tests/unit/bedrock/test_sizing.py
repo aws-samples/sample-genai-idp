@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import pytest
+
 from idp_common.bedrock.sizing import compute_sizing_plan
 
 NOVA_LITE = "us.amazon.nova-lite-v1:0"

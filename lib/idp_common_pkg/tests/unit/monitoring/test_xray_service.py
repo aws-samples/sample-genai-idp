@@ -8,8 +8,9 @@ Unit tests for idp_common.monitoring.xray_service
 import json
 from unittest.mock import MagicMock, patch
 
-import idp_common.monitoring.xray_service as xray_module
 import pytest
+
+import idp_common.monitoring.xray_service as xray_module
 from idp_common.monitoring.xray_service import (
     analyze_trace,
     extract_lambda_request_ids,

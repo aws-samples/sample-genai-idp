@@ -23,6 +23,18 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 s3_client = boto3.client("s3")
 dynamodb = boto3.resource("dynamodb")
 
+# R14 graded packet metrics forwarded from each doc's ``doc_split_metrics``.
+# Order matches ``idp_common.evaluation.models.DocSplitMetrics`` so any
+# additions there are noticed here (mismatch drops the new field from
+# aggregation rather than crashing). All values are in [0.0, 1.0].
+_GRADED_PACKET_KEYS = (
+    "final_score",
+    "clustering_score",
+    "v_measure",
+    "rand_index",
+    "avg_ordering_score",
+)
+
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
@@ -151,13 +163,22 @@ def aggregate_test_run_with_stickler(
         Dictionary with aggregated metrics matching the existing format
     """
     # Load Stickler comparison results from S3
-    comparison_results, doc_weighted_scores = _load_comparison_results(
-        test_run_id, tracking_table_name
+    comparison_results, doc_weighted_scores, doc_graded_packet_scores = (
+        _load_comparison_results(test_run_id, tracking_table_name)
     )
 
     if not comparison_results:
         logger.warning(f"No comparison results found for test run: {test_run_id}")
-        return _empty_metrics()
+        empty = _empty_metrics()
+        # Even with no per-section extraction comparisons we may still have
+        # graded packet metrics (they come from doc_split, which runs before
+        # extraction evaluation and survives an all-empty section pass). Fold
+        # them in so the UI can still render classification-only runs.
+        if doc_graded_packet_scores:
+            empty["graded_packet_metrics"] = _aggregate_graded_packet_metrics(
+                doc_graded_packet_scores
+            )
+        return empty
 
     # Use Stickler's bulk aggregator
     try:
@@ -254,9 +275,20 @@ def aggregate_test_run_with_stickler(
             process_eval.confidence_metrics = confidence_metrics
 
         # Transform to IDP format (split metrics will be added by caller from Athena)
-        return _transform_stickler_metrics(
+        transformed = _transform_stickler_metrics(
             process_eval, doc_weighted_scores, comparison_results, ecab_metrics
         )
+        # Fold in run-level graded packet metrics (R14). Same idiom as
+        # weighted_overall_scores: simple mean across documents plus the
+        # per-document map. Emitted here (not in _transform_stickler_metrics)
+        # so the graded-packet plumbing stays independent of Stickler's
+        # confusion-matrix path — a Stickler shape change won't collide with
+        # this field, and the field won't appear at all when the aggregation
+        # itself returned nothing.
+        transformed["graded_packet_metrics"] = _aggregate_graded_packet_metrics(
+            doc_graded_packet_scores
+        )
+        return transformed
 
     except Exception as e:
         logger.error(
@@ -267,7 +299,7 @@ def aggregate_test_run_with_stickler(
 
 def _load_comparison_results(
     test_run_id: str, tracking_table_name: str
-) -> tuple[List[Dict[str, Any]], Dict[str, float]]:
+) -> tuple[List[Dict[str, Any]], Dict[str, float], Dict[str, Dict[str, float]]]:
     """
     Load all Stickler comparison results for documents in a test run.
 
@@ -276,18 +308,25 @@ def _load_comparison_results(
         tracking_table_name: DynamoDB tracking table name
 
     Returns:
-        Tuple of (comparison_results, doc_weighted_scores)
+        Tuple of (comparison_results, doc_weighted_scores, doc_graded_packet_scores).
+        ``doc_graded_packet_scores`` maps doc_key → the graded packet metrics
+        dict (``{final_score, clustering_score, v_measure, rand_index,
+        avg_ordering_score}``) computed per document by
+        ``compute_graded_packet_metrics``. Docs written before R14 landed —
+        and docs whose gt/pred pages never overlap so ``evaluate_packet``
+        can't produce scores — are absent from the map.
     """
     table = dynamodb.Table(tracking_table_name)
     output_bucket = os.environ.get("OUTPUT_BUCKET")
 
     if not output_bucket:
         logger.error("OUTPUT_BUCKET environment variable not set")
-        return [], {}
+        return [], {}, {}
 
     # Scan for all documents matching the test run prefix
     comparison_results = []
     doc_weighted_scores = {}
+    doc_graded_packet_scores: Dict[str, Dict[str, float]] = {}
 
     # Use scan with filter on PK to select only document records for this test run
     response = table.scan(
@@ -378,10 +417,26 @@ def _load_comparison_results(
                     "weighted_overall_score"
                 )
 
+            # R14 graded packet metrics (V-measure / Rand / ordering) computed
+            # per-doc by ``compute_graded_packet_metrics`` and serialized into
+            # ``doc_split_metrics``. Only forward the five graded fields — the
+            # rest of ``doc_split_metrics`` is the exact-match plumbing that
+            # Athena already aggregates via ``split_classification_metrics``.
+            # ``None`` values (older payloads, or payloads where
+            # ``evaluate_packet`` returned no rows) are dropped so downstream
+            # averaging never sees mixed-type entries.
+            doc_split_metrics = eval_data.get("doc_split_metrics") or {}
+            graded_scores = {
+                key: doc_split_metrics[key]
+                for key in _GRADED_PACKET_KEYS
+                if isinstance(doc_split_metrics.get(key), (int, float))
+            }
+
             return {
                 "doc_key": doc_key,
                 "comparisons": doc_comparisons,
                 "weighted_score": weighted_score,
+                "graded_scores": graded_scores,
                 "success": True,
             }
         except Exception as e:
@@ -403,6 +458,10 @@ def _load_comparison_results(
                 comparison_results.extend(result["comparisons"])
                 if result["weighted_score"] is not None:
                     doc_weighted_scores[result["doc_key"]] = result["weighted_score"]
+                if result.get("graded_scores"):
+                    doc_graded_packet_scores[result["doc_key"]] = result[
+                        "graded_scores"
+                    ]
 
     logger.info(
         f"Loaded {len(comparison_results)} comparison results for test run {test_run_id}"
@@ -410,7 +469,11 @@ def _load_comparison_results(
     logger.info(
         f"Loaded {len(doc_weighted_scores)} weighted scores for test run {test_run_id}"
     )
-    return comparison_results, doc_weighted_scores
+    logger.info(
+        f"Loaded graded packet metrics for {len(doc_graded_packet_scores)} documents "
+        f"for test run {test_run_id}"
+    )
+    return comparison_results, doc_weighted_scores, doc_graded_packet_scores
 
 
 def _load_s3_json(s3_uri: str) -> Dict[str, Any]:
@@ -536,6 +599,45 @@ def _transform_stickler_metrics(
         "field_metrics": process_eval.field_metrics,
         "document_count": process_eval.document_count,
         "total_time": process_eval.total_time,
+    }
+
+
+def _aggregate_graded_packet_metrics(
+    doc_graded_packet_scores: Dict[str, Dict[str, float]],
+) -> Dict[str, Any]:
+    """Roll per-doc graded packet metrics up into a run-level bundle.
+
+    Same idiom as ``weighted_overall_scores``: emits ``{"per_document": {...},
+    "mean": {...}}`` where each ``mean`` entry is a simple unweighted average
+    across the documents that reported that key. Docs are already
+    page-count-aware within themselves (V-measure / Rand / ordering are
+    computed over every page of the doc), so averaging per-doc gives each
+    document equal weight in the run summary — matching how
+    ``weighted_overall_scores`` is surfaced today.
+
+    Returns an empty dict when no document reported graded metrics so the
+    UI can skip the panel entirely rather than render an all-null table.
+    """
+    if not doc_graded_packet_scores:
+        return {}
+
+    means: Dict[str, float] = {}
+    for key in _GRADED_PACKET_KEYS:
+        values = [
+            doc_scores[key]
+            for doc_scores in doc_graded_packet_scores.values()
+            if isinstance(doc_scores.get(key), (int, float))
+        ]
+        if values:
+            means[key] = sum(values) / len(values)
+
+    if not means:
+        return {}
+
+    return {
+        "mean": means,
+        "per_document": doc_graded_packet_scores,
+        "document_count": len(doc_graded_packet_scores),
     }
 
 
@@ -732,6 +834,7 @@ def _empty_metrics() -> Dict[str, Any]:
             "false_discovery_rate": None,
         },
         "split_classification_metrics": {},
+        "graded_packet_metrics": {},
         "document_count": 0,
         "total_time": 0,
     }

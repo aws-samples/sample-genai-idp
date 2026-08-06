@@ -14,9 +14,10 @@ from typing import Optional
 
 import boto3
 from botocore.config import Config
-from idp_sdk import IDPClient
 from rich.console import Console
 from rich.table import Table
+
+from idp_sdk import IDPClient
 
 logger = logging.getLogger(__name__)
 console = Console()

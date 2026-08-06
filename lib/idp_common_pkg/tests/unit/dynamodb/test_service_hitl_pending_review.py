@@ -7,6 +7,7 @@ from decimal import Decimal
 from unittest.mock import Mock
 
 import pytest
+
 from idp_common.dynamodb.service import (
     DocumentDynamoDBService,
     convert_decimals_to_native,

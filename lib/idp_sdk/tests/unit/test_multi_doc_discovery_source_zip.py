@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+
 from idp_sdk._core.publish import MULTI_DOC_DISCOVERY_BUILD_INPUTS, IDPPublisher
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]

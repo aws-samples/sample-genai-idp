@@ -936,6 +936,64 @@ Test Studio uses Stickler's `BulkStructuredModelEvaluator` for accurate metric a
 - **Efficient**: No Athena queries needed for new data
 - **Cost Effective**: Reduces Athena query costs
 
+### Graded Packet Metrics (Run-Level)
+
+The exact-match split counters above (`page_level_accuracy`,
+`split_accuracy_without_order`, `split_accuracy_with_order`) score packet
+classification all-or-nothing — a section that groups 9 of 10 pages correctly
+scores 0. Graded packet metrics from
+`stickler.doc_split.packet_evaluation_metrics.evaluate_packet` score the same
+per-doc partial correctness on five continuous [0.0, 1.0] axes. They were
+already computed per document (surfaced in each doc's `evaluation/results.json`
+under `doc_split_metrics`) but are now also aggregated at the run level and
+rendered in the Additional Metrics panel:
+
+| Metric | What it measures |
+|---|---|
+| **Final Score** | Composite of the four metrics below — the headline number |
+| **Clustering Score** | How well predicted section boundaries match ground-truth grouping (ignoring section identity) |
+| **V Measure** | Harmonic mean of homogeneity and completeness of the predicted clustering |
+| **Rand Index** | Fraction of page-pairs whose "same section vs different section" relationship matches ground truth |
+| **Avg Ordering Score** | How well the pages within each section preserve ground-truth order |
+
+**Aggregation.** Simple unweighted mean across documents that reported each
+key — the same idiom as `weightedOverallScores`. Per-doc scores are already
+page-count-aware within a document (V-measure / Rand / ordering are computed
+over every page of the doc), so averaging per-doc gives each document equal
+weight in the run summary. Documents missing a key are excluded from that
+key's mean (not zero-filled), so an older `results.json` payload without
+graded metrics can't drag the newer docs' scores down.
+
+**When the panel populates.**
+- **Multi-section documents** (lending packages, medical prior-auth packets,
+  DocSplit-Poly-Seq): metrics vary meaningfully per doc and the panel is the
+  primary way to see how close-but-not-exact classification is. E.g. a run
+  where `split_accuracy_without_order = 0.41` typically shows graded means
+  around 0.56–0.69, revealing partial correctness the exact-match view
+  clipped to zero.
+- **Single-section documents** (OmniAI-OCR-Benchmark, standalone W-2s):
+  every metric collapses to `1.0` trivially since there's nothing to
+  mis-cluster. The panel still renders but adds no signal beyond the
+  existing accuracy row.
+- **No page overlap between ground-truth and prediction** (rare — usually an
+  OCR page-count mismatch): `evaluate_packet` returns nothing for that doc
+  and it's absent from the map. If no doc in the run reported any graded
+  metric, the panel hides entirely rather than showing an all-null table.
+
+**Backward compatibility.** Runs that completed before the aggregation
+Lambda knew about graded metrics re-aggregate once on next view — the stale-
+cache guard treats a missing `gradedPacketMetrics` key as "recalculate this
+run's cache." No manual migration required.
+
+The recompute is queued asynchronously (aggregation re-reads every document's
+`results.json` from S3 and can take minutes on a large run, well past the
+API's read timeout), so the **first** view of a pre-existing run still renders
+immediately from its cached metrics with the graded panel hidden; reload once
+the re-aggregation finishes to see the graded rows. Because the cache write
+always includes the `gradedPacketMetrics` key — `{}` when a run legitimately
+has no graded metrics, e.g. single-section documents — a run is re-queued at
+most once and never loops.
+
 ### Field-Level Metrics
 
 Test results include detailed per-field extraction performance metrics displayed in an interactive table with optional confidence calibration columns (Stickler v0.4.0+):

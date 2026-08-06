@@ -14,11 +14,11 @@ from typing import Optional
 
 import boto3
 from botocore.config import Config
-from idp_common.dynamodb import DocumentDynamoDBService
-from idp_common.models import Status
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
+from idp_common.dynamodb import DocumentDynamoDBService
+from idp_common.models import Status
 from idp_sdk._core.stack_info import StackInfo
 
 logger = logging.getLogger(__name__)

@@ -11,6 +11,7 @@ import warnings
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from idp_common.evaluation.models import (
     AttributeEvaluationResult,
     SectionEvaluationResult,

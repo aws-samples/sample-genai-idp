@@ -13,6 +13,8 @@ implementation would fail open (no scope recorded, lookup error, unknown role).
 
 import boto3
 import pytest
+from moto import mock_aws
+
 from idp_common import testset_scope
 from idp_common.testset_scope import (
     TestSetAccessDenied,
@@ -20,7 +22,6 @@ from idp_common.testset_scope import (
     get_allowed_test_sets,
     visible_test_sets,
 )
-from moto import mock_aws
 
 pytestmark = pytest.mark.unit
 

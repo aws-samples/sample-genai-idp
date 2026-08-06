@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
+
 from idp_common.discovery.clustering_service import ClusteringService, ClusterResult
 from idp_common.discovery.discovery_agent import (
     ClusterAnalysisTool,

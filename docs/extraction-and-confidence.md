@@ -947,6 +947,65 @@ to the `explainability_info` based on configuration.
 }
 ```
 
+### Thresholds inside lists (arrays)
+
+For `type: array` attributes, each **item sub-field** carries its own threshold,
+resolved from the item schema. This works whether the item schema is inline
+under `items.properties` or referenced with `$ref` into `$defs`:
+
+```json
+{
+  "w2_copies": {
+    "type": "array",
+    "items": { "$ref": "#/$defs/W2CopyItem" }
+  },
+  "$defs": {
+    "W2CopyItem": {
+      "type": "object",
+      "properties": {
+        "w2_box_a_employee_ssn": { "type": "string", "x-aws-idp-confidence-threshold": "0.8" },
+        "w2_box_1_wages":        { "type": "number", "x-aws-idp-confidence-threshold": "0.9" },
+        "w2_form_year":          { "type": "string" }
+      }
+    }
+  }
+}
+```
+
+Each row of `w2_copies` is scored per column: `w2_box_a_employee_ssn` against
+`0.8`, `w2_box_1_wages` against `0.9`, and `w2_form_year` — which declares no
+threshold — against `hitl.confidence_threshold`.
+
+Resolution order for any field is:
+
+1. The field's own `x-aws-idp-confidence-threshold` (for list columns, the one
+   inside the resolved `items` / `$defs` schema).
+2. The `x-aws-idp-confidence-threshold` on the array attribute itself, if set.
+3. `hitl.confidence_threshold`.
+
+This applies to both processing modes. In BDA mode, per-field thresholds are
+resolved for the blueprint-driven `custom_output` (the section results that match
+your class schema). Page-level `standard_output` confidence is generic document
+analysis rather than named schema fields, so it uses `hitl.confidence_threshold`.
+
+> **Note:** if `hitl.confidence_threshold` is `0.0`, any field without an explicit
+> `x-aws-idp-confidence-threshold` is effectively never flagged. Set a meaningful
+> default (e.g. `0.8`) so unannotated fields still get reviewed.
+
+> **Note — nesting depth.** Two resolvers are involved, and they differ below the
+> first array level. The path-based resolver (`resolve_threshold_for_path`, used by
+> the BDA HITL alert path) walks arbitrary nesting — objects inside array items,
+> arrays inside groups, nested arrays. The enrichment function
+> (`enrich_assessment_with_thresholds`, used by the pipeline assessment and BDA
+> `result.json` paths) resolves only **one** level of array item sub-fields, so a
+> threshold declared on a field *below* an array item (e.g.
+> `w2_copies[].address.zip`) falls back to `hitl.confidence_threshold` there while
+> the HITL alert path honors it. For the common case — flat array items with
+> per-field thresholds, which is what `$defs` item schemas normally describe —
+> both paths agree exactly. This is pinned by
+> `test_resolvers_diverge_on_nesting_below_array_items`, so if you need the deeper
+> case, unify the two paths and update that test rather than working around it.
+
 ### UI visual feedback
 
 The UI renders confidence with color coding:

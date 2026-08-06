@@ -4,6 +4,7 @@
 """Integration tests for BedrockClient serviceTier with model ID suffixes."""
 
 import pytest
+
 from idp_common.bedrock.client import BedrockClient
 
 

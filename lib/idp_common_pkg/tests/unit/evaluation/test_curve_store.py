@@ -11,6 +11,8 @@ replays whatever the test told it.
 
 import boto3
 import pytest
+from moto import mock_aws
+
 from idp_common.evaluation.confidence_curve import ConfidenceCurve
 from idp_common.evaluation.curve_store import (
     CurveStore,
@@ -18,7 +20,6 @@ from idp_common.evaluation.curve_store import (
     observations_from_baseline_review,
     observations_from_comparison_results,
 )
-from moto import mock_aws
 
 pytestmark = pytest.mark.unit
 

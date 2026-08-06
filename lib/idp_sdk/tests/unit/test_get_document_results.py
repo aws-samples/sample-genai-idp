@@ -13,6 +13,7 @@ import json
 from unittest.mock import Mock, patch
 
 import pytest
+
 from idp_sdk import IDPClient
 from idp_sdk.operations.batch import BatchOperation
 

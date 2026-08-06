@@ -192,6 +192,7 @@ class TestAbortTestRunsCLI:
     def test_cli_abort_success(self):
         """Test CLI abort command with successful result"""
         from click.testing import CliRunner
+
         from idp_cli.cli import abort_test_run
 
         with patch("idp_sdk.IDPClient") as mock_client_class:
@@ -223,6 +224,7 @@ class TestAbortTestRunsCLI:
     def test_cli_abort_multiple_ids(self):
         """Test CLI abort with multiple test run IDs"""
         from click.testing import CliRunner
+
         from idp_cli.cli import abort_test_run
 
         with patch("idp_sdk.IDPClient") as mock_client_class:
@@ -255,6 +257,7 @@ class TestAbortTestRunsCLI:
     def test_cli_abort_with_failures(self):
         """Test CLI abort with partial failures"""
         from click.testing import CliRunner
+
         from idp_cli.cli import abort_test_run
 
         with patch("idp_sdk.IDPClient") as mock_client_class:
@@ -285,6 +288,7 @@ class TestAbortTestRunsCLI:
     def test_cli_abort_complete_failure(self):
         """Test CLI abort with complete failure"""
         from click.testing import CliRunner
+
         from idp_cli.cli import abort_test_run
 
         with patch("idp_sdk.IDPClient") as mock_client_class:
@@ -315,6 +319,7 @@ class TestAbortTestRunsCLI:
     def test_cli_abort_confirmation_declined(self):
         """Test CLI abort when user declines confirmation"""
         from click.testing import CliRunner
+
         from idp_cli.cli import abort_test_run
 
         with patch("idp_sdk.IDPClient"):
@@ -335,6 +340,7 @@ class TestAbortTestRunsCLI:
     def test_cli_abort_empty_test_run_ids(self):
         """Test CLI abort with empty test run IDs"""
         from click.testing import CliRunner
+
         from idp_cli.cli import abort_test_run
 
         runner = CliRunner()

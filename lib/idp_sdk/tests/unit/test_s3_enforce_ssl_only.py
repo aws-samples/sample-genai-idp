@@ -17,6 +17,8 @@ import json
 import boto3
 import botocore.exceptions
 import pytest
+from moto import mock_aws
+
 from idp_sdk._core.s3_security import (
     apply_enforce_ssl_only,
     enforce_ssl_only_policy,
@@ -24,7 +26,6 @@ from idp_sdk._core.s3_security import (
     merge_enforce_ssl_only,
     statement_list,
 )
-from moto import mock_aws
 
 REGION = "us-west-2"
 

@@ -14,8 +14,9 @@ AWS credentials.
 import subprocess
 import types
 
-import idp_sdk.operations.publish as pub
 import pytest
+
+import idp_sdk.operations.publish as pub
 from idp_sdk.operations.publish import (
     DEFAULT_GOVCLOUD_LINT_REGION,
     PublishOperation,

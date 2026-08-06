@@ -9,6 +9,7 @@ Tests the static methods that don't require AWS resources or Bedrock access.
 import io
 
 import pytest
+
 from idp_common.discovery.classes_discovery import ClassesDiscovery
 
 # Import locally for test helpers only

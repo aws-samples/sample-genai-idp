@@ -14,6 +14,7 @@ are actually detected rather than assumed away.
 import random
 
 import pytest
+
 from idp_common.evaluation import confidence_curve as cc
 from idp_common.evaluation.confidence_curve import (
     ConfidenceCurve,

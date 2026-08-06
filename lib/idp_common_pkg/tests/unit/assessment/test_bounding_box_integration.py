@@ -6,6 +6,7 @@ Unit tests for bounding box integration in AssessmentService.
 """
 
 import pytest
+
 from idp_common.assessment.service import AssessmentService
 
 

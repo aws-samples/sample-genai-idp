@@ -30,6 +30,15 @@ def handler(event, context):
             test_run_id = message["testRunId"]
             test_set_id = message["testSetId"]
             number_of_files = message.get("numberOfFiles")  # Optional parameter
+            # filesToProcess is the runner's authoritative cap = min(user
+            # numberOfFiles, test_set.fileCount). Always honored when present
+            # (checked with `is None`, not truthiness, so the cap is respected
+            # literally rather than reinterpreting a 0 as "unset"); falls back
+            # to numberOfFiles for messages enqueued before the runner started
+            # sending it.
+            files_to_process = message.get("filesToProcess")
+            if files_to_process is None:
+                files_to_process = number_of_files
             config_version = message.get("configVersion")  # Optional parameter
             # Optional explicit document list (draft labeling a subset)
             object_keys = message.get("objectKeys") or []
@@ -69,12 +78,41 @@ def handler(event, context):
                     f"Restricted to {len(input_files)} explicitly requested document(s)"
                 )
 
-            # Limit files if numberOfFiles is specified
-            if number_of_files is not None:
-                input_files = input_files[:number_of_files]
+            # Cap input_files at the runner's intended count. Sort first so the
+            # same N files are picked deterministically across repeat runs of
+            # the same test set — otherwise S3 list ordering (already
+            # lexicographic today, but not contractually stable) could swap
+            # which subset of an over-populated folder actually gets processed
+            # from run to run and mask baseline drift. Log the drift so an
+            # operator whose S3 folder outgrew the test set's fileCount notices
+            # instead of silently getting a subset.
+            #
+            # Sort order note: Python's default ``.sort()`` compares strings by
+            # Unicode code point. S3's ``list_objects_v2`` also returns keys in
+            # UTF-8 binary sort order, so for ASCII filenames (every test set
+            # in this repo today) the pre-fix legacy ``numberOfFiles`` path and
+            # the post-fix sorted path select the same subset. For test sets
+            # whose filenames contain non-ASCII characters, Python's default
+            # sort and S3's binary sort diverge above U+007F — future test
+            # sets should either stick to ASCII filenames or move to
+            # ``key=lambda s: s.encode('utf-8')`` here to match S3 exactly.
+            input_files.sort()
+            baseline_files.sort()
+            capped = False
+            if files_to_process is not None and len(input_files) > files_to_process:
+                logger.warning(
+                    f"S3 test-set folder for {test_set_id} contains "
+                    f"{len(input_files)} input files but this run was scoped to "
+                    f"{files_to_process}; processing the first {files_to_process} "
+                    f"lexicographically. Update the test set's fileCount if the "
+                    f"extra files should be included."
+                )
+                input_files = input_files[:files_to_process]
+                capped = True
 
-            # Keep baselines aligned with whatever input selection survived above.
-            if object_keys or number_of_files is not None:
+            # Keep baselines aligned with whatever input selection survived above
+            # (explicit objectKeys, the fileCount cap, or both).
+            if object_keys or capped:
                 input_file_set = set(input_file + "/" for input_file in input_files)
                 baseline_files = [
                     bf

@@ -12,8 +12,9 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from idp_common.extraction import agentic_idp
 from pydantic import BaseModel
+
+from idp_common.extraction import agentic_idp
 
 
 class _Doc(BaseModel):

@@ -3688,6 +3688,7 @@ Resources:
   FccDatasetDeployerFunction:
     Type: AWS::Serverless::Function
     Metadata:
+      BuildMethod: makefile
       cfn_nag:
         rules_to_suppress:
           - id: W89
@@ -3775,6 +3776,7 @@ Resources:
   OcrBenchmarkDeployerFunction:
     Type: AWS::Serverless::Function
     Metadata:
+      BuildMethod: makefile
       cfn_nag:
         rules_to_suppress:
           - id: W89
@@ -3931,6 +3933,7 @@ Resources:
   W2DatasetDeployerFunction:
     Type: AWS::Serverless::Function
     Metadata:
+      BuildMethod: makefile
       cfn_nag:
         rules_to_suppress:
           - id: W89
@@ -11159,6 +11162,7 @@ Resources:
   FinetuningProcessDocumentFunction:
     Type: AWS::Serverless::Function
     Metadata:
+      BuildMethod: makefile
       cfn_nag:
         rules_to_suppress:
           - id: W89
