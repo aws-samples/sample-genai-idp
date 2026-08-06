@@ -2157,6 +2157,183 @@ class TestTestSetResolver:
         assert result["totalDocs"] == 1
         assert result["docsToReview"] <= 1
 
+    def test_reharvest_prunes_sections_the_new_run_no_longer_produces(
+        self, labeling_env
+    ):
+        """Found live: orphan sections kept a fixed document reading 50%.
+
+        A document's confidence is the minimum across its sections, so a stale
+        0.50 section from an earlier run masked a corrected run that scored every
+        real field above 0.94 — the fix was applied but invisible. Orphans also
+        linger in the annotation queue as sections of a document that no longer
+        has them.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        # A previous run left 3 draft sections behind.
+        for n in (1, 2, 3):
+            s3.put_object(
+                Bucket="test-set-bucket",
+                Key=f"ts1/baseline/a.pdf/sections/{n}/result.json",
+                Body=json.dumps(
+                    {
+                        "labelSource": "draft-machine",
+                        "inference_result": {"f": f"old-{n}"},
+                        "explainability_info": [{"f": {"confidence": 0.5}}],
+                    }
+                ).encode(),
+            )
+        # The new run produces only section 1.
+        uri = _seed_pipeline_result(
+            s3, "run2/a.pdf/sections/1/result.json", {"f": "new"}
+        )
+        _seed_completed_run(
+            table,
+            "run2",
+            "ts1",
+            ["a.pdf"],
+            {"a.pdf": [{"Id": "1", "OutputJSONUri": uri}]},
+        )
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#run2",
+                "testSetId": "ts1",
+                "jobId": "run2",
+                "status": "RUNNING",
+                "total": 1,
+                "labeled": 0,
+            }
+        )
+
+        test_set_index.get_draft_label_job({"testSetId": "ts1", "jobId": "run2"})
+
+        keys = [
+            o["Key"]
+            for o in s3.list_objects_v2(
+                Bucket="test-set-bucket", Prefix="ts1/baseline/a.pdf/sections/"
+            ).get("Contents", [])
+        ]
+        assert keys == ["ts1/baseline/a.pdf/sections/1/result.json"], keys
+        body = json.loads(
+            s3.get_object(Bucket="test-set-bucket", Key=keys[0])["Body"].read()
+        )
+        assert body["inference_result"] == {"f": "new"}
+
+    def test_pruning_never_touches_ground_truth_or_reviewed_labels(self, labeling_env):
+        """The destructive path must only ever remove disposable machine drafts."""
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        # Section 2 is authored ground truth (no labelSource); 3 is human-reviewed.
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/a.pdf/sections/2/result.json",
+            Body=json.dumps({"inference_result": {"box_a": "authored"}}).encode(),
+        )
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/a.pdf/sections/3/result.json",
+            Body=json.dumps(
+                {"labelSource": "reviewed-human", "inference_result": {"f": "checked"}}
+            ).encode(),
+        )
+        uri = _seed_pipeline_result(
+            s3, "run2/a.pdf/sections/1/result.json", {"f": "new"}
+        )
+        _seed_completed_run(
+            table,
+            "run2",
+            "ts1",
+            ["a.pdf"],
+            {"a.pdf": [{"Id": "1", "OutputJSONUri": uri}]},
+        )
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#run2",
+                "testSetId": "ts1",
+                "jobId": "run2",
+                "status": "RUNNING",
+                "total": 1,
+                "labeled": 0,
+            }
+        )
+
+        test_set_index.get_draft_label_job({"testSetId": "ts1", "jobId": "run2"})
+
+        keys = sorted(
+            o["Key"]
+            for o in s3.list_objects_v2(
+                Bucket="test-set-bucket", Prefix="ts1/baseline/a.pdf/sections/"
+            ).get("Contents", [])
+        )
+        # All three survive: the two protected ones were never eligible.
+        assert keys == [
+            "ts1/baseline/a.pdf/sections/1/result.json",
+            "ts1/baseline/a.pdf/sections/2/result.json",
+            "ts1/baseline/a.pdf/sections/3/result.json",
+        ], keys
+
+    def test_pruning_does_not_run_when_the_harvest_wrote_nothing(self, labeling_env):
+        """A run that harvests nothing must not empty an existing baseline.
+
+        Otherwise a partial pipeline failure would delete the previous run's
+        perfectly good drafts and leave the document with no labels at all.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/a.pdf/sections/1/result.json",
+            Body=json.dumps(
+                {"labelSource": "draft-machine", "inference_result": {"f": "keep"}}
+            ).encode(),
+        )
+        # Run finished but produced no usable section output.
+        _seed_completed_run(table, "run2", "ts1", ["a.pdf"], {"a.pdf": []})
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#run2",
+                "testSetId": "ts1",
+                "jobId": "run2",
+                "status": "RUNNING",
+                "total": 1,
+                "labeled": 0,
+            }
+        )
+
+        test_set_index.get_draft_label_job({"testSetId": "ts1", "jobId": "run2"})
+
+        body = json.loads(
+            s3.get_object(
+                Bucket="test-set-bucket",
+                Key="ts1/baseline/a.pdf/sections/1/result.json",
+            )["Body"].read()
+        )
+        assert body["inference_result"] == {"f": "keep"}
+
+    def test_documents_page_surfaces_a_running_job_for_rehydration(self, labeling_env):
+        """A page load must be able to resume polling a job it did not start."""
+        table, s3 = labeling_env
+        _seed_test_set(
+            table, "ts1", fileCount=1, labelJobId="run9", labelJobStatus="RUNNING"
+        )
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/a.pdf", Body=b"x")
+
+        page = test_set_index.get_test_set_documents({"testSetId": "ts1"})
+        assert page["activeLabelJobId"] == "run9"
+
+    def test_documents_page_omits_the_job_once_it_is_finished(self, labeling_env):
+        table, s3 = labeling_env
+        _seed_test_set(
+            table, "ts1", fileCount=1, labelJobId="run9", labelJobStatus="COMPLETED"
+        )
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/a.pdf", Body=b"x")
+
+        page = test_set_index.get_test_set_documents({"testSetId": "ts1"})
+        assert "activeLabelJobId" not in page
+
     def test_queue_harvests_the_running_label_job(self, labeling_env):
         """Found live: the queue never advanced draft labeling.
 

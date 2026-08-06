@@ -158,6 +158,17 @@ const TestSetDetail = (): React.JSX.Element => {
           next[pageIndex] = page?.nextToken ?? null;
           return next;
         });
+        // Resume polling a job this session did not start. Harvesting happens on
+        // read, so a job only progresses while something polls it — a refresh
+        // mid-run otherwise left it RUNNING forever and the Test Sets list
+        // reported "Labeling" indefinitely.
+        if (page?.activeLabelJobId) {
+          setLabelJob((current) =>
+            current?.jobId === page.activeLabelJobId
+              ? current
+              : { jobId: page.activeLabelJobId as string, status: 'RUNNING', total: 0, labeled: 0 },
+          );
+        }
       } catch (err) {
         logger.error('Error loading test set documents:', err);
         setError('Failed to load test set documents. Please try again.');

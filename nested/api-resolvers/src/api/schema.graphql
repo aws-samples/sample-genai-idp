@@ -747,6 +747,11 @@ type TestSetDocument @aws_cognito_user_pools @aws_iam {
 type TestSetDocumentsPage @aws_cognito_user_pools @aws_iam {
   documents: [TestSetDocument!]!
   nextToken: String
+  # Set when a draft-labeling job for this set is still RUNNING, so a page load
+  # can resume polling it. Labels are harvested on read, so a job only advances
+  # while something polls: without this a browser refresh mid-run dropped the
+  # poll and the set showed "Labeling" indefinitely.
+  activeLabelJobId: String
 }
 
 type TestSetVersion @aws_cognito_user_pools @aws_iam {

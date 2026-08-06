@@ -1493,8 +1493,12 @@ def _write_draft_labels_for_doc(test_set_bucket, test_set_id, file_name, section
 
     Returns True if anything was written. Sections already reviewed by a human
     are left untouched.
+
+    Sections a previous run wrote that this one no longer produces are pruned —
+    see :func:`_prune_superseded_draft_sections`.
     """
     wrote = False
+    written_section_ids = set()
     for section in sections:
         section_id = str(section.get("Id") or section.get("SectionId") or "")
         output_uri = section.get("OutputJSONUri") or ""
@@ -1528,9 +1532,67 @@ def _write_draft_labels_for_doc(test_set_bucket, test_set_id, file_name, section
             Body=json.dumps(result, indent=2).encode("utf-8"),
             ContentType="application/json",
         )
+        written_section_ids.add(section_id)
         wrote = True
 
+    if wrote:
+        _prune_superseded_draft_sections(
+            test_set_bucket, test_set_id, file_name, written_section_ids
+        )
+
     return wrote
+
+
+def _prune_superseded_draft_sections(
+    test_set_bucket, test_set_id, file_name, written_section_ids
+):
+    """Delete draft sections a previous run wrote that this one did not produce.
+
+    Draft labeling writes one object per section, so a re-run that produces
+    *fewer* sections than the last one leaves the extras behind. They are not
+    inert: a document's confidence is the minimum across its sections, so a stale
+    0.50 orphan keeps the document reading 50% even after a corrected run scores
+    every real field above 0.94 — the fix is applied but invisible. Orphans also
+    stay in the annotation queue and in scoring as sections of a document that no
+    longer has them.
+
+    Only a document's own ``draft-machine`` sections are eligible. Ground truth
+    (uploaded, generated, or ``reviewed-human``) is never touched, and this only
+    runs when the current run wrote at least one section for the document, so a
+    partial failure cannot empty an existing baseline.
+    """
+    prefix = f"{test_set_id}/baseline/{file_name}/sections/"
+    try:
+        paginator = s3_client.get_paginator("list_objects_v2")
+        existing = []
+        for page in paginator.paginate(Bucket=test_set_bucket, Prefix=prefix):
+            existing.extend(obj["Key"] for obj in page.get("Contents", []))
+    except Exception as e:  # noqa: BLE001 — pruning must not fail the harvest
+        logger.warning(f"Could not list baseline sections under {prefix}: {e}")
+        return
+
+    removed = 0
+    for key in existing:
+        if not key.endswith("/result.json"):
+            continue
+        section_id = key[len(prefix) :].split("/")[0]
+        if section_id in written_section_ids:
+            continue
+        # Never prune anything this run could not have written: only a prior
+        # machine draft is disposable.
+        if _existing_label_is_human(test_set_bucket, key):
+            continue
+        try:
+            s3_client.delete_object(Bucket=test_set_bucket, Key=key)
+            removed += 1
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Could not prune superseded draft section {key}: {e}")
+
+    if removed:
+        logger.info(
+            f"Pruned {removed} superseded draft section(s) for {file_name}: this "
+            f"run produced sections {sorted(written_section_ids)}"
+        )
 
 
 def _existing_label_is_human(bucket, key):
@@ -2143,6 +2205,16 @@ def get_test_set_documents(args):
         "documents": documents,
         "nextToken": response.get("NextContinuationToken"),
     }
+
+    # Surface any in-flight labeling job so a page load can resume polling it.
+    # Labels are harvested on read, so a job only advances while something polls;
+    # a browser refresh mid-run previously dropped the poll and left the job
+    # RUNNING forever, which the Test Sets list then reported as "Labeling"
+    # indefinitely even though every document had finished.
+    meta = db_client.get_item({"PK": f"testset#{test_set_id}", "SK": "metadata"})
+    if meta and meta.get("labelJobStatus") == "RUNNING" and meta.get("labelJobId"):
+        result["activeLabelJobId"] = meta["labelJobId"]
+
     logger.info(
         f"getTestSetDocuments({test_set_id}): {len(documents)} documents"
         f"{' (more available)' if result['nextToken'] else ''}"

@@ -14,5 +14,6 @@ query GetTestSetDocuments($testSetId: String!, $limit: Int, $nextToken: String, 
       confidenceThreshold
     }
     nextToken
+    activeLabelJobId
   }
 }

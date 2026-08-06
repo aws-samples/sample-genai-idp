@@ -851,6 +851,7 @@ export const getTestSetDocuments = /* GraphQL */ `
         confidenceThreshold
       }
       nextToken
+      activeLabelJobId
     }
   }
 ` as GeneratedQuery<GetTestSetDocumentsQueryVariables, GetTestSetDocumentsQuery>;

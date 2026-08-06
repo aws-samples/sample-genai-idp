@@ -1912,6 +1912,7 @@ export type TestSetDocumentSection = {
 };
 
 export type TestSetDocumentsPage = {
+  activeLabelJobId?: Maybe<Scalars['String']['output']>;
   documents: Array<TestSetDocument>;
   nextToken?: Maybe<Scalars['String']['output']>;
 };
@@ -2682,7 +2683,7 @@ export type GetTestSetDocumentsQueryVariables = Exact<{
 }>;
 
 
-export type GetTestSetDocumentsQuery = { getTestSetDocuments?: { nextToken?: string | null, documents: Array<{ objectKey: string, inputKey: string, size?: number | null, lastModified?: string | null, labelSource?: string | null, minConfidence?: number | null, confidenceThreshold?: number | null, sections: Array<{ sectionId: string, baselineKey: string }> }> } | null };
+export type GetTestSetDocumentsQuery = { getTestSetDocuments?: { nextToken?: string | null, activeLabelJobId?: string | null, documents: Array<{ objectKey: string, inputKey: string, size?: number | null, lastModified?: string | null, labelSource?: string | null, minConfidence?: number | null, confidenceThreshold?: number | null, sections: Array<{ sectionId: string, baselineKey: string }> }> } | null };
 
 export type GetTestSetVersionsQueryVariables = Exact<{
   testSetId: Scalars['String']['input'];

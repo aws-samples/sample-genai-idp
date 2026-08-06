@@ -1912,6 +1912,7 @@ export type TestSetDocumentSection = {
 };
 
 export type TestSetDocumentsPage = {
+  activeLabelJobId?: Maybe<Scalars['String']['output']>;
   documents: Array<TestSetDocument>;
   nextToken?: Maybe<Scalars['String']['output']>;
 };
