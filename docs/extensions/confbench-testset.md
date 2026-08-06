@@ -27,6 +27,9 @@ Because the ground-truth schema is byte-identical to `realkie-fcc-verified`,
 accuracy on any degraded variant is **directly comparable** to the clean
 baseline. That comparability is the whole point of the benchmark.
 
+https://github.com/user-attachments/assets/44be46d8-4817-4d71-a875-8fa725aaf247
+
+
 ## Why this is an extension, not a pre-deployed test set
 
 The accelerator pre-deploys four benchmark datasets on every stack deployment.
