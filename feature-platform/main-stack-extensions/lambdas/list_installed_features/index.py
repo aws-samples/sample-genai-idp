@@ -30,7 +30,8 @@ Environment:
 import json
 import logging
 import os
-from typing import Any, Dict, List
+import re
+from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -76,6 +77,52 @@ def _catalog_latest_versions() -> Dict[str, str]:
     return out
 
 
+_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?")
+
+
+def _parse_version(value: str) -> Optional[Tuple[int, int, int, bool, str]]:
+    """Parse a SemVer string into a comparable tuple, or None if unparseable.
+
+    The 4th element inverts prerelease presence so that plain comparison orders
+    1.0.0-rc1 BEFORE 1.0.0 (SemVer §11: a prerelease has lower precedence than
+    its release). Build metadata is ignored, also per SemVer.
+    """
+    m = _SEMVER_RE.match(value.strip())
+    if not m:
+        return None
+    major, minor, patch = (int(m.group(i)) for i in (1, 2, 3))
+    prerelease = m.group(4) or ""
+    return (major, minor, patch, not prerelease, prerelease)
+
+
+def _update_available(installed: str, latest: Optional[str]) -> bool:
+    """True only when `latest` is strictly NEWER than `installed`.
+
+    Previously this was `latest != installed`, which reported "Update available"
+    whenever the two merely DIFFERED — including when the catalog was BEHIND the
+    installed version. That happens routinely: an extension installed with
+    `idp-feature-cli deploy --from-code` (the documented dev loop) publishes its
+    own artifacts immediately, while catalog.json only refreshes on a host stack
+    create/update. The UI then told an admin running v0.1.1 that v0.1.0 was
+    "available" — an invitation to downgrade.
+
+    Unparseable versions fall back to inequality, preserving the old behavior
+    for non-SemVer version strings rather than silently suppressing the badge.
+    """
+    if not latest:
+        return False
+    lv, iv = _parse_version(latest), _parse_version(installed)
+    if lv is None or iv is None:
+        logger.warning(
+            "Non-SemVer version compare (installed=%r latest=%r); "
+            "falling back to inequality",
+            installed,
+            latest,
+        )
+        return latest != installed
+    return lv > iv
+
+
 def _row_to_feature(
     row: Dict[str, Any], latest_by_id: Dict[str, str]
 ) -> Dict[str, Any]:
@@ -88,7 +135,7 @@ def _row_to_feature(
         "displayName": row.get("displayName", feature_id),
         "installedVersion": installed_version,
         "latestVersion": latest_version,
-        "updateAvailable": bool(latest_version and latest_version != installed_version),
+        "updateAvailable": _update_available(installed_version, latest_version),
         "stackName": row.get("stackName", ""),
         "stackRegion": row.get("stackRegion", ""),
         "stackId": row.get("stackId"),

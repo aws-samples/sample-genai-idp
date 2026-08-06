@@ -117,6 +117,147 @@ def test_update_available_when_catalog_version_differs(
     assert result[0]["updateAvailable"] is True
 
 
+def test_no_update_when_catalog_is_BEHIND_installed(
+    monkeypatch, mock_stack, load_lambda
+):
+    """A catalog OLDER than the installed version is not an update.
+
+    This is the routine case, not an edge case: `idp-feature-cli deploy
+    --from-code` (the documented dev loop) installs a newer extension
+    immediately, while catalog.json only refreshes on a host stack
+    create/update. The previous `latest != installed` check reported
+    "Update available: v0.1.0" to an admin already running v0.1.1 — an
+    invitation to downgrade.
+    """
+    table_name = mock_stack["table_name"]
+    bucket = mock_stack["bucket"]
+
+    _seed(
+        table_name,
+        [
+            {
+                "featureId": "confbench-testset",
+                "displayName": "Test Set - ConfBench",
+                "installedVersion": "0.1.1",
+                "stackName": "s",
+                "stackRegion": "us-west-2",
+                "uiBundlePath": "features/confbench-testset/v0.1.1/",
+                "installedAt": "2026-01-01T00:00:00Z",
+            }
+        ],
+    )
+    _put_catalog(
+        bucket,
+        [{"featureId": "confbench-testset", "source": "oss", "latestVersion": "0.1.0"}],
+    )
+
+    mod = _preload(monkeypatch, table_name, load_lambda, configuration_bucket=bucket)
+    result = mod.handler(make_appsync_event("listInstalledFeatures"), None)
+
+    assert result[0]["installedVersion"] == "0.1.1"
+    assert result[0]["latestVersion"] == "0.1.0"
+    assert result[0]["updateAvailable"] is False
+
+
+def test_version_comparison_is_numeric_not_lexicographic(
+    monkeypatch, mock_stack, load_lambda
+):
+    """0.1.10 > 0.1.9 numerically, even though it sorts earlier as a string."""
+    table_name = mock_stack["table_name"]
+    bucket = mock_stack["bucket"]
+
+    _seed(
+        table_name,
+        [
+            {
+                "featureId": "f",
+                "displayName": "F",
+                "installedVersion": "0.1.9",
+                "stackName": "s",
+                "stackRegion": "us-east-1",
+                "uiBundlePath": "features/f/v0.1.9/",
+                "installedAt": "2026-01-01T00:00:00Z",
+            }
+        ],
+    )
+    _put_catalog(bucket, [{"featureId": "f", "latestVersion": "0.1.10"}])
+
+    mod = _preload(monkeypatch, table_name, load_lambda, configuration_bucket=bucket)
+    assert (
+        mod.handler(make_appsync_event("listInstalledFeatures"), None)[0][
+            "updateAvailable"
+        ]
+        is True
+    )
+
+
+def test_prerelease_ordering(monkeypatch, mock_stack, load_lambda):
+    """SemVer 11: a prerelease has LOWER precedence than its release, so
+    1.0.0 is an update over 1.0.0-rc1 but 1.0.0-rc1 is not over 1.0.0."""
+    table_name = mock_stack["table_name"]
+    bucket = mock_stack["bucket"]
+
+    for installed, latest, expected in (
+        ("1.0.0-rc1", "1.0.0", True),
+        ("1.0.0", "1.0.0-rc1", False),
+    ):
+        _seed(
+            table_name,
+            [
+                {
+                    "featureId": "p",
+                    "displayName": "P",
+                    "installedVersion": installed,
+                    "stackName": "s",
+                    "stackRegion": "us-east-1",
+                    "uiBundlePath": "features/p/",
+                    "installedAt": "2026-01-01T00:00:00Z",
+                }
+            ],
+        )
+        _put_catalog(bucket, [{"featureId": "p", "latestVersion": latest}])
+        mod = _preload(
+            monkeypatch, table_name, load_lambda, configuration_bucket=bucket
+        )
+        got = mod.handler(make_appsync_event("listInstalledFeatures"), None)[0][
+            "updateAvailable"
+        ]
+        assert got is expected, f"installed={installed} latest={latest}"
+
+
+def test_unparseable_version_falls_back_to_inequality(
+    monkeypatch, mock_stack, load_lambda
+):
+    """Non-SemVer strings keep the old behavior rather than silently hiding the
+    badge — better to over-report than to strand a real update."""
+    table_name = mock_stack["table_name"]
+    bucket = mock_stack["bucket"]
+
+    _seed(
+        table_name,
+        [
+            {
+                "featureId": "odd",
+                "displayName": "Odd",
+                "installedVersion": "latest",
+                "stackName": "s",
+                "stackRegion": "us-east-1",
+                "uiBundlePath": "features/odd/",
+                "installedAt": "2026-01-01T00:00:00Z",
+            }
+        ],
+    )
+    _put_catalog(bucket, [{"featureId": "odd", "latestVersion": "2026-08-01"}])
+
+    mod = _preload(monkeypatch, table_name, load_lambda, configuration_bucket=bucket)
+    assert (
+        mod.handler(make_appsync_event("listInstalledFeatures"), None)[0][
+            "updateAvailable"
+        ]
+        is True
+    )
+
+
 def test_update_not_available_when_versions_match(monkeypatch, mock_stack, load_lambda):
     table_name = mock_stack["table_name"]
     bucket = mock_stack["bucket"]
