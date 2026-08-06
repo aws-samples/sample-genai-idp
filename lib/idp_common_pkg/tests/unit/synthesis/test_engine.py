@@ -9,6 +9,7 @@ import types
 from unittest.mock import patch
 
 import pytest
+
 from idp_common.synthesis import engine, packet_io
 
 pytestmark = pytest.mark.unit

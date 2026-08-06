@@ -7,6 +7,7 @@ import json
 from unittest.mock import Mock
 
 import pytest
+
 from idp_common.synthesis import catalog
 
 pytestmark = pytest.mark.unit

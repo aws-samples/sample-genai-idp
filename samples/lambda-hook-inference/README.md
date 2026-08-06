@@ -14,6 +14,7 @@ See [docs/lambda-hook-inference.md](../../docs/lambda-hook-inference.md) for ful
 | **GENAIIDP-sagemaker-hook** | Calls a SageMaker real-time inference endpoint. Shows format conversion between Converse API and SageMaker. |
 | **GENAIIDP-chandra-ocr-hook** | Calls the [Chandra OCR 2](https://github.com/datalab-to/chandra) hosted API for high-quality OCR. Converts page images to structured Markdown, JSON, or HTML. |
 | **GENAIIDP-mistral-ocr-hook** | Calls the hosted [Mistral OCR](https://mistral.ai/news/ocr-4/) API for high-quality OCR. Returns Markdown **plus per-word confidence scores and bounding-box geometry** (in Amazon Textract format) so extraction confidence and spatial localization work in Assessment and the UI. Fully serverless — no SageMaker/GPU. |
+| **GENAIIDP-w2-copy-consistency** | **Assessment** hook (not OCR): deterministically flags Form-W2 fields that disagree across duplicate copies of the same employee on one page (hand-filled Copy B vs Copy C). Pure Python comparison — no LLM call, no added inference cost. No-op passthrough for every other document class. |
 
 ## Naming Convention
 
@@ -73,6 +74,14 @@ sam deploy --guided \
     IDPWorkingBucket=<your-idp-working-bucket-name> \
     CustomerManagedEncryptionKeyArn=<your-kms-key-arn> \
     MistralApiKey=<your-mistral-api-key>
+```
+
+```bash
+# Deploy the W-2 copy-consistency Assessment hook sample
+# (no parameters: this function makes no AWS service calls)
+cd samples/lambda-hook-inference/GENAIIDP-w2-copy-consistency
+sam build
+sam deploy --guided --stack-name GENAIIDP-w2-copy-consistency
 ```
 
 > **Note:** The `CustomerManagedEncryptionKeyArn` is optional but required if the IDP stack's working bucket uses KMS encryption (which it does by default). You can find the KMS key ARN in the IDP stack's CloudFormation **Outputs** tab → `CustomerManagedEncryptionKeyArn`.
@@ -178,6 +187,40 @@ python test_local.py ../../insurance_package.pdf --pages 1,2
 AWS_PROFILE=default python test_deployed.py \
   --bucket <your-idp-working-bucket-name> \
   --image ../../old_cal_license.png
+```
+
+### W-2 Copy Consistency Configuration
+
+This is an **Assessment** hook, not an OCR one — it replaces the confidence model
+rather than the OCR engine, so it wires into `extraction.confidence`:
+
+```yaml
+extraction:
+  confidence:
+    model: "LambdaHook"
+    model_lambda_hook_arn: "arn:aws:lambda:us-east-1:123456789012:function:GENAIIDP-w2-copy-consistency"
+hitl:
+  confidence_threshold: 0.8   # must be above the 0.2 the hook assigns to mismatches
+```
+
+A single Form-W2 page usually carries several duplicate copies of the *same*
+employee's W-2 (the perforated Copy B / Copy 2 / Copy C layout). Because these
+are hand-completed, one copy can disagree with another — e.g. Box 1 wages differ
+between quadrants. The hook groups `w2_copies` rows by normalized SSN and scores
+any critical field that disagrees *within an SSN group* at low confidence (0.2)
+with a `confidence_reason` naming the mismatch. Values differing across
+*different* SSNs (a genuine multi-employee page) are never flagged. Everything is
+deterministic Python — no LLM call, so no added inference cost or latency.
+
+For any other document class (no `w2_copies` key in the extraction) the hook is a
+**no-op passthrough** returning uniform high confidence, so it is safe to leave
+configured on a multi-class stack. Note that this means non-W2 classes get no
+real confidence judgement while it is active.
+
+**Local testing** (no AWS or API key needed):
+```bash
+cd samples/lambda-hook-inference/GENAIIDP-w2-copy-consistency
+python test_local.py
 ```
 
 ## Request/Response Format

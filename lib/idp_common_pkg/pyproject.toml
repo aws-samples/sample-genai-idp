@@ -21,7 +21,7 @@ exclude = [
 
 [project]
 name = "idp_common"
-version = "0.6.2"
+version = "0.6.3"
 description = "Common utilities for GenAI IDP Accelerator patterns"
 authors = [{ name = "AWS", email = "noreply@amazon.com" }]
 requires-python = ">=3.12,<3.14"
@@ -86,10 +86,19 @@ assessment = [
 
 # Evaluation module dependencies
 evaluation = [
+  # Note: the `[llm]` extra (strands-based LLM comparator) is intentionally
+  # NOT installed — IDP provides its own Bedrock-backed comparator via
+  # ``idp_common.evaluation.llm_comparator.LLMComparator``, which rides
+  # ``idp_common.bedrock`` (retry/throttling, cost metering, GovCloud endpoints,
+  # robust JSON response parsing) that upstream's strands-based comparator does
+  # not replicate.
   "stickler-eval==0.5.0",
   "genson==1.3.0",  # For automatic JSON Schema generation from data
-  "munkres>=1.1.4", # For Hungarian algorithm (legacy, may be removed)
-  "numpy==1.26.4",  # For numeric operations
+  # Numpy pin relaxed: stickler-eval declares ``numpy>=1.26,<3``; an exact 1.26.4
+  # pin invited resolver conflicts on upgrade. Kept above 1.26 so the eval
+  # extras still install into environments that need matching numpy on other
+  # extras.
+  "numpy>=1.26,<3",
   # Explicitly prevent ruamel-yaml C extensions (they require compilation in Lambda)
   "ruamel-yaml>=0.17.0,<0.19.0; python_version>='3.10'",  # Pure Python YAML, no C extensions
 ]
@@ -181,15 +190,17 @@ test = [
   "moto>=5.1.8",
   "pytest-asyncio>=1.1.0",
   "typer>=0.19.2",
-  "ruff>=0.14.0",
+  # Keep in sync with the ruff pin in .gitlab-ci.yml. Cap below 0.16: ruff 0.16
+  # formats Python code blocks in Markdown files, which fails `ruff format
+  # --check` on ~49 README/skill-file snippets during CodeBuild publish.
+  "ruff>=0.14.0,<0.16",
   "deepdiff>=6.0.0",                    # Required for BDA blueprint service tests
-  "datamodel-code-generator>=0.25.0",   # Required for schema/pydantic generator tests
+  "datamodel-code-generator>=0.64.0",   # Required for schema/pydantic generator tests
   "mypy-boto3-bedrock-runtime>=1.39.0", # Required for bedrock_utils tests
   # Evaluation module dependencies (from evaluation group)
   "stickler-eval==0.5.0",
   "genson==1.3.0",
-  "munkres>=1.1.4",
-  "numpy==1.26.4",
+  "numpy>=1.26,<3",
   "build==1.3.0",
 ]
 
@@ -200,7 +211,6 @@ all = [
   "Pillow==12.2.0",
   "pypdfium2>=5.5.0",
   "amazon-textract-textractor[pandas]==1.9.2",
-  "munkres>=1.1.4",
   "numpy==1.26.4",
   "pandas==2.2.3",
   "requests==2.33.0",
@@ -221,7 +231,7 @@ agentic-extraction = [
   "email-validator>=2.3.0",
   "tabulate>=0.9.0",
   "aws-lambda-powertools>=3.2.0",                          # Structured logging and observability
-  "datamodel-code-generator>=0.25.0",                      # Generate Pydantic models from JSON Schema
+  "datamodel-code-generator>=0.64.0",                      # Generate Pydantic models from JSON Schema
   "mypy-boto3-bedrock-runtime>=1.39.0",                    # Type stubs for bedrock_utils.py
 ]
 

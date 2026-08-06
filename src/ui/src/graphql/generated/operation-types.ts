@@ -1674,6 +1674,7 @@ export type TestRun = {
   failedFiles?: Maybe<Scalars['Int']['output']>;
   fieldMetrics?: Maybe<Scalars['AWSJSON']['output']>;
   filesCount: Scalars['Int']['output'];
+  gradedPacketMetrics?: Maybe<Scalars['AWSJSON']['output']>;
   overallAccuracy?: Maybe<Scalars['Float']['output']>;
   splitClassificationMetrics?: Maybe<Scalars['AWSJSON']['output']>;
   status: Scalars['String']['output'];
@@ -1707,6 +1708,7 @@ export type TestRunStatus = {
 };
 
 export type TestSet = {
+  configVersion?: Maybe<Scalars['String']['output']>;
   createdAt: Scalars['AWSDateTime']['output'];
   description?: Maybe<Scalars['String']['output']>;
   documentClassType?: Maybe<DocumentClassType>;
@@ -2351,7 +2353,7 @@ export type GetDocumentVersionQueryVariables = Exact<{
 }>;
 
 
-export type GetDocumentVersionQuery = { getDocumentVersion?: { RunId: string, ObjectKey?: string | null, CompletionTime?: string | null, QueuedTime?: string | null, WorkflowStartTime?: string | null, WorkflowExecutionArn?: string | null, ConfigVersion?: string | null, PageCount?: number | null, FileCount?: number | null, ManifestUri?: string | null, SummaryReportUri?: string | null, EvaluationReportUri?: string | null, Metering?: string | null, Sections?: Array<{ Id?: string | null, PageIds?: Array<number | null> | null, Class?: string | null, OutputJSONUri?: string | null } | null> | null, Pages?: Array<{ Id?: number | null, Class?: string | null, ImageUri?: string | null, TextUri?: string | null, OcrPageDataUri?: string | null } | null> | null, Files?: Array<{ Key?: string | null, VersionId?: string | null, Size?: number | null } | null> | null } | null };
+export type GetDocumentVersionQuery = { getDocumentVersion?: { RunId: string, ObjectKey?: string | null, CompletionTime?: string | null, QueuedTime?: string | null, WorkflowStartTime?: string | null, WorkflowExecutionArn?: string | null, ConfigVersion?: string | null, PageCount?: number | null, FileCount?: number | null, ManifestUri?: string | null, SummaryReportUri?: string | null, EvaluationReportUri?: string | null, Metering?: string | null, Sections?: Array<{ Id?: string | null, PageIds?: Array<number | null> | null, Class?: string | null, OutputJSONUri?: string | null, ConfidenceThresholdAlerts?: Array<{ attributeName?: string | null, confidence?: number | null, confidenceThreshold?: number | null } | null> | null, ProcessingIssues?: Array<{ stage?: string | null, severity?: string | null, code?: string | null, message?: string | null, rootCause?: string | null } | null> | null } | null> | null, Pages?: Array<{ Id?: number | null, Class?: string | null, ImageUri?: string | null, TextUri?: string | null, OcrPageDataUri?: string | null } | null> | null, Files?: Array<{ Key?: string | null, VersionId?: string | null, Size?: number | null } | null> | null } | null };
 
 export type GetFileContentsQueryVariables = Exact<{
   s3Uri: Scalars['String']['input'];
@@ -2415,7 +2417,7 @@ export type GetTestRunQueryVariables = Exact<{
 }>;
 
 
-export type GetTestRunQuery = { getTestRun?: { testRunId: string, testSetId?: string | null, testSetName?: string | null, status: string, filesCount: number, completedFiles?: number | null, failedFiles?: number | null, overallAccuracy?: number | null, weightedOverallScores?: string | null, averageConfidence?: number | null, confidenceMetrics?: string | null, accuracyBreakdown?: string | null, confusionMatrix?: string | null, fieldMetrics?: string | null, splitClassificationMetrics?: string | null, totalCost?: number | null, costBreakdown?: string | null, createdAt?: string | null, completedAt?: string | null, context?: string | null, configVersion?: string | null, config?: string | null } | null };
+export type GetTestRunQuery = { getTestRun?: { testRunId: string, testSetId?: string | null, testSetName?: string | null, status: string, filesCount: number, completedFiles?: number | null, failedFiles?: number | null, overallAccuracy?: number | null, weightedOverallScores?: string | null, averageConfidence?: number | null, confidenceMetrics?: string | null, accuracyBreakdown?: string | null, confusionMatrix?: string | null, fieldMetrics?: string | null, splitClassificationMetrics?: string | null, gradedPacketMetrics?: string | null, totalCost?: number | null, costBreakdown?: string | null, createdAt?: string | null, completedAt?: string | null, context?: string | null, configVersion?: string | null, config?: string | null } | null };
 
 export type GetTestRunStatusQueryVariables = Exact<{
   testRunId: Scalars['String']['input'];
@@ -2446,7 +2448,7 @@ export type GetTestSetDocumentsQuery = { getTestSetDocuments?: { nextToken?: str
 export type GetTestSetsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetTestSetsQuery = { getTestSets?: Array<{ id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, status?: string | null, createdAt: string, error?: string | null, lastAddResult?: string | null, documentClassType?: DocumentClassType | null } | null> | null };
+export type GetTestSetsQuery = { getTestSets?: Array<{ id: string, name: string, description?: string | null, filePattern?: string | null, fileCount?: number | null, status?: string | null, createdAt: string, error?: string | null, lastAddResult?: string | null, documentClassType?: DocumentClassType | null, configVersion?: string | null } | null> | null };
 
 export type ListAgentJobsQueryVariables = Exact<{
   limit?: InputMaybe<Scalars['Int']['input']>;

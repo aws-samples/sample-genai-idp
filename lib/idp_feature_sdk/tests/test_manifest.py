@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from idp_feature_sdk.manifest import ManifestError, load_manifest
 
 

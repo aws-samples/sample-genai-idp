@@ -56,6 +56,37 @@ export interface SplitClassificationMetrics {
   };
 }
 
+/**
+ * Parsed graded packet metrics from TestRun.gradedPacketMetrics AWSJSON field.
+ *
+ * Aggregated by the test-execution-aggregation Lambda as a simple unweighted
+ * mean across documents that reported each key (see
+ * ``_aggregate_graded_packet_metrics``). All values are in [0.0, 1.0] where
+ * 1.0 is perfect. Empty ``{}`` when no document reported graded metrics —
+ * older results.json payloads or classification runs with no page overlap.
+ */
+export interface GradedPacketMetrics {
+  mean?: {
+    final_score?: number;
+    clustering_score?: number;
+    v_measure?: number;
+    rand_index?: number;
+    avg_ordering_score?: number;
+    [key: string]: number | undefined;
+  };
+  per_document?: {
+    [documentId: string]: {
+      final_score?: number;
+      clustering_score?: number;
+      v_measure?: number;
+      rand_index?: number;
+      avg_ordering_score?: number;
+      [key: string]: number | undefined;
+    };
+  };
+  document_count?: number;
+}
+
 /** Parsed field metrics from TestRun.fieldMetrics AWSJSON field */
 export interface FieldMetrics {
   [fieldName: string]: {

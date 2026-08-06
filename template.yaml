@@ -2512,6 +2512,11 @@ Resources:
       ClientSecret: !GetAtt ExternalAppClient.ClientSecret
       ConnectorClientId: !Ref MCPConnectorClient
       ExecutionRoleArn: !GetAtt AgentCoreGatewayExecutionRole.Arn
+      # Bump when IDP_TOOLS_SCHEMA in the gateway manager Lambda changes.
+      # Custom resources only re-run when a property changes; this forces the
+      # manager to run on stack update and re-sync the gateway target's tool
+      # schema (update_gateway_target_if_needed) onto existing deployments.
+      ToolSchemaVersion: "2026-07-26-get-results-document-id"
       SourceCodeHash: <LAMBDA_HASH_TOKEN>
 
   ##########################################################################
@@ -3683,6 +3688,7 @@ Resources:
   FccDatasetDeployerFunction:
     Type: AWS::Serverless::Function
     Metadata:
+      BuildMethod: makefile
       cfn_nag:
         rules_to_suppress:
           - id: W89
@@ -3770,6 +3776,7 @@ Resources:
   OcrBenchmarkDeployerFunction:
     Type: AWS::Serverless::Function
     Metadata:
+      BuildMethod: makefile
       cfn_nag:
         rules_to_suppress:
           - id: W89
@@ -3926,6 +3933,7 @@ Resources:
   W2DatasetDeployerFunction:
     Type: AWS::Serverless::Function
     Metadata:
+      BuildMethod: makefile
       cfn_nag:
         rules_to_suppress:
           - id: W89
@@ -9606,7 +9614,10 @@ Resources:
         ]
       Handler: index.handler
       Runtime: python3.12
-      Timeout: 60
+      # Long enough for the OperationAborted retry ladder below (~5 min of
+      # backoff) plus overhead. S3 serializes conflicting bucket-config writes,
+      # and a rollback fires several of them at once.
+      Timeout: 420
       VpcConfig:
         !If
           - DeployInVPC
@@ -9619,19 +9630,64 @@ Resources:
         import cfnresponse
         import json
         import logging
+        import time
+
+        from botocore.exceptions import ClientError
 
         logger = logging.getLogger()
         logger.setLevel(logging.INFO)
 
+        # S3 allows only ONE conditional bucket-config operation at a time. A
+        # CloudFormation rollback/delete tears down TestSetBucketPolicy,
+        # TestSetBucketAutoDelete and this notification config concurrently, so
+        # PutBucketNotificationConfiguration intermittently returns
+        # OperationAborted ("A conflicting conditional operation is currently in
+        # progress"). It is purely transient - the same call succeeds moments
+        # later - so retry with backoff instead of failing the resource.
+        RETRY_DELAYS = [2, 5, 10, 20, 30, 45, 60, 60, 60, 60]
+        RETRYABLE_CODES = {'OperationAborted', 'SlowDown', 'RequestTimeout',
+                           'InternalError', 'ServiceUnavailable',
+                           'TooManyRequests'}
+
+
+        def put_notification_with_retry(s3_client, bucket_name, notification_config):
+            """PutBucketNotificationConfiguration, retrying transient conflicts."""
+            last_error = None
+            for attempt, delay in enumerate([0] + RETRY_DELAYS, start=1):
+                if delay:
+                    logger.warning(
+                        "Retrying bucket notification config for %s in %ss "
+                        "(attempt %s) after %s",
+                        bucket_name, delay, attempt, last_error
+                    )
+                    time.sleep(delay)
+                try:
+                    s3_client.put_bucket_notification_configuration(
+                        Bucket=bucket_name,
+                        NotificationConfiguration=notification_config
+                    )
+                    return
+                except ClientError as e:
+                    code = e.response.get('Error', {}).get('Code', '')
+                    if code not in RETRYABLE_CODES:
+                        raise
+                    last_error = code
+            raise RuntimeError(
+                f"PutBucketNotificationConfiguration on {bucket_name} still "
+                f"failing with {last_error} after {len(RETRY_DELAYS) + 1} attempts"
+            )
+
+
         def handler(event, context):
             logger.info(json.dumps(event))
-            
+
+            request_type = event['RequestType']
             try:
                 s3_client = boto3.client('s3')
                 bucket_name = event['ResourceProperties']['BucketName']
                 function_arn = event['ResourceProperties']['FunctionArn']
-                
-                if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+
+                if request_type == 'Create' or request_type == 'Update':
                     # Configure bucket notification
                     notification_config = {
                         'LambdaFunctionConfigurations': [
@@ -9652,25 +9708,32 @@ Resources:
                             }
                         ]
                     }
-                    
-                    s3_client.put_bucket_notification_configuration(
-                        Bucket=bucket_name,
-                        NotificationConfiguration=notification_config
+
+                    put_notification_with_retry(
+                        s3_client, bucket_name, notification_config
                     )
-                    
-                elif event['RequestType'] == 'Delete':
+
+                elif request_type == 'Delete':
                     # Remove bucket notification
-                    s3_client.put_bucket_notification_configuration(
-                        Bucket=bucket_name,
-                        NotificationConfiguration={}
-                    )
-                
+                    put_notification_with_retry(s3_client, bucket_name, {})
+
                 cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
-                
+
             except Exception as e:
                 logger.error(f"Error: {str(e)}")
-                cfnresponse.send(event, context, cfnresponse.FAILED, {}, 
-                               reason=f"Error configuring bucket notification: {str(e)}")
+                if request_type == 'Delete':
+                    # Never block a stack delete/rollback on cleanup of a
+                    # notification config: the bucket itself is Retain, and a
+                    # DELETE_FAILED here wedges the whole stack in
+                    # ROLLBACK_FAILED (requiring manual intervention) for a
+                    # resource that no longer matters. Mirrors the
+                    # best-effort-succeed behavior of
+                    # TestSetBucketAutoDeleteFunction.
+                    cfnresponse.send(event, context, cfnresponse.SUCCESS, {},
+                                     reason=f"Notification cleanup attempted: {str(e)}")
+                else:
+                    cfnresponse.send(event, context, cfnresponse.FAILED, {},
+                                     reason=f"Error configuring bucket notification: {str(e)}")
       Policies:
         - Statement:
             - Effect: Allow
@@ -9684,6 +9747,13 @@ Resources:
     DependsOn:
       - TestSetZipExtractorFunctionInvokePermission
       - TestSetZipExtractorS3Policy
+      # Serialize against the other conditional bucket-config write on
+      # TestSetBucket. Without this, CloudFormation creates (and, in reverse,
+      # deletes) the policy and this notification config in the same instant,
+      # and S3 rejects the second with OperationAborted. Ordering them costs
+      # nothing and removes the race at the source; the retry ladder in the
+      # handler above covers any residual conflict from outside this stack.
+      - TestSetBucketPolicy
     Properties:
       ServiceToken: !GetAtt TestSetBucketNotificationFunction.Arn
       BucketName: !Ref TestSetBucket
@@ -10665,6 +10735,51 @@ Resources:
       # Force codebuild to rerun when source code changes (filename will change), and to correctly roll back to
       # previous version if build fails.
       CodeLocation: !Sub "arn:${AWS::Partition}:s3:::<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/<WEBUI_ZIPFILE_TOKEN>"
+      # Force codebuild to rerun when a CloudFormation parameter that Vite BAKES
+      # INTO the bundle changes. This property is the only thing that makes a
+      # parameter-only stack update rebuild the UI.
+      #
+      # Why it is needed: the UI reads these as `import.meta.env.VITE_*`, which
+      # Vite substitutes textually at `npm run build` and freezes into the JS in
+      # WebUIBucket. Changing the parameter updates UICodeBuildProject's env var,
+      # but mutating a CodeBuild project definition does NOT run a build — only
+      # this custom resource does, via start_build. Without a property diff here,
+      # CloudFormation skips the resource entirely (no Update event, no build) and
+      # the previously-built bundle stays deployed, so the change silently has no
+      # effect in the UI. A fresh stack create always runs the build once, which
+      # is why this gate is invisible to create-only testing.
+      #
+      # Regression that prompted this: adding AllowedSignUpEmailDomain to an
+      # existing stack correctly flipped the backend (UserPool
+      # AllowAdminCreateUserOnly=false + the PreSignUp domain-verify Lambda) but
+      # the login page kept hiding the Sign Up tab, because VITE_SHOULD_HIDE_SIGN_UP
+      # was still "true" in the stale bundle.
+      #
+      # ONLY list parameters that are baked in at build time. Values resolved at
+      # runtime (the SSM settings parameter read by useParameterStore, e.g.
+      # ConsoleTitle / DefaultFeatureId) must NOT be here — they already take
+      # effect without a rebuild, and adding them would force needless 30-minute
+      # UI rebuilds. Keep in sync with the VITE_* vars in UICodeBuildProject that
+      # derive from a CFN parameter.
+      UIBuildInputs: !Join
+        - "|"
+        - # -> VITE_SHOULD_HIDE_SIGN_UP (hideSignUp on the Authenticator)
+          - !Ref AllowedSignUpEmailDomain
+          # -> VITE_EXTERNAL_IDP_NAME / VITE_COGNITO_DOMAIN (federated sign-in
+          #    button + Amplify OAuth config in aws-exports.js)
+          - !Ref ExternalIdPType
+          - !Ref ExternalIdPName
+          # -> VITE_EXTERNAL_IDP_AUTO_LOGIN (auto-redirect to the IdP)
+          - !Ref ExternalIdPAutoLogin
+          # -> VITE_ENABLE_QUICK_START_WIDGET
+          - !Ref EnableQuickStartWidget
+          # -> VITE_UI_BASE_PATH + VITE_CLOUDFRONT_DOMAIN (Vite `base`, so every
+          #    asset URL in the bundle) and the CloudFront-invalidation branch of
+          #    the buildspec
+          - !Ref WebUIHosting
+          # -> VITE_CLOUDFRONT_DOMAIN (empty when set, so OAuth redirects fall
+          #    back to window.location.origin)
+          - !Ref CustomDomainUrl
 
   ##########################################################################
   # HITL User Management Lambda
@@ -11015,6 +11130,7 @@ Resources:
   FinetuningProcessDocumentFunction:
     Type: AWS::Serverless::Function
     Metadata:
+      BuildMethod: makefile
       cfn_nag:
         rules_to_suppress:
           - id: W89

@@ -4,6 +4,7 @@
 """Unit tests for the v0.5 -> v0.6 config-shape migration."""
 
 import pytest
+
 from idp_common.config.migrations.v05_to_v06 import migrate_v05_to_v06
 from idp_common.config.models import CONFIG_FORMAT_VERSION, IDPConfig
 

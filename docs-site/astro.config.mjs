@@ -170,6 +170,10 @@ export default defineConfig({
                   slug: "extensions/pii-anonymizer",
                 },
                 {
+                  label: "Test Set - ConfBench",
+                  slug: "extensions/confbench-testset",
+                },
+                {
                   label: "Test Set Generator",
                   slug: "extensions/idp-data-generator",
                 },
@@ -261,6 +265,10 @@ export default defineConfig({
               slug: "using-notebooks-with-idp-common",
             },
             { label: "Dependency Mirroring", slug: "dependency-mirroring" },
+            {
+              label: "Installing First-Party Packages",
+              slug: "dependency-confusion",
+            },
           ],
         },
         {

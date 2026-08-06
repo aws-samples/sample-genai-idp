@@ -4,6 +4,7 @@
 from unittest.mock import Mock, patch
 
 import pytest
+
 from idp_common.bda.bda_blueprint_service import BdaBlueprintService
 
 

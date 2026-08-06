@@ -31,6 +31,22 @@ without running a test execution. See the
 installation.
 
 
+## Deploying the ConfBench benchmark on demand
+
+The [Test Set - ConfBench](extensions/confbench-testset.md) extension adds the
+**amazon/ConfBench** benchmark — the same 75 FCC invoices as
+[RealKIE-FCC-Verified](#realkie-fcc-verified) below, each degraded by up to 21
+Augraphy noise pipelines (1,346 documents) — for confidence-calibration and OCR
+robustness work.
+
+It ships as an optional extension rather than a pre-deployed test set because
+the full dataset is **32.71 GB**, roughly 42x the combined size of the four sets
+below. After installing it you choose a size tier (from a 0.02 GB clean baseline
+up to the full 32.71 GB) or hand-pick individual noise variants, and the ingest
+runs as a background job. See the
+[Test Set - ConfBench extension](extensions/confbench-testset.md).
+
+
 ## Pre-Deployed Test Sets
 
 The accelerator automatically deploys **four benchmark datasets** from HuggingFace as ready-to-use test sets during stack deployment:
@@ -612,6 +628,64 @@ Test Studio uses Stickler's `BulkStructuredModelEvaluator` for accurate metric a
 - **Efficient**: No Athena queries needed for new data
 - **Cost Effective**: Reduces Athena query costs
 
+### Graded Packet Metrics (Run-Level)
+
+The exact-match split counters above (`page_level_accuracy`,
+`split_accuracy_without_order`, `split_accuracy_with_order`) score packet
+classification all-or-nothing — a section that groups 9 of 10 pages correctly
+scores 0. Graded packet metrics from
+`stickler.doc_split.packet_evaluation_metrics.evaluate_packet` score the same
+per-doc partial correctness on five continuous [0.0, 1.0] axes. They were
+already computed per document (surfaced in each doc's `evaluation/results.json`
+under `doc_split_metrics`) but are now also aggregated at the run level and
+rendered in the Additional Metrics panel:
+
+| Metric | What it measures |
+|---|---|
+| **Final Score** | Composite of the four metrics below — the headline number |
+| **Clustering Score** | How well predicted section boundaries match ground-truth grouping (ignoring section identity) |
+| **V Measure** | Harmonic mean of homogeneity and completeness of the predicted clustering |
+| **Rand Index** | Fraction of page-pairs whose "same section vs different section" relationship matches ground truth |
+| **Avg Ordering Score** | How well the pages within each section preserve ground-truth order |
+
+**Aggregation.** Simple unweighted mean across documents that reported each
+key — the same idiom as `weightedOverallScores`. Per-doc scores are already
+page-count-aware within a document (V-measure / Rand / ordering are computed
+over every page of the doc), so averaging per-doc gives each document equal
+weight in the run summary. Documents missing a key are excluded from that
+key's mean (not zero-filled), so an older `results.json` payload without
+graded metrics can't drag the newer docs' scores down.
+
+**When the panel populates.**
+- **Multi-section documents** (lending packages, medical prior-auth packets,
+  DocSplit-Poly-Seq): metrics vary meaningfully per doc and the panel is the
+  primary way to see how close-but-not-exact classification is. E.g. a run
+  where `split_accuracy_without_order = 0.41` typically shows graded means
+  around 0.56–0.69, revealing partial correctness the exact-match view
+  clipped to zero.
+- **Single-section documents** (OmniAI-OCR-Benchmark, standalone W-2s):
+  every metric collapses to `1.0` trivially since there's nothing to
+  mis-cluster. The panel still renders but adds no signal beyond the
+  existing accuracy row.
+- **No page overlap between ground-truth and prediction** (rare — usually an
+  OCR page-count mismatch): `evaluate_packet` returns nothing for that doc
+  and it's absent from the map. If no doc in the run reported any graded
+  metric, the panel hides entirely rather than showing an all-null table.
+
+**Backward compatibility.** Runs that completed before the aggregation
+Lambda knew about graded metrics re-aggregate once on next view — the stale-
+cache guard treats a missing `gradedPacketMetrics` key as "recalculate this
+run's cache." No manual migration required.
+
+The recompute is queued asynchronously (aggregation re-reads every document's
+`results.json` from S3 and can take minutes on a large run, well past the
+API's read timeout), so the **first** view of a pre-existing run still renders
+immediately from its cached metrics with the graded panel hidden; reload once
+the re-aggregation finishes to see the graded rows. Because the cache write
+always includes the `gradedPacketMetrics` key — `{}` when a run legitimately
+has no graded metrics, e.g. single-section documents — a run is re-queued at
+most once and never loops.
+
 ### Field-Level Metrics
 
 Test results include detailed per-field extraction performance metrics displayed in an interactive table with optional confidence calibration columns (Stickler v0.4.0+):
@@ -638,12 +712,12 @@ Test results include detailed per-field extraction performance metrics displayed
 - **Expandable Section**: Collapsed by default to keep results view clean
 - **Paginated**: 10 fields per page for easy navigation
 - **Resizable Columns**: Adjust column widths as needed
-- **Backward Compatible**: Confidence columns only shown for test runs with Stickler v0.4.0+ data
+- **Backward Compatible**: Confidence columns only appear for test runs whose per-doc results include the `confidenceMetrics` blob (older runs from before this feature landed simply don't show them)
 - **Interactive Help**: Info icons next to metric names provide explanatory tooltips with links to documentation (Wikipedia for standard metrics, Stickler docs for ECARB@30). Available for all accuracy metrics, confidence metrics, confusion matrix components, error rates, and split classification metrics
 
 **How It Works:**
 - Backend stores confusion matrix values (TP, FP, TN, FN) from Stickler aggregation
-- Backend computes confidence calibration metrics (AUROC, ECE, Brier) using Stickler v0.4.0+ ConfidenceCalculator
+- Backend computes confidence calibration metrics (AUROC, ECE, Brier) using Stickler's `BulkStructuredModelEvaluator` in the aggregation Lambda
 - UI calculates Accuracy, Precision, and Recall on-the-fly from confusion matrix values
 - Confidence columns dynamically appear only when `confidenceMetrics` data is present
 - Metrics displayed with 3 decimal precision (e.g., 0.850)
@@ -656,11 +730,11 @@ Test results include detailed per-field extraction performance metrics displayed
 - **Prioritization**: Prioritize prompt engineering efforts on problematic fields or fields with poor confidence calibration
 - **Tracking**: Track improvement in specific fields after configuration changes
 
-#### Confidence Calibration Metrics (Stickler v0.4.0+)
+#### Confidence Calibration Metrics
 
 https://github.com/user-attachments/assets/1d17ea33-f098-4d9e-a461-1113b9dc3ce9
 
-The evaluation engine uses **Stickler v0.4.0** to compute confidence calibration metrics alongside traditional accuracy metrics. These metrics assess how well the model's confidence scores reflect actual correctness.
+The evaluation engine uses Stickler's bulk aggregator to compute confidence calibration metrics alongside traditional accuracy metrics. These metrics assess how well the model's confidence scores reflect actual correctness.
 
 **What Are Confidence Calibration Metrics?**
 
@@ -689,8 +763,8 @@ When a model extracts a field with 90% confidence, ideally 90% of such predictio
 
 2. **Test Aggregation**: When viewing test results, the aggregation function:
    - Loads all `stickler_comparison_result` records for the test run
-   - Computes calibration metrics (AUROC, ECE, Brier) using Stickler's `ConfidenceMetricsCalculator`
-   - Computes ECAB (Error Capture at Budget) metrics using `BulkStructuredModelEvaluator` with `ErrorCaptureAtBudgetMetric`
+   - Computes calibration metrics (AUROC, ECE, Brier) via `aggregate_from_comparisons` and a `BulkStructuredModelEvaluator` with the confidence metrics installed as bulk-level accumulators
+   - Also runs `BulkStructuredModelEvaluator` with `ErrorCaptureAtBudgetMetric` to compute ECAB (Error Capture at Budget)
    - Aggregates path-based keys (e.g., `LineItems[0].Rate`) to pattern-based keys (`LineItems.Rate`)
    - Merges ECAB metrics into the confidence metrics structure
    - Returns `confidence_metrics` field with overall and per-field calibration data
@@ -704,17 +778,16 @@ When a model extracts a field with 90% confidence, ideally 90% of such predictio
 
 **Known Limitations:**
 
-- **Overall Brier Score**: Stickler v0.4.0's bulk aggregator returns `null` for overall Brier score (implementation pending). However, **field-level Brier scores are computed** via scikit-learn in the test aggregation function and are available in the field metrics table.
 - **Coverage**: Confidence metrics only available for fields where extraction service provided confidence scores
-- **Backward Compatibility**: Test runs executed before Stickler v0.4.0 upgrade will not have confidence calibration data
+- **Backward Compatibility**: Test runs executed before this feature landed will not carry the `confidenceMetrics` blob, so the UI hides those columns
 
 **Architecture:**
 
 - **Evaluation Service**: `lib/idp_common_pkg/idp_common/evaluation/service.py`
   - Flattens confidence scores and patches field_comparisons
 - **Confidence Integration**: `lib/idp_common_pkg/idp_common/evaluation/confidence_integration.py`
-  - Wrapper for Stickler's ConfidenceMetricsCalculator
+  - Contains `get_average_confidence_from_metrics`, the small helper used by the aggregation Lambda's confidence merging path
 - **Test Aggregation**: `patterns/unified/src/test_execution_aggregation_function/index.py`
-  - Computes and aggregates calibration metrics across test run
+  - Computes and aggregates calibration metrics across test run via `aggregate_from_comparisons` + `BulkStructuredModelEvaluator`
 - **UI Display**: `src/ui/src/components/test-studio/TestResults.tsx`
   - Renders confidence columns in field metrics table

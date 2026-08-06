@@ -1769,6 +1769,207 @@ def get_codebuild_logs():
         return f"Failed to retrieve CodeBuild logs: {str(e)}"
 
 
+# A nested-stack CodeBuild custom resource (e.g. MULTIDOCDISCOVERYSTACK's
+# DockerBuildRun) reports failure to CloudFormation as nothing more than
+# "CodeBuild failed with status: FAILED". The evidence chain dead-ends at the
+# CloudFormation boundary, so no amount of prompt tuning can explain WHY the
+# image build failed — the real cause (a pip BrokenPipeError, a Docker layer
+# error, an ECR auth failure) lives only in that build's own CloudWatch stream.
+# This marker is what tells us to go follow that trail.
+_CODEBUILD_CR_FAILURE_MARKER = "codebuild failed with status"
+
+# Lines of the failing build's log to attach. The interesting part (the failing
+# command + its traceback + the buildspec phase summary) is always at the tail.
+_CODEBUILD_LOG_TAIL_LINES = 120
+
+# Build statuses that represent a settled failure worth reporting on. Notably
+# EXCLUDES IN_PROGRESS: a still-running build carries no failure phase, so
+# treating it as "the failure" produces an empty, misleading report.
+_TERMINAL_BUILD_FAILURE_STATUSES = ("FAILED", "FAULT", "TIMED_OUT", "STOPPED")
+
+
+def _codebuild_projects_in_stack(cf_client, stack_name):
+    """Logical-id → project name for every CodeBuild project in a stack."""
+    projects = {}
+    try:
+        paginator = cf_client.get_paginator("describe_stack_resources")
+        pages = paginator.paginate(StackName=stack_name)
+    except Exception:
+        # describe_stack_resources isn't paginated in all botocore versions.
+        try:
+            pages = [cf_client.describe_stack_resources(StackName=stack_name)]
+        except Exception:
+            return projects
+    try:
+        for page in pages:
+            for res in page.get("StackResources", []):
+                if res.get("ResourceType") == "AWS::CodeBuild::Project":
+                    projects[res.get("LogicalResourceId", "")] = res.get(
+                        "PhysicalResourceId", ""
+                    )
+    except Exception:
+        pass
+    return projects
+
+
+def _codebuild_log_tail(build, tail_lines=_CODEBUILD_LOG_TAIL_LINES):
+    """Tail of a build's CloudWatch log stream, plus its console URL."""
+    logs_info = build.get("logs", {}) or {}
+    group = logs_info.get("groupName")
+    stream = logs_info.get("streamName")
+    deep_link = logs_info.get("deepLink", "")
+    if not group or not stream:
+        return "", deep_link
+    try:
+        logs_client = boto3.client("logs")
+        response = logs_client.get_log_events(
+            logGroupName=group, logStreamName=stream, startFromHead=False
+        )
+        messages = [e.get("message", "") for e in response.get("events", [])]
+        return "\n".join(messages[-tail_lines:]), deep_link
+    except Exception as e:  # noqa: BLE001
+        return f"(could not read {group}/{stream}: {e})", deep_link
+
+
+def get_codebuild_failure_details(stack_name, failed_events, max_projects=3):
+    """Follow a CodeBuild custom-resource failure down to the real build error.
+
+    When a nested stack fails because its Docker-image CodeBuild run failed, the
+    CloudFormation reason is only "CodeBuild failed with status: FAILED". This
+    resolves the CodeBuild project from the *nested* stack that reported the
+    failure (the project is a resource in that same stack), finds its most recent
+    non-successful build, and returns that build's phase error + log tail so the
+    summary can name the actual cause.
+
+    Must be called BEFORE stack teardown — the nested stacks and their builds'
+    log streams are needed. Returns a list of dicts; empty when nothing matched
+    (so a summary prompt can simply omit the section).
+    """
+    triggering = [
+        ev
+        for ev in failed_events or []
+        if isinstance(ev, dict)
+        and _CODEBUILD_CR_FAILURE_MARKER in (ev.get("reason") or "").lower()
+    ]
+    if not triggering:
+        return []
+
+    cf_client = boto3.client("cloudformation")
+    cb_client = boto3.client("codebuild")
+    details = []
+    seen_projects = set()
+
+    for ev in triggering:
+        # The failing custom resource lives in a nested stack; its `stack_name`
+        # is what get_cloudformation_logs recorded when it walked that stack.
+        owning_stack = ev.get("stack_name") or stack_name
+        for logical_id, project_name in _codebuild_projects_in_stack(
+            cf_client, owning_stack
+        ).items():
+            if not project_name or project_name in seen_projects:
+                continue
+            if len(seen_projects) >= max_projects:
+                break
+            seen_projects.add(project_name)
+            try:
+                ids = cb_client.list_builds_for_project(
+                    projectName=project_name, sortOrder="DESCENDING"
+                ).get("ids", [])
+                if not ids:
+                    continue
+                # Inspect the few most recent builds and report the newest one
+                # that reached a TERMINAL FAILURE. Matching on "not SUCCEEDED"
+                # would also match IN_PROGRESS — and since the DockerBuildRun
+                # custom resource now retries once, the newest build is often
+                # still running when we look. An in-progress build has no
+                # FAILED/FAULT/TIMED_OUT phase, so it yields an empty
+                # phase_error and a partial log tail, and next() would stop
+                # there and never reach the build that actually failed.
+                builds = cb_client.batch_get_builds(ids=ids[:5]).get("builds", [])
+                failed = next(
+                    (
+                        b
+                        for b in builds
+                        if b.get("buildStatus") in _TERMINAL_BUILD_FAILURE_STATUSES
+                    ),
+                    None,
+                )
+                if not failed:
+                    continue
+                phase_error = next(
+                    (
+                        (p.get("contexts") or [{}])[0].get("message", "")
+                        for p in reversed(failed.get("phases", []))
+                        if p.get("phaseStatus") in ("FAILED", "FAULT", "TIMED_OUT")
+                    ),
+                    "",
+                )
+                log_tail, deep_link = _codebuild_log_tail(failed)
+                details.append(
+                    {
+                        "stack_name": owning_stack,
+                        "logical_id": logical_id,
+                        "project_name": project_name,
+                        "build_id": failed.get("id", ""),
+                        "build_status": failed.get("buildStatus", ""),
+                        "failed_phase": next(
+                            (
+                                p.get("phaseType", "")
+                                for p in failed.get("phases", [])
+                                if p.get("phaseStatus")
+                                in ("FAILED", "FAULT", "TIMED_OUT")
+                            ),
+                            "",
+                        ),
+                        "phase_error": phase_error,
+                        "log_url": deep_link,
+                        "log_tail": log_tail,
+                    }
+                )
+            except Exception as e:  # noqa: BLE001
+                details.append(
+                    {
+                        "stack_name": owning_stack,
+                        "project_name": project_name,
+                        "error": f"Could not retrieve CodeBuild detail: {e}",
+                    }
+                )
+    return details
+
+
+def _recovery_command(stack_name):
+    """The CORRECT recovery command for the stack's actual current state.
+
+    `continue-update-rollback` is valid ONLY from UPDATE_ROLLBACK_FAILED. A
+    CREATE that rolled back lands in ROLLBACK_FAILED, where the only way forward
+    is delete-stack — recommending continue-update-rollback there just errors out
+    (the model guessed wrong on exactly this case), so the command is decided in
+    Python from the real status instead of being left to the model.
+    """
+    try:
+        cf_client = boto3.client("cloudformation")
+        status = (
+            cf_client.describe_stacks(StackName=stack_name)
+            .get("Stacks", [{}])[0]
+            .get("StackStatus", "")
+        )
+    except Exception:  # noqa: BLE001
+        status = ""
+
+    if status == "UPDATE_ROLLBACK_FAILED":
+        return (
+            f"aws cloudformation continue-update-rollback --stack-name {stack_name}",
+            status,
+        )
+    if status in ("ROLLBACK_FAILED", "ROLLBACK_COMPLETE", "CREATE_FAILED"):
+        # A CREATE rollback cannot be continued or updated — the stack must go.
+        return (
+            f"aws cloudformation delete-stack --stack-name {stack_name}",
+            status,
+        )
+    return ("", status)
+
+
 def get_workflow_failure_details(stack_name, max_executions=5):
     """Capture the real cause of a document processing failure before teardown.
 
@@ -2166,11 +2367,45 @@ def generate_deployment_summary(result, stack_name, template_url):
                     print(f"⚠️ Exception getting CF logs for {stack_name}: {e}")
                     logs = [{"error": f"Exception: {str(e)}", "stack_name": stack_name}]
 
+            # A CodeBuild custom resource reports only "CodeBuild failed with
+            # status: FAILED" to CloudFormation, so follow that trail into the
+            # failing build's own log stream. Prefer pre-captured details.
+            codebuild_failures = result.get("codebuild_failures")
+            if codebuild_failures is None:
+                try:
+                    codebuild_failures = get_codebuild_failure_details(
+                        stack_name, logs
+                    )
+                    if codebuild_failures:
+                        print(
+                            f"✅ Captured {len(codebuild_failures)} CodeBuild "
+                            "failure detail(s)"
+                        )
+                except Exception as e:  # noqa: BLE001
+                    print(f"⚠️ Could not capture CodeBuild failure detail: {e}")
+                    codebuild_failures = []
+
+            # Order events chronologically here rather than asking the model to
+            # do it: the FIRST concrete failure is what caused the rollback, and
+            # anything after it (notably a DELETE_FAILED mid-rollback) is a
+            # SEPARATE, secondary fault that blocked the rollback. Conflating the
+            # two sends readers chasing the wrong resource.
+            ordered = [e for e in logs if isinstance(e, dict)]
+            primary = ordered[0] if ordered else {}
+            secondary = [
+                e
+                for e in ordered[1:]
+                if e.get("status") in ("DELETE_FAILED", "UPDATE_ROLLBACK_FAILED")
+                or "failed to delete" in (e.get("reason") or "").lower()
+            ]
+            recovery_cmd, live_status = _recovery_command(stack_name)
+
             cf_prompt = dedent(f"""
             An AWS CloudFormation deployment failed. Analyze the error events to
             determine the root cause.
 
             Stack Name: {stack_name}
+            Current stack status: {live_status or "unknown (already deleted)"}
 
             Deployment error:
             {error_text}
@@ -2180,17 +2415,40 @@ def generate_deployment_summary(result, stack_name, template_url):
             either, so read the `stack_name` field on each event):
             {json.dumps(logs, indent=2)}
 
+            PRIMARY failure (earliest concrete event — this CAUSED the rollback):
+            {json.dumps(primary, indent=2)}
+
+            SECONDARY failures that BLOCKED the rollback (may be empty; these did
+            NOT cause the deploy to fail, they only prevented clean teardown):
+            {json.dumps(secondary, indent=2)}
+
+            Failing CodeBuild build detail (AUTHORITATIVE when present: a
+            CloudFormation reason of "CodeBuild failed with status: FAILED" is a
+            dead end, and `phase_error` / the tail of `log_tail` below hold the
+            REAL cause — e.g. a pip network error, a Docker build error, an ECR
+            auth failure):
+            {json.dumps(codebuild_failures, indent=2)}
+
             GROUNDING RULES — follow strictly:
-            • Base the root cause ONLY on a concrete ResourceStatusReason
-              actually present in the events above. Do NOT invent causes.
+            • Base the root cause ONLY on a concrete ResourceStatusReason or
+              CodeBuild phase_error/log_tail line actually present above. Do NOT
+              invent causes.
+            • If CodeBuild detail IS present, the root cause is the error inside
+              that build — quote the specific failing command/exception from
+              phase_error or log_tail. Do NOT stop at "CodeBuild failed".
+            • Report the PRIMARY failure as the root cause. If SECONDARY failures
+              are present, report them separately and explicitly as having
+              blocked the rollback, not as the cause of the deploy failure.
             • If the events list is empty or every entry has only an "error"
               field (retrieval failed / stack already deleted), you MUST say the
               root cause was NOT captured and recommend re-running with
               `idp-cli deploy --no-rollback` to preserve the failed resources.
               Do NOT guess at IAM/quota/API-limit causes with no evidence.
-            • Find the FIRST CREATE_FAILED events (chronologically) with a
-              concrete reason — later "Resource creation cancelled" events are
-              cascades. Quote the exact reason string verbatim.
+            • For the recovery command, use EXACTLY this (it was derived from the
+              stack's real status; do not substitute your own):
+              {recovery_cmd or "aws cloudformation describe-stacks --stack-name " + stack_name}
+              Never suggest `continue-update-rollback` unless it appears above —
+              it is invalid for anything other than UPDATE_ROLLBACK_FAILED.
 
             Provide analysis in this format:
 
@@ -2198,16 +2456,21 @@ def generate_deployment_summary(result, stack_name, template_url):
 
             📋 Status: {stack_name} FAILED - [one-line root cause, or "root cause not captured"]
 
-            🔍 CloudFormation Root Cause:
-            • Quote the exact ResourceStatusReason of the original failure
+            🔍 Root Cause (primary):
+            • Quote the exact error that caused the failure (from CodeBuild
+              phase_error/log_tail when present, else the ResourceStatusReason)
             • Name the stack + logical resource that failed (from the events)
             • If nothing concrete was captured, say so explicitly
 
-            💡 Fix Commands:
-            • Provide specific AWS CLI commands based on actual failures found
-            • If root cause not captured, give the --no-rollback re-run command
+            ⚠️ Also blocked rollback (omit this whole section if none):
+            • Name the resource + quote its reason, and state it is secondary
 
-            Keep each bullet point under 75 characters.
+            💡 Fix Commands:
+            • The recovery command given above, verbatim
+            • Any further command supported by the evidence
+            {"• Failing build log: " + (codebuild_failures[0].get("log_url") or "n/a") if codebuild_failures else ""}
+
+            Keep each bullet point under 75 characters, except URLs which may run long.
             Respond ONLY with the format above, no other text.
             """)
             return _invoke_bedrock(cf_prompt)
@@ -3307,8 +3570,13 @@ def validate_zap_dast(stack_name):
     # the container's non-root user can write the report. (Contents are a
     # throwaway OpenAPI seed + ZAP reports — no secrets; the token lives in a
     # separate options file, also 0o777 here but never uploaded.)
+    # nosec B103 - accepted: the report is written by the ZAP image's non-root
+    # `zap` user, whose uid we don't control, into this root-owned bind mount,
+    # so a narrower mask makes the scan fail (see the comment above). Scope is a
+    # throwaway per-run mkdtemp dir in a single-tenant, ephemeral CodeBuild
+    # container holding only an OpenAPI seed and ZAP reports.
     workdir = tempfile.mkdtemp(prefix="zap-")
-    os.chmod(workdir, 0o777)
+    os.chmod(workdir, 0o777)  # nosec B103
     email = "zap-dast@example.invalid"
     password = "Aa1!" + secrets.token_urlsafe(24)
     token = None
@@ -3318,7 +3586,11 @@ def validate_zap_dast(stack_name):
         rbac_common.enable_admin_auth(ctx)
         rbac_common.create_cognito_user(ctx, email, "Admin", password)
         token = rbac_common.get_id_token(ctx, email, password)
-        if not token or token == "None":
+        # nosec B105 - the "None" literal is the string the AWS CLI prints for a
+        # null `--query` result (`--output text`), i.e. the sentinel for "no
+        # token was minted", not a credential. Bandit's heuristic fires only
+        # because the compared variable is named `token`.
+        if not token or token == "None":  # nosec B105
             return {"success": False, "error": "Failed to mint Cognito ID token"}
 
         fields = _zap_op_fields()
@@ -3500,6 +3772,19 @@ def _capture_cf_events(result, *stack_names):
     result["cf_events"] = events or [
         {"error": "No CloudFormation events captured", "stacks": list(stack_names)}
     ]
+
+    # Snapshot the failing nested CodeBuild build's error + log tail NOW, for the
+    # same reason as the events above: resolving the project requires the nested
+    # stack to still exist, and teardown deletes it. Without this the summary can
+    # only ever report "CodeBuild failed with status: FAILED".
+    if events:
+        try:
+            details = get_codebuild_failure_details(stack_names[0], events)
+            if details:
+                result["codebuild_failures"] = details
+                print(f"✅ Captured {len(details)} CodeBuild failure detail(s)")
+        except Exception as e:  # noqa: BLE001
+            print(f"⚠️ Could not capture CodeBuild failure detail: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -3707,11 +3992,12 @@ PROBE_TRANSIENT_MAX_ATTEMPTS = 2
 
 
 # Known AWS eventual-consistency (control-plane propagation) races that a fresh
-# redeploy re-rolls. Each entry is (resource_type, reason_substring) matched
-# case-insensitively against a CREATE_FAILED event. These are the ONLY failures
-# retried: they are non-deterministic (a clean redeploy usually passes), whereas
-# a real config/permission/template error fails IDENTICALLY every time and must
-# surface, not be masked. Verified from real CI runs:
+# redeploy re-rolls. Each entry is (resource_type, reason_substring, statuses)
+# matched case-insensitively on reason against an event whose status is in
+# statuses. These are the ONLY failures retried: they are non-deterministic (a
+# clean redeploy usually passes), whereas a real config/permission/template error
+# fails IDENTICALLY every time and must surface, not be masked. Verified from
+# real CI runs:
 #   * LogGroup: an AWS::Logs::LogGroup with RetentionInDays makes CFN issue
 #     CreateLogGroup then PutRetentionPolicy; under heavy concurrent stack
 #     creation (~250 log groups at once) CWL isn't read-your-write consistent, so
@@ -3721,9 +4007,22 @@ PROBE_TRANSIENT_MAX_ATTEMPTS = 2
 #     eventually consistent, so CodeBuild's CreateProject trust validation
 #     occasionally races the new role → "is not authorized to perform:
 #     sts:AssumeRole on service role ... trust policy configured".
+#   * S3 bucket-config OperationAborted: S3 permits only one conditional
+#     bucket-config write at a time, so concurrent CFN operations on the same
+#     bucket (notification config vs bucket policy vs auto-delete) collide →
+#     "A conflicting conditional operation is currently in progress". Seen as a
+#     DELETE_FAILED during rollback, which wedges the stack in ROLLBACK_FAILED.
+#     This is now fixed at the source (retry ladder + best-effort delete +
+#     DependsOn ordering in template.yaml); the entry remains as a backstop for
+#     any other bucket-config resource that hits the same S3 constraint.
 _TRANSIENT_DEPLOY_RACES = (
-    ("AWS::Logs::LogGroup", "does not exist"),
-    ("AWS::CodeBuild::Project", "sts:assumerole on service role"),
+    ("AWS::Logs::LogGroup", "does not exist", ("CREATE_FAILED",)),
+    ("AWS::CodeBuild::Project", "sts:assumerole on service role", ("CREATE_FAILED",)),
+    (
+        "Custom::S3BucketNotification",
+        "conflicting conditional operation",
+        ("CREATE_FAILED", "DELETE_FAILED", "UPDATE_FAILED"),
+    ),
 )
 
 
@@ -3731,25 +4030,31 @@ def _is_transient_deploy_race(result):
     """True iff the deploy rolled back on a KNOWN transient AWS-consistency race.
 
     NOT a blanket "retry any rollback": matched tightly to resource type +
-    message (see _TRANSIENT_DEPLOY_RACES) so genuine config/permission/template
-    errors — which fail identically on a redeploy — still surface. Requirements:
+    message + status (see _TRANSIENT_DEPLOY_RACES) so genuine
+    config/permission/template errors — which fail identically on a redeploy —
+    still surface. Requirements:
       * failure_type must be "deploy" (never a validation failure), and
-      * some captured event is a CREATE_FAILED on one of the known-racy resource
-        types whose reason contains the matching substring (the initiating
-        cause — collateral rolled-back resources carry "Resource creation
-        cancelled", which this deliberately does NOT match).
+      * some captured event matches a known-racy (resource type, reason
+        substring, status) triple. Most races are CREATE_FAILED on the
+        initiating resource; collateral rolled-back resources carry "Resource
+        creation cancelled", which this deliberately does NOT match. A few
+        (S3 bucket-config conflicts) surface as DELETE_FAILED mid-rollback, so
+        the matchable statuses are per-entry rather than CREATE_FAILED-only.
     """
     if result.get("failure_type") != "deploy":
         return False
     for ev in result.get("cf_events") or []:
         if not isinstance(ev, dict):
             continue
-        if ev.get("status") != "CREATE_FAILED":
-            continue
+        status = ev.get("status")
         rtype = ev.get("resource_type")
         reason = (ev.get("reason") or "").lower()
-        for race_type, race_substr in _TRANSIENT_DEPLOY_RACES:
-            if rtype == race_type and race_substr in reason:
+        for race_type, race_substr, race_statuses in _TRANSIENT_DEPLOY_RACES:
+            if (
+                rtype == race_type
+                and status in race_statuses
+                and race_substr in reason
+            ):
                 return True
     return False
 

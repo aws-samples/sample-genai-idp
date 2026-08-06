@@ -8,8 +8,9 @@ Unit tests for idp_common.monitoring.stepfunctions_service
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-import idp_common.monitoring.stepfunctions_service as sf_module
 import pytest
+
+import idp_common.monitoring.stepfunctions_service as sf_module
 from idp_common.monitoring.stepfunctions_service import (
     analyze_execution_timeline,
     extract_failure_details,

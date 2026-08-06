@@ -556,6 +556,22 @@ Resources:
                 Action:
                   - logs:*
                 Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+        # Read-only, so the deployment summary can follow a nested stack's
+        # CodeBuild custom-resource failure down to the REAL cause. A failed
+        # Docker-image build reports only "CodeBuild failed with status: FAILED"
+        # to CloudFormation; the actual error (a pip network fault, a Docker
+        # layer error) lives solely in that build's own log stream, which the
+        # CloudWatchLogsAccess statement above already permits reading.
+        # See get_codebuild_failure_details in codebuild_deployment.py.
+        - PolicyName: CodeBuildReadAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codebuild:ListBuildsForProject
+                  - codebuild:BatchGetBuilds
+                Resource: !Sub 'arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:project/*'
         - PolicyName: CloudWatchMetricsAccess
           PolicyDocument:
             Version: '2012-10-17'

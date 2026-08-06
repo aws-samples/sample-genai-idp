@@ -8,6 +8,7 @@ import os
 from unittest.mock import Mock
 
 import pytest
+
 from idp_common.synthesis import packet_io
 
 pytestmark = pytest.mark.unit
@@ -121,4 +122,20 @@ class TestUploadPacketToTestSet:
         baseline_key = s3.put_object.call_args.kwargs["Key"]
         assert baseline_key == (
             "my-test-set/baseline/packet_001.pdf/sections/1/result.json"
+        )
+
+    def test_name_prefix_makes_keys_unique(self, tmp_path):
+        root = str(tmp_path)
+        _make_packet(root, "packet_001.pdf", [SECTION])
+        docs = packet_io.read_packet(root)
+        s3 = Mock()
+        count = packet_io.upload_packet_to_test_set(
+            docs, "my-test-set", "test-set-bucket", s3_client=s3, name_prefix="abc123_"
+        )
+        assert count == 1
+        input_key = s3.upload_file.call_args[0][2]
+        assert input_key == "my-test-set/input/abc123_packet_001.pdf"
+        baseline_key = s3.put_object.call_args.kwargs["Key"]
+        assert baseline_key == (
+            "my-test-set/baseline/abc123_packet_001.pdf/sections/1/result.json"
         )

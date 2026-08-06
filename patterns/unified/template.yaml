@@ -5142,7 +5142,23 @@ Resources:
                 Action:
                   - kms:Decrypt
                   - kms:DescribeKey
+                  # Encrypt/GenerateDataKey are needed to WRITE the
+                  # compressed-document object below (the working bucket is
+                  # encrypted with the customer-managed key).
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
                 Resource: !Ref CustomerManagedEncryptionKeyArn
+              # Document mutation: when a hook returns an INLINE updated
+              # document dict, the dispatcher spills it to the working bucket
+              # in the same compressed-wrapper shape the step Lambdas use, so
+              # the next step's Document.load_document() resolves it normally.
+              # Scoped to the compressed_documents/ prefix the wrapper points
+              # at. PutObject only — the dispatcher never reads documents back
+              # (it passes references through opaquely), so a hook that needs
+              # to READ the document uses its own role.
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${WorkingBucket}/compressed_documents/*'
               # Two parallel allow paths for hook Lambdas:
               #
               # 1. Tag-based ABAC for vertical-product packs. Pack-shipped
@@ -5195,6 +5211,10 @@ Resources:
           # Lets the dispatcher surface PREPROCESSING as the document's visible
           # status while a preprocessing hook runs (best-effort, cosmetic).
           TRACKING_TABLE: !Ref TrackingTable
+          # Destination for a hook-returned INLINE updated document, spilled to
+          # S3 as a compressed reference for the next step. Unused when hooks
+          # are read-only or return their own compressed reference.
+          WORKING_BUCKET: !Ref WorkingBucket
 
   PipelineHooksDispatcherFunctionLogGroup:
     Type: AWS::Logs::LogGroup

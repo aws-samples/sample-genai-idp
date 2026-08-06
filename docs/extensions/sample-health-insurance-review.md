@@ -89,8 +89,11 @@ After installing:
 
 1. Open **Configuration**, find the `sample-health-insurance-review-v<version>` version, and
    **activate** it.
-2. Upload a prior-auth packet from `samples/rule-validation/` (e.g.
-   `Prior-Auth-12345678.pdf`) to the input bucket.
+2. Upload the sample prior-auth packet
+   `samples/rule-validation/medicare_respiratory_pa_packet.pdf` to the input
+   bucket. (Its content — a Medicare respiratory prior-auth request — matches
+   the NCCI policy rules the bundled preset ships with, so rules evaluate to
+   real Pass/Fail results.)
 3. When processing finishes, the claim appears in the **Claims Dashboard** with
    its status and per-rule breakdown.
 4. In the **Rules Discovery** tab, upload

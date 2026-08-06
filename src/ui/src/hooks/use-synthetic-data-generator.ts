@@ -11,7 +11,14 @@ const logger = new ConsoleLogger('useSyntheticDataGenerator');
 // registers a feature API exposing POST /generate and /generate-from-config.
 export const DATA_GENERATOR_FEATURE_ID = 'idp-data-generator';
 
-export interface GenerateFromPromptArgs {
+// Destination test set for the generated docs: either a new set (by name) or an
+// existing one (by id, appended to).
+export interface TestSetDestination {
+  testSetName?: string;
+  testSetId?: string;
+}
+
+export interface GenerateFromPromptArgs extends TestSetDestination {
   prompt: string;
   count: number;
   className?: string;
@@ -20,13 +27,19 @@ export interface GenerateFromPromptArgs {
   scenario?: string;
 }
 
-export interface GenerateFromConfigArgs {
+export interface GenerateFromConfigArgs extends TestSetDestination {
   configVersion: string;
   className: string;
   count: number;
   augment?: boolean;
   threshold?: number;
   scenario?: string;
+}
+
+export interface TestSetSummary {
+  id: string;
+  name: string;
+  status?: string;
 }
 
 export interface SuggestScenarioArgs {
@@ -155,6 +168,8 @@ const useSyntheticDataGenerator = () => {
         augment: Boolean(args.augment),
         threshold: args.threshold,
         scenario: args.scenario || undefined,
+        testSetName: args.testSetName || undefined,
+        testSetId: args.testSetId || undefined,
       }),
     [_post],
   );
@@ -168,6 +183,8 @@ const useSyntheticDataGenerator = () => {
         augment: Boolean(args.augment),
         threshold: args.threshold,
         scenario: args.scenario || undefined,
+        testSetName: args.testSetName || undefined,
+        testSetId: args.testSetId || undefined,
       }),
     [_post],
   );

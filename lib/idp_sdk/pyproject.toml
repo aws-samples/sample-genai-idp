@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "idp-sdk"
-version = "0.6.2"
+version = "0.6.3"
 description = "Python SDK for IDP Accelerator - programmatic access to document processing capabilities"
 authors = [{name = "AWS"}]
 license = {text = "MIT-0"}
@@ -28,6 +28,14 @@ dependencies = [
     "boto3>=1.28.0",
     "botocore>=1.31.0",
     "pydantic>=2.0.0",
+    # SECURITY: idp_common is a FIRST-PARTY package that lives in this repo at
+    # lib/idp_common_pkg. It is NOT published to PyPI, and the name `idp-common` on
+    # PyPI is squatted by a third party. A bare requirement here lets pip resolve it
+    # from public PyPI whenever it is not already installed (dependency confusion),
+    # so it must always be installed from the local checkout — install first-party
+    # packages together in one pip invocation:
+    #   pip install -e lib/idp_common_pkg -e lib/idp_sdk
+    # `make setup` / `make setup-venv` do this for you.
     "idp_common",
     "click>=8.0.0",
     "rich>=13.0.0",

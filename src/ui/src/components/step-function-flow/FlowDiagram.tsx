@@ -3,7 +3,6 @@
 
 import React from 'react';
 import { Box, Badge } from '@cloudscape-design/components';
-import useConfiguration from '../../hooks/use-configuration';
 import './FlowDiagram.css';
 
 interface StepConfig {
@@ -33,6 +32,11 @@ interface FlowDiagramProps {
   onStepClick: (step: Step) => void;
   selectedStep?: Step | null;
   getStepIcon: (name: string, type: string, status: string) => React.ReactNode;
+  // Merged config for the version this document was processed with (passed
+  // down from DocumentPanel via StepFunctionFlowViewer). Drives step-disabled
+  // rendering so a historical run's greyed-out steps reflect the toggles
+  // active AT PROCESSING TIME, not the stack's current live config.
+  mergedConfig?: StepConfig | null;
 }
 
 // Helper function to check if a step is disabled based on configuration
@@ -59,10 +63,13 @@ const isStepDisabled = (stepName: string, config: StepConfig | null): boolean =>
   return false;
 };
 
-const FlowDiagram = ({ steps = [], onStepClick, selectedStep = null, getStepIcon }: FlowDiagramProps): React.JSX.Element => {
-  // Use the configuration hook to get mergedConfig
-  const { mergedConfig } = useConfiguration();
-
+const FlowDiagram = ({
+  steps = [],
+  onStepClick,
+  selectedStep = null,
+  getStepIcon,
+  mergedConfig = null,
+}: FlowDiagramProps): React.JSX.Element => {
   if (!steps || steps.length === 0) {
     return (
       <Box textAlign="center" padding="xl">

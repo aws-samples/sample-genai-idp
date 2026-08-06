@@ -31,7 +31,6 @@ from idp_common.config.schema_constants import (
     TYPE_OBJECT,
     TYPE_STRING,
     X_AWS_IDP_CONFIDENCE_THRESHOLD,
-    X_AWS_IDP_DOCUMENT_TYPE,
     X_AWS_IDP_LIST_ITEM_DESCRIPTION,
 )
 from idp_common.models import Document
@@ -157,12 +156,9 @@ class AssessmentService:
         Returns:
             JSON Schema dict for the class, or empty dict if not found
         """
-        # Type-safe access to classes
-        classes = self.config.classes
-        for schema in classes:
-            if schema.get(X_AWS_IDP_DOCUMENT_TYPE, "").lower() == class_label.lower():
-                return schema
-        return {}
+        from idp_common.assessment.threshold_resolver import find_class_schema
+
+        return find_class_schema(class_label, self.config.classes) or {}
 
     def _resolve_confidence_escalation_model(self, class_label: str) -> Optional[str]:
         """Pick the stronger confidence model the self-healing ladder escalates to.
@@ -276,6 +272,152 @@ class AssessmentService:
                 # Not a confidence assessment - pass through unchanged
                 enhanced[key] = value
         return enhanced
+
+    def _enhance_dict_assessment_with_field_thresholds(
+        self,
+        assessment_dict: Dict[str, Any],
+        default_threshold: float,
+        field_thresholds: Dict[str, float],
+    ) -> Dict[str, Any]:
+        """Enhance a list-item assessment dict using per-sub-field thresholds.
+
+        Like ``_enhance_dict_assessment`` but looks up each sub-field's threshold
+        from ``field_thresholds`` (resolved from ``$defs`` via
+        ``resolve_array_item_thresholds``). Falls back to ``default_threshold``
+        for sub-fields not in the map.
+
+        Args:
+            assessment_dict: A single list-item assessment (e.g. one W2 copy's
+                per-field confidence data).
+            default_threshold: Fallback threshold when a sub-field has no entry
+                in ``field_thresholds``.
+            field_thresholds: ``{sub_field_name: threshold}`` from the resolved
+                item schema.
+
+        Returns:
+            Enhanced assessment dict with per-sub-field ``confidence_threshold``.
+        """
+        if not isinstance(assessment_dict, dict):
+            logger.warning(
+                f"Expected dictionary for assessment enhancement, got {type(assessment_dict)}. "
+                f"Creating default assessment structure."
+            )
+            return {
+                "confidence": 0.5,
+                "confidence_reason": f"LLM returned unexpected type {type(assessment_dict)} instead of dictionary. Using default confidence.",
+                "confidence_threshold": default_threshold,
+            }
+
+        # If this dict itself is a confidence leaf (shouldn't happen for a list
+        # item, but safety)
+        if "confidence" in assessment_dict:
+            return {
+                **assessment_dict,
+                "confidence_threshold": default_threshold,
+            }
+
+        # If no per-field thresholds resolved, fall back to uniform threshold
+        if not field_thresholds:
+            return self._enhance_dict_assessment(assessment_dict, default_threshold)
+
+        # Apply per-sub-field thresholds
+        enhanced = {}
+        for key, value in assessment_dict.items():
+            sub_threshold = field_thresholds.get(key, default_threshold)
+            if isinstance(value, dict) and "confidence" in value:
+                enhanced[key] = {
+                    **value,
+                    "confidence_threshold": sub_threshold,
+                }
+            elif isinstance(value, dict):
+                # Nested dict without "confidence" — recurse with same sub_threshold
+                enhanced[key] = self._enhance_dict_assessment(value, sub_threshold)
+            else:
+                enhanced[key] = value
+        return enhanced
+
+    def _check_confidence_alerts_with_field_thresholds(
+        self,
+        assessment_data: Dict[str, Any],
+        attr_name: str,
+        default_threshold: float,
+        field_thresholds: Dict[str, float],
+        alerts_list: List[Dict[str, Any]],
+    ) -> None:
+        """Check list-item assessment for threshold violations using per-sub-field thresholds.
+
+        Like ``_check_confidence_alerts`` but uses ``field_thresholds`` to
+        apply different thresholds per sub-field within a list item.
+
+        Args:
+            assessment_data: A single list-item assessment dict.
+            attr_name: Prefix path (e.g. ``"w2_copies[0]"``).
+            default_threshold: Fallback threshold for unresolved sub-fields.
+            field_thresholds: ``{sub_field_name: threshold}`` from resolved schema.
+            alerts_list: List to append alerts to (modified in place).
+        """
+        if not isinstance(assessment_data, dict):
+            return
+
+        # If this dict is itself a confidence leaf, alert on it — then still fall
+        # through to the sub-field scan below. A dict can carry BOTH its own
+        # ``confidence`` and nested per-field children; ``_check_confidence_alerts``
+        # reports both levels, so returning early here would silently drop the
+        # children's alerts relative to the uniform-threshold path.
+        if "confidence" in assessment_data:
+            confidence = _safe_float_conversion(
+                assessment_data.get("confidence", 0.0), 0.0
+            )
+            if confidence < _safe_float_conversion(default_threshold, 0.9):
+                alerts_list.append(
+                    {
+                        "attribute_name": attr_name,
+                        "confidence": confidence,
+                        "confidence_threshold": _safe_float_conversion(
+                            default_threshold, 0.9
+                        ),
+                    }
+                )
+
+        # If no per-field thresholds, fall back to uniform check for the
+        # sub-fields. Skip the leaf re-check (already handled above) by only
+        # delegating when this dict is not itself a leaf.
+        if not field_thresholds:
+            if "confidence" not in assessment_data:
+                self._check_confidence_alerts(
+                    assessment_data, attr_name, default_threshold, alerts_list
+                )
+            else:
+                for sub_attr_name, sub_assessment in assessment_data.items():
+                    if (
+                        isinstance(sub_assessment, dict)
+                        and "confidence" in sub_assessment
+                    ):
+                        self._check_confidence_alerts(
+                            sub_assessment,
+                            f"{attr_name}.{sub_attr_name}",
+                            default_threshold,
+                            alerts_list,
+                        )
+            return
+
+        # Check each sub-field against its specific threshold
+        for sub_attr_name, sub_assessment in assessment_data.items():
+            if isinstance(sub_assessment, dict) and "confidence" in sub_assessment:
+                confidence = _safe_float_conversion(
+                    sub_assessment.get("confidence", 0.0), 0.0
+                )
+                sub_threshold = _safe_float_conversion(
+                    field_thresholds.get(sub_attr_name, default_threshold), 0.9
+                )
+                if confidence < sub_threshold:
+                    alerts_list.append(
+                        {
+                            "attribute_name": f"{attr_name}.{sub_attr_name}",
+                            "confidence": confidence,
+                            "confidence_threshold": sub_threshold,
+                        }
+                    )
 
     def _check_confidence_alerts(
         self,
@@ -1001,17 +1143,29 @@ class AssessmentService:
                 )
             elif isinstance(attr_assessment, list):
                 if attr_type == "list":
+                    # Resolve per-sub-field thresholds from $ref/$defs for array items
+                    from idp_common.assessment.threshold_resolver import (
+                        resolve_array_item_thresholds,
+                    )
+
+                    item_thresholds = resolve_array_item_thresholds(
+                        prop_schema, class_schema, attr_threshold
+                    )
+
                     enhanced_list = []
                     for i, item_assessment in enumerate(attr_assessment):
                         if isinstance(item_assessment, dict):
-                            enhanced_item = self._enhance_dict_assessment(
-                                item_assessment, attr_threshold
+                            enhanced_item = (
+                                self._enhance_dict_assessment_with_field_thresholds(
+                                    item_assessment, attr_threshold, item_thresholds
+                                )
                             )
                             enhanced_list.append(enhanced_item)
-                            self._check_confidence_alerts(
+                            self._check_confidence_alerts_with_field_thresholds(
                                 item_assessment,
                                 f"{attr_name}[{i}]",
                                 attr_threshold,
+                                item_thresholds,
                                 confidence_threshold_alerts,
                             )
                         else:

@@ -6,6 +6,7 @@
 from unittest.mock import Mock
 
 import pytest
+
 from idp_common.delete_documents import _delete_run_records
 
 

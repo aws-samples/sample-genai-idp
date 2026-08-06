@@ -289,6 +289,7 @@ class TestLoadTestInternal:
     def test_copy_file_error(self, mock_stack_info, mock_boto):
         """Test _copy_file handles errors"""
         from botocore.exceptions import ClientError
+
         from idp_sdk._core.load_test import CopyStats, LoadTester
 
         tester = LoadTester("test-stack")
@@ -329,6 +330,7 @@ class TestLoadTestInternal:
     def test_upload_local_file_error(self, mock_stack_info, mock_boto):
         """Test _upload_local_file handles errors"""
         from botocore.exceptions import ClientError
+
         from idp_sdk._core.load_test import CopyStats, LoadTester
 
         tester = LoadTester("test-stack")

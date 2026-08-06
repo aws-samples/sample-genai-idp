@@ -1,0 +1,3 @@
+# Parsing the bundled config preset (YAML) before handing it to the host's
+# applyFeatureConfigPreset resolver.
+PyYAML==6.0.2

@@ -6,6 +6,7 @@ Unit tests for IDPClient initialization and basic functionality.
 """
 
 import pytest
+
 from idp_sdk import IDPClient, IDPConfigurationError
 
 

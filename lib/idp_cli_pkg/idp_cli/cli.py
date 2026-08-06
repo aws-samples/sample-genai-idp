@@ -26,29 +26,53 @@ To fix this, run one of:
 If you already ran 'make setup-venv', activate it first:
   source .venv/bin/activate
 
+If idp_sdk IS installed but fails to provide IDPClient, you likely have the
+wrong package: idp-sdk and idp-common are first-party (they live in lib/ and are
+not published to PyPI), but those names are squatted on public PyPI. Verify with:
+  python scripts/check_first_party_deps.py
+
 See docs/idp-cli.md for details.
 """
 
+_IMPORT_ERROR: Optional[ImportError] = None
+
+# Imports are split into two tiers, and the split is deliberate.
+#
+# Tier 1 — click / rich / boto3 — are used at MODULE level (the `@click.group()`
+# and `@click.option(...)` decorators below, and `console = Console()`). They
+# cannot be stubbed to None: the stub itself would blow up during import with
+# `AttributeError: 'NoneType' object has no attribute 'group'` long before any
+# handler could explain what went wrong. So report and exit here instead.
 try:
     import boto3
     import click
-    from idp_sdk import IDPClient
     from rich.console import Console
     from rich.live import Live
     from rich.table import Table
+except ImportError as exc:
+    print(_SETUP_HELP, file=sys.stderr)
+    print(f"Underlying import error: {exc}", file=sys.stderr)
+    raise SystemExit(1) from exc
+
+# Tier 2 — IDPClient / display — are only ever used INSIDE functions, so the
+# module can finish importing without them. Stub them and keep the original
+# exception for main() to report.
+#
+# Keep that exception: swallowing it makes a partially-broken install look like
+# "nothing is installed". In particular, an `idp_sdk` that imports but does not
+# export `IDPClient` means the squatted PyPI package is installed instead of the
+# first-party one — a different problem needing a different fix — and any later
+# use of a None stub would surface as an unrelated AttributeError far from the
+# real cause.
+try:
+    from idp_sdk import IDPClient
 
     from . import display
-except ImportError:
-    # Dependencies not installed — main() will print a helpful message and exit.
-    # Define minimal stubs so the module can still be imported for entry point resolution.
+except ImportError as exc:
+    _IMPORT_ERROR = exc
     if not TYPE_CHECKING:
-        click = None
         IDPClient = None
-        Console = None
-        Live = None
-        Table = None
         display = None
-        boto3 = None
 
 # Configure logging
 logging.basicConfig(
@@ -56,7 +80,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-console = Console() if Console is not None else None
+# Console is guaranteed importable — a missing rich exits above, not stubs to None.
+console = Console()
 
 
 def _build_from_local_code(
@@ -279,7 +304,7 @@ def _parse_tags(tags: Optional[str]) -> Dict[str, str]:
 
 
 @click.group()
-@click.version_option(version="0.6.2")
+@click.version_option(version="0.6.3")
 def cli():
     """
     IDP CLI - Batch document processing for IDP Accelerator
@@ -527,6 +552,7 @@ def deploy(
 
             import boto3 as _boto3
             import requests
+
             from idp_sdk.operations.publish import DEFAULT_GOVCLOUD_LINT_REGION
 
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -1334,6 +1360,7 @@ def delete_documents_cmd(
     """
     try:
         import boto3
+
         from idp_common.delete_documents import (
             delete_documents,
             get_documents_by_batch,
@@ -2603,8 +2630,9 @@ def list_versions(stack_name: str, document_id: str, region: Optional[str]):
       idp-cli list-versions --stack-name my-stack --document-id loan-123/package.pdf
     """
     try:
-        from idp_sdk import IDPClient
         from rich.table import Table
+
+        from idp_sdk import IDPClient
 
         client = IDPClient(stack_name=stack_name, region=region)
         versions = client.batch.list_versions(document_id=document_id)
@@ -4176,6 +4204,7 @@ def config_validate(
     """
     try:
         import yaml
+
         from idp_common.config.merge_utils import load_yaml_file, validate_config
 
         # Load the user's config
@@ -5399,7 +5428,7 @@ def multi_discover(
     agentic analysis to automatically discover document classes and generate
     JSON Schemas.
 
-    Requires: make setup (or: pip install idp-common[multi_document_discovery])
+    Requires: make setup (or: pip install -e 'lib/idp_common_pkg[multi_document_discovery]')
 
     Note: Requires at least 2 documents per expected class. Clusters with
     fewer than 2 documents are filtered as noise. For discovering schemas
@@ -5448,8 +5477,14 @@ def multi_discover(
 
     try:
         from idp_sdk import IDPClient
-    except ImportError:
-        console.print("[red]Error: idp-sdk is required. pip install idp-sdk[/red]")
+    except ImportError as exc:
+        # Never suggest `pip install idp-sdk`: idp-sdk is first-party (lib/idp_sdk)
+        # and the PyPI name is a third-party squat. Point at the local install.
+        console.print(
+            "[red]Error: idp-sdk is required. Install it from the local checkout "
+            "with 'make setup' (or: pip install -e lib/idp_sdk).[/red]"
+        )
+        console.print(f"[red]Underlying import error: {exc}[/red]")
         sys.exit(1)
 
     client = IDPClient(stack_name=stack_name, region=region)
@@ -6401,11 +6436,16 @@ def bootstrap(
 
 def main():
     """Main entry point for the CLI"""
-    # Pre-flight check: verify core dependencies are importable
-    try:
-        import idp_sdk  # noqa: F401
-    except ImportError:
+    # Pre-flight check: report the underlying ImportError rather than only
+    # "not installed". An `idp_sdk` that imports but lacks `IDPClient` means the
+    # wrong (non first-party) package is installed — most likely the squatted
+    # PyPI package — and that needs a different fix than "run make setup".
+    #
+    # This covers a missing idp_sdk too: the tier-2 import above fails either
+    # way, so no separate `import idp_sdk` probe is needed.
+    if _IMPORT_ERROR is not None:
         print(_SETUP_HELP, file=sys.stderr)
+        print(f"Underlying import error: {_IMPORT_ERROR}", file=sys.stderr)
         sys.exit(1)
 
     # Parse --profile from anywhere in sys.argv before Click processes arguments

@@ -482,6 +482,18 @@ export const getDocumentVersion = /* GraphQL */ `
         PageIds
         Class
         OutputJSONUri
+        ConfidenceThresholdAlerts {
+          attributeName
+          confidence
+          confidenceThreshold
+        }
+        ProcessingIssues {
+          stage
+          severity
+          code
+          message
+          rootCause
+        }
       }
       Pages {
         Id
@@ -665,6 +677,7 @@ export const getTestRun = /* GraphQL */ `
       confusionMatrix
       fieldMetrics
       splitClassificationMetrics
+      gradedPacketMetrics
       totalCost
       costBreakdown
       createdAt
@@ -737,6 +750,7 @@ export const getTestSets = /* GraphQL */ `
       error
       lastAddResult
       documentClassType
+      configVersion
     }
   }
 ` as GeneratedQuery<GetTestSetsQueryVariables, GetTestSetsQuery>;

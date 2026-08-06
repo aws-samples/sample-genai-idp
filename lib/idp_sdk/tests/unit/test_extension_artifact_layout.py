@@ -23,8 +23,9 @@ import json
 import types
 
 import boto3
-from idp_sdk._core.publish import IDPPublisher
 from moto import mock_aws
+
+from idp_sdk._core.publish import IDPPublisher
 
 _BUCKET = "test-artifacts-bucket"
 _PREFIX = "idp-cli"

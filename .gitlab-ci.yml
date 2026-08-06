@@ -58,11 +58,28 @@ stages:
 # Prevent DUPLICATE pipelines: without this, a push to a branch that has an open
 # MR triggers BOTH a branch pipeline and an MR pipeline. Run the MR pipeline when
 # an MR is open, otherwise the branch pipeline — never both.
+#
+# auto_cancel on develop: GitLab's "auto-cancel redundant pipelines" cancels the
+# previous pipeline on a ref whenever ANY new pipeline is created there. A
+# doc-only commit to develop creates a pipeline (fast_checks has no changes:
+# filter) but SKIPS integration_tests (deploy_affecting_changes filter) — so it
+# used to cancel the in-flight ~70-min deploy of the prior code commit, which
+# was then never re-run: that merge ended up never integration-tested. GitLab
+# can't condition the cancel on what the NEW commit touched, so on develop we
+# disable auto-cancel entirely (`on_new_commit: none`, GitLab >= 16.8): every
+# merge to the integration branch gets its own completed deploy, serialized by
+# integration_tests' per-branch resource_group. MR pipelines keep the default
+# (conservative) supersede behavior — the bug doesn't exist there, because MR
+# `changes:` compares against the target branch, so a doc push to an MR whose
+# diff still touches deploy-affecting files re-runs the deploy anyway.
 workflow:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
       when: never
+    - if: $CI_COMMIT_BRANCH == "develop"
+      auto_cancel:
+        on_new_commit: none
     - if: $CI_COMMIT_BRANCH
 
 code_checks:
@@ -121,12 +138,18 @@ code_checks:
     - uv pip install 'ruff==0.15.13'
     # Install dependencies needed by publish.py for test imports
     - uv pip install typer rich boto3
-    # Install test dependencies
-    - cd lib/idp_common_pkg && uv pip install -e ".[test,evaluation]" && cd ../..
-    # Install the other package suites run by `make test-packages-cicd`
-    - cd lib/idp_sdk && uv pip install -e ".[test]" && cd ../..
-    - cd lib/idp_cli_pkg && uv pip install -e ".[test]" && cd ../..
-    - cd lib/idp_feature_sdk && uv pip install -e ".[test]" && cd ../..
+    # Install ALL first-party packages in a SINGLE resolution pass.
+    # SECURITY — dependency confusion: these depend on each other by bare name
+    # (idp_cli_pkg -> "idp-sdk", idp_sdk -> "idp_common") and those names are
+    # squatted on public PyPI. Installing them one at a time lets a
+    # not-yet-installed sibling resolve from the index instead of the checkout.
+    # Do not split this into per-package calls. See docs/dependency-confusion.md.
+    - uv pip install -e "lib/idp_common_pkg[test,evaluation]"
+                     -e "lib/idp_sdk[test]"
+                     -e "lib/idp_cli_pkg[test]"
+                     -e "lib/idp_feature_sdk[test]"
+    # Fail the build if any first-party package came from an index, not source.
+    - python3 scripts/check_first_party_deps.py
 
   script:
     # SKIP_NPM_CI=1: UI deps already installed once in before_script, so the UI
@@ -206,7 +229,10 @@ integration_tests:
   # quotas). The resource_group is a size-1 mutex, so scoping it PER-BRANCH
   # (CI_COMMIT_REF_SLUG) still serializes rapid pushes to the SAME MR (a newer
   # pipeline supersedes an older queued one via interruptible) while letting
-  # DIFFERENT MRs deploy concurrently. Concurrency is therefore bounded by the
+  # DIFFERENT MRs deploy concurrently. NOTE: on develop, auto-cancel is disabled
+  # (workflow rule `on_new_commit: none` above), so `interruptible` has no
+  # effect there — every develop deploy runs to completion, serialized by this
+  # resource_group; supersede-on-push applies to MR pipelines only. Concurrency is therefore bounded by the
   # number of active MRs (typically <=5); this is NOT a hard cap of 5. If
   # concurrent deploys ever exhaust account quotas again, revert to a single
   # shared group (`resource_group: integration_deploy`).

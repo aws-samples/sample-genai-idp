@@ -5,6 +5,7 @@
 
 import numpy as np
 import pytest
+
 from idp_common.discovery.clustering_service import ClusteringService, ClusterResult
 
 

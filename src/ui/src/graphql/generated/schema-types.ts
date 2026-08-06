@@ -1674,6 +1674,7 @@ export type TestRun = {
   failedFiles?: Maybe<Scalars['Int']['output']>;
   fieldMetrics?: Maybe<Scalars['AWSJSON']['output']>;
   filesCount: Scalars['Int']['output'];
+  gradedPacketMetrics?: Maybe<Scalars['AWSJSON']['output']>;
   overallAccuracy?: Maybe<Scalars['Float']['output']>;
   splitClassificationMetrics?: Maybe<Scalars['AWSJSON']['output']>;
   status: Scalars['String']['output'];
@@ -1707,6 +1708,7 @@ export type TestRunStatus = {
 };
 
 export type TestSet = {
+  configVersion?: Maybe<Scalars['String']['output']>;
   createdAt: Scalars['AWSDateTime']['output'];
   description?: Maybe<Scalars['String']['output']>;
   documentClassType?: Maybe<DocumentClassType>;

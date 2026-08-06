@@ -4,6 +4,7 @@
 """Unit tests for model_utils module."""
 
 import pytest
+
 from idp_common.bedrock.model_utils import (
     get_model_max_input_tokens,
     get_model_max_output_tokens,
@@ -421,15 +422,17 @@ class TestModelLimitEntryPatternValidation:
         assert entry.pattern == "claude-sonnet-5.*"
 
     def test_invalid_regex_rejected(self):
-        from idp_common.config.models import ModelLimitEntry
         from pydantic import ValidationError
+
+        from idp_common.config.models import ModelLimitEntry
 
         with pytest.raises(ValidationError, match="valid regular expression"):
             ModelLimitEntry(pattern="claude-(", max_output_tokens=128000)
 
     def test_empty_pattern_rejected(self):
-        from idp_common.config.models import ModelLimitEntry
         from pydantic import ValidationError
+
+        from idp_common.config.models import ModelLimitEntry
 
         with pytest.raises(ValidationError, match="non-empty"):
             ModelLimitEntry(pattern="   ", max_output_tokens=128000)

@@ -40,7 +40,7 @@ This report is updated incrementally as each finding is addressed. Each section 
 
 | 12 | Permissive CSP / CORS Configuration | **Partially Fixed (Phase 1: object-src, connect-src)** |
 | 13 | Non-Compliant AppSec TLS Configuration | **Partially Fixed (CloudFront OK; ALB documented)** |
-| 14 | Missing Anti-Clickjacking Headers in ALB Hosting Path | **Risk-Accepted (customer-action guidance documented)** |
+| 14 | Missing Anti-Clickjacking Headers in ALB Hosting Path | **Resolved by removal (v0.6.0) — superseded; was Risk-Accepted** |
 | 15 | Unsafe YAML Load (ACAT) | **False Positive** |
 | 16 | Jinja2 Autoescape Disabled (ACAT) | **False Positive** |
 | 17 | IAM Role Privilege Escalation (CloudFormation Service Role) | **Risk-Accepted (deployment-time service role; compensating controls documented)** |
@@ -818,10 +818,42 @@ uses `ELBSecurityPolicy-TLS13-1-2-2021-06`.
 
 ## Finding #14 — Missing Anti-Clickjacking Headers in ALB Hosting Path
 
-- **Status:** Risk-Accepted (customer-action guidance documented)
-- **Files:** `docs/alb-hosting.md` (new "Security Hardening for ALB-Hosted Deployments" section)
+- **Status:** **Resolved by removal in v0.6.0** (previously Risk-Accepted)
+- **Files:** ALB hosting mode deleted — `nested/alb-hosting/`, all `ALB*`
+  parameters, and `docs/alb-hosting.md` no longer exist
 
-**Talos-ready response:**
+> ### ⚠️ Status update (2026-07-28) — supersedes the Risk-Accepted response below
+>
+> **The ALB hosting mode this finding describes was removed in v0.6.0.** The
+> `WebUIHosting=ALB` option, the `nested/alb-hosting/` stack, all `ALB*`
+> parameters, and the `docs/alb-hosting.md` page referenced below were all
+> deleted and replaced by **API Gateway S3-proxy hosting**
+> (`WebUIHosting=APIGateway`). The finding is therefore no longer reachable:
+> there is no ALB in the architecture and no deployment path that omits the
+> header trio for lack of ALB header-injection support.
+>
+> **The original risk acceptance is void** — it was conditioned on
+> customer-action guidance in `docs/alb-hosting.md`, a file that no longer
+> exists. Anyone auditing this finding against a v0.6+ deployment should treat
+> it as closed-by-removal, not accepted.
+>
+> **What replaced it.** In `WebUIHosting=APIGateway` mode the SPA document and
+> asset responses set `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+> `Strict-Transport-Security`, and `Referrer-Policy` **per-method** on the
+> `GET /` and `GET /{proxy+}` integrations — so anti-clickjacking is now
+> enforced in *both* hosting modes rather than being a documented customer
+> action. One residual difference remains and is tracked as a live threat, not
+> as this finding: **no Content-Security-Policy is emitted in APIGateway mode**,
+> because the CSP lives in a CloudFront `ResponseHeadersPolicy` gated on
+> `UseCloudFrontHosting`. See **UI.T07** in
+> [`feature-threats/web-ui.md`](feature-threats/web-ui.md).
+>
+> Migration for affected deployments: switch `WebUIHosting=ALB` →
+> `WebUIHosting=APIGateway` (add `ApiGatewayVisibility=PRIVATE` +
+> `DeployInVPC=true` for the equivalent private posture). No ACM certificate,
+> ALB, or S3 VPC endpoint is needed.
+
+**Original Talos-ready response (historical — ALB mode no longer exists):**
 
 > The default (CloudFront) deployment applies X-Frame-Options
 > `SAMEORIGIN`, HSTS, `X-Content-Type-Options: nosniff`, Referrer-
@@ -1027,7 +1059,8 @@ via the continuous-monitoring policy above.
 | Fixed | 6 | #1, #2, #6, #8, #10, #11 |
 | Partially Fixed | 4 | #4, #5, #12, #13 |
 | False Positive | 3 | #3, #15, #16 |
-| Risk-Accepted | 5 | #7, #9, #14, #17, #18–20 |
+| Risk-Accepted | 4 | #7, #9, #17, #18–20 |
+| Resolved by removal | 1 | #14 (ALB hosting mode deleted in v0.6.0) |
 | Deferred | 0 | — |
 
 **Every finding now has a resolved disposition — zero findings remain
@@ -1041,8 +1074,11 @@ documented residual risk (Partially Fixed). The 5 Risk-Accepted and
   test runs; hardening hook documented for customers who need it.
 - **#9 (`LogLevel` default)** — customer-configurable with a safe
   default (`INFO`); not a true positive for the product defaults.
-- **#14 (ALB clickjacking headers)** — only affects the opt-in ALB
-  hosting mode; customer-action guidance added to `docs/alb-hosting.md`.
+- **#14 (ALB clickjacking headers)** — **superseded 2026-07-28: resolved by
+  removal.** The opt-in ALB hosting mode was deleted in v0.6.0 and replaced by
+  API Gateway S3-proxy hosting, which sets the header trio per-method in both
+  hosting modes. The original acceptance pointed at `docs/alb-hosting.md`, which
+  no longer exists. Residual CSP-in-APIGateway-mode gap tracked as UI.T07.
 - **#17 (CloudFormation service role)** — deployment-time IaC service
   role; compensating controls (`PermissionsBoundaryArn` stack
   parameter, SCPs, scoped-down replacement path) documented.

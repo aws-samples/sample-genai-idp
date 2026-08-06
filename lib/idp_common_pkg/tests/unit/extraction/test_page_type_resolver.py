@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import pytest
+
 from idp_common.extraction.page_type_resolver import (
     PageTypePresence,
     resolve_page_types,

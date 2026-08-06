@@ -16,6 +16,7 @@ from pathlib import Path
 from textwrap import dedent
 
 import pytest
+
 from idp_feature_sdk.scaffold import (
     ScaffoldError,
     ScaffoldOptions,

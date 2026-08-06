@@ -15,6 +15,8 @@ from pydantic import BaseModel, Field
 
 # Check if strands-agents is actually available (not just a stub/mock)
 try:
+    from strands.types.agent import AgentInput  # noqa: F401
+
     from idp_common.extraction.agentic_idp import (
         SYSTEM_PROMPT,
         TABLE_PARSING_PROMPT_ADDENDUM,
@@ -30,7 +32,6 @@ try:
         set_confidence_data,
         supports_tool_caching,
     )
-    from strands.types.agent import AgentInput  # noqa: F401
 
     STRANDS_AVAILABLE = True
 except (ImportError, ModuleNotFoundError):

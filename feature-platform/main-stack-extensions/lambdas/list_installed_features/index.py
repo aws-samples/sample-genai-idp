@@ -30,7 +30,8 @@ Environment:
 import json
 import logging
 import os
-from typing import Any, Dict, List
+import re
+from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -76,6 +77,80 @@ def _catalog_latest_versions() -> Dict[str, str]:
     return out
 
 
+_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?")
+
+
+def _prerelease_key(prerelease: str) -> List[Tuple[int, int, str]]:
+    """Comparable key for a prerelease string, per SemVer §11.4.
+
+    Identifiers are dot-separated and compared left to right. Numeric ones
+    compare NUMERICALLY (so rc.10 > rc.2, which a plain string compare gets
+    backwards) and always rank lower than alphanumeric ones.
+
+    Each identifier becomes (is_alphanumeric, numeric_value, text) so tuple
+    comparison reproduces those rules without branching at the call site.
+    """
+    key: List[Tuple[int, int, str]] = []
+    for ident in prerelease.split("."):
+        if ident.isdigit():
+            key.append((0, int(ident), ""))
+        else:
+            key.append((1, 0, ident))
+    return key
+
+
+def _parse_version(
+    value: str,
+) -> Optional[Tuple[int, int, int, int, List[Tuple[int, int, str]]]]:
+    """Parse a SemVer string into a comparable tuple, or None if unparseable.
+
+    The 4th element is 0 for a prerelease and 1 for a release, so a prerelease
+    sorts BEFORE its release (SemVer §11.3). The 5th orders prereleases among
+    themselves (§11.4). Build metadata is ignored — §10 says it takes no part in
+    precedence, so 1.0.0+a and 1.0.0+b are equal and neither is an "update".
+    """
+    m = _SEMVER_RE.match(value.strip())
+    if not m:
+        return None
+    major, minor, patch = (int(m.group(i)) for i in (1, 2, 3))
+    prerelease = m.group(4) or ""
+    return (
+        major,
+        minor,
+        patch,
+        0 if prerelease else 1,
+        _prerelease_key(prerelease) if prerelease else [],
+    )
+
+
+def _update_available(installed: str, latest: Optional[str]) -> bool:
+    """True only when `latest` is strictly NEWER than `installed`.
+
+    Previously this was `latest != installed`, which reported "Update available"
+    whenever the two merely DIFFERED — including when the catalog was BEHIND the
+    installed version. That happens routinely: an extension installed with
+    `idp-feature-cli deploy --from-code` (the documented dev loop) publishes its
+    own artifacts immediately, while catalog.json only refreshes on a host stack
+    create/update. The UI then told an admin running v0.1.1 that v0.1.0 was
+    "available" — an invitation to downgrade.
+
+    Unparseable versions fall back to inequality, preserving the old behavior
+    for non-SemVer version strings rather than silently suppressing the badge.
+    """
+    if not latest:
+        return False
+    lv, iv = _parse_version(latest), _parse_version(installed)
+    if lv is None or iv is None:
+        logger.warning(
+            "Non-SemVer version compare (installed=%r latest=%r); "
+            "falling back to inequality",
+            installed,
+            latest,
+        )
+        return latest != installed
+    return lv > iv
+
+
 def _row_to_feature(
     row: Dict[str, Any], latest_by_id: Dict[str, str]
 ) -> Dict[str, Any]:
@@ -88,7 +163,7 @@ def _row_to_feature(
         "displayName": row.get("displayName", feature_id),
         "installedVersion": installed_version,
         "latestVersion": latest_version,
-        "updateAvailable": bool(latest_version and latest_version != installed_version),
+        "updateAvailable": _update_available(installed_version, latest_version),
         "stackName": row.get("stackName", ""),
         "stackRegion": row.get("stackRegion", ""),
         "stackId": row.get("stackId"),

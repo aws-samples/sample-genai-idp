@@ -73,6 +73,9 @@ unfixable = []
 # Allow unused variables when underscore-prefixed.
 dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
 
+[lint.isort]
+known-first-party = ["idp_common", "idp_cli", "idp_sdk", "idp_feature_sdk", "idp_mcp_connector"]
+
 [lint.flake8-tidy-imports.banned-api]
 "idp_sdk._core" = {msg = "This is a private internal module. Use IDPClient from idp_sdk instead."}
 

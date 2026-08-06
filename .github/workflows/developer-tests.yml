@@ -36,9 +36,15 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      # `github.base_ref` is attacker-controllable (a fork can name its branch
+      # anything), so it must never be interpolated straight into `run:` where
+      # the shell would evaluate it. Pass it through `env:` and quote the
+      # expansion instead.
       - name: Fetch base branch
+        env:
+          BASE_REF: ${{ github.base_ref || 'main' }}
         run: |
-          git fetch origin ${{ github.base_ref || 'main' }}:refs/remotes/origin/${{ github.base_ref || 'main' }}
+          git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           git branch -a
 
       - name: Set up environment
@@ -47,21 +53,34 @@ jobs:
           apt-get update -y
           apt-get install make curl -y
 
+      # Use the first-party pinned action rather than
+      # `curl -LsSf https://astral.sh/uv/install.sh | sh`: piping a remote
+      # script into a shell executes whatever the endpoint serves, and the
+      # pipeline also hid failures (it exited with sh's status, not curl's).
+      # The action also puts uv on PATH itself — the old step appended a
+      # `$HOME/.cargo/bin` that recent uv installers no longer use.
       - name: Install uv
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.3.1
 
       - name: Create virtual environment
         run: |
           uv venv .venv
           echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
 
-      - name: Install Node.js and basedpyright
-        run: |
-          curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-          apt-get install -y nodejs
-          npm install -g basedpyright
+      # Node 22 is needed for the UI unit tests and for basedpyright. Use the
+      # first-party setup-node action (as deploy-docs.yml already does) rather
+      # than piping NodeSource's installer into bash: that pipeline swallowed a
+      # failed download (`curl ... | bash -` exits with bash's status, not
+      # curl's), so a NodeSource 403 silently left the repo unregistered, the
+      # following apt-get installed Debian's own nodejs 18 — which ships no npm
+      # — and the job failed several steps later with a bare `npm: not found`.
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        with:
+          node-version: 22
+
+      - name: Install basedpyright
+        run: npm install -g basedpyright
 
       - name: Install Python dependencies
         run: |
@@ -73,8 +92,10 @@ jobs:
         run: make lint-cicd
 
       - name: Run type checking
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          TARGET_BRANCH="${{ github.base_ref }}"
+          TARGET_BRANCH="$BASE_REF"
           echo "=== Type Checking Configuration ==="
           echo "PR target branch (github.base_ref): $TARGET_BRANCH"
           echo "Comparing: origin/$TARGET_BRANCH...HEAD"
@@ -90,7 +111,7 @@ jobs:
 
       - name: Run UI unit tests
         id: run-ui-tests
-        # Vitest + jsdom (no browser). Node 22 is installed above.
+        # Vitest + jsdom (no browser). Node 22 comes from setup-node above.
         run: cd src/ui && npm ci --prefer-offline --no-audit && npx vitest run
         continue-on-error: false
 

@@ -12,8 +12,9 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from idp_common.extraction.service import ExtractionService
 from pydantic import BaseModel
+
+from idp_common.extraction.service import ExtractionService
 
 pytestmark = pytest.mark.agentic
 

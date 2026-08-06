@@ -468,6 +468,12 @@ class PipelineHook(BaseModel):
         "{key, value}); the hook reads its own config from these, keeping the "
         "pipeline hook-agnostic.",
     )
+    allowDocumentUpdate: bool = Field(  # noqa: N815 — matches stored config key
+        default=True,
+        description="Whether this hook may return an `updatedDocument` that "
+        "replaces the document for downstream steps. Set false to pin the hook "
+        "to observe-only (it can still read the document and write to S3).",
+    )
 
 
 class PreprocessingConfig(BaseModel):
@@ -512,6 +518,13 @@ class PreprocessingConfig(BaseModel):
     featureId: str = Field(  # noqa: N815 — matches stored config key
         default="",
         description="Feature/owner that provides this hook (label only).",
+    )
+    allowDocumentUpdate: bool = Field(  # noqa: N815 — matches stored config key
+        default=True,
+        description="Whether this hook may return an `updatedDocument` that "
+        "replaces the source document for the rest of the pipeline. Set false to "
+        "pin the hook to observe-only (it can still halt, read the document, and "
+        "write to S3).",
     )
 
 

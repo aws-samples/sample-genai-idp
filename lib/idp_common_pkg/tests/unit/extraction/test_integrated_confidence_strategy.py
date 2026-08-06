@@ -40,10 +40,11 @@ for mod_name in [
     sys.modules.setdefault(mod_name, MagicMock())
 
 import pytest  # noqa: E402
+from pydantic import BaseModel  # noqa: E402
+
 from idp_common.extraction.agentic_idp import (  # noqa: E402
     create_dynamic_extraction_tool_and_patch_tool,
 )
-from pydantic import BaseModel  # noqa: E402
 
 
 # --- minimal Strands Agent mock (only needs .state.get/.set) ----------------

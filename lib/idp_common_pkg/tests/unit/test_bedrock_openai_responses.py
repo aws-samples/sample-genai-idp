@@ -7,6 +7,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from idp_common.bedrock import openai_responses as oar
 from idp_common.bedrock.client import BedrockClient
 

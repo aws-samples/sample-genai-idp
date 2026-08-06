@@ -6,6 +6,7 @@ Unit tests for SDK exceptions.
 """
 
 import pytest
+
 from idp_sdk.exceptions import (
     IDPConfigurationError,
     IDPError,

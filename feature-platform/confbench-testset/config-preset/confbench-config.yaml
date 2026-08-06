@@ -1,0 +1,111 @@
+# ConfBench extraction configuration — bundled config preset for the
+# Test Set - ConfBench extension (feature-platform/confbench-testset).
+#
+# Applied at install as a NON-ACTIVE configuration version. Unlike the main
+# stack's managed_config/* presets this is NOT flagged `managed: true`: it is
+# not overwritten on stack update, so an admin may edit it in place.
+#
+# The Invoice schema below is deliberately IDENTICAL to the
+# realkie-fcc-verified managed config. ConfBench is a noise augmentation of
+# those same 75 FCC invoices with the same ground truth, so keeping the schema
+# byte-identical is what makes clean-vs-degraded accuracy comparisons valid.
+test_set: "ConfBench"
+description: "ConfBench — 75 FCC invoices x up to 21 Augraphy noise-degradation variants, for confidence calibration and OCR robustness evaluation"
+
+use_bda: false
+
+notes: "ConfBench dataset settings for pipeline mode (Bedrock LLM). An augmentation of FCC Invoices Verified, each document degraded by up to 21 distinct Augraphy pipelines, to support confidence calibration research, OCR robustness evaluation, and KIE under realistic noise conditions. Same Invoice schema as RealKIE-FCC-Verified, so accuracy is directly comparable between the clean and degraded sets. Assessment and summarization disabled by default."
+
+summarization:
+  enabled: false
+
+classes:
+- $schema: https://json-schema.org/draft/2020-12/schema
+  $defs:
+    LineItem:
+      type: object
+      properties:
+        LineItemRate:
+          description: Rate for the line item. Output null if not shown.
+          x-aws-idp-confidence-threshold: '0.8'
+          x-aws-idp-evaluation-method: NUMERIC_EXACT
+          type: number
+        LineItemDays:
+          description: Days of the week as shown in the line item. Output null if
+            not shown.
+          x-aws-idp-confidence-threshold: '0.8'
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          type: string
+        LineItemStartDate:
+          description: Start date for the line item, formatted as MM/DD/YY (2-digit year, e.g. 10/22/16). Output null if not shown.
+          x-aws-idp-confidence-threshold: '0.8'
+          x-aws-idp-evaluation-method: DATE
+          x-aws-idp-evaluation-threshold: '0.7'
+          type: string
+        LineItemEndDate:
+          description: End date for the line item, formatted as MM/DD/YY (2-digit year, e.g. 10/22/16). Output null if not shown.
+          x-aws-idp-confidence-threshold: '0.8'
+          x-aws-idp-evaluation-method: DATE
+          x-aws-idp-evaluation-threshold: '0.7'
+          type: string
+        LineItemDescription:
+          description: Description of the line item. Output null if not shown.
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          type: string
+  description: Invoice document
+  type: object
+  x-aws-idp-document-type: Invoice
+  properties:
+    Agency:
+      description: The agency the invoice is addressed to
+      x-aws-idp-confidence-threshold: '0.8'
+      x-aws-idp-evaluation-weight: '2'
+      x-aws-idp-evaluation-method: LEVENSHTEIN
+      x-aws-idp-evaluation-threshold: '0.7'
+      type: string
+    Advertiser:
+      description: The name of the advertiser
+      x-aws-idp-confidence-threshold: '0.8'
+      x-aws-idp-evaluation-weight: '2'
+      x-aws-idp-evaluation-method: FUZZY
+      x-aws-idp-evaluation-threshold: '0.8'
+      type: string
+    GrossTotal:
+      description: The gross total amount. Output null if not shown.
+      x-aws-idp-evaluation-weight: '2'
+      x-aws-idp-confidence-threshold: '0.8'
+      x-aws-idp-evaluation-method: NUMERIC_EXACT
+      type: number
+    PaymentTerms:
+      description: Terms of payment. Output null if not shown.
+      x-aws-idp-evaluation-weight: '0.2'
+      x-aws-idp-evaluation-method: FUZZY
+      x-aws-idp-evaluation-threshold: '0.7'
+      type: string
+    AgencyCommission:
+      description: The agency commission amount. Output null if not shown.
+      x-aws-idp-evaluation-weight: '0.2'
+      x-aws-idp-confidence-threshold: '0.8'
+      x-aws-idp-evaluation-method: NUMERIC_EXACT
+      type: number
+    NetAmountDue:
+      description: The net amount due after commission. Output null if not shown.
+      x-aws-idp-evaluation-weight: '2'
+      x-aws-idp-confidence-threshold: '0.8'
+      x-aws-idp-evaluation-method: NUMERIC_EXACT
+      type: number
+    LineItems:
+      type: array
+      description: List of line item details on the invoice; each item has several
+        possible elements
+      items:
+        $ref: '#/$defs/LineItem'
+  required:
+  - Agency
+  - Advertiser
+  - LineItems
+  $id: Invoice
+rule_validation:
+  enabled: false

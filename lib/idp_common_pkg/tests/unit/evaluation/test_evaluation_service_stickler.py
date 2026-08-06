@@ -11,6 +11,7 @@ import warnings
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from idp_common.evaluation.models import (
     AttributeEvaluationResult,
     SectionEvaluationResult,
@@ -131,6 +132,138 @@ class TestSticklerEvaluationService:
         # Test caching
         model_class_2 = service._get_stickler_model("Invoice")
         assert model_class is model_class_2  # Same instance from cache
+
+    def test_top_level_match_threshold_applied_to_model_class(self):
+        """R2: The document-level match_threshold in config must be applied to
+        the built model class. `create_model` doesn't route through Stickler's
+        ModelFactory, so without this the ClassVar default (0.7 in 0.5.0) would
+        remain, silently overriding x-aws-idp-evaluation-match-threshold."""
+        config = {
+            "classes": [
+                {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "$id": "form",
+                    "x-aws-idp-document-type": "Form",
+                    "x-aws-idp-evaluation-match-threshold": 0.85,
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                }
+            ]
+        }
+        svc = EvaluationService(region="us-east-1", config=config, max_workers=1)
+        model = svc._get_stickler_model("Form")
+        assert model.match_threshold == 0.85
+
+    def test_idp_llm_comparator_registered_via_public_api(self):
+        """R5: IDPLLMComparator is registered under a distinct name in Stickler's
+        registry (no private-dict rewrite of the built-in LLMComparator)."""
+        # The service __init__ side-effect registers IDPLLMComparator
+        # regardless of whether any class declares an LLM method.
+        EvaluationService(region="us-east-1", config={"classes": []}, max_workers=1)
+        from stickler.structured_object_evaluator.models.comparator_registry import (
+            _global_registry,
+        )
+
+        assert _global_registry.is_registered("IDPLLMComparator")
+        # The built-in stickler LLMComparator must not have been overwritten by
+        # IDP's — before R5 the private-dict rewrite made
+        # _global_registry.get("LLMComparator") return IDP's class. Now they
+        # live under distinct names, so Stickler's built-in stays put.
+        idp_cls = _global_registry.get("IDPLLMComparator")
+        stickler_cls = _global_registry.get("LLMComparator")
+        assert idp_cls is not stickler_cls
+        assert idp_cls.__module__.startswith("idp_common.")
+        assert stickler_cls.__module__.startswith("stickler.")
+
+    def test_llm_config_per_service_no_shared_state(self):
+        """R6: Two services with different LLM configs must not share state.
+
+        The mapper surfaces ``evaluation.llm_method`` per-schema as
+        ``x-aws-stickler-comparator-config`` so each service's LLM-method fields
+        carry their own config. The previous module-level singleton would have
+        overwritten svc_a's config with svc_b's.
+        """
+        config_a = {
+            "classes": [
+                {
+                    "$id": "a",
+                    "x-aws-idp-document-type": "A",
+                    "type": "object",
+                    "properties": {
+                        "notes": {
+                            "type": "string",
+                            "x-aws-idp-evaluation-method": "LLM",
+                        }
+                    },
+                }
+            ],
+            "evaluation": {"llm_method": {"model": "svc-a-model", "temperature": 0.1}},
+        }
+        config_b = {
+            "classes": [
+                {
+                    "$id": "b",
+                    "x-aws-idp-document-type": "B",
+                    "type": "object",
+                    "properties": {
+                        "notes": {
+                            "type": "string",
+                            "x-aws-idp-evaluation-method": "LLM",
+                        }
+                    },
+                }
+            ],
+            "evaluation": {"llm_method": {"model": "svc-b-model", "temperature": 0.9}},
+        }
+        svc_a = EvaluationService(region="us-east-1", config=config_a, max_workers=1)
+        svc_b = EvaluationService(region="us-east-1", config=config_b, max_workers=1)
+
+        cfg_a = svc_a.stickler_models["a"]["schema"]["properties"]["notes"][
+            "x-aws-stickler-comparator-config"
+        ]
+        cfg_b = svc_b.stickler_models["b"]["schema"]["properties"]["notes"][
+            "x-aws-stickler-comparator-config"
+        ]
+        # Only the service-specific keys need to differ — IDPConfig expands
+        # llm_method with defaults for the rest, but the model + temperature
+        # each service supplied must not have crossed over.
+        assert cfg_a["model"] == "svc-a-model"
+        assert cfg_a["temperature"] == 0.1
+        assert cfg_b["model"] == "svc-b-model"
+        assert cfg_b["temperature"] == 0.9
+
+    def test_array_items_match_threshold_reaches_element_class(self):
+        """R2: match_threshold on a structured array must reach the list
+        element class (via the items schema), not stay as the ClassVar default."""
+        import typing
+
+        config = {
+            "classes": [
+                {
+                    "$schema": "https://json-schema.org/draft/2020-12/schema",
+                    "$id": "inv",
+                    "x-aws-idp-document-type": "Inv",
+                    "type": "object",
+                    "properties": {
+                        "LineItems": {
+                            "type": "array",
+                            "x-aws-idp-evaluation-match-threshold": 0.55,
+                            "items": {
+                                "type": "object",
+                                "properties": {"sku": {"type": "string"}},
+                            },
+                        }
+                    },
+                }
+            ]
+        }
+        svc = EvaluationService(region="us-east-1", config=config, max_workers=1)
+        model = svc._get_stickler_model("Inv")
+        # Unwrap Optional[List[X]] -> X
+        annotation = model.model_fields["LineItems"].annotation
+        while typing.get_args(annotation):
+            annotation = typing.get_args(annotation)[0]
+        assert getattr(annotation, "match_threshold", None) == 0.55
 
     def test_stickler_model_not_found(self, service):
         """Test error when Stickler model not found for class."""
@@ -695,6 +828,8 @@ class TestSticklerEvaluationService:
 
     def test_resolve_leaf_schema(self, service):
         """Leaf schema resolution follows array items and object properties."""
+        from idp_common.evaluation.stickler_backend.results import resolve_leaf_schema
+
         field_schema = {
             "type": "array",
             "items": {
@@ -712,22 +847,25 @@ class TestSticklerEvaluationService:
         }
 
         # Flat list-item field
-        leaf = service._resolve_leaf_schema(field_schema, "LineItems[0].Amount")
+        leaf = resolve_leaf_schema(field_schema, "LineItems[0].Amount")
         assert leaf is not None
         assert leaf["x-aws-stickler-comparator"] == "NumericComparator"
 
         # Deeply nested object field within a list item
-        leaf = service._resolve_leaf_schema(field_schema, "LineItems[1].bankInfo.bank")
+        leaf = resolve_leaf_schema(field_schema, "LineItems[1].bankInfo.bank")
         assert leaf is not None
         assert leaf["x-aws-stickler-comparator"] == "FuzzyComparator"
 
         # Unknown field resolves to None
-        assert (
-            service._resolve_leaf_schema(field_schema, "LineItems[0].Missing") is None
-        )
+        assert resolve_leaf_schema(field_schema, "LineItems[0].Missing") is None
 
     def test_annotate_nested_comparison_methods(self, service):
         """Nested comparisons get per-field evaluation_method and weight."""
+        from idp_common.evaluation.service import _format_evaluation_method
+        from idp_common.evaluation.stickler_backend.results import (
+            annotate_nested_comparison_methods,
+        )
+
         field_schema = {
             "type": "array",
             "items": {
@@ -758,8 +896,11 @@ class TestSticklerEvaluationService:
             },
         ]
 
-        service._annotate_nested_comparison_methods(
-            comparisons, field_schema=field_schema, match_threshold=0.8
+        annotate_nested_comparison_methods(
+            comparisons,
+            field_schema=field_schema,
+            match_threshold=0.8,
+            format_evaluation_method=_format_evaluation_method,
         )
 
         assert comparisons[0]["evaluation_method"] == "Fuzzy (threshold: 0.90)"
@@ -817,32 +958,24 @@ class TestSticklerEvaluationService:
             {"tp": 1, "fp": 0, "fn": 0, "tn": 0, "fp1": 0, "fp2": 0},
         )
 
-        # Patch calculate_metrics
-        with patch("idp_common.evaluation.metrics.calculate_metrics") as mock_metrics:
-            mock_metrics.return_value = {
-                "precision": 1.0,
-                "recall": 1.0,
-                "f1_score": 1.0,
-            }
+        # Evaluate document. Document-level metrics are now derived inline
+        # from the summed Stickler counts (R10 removed the calculate_metrics
+        # helper module the previous test used to patch).
+        result = service.evaluate_document(
+            actual_document=sample_document,
+            expected_document=expected_document,
+            store_results=True,
+        )
 
-            # Evaluate document
-            result = service.evaluate_document(
-                actual_document=sample_document,
-                expected_document=expected_document,
-                store_results=True,
-            )
+        # Verify API contract
+        assert result.id == "test-doc"
+        assert result.status == Status.COMPLETED
+        assert result.evaluation_report_uri is not None
+        assert result.evaluation_results_uri is not None
+        assert result.evaluation_result is not None
 
-            # Verify API contract
-            assert result.id == "test-doc"
-            assert result.status == Status.COMPLETED
-            assert result.evaluation_report_uri is not None
-            assert result.evaluation_results_uri is not None
-            assert result.evaluation_result is not None
-
-            # Verify Stickler enhancements
-            assert (
-                result.evaluation_result.section_results[0].attributes[0].weight == 3.0
-            )
+        # Verify Stickler enhancements
+        assert result.evaluation_result.section_results[0].attributes[0].weight == 3.0
 
     @patch("idp_common.s3.write_content")
     @patch("idp_common.evaluation.service.EvaluationService._process_section")
@@ -1142,4 +1275,111 @@ def test_document_evaluation_serializes_stickler_comparison():
     assert (
         result_dict["section_results"][0]["stickler_comparison_result"]
         == stickler_result
+    )
+
+
+@pytest.mark.unit
+def test_document_rollup_weight_does_not_double_count_fps():
+    """Regression: field-count rollup weight must not double-count FPs.
+
+    Stickler's invariant: ``fp == fa + fd`` (every FA row is ``{fa:1, fp:1}``;
+    every FD row is ``{fd:1, fp:1}``). An earlier implementation summed
+    ``tp + fa + fd + fp + tn + fn`` for the section-weight in the document
+    rollup, which counted every FP twice and biased ``weighted_overall_score``
+    toward low-scoring sections with more errors.
+
+    Drives ``evaluate_document`` with two sections whose Stickler counts have
+    FPs, asserts the rollup weight equals ``tp + fp + tn + fn`` (i.e. each
+    real field counted once).
+    """
+    config = {
+        "classes": [
+            {
+                "$id": "t",
+                "x-aws-idp-document-type": "T",
+                "type": "object",
+                "properties": {"a": {"type": "string"}},
+            }
+        ]
+    }
+    svc = EvaluationService(region="us-east-1", config=config, max_workers=1)
+
+    # Section A: tp=3, fa=1, fd=1, fp=2, tn=0, fn=0 -> 5 real fields
+    section_a = SectionEvaluationResult(
+        section_id="1",
+        document_class="T",
+        attributes=[],
+        metrics={
+            "weighted_overall_score": 0.6,
+            "_stickler_counts": {
+                "tp": 3,
+                "fa": 1,
+                "fd": 1,
+                "fp": 2,
+                "tn": 0,
+                "fn": 0,
+            },
+        },
+    )
+    # Section B: tp=4, fp=0, tn=1, fn=1 -> 6 real fields
+    section_b = SectionEvaluationResult(
+        section_id="2",
+        document_class="T",
+        attributes=[],
+        metrics={
+            "weighted_overall_score": 0.9,
+            "_stickler_counts": {
+                "tp": 4,
+                "fa": 0,
+                "fd": 0,
+                "fp": 0,
+                "tn": 1,
+                "fn": 1,
+            },
+        },
+    )
+
+    doc = Document(
+        id="doc-fp-rollup",
+        input_key="doc.pdf",
+        input_bucket="in-bucket",
+        output_bucket="out-bucket",
+        status=Status.EXTRACTING,
+    )
+    doc.sections.append(Section(section_id="1", classification="T", page_ids=["1"]))
+    doc.sections.append(Section(section_id="2", classification="T", page_ids=["2"]))
+
+    def fake_process_section(actual_section, expected_section):
+        if actual_section.section_id == "1":
+            return section_a, {
+                "tp": 3,
+                "fp": 2,
+                "fn": 0,
+                "tn": 0,
+                "fp1": 1,
+                "fp2": 1,
+            }
+        return section_b, {
+            "tp": 4,
+            "fp": 0,
+            "fn": 1,
+            "tn": 1,
+            "fp1": 0,
+            "fp2": 0,
+        }
+
+    with patch.object(svc, "_process_section", side_effect=fake_process_section):
+        with patch("idp_common.s3.write_content"):
+            result = svc.evaluate_document(doc, doc, store_results=False)
+
+    # Expected weight per section (fp counted ONCE, not doubled):
+    #   A: tp=3 + fp=2 + tn=0 + fn=0 = 5   (bug would give 3+1+1+2+0+0 = 7)
+    #   B: tp=4 + fp=0 + tn=1 + fn=1 = 6
+    # Weighted mean: (0.6*5 + 0.9*6) / (5 + 6) = (3.0 + 5.4) / 11 ~= 0.76364
+    # Under the bug: (0.6*7 + 0.9*6) / (7 + 6) = (4.2 + 5.4) / 13 ~= 0.73846
+    expected_weighted = (0.6 * 5 + 0.9 * 6) / (5 + 6)
+    actual_weighted = result.evaluation_result.overall_metrics["weighted_overall_score"]
+    assert abs(actual_weighted - expected_weighted) < 1e-9, (
+        f"weighted_overall_score={actual_weighted!r} does not match expected "
+        f"{expected_weighted!r} — FP double-counting regression?"
     )

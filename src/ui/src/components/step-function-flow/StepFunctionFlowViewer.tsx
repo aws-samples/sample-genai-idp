@@ -465,7 +465,7 @@ const StepFunctionFlowViewer = ({
             onStepClick={setSelectedStep}
             selectedStep={selectedStep}
             getStepIcon={getStepIcon}
-            {...({ mergedConfig } as Record<string, unknown>)}
+            mergedConfig={mergedConfig}
           />
         </Container>
 

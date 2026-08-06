@@ -9,6 +9,7 @@ import json
 from unittest.mock import patch
 
 import pytest
+
 from idp_sdk import IDPClient
 from idp_sdk.exceptions import IDPConfigurationError, IDPResourceNotFoundError
 from idp_sdk.models import (
