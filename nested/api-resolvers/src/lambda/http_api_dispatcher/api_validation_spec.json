@@ -634,6 +634,13 @@
           "name": "endDateTime",
           "non_null": false,
           "type": "AWSDateTime"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "submissionSource",
+          "non_null": false,
+          "type": "String"
         }
       ]
     },
@@ -994,6 +1001,13 @@
           "elem_non_null": false,
           "is_list": false,
           "name": "nextToken",
+          "non_null": false,
+          "type": "String"
+        },
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "submissionSource",
           "non_null": false,
           "type": "String"
         }

@@ -24,6 +24,7 @@ Item Type Mapping (from PK prefix):
 import json
 import logging
 import os
+import re
 import time
 
 import boto3
@@ -107,7 +108,7 @@ def lambda_handler(event, context):
         "Segment": segment,
         "TotalSegments": total_segments,
         # Fetch attributes needed for ItemType, HITL status, and ConfidenceAlertCount backfill
-        "ProjectionExpression": "PK, SK, #it, HITLTriggered, HITLCompleted, HITLStatus, HITLPendingReview, InitialEventTime, ConfidenceAlertCount, Sections",
+        "ProjectionExpression": "PK, SK, #it, HITLTriggered, HITLCompleted, HITLStatus, HITLPendingReview, InitialEventTime, ConfidenceAlertCount, Sections, SubmissionSource, TestSetId",
         "ExpressionAttributeNames": {"#it": "ItemType"},
     }
 
@@ -182,6 +183,24 @@ def lambda_handler(event, context):
     return stats
 
 
+_TEST_RUN_KEY_RE = re.compile(r"^doc#[^/]+-\d{8}-\d{6}/")
+
+
+def _looks_like_test_run_document(pk, item):
+    """True when this document item was submitted by a test run.
+
+    Two signals, in order of reliability:
+      - TestSetId / SubmissionSource present: written by the copier once
+        provenance tagging shipped, so this is definitive.
+      - Key shape: the copier writes into "<testSetId>-<YYYYMMDD>-<HHMMSS>/",
+        which a user upload would have to be contrived to imitate. This is the
+        only signal available for documents that predate tagging.
+    """
+    if item.get("SubmissionSource") or item.get("TestSetId"):
+        return True
+    return bool(_TEST_RUN_KEY_RE.match(pk))
+
+
 def _determine_updates(item, pk):
     """
     Determine which attributes need to be set on this item.
@@ -196,6 +215,15 @@ def _determine_updates(item, pk):
                 updates["ItemType"] = item_type
                 break
         # If PK doesn't match any known prefix (e.g., list#, agent#), skip ItemType
+
+    # 1b. Retype documents that a test run submitted. These predate provenance
+    # tagging, so they carry ItemType="document" and appear in the production
+    # Document List alongside real customer uploads. They are identified by their
+    # key shape — the copier writes them under "<testSetId>-<YYYYMMDD>-<HHMMSS>/"
+    # — because the metadata that would say so was never recorded for them.
+    if item.get("ItemType") == "document" or updates.get("ItemType") == "document":
+        if _looks_like_test_run_document(pk, item):
+            updates["ItemType"] = "test-document"
 
     # 2. Check if HITLPendingReview needs to be set (only for documents)
     if pk.startswith("doc#") and "HITLPendingReview" not in item:
@@ -286,6 +314,15 @@ def _apply_update(table, pk, sk, updates):
                 f"(attribute_not_exists(#attr{i}) OR #attr{i} = :zero)"
             )
             expr_values[":zero"] = 0
+        elif attr_name == "ItemType" and attr_value == "test-document":
+            # Retyping a test-run document is a deliberate overwrite of an
+            # existing "document" value, so attribute_not_exists alone would
+            # reject it. Still idempotent: the condition fails once the value is
+            # already "test-document".
+            condition_parts.append(
+                f"(attribute_not_exists(#attr{i}) OR #attr{i} = :legacy_doc_type)"
+            )
+            expr_values[":legacy_doc_type"] = "document"
         else:
             condition_parts.append(f"attribute_not_exists(#attr{i})")
     condition_expression = " OR ".join(condition_parts)

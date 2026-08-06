@@ -1408,10 +1408,17 @@ type Query @aws_cognito_user_pools @aws_iam {
     endDateTime: AWSDateTime
     limit: Int
     nextToken: String
+    # Which submissions to list: "production" (default) for ordinary uploads, or
+    # "test" for documents submitted by Test Studio / Auto Optimizer. These run
+    # through the same pipeline, so without this they are indistinguishable in
+    # this list — on a dev stack 248 of 249 rows were test artifacts.
+    submissionSource: String
   ): DocumentPage
   getDocumentCount(
     startDateTime: AWSDateTime
     endDateTime: AWSDateTime
+    # Must match the listDocuments view or the header count contradicts the rows.
+    submissionSource: String
   ): DocumentCount
   listDocumentsDateHour(date: AWSDate, hour: Int): DocumentList
   listDocumentsDateShard(date: AWSDate, shard: Int): DocumentList

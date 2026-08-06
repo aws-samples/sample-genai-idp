@@ -19,6 +19,12 @@ from idp_common.models import Document, Page, ProcessingIssue, Section, Status
 
 logger = logging.getLogger(__name__)
 
+# TypeDateIndex hash-key values. A document submitted by a non-production caller
+# (Test Studio, Auto Optimizer) gets its own ItemType so it never appears in the
+# production Document List, while staying efficiently queryable on its own.
+ITEM_TYPE_DOCUMENT = "document"
+ITEM_TYPE_TEST_DOCUMENT = "test-document"
+
 
 def convert_floats_to_decimal(obj):
     """
@@ -177,8 +183,21 @@ class DocumentDynamoDBService:
             "ObjectStatus": document.status.value,
             "InitialEventTime": document.initial_event_time,
             "QueuedTime": document.queued_time,
-            "ItemType": "document",
+            # ItemType is the TypeDateIndex hash key, so it is what partitions the
+            # production Document List from non-production submissions (Test
+            # Studio, Auto Optimizer). Filtering on a projected attribute instead
+            # would not work: DynamoDB applies FilterExpression *after* Limit, so
+            # on a stack where most documents are test artifacts a page of 50 can
+            # return 1 with no indication the rest were dropped.
+            "ItemType": ITEM_TYPE_TEST_DOCUMENT
+            if document.submission_source
+            else ITEM_TYPE_DOCUMENT,
         }
+
+        if document.submission_source:
+            item["SubmissionSource"] = document.submission_source
+        if document.test_set_id:
+            item["TestSetId"] = document.test_set_id
 
         if expires_after:
             item["ExpiresAfter"] = expires_after

@@ -142,6 +142,8 @@ def handler(event, context):
                 f"{test_run_id}/",
                 input_files,
                 config_version,
+                submission_source="test-studio",
+                test_set_id=test_set_id,
             )
 
             # Copy baseline files from test set bucket to baseline bucket with
@@ -232,7 +234,14 @@ def _list_test_set_files(test_set_bucket, test_set_id, folder_type):
 
 
 def _copy_files_to_bucket(
-    source_bucket, source_prefix, dest_bucket, dest_prefix, files, config_version=None
+    source_bucket,
+    source_prefix,
+    dest_bucket,
+    dest_prefix,
+    files,
+    config_version=None,
+    submission_source=None,
+    test_set_id=None,
 ):
     """Copy files from source bucket to destination bucket - track failures"""
     successful_files = []
@@ -257,8 +266,19 @@ def _copy_files_to_bucket(
                 "Key": dest_key,
             }
 
+            # Object metadata is how provenance reaches the pipeline: the document
+            # enters via the ordinary S3 -> EventBridge -> queue-sender path, and
+            # Document.from_s3_event already HEADs the object, so this costs no
+            # extra call.
+            metadata = {}
             if config_version:
-                copy_args["Metadata"] = {"config-version": config_version}
+                metadata["config-version"] = config_version
+            if submission_source:
+                metadata["submission-source"] = submission_source
+            if test_set_id:
+                metadata["test-set-id"] = test_set_id
+            if metadata:
+                copy_args["Metadata"] = metadata
                 copy_args["MetadataDirective"] = "REPLACE"
 
             s3.copy_object(**copy_args)

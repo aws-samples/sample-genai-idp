@@ -154,7 +154,7 @@ def test_unlabeled_set_does_not_fail_the_run(copier_env, monkeypatch):
     monkeypatch.setattr(
         copier,
         "_copy_files_to_bucket",
-        lambda src, sp, dst, dp, files, cv=None: list(files),
+        lambda src, sp, dst, dp, files, cv=None, **kwargs: list(files),
     )
     monkeypatch.setattr(
         copier,
@@ -249,7 +249,7 @@ def test_object_keys_restricts_to_the_named_documents(copier_env, monkeypatch):
     )
     monkeypatch.setattr(copier, "_update_tracking_in_progress", lambda *a, **k: None)
 
-    def _copy(src, sp, dst, dp, files, cv=None):
+    def _copy(src, sp, dst, dp, files, cv=None, **kwargs):
         copied["baseline" if "baseline" in sp else "input"] = list(files)
         return list(files)
 

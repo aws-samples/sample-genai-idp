@@ -1462,6 +1462,7 @@ export type QueryGetDocumentArgs = {
 export type QueryGetDocumentCountArgs = {
   endDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
   startDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  submissionSource?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -1575,6 +1576,7 @@ export type QueryListDocumentsArgs = {
   limit?: InputMaybe<Scalars['Int']['input']>;
   nextToken?: InputMaybe<Scalars['String']['input']>;
   startDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
+  submissionSource?: InputMaybe<Scalars['String']['input']>;
 };
 
 

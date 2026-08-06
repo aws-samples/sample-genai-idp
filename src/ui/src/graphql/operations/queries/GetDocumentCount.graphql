@@ -1,5 +1,5 @@
-query GetDocumentCount($startDateTime: AWSDateTime, $endDateTime: AWSDateTime) {
-  getDocumentCount(startDateTime: $startDateTime, endDateTime: $endDateTime) {
+query GetDocumentCount($startDateTime: AWSDateTime, $endDateTime: AWSDateTime, $submissionSource: String) {
+  getDocumentCount(startDateTime: $startDateTime, endDateTime: $endDateTime, submissionSource: $submissionSource) {
     count
   }
 }

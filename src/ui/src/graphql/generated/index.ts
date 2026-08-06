@@ -551,8 +551,8 @@ export const getDocument = /* GraphQL */ `
 ` as GeneratedQuery<GetDocumentQueryVariables, GetDocumentQuery>;
 
 export const getDocumentCount = /* GraphQL */ `
-  query GetDocumentCount($startDateTime: AWSDateTime, $endDateTime: AWSDateTime) {
-    getDocumentCount(startDateTime: $startDateTime, endDateTime: $endDateTime) {
+  query GetDocumentCount($startDateTime: AWSDateTime, $endDateTime: AWSDateTime, $submissionSource: String) {
+    getDocumentCount(startDateTime: $startDateTime, endDateTime: $endDateTime, submissionSource: $submissionSource) {
       count
     }
   }
@@ -986,8 +986,8 @@ export const listDiscoveryJobs = /* GraphQL */ `
 ` as GeneratedQuery<ListDiscoveryJobsQueryVariables, ListDiscoveryJobsQuery>;
 
 export const listDocuments = /* GraphQL */ `
-  query ListDocuments($startDateTime: AWSDateTime, $endDateTime: AWSDateTime, $limit: Int, $nextToken: String) {
-    listDocuments(startDateTime: $startDateTime, endDateTime: $endDateTime, limit: $limit, nextToken: $nextToken) {
+  query ListDocuments($startDateTime: AWSDateTime, $endDateTime: AWSDateTime, $limit: Int, $nextToken: String, $submissionSource: String) {
+    listDocuments(startDateTime: $startDateTime, endDateTime: $endDateTime, limit: $limit, nextToken: $nextToken, submissionSource: $submissionSource) {
       Documents {
         PK
         SK

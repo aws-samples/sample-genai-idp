@@ -4902,6 +4902,11 @@ Resources:
               - FilesCount
               - Status
               - CompletedAt
+              # Provenance of the submission ("test-studio", "auto-optimizer", …).
+              # Projected so the Document List can filter production traffic from
+              # Test Studio / Auto Optimizer runs without a table read per row.
+              - SubmissionSource
+              - TestSetId
       TimeToLiveSpecification:
         AttributeName: ExpiresAfter
         Enabled: true
