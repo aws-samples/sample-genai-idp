@@ -89,6 +89,7 @@ class TestWorkflowStopper:
     def test_purge_queue_error(self, mock_stack_info, mock_boto_clients):
         """Test purge queue handles errors"""
         from botocore.exceptions import ClientError
+
         from idp_sdk._core.stop_workflows import WorkflowStopper
 
         mock_boto_clients["sqs"].purge_queue.side_effect = ClientError(

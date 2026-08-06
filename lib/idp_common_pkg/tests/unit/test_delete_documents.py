@@ -5,6 +5,7 @@ Unit tests for delete_documents module — get_documents_by_batch and get_docume
 from unittest.mock import MagicMock
 
 import pytest
+
 from idp_common.delete_documents import (
     get_documents_by_batch,
     get_documents_by_pattern,

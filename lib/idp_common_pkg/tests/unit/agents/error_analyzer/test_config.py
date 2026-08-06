@@ -6,6 +6,7 @@ Unit tests for Error Analyzer configuration.
 """
 
 import pytest
+
 from idp_common.agents.error_analyzer.config import get_aws_service_capabilities
 from idp_common.config.models import (
     ErrorAnalyzerConfig,

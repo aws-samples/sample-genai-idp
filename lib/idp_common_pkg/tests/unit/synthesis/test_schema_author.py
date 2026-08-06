@@ -13,6 +13,7 @@ import json
 from unittest.mock import Mock
 
 import pytest
+
 from idp_common.synthesis import schema_author
 
 pytestmark = pytest.mark.unit

@@ -3,6 +3,7 @@
 from unittest.mock import Mock, patch
 
 import pytest
+
 from idp_common.config.configuration_manager import ConfigurationManager
 
 

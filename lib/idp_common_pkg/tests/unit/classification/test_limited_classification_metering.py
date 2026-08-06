@@ -6,6 +6,7 @@ Tests for metering data transfer in limited classification scenarios.
 """
 
 import pytest
+
 from idp_common.classification.service import ClassificationService
 from idp_common.models import Document, Page, Section
 

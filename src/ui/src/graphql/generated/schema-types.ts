@@ -1708,6 +1708,7 @@ export type TestRunStatus = {
 };
 
 export type TestSet = {
+  configVersion?: Maybe<Scalars['String']['output']>;
   createdAt: Scalars['AWSDateTime']['output'];
   description?: Maybe<Scalars['String']['output']>;
   documentClassType?: Maybe<DocumentClassType>;

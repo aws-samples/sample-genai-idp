@@ -320,6 +320,7 @@ class DocumentOperation:
             DocumentDeletionResult with deletion details
         """
         import boto3
+
         from idp_common.delete_documents import delete_documents
 
         name = self._client._require_stack(stack_name)

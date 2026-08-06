@@ -8,6 +8,7 @@ Unit tests for the BdaInvocation class.
 from unittest.mock import patch
 
 import pytest
+
 from idp_common.bda.bda_invocation import BdaInvocation
 
 

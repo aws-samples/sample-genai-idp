@@ -8,6 +8,7 @@ Unit tests for the utils module.
 import json
 
 import pytest
+
 from idp_common.utils import (
     detect_format,
     extract_json_from_text,

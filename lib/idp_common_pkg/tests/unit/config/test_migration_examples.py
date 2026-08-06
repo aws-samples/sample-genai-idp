@@ -5,6 +5,7 @@
 """Unit tests for few-shot example migration from legacy to JSON Schema format."""
 
 import pytest
+
 from idp_common.config.migration import is_legacy_format, migrate_legacy_to_schema
 from idp_common.config.schema_constants import (
     LEGACY_ATTRIBUTES_PROMPT,

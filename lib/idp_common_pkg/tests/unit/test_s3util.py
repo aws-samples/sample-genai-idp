@@ -6,6 +6,7 @@ Unit tests for S3Util — specifically s3_url_to_bucket_key.
 """
 
 import pytest
+
 from idp_common.utils.s3util import S3Util
 
 

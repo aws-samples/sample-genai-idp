@@ -16,8 +16,9 @@ import json
 
 import boto3
 import pytest
-from idp_feature_sdk.pack import apply_public_artifacts_policy, ensure_artifacts_bucket
 from moto import mock_aws
+
+from idp_feature_sdk.pack import apply_public_artifacts_policy, ensure_artifacts_bucket
 
 REGION = "us-west-2"
 
@@ -241,6 +242,7 @@ def test_enforce_ssl_only_failure_is_not_fatal_on_existing_bucket(aws_credential
         )
 
         import botocore.exceptions
+
         import idp_feature_sdk.pack as pack_mod
 
         real_client = boto3.client

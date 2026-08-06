@@ -4,6 +4,7 @@
 """Unit tests for the per-agent page-image cap (oversized-request guard)."""
 
 import pytest
+
 from idp_common.extraction.service import ExtractionService
 
 pytestmark = pytest.mark.unit

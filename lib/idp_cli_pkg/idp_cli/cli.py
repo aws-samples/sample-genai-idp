@@ -552,6 +552,7 @@ def deploy(
 
             import boto3 as _boto3
             import requests
+
             from idp_sdk.operations.publish import DEFAULT_GOVCLOUD_LINT_REGION
 
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -1359,6 +1360,7 @@ def delete_documents_cmd(
     """
     try:
         import boto3
+
         from idp_common.delete_documents import (
             delete_documents,
             get_documents_by_batch,
@@ -2628,8 +2630,9 @@ def list_versions(stack_name: str, document_id: str, region: Optional[str]):
       idp-cli list-versions --stack-name my-stack --document-id loan-123/package.pdf
     """
     try:
-        from idp_sdk import IDPClient
         from rich.table import Table
+
+        from idp_sdk import IDPClient
 
         client = IDPClient(stack_name=stack_name, region=region)
         versions = client.batch.list_versions(document_id=document_id)
@@ -4201,6 +4204,7 @@ def config_validate(
     """
     try:
         import yaml
+
         from idp_common.config.merge_utils import load_yaml_file, validate_config
 
         # Load the user's config

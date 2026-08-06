@@ -4,6 +4,7 @@
 from unittest.mock import Mock, patch
 
 import pytest
+
 from idp_common.s3 import find_matching_files
 
 

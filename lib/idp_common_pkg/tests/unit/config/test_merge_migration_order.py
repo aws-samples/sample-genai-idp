@@ -10,6 +10,7 @@ See .claude/plans/config-v06-migration-and-test-plan.md (P0 hazard §2.1).
 """
 
 import pytest
+
 from idp_common.config.merge_utils import merge_config_with_defaults
 from idp_common.config.models import IDPConfig
 

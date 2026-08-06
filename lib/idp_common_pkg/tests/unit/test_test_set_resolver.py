@@ -165,6 +165,80 @@ class TestTestSetResolver:
             assert mock_delete.call_count == 2
             assert result is True
 
+    @patch.dict(os.environ, {"TEST_SET_BUCKET": "test-set-bucket"})
+    def test_delete_test_sets_paginates_beyond_1000_objects(self):
+        """Every object is deleted, not just the first list page.
+
+        Both S3 APIs involved are page-limited at 1000: list_objects_v2 returns
+        at most 1000 keys, and delete_objects accepts at most 1000. A single
+        unpaginated pass orphaned everything past the first page — the test set
+        vanished from the UI while its files stayed in the bucket, invisible and
+        still billed. Real test sets exceed this easily (Fake-W2-Tax-Forms is
+        2000 documents, ~4000 objects counting baselines).
+        """
+        total_objects = 2500
+        keys = [f"big-set/input/doc{i}.pdf" for i in range(total_objects)]
+
+        def fake_list(**kwargs):
+            start = int(kwargs.get("ContinuationToken") or 0)
+            page = keys[start : start + 1000]
+            nxt = start + 1000
+            truncated = nxt < len(keys)
+            resp = {
+                "Contents": [{"Key": k} for k in page],
+                "IsTruncated": truncated,
+            }
+            if truncated:
+                resp["NextContinuationToken"] = str(nxt)
+            return resp
+
+        deleted = []
+
+        def fake_delete_objects(**kwargs):
+            batch = kwargs["Delete"]["Objects"]
+            # S3 rejects a batch larger than 1000.
+            assert len(batch) <= 1000
+            deleted.extend(o["Key"] for o in batch)
+            return {}
+
+        with patch.object(test_set_index.db_client, "delete_item"):
+            with patch.object(
+                test_set_index.s3_client, "list_objects_v2", side_effect=fake_list
+            ):
+                with patch.object(
+                    test_set_index.s3_client,
+                    "delete_objects",
+                    side_effect=fake_delete_objects,
+                ):
+                    result = test_set_index.delete_test_sets(
+                        {"testSetIds": ["big-set"]}
+                    )
+
+        assert result is True
+        assert sorted(deleted) == sorted(keys), (
+            f"expected all {total_objects} objects deleted, got {len(deleted)}"
+        )
+
+    @patch.dict(os.environ, {"TEST_SET_BUCKET": "test-set-bucket"})
+    def test_delete_test_sets_stops_on_truncated_page_without_token(self):
+        """A truncated response with no continuation token must not loop forever."""
+        responses = [
+            {
+                "Contents": [{"Key": "s/input/a.pdf"}],
+                "IsTruncated": True,
+                # No NextContinuationToken — malformed/edge response.
+            }
+        ]
+
+        with patch.object(test_set_index.db_client, "delete_item"):
+            with patch.object(
+                test_set_index.s3_client, "list_objects_v2", side_effect=responses * 5
+            ):
+                with patch.object(test_set_index.s3_client, "delete_objects"):
+                    result = test_set_index.delete_test_sets({"testSetIds": ["s"]})
+
+        assert result is True
+
     @patch.dict(
         os.environ, {"INPUT_BUCKET": "test-bucket", "TRACKING_TABLE": "test-table"}
     )
@@ -203,6 +277,50 @@ class TestTestSetResolver:
                 mock_table.query.assert_called_once()
                 assert len(result) == 1
                 assert result[0]["id"] == "test-id"
+                # Absent on the record -> None, not a KeyError. Stack-managed
+                # benchmark sets don't set it; the UI falls back to matching a
+                # config version named after the test set id.
+                assert result[0]["configVersion"] is None
+
+    @patch.dict(
+        "os.environ", {"TRACKING_TABLE": "test-table", "INPUT_BUCKET": "test-bucket"}
+    )
+    def test_get_test_sets_passes_through_declared_config_version(self):
+        """A test set may DECLARE the config version Test Studio preselects.
+
+        Needed by extension-deployed test sets: the Feature Platform names their
+        config presets `<featureId>-v<version>`, which can never equal the test
+        set id, so the id-matching convention cannot reach them.
+        """
+        with patch.object(test_set_index, "find_matching_files") as mock_find_files:
+            mock_find_files.return_value = []
+
+            with patch.object(test_set_index, "boto3") as mock_boto3:
+                mock_table = MagicMock()
+                mock_table.query.return_value = {
+                    "Items": [{"PK": "testset#confbench-clean", "SK": "metadata"}]
+                }
+                mock_boto3.resource.return_value.Table.return_value = mock_table
+                mock_boto3.resource.return_value.batch_get_item.return_value = {
+                    "Responses": {
+                        "test-table": [
+                            {
+                                "PK": "testset#confbench-clean",
+                                "SK": "metadata",
+                                "id": "confbench-clean",
+                                "name": "ConfBench (clean baseline)",
+                                "fileCount": 75,
+                                "createdAt": "2026-08-05T16:00:00Z",
+                                "configVersion": "confbench-testset-v0.1.0",
+                            }
+                        ]
+                    }
+                }
+
+                result = test_set_index.get_test_sets()
+
+                assert len(result) == 1
+                assert result[0]["configVersion"] == "confbench-testset-v0.1.0"
 
     @patch.dict("os.environ", {"INPUT_BUCKET": "test-bucket"})
     def test_list_input_bucket_files(self):

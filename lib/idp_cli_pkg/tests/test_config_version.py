@@ -5,6 +5,7 @@ Test config-version parameter flow in batch processor
 from unittest.mock import Mock, patch
 
 import pytest
+
 from idp_sdk._core.batch_processor import BatchProcessor
 
 

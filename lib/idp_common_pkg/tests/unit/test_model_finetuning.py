@@ -7,6 +7,7 @@ Unit tests for model fine-tuning module.
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from idp_common.model_finetuning.models import (
     AvailableModelsResult,
     CustomModel,

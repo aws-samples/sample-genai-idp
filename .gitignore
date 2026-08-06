@@ -111,3 +111,7 @@ config_library/samples-manifest.json
 # REPORT_DIR=./api-test-results or ./zap-reports.
 api-test-results/
 zap-reports/
+
+# draw.io editor backup files
+*.bkp
+.$*

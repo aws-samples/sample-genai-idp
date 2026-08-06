@@ -8,6 +8,7 @@ Unit tests for Chat operations (mocked).
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from idp_sdk import IDPClient
 from idp_sdk.models.chat import ChatResponse
 from idp_sdk.operations.chat import ChatOperation

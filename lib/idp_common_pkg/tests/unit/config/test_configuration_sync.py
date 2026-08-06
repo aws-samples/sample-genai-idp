@@ -12,6 +12,8 @@ from unittest.mock import patch
 
 import boto3
 import pytest
+from moto import mock_aws
+
 from idp_common.config.configuration_manager import ConfigurationManager
 from idp_common.config.models import (
     ConfidenceConfig,
@@ -19,7 +21,6 @@ from idp_common.config.models import (
     IDPConfig,
     ImageConfig,
 )
-from moto import mock_aws
 
 
 class TestSyncCustomWithNewDefault:

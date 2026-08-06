@@ -1,0 +1,44 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  GENAIIDP-w2-copy-consistency: Assessment LambdaHook that deterministically
+  flags Form-W2 fields that disagree across duplicate copies belonging to the
+  same employee on a single page (e.g., hand-filled Copy B vs Copy C
+  mismatches). No LLM call -- pure Python comparison logic. No-op passthrough
+  for every other document class.
+
+Resources:
+  W2CopyConsistencyFunction:
+    Type: AWS::Serverless::Function
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration (log level only)"
+    # checkov:skip=CKV_AWS_116: "DLQ not required - errors handled via permissive passthrough inside the handler, and by the IDP pipeline's own retry/onError handling"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access - pure in-memory logic, no AWS service calls"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency - lightweight deterministic function"
+    Properties:
+      FunctionName: GENAIIDP-w2-copy-consistency
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      CodeUri: .
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+      # No AWS service permissions required: this function only inspects the
+      # payload it receives and returns a computed JSON response. No S3, no
+      # Bedrock, no DynamoDB access.
+
+Outputs:
+  FunctionArn:
+    Description: ARN of the W2 copy-consistency Assessment Lambda hook function
+    Value: !GetAtt W2CopyConsistencyFunction.Arn
+
+  Usage:
+    Description: How to wire this into the IDP Accelerator configuration
+    Value: !Sub |
+      In your configuration's extraction.confidence block, set:
+        model: "LambdaHook"
+        model_lambda_hook_arn: "${W2CopyConsistencyFunction.Arn}"
+      Also raise hitl.confidence_threshold above 0.2 (e.g. 0.8) so the low
+      confidence this hook assigns to mismatched W-2 copy fields actually
+      triggers Review Pending.

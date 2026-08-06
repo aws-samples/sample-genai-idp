@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from idp_common.bda.bda_blueprint_service import BdaBlueprintService
 
 

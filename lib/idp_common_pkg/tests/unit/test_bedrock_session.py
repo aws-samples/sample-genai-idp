@@ -8,6 +8,7 @@ from unittest.mock import patch
 import boto3
 import pytest
 from botocore.credentials import DeferredRefreshableCredentials
+
 from idp_common.bedrock import session as bedrock_session
 
 

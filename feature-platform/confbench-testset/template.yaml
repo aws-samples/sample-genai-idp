@@ -1,0 +1,798 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  confbench-testset v<FEATURE_VERSION_TOKEN> — on-demand deployment of the
+  amazon/ConfBench benchmark dataset (75 FCC invoices x up to 21 Augraphy noise
+  variants, 1,346 documents / 32.71 GB) into the host's Test Studio. Installing
+  this stack creates only the machinery; an admin then picks a size tier or
+  individual noise variants and starts an ingest job from the feature UI.
+
+Parameters:
+
+  MainStackName:
+    Type: String
+    Description: Name of the IDP Accelerator main stack to attach to. Host
+      resources (TestSet bucket, tracking table, Cognito, KMS key) are resolved
+      via Fn::ImportValue against this name.
+
+  # NOTE: There is intentionally no FeatureVersion parameter. The version is
+  # baked into this template at publish time by `idp-feature-cli publish`,
+  # which substitutes the literal string `<FEATURE_VERSION_TOKEN>`. Why bake it
+  # in instead of using a CFN Parameter? CloudFormation Console's "Update stack"
+  # wizard ignores `param_*` query-string overrides — admins clicking "Update"
+  # from the IDP nav would otherwise stay on the old version. By making the new
+  # template literally contain the new version string, CFN sees a real template
+  # change and the update applies cleanly.
+
+  FeatureId:
+    Type: String
+    Default: confbench-testset
+
+  FeatureDisplayName:
+    Type: String
+    Default: "Test Set - ConfBench"
+
+  FeatureBucket:
+    Type: String
+    Description: S3 bucket holding this version's artifacts (host artifacts
+      bucket for OSS). The ui-deployer copies the UI bundle and config preset
+      from here. Pre-filled by the host's getFeatureLaunchUrl.
+
+  # NOTE: the version-free artifact base (<prefix>/extensions/<id>) is NOT a CFN
+  # parameter either — same reasoning as FEATURE_VERSION above. The publisher
+  # substitutes <FEATURE_ARTIFACT_PREFIX_TOKEN>.
+
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues: [DEBUG, INFO, WARNING, ERROR]
+
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    Description: CloudWatch log retention for this feature's functions.
+
+  JobHistoryRetentionDays:
+    Type: Number
+    Default: 90
+    MinValue: 1
+    MaxValue: 3650
+    Description: Days to retain ingest-job history rows. Job rows are tiny
+      metadata records; the ingested documents themselves are governed by the
+      host TestSet bucket's own DataRetentionInDays lifecycle rule.
+
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ''
+    Description: Optional IAM permissions boundary ARN applied to created roles.
+
+  S3VpcEndpointDnsNameOverride:
+    Type: String
+    Default: ''
+    Description: >-
+      Optional. Only needed when the host is deployed in private-VPC mode with a
+      bring-your-own S3 interface endpoint. Set to the endpoint's DNS name with
+      the AWS-assigned random suffix and leading "*." stripped, and the ingest
+      functions will address S3 through it.
+
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, '']]
+  HasS3VpcEndpoint: !Not [!Equals [!Ref S3VpcEndpointDnsNameOverride, '']]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 60
+    MemorySize: 256
+    Tracing: Active
+    Architectures: [arm64]
+
+Resources:
+
+  ###########################################################################
+  # Shared layer — the noise-variant catalog (exact per-variant file counts
+  # and byte sizes, the size tiers, selection -> test-set-id mapping).
+  #
+  # A layer rather than a copy in each function's CodeUri: the feature API and
+  # the ingest planner MUST agree on these numbers. If they drifted, the cost
+  # estimate an admin approves would stop matching the bytes that actually
+  # land — precisely the problem this extension exists to prevent.
+  ###########################################################################
+  SharedLayer:
+    Type: AWS::Serverless::LayerVersion
+    Metadata:
+      # `makefile`, not `python3.12`: the python build method runs pip against a
+      # requirements.txt and does NOT copy hand-authored source, so variants.py
+      # would be silently dropped from the layer. Omitting BuildMethod entirely
+      # is worse — SAM then leaves ContentUri as a relative path pointing
+      # outside .aws-sam/build and `sam package` fails. See shared/Makefile.
+      BuildMethod: makefile
+    Properties:
+      LayerName: !Sub '${MainStackName}-${FeatureId}-shared'
+      Description: ConfBench noise-variant catalog and size tiers.
+      ContentUri: shared/
+      CompatibleRuntimes: [python3.12]
+      CompatibleArchitectures: [arm64]
+      RetentionPolicy: Delete
+
+  ###########################################################################
+  # Ingest job table — OWNED by this feature. One row per admin-initiated
+  # ingest, carrying live progress counters the UI polls. The ByTestSet GSI
+  # backs the concurrent-job check (refusing a second ingest for a test set
+  # that already has one in flight).
+  ###########################################################################
+  IngestJobTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: jobId
+          AttributeType: S
+        - AttributeName: testSetId
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: jobId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: ByTestSet
+          KeySchema:
+            - AttributeName: testSetId
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      # Job rows are metadata only; expire them so history doesn't grow forever.
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: 'idp:feature-id'
+          Value: !Ref FeatureId
+
+  ###########################################################################
+  # Ingest state machine
+  #
+  # Plan -> Map(over noise variants, MaxConcurrency 4) -> Finalize
+  #
+  # Why a state machine rather than the chained self-invocation of the original
+  # PR #583 deployer: nothing here waits on a CloudFormation response, so the
+  # ~32.7 GB transfer is no longer racing CFN's 1-hour custom-resource deadline
+  # and an overrun is a retryable job instead of a stack rollback. Step
+  # Functions also owns retry/backoff and the resume bookkeeping, so the worker
+  # doesn't hand-roll a retry ladder or thread accumulated state through async
+  # invoke payloads (which silently break past Lambda's 256 KB Event limit).
+  #
+  # The inner Choice loop lets one variant take several passes: variant sizes
+  # span 0.02 GB (original) to 7.12 GB (custom15), so a single fixed shard size
+  # cannot fit them all. Each pass returns a resume offset.
+  ###########################################################################
+  IngestStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub '${MainStackName}-${FeatureId}-ingest'
+      Role: !GetAtt IngestStateMachineRole.Arn
+      Logging:
+        Level: ERROR
+        IncludeExecutionData: false
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt IngestStateMachineLogGroup.Arn
+      Tags:
+        'idp:feature-id': !Ref FeatureId
+      DefinitionSubstitutions:
+        PlannerFunctionArn: !GetAtt PlannerFunction.Arn
+        IngestWorkerFunctionArn: !GetAtt IngestWorkerFunction.Arn
+        FinalizeFunctionArn: !GetAtt FinalizeFunction.Arn
+        FailFunctionArn: !GetAtt FailFunction.Arn
+      Definition:
+        Comment: >-
+          ConfBench ingest: plan the row index once, fan out over noise
+          variants, then finalize the test-set record.
+        StartAt: Plan
+        States:
+          Plan:
+            Type: Task
+            Resource: '${PlannerFunctionArn}'
+            ResultPath: $.plan
+            Retry:
+              # The parquet download is the only network call here; transient
+              # CDN faults are common and cheap to retry.
+              - ErrorEquals: [States.TaskFailed, Lambda.ServiceException, Lambda.TooManyRequestsException]
+                IntervalSeconds: 10
+                MaxAttempts: 3
+                BackoffRate: 2.0
+            Catch:
+              - ErrorEquals: [States.ALL]
+                ResultPath: $.error
+                Next: MarkFailed
+            Next: IngestVariants
+
+          IngestVariants:
+            Type: Map
+            ItemsPath: $.plan.shards
+            # 4 concurrent variant workers. Higher concurrency does not help —
+            # the HuggingFace CDN is the bottleneck (2-14 MB/s per stream) and
+            # more parallel streams tend to divide the same bandwidth while
+            # multiplying the chance of a 429/5xx.
+            MaxConcurrency: 4
+            ResultPath: $.results
+            Catch:
+              - ErrorEquals: [States.ALL]
+                ResultPath: $.error
+                Next: MarkFailed
+            Next: Finalize
+            Iterator:
+              StartAt: IngestShard
+              States:
+                IngestShard:
+                  Type: Task
+                  Resource: '${IngestWorkerFunctionArn}'
+                  # OutputPath keeps only the worker's own return value, so the
+                  # Map result stays small regardless of how many passes a
+                  # variant takes.
+                  Retry:
+                    - ErrorEquals: [RetryableIngestError]
+                      IntervalSeconds: 15
+                      MaxAttempts: 5
+                      BackoffRate: 2.0
+                    - ErrorEquals: [Lambda.ServiceException, Lambda.TooManyRequestsException, States.TaskFailed]
+                      IntervalSeconds: 10
+                      MaxAttempts: 3
+                      BackoffRate: 2.0
+                  Next: ShardComplete
+                ShardComplete:
+                  Type: Choice
+                  Choices:
+                    # Not done -> another pass for this same variant, resuming
+                    # at the offset the worker returned.
+                    - Variable: $.done
+                      BooleanEquals: false
+                      Next: IngestShard
+                  Default: ShardDone
+                ShardDone:
+                  Type: Pass
+                  End: true
+
+          Finalize:
+            Type: Task
+            Resource: '${FinalizeFunctionArn}'
+            Parameters:
+              jobId.$: $.jobId
+              testSetId.$: $.testSetId
+              results.$: $.results
+            Retry:
+              - ErrorEquals: [States.TaskFailed, Lambda.ServiceException, Lambda.TooManyRequestsException]
+                IntervalSeconds: 10
+                MaxAttempts: 3
+                BackoffRate: 2.0
+            End: true
+
+          MarkFailed:
+            Type: Task
+            Resource: '${FailFunctionArn}'
+            Parameters:
+              jobId.$: $.jobId
+              testSetId.$: $.testSetId
+              error.$: $.error
+            # A failure to record a failure must not mask the original one.
+            Catch:
+              - ErrorEquals: [States.ALL]
+                Next: Failed
+            Next: Failed
+
+          Failed:
+            Type: Fail
+            Error: ConfBenchIngestFailed
+            Cause: >-
+              ConfBench ingest failed. See the job row's lastError and the
+              per-variant failure reports under
+              s3://<TestSetBucket>/_confbench_jobs/<jobId>/.
+
+  IngestStateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/vendedlogs/states/${MainStackName}-${FeatureId}-ingest'
+      RetentionInDays: !Ref LogRetentionDays
+
+  IngestStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref 'AWS::NoValue']
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: !Sub 'states.${AWS::URLSuffix}' }
+            Action: sts:AssumeRole
+      Tags:
+        - Key: 'idp:feature-id'
+          Value: !Ref FeatureId
+      Policies:
+        - PolicyName: InvokeIngestFunctions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !GetAtt PlannerFunction.Arn
+                  - !GetAtt IngestWorkerFunction.Arn
+                  - !GetAtt FinalizeFunction.Arn
+                  - !GetAtt FailFunction.Arn
+        - PolicyName: StateMachineLogging
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Step Functions' vended-logs delivery requires these at the
+              # account level; CloudWatch Logs does not support resource-level
+              # scoping for log-delivery configuration calls.
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                  - logs:DescribeLogGroups
+                Resource: '*'
+
+  ###########################################################################
+  # Ingest functions
+  #
+  # All three need the host's TestSet bucket (write), its KMS key (the bucket is
+  # SSE-KMS, so S3 transparently requires Encrypt/GenerateDataKey on write), and
+  # the job table. Only the planner and finalizer touch the host tracking table.
+  ###########################################################################
+  PlannerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref 'AWS::NoValue']
+      CodeUri: ingest/
+      Handler: planner.plan_handler
+      # Downloads and parses the 76 KB parquet, then writes a row index holding
+      # ground truth for up to 1,346 rows. Memory is for the pyarrow decode.
+      MemorySize: 2048
+      Timeout: 300
+      Layers: [!Ref SharedLayer]
+      Tags:
+        'idp:feature-id': !Ref FeatureId
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TESTSET_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
+          HOST_TRACKING_TABLE: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
+          # Config version the ui-deployer creates from the bundled preset;
+          # recorded on each test-set row so Test Studio preselects it.
+          CONFIG_VERSION_NAME: !Sub '${FeatureId}-v<FEATURE_VERSION_TOKEN>'
+          JOB_TABLE: !Ref IngestJobTable
+          S3_ENDPOINT_URL: !If
+            - HasS3VpcEndpoint
+            - !Sub 'https://bucket.${S3VpcEndpointDnsNameOverride}'
+            - !Ref 'AWS::NoValue'
+      Policies:
+        - !Ref IngestSharedPolicy
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                'Fn::Sub':
+                  - 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}'
+                  - T: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
+
+  IngestWorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref 'AWS::NoValue']
+      CodeUri: ingest/
+      Handler: index.handler
+      # Streams PDFs CDN -> S3 in bounded 16 MB windows, so memory is modest
+      # even for the dataset's 615 MB largest object. 900 s is the ceiling the
+      # worker's own time guard measures against.
+      MemorySize: 1024
+      Timeout: 900
+      Layers: [!Ref SharedLayer]
+      Tags:
+        'idp:feature-id': !Ref FeatureId
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TESTSET_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
+          JOB_TABLE: !Ref IngestJobTable
+          S3_ENDPOINT_URL: !If
+            - HasS3VpcEndpoint
+            - !Sub 'https://bucket.${S3VpcEndpointDnsNameOverride}'
+            - !Ref 'AWS::NoValue'
+      Policies:
+        - !Ref IngestSharedPolicy
+
+  FinalizeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref 'AWS::NoValue']
+      CodeUri: ingest/
+      Handler: planner.finalize_handler
+      MemorySize: 512
+      Timeout: 300
+      Layers: [!Ref SharedLayer]
+      Tags:
+        'idp:feature-id': !Ref FeatureId
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TESTSET_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
+          HOST_TRACKING_TABLE: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
+          # Config version the ui-deployer creates from the bundled preset;
+          # recorded on each test-set row so Test Studio preselects it.
+          CONFIG_VERSION_NAME: !Sub '${FeatureId}-v<FEATURE_VERSION_TOKEN>'
+          JOB_TABLE: !Ref IngestJobTable
+          S3_ENDPOINT_URL: !If
+            - HasS3VpcEndpoint
+            - !Sub 'https://bucket.${S3VpcEndpointDnsNameOverride}'
+            - !Ref 'AWS::NoValue'
+      Policies:
+        - !Ref IngestSharedPolicy
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:UpdateItem
+              Resource:
+                'Fn::Sub':
+                  - 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}'
+                  - T: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
+
+  FailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref 'AWS::NoValue']
+      CodeUri: ingest/
+      Handler: planner.fail_handler
+      Layers: [!Ref SharedLayer]
+      Tags:
+        'idp:feature-id': !Ref FeatureId
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TESTSET_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
+          HOST_TRACKING_TABLE: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
+          # Config version the ui-deployer creates from the bundled preset;
+          # recorded on each test-set row so Test Studio preselects it.
+          CONFIG_VERSION_NAME: !Sub '${FeatureId}-v<FEATURE_VERSION_TOKEN>'
+          JOB_TABLE: !Ref IngestJobTable
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:UpdateItem]
+              Resource: !GetAtt IngestJobTable.Arn
+            - Effect: Allow
+              Action: [dynamodb:UpdateItem]
+              Resource:
+                'Fn::Sub':
+                  - 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}'
+                  - T: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
+            - Effect: Allow
+              Action: [kms:Decrypt, kms:DescribeKey, kms:GenerateDataKey]
+              Resource: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
+
+  ###########################################################################
+  # Shared IAM policy for the ingest functions. Scoped to this extension's own
+  # prefixes in the host TestSet bucket — the ConfBench test-set folders and the
+  # job-state area — never the whole bucket.
+  ###########################################################################
+  IngestSharedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: ConfBench ingest — host TestSet bucket + job table + KMS.
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: TestSetObjects
+            Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+              - s3:DeleteObject
+              - s3:AbortMultipartUpload
+              - s3:ListMultipartUploadParts
+            Resource:
+              - !Sub
+                - 'arn:${AWS::Partition}:s3:::${B}/confbench*'
+                - B: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
+              - !Sub
+                - 'arn:${AWS::Partition}:s3:::${B}/_confbench_jobs/*'
+                - B: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
+          - Sid: TestSetList
+            Effect: Allow
+            # ListBucket is bucket-scoped by API design; the prefix condition
+            # keeps it to this extension's own keys.
+            Action: s3:ListBucket
+            Resource: !Sub
+              - 'arn:${AWS::Partition}:s3:::${B}'
+              - B: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
+            Condition:
+              StringLike:
+                's3:prefix':
+                  - 'confbench*'
+                  - '_confbench_jobs/*'
+          - Sid: JobTable
+            Effect: Allow
+            Action:
+              - dynamodb:PutItem
+              - dynamodb:GetItem
+              - dynamodb:UpdateItem
+              - dynamodb:Query
+            Resource:
+              - !GetAtt IngestJobTable.Arn
+              - !Sub '${IngestJobTable.Arn}/index/*'
+          - Sid: TestSetBucketKms
+            Effect: Allow
+            # The host TestSet bucket is SSE-KMS with the main stack's
+            # customer-managed key, so S3 transparently requires these on both
+            # read and write.
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: { 'Fn::ImportValue': !Sub '${MainStackName}-CustomerManagedEncryptionKeyArn' }
+
+  ###########################################################################
+  # Feature API: HttpApi + Lambda, authorised by the main stack's Cognito User
+  # Pool. The mutating routes additionally require Admin group membership
+  # (enforced in the handler) — an ingest moves up to 32.71 GB and the delete
+  # is destructive.
+  ###########################################################################
+  FeatureApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      # CORS is served by API Gateway's built-in preflight handler. Without this
+      # block OPTIONS preflight hits the JWT authorizer, which rejects it (no
+      # Authorization header on preflight) and the browser reports "Failed to
+      # fetch" before it ever sends the GET.
+      #
+      # AllowOrigins='*' is safe here because the API uses Bearer JWT auth
+      # (Authorization header), NOT cookies. With AllowCredentials unset
+      # (default false) a wildcard origin is CORS-compliant.
+      CorsConfiguration:
+        AllowOrigins: ['*']
+        AllowMethods: [GET, POST, DELETE, OPTIONS]
+        AllowHeaders:
+          - authorization
+          - content-type
+          - x-amz-date
+          - x-amz-security-token
+        MaxAge: 600
+      Auth:
+        DefaultAuthorizer: CognitoJwt
+        Authorizers:
+          CognitoJwt:
+            JwtConfiguration:
+              issuer: !Sub
+                - 'https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${UserPoolId}'
+                - UserPoolId: { 'Fn::ImportValue': !Sub '${MainStackName}-UserPoolId' }
+              audience:
+                - !Sub
+                  - '${ClientId}'
+                  - ClientId: { 'Fn::ImportValue': !Sub '${MainStackName}-UserPoolClientId' }
+            IdentitySource: '$request.header.Authorization'
+
+  FeatureApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref 'AWS::NoValue']
+      CodeUri: feature-api/
+      Handler: handler.lambda_handler
+      # DELETE walks up to ~2,700 objects in 1,000-key pages; give it room.
+      Timeout: 300
+      MemorySize: 512
+      Layers: [!Ref SharedLayer]
+      Tags:
+        'idp:feature-id': !Ref FeatureId
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          MAIN_STACK_NAME: !Ref MainStackName
+          JOB_TABLE: !Ref IngestJobTable
+          TESTSET_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-TestSetBucketName' }
+          HOST_TRACKING_TABLE: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
+          INGEST_STATE_MACHINE_ARN: !Ref IngestStateMachine
+          JOB_HISTORY_RETENTION_DAYS: !Ref JobHistoryRetentionDays
+      Policies:
+        - !Ref IngestSharedPolicy
+        - Statement:
+            - Effect: Allow
+              Action: [dynamodb:Scan]
+              Resource: !GetAtt IngestJobTable.Arn
+            - Effect: Allow
+              Action: [states:StartExecution]
+              Resource: !Ref IngestStateMachine
+            # DELETE /dataset removes the host's test-set record for a ConfBench
+            # set. Item-level scoping is not expressible in IAM for DynamoDB, so
+            # the handler restricts the key to this extension's own ids.
+            - Effect: Allow
+              Action: [dynamodb:DeleteItem, dynamodb:GetItem]
+              Resource:
+                'Fn::Sub':
+                  - 'arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}'
+                  - T: { 'Fn::ImportValue': !Sub '${MainStackName}-TrackingTableName' }
+      Events:
+        # Methods are listed explicitly rather than using ANY: an `ANY /{proxy+}`
+        # route matches OPTIONS too, bypassing API Gateway's built-in CORS
+        # preflight handler and sending preflight to the JWT authorizer (401 ->
+        # "Failed to fetch" in the browser).
+        Get:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FeatureApi
+            Path: /{proxy+}
+            Method: GET
+        Post:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FeatureApi
+            Path: /{proxy+}
+            Method: POST
+        Delete:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref FeatureApi
+            Path: /{proxy+}
+            Method: DELETE
+
+  ###########################################################################
+  # CloudWatch Log Groups — explicit retention (the implicit default never
+  # expires).
+  ###########################################################################
+  FeatureApiFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FeatureApiFunction}'
+      RetentionInDays: !Ref LogRetentionDays
+
+  PlannerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${PlannerFunction}'
+      RetentionInDays: !Ref LogRetentionDays
+
+  IngestWorkerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${IngestWorkerFunction}'
+      RetentionInDays: !Ref LogRetentionDays
+
+  FinalizeFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FinalizeFunction}'
+      RetentionInDays: !Ref LogRetentionDays
+
+  FailFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${FailFunction}'
+      RetentionInDays: !Ref LogRetentionDays
+
+  UiDeployerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${UiDeployerFunction}'
+      RetentionInDays: !Ref LogRetentionDays
+
+  ###########################################################################
+  # UI deployer: copies the UMD bundle into the host WebUI bucket, registers
+  # the feature, and applies the bundled config preset by directly invoking the
+  # host's resolver Lambdas.
+  ###########################################################################
+  UiDeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref 'AWS::NoValue']
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: !Sub 'lambda.${AWS::URLSuffix}' }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Tags:
+        # REQUIRED, not decorative: the host's WebUIBucketPolicy allows writes
+        # under features/<FeatureId>/* only for a principal carrying this tag.
+        - Key: 'idp:feature-id'
+          Value: !Ref FeatureId
+      Policies:
+        - PolicyName: ReadFeatureBucket
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # GetObject only — the FeatureBucket is GetObject-only by
+              # contract; we never list it. Scoped to this extension's
+              # version-free base, baked at publish time.
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub 'arn:${AWS::Partition}:s3:::${FeatureBucket}/<FEATURE_ARTIFACT_PREFIX_TOKEN>/*'
+        - PolicyName: WriteWebUIBucketPrefix
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                  - s3:DeleteObject
+                Resource: !Sub
+                  - 'arn:${AWS::Partition}:s3:::${Bucket}/features/${FeatureId}/*'
+                  - Bucket: { 'Fn::ImportValue': !Sub '${MainStackName}-WebUIBucketName' }
+        - PolicyName: InvokeHostResolvers
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Direct Lambda invoke of the host's resolver functions (the
+              # AppSync transport was removed).
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - { 'Fn::ImportValue': !Sub '${MainStackName}-RegisterFeatureFunctionArn' }
+                  - { 'Fn::ImportValue': !Sub '${MainStackName}-ApplyFeatureConfigPresetFunctionArn' }
+
+  UiDeployerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ui-deployer/
+      Handler: handler.lambda_handler
+      Role: !GetAtt UiDeployerRole.Arn
+      Timeout: 120
+      Environment:
+        Variables:
+          FEATURE_ID: !Ref FeatureId
+          FEATURE_DISPLAY_NAME: !Ref FeatureDisplayName
+          # Version is substituted at publish time — see the top-of-file note
+          # on why this is not a CFN parameter.
+          FEATURE_VERSION: '<FEATURE_VERSION_TOKEN>'
+          MAIN_STACK_NAME: !Ref MainStackName
+          WEBUI_BUCKET: { 'Fn::ImportValue': !Sub '${MainStackName}-WebUIBucketName' }
+          FEATURE_BUCKET: !Ref FeatureBucket
+          # Baked at publish time (see top-of-file note) — NOT a CFN param.
+          FEATURE_ARTIFACT_PREFIX: '<FEATURE_ARTIFACT_PREFIX_TOKEN>'
+          REGISTER_FEATURE_FUNCTION_ARN: { 'Fn::ImportValue': !Sub '${MainStackName}-RegisterFeatureFunctionArn' }
+          APPLY_FEATURE_CONFIG_PRESET_FUNCTION_ARN: { 'Fn::ImportValue': !Sub '${MainStackName}-ApplyFeatureConfigPresetFunctionArn' }
+          FEATURE_API_ENDPOINT: !GetAtt FeatureApi.ApiEndpoint
+          # Relative key of the preset under <FeatureArtifactPrefix>/<version>/;
+          # must match feature.yaml -> configPreset.path.
+          CONFIG_PRESET_RELATIVE_KEY: config-preset/confbench-config.yaml
+          LOG_LEVEL: !Ref LogLevel
+
+  RegisterFeatureResource:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt UiDeployerFunction.Arn
+      # FeatureVersion changes between releases — including it as a property
+      # ensures CFN re-runs the resource on update (custom resources are only
+      # re-invoked when at least one property changes). Substituted at publish
+      # time.
+      FeatureVersion: '<FEATURE_VERSION_TOKEN>'
+      FeatureDisplayName: !Ref FeatureDisplayName
+
+Outputs:
+  FeatureApiEndpoint:
+    Description: Base URL for this feature's API.
+    Value: !GetAtt FeatureApi.ApiEndpoint
+  IngestStateMachineArn:
+    Description: ARN of the ConfBench ingest state machine.
+    Value: !Ref IngestStateMachine
+  IngestJobTableName:
+    Description: Name of this feature's ingest-job table.
+    Value: !Ref IngestJobTable
+  InstalledVersion:
+    Value: '<FEATURE_VERSION_TOKEN>'

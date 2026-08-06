@@ -8,6 +8,7 @@ Unit tests for the SaveReportingData class.
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from idp_common.models import Document
 from idp_common.reporting.save_reporting_data import SaveReportingData
 

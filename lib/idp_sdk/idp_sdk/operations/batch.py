@@ -751,6 +751,7 @@ class BatchOperation:
             BatchDeletionResult with deletion statistics
         """
         import boto3
+
         from idp_common.delete_documents import (
             delete_documents,
             get_documents_by_batch,
