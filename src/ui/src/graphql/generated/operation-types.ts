@@ -1859,7 +1859,9 @@ export type TestRunComparison = {
 export type TestRunInput = {
   configVersion?: InputMaybe<Scalars['String']['input']>;
   context?: InputMaybe<Scalars['String']['input']>;
+  draftLabeling?: InputMaybe<Scalars['Boolean']['input']>;
   numberOfFiles?: InputMaybe<Scalars['Int']['input']>;
+  objectKeys?: InputMaybe<Array<Scalars['String']['input']>>;
   testSetId: Scalars['String']['input'];
 };
 

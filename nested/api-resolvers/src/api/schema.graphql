@@ -966,6 +966,15 @@ input TestRunInput {
   context: String
   numberOfFiles: Int
   configVersion: String
+  # Optional explicit document list. Unlike numberOfFiles (the first N files of
+  # the set) this names exactly which documents to process, which is what
+  # labeling or re-labeling a subset needs.
+  objectKeys: [String!]
+  # Marks a run whose purpose is to PRODUCE ground truth rather than be scored
+  # against it. Suppresses baseline staging, and therefore evaluation: a draft
+  # run has no valid baseline by definition, so scoring it compares the new
+  # extraction against a stale copy of itself.
+  draftLabeling: Boolean
 }
 
 type AgentChatMessage @aws_cognito_user_pools @aws_iam {

@@ -42,6 +42,9 @@ def handler(event, context):
             config_version = message.get("configVersion")  # Optional parameter
             # Optional explicit document list (draft labeling a subset)
             object_keys = message.get("objectKeys") or []
+            # "draft-labeling" runs create ground truth; anything else is scored
+            # against it. Absent on messages enqueued before this field existed.
+            purpose = message.get("purpose") or "scoring"
             tracking_table = message["trackingTable"]
 
             # Get environment variables
@@ -141,14 +144,34 @@ def handler(event, context):
                 config_version,
             )
 
-            # Copy baseline files from test set bucket to baseline bucket with test_run_id prefix
-            successful_baseline_files = _copy_files_to_bucket(
-                test_set_bucket,
-                f"{test_set_id}/baseline/",
-                baseline_bucket,
-                f"{test_run_id}/",
-                baseline_files,
-            )
+            # Copy baseline files from test set bucket to baseline bucket with
+            # test_run_id prefix.
+            #
+            # Skipped entirely for a draft-labeling run. That run's whole purpose is
+            # to PRODUCE the baseline, so staging the current one makes the
+            # evaluation step score the new extraction against a stale copy of
+            # itself. Observed live: a re-run with corrected settings reported
+            # accuracy 0.47 by comparing its single merged section against one
+            # section of the previous run's output — and because the aggregation
+            # records confidence-curve observations for any run carrying a
+            # TestSetId, that meaningless verdict fed the calibration curve the
+            # review estimator depends on.
+            if purpose == "draft-labeling":
+                logger.info(
+                    f"Draft-labeling run {test_run_id}: not staging baselines "
+                    f"({len(baseline_files)} present in the test set). The run "
+                    f"produces ground truth, so there is nothing to score against."
+                )
+                baseline_files = []
+                successful_baseline_files = []
+            else:
+                successful_baseline_files = _copy_files_to_bucket(
+                    test_set_bucket,
+                    f"{test_set_id}/baseline/",
+                    baseline_bucket,
+                    f"{test_run_id}/",
+                    baseline_files,
+                )
 
             # Check if all files failed to copy
             if len(successful_input_files) == 0:

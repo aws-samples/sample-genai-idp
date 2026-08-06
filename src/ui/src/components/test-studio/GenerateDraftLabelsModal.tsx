@@ -68,7 +68,11 @@ const GenerateDraftLabelsModal = ({ visible, testSetId, documents, onDismiss, on
 
   const labelable = useMemo(() => documents.filter((d) => !isProtected(d)), [documents]);
   const protectedCount = documents.length - labelable.length;
-  const redoCount = useMemo(() => selected.filter((d) => d.labelSource === 'draft-machine').length, [selected]);
+  // Count against whatever will actually be submitted. Keying this on `selected`
+  // alone meant the warning never appeared in the default "label everything"
+  // mode — which is precisely the path that silently replaces existing drafts.
+  const targeted = selectAll ? labelable : selected;
+  const redoCount = useMemo(() => targeted.filter((d) => d.labelSource === 'draft-machine').length, [targeted]);
 
   const loadVersions = useCallback(async () => {
     setLoadingVersions(true);
@@ -102,6 +106,11 @@ const GenerateDraftLabelsModal = ({ visible, testSetId, documents, onDismiss, on
 
   const effectiveKeys = selectAll ? undefined : selected.map((d) => d.objectKey);
   const targetCount = selectAll ? labelable.length : selected.length;
+  // Cloudscape types Option.value as `string | undefined`, so a bare ternary on
+  // it can yield a non-string. One run reached the backend with
+  // configVersion=true, which then pinned the run to a version named "True".
+  const rawConfigVersion = configVersion.value;
+  const selectedConfigVersion = typeof rawConfigVersion === 'string' && rawConfigVersion !== ACTIVE_CONFIG ? rawConfigVersion : undefined;
 
   return (
     <Modal
@@ -123,7 +132,7 @@ const GenerateDraftLabelsModal = ({ visible, testSetId, documents, onDismiss, on
               variant="primary"
               loading={submitting}
               disabled={targetCount === 0}
-              onClick={() => onSubmit(configVersion.value === ACTIVE_CONFIG ? undefined : configVersion.value, effectiveKeys)}
+              onClick={() => onSubmit(selectedConfigVersion, effectiveKeys)}
             >
               {targetCount === 0 ? 'Nothing to label' : `Label ${targetCount} document(s)`}
             </Button>

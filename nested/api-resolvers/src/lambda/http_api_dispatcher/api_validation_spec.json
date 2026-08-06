@@ -2672,6 +2672,20 @@
         "name": "configVersion",
         "non_null": false,
         "type": "String"
+      },
+      {
+        "elem_non_null": true,
+        "is_list": true,
+        "name": "objectKeys",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "draftLabeling",
+        "non_null": false,
+        "type": "Boolean"
       }
     ],
     "TestSetDocumentsUploadInput": [

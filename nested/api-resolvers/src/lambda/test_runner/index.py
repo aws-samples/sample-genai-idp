@@ -100,6 +100,11 @@ def handler(event, context):
         # labeling a subset requires.
         object_keys = input_data.get("objectKeys") or []
         config_version = input_data.get("configVersion")
+        # A draft-labeling run PRODUCES ground truth rather than being scored
+        # against it, so evaluation is meaningless for it. Carried explicitly
+        # rather than inferred from the free-text `context`, which is a user-facing
+        # label that must not be load-bearing.
+        purpose = "draft-labeling" if input_data.get("draftLabeling") else "scoring"
         tracking_table = os.environ["TRACKING_TABLE"]
         config_table = os.environ["CONFIG_TABLE"]
 
@@ -192,6 +197,12 @@ def handler(event, context):
         # Include configVersion if specified
         if config_version is not None:
             message_body["configVersion"] = config_version
+
+        # Tell the copier not to stage baselines for a draft-labeling run: the
+        # baseline is what the run is creating, so scoring against it compares the
+        # extraction to a stale copy of itself.
+        if purpose == "draft-labeling":
+            message_body["purpose"] = purpose
 
         sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps(message_body))
 

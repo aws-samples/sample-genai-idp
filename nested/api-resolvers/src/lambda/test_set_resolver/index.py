@@ -754,7 +754,12 @@ def generate_draft_labels(args, event=None):
     # passes through as an explicit document list, so labeling a subset processes
     # only those documents rather than the whole set.
     runner_arn = os.environ["TEST_RUNNER_FUNCTION_ARN"]
-    run_input = {"testSetId": test_set_id, "context": "Draft labeling run"}
+    run_input = {
+        "testSetId": test_set_id,
+        "context": "Draft labeling run",
+        # Suppresses baseline staging (and therefore evaluation) for this run.
+        "draftLabeling": True,
+    }
     if config_version:
         run_input["configVersion"] = config_version
     if object_keys:
