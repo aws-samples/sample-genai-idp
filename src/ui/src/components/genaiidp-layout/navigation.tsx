@@ -560,7 +560,11 @@ const Navigation = ({
 
   return (
     <div className="idp-side-nav">
-      {isQuickStartWidgetEnabled() && (
+      {/* Quick Start drives discovery and document upload, which is well outside
+          what an Annotator is scoped to: they may read and annotate their assigned
+          test set(s) and nothing else. Hidden rather than left to fail server-side,
+          so the UI does not advertise a capability the role does not have. */}
+      {isQuickStartWidgetEnabled() && !isAnnotatorOnly && (
         <div className="nav-quick-start">
           <Hotspot hotspotId="nav-quick-start" side="right">
             <Button variant="primary" iconName="gen-ai" onClick={() => window.dispatchEvent(new CustomEvent('openQuickStart'))}>
