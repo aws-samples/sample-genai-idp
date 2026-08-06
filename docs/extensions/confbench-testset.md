@@ -203,3 +203,4 @@ transfer and ground-truth baseline format are carried over from it.
 - Augmentation library: [Augraphy](https://github.com/sparkfish/augraphy)
 - Source: [`feature-platform/confbench-testset/`](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/tree/main/feature-platform/confbench-testset)
 - [Test Studio](../test-studio.md) · [Feature Platform](../feature-platform.md)
+- [Can You Trust the Confidence? ConfBench for Vision-Language Models on Document Extraction](https://arxiv.org/abs/2608.01792)

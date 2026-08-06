@@ -71,7 +71,7 @@ Reference deployments showing measurable accuracy, cost, and throughput results.
 ## Research Papers
 
 Published and preprint work behind the accelerator's agentic, configuration
-optimization, and document-splitting approaches.
+optimization, confidence-calibration, and document-splitting approaches.
 
 - **[IDP Accelerator: Agentic Document Intelligence from Extraction to Compliance Validation](https://arxiv.org/abs/2602.23481)**
   *(ACL 2026)* — The research paper describing the accelerator itself: a
@@ -93,6 +93,23 @@ optimization, and document-splitting approaches.
   two hours. Also finds a hard agent-capability threshold below which
   optimization fails, and that curated domain skills beat raw source-code
   access.
+
+- **[Can You Trust the Confidence? ConfBench for Vision-Language Models on Document Extraction](https://arxiv.org/abs/2608.01792)**
+  *(arXiv preprint, Aug 2026)* — The research paper behind the
+  [Test Set - ConfBench](./extensions/confbench-testset.md) benchmark: the first
+  calibration-specific benchmark for key information extraction, built by running
+  20 controlled degradation pipelines over a document collection to produce 1,346
+  variants and 70K+ entity-level evaluations spanning the full accuracy range —
+  the low-accuracy region that clean benchmarks leave too sparse to measure
+  calibration. Evaluates four proprietary and three open-weight VLMs across
+  verbalized and log-probability confidence estimation and three input
+  modalities, finding that OCR+Image yields the most accurate confidence, that
+  model capability (not parameter count) predicts confidence quality, that
+  calibration ranges from near-perfect to severely overconfident but responds to
+  per-model post-hoc correction, and that log-probability with first-token
+  aggregation beats mean-token and margin aggregation. Also introduces ECARB, a
+  review-budget metric that translates discriminative gains into operational
+  savings. See also [Assessment](./assessment.md).
 
 - **[DocSplit: A Comprehensive Benchmark Dataset and Evaluation Approach for Document Packet Recognition and Splitting](https://www.amazon.science/publications/docsplit-a-comprehensive-benchmark-dataset-and-evaluation-approach-for-document-packet-recognition-and-splitting)**
   *(ACL 2026)* — Introduces the first benchmark and evaluation metrics for
