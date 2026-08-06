@@ -4902,11 +4902,14 @@ Resources:
               - FilesCount
               - Status
               - CompletedAt
-              # Provenance of the submission ("test-studio", "auto-optimizer", …).
-              # Projected so the Document List can filter production traffic from
-              # Test Studio / Auto Optimizer runs without a table read per row.
-              - SubmissionSource
-              - TestSetId
+              # NOTE: do NOT add attributes here on an existing stack. DynamoDB
+              # rejects any GSI change other than throughput/Contributor Insights
+              # with "Cannot update GSI's properties other than Provisioned
+              # Throughput", which fails the whole stack update. Submission
+              # provenance is therefore carried by the ItemType *key* rather than a
+              # projected attribute — see idp_common.dynamodb.service. (Same reason
+              # VersionCount is deliberately absent; see the Document type in
+              # schema.graphql.)
       TimeToLiveSpecification:
         AttributeName: ExpiresAfter
         Enabled: true
