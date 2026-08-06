@@ -225,6 +225,51 @@ def test_prerelease_ordering(monkeypatch, mock_stack, load_lambda):
         assert got is expected, f"installed={installed} latest={latest}"
 
 
+def test_dotted_prerelease_identifiers_compare_numerically(
+    monkeypatch, mock_stack, load_lambda
+):
+    """SemVer 11.4: a NUMERIC prerelease identifier compares numerically, so
+    rc.10 > rc.2 — the opposite of what string comparison gives.
+
+    Undotted `rc10` vs `rc2` is deliberately NOT an update: those are single
+    alphanumeric identifiers, which 11.4 compares in ASCII order, making
+    `rc10` genuinely lower than `rc2`. Only dot-separated numeric parts get
+    numeric treatment.
+    """
+    table_name = mock_stack["table_name"]
+    bucket = mock_stack["bucket"]
+
+    for installed, latest, expected in (
+        ("1.0.0-rc.2", "1.0.0-rc.10", True),  # numeric identifier
+        ("1.0.0-rc.10", "1.0.0-rc.2", False),
+        ("1.0.0-alpha", "1.0.0-beta", True),  # alphanumeric, ASCII order
+        ("1.0.0-alpha.1", "1.0.0-alpha.beta", True),  # numeric < alphanumeric
+        ("1.0.0", "1.0.0+build", False),  # 10: build metadata is not precedence
+    ):
+        _seed(
+            table_name,
+            [
+                {
+                    "featureId": "pre",
+                    "displayName": "Pre",
+                    "installedVersion": installed,
+                    "stackName": "s",
+                    "stackRegion": "us-east-1",
+                    "uiBundlePath": "features/pre/",
+                    "installedAt": "2026-01-01T00:00:00Z",
+                }
+            ],
+        )
+        _put_catalog(bucket, [{"featureId": "pre", "latestVersion": latest}])
+        mod = _preload(
+            monkeypatch, table_name, load_lambda, configuration_bucket=bucket
+        )
+        got = mod.handler(make_appsync_event("listInstalledFeatures"), None)[0][
+            "updateAvailable"
+        ]
+        assert got is expected, f"installed={installed} latest={latest}"
+
+
 def test_unparseable_version_falls_back_to_inequality(
     monkeypatch, mock_stack, load_lambda
 ):

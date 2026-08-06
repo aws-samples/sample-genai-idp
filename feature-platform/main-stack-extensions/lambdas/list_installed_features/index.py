@@ -80,19 +80,47 @@ def _catalog_latest_versions() -> Dict[str, str]:
 _SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?")
 
 
-def _parse_version(value: str) -> Optional[Tuple[int, int, int, bool, str]]:
+def _prerelease_key(prerelease: str) -> List[Tuple[int, int, str]]:
+    """Comparable key for a prerelease string, per SemVer §11.4.
+
+    Identifiers are dot-separated and compared left to right. Numeric ones
+    compare NUMERICALLY (so rc.10 > rc.2, which a plain string compare gets
+    backwards) and always rank lower than alphanumeric ones.
+
+    Each identifier becomes (is_alphanumeric, numeric_value, text) so tuple
+    comparison reproduces those rules without branching at the call site.
+    """
+    key: List[Tuple[int, int, str]] = []
+    for ident in prerelease.split("."):
+        if ident.isdigit():
+            key.append((0, int(ident), ""))
+        else:
+            key.append((1, 0, ident))
+    return key
+
+
+def _parse_version(
+    value: str,
+) -> Optional[Tuple[int, int, int, int, List[Tuple[int, int, str]]]]:
     """Parse a SemVer string into a comparable tuple, or None if unparseable.
 
-    The 4th element inverts prerelease presence so that plain comparison orders
-    1.0.0-rc1 BEFORE 1.0.0 (SemVer §11: a prerelease has lower precedence than
-    its release). Build metadata is ignored, also per SemVer.
+    The 4th element is 0 for a prerelease and 1 for a release, so a prerelease
+    sorts BEFORE its release (SemVer §11.3). The 5th orders prereleases among
+    themselves (§11.4). Build metadata is ignored — §10 says it takes no part in
+    precedence, so 1.0.0+a and 1.0.0+b are equal and neither is an "update".
     """
     m = _SEMVER_RE.match(value.strip())
     if not m:
         return None
     major, minor, patch = (int(m.group(i)) for i in (1, 2, 3))
     prerelease = m.group(4) or ""
-    return (major, minor, patch, not prerelease, prerelease)
+    return (
+        major,
+        minor,
+        patch,
+        0 if prerelease else 1,
+        _prerelease_key(prerelease) if prerelease else [],
+    )
 
 
 def _update_available(installed: str, latest: Optional[str]) -> bool:
