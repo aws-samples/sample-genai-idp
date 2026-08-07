@@ -1396,3 +1396,178 @@ def test_hook_supplied_wrapper_fields_are_not_overwritten(monkeypatch):
     )
     assert out["document"]["sections"] == ["1", "2", "3"]  # hook wins
     assert out["document"]["num_pages"] == 6  # absent -> back-filled
+
+
+# ---------------------------------------------------------------------------
+# Active-version resolution (issue #599).
+#
+# The dispatcher resolves the active config version with a FILTERED scan.
+# DynamoDB applies both `Limit` and the implicit 1MB page size to the items it
+# EXAMINES, not to the items that pass FilterExpression — so a single scan call
+# returns no match whenever the active row sorts beyond the first page, and the
+# dispatcher then falls back to Config#default, which carries no feature hooks.
+# Every pipeline hook stops firing while the workflow still reports success.
+#
+# Observed live on a v0.6.3 stack: 35 Config# rows, the active one at scan
+# position 33, a 10-item examine window — every hook silently stopped.
+# ---------------------------------------------------------------------------
+
+
+class _PagedScanTable:
+    """A table whose scan() reproduces DynamoDB's examine-then-filter paging.
+
+    `rows` is the full scan order. Each call examines at most `page_size` rows,
+    applies the IsActive filter to just those, and reports LastEvaluatedKey if
+    any rows remain — exactly how the real service bounds a filtered scan.
+    Correct callers must page until they find a match or run out of rows.
+    """
+
+    def __init__(self, rows, page_size=10):
+        self.rows = rows
+        self.page_size = page_size
+        self.scan_calls = 0
+
+    def scan(self, **kwargs):
+        self.scan_calls += 1
+        # A Limit, if the caller passes one, narrows the examine window further.
+        window = min(self.page_size, kwargs.get("Limit", self.page_size))
+        start = 0
+        if "ExclusiveStartKey" in kwargs:
+            key = kwargs["ExclusiveStartKey"]["Configuration"]
+            start = next(
+                i + 1 for i, r in enumerate(self.rows) if r["Configuration"] == key
+            )
+        examined = self.rows[start : start + window]
+        matched = [r for r in examined if r.get("IsActive") is True]
+        resp = {"Items": [{"Configuration": r["Configuration"]} for r in matched]}
+        if start + window < len(self.rows):
+            resp["LastEvaluatedKey"] = {"Configuration": examined[-1]["Configuration"]}
+        return resp
+
+
+def _config_rows(active_at, total=35):
+    """`total` Config# rows, exactly one of them active, at index `active_at`."""
+    return [
+        {"Configuration": f"Config#v{i}", "IsActive": i == active_at}
+        for i in range(total)
+    ]
+
+
+def test_active_version_found_beyond_the_first_scan_page(monkeypatch):
+    """The regression: the active row is at position 33 of 35, well past any
+    single examine window. Before the fix this resolved to 'default' and every
+    registered hook silently stopped firing."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    table = _PagedScanTable(_config_rows(active_at=33, total=35))
+
+    assert mod._resolve_active_version(table, None) == "v33"
+    assert table.scan_calls > 1, "must page rather than trust a single scan call"
+
+
+def test_active_version_found_on_the_very_last_page(monkeypatch):
+    """Boundary: the active row is the final item examined."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    assert (
+        mod._resolve_active_version(
+            _PagedScanTable(_config_rows(active_at=34, total=35)), None
+        )
+        == "v34"
+    )
+
+
+def test_active_version_resolution_stops_at_the_first_match(monkeypatch):
+    """Paging must not become a full-table walk when the active row is early —
+    the dispatcher runs at every hook point of every document."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    table = _PagedScanTable(_config_rows(active_at=0, total=500))
+    assert mod._resolve_active_version(table, None) == "v0"
+    assert table.scan_calls == 1
+
+
+def test_no_active_row_falls_back_to_default_with_a_warning(monkeypatch, caplog):
+    """A genuine "nothing is active" state still resolves to default, but must
+    say so at WARNING: logged at INFO it is indistinguishable from the ordinary
+    no-op of a host with no features installed, which is what hid #599."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    rows = [{"Configuration": f"Config#v{i}", "IsActive": False} for i in range(35)]
+    with caplog.at_level("WARNING"):
+        assert mod._resolve_active_version(_PagedScanTable(rows), None) == "default"
+    assert any(
+        r.levelname == "WARNING" and "No active Config# version" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_scan_failure_falls_back_to_default(monkeypatch):
+    """A throttled/failed scan must not fail the workflow."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+
+    class _Boom:
+        def scan(self, **kwargs):
+            raise RuntimeError("throttled")
+
+    assert mod._resolve_active_version(_Boom(), None) == "default"
+
+
+def test_pinned_version_still_skips_the_scan_entirely(monkeypatch):
+    """Pagination must not have introduced a scan on the pinned fast path."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    table = _PagedScanTable(_config_rows(active_at=0))
+    assert mod._resolve_active_version(table, "claims-pack-v0.4.0") == (
+        "claims-pack-v0.4.0"
+    )
+    assert table.scan_calls == 0
+
+
+def test_hooks_resolve_from_a_late_active_row_end_to_end(monkeypatch):
+    """Full handler path: with the active row late in scan order, the hook
+    registered in THAT version must actually be invoked. This is the assertion
+    the live failure would have tripped — `invoked` was 0."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+
+    rows = _config_rows(active_at=33, total=35)
+
+    class _Table(_PagedScanTable):
+        def get_item(self, Key):
+            # Only the active version carries the hook.
+            if Key["Configuration"] != "Config#v33":
+                return {"Item": {"Configuration": Key["Configuration"]}}
+            return {
+                "Item": {
+                    "Configuration": "Config#v33",
+                    "rule_validation": {
+                        "postHook": [{"featureId": "claims-pack", "arn": "arn:cp"}]
+                    },
+                }
+            }
+
+    monkeypatch.setattr(mod._dynamodb, "Table", lambda name: _Table(rows))
+    monkeypatch.setattr(mod, "_invoke_hook", lambda h, p: _ok({}))
+
+    out = mod.lambda_handler({"hookPoint": "postRuleValidation", "document": {}}, None)
+    assert out["invoked"] == 1
+    assert out["configVersion"] == "v33"
+
+
+def test_noop_reports_the_resolved_config_version(monkeypatch):
+    """`invoked: 0` alone cannot distinguish "the active version has no hooks
+    here" from "we resolved the wrong version", which is why #599 was
+    undiagnosable from the state machine output. The no-hooks result now names
+    the version it read."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    monkeypatch.setattr(mod, "_resolve_active_version", lambda *a, **k: "v33")
+    monkeypatch.setattr(mod, "_read_hooks_from_config", lambda *a, **k: [])
+    out = mod.lambda_handler({"hookPoint": "postOcr", "document": {"id": "w2"}}, None)
+    assert out["invoked"] == 0
+    assert out["configVersion"] == "v33"
+    # The state-machine-critical fields are still unconditionally present.
+    assert out["halt"] is False
+    assert out["document"] == {"id": "w2"}
