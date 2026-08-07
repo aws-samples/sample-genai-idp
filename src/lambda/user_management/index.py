@@ -357,14 +357,25 @@ def list_users(event):
 
     table = dynamodb.Table(USERS_TABLE_NAME)
 
-    # Scan for all user records
-    response = table.scan(
-        FilterExpression="begins_with(PK, :pk_prefix)",
-        ExpressionAttributeValues={":pk_prefix": "USER#"},
-    )
+    # Scan for all user records. Must paginate: DynamoDB applies the 1MB page
+    # size to the items EXAMINED, not the items matching FilterExpression, so a
+    # single call silently truncates the user list once the table outgrows one
+    # page — the admin sees fewer users than exist, with no error.
+    scan_kwargs = {
+        "FilterExpression": "begins_with(PK, :pk_prefix)",
+        "ExpressionAttributeValues": {":pk_prefix": "USER#"},
+    }
+    items = []
+    while True:
+        response = table.scan(**scan_kwargs)
+        items.extend(response.get("Items", []))
+        last_key = response.get("LastEvaluatedKey")
+        if not last_key:
+            break
+        scan_kwargs["ExclusiveStartKey"] = last_key
 
     users = []
-    for item in response.get("Items", []):
+    for item in items:
         user = {
             "userId": item["userId"],
             "email": item["email"],
@@ -390,13 +401,27 @@ def sync_cognito_users_to_dynamodb():
 
     table = dynamodb.Table(USERS_TABLE_NAME)
 
-    # Get existing emails in DynamoDB for quick lookup
-    existing_response = table.scan(
-        FilterExpression="begins_with(PK, :pk_prefix)",
-        ExpressionAttributeValues={":pk_prefix": "USER#"},
-        ProjectionExpression="email",
-    )
-    existing_emails = {item["email"] for item in existing_response.get("Items", [])}
+    # Get existing emails in DynamoDB for quick lookup. Must paginate: the 1MB
+    # page size bounds the items EXAMINED, not the items matching
+    # FilterExpression, so a single call yields an INCOMPLETE email set once the
+    # table outgrows one page — and every user missing from it gets re-created
+    # below under a fresh uuid4, duplicating the record. (The Cognito paginator
+    # further down pages Cognito, not this scan.)
+    existing_scan_kwargs = {
+        "FilterExpression": "begins_with(PK, :pk_prefix)",
+        "ExpressionAttributeValues": {":pk_prefix": "USER#"},
+        "ProjectionExpression": "email",
+    }
+    existing_emails = set()
+    while True:
+        existing_response = table.scan(**existing_scan_kwargs)
+        existing_emails.update(
+            item["email"] for item in existing_response.get("Items", [])
+        )
+        last_key = existing_response.get("LastEvaluatedKey")
+        if not last_key:
+            break
+        existing_scan_kwargs["ExclusiveStartKey"] = last_key
 
     # List all Cognito users
     paginator = cognito.get_paginator("list_users")

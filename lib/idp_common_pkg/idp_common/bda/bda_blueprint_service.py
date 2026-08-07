@@ -2140,19 +2140,29 @@ class BdaBlueprintService:
                 try:
                     dynamodb = boto3.resource("dynamodb")
                     table = dynamodb.Table(configuration_table_name)
-                    # Find and delete BdaProject# entries that reference this ARN
-                    response = table.scan(
-                        FilterExpression="begins_with(Configuration, :prefix)",
-                        ExpressionAttributeValues={":prefix": "BdaProject#"},
-                    )
-                    for item in response.get("Items", []):
-                        if item.get("ProjectArn") == project_arn:
-                            table.delete_item(
-                                Key={"Configuration": item["Configuration"]}
-                            )
-                            logger.info(
-                                f"Deleted DynamoDB tracking entry: {item['Configuration']}"
-                            )
+                    # Find and delete BdaProject# entries that reference this ARN.
+                    # Must paginate: DynamoDB bounds the 1MB page by items
+                    # EXAMINED, not items matching FilterExpression, so a single
+                    # call can miss the very entry being cleaned up and leave an
+                    # orphaned tracking row pointing at a deleted BDA project.
+                    scan_kwargs = {
+                        "FilterExpression": "begins_with(Configuration, :prefix)",
+                        "ExpressionAttributeValues": {":prefix": "BdaProject#"},
+                    }
+                    while True:
+                        response = table.scan(**scan_kwargs)
+                        for item in response.get("Items", []):
+                            if item.get("ProjectArn") == project_arn:
+                                table.delete_item(
+                                    Key={"Configuration": item["Configuration"]}
+                                )
+                                logger.info(
+                                    f"Deleted DynamoDB tracking entry: {item['Configuration']}"
+                                )
+                        last_key = response.get("LastEvaluatedKey")
+                        if not last_key:
+                            break
+                        scan_kwargs["ExclusiveStartKey"] = last_key
                 except Exception as db_e:
                     logger.warning(
                         f"Failed to clean up DynamoDB tracking for {project_arn}: {db_e}"
