@@ -14,21 +14,33 @@ items it **examines**, not to the items that pass `FilterExpression`, so:
 finds a match only when it happens to fall inside the examined window. The row
 count needed to break it is data-dependent and grows over time, so this fails
 *silently* and *later* — typically on the longest-lived stack. It has now bitten
-this codebase five times, with symptoms as unalike as "configuration appears
+this codebase repeatedly, with symptoms as unalike as "configuration appears
 empty", "a list view shows fewer rows than exist", and "pipeline hooks stop
 firing" (issue #599). In every case the fix was to page.
 
-This check enforces that every `.scan(FilterExpression=...)` call site either:
+This check enforces that every filtered `.scan(...)` call site either:
 
-  * paginates — the enclosing function mentions `LastEvaluatedKey` (the loop may
-    live a few lines away, so the check is function-scoped rather than
-    expression-scoped); or
+  * paginates — the enclosing function *uses* `LastEvaluatedKey` /
+    `ExclusiveStartKey` (the loop may live a few lines away, so the check is
+    function-scoped rather than expression-scoped); or
   * is explicitly marked as a deliberate bounded sample, with a reason:
 
         # filtered-scan-ok: sampling one row to detect whether backfill ran
 
 The marker is deliberately verbose and requires prose after the colon, so
 silencing the check is a conscious act that leaves a reviewable justification.
+
+Two subtleties, both learned the hard way:
+
+1. `FilterExpression` is resolved through **splatted kwargs**. The paginating
+   idiom builds its arguments in a dict (`kw = {...}; table.scan(**kw)`), which
+   is exactly what every fix for #599 does — so a checker that only reads literal
+   keywords sees no arguments at all and skips precisely the call sites it exists
+   to protect. See _splatted_kwarg_keys.
+2. Evidence of paging must be a *use*, not a mention. A bare
+   `_x = "LastEvaluatedKey"` does nothing; and a boto3 paginator pages the call
+   made *through* it, saying nothing about a sibling `table.scan(...)`. See
+   _paginates.
 
 Usage:
     python3 scripts/check_filtered_scans.py            # whole repo
@@ -89,7 +101,7 @@ class Finding(NamedTuple):
         return (
             f"  {self.path}:{self.line}  (in {self.func}())\n"
             f"      filtered scan {why}, and the enclosing function never\n"
-            f"      references LastEvaluatedKey."
+            f"      uses LastEvaluatedKey / ExclusiveStartKey to page."
         )
 
 
@@ -101,8 +113,76 @@ def _is_scan_call(node: ast.AST) -> bool:
     )
 
 
-def _kwarg_names(call: ast.Call) -> set:
-    return {kw.arg for kw in call.keywords if kw.arg}
+def _dict_literal_keys(node: ast.AST) -> set:
+    """String keys of a dict literal, or an empty set for anything else."""
+    if not isinstance(node, ast.Dict):
+        return set()
+    return {
+        k.value
+        for k in node.keys
+        if isinstance(k, ast.Constant) and isinstance(k.value, str)
+    }
+
+
+def _splatted_kwarg_keys(call: ast.Call, scope: Optional[ast.AST]) -> set:
+    """Keys contributed by `**kwargs` in `call`, resolved within `scope`.
+
+    The paginating idiom this checker exists to enforce builds its arguments in a
+    dict and splats them:
+
+        scan_kwargs = {"FilterExpression": ..., "ProjectionExpression": ...}
+        resp = table.scan(**scan_kwargs)
+
+    Without resolving that dict the checker sees NO keywords at all and silently
+    skips the call — which made it blind to the exact call sites it was added to
+    protect (every fix for issue #599 uses this form). So: for each `**name`, walk
+    the enclosing function for `name = {...}` assignments and `name["key"] = ...`
+    subscript stores, and collect their string keys.
+
+    Deliberately shallow — no dataflow, no branch awareness. It over-approximates
+    (a key assigned on one path counts everywhere), which is the safe direction:
+    over-approximating `FilterExpression` means we ANALYZE the call rather than
+    skip it, and the pagination check then decides. Nothing is suppressed by it.
+    """
+    names = {
+        kw.value.id
+        for kw in call.keywords
+        if kw.arg is None and isinstance(kw.value, ast.Name)
+    }
+    if not names or scope is None:
+        return set()
+    keys: set = set()
+    for node in ast.walk(scope):
+        # name = {"FilterExpression": ...}  /  name = dict(...)
+        if isinstance(node, ast.Assign):
+            for tgt in node.targets:
+                if isinstance(tgt, ast.Name) and tgt.id in names:
+                    keys |= _dict_literal_keys(node.value)
+                # name["Limit"] = 10
+                elif (
+                    isinstance(tgt, ast.Subscript)
+                    and isinstance(tgt.value, ast.Name)
+                    and tgt.value.id in names
+                    and isinstance(tgt.slice, ast.Constant)
+                    and isinstance(tgt.slice.value, str)
+                ):
+                    keys.add(tgt.slice.value)
+        # name: Dict[str, Any] = {"FilterExpression": ...}
+        elif isinstance(node, ast.AnnAssign):
+            if (
+                isinstance(node.target, ast.Name)
+                and node.target.id in names
+                and node.value is not None
+            ):
+                keys |= _dict_literal_keys(node.value)
+    return keys
+
+
+def _kwarg_names(call: ast.Call, scope: Optional[ast.AST] = None) -> set:
+    """Argument names for `call`, including those reaching it via `**kwargs`."""
+    return {kw.arg for kw in call.keywords if kw.arg} | _splatted_kwarg_keys(
+        call, scope
+    )
 
 
 def _enclosing_functions(tree: ast.AST) -> List[ast.AST]:
@@ -114,9 +194,7 @@ def _enclosing_functions(tree: ast.AST) -> List[ast.AST]:
     return out
 
 
-def _owner(
-    call: ast.Call, funcs: List[ast.AST]
-) -> Tuple[Optional[ast.AST], str]:
+def _owner(call: ast.Call, funcs: List[ast.AST]) -> Tuple[Optional[ast.AST], str]:
     """The innermost function containing `call`, plus a display name."""
     best: Optional[ast.AST] = None
     for fn in funcs:
@@ -147,16 +225,42 @@ def _paginates(scope: Optional[ast.AST], tree: ast.AST) -> bool:
     `table.scan(...)` call at all — so a paginator elsewhere in the function
     says nothing about this scan. `list_users` in src/lambda/user_management is
     exactly that trap: it pages *Cognito* while its DynamoDB scan reads one page.
+
+    A bare string constant is NOT evidence either. `_x = "LastEvaluatedKey"` on
+    its own does nothing, so accepting it let a dead mention silence the check.
+    The key has to be USED: as a subscript (`resp["LastEvaluatedKey"]`), a
+    membership test (`"LastEvaluatedKey" in resp`), a `.get()` argument, or an
+    attribute/identifier of that name.
     """
     target = scope if scope is not None else tree
     for node in ast.walk(target):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if node.value in _PAGING_KEYS:
+        # resp["LastEvaluatedKey"] / kwargs["ExclusiveStartKey"] = ...
+        if isinstance(node, ast.Subscript):
+            s = node.slice
+            if isinstance(s, ast.Constant) and s.value in _PAGING_KEYS:
                 return True
-        if isinstance(node, ast.Attribute) and node.attr in _PAGING_KEYS:
+        # "LastEvaluatedKey" in resp  /  not in
+        elif isinstance(node, ast.Compare):
+            if isinstance(node.left, ast.Constant) and node.left.value in _PAGING_KEYS:
+                if any(isinstance(o, (ast.In, ast.NotIn)) for o in node.ops):
+                    return True
+        # resp.get("LastEvaluatedKey") / dict(ExclusiveStartKey=...) / scan(ExclusiveStartKey=...)
+        elif isinstance(node, ast.Call):
+            for a in node.args:
+                if isinstance(a, ast.Constant) and a.value in _PAGING_KEYS:
+                    return True
+            for kw in node.keywords:
+                if kw.arg in _PAGING_KEYS:
+                    return True
+        # obj.LastEvaluatedKey — some SDK wrappers expose it as an attribute
+        elif isinstance(node, ast.Attribute) and node.attr in _PAGING_KEYS:
             return True
-        if isinstance(node, ast.Name) and node.id in _PAGING_KEYS:
+        elif isinstance(node, ast.Name) and node.id in _PAGING_KEYS:
             return True
+        # {"ExclusiveStartKey": last} passed into a splatted kwargs dict
+        elif isinstance(node, ast.Dict):
+            if _dict_literal_keys(node) & set(_PAGING_KEYS):
+                return True
     return False
 
 
@@ -202,23 +306,37 @@ def check_file(path: Path) -> List[Finding]:
 
     lines = source.splitlines()
     funcs = _enclosing_functions(tree)
-    rel = path.relative_to(REPO_ROOT).as_posix()
+    # Render repo-relative when possible, but never fail on a path outside the
+    # repo — callers may pass absolute or external paths (pre-commit hooks, CI
+    # wrappers, ad-hoc checks of a scratch file).
+    try:
+        rel = path.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        rel = path.as_posix()
     findings: List[Finding] = []
 
     for node in ast.walk(tree):
         if not _is_scan_call(node):
             continue
-        kwargs = _kwarg_names(node)
+        # Resolve the enclosing function FIRST: it is the scope `**kwargs` dicts
+        # are resolved in, so it is needed before we can tell whether this call
+        # even passes a FilterExpression.
+        scope, name = _owner(node, funcs)
+        kwargs = _kwarg_names(node, scope)
         if "FilterExpression" not in kwargs:
             continue
         # A marker may sit anywhere inside the call expression, or in the comment
         # block immediately preceding it. Justifications are usually a sentence
         # or two of prose, so scan back over contiguous comment/blank lines
         # rather than a fixed one-line lookbehind.
-        span = set(range(_comment_block_start(lines, node.lineno), (node.end_lineno or node.lineno) + 1))
+        span = set(
+            range(
+                _comment_block_start(lines, node.lineno),
+                (node.end_lineno or node.lineno) + 1,
+            )
+        )
         if span & marked:
             continue
-        scope, name = _owner(node, funcs)
         if _paginates(scope, tree):
             continue
         findings.append(Finding(rel, node.lineno, name, "Limit" in kwargs))
@@ -264,15 +382,15 @@ def main(argv: List[str]) -> int:
         "\nwhen it lands in the examined window. This breaks silently as data"
         "\ngrows (see issue #599). Either page:"
         "\n"
-        "\n    kwargs = {\"FilterExpression\": ..., \"ProjectionExpression\": ...}"
+        '\n    kwargs = {"FilterExpression": ..., "ProjectionExpression": ...}'
         "\n    while True:"
         "\n        resp = table.scan(**kwargs)"
-        "\n        for item in resp.get(\"Items\") or []:"
+        '\n        for item in resp.get("Items") or []:'
         "\n            return item          # first match wins"
-        "\n        last = resp.get(\"LastEvaluatedKey\")"
+        '\n        last = resp.get("LastEvaluatedKey")'
         "\n        if not last:"
         "\n            return None"
-        "\n        kwargs[\"ExclusiveStartKey\"] = last"
+        '\n        kwargs["ExclusiveStartKey"] = last'
         "\n"
         "\n...or, if a bounded sample is genuinely what you want, say so and why:"
         "\n"

@@ -20,9 +20,7 @@ from pathlib import Path
 
 import pytest
 
-_SCRIPT = (
-    Path(__file__).resolve().parent.parent.parent / "check_filtered_scans.py"
-)
+_SCRIPT = Path(__file__).resolve().parent.parent.parent / "check_filtered_scans.py"
 
 
 @pytest.fixture(scope="module")
@@ -42,9 +40,7 @@ def _check(checker, code):
     parallel cannot clobber each other's fixture (and a leaked file from a
     crashed run cannot make the repo-clean test fail).
     """
-    target = (
-        Path(checker.REPO_ROOT) / f"_tmp_filtered_scan_case_{uuid.uuid4().hex}.py"
-    )
+    target = Path(checker.REPO_ROOT) / f"_tmp_filtered_scan_case_{uuid.uuid4().hex}.py"
     target.write_text(textwrap.dedent(code), encoding="utf-8")
     try:
         return checker.check_file(target)
@@ -109,6 +105,67 @@ class TestFlagged:
             def resolve(table):
                 # filtered-scan-ok:
                 return table.scan(FilterExpression="IsActive = :t", Limit=1)
+            """,
+        )
+        assert len(findings) == 1
+
+    def test_flags_a_splatted_kwargs_scan(self, checker):
+        """The form EVERY #599 fix uses: arguments built in a dict and splatted.
+
+        The checker originally saw no keywords at all here, so it skipped the call
+        — leaving it blind to the exact call sites it was added to protect. A
+        regression of any of those seven fixes would have passed silently.
+        """
+        findings = _check(
+            checker,
+            """
+            def resolve(table):
+                kw = {"FilterExpression": "IsActive = :t", "Limit": 1}
+                return table.scan(**kw)
+            """,
+        )
+        assert len(findings) == 1
+        assert findings[0].has_limit is True
+
+    def test_flags_a_splatted_scan_whose_limit_is_set_by_subscript(self, checker):
+        """`kw["Limit"] = 10` after the dict literal must still register."""
+        findings = _check(
+            checker,
+            """
+            def resolve(table):
+                kw = {"FilterExpression": "IsActive = :t"}
+                kw["Limit"] = 10
+                return table.scan(**kw)
+            """,
+        )
+        assert len(findings) == 1
+        assert findings[0].has_limit is True
+
+    def test_flags_an_annotated_splatted_kwargs_dict(self, checker):
+        """The dispatcher annotates its dict (`scan_kwargs: Dict[str, Any] = {...}`),
+        which is an AnnAssign rather than an Assign."""
+        findings = _check(
+            checker,
+            """
+            from typing import Any, Dict
+
+            def resolve(table):
+                kw: Dict[str, Any] = {"FilterExpression": "IsActive = :t", "Limit": 1}
+                return table.scan(**kw)
+            """,
+        )
+        assert len(findings) == 1
+
+    def test_a_dead_paging_key_string_is_not_evidence_of_paging(self, checker):
+        """`_x = "LastEvaluatedKey"` does nothing, so it must not silence the
+        check — the key has to actually be USED."""
+        findings = _check(
+            checker,
+            """
+            def resolve(table):
+                r = table.scan(FilterExpression="IsActive = :t", Limit=1)
+                _unused = "LastEvaluatedKey"
+                return (r.get("Items") or [None])[0]
             """,
         )
         assert len(findings) == 1
@@ -220,6 +277,69 @@ class TestNotFlagged:
         )
         assert findings == []
 
+    def test_accepts_the_real_splatted_paginating_shape(self, checker):
+        """The exact idiom every #599 fix uses — dict built, splatted, paged via
+        `kw["ExclusiveStartKey"]`. Now that splatted kwargs are resolved, this
+        must NOT become a false positive."""
+        findings = _check(
+            checker,
+            """
+            from typing import Any, Dict
+
+            def resolve(table):
+                kw: Dict[str, Any] = {
+                    "FilterExpression": "IsActive = :t",
+                    "ProjectionExpression": "Configuration",
+                }
+                while True:
+                    resp = table.scan(**kw)
+                    for item in resp.get("Items") or []:
+                        return item["Configuration"]
+                    last = resp.get("LastEvaluatedKey")
+                    if not last:
+                        return None
+                    kw["ExclusiveStartKey"] = last
+            """,
+        )
+        assert findings == []
+
+    def test_membership_test_counts_as_paging(self, checker):
+        """`while "LastEvaluatedKey" in resp:` — the accumulate-all-pages idiom
+        used by test_execution_aggregation_function."""
+        findings = _check(
+            checker,
+            """
+            def list_all(table):
+                items = []
+                resp = table.scan(FilterExpression="begins_with(PK, :p)")
+                items.extend(resp.get("Items", []))
+                while "LastEvaluatedKey" in resp:
+                    resp = table.scan(
+                        FilterExpression="begins_with(PK, :p)",
+                        ExclusiveStartKey=resp["LastEvaluatedKey"],
+                    )
+                    items.extend(resp.get("Items", []))
+                return items
+            """,
+        )
+        assert findings == []
+
+    def test_a_path_outside_the_repo_does_not_crash(self, checker, tmp_path):
+        """check_file renders repo-relative paths; an external path must degrade
+        to the absolute path rather than raising ValueError (pre-commit hooks and
+        CI wrappers pass absolute paths)."""
+        target = tmp_path / "outside.py"
+        target.write_text(
+            "def resolve(table):\n"
+            '    return table.scan(FilterExpression="IsActive = :t", Limit=1)\n',
+            encoding="utf-8",
+        )
+        findings = checker.check_file(target)
+        assert len(findings) == 1
+        # Falls back to the absolute path, and rendering must not raise either.
+        assert findings[0].path == target.as_posix()
+        assert "outside.py" in findings[0].render()
+
     def test_a_non_dynamodb_scan_is_ignored(self, checker):
         """Only calls that actually pass FilterExpression are considered."""
         findings = _check(
@@ -232,8 +352,7 @@ class TestNotFlagged:
         assert findings == []
 
     def test_syntax_errors_do_not_crash_the_check(self, checker):
-        assert _check(
-            checker, "def broken(:\n") == []
+        assert _check(checker, "def broken(:\n") == []
 
 
 @pytest.mark.unit
