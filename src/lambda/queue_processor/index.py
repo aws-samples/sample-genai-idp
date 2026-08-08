@@ -151,7 +151,42 @@ def start_workflow(document: Document) -> Dict[str, Any]:
     # Update document status and timing
     document.status = Status.RUNNING
     document.start_time = datetime.now(timezone.utc).isoformat()
-    
+
+    # Pin the configuration version BEFORE compressing, so every downstream
+    # consumer reads one explicitly-recorded value instead of re-resolving the
+    # active version for itself.
+    #
+    # This is the single chokepoint every execution passes through, which makes
+    # it the right place to make the pin non-optional. Historically the pin was
+    # only set when the uploader supplied `config-version` S3 metadata (or when
+    # queue_sender managed to resolve it), so a document could reach the workflow
+    # unpinned — and then each consumer resolved the active version again, on its
+    # own, with its own filtered-scan bug. That is exactly how issue #599
+    # presented: the queue sender failed to stamp a version, so the pipeline-hooks
+    # dispatcher fell back to its own (broken) scan and silently read
+    # Config#default, disabling every registered hook.
+    #
+    # Deliberately NOT fatal when nothing is active: a freshly deployed stack
+    # writes Config#default with no IsActive attribute, so "no active version"
+    # is a normal state and resolve_active_version() returns 'default' for it.
+    # Failing here would reject documents that process correctly today.
+    config_table_name = os.environ.get('CONFIG_TABLE')
+    if not document.config_version and config_table_name:
+        try:
+            document.config_version = ConfigurationManager(
+                table_name=config_table_name
+            ).resolve_active_version()
+            logger.info(
+                f"Pinned config version '{document.config_version}' for document "
+                f"{document.id}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"Could not pin a config version for {document.id}: {e}. "
+                f"Downstream steps will resolve it themselves.",
+                exc_info=True,
+            )
+
     # Compress document for Step Functions to handle large documents
     working_bucket = os.environ.get('WORKING_BUCKET')
     if working_bucket:
@@ -166,9 +201,11 @@ def start_workflow(document: Document) -> Dict[str, Any]:
     # Inject use_bda flag and bda_project_arn from config into document for state machine routing.
     # The unified state machine uses $.document.use_bda to choose BDA vs pipeline branch,
     # and $.document.bda_project_arn for the per-config-version BDA project.
-    config_table_name = os.environ.get('CONFIG_TABLE')
     if config_table_name:
         try:
+            # Read the version PINNED above, so the routing flags and the rest of
+            # the pipeline are guaranteed to come from the same config version.
+            # (Still tolerant of an unset pin: the pin block above is best-effort.)
             config_version = getattr(document, 'config_version', None) or 'default'
             manager = ConfigurationManager(table_name=config_table_name)
 

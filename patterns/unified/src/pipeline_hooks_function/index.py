@@ -52,6 +52,15 @@ Resolution rules:
   2. Else, scan the table for the row with IsActive=true.
   3. Else, fall back to `Config#default`.
 
+Step 1 is the normal path: the queue processor pins `config_version` on every
+document before starting the execution (see src/lambda/queue_processor), and
+Document.compress() carries it in the lightweight wrapper specifically so this
+dispatcher can honor it without decompressing. Steps 2-3 are a DEFENSIVE
+fallback for the narrow cases that still arrive unpinned — a DynamoDB failure
+during pinning, or a document queued by an older release. They are not dead
+code, but reaching them is worth noticing, which is why step 3 logs at WARNING
+and the returned payload always names the version actually used.
+
 Returns immediately when the requested step has no `postHook` entries,
 keeping the no-vertical-pack overhead at one DDB GetItem.
 """

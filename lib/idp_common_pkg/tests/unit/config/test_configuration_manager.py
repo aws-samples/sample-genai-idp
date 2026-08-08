@@ -94,3 +94,77 @@ class TestConfigurationManagerListConfigVersions:
         _, second_call_kwargs = mock_table.scan.call_args_list[1]
         assert second_call_kwargs["ExclusiveStartKey"] == {"Configuration": "config#v1"}
         assert [v["versionName"] for v in versions] == ["v1", "v2"]
+
+
+@pytest.mark.unit
+class TestConfigurationManagerResolveActiveVersion:
+    """Test resolve_active_version — the version a new document is pinned to.
+
+    Callers use this to STAMP document.config_version at queue time instead of
+    leaving it None and letting each downstream consumer resolve it for itself.
+    Every independent re-resolution was a place the answer could disagree or
+    silently fail, which is what issue #599 was.
+    """
+
+    @patch("idp_common.config.configuration_manager.boto3")
+    def test_returns_the_active_version(self, mock_boto3):
+        mock_table = Mock()
+        mock_boto3.resource.return_value.Table.return_value = mock_table
+        mock_table.scan.return_value = {
+            "Items": [
+                {"Configuration": "Config#default", "IsActive": False},
+                {"Configuration": "Config#claims-pack-v0.4.0", "IsActive": True},
+            ]
+        }
+
+        manager = ConfigurationManager(table_name="test-table")
+        assert manager.resolve_active_version() == "claims-pack-v0.4.0"
+
+    @patch("idp_common.config.configuration_manager.boto3")
+    def test_finds_an_active_version_beyond_the_first_scan_page(self, mock_boto3):
+        """Built on list_config_versions, which paginates — so an active row that
+        sorts late is still found. An unpaginated resolver reported 'nothing
+        active' here and silently pinned the default (issue #599)."""
+        mock_table = Mock()
+        mock_boto3.resource.return_value.Table.return_value = mock_table
+        mock_table.scan.side_effect = [
+            {
+                "Items": [{"Configuration": "Config#v1", "IsActive": False}],
+                "LastEvaluatedKey": {"Configuration": "Config#v1"},
+            },
+            {"Items": [{"Configuration": "Config#v2", "IsActive": True}]},
+        ]
+
+        manager = ConfigurationManager(table_name="test-table")
+        assert manager.resolve_active_version() == "v2"
+        assert mock_table.scan.call_count == 2
+
+    @patch("idp_common.config.configuration_manager.boto3")
+    def test_no_active_version_returns_default(self, mock_boto3):
+        """A NORMAL state, not an error: a freshly deployed stack writes
+        Config#default with no IsActive attribute at all."""
+        mock_table = Mock()
+        mock_boto3.resource.return_value.Table.return_value = mock_table
+        mock_table.scan.return_value = {"Items": [{"Configuration": "Config#default"}]}
+
+        manager = ConfigurationManager(table_name="test-table")
+        assert manager.resolve_active_version() == "default"
+
+    @patch("idp_common.config.configuration_manager.boto3")
+    def test_empty_table_returns_default(self, mock_boto3):
+        mock_table = Mock()
+        mock_boto3.resource.return_value.Table.return_value = mock_table
+        mock_table.scan.return_value = {"Items": []}
+
+        manager = ConfigurationManager(table_name="test-table")
+        assert manager.resolve_active_version() == "default"
+
+    @patch("idp_common.config.configuration_manager.boto3")
+    def test_scan_failure_returns_default_rather_than_raising(self, mock_boto3):
+        """Never fail a document over this — the default is always readable."""
+        mock_table = Mock()
+        mock_boto3.resource.return_value.Table.return_value = mock_table
+        mock_table.scan.side_effect = RuntimeError("throttled")
+
+        manager = ConfigurationManager(table_name="test-table")
+        assert manager.resolve_active_version() == "default"

@@ -425,6 +425,47 @@ class ConfigurationManager:
             logger.error(f"Error activating version {version}: {e}")
             raise
 
+    def resolve_active_version(self) -> str:
+        """
+        Resolve the configuration version a new document should be processed under.
+
+        Returns the IsActive=true version's name, or DEFAULT_VERSION when no
+        version is marked active. The latter is a NORMAL state, not an error: a
+        freshly deployed stack writes Config#default with no IsActive attribute
+        at all (the Create path calls activate_version, but inside a log-only
+        except), so documents legitimately process under the default until an
+        admin activates something.
+
+        Callers should use this to STAMP document.config_version at queue time
+        rather than leaving it None and letting each downstream consumer resolve
+        it independently. Every consumer that re-resolved on its own was a place
+        the resolution could disagree or silently fail — which is what issue #599
+        was. Built on list_config_versions(), which paginates, so it cannot miss
+        an active row that sorts late.
+
+        Returns:
+            The active version name, or DEFAULT_VERSION if none is active.
+        """
+        try:
+            for version_dict in self.list_config_versions():
+                if version_dict.get("isActive"):
+                    name = version_dict.get("versionName")
+                    if name:
+                        return name
+        except Exception as e:  # noqa: BLE001
+            # Never fail a document over this — the default is always readable.
+            logger.warning(
+                f"Could not resolve the active config version ({e}); "
+                f"falling back to '{DEFAULT_VERSION}'"
+            )
+            return DEFAULT_VERSION
+        # Note: list_config_versions() swallows ClientError and returns [], so a
+        # throttled scan also lands here rather than in the except above. It logs
+        # its own error first, so the failure is still visible — but treat this
+        # message as "no active version was FOUND", not proof none is set.
+        logger.info(f"No active config version is set; using '{DEFAULT_VERSION}'")
+        return DEFAULT_VERSION
+
     def list_config_versions(self) -> List[Dict[str, Any]]:
         """
         List all configuration versions.
