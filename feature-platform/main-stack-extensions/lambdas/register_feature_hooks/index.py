@@ -96,20 +96,39 @@ def _decompress(item: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _resolve_active_version(table: Any) -> str:
+    """The version segment of the IsActive=true Config# row, or 'default'.
+
+    The scan MUST paginate. DynamoDB applies `Limit` (and the implicit 1MB page
+    size) to the items *examined*, not the items matching `FilterExpression`, so
+    the previous `Limit=1` returned a match only when the active row happened to
+    be the very first item examined — i.e. almost never on a table with more
+    than a handful of versions. Resolving to `default` here writes the
+    feature's hooks into a row that is not the active one, so the hooks are
+    registered successfully and then never fire (issue #599).
+    """
+    scan_kwargs: Dict[str, Any] = {
+        "FilterExpression": "begins_with(Configuration, :p) AND IsActive = :t",
+        "ExpressionAttributeValues": {":p": "Config#", ":t": True},
+        "ProjectionExpression": "Configuration",
+    }
     try:
-        resp = table.scan(
-            FilterExpression="begins_with(Configuration, :p) AND IsActive = :t",
-            ExpressionAttributeValues={":p": "Config#", ":t": True},
-            ProjectionExpression="Configuration",
-            Limit=1,
-        )
-        items = resp.get("Items") or []
-        if items:
-            key = items[0]["Configuration"]
-            if "#" in key:
-                return key.split("#", 1)[1]
+        while True:
+            resp = table.scan(**scan_kwargs)
+            for item in resp.get("Items") or []:
+                key = item["Configuration"]
+                if "#" in key:
+                    return key.split("#", 1)[1]
+            last_key = resp.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            scan_kwargs["ExclusiveStartKey"] = last_key
     except Exception as exc:  # noqa: BLE001
         logger.warning("Active-version scan failed (defaulting to 'default'): %s", exc)
+        return "default"
+    logger.warning(
+        "No active Config# version found after a full scan; registering hooks "
+        "into Config#default. They will not run unless that version is active."
+    )
     return "default"
 
 

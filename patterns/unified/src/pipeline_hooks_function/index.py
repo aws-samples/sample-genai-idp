@@ -52,6 +52,15 @@ Resolution rules:
   2. Else, scan the table for the row with IsActive=true.
   3. Else, fall back to `Config#default`.
 
+Step 1 is the normal path: the queue processor pins `config_version` on every
+document before starting the execution (see src/lambda/queue_processor), and
+Document.compress() carries it in the lightweight wrapper specifically so this
+dispatcher can honor it without decompressing. Steps 2-3 are a DEFENSIVE
+fallback for the narrow cases that still arrive unpinned — a DynamoDB failure
+during pinning, or a document queued by an older release. They are not dead
+code, but reaching them is worth noticing, which is why step 3 logs at WARNING
+and the returned payload always names the version actually used.
+
 Returns immediately when the requested step has no `postHook` entries,
 keeping the no-vertical-pack overhead at one DDB GetItem.
 """
@@ -180,6 +189,11 @@ _CONFIG_METADATA_FIELDS = {
     "BdaLastSyncedAt",
 }
 
+# The version used when no IsActive row can be resolved. It always exists (the
+# host seeds Config#default) but carries no feature hooks, so resolving to it
+# unintentionally is the silent-no-hooks failure mode of issue #599.
+_FALLBACK_VERSION = "default"
+
 _dynamodb = boto3.resource("dynamodb")
 # Hooks run synchronously through this client, so its read timeout must cover
 # the longest hook (the PII preprocessing hook budgets 900s); botocore's
@@ -226,27 +240,47 @@ def _resolve_active_version(table: Any, pinned: Optional[str]) -> Optional[str]:
 
     Order: explicit pin from the document → IsActive=true row → default.
     Returns the version segment ("claims-pack-v0.1.0", "default", …) or
-    None if the table has no Config rows at all.
+    None if the active row's key is malformed.
+
+    The scan MUST paginate. DynamoDB applies both `Limit` and the implicit
+    1MB page size to the items *examined*, not the items that pass
+    `FilterExpression` — so a single scan call returns "no active version"
+    whenever the active row happens to sort beyond the first page, which
+    gets likelier with every config version an admin saves or feature
+    installs. Falling back to `Config#default` then silently disables every
+    registered hook while the workflow still succeeds: the exact
+    growth-triggered failure in issue #599, observed live with the active row
+    at scan position 33 of 35.
     """
     if pinned:
         return pinned
+    scan_kwargs: Dict[str, Any] = {
+        "FilterExpression": "begins_with(Configuration, :p) AND IsActive = :t",
+        "ExpressionAttributeValues": {":p": "Config#", ":t": True},
+        "ProjectionExpression": "Configuration",
+    }
     try:
-        resp = table.scan(
-            FilterExpression="begins_with(Configuration, :p) AND IsActive = :t",
-            ExpressionAttributeValues={
-                ":p": "Config#",
-                ":t": True,
-            },
-            ProjectionExpression="Configuration",
-            Limit=10,
-        )
-        items = resp.get("Items") or []
-        if items:
-            key = items[0]["Configuration"]
-            return key.split("#", 1)[1] if "#" in key else None
+        while True:
+            resp = table.scan(**scan_kwargs)
+            for item in resp.get("Items") or []:
+                key = item["Configuration"]
+                return key.split("#", 1)[1] if "#" in key else None
+            last_key = resp.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            scan_kwargs["ExclusiveStartKey"] = last_key
     except Exception as exc:  # noqa: BLE001
         logger.warning("Active-version scan failed: %s", exc)
-    return "default"
+        return _FALLBACK_VERSION
+    # A full scan found no IsActive row. Distinct from the common no-op of
+    # "the active version simply has no hooks for this point", so log it at
+    # WARNING — this is the shape that hid #599 for over an hour.
+    logger.warning(
+        "No active Config# version found after a full scan of the "
+        "ConfigurationTable; falling back to Config#default. Hooks registered "
+        "in a feature's own config version will NOT run."
+    )
+    return _FALLBACK_VERSION
 
 
 def _normalize_hook(h: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -617,21 +651,30 @@ def _invoke_hook(hook: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any
         }
 
 
-def _noop(point: Any, document: Any) -> Dict[str, Any]:
+def _noop(point: Any, document: Any, version: Optional[str] = None) -> Dict[str, Any]:
     """An empty dispatch result.
 
     Carries halt=False AND the inbound document unchanged, so both state-machine
     reads — $.HookResults.<point>.Payload.halt (the Choice) and
     ...Payload.document (the Apply Pass state) — resolve unconditionally, even
     when no hook is registered or the point is unknown.
+
+    `version` is echoed as `configVersion` when a version WAS resolved, so the
+    execution history distinguishes "the active version has no hooks here" from
+    "we resolved the wrong version and found none" — `invoked: 0` alone cannot
+    (issue #599). Omitted entirely when resolution never happened (unknown hook
+    point, no configuration table), since there is no version to report.
     """
-    return {
+    out: Dict[str, Any] = {
         "hookPoint": point,
         "invoked": 0,
         "halt": False,
         "document": document,
         "results": [],
     }
+    if version is not None:
+        out["configVersion"] = version
+    return out
 
 
 def lambda_handler(event: Dict[str, Any], _ctx: Any) -> Dict[str, Any]:
@@ -655,7 +698,7 @@ def lambda_handler(event: Dict[str, Any], _ctx: Any) -> Dict[str, Any]:
     hooks = _read_hooks_from_config(table, version, point)
     if not hooks:
         logger.info("No hooks registered for %s in Config#%s", point, version)
-        return _noop(point, inbound_document)
+        return _noop(point, inbound_document, version)
 
     # Surface the preprocessing step in the document's visible status (the
     # generic RUNNING otherwise persists for the whole — possibly long —

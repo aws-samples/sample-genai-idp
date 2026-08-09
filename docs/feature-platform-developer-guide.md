@@ -231,6 +231,23 @@ clear the dispatcher's IAM check. This is handy for one-off integrations, but
 installable features should use `registerFeatureHooks` so hooks are
 added/removed with the stack.
 
+**Verifying a hook actually fired.** Asserting on your feature's own output
+cannot distinguish "the hook ran and decided nothing" from "the hook was never
+invoked" — from the feature's data store the two look identical. The dispatcher
+reports both the count and the config version it resolved, so check those
+instead:
+
+```python
+# From the workflow execution history, at the hook state's exit:
+payload = output["HookResults"]["postRuleValidation"]["Payload"]
+assert payload.get("invoked", 0) > 0, "the dispatcher never invoked the hook"
+assert payload["configVersion"] == expected_version
+```
+
+`invoked: 0` with a `configVersion` you did not expect means the hooks are
+registered in a different config version than the one the document resolved —
+activate the right version, or pin it per document via `config_version`.
+
 See [Feature Platform → Pipeline hooks](feature-platform.md#pipeline-hooks) for
 the full contract.
 

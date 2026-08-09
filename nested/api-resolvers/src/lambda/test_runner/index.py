@@ -209,38 +209,64 @@ def _decompress_config_item(item):
     return full_item
 
 
+def _resolve_active_config_key(table):
+    """Return the key ('Config#<version>') of the IsActive=true row, or None.
+
+    Paginates, and projects only the key. DynamoDB applies the 1MB page size to
+    the items EXAMINED, not the items matching FilterExpression, so an
+    unpaginated scan finds the active row only when it lands in the first page —
+    and an unprojected one reads whole config bodies, fitting only a handful of
+    versions per page. Missing the active row here captures the WRONG
+    configuration into the test run's metadata, so its comparisons are scored
+    against a config the documents were not processed under. See #599.
+    """
+    scan_kwargs = {
+        "FilterExpression": (
+            "begins_with(Configuration, :config_prefix) AND IsActive = :active"
+        ),
+        "ExpressionAttributeValues": {
+            ":config_prefix": "Config#",
+            ":active": True
+        },
+        "ProjectionExpression": "Configuration",
+    }
+    while True:
+        response = table.scan(**scan_kwargs)
+        for item in response.get('Items', []):
+            return item['Configuration']
+        last_key = response.get('LastEvaluatedKey')
+        if not last_key:
+            return None
+        scan_kwargs['ExclusiveStartKey'] = last_key
+
+
 def _capture_config(config_table, config_version=None):
     """Capture configuration - specific version or current active config"""
     table = dynamodb.Table(config_table)  # type: ignore[attr-defined]
-    
+
     config = {}
-    
+
     # Get Config (versioned) - this is what's used for comparisons
     try:
         if config_version:
-            # Get specific config version
             key = f"Config#{config_version}"
-            response = table.get_item(Key={'Configuration': key})
-            if 'Item' in response:
-                config['Config'] = _decompress_config_item(response['Item'])
-            else:
-                logger.warning(f"Config version {config_version} not found")
         else:
-            # Get active config version - scan for is_active=True
-            scan_response = table.scan(
-                FilterExpression="begins_with(Configuration, :config_prefix) AND IsActive = :active",
-                ExpressionAttributeValues={
-                    ":config_prefix": "Config#",
-                    ":active": True
-                }
-            )
-            items = scan_response.get('Items', [])
-            if items:
-                config['Config'] = _decompress_config_item(items[0])
-            
+            # Get active config version - scan for IsActive=True. The scan only
+            # locates the key; the body is read with GetItem below, so the
+            # projected scan stays cheap however large the configs are.
+            key = _resolve_active_config_key(table)
+            if not key:
+                logger.warning("No active config version found after a full scan")
+                return config
+        response = table.get_item(Key={'Configuration': key})
+        if 'Item' in response:
+            config['Config'] = _decompress_config_item(response['Item'])
+        else:
+            logger.warning(f"Config {key} not found")
+
     except Exception as e:
         logger.warning(f"Could not retrieve Config: {e}")
-    
+
     return config
 
 def _store_test_run_metadata(tracking_table, test_run_id, test_set_id, test_set_name, config, files, context=None, file_count=0, config_version=None):
