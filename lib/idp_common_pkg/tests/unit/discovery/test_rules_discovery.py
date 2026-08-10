@@ -16,11 +16,13 @@ import json
 import logging
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from idp_common.config.models import IDPConfig
+from idp_common.discovery import rules_discovery as rules_discovery_module
 from idp_common.discovery.rules_discovery import (
     RulesDiscovery,
+    _is_max_tokens_error,
     RulesTruncatedError,
     to_policy_class,
 )
@@ -468,14 +470,44 @@ class TestSaveTimeWarnings:
         classes = [{"x-aws-idp-policy-type": "a", "rule_properties": {}}]
         assert RulesDiscovery._warn_if_no_regex(classes, "v1") is None
 
-    def test_no_warning_when_a_regex_is_present(self):
+    def test_partial_regex_coverage_names_the_unmatched_classes(self, caplog):
+        """The likely state AFTER acting on the all-or-nothing warning.
+
+        User adds a regex to policy A, runs discovery again, and new class B has
+        none: B's rules silently never fire while A's do.
+        """
+        classes = [
+            {
+                "x-aws-idp-policy-type": "policy_a",
+                "x-aws-idp-document-name-regex": ".*",
+                "rule_properties": {},
+            },
+            {"x-aws-idp-policy-type": "policy_b", "rule_properties": {}},
+        ]
+        with caplog.at_level(logging.WARNING):
+            message = RulesDiscovery._warn_if_no_regex(classes, "v1")
+
+        assert message is not None, (
+            "a regex-less class alongside a regex-bearing one was not reported; "
+            "its rules can never fire"
+        )
+        assert "policy_b" in message
+        assert "policy_a" not in message
+        assert "never fire" in message
+        assert "policy_b" in caplog.text
+
+    def test_no_warning_when_every_class_has_a_regex(self):
         classes = [
             {
                 "x-aws-idp-policy-type": "a",
                 "x-aws-idp-document-name-regex": ".*",
                 "rule_properties": {},
             },
-            {"x-aws-idp-policy-type": "b", "rule_properties": {}},
+            {
+                "x-aws-idp-policy-type": "b",
+                "x-aws-idp-document-name-regex": ".*",
+                "rule_properties": {},
+            },
         ]
         assert RulesDiscovery._warn_if_no_regex(classes, "v1") is None
 
@@ -486,7 +518,11 @@ class TestSaveTimeWarnings:
                 "x-aws-idp-page-content-regex": "foo",
                 "rule_properties": {},
             },
-            {"x-aws-idp-policy-type": "b", "rule_properties": {}},
+            {
+                "x-aws-idp-policy-type": "b",
+                "x-aws-idp-page-content-regex": "bar",
+                "rule_properties": {},
+            },
         ]
         assert RulesDiscovery._warn_if_no_regex(classes, "v1") is None
 
@@ -540,3 +576,131 @@ class TestSaveTimeWarnings:
         assert (
             RulesDiscovery._warn_if_rules_duplicated(newly_added, newly_added) is None
         ), "the newly-saved class was compared against itself"
+
+
+@pytest.mark.unit
+class TestAgenticTruncationIsNotSuccess:
+    """The agentic path must also refuse a partial ruleset (#603).
+
+    Its primary protection differs from the traditional path's: Strands fails
+    hard with MaxTokensReachedException on stopReason == "max_tokens" rather than
+    returning a truncated result, so there is no partial payload to inspect. The
+    job therefore already fails — but it surfaced as an opaque "Agent has reached
+    an unrecoverable state" with no remediation. These tests pin the translation.
+    """
+
+    @pytest.fixture
+    def agentic_discovery(self, monkeypatch):
+        """Agentic-mode RulesDiscovery, forced importable.
+
+        tests/conftest.py stubs `strands` with a MagicMock, so
+        `from ...agentic_idp import structured_output` fails at import time and
+        AGENTIC_AVAILABLE is False for the whole suite — which is precisely why
+        this path had no coverage before. Force the flag on and inject the symbol
+        so the guard logic under test can run without the real extras installed.
+        """
+        monkeypatch.setattr(rules_discovery_module, "AGENTIC_AVAILABLE", True)
+        cfg = IDPConfig()
+        cfg.discovery.rules.agentic.enabled = True
+        d = RulesDiscovery(
+            input_bucket="test-bucket", input_prefix="test-policy.pdf", config=cfg
+        )
+        d.bedrock_client = MagicMock()
+        return d
+
+    def test_strands_max_tokens_becomes_actionable_error(self, agentic_discovery):
+        class MaxTokensReachedException(Exception):
+            pass
+
+        with patch(
+            "idp_common.discovery.rules_discovery.structured_output",
+            create=True,
+            side_effect=MaxTokensReachedException(
+                "Agent has reached an unrecoverable state due to max_tokens limit."
+            ),
+        ):
+            with pytest.raises(RulesTruncatedError) as exc:
+                agentic_discovery._extract_rules(b"pdf-bytes", "pdf")
+
+        message = str(exc.value)
+        assert "split" in message.lower()
+        assert "max_tokens" in message
+
+    def test_unrelated_agentic_failure_is_not_relabeled(self, agentic_discovery):
+        """A genuine error must not be reported as a truncation."""
+        with patch(
+            "idp_common.discovery.rules_discovery.structured_output",
+            create=True,
+            side_effect=RuntimeError("bedrock exploded"),
+        ):
+            with pytest.raises(RuntimeError):
+                agentic_discovery._extract_rules(b"pdf-bytes", "pdf")
+
+    def test_envelope_stop_reason_guard_fires_if_ever_populated(
+        self, agentic_discovery
+    ):
+        """The belt-and-braces check works once the envelope carries a stopReason.
+
+        structured_output() does not populate stopReason today, so this guard is
+        inert in production — but it must actually work if that changes, or it is
+        decoration rather than defence.
+        """
+        structured = MagicMock()
+        rc = MagicMock()
+        rc.model_dump.return_value = {
+            "x-aws-idp-policy-type": "p",
+            "rule_properties": {"a": {"description": "Q?"}},
+        }
+        structured.rule_classes = [rc]
+
+        with patch(
+            "idp_common.discovery.rules_discovery.structured_output",
+            create=True,
+            return_value=(structured, {"response": {"stopReason": "max_tokens"}}),
+        ):
+            with pytest.raises(RulesTruncatedError):
+                agentic_discovery._extract_rules(b"pdf-bytes", "pdf")
+
+    def test_untruncated_agentic_response_succeeds(self, agentic_discovery):
+        structured = MagicMock()
+        rc = MagicMock()
+        rc.model_dump.return_value = {
+            "x-aws-idp-policy-type": "p",
+            "rule_properties": {"a": {"description": "Q?"}},
+        }
+        structured.rule_classes = [rc]
+
+        with patch(
+            "idp_common.discovery.rules_discovery.structured_output",
+            create=True,
+            return_value=(structured, {"response": {"stopReason": "end_turn"}}),
+        ):
+            rules = agentic_discovery._extract_rules(b"pdf-bytes", "pdf")
+
+        assert rules is not None and len(rules) == 1
+
+
+@pytest.mark.unit
+class TestIsMaxTokensError:
+    """Detector for Strands' truncation failure, matched without importing it."""
+
+    def test_matches_by_type_name(self):
+        class MaxTokensReachedException(Exception):
+            pass
+
+        assert _is_max_tokens_error(MaxTokensReachedException("anything"))
+
+    def test_matches_by_message(self):
+        assert _is_max_tokens_error(
+            Exception(
+                "Agent has reached an unrecoverable state due to max_tokens limit"
+            )
+        )
+
+    def test_does_not_match_unrelated_errors(self):
+        for message in (
+            "bedrock exploded",
+            "ValidationException: input is too long",
+            "throttled",
+        ):
+            assert not _is_max_tokens_error(Exception(message)), message

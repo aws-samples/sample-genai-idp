@@ -94,6 +94,22 @@ def to_policy_class(rule_class: Dict[str, Any], unique_type: str) -> Dict[str, A
     return reshaped_class
 
 
+def _is_max_tokens_error(exc: Exception) -> bool:
+    """Detect Strands' hard failure on a response truncated at max output tokens.
+
+    Strands raises ``MaxTokensReachedException`` when the model stops with
+    ``stopReason == "max_tokens"``, and deliberately lets it bubble up rather
+    than wrapping it. Match on type name and message text rather than importing
+    the Strands exception type, mirroring ``_is_context_overflow_error`` in
+    ``extraction.agentic_idp`` — this module must stay importable when the
+    agentic extras are not installed.
+    """
+    if "maxtokensreached" in type(exc).__name__.lower():
+        return True
+    msg = str(exc).lower()
+    return "max_tokens limit" in msg or "due to max_tokens" in msg
+
+
 class RulesTruncatedError(Exception):
     """Rule extraction was truncated at the model's output token limit.
 
@@ -613,6 +629,15 @@ class RulesDiscovery:
             # listing rules. A response cut off at the token ceiling can still
             # deserialize into a valid RuleDiscoveryOutput holding a fraction of
             # the policy's rules. Refuse it rather than persisting silently.
+            #
+            # NOTE: on this path the primary protection is Strands raising
+            # MaxTokensReachedException (translated in the handler below) — it
+            # fails hard on stopReason == "max_tokens" before returning. This
+            # check is a belt-and-braces fallback: structured_output() currently
+            # synthesizes its envelope WITHOUT a stopReason, so it does not fire
+            # today, but it will start working if that envelope ever carries the
+            # real stop reason. Keeping both means neither a Strands behavior
+            # change nor an envelope change can reopen the silent-persist hole.
             if self._response_was_truncated(response_with_metering):
                 logger.error(
                     "Agentic rules extraction hit the output token limit — "
@@ -642,6 +667,28 @@ class RulesDiscovery:
             # agentic failure.
             raise
         except Exception as e:
+            # Strands fails hard on truncation, raising MaxTokensReachedException
+            # rather than returning a partial result (and special-cases it to
+            # bubble up rather than be wrapped). So the agentic path already
+            # refuses to persist a partial ruleset — but it surfaces as an opaque
+            # "Agent has reached an unrecoverable state" with no mention of what
+            # to do about it. Translate it into the same actionable error the
+            # traditional path raises, so both paths give the user the same
+            # remedies instead of one of them requiring Strands knowledge.
+            if _is_max_tokens_error(e):
+                logger.error(
+                    "Agentic rules extraction hit the output token limit "
+                    "(Strands MaxTokensReachedException). Refusing to persist a "
+                    "partial ruleset."
+                )
+                raise RulesTruncatedError(
+                    "The model's response was truncated at its output token "
+                    "limit, so the extracted ruleset is incomplete. A partial "
+                    "ruleset is not saved, because rules missing from a "
+                    "compliance validation set fail silently. Split the policy "
+                    "document into smaller uploads (e.g. by chapter), or raise "
+                    f"discovery.rules.max_tokens. (underlying error: {e})"
+                ) from e
             logger.error(f"Agentic rule discovery failed: {e}", exc_info=True)
             raise
 
@@ -906,29 +953,60 @@ class RulesDiscovery:
     def _warn_if_no_regex(
         policy_classes: List[Dict[str, Any]], version: Optional[str]
     ) -> Optional[str]:
-        """Warn when multiple policy classes exist and NONE has a matching regex.
+        """Warn about policy classes that cannot be matched once there are ≥2.
 
         Discovery never sets a regex, and ``PolicyClassificationService``
-        requires one as soon as there are ≥2 classes — so a second discovery run
-        silently switches rule validation off for the FIRST policy too. The user
-        changed no configuration by hand and gets no error. See #601.
+        requires one as soon as there are ≥2 classes. Two distinct bad states
+        follow, and both are silent (see #601):
+
+        1. **No class has a regex** — rule validation fires for NOTHING, so a
+           second discovery run switches off the FIRST policy's rules too.
+        2. **Some classes have one and some don't** — the regex-less classes are
+           simply never evaluated while the others work. This is the likelier
+           state *after* a user acts on warning (1): they add a regex to policy
+           A, run discovery again, and new class B silently can't fire. Warning
+           only on the all-or-nothing case would leave the follow-up
+           uncaught — which is the stricter rule the ``config_library`` preset
+           gate already enforces, so the two now agree.
         """
         if len(policy_classes) <= 1:
             return None
-        if any(
-            pc.get("x-aws-idp-document-name-regex")
-            or pc.get("x-aws-idp-page-content-regex")
+
+        def has_regex(pc: Dict[str, Any]) -> bool:
+            return bool(
+                pc.get("x-aws-idp-document-name-regex")
+                or pc.get("x-aws-idp-page-content-regex")
+            )
+
+        unmatched = [
+            pc.get("x-aws-idp-policy-type") or pc.get("x-aws-idp-rule-type") or "?"
             for pc in policy_classes
-        ):
+            if not has_regex(pc)
+        ]
+        if not unmatched:
             return None
 
-        message = (
-            f"Config#{version} now has {len(policy_classes)} policy classes and "
-            f"NONE has a document-matching regex. Rule validation requires a "
-            f"regex when multiple policy classes exist, so it will NOT fire for "
-            f"ANY of them until you add one. Set a Document Name Regex (or Page "
-            f"Content Regex) on each policy class in Configuration → Policy Schema."
-        )
+        total = len(policy_classes)
+        if len(unmatched) == total:
+            message = (
+                f"Config#{version} now has {total} policy classes and NONE has a "
+                f"document-matching regex. Rule validation requires a regex when "
+                f"multiple policy classes exist, so it will NOT fire for ANY of "
+                f"them until you add one. Set a Document Name Regex (or Page "
+                f"Content Regex) on each policy class in Configuration → Policy "
+                f"Schema."
+            )
+        else:
+            shown = ", ".join(sorted(unmatched)[:10])
+            more = f" (and {len(unmatched) - 10} more)" if len(unmatched) > 10 else ""
+            message = (
+                f"Config#{version} has {total} policy classes, and {len(unmatched)} "
+                f"of them have no document-matching regex: {shown}{more}. With "
+                f"multiple policy classes only regex-matched classes are "
+                f"evaluated, so THESE classes' rules will never fire while the "
+                f"others do. Add a Document Name Regex (or Page Content Regex) to "
+                f"each in Configuration → Policy Schema."
+            )
         logger.warning(message)
         return message
 

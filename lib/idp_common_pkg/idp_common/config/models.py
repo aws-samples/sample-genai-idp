@@ -2640,16 +2640,17 @@ class IDPConfig(BaseModel):
                 # how hand-written and notebook-produced configs ended up with
                 # rule validation that never fired.
                 discarded = data.get("rule_classes")
+                count = (
+                    len(discarded) if isinstance(discarded, (list, dict)) else 1
+                )
                 logger.warning(
                     "Both 'rule_classes' (deprecated) and 'policy_classes' are "
                     "present in this configuration; DISCARDING 'rule_classes' "
-                    "(%d entr%s). 'rule_classes' was renamed to 'policy_classes' "
-                    "in v0.5.9 — merge these entries into 'policy_classes' or "
-                    "they will not be used.",
-                    len(discarded) if isinstance(discarded, (list, dict)) else 1,
-                    "y"
-                    if isinstance(discarded, (list, dict)) and len(discarded) == 1
-                    else "ies",
+                    "(%d %s). 'rule_classes' was renamed to 'policy_classes' in "
+                    "v0.5.9 — merge these entries into 'policy_classes' or they "
+                    "will not be used.",
+                    count,
+                    "entry" if count == 1 else "entries",
                 )
                 del data["rule_classes"]
 
