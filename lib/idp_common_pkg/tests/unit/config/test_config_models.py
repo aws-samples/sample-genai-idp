@@ -5,6 +5,8 @@
 Tests for configuration Pydantic models.
 """
 
+import logging
+
 import pytest
 
 from idp_common.config.models import (
@@ -411,3 +413,40 @@ class TestPipelineHookPreservation:
         assert len(cfg.rule_validation.postHook) == 1
         # classification still has its default model (not wiped out).
         assert cfg.classification.model
+
+
+@pytest.mark.unit
+class TestRuleClassesMigrationIsLoud:
+    """Discarding user-supplied rule_classes must be logged (#600).
+
+    `rule_classes` was renamed to `policy_classes` in v0.5.9. When BOTH keys are
+    present the deprecated one is dropped — and because `rule_classes` is a
+    known-deprecated key it does not trip the unknown-field warning either. A
+    notebook user following the old guidance therefore lost their rules with no
+    message anywhere.
+    """
+
+    def test_rename_when_only_legacy_key_present(self):
+        cfg = IDPConfig(
+            **{"rule_classes": [{"x-aws-idp-policy-type": "a", "rule_properties": {}}]}
+        )
+        assert len(cfg.policy_classes) == 1
+        assert cfg.policy_classes[0]["x-aws-idp-policy-type"] == "a"
+
+    def test_discarding_legacy_key_warns(self, caplog):
+        with caplog.at_level(logging.WARNING):
+            cfg = IDPConfig(
+                **{
+                    "policy_classes": [
+                        {"x-aws-idp-policy-type": "kept", "rule_properties": {}}
+                    ],
+                    "rule_classes": [
+                        {"x-aws-idp-policy-type": "dropped", "rule_properties": {}}
+                    ],
+                }
+            )
+
+        # policy_classes still wins — behavior is unchanged, only the silence is.
+        assert [pc["x-aws-idp-policy-type"] for pc in cfg.policy_classes] == ["kept"]
+        assert "DISCARDING 'rule_classes'" in caplog.text
+        assert "policy_classes" in caplog.text

@@ -2633,6 +2633,25 @@ class IDPConfig(BaseModel):
                 data["policy_classes"] = data.pop("rule_classes")
                 logger.info("Migrated config key 'rule_classes' → 'policy_classes'")
             elif "rule_classes" in data:
+                # Both keys present: policy_classes wins and rule_classes is
+                # dropped. Say so loudly — this discards user-supplied rules, and
+                # because 'rule_classes' is a known-deprecated key it does not
+                # trip the unknown-field warning either. Silently losing it is
+                # how hand-written and notebook-produced configs ended up with
+                # rule validation that never fired.
+                discarded = data.get("rule_classes")
+                count = (
+                    len(discarded) if isinstance(discarded, (list, dict)) else 1
+                )
+                logger.warning(
+                    "Both 'rule_classes' (deprecated) and 'policy_classes' are "
+                    "present in this configuration; DISCARDING 'rule_classes' "
+                    "(%d %s). 'rule_classes' was renamed to 'policy_classes' in "
+                    "v0.5.9 — merge these entries into 'policy_classes' or they "
+                    "will not be used.",
+                    count,
+                    "entry" if count == 1 else "entries",
+                )
                 del data["rule_classes"]
 
             # Get all field names defined in the model

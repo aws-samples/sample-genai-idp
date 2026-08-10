@@ -461,7 +461,20 @@ If **multiple policy classes** are configured, `PolicyClassificationService` req
 ## Limitations
 
 - **Single-document rule extraction only.** Policy Discovery does not currently support multi-document clustering (unlike [Multi-Document Collection Discovery](discovery.md#multi-document-collection-discovery)). Each policy manual is processed independently.
+
+  Note that the workaround for the token limit below — splitting a manual by chapter into several uploads — interacts with this: **each upload becomes its own policy class**, so one logical policy ends up fragmented across several classes that must each be given the same matching regex. There is no `policy_group` concept to accumulate several uploads into one class, and no way for a later upload (an amendment or rider) to supersede a rule in an earlier one; the two rules simply coexist.
 - **No automatic regex generation.** The LLM extracts rules but does not propose a `Document Name Regex` for the policy class. Regex authoring is a manual step today.
+
+  Because rule validation requires a regex once a configuration holds **more than one** policy class, a *second* Policy Discovery run switches rule validation off for **every** policy class until you add one — the first policy's rules were evaluating, and now nothing is. The discovery job reports this in its status message when its save creates that state, but the remedy is manual: add a `Document Name Regex` (or `Page Content Regex`) to each policy class in **Configuration → Policy Schema**.
 - **No cross-policy deduplication.** If two policy documents contain the same underlying rule, it will appear in both policy classes. Duplicate detection across policies is not provided.
+
+  This is more than untidy output: Rule Validation answers **each copy** with its own LLM call for **every** document processed, so a rule duplicated across three payer manuals is a standing 3× cost multiplier on that rule, not a one-time extraction cost. The copies are also worded differently (each is extracted verbatim from its own source), so they can return **contradictory** Pass/Fail answers with nothing indicating they were ever the same rule. The discovery job now reports rule names that collide with other policy classes in its status message; removing the duplicates in **Configuration → Policy Schema** is still manual.
 - **Token limits on very large manuals.** Manuals with thousands of rules may exceed a single Bedrock call's output token limit even at `max_tokens: 64000`. Split the document by chapter/section into multiple uploads for very large sources.
+
+  A truncated response does **not** silently persist a partial ruleset — a compliance validation set quietly missing rules would report documents as compliant against a fraction of the policy, so the job fails instead. The mechanism differs by extraction method, and both end in a failed job naming the remedy:
+
+  - **Traditional:** the model's stop reason is checked directly. A truncated response is retried, and if every attempt truncates the job fails rather than saving what was recovered.
+  - **Agentic:** Strands fails hard on a truncated response (`MaxTokensReachedException`) before any result is returned, so there is no partial ruleset to save. That error is translated into the same actionable message as the traditional path.
+
+  If a job fails with a truncation message, split the document by chapter or raise `discovery.rules.max_tokens`.
 - **Validation-question phrasing depends on prompt.** Rule descriptions are only as good as the `task_prompt`'s instruction to phrase them as yes/no questions. Customize the prompt if the default phrasing doesn't match your validator's expectations.

@@ -20,10 +20,29 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from idp_common import bedrock, s3, utils
 from idp_common.config.models import IDPConfig
+from idp_common.config.schema_constants import (
+    X_AWS_IDP_POLICY_TYPE,
+    X_AWS_IDP_RULE_TYPE,
+)
 from idp_common.models import Document, RuleValidationResult, Status
 from idp_common.rule_validation.models import FactExtractionResponse
 
 logger = logging.getLogger(__name__)
+
+
+def _policy_type_of(policy_class: Dict[str, Any]) -> Optional[str]:
+    """Read a policy class's type, tolerating the legacy discriminator.
+
+    Raw rules-discovery output and pre-v0.5.9 configs carry
+    ``x-aws-idp-rule-type``. Keying only on the current name made such a class
+    contribute no policy type and no rule questions — rule validation produced
+    nothing, silently. Kept consistent with
+    ``PolicyClassificationService._load_policy_classes``, which must agree with
+    this or a class could classify yet yield zero questions.
+    """
+    return policy_class.get(X_AWS_IDP_POLICY_TYPE) or policy_class.get(
+        X_AWS_IDP_RULE_TYPE
+    )
 
 
 class RuleValidationService:
@@ -114,9 +133,7 @@ class RuleValidationService:
         """
         policy_classes = config.get("policy_classes", [])
         policy_types = [
-            policy_class.get("x-aws-idp-policy-type")
-            for policy_class in policy_classes
-            if policy_class.get("x-aws-idp-policy-type")
+            pt for pt in (_policy_type_of(pc) for pc in policy_classes) if pt
         ]
         logger.debug(
             f"Extracted {len(policy_types)} policy types from policy_classes: {policy_types}"
@@ -138,7 +155,7 @@ class RuleValidationService:
         """
         policy_classes = config.get("policy_classes", [])
         for policy_class in policy_classes:
-            if policy_class.get("x-aws-idp-policy-type") == policy_type:
+            if _policy_type_of(policy_class) == policy_type:
                 rule_properties = policy_class.get("rule_properties", {})
                 questions = [
                     prop.get("description")
