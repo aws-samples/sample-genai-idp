@@ -405,6 +405,20 @@ def process_rules_discovery_job(job_id, document_key, bucket, version=None):
             f"Extracted {num_rules} rules — appended to policy_classes in "
             f"version '{saved_version}'. View in Configuration → Policy Schema."
         )
+
+        # Append any advisories the save raised (no document-matching regex on
+        # any class, duplicated rule names). These describe states in which the
+        # extracted rules will not fire, or will be billed repeatedly, so they
+        # must reach the person who ran discovery — not just CloudWatch.
+        warnings = result.get("warnings") or []
+        if warnings:
+            success_message = " ".join([success_message, "⚠️ ", *warnings])
+            logger.warning(
+                "Rules discovery job %s completed with %d advisory warning(s)",
+                job_id,
+                len(warnings),
+            )
+
         update_job_status(
             job_id,
             'COMPLETED',

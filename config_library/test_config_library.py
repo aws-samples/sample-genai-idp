@@ -15,6 +15,7 @@ Or via: make test-config-library
 
 import json
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -138,3 +139,82 @@ class TestConfigFilesStructure:
                 f"'use_bda' field should be a boolean, got {type(parsed['use_bda']).__name__} "
                 f"with value '{parsed['use_bda']}'"
             )
+
+
+class TestPolicyClassRegexCoverage:
+    """Every policy class in a preset must be reachable.
+
+    ``PolicyClassificationService`` requires a document-matching regex once a
+    config holds more than one policy class, and it evaluates ONLY the classes
+    whose regex matches. A class with no regex among several is therefore dead
+    weight: its rules never evaluate, silently, with the job still reporting
+    success. The ``rule-validation`` preset shipped with 7 classes but a regex
+    on only the first, so its own bundled sample evaluated 2 of 14 rules.
+    """
+
+    @pytest.mark.parametrize("config_file", discover_config_files())
+    def test_every_policy_class_has_a_matching_regex(self, config_file: Path):
+        """With >1 policy class, each one needs a name or page-content regex."""
+        content = config_file.read_text(encoding="utf-8")
+        parsed = (
+            json.loads(content)
+            if config_file.suffix == ".json"
+            else yaml.safe_load(content)
+        )
+
+        policy_classes = (parsed or {}).get("policy_classes") or []
+        # A single class matches unconditionally, so a regex is optional there.
+        if len(policy_classes) < 2:
+            return
+
+        missing = [
+            pc.get("x-aws-idp-policy-type", f"index {i}")
+            for i, pc in enumerate(policy_classes)
+            if not pc.get("x-aws-idp-document-name-regex")
+            and not pc.get("x-aws-idp-page-content-regex")
+        ]
+        assert not missing, (
+            f"Config file {config_file.relative_to(CONFIG_LIBRARY_ROOT)}: "
+            f"{len(missing)} of {len(policy_classes)} policy classes have no "
+            f"x-aws-idp-document-name-regex and no x-aws-idp-page-content-regex: "
+            f"{missing}. With multiple policy classes only regex-matched classes "
+            f"are evaluated, so these classes' rules can never fire."
+        )
+
+    def test_rule_validation_preset_matches_its_own_sample(self):
+        """The rule-validation preset must evaluate ALL its rules on its sample.
+
+        Guards the specific regression: the preset's regex used `prior_auth` /
+        `pa_packet` with underscores only, and sat on just one of 7 classes.
+        """
+        config_file = (
+            CONFIG_LIBRARY_ROOT / "unified" / "rule-validation" / "config.yaml"
+        )
+        parsed = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+        policy_classes = parsed["policy_classes"]
+
+        # Filenames the preset is expected to recognize, including the shipped
+        # sample and the hyphenated form real intake systems produce.
+        for doc_name in (
+            "medicare_respiratory_pa_packet.pdf",
+            "Prior-Auth-123789456.pdf",
+            "prior auth packet.pdf",
+        ):
+            matched = [
+                pc["x-aws-idp-policy-type"]
+                for pc in policy_classes
+                if re.search(pc.get("x-aws-idp-document-name-regex", "$^"), doc_name)
+            ]
+            assert len(matched) == len(policy_classes), (
+                f"'{doc_name}' matched only {len(matched)} of "
+                f"{len(policy_classes)} policy classes ({matched}); the unmatched "
+                f"classes' rules would never be evaluated."
+            )
+
+        # An unrelated document must still match nothing — the regexes narrow
+        # the preset to policy documents rather than matching everything.
+        assert not [
+            pc["x-aws-idp-policy-type"]
+            for pc in policy_classes
+            if re.search(pc.get("x-aws-idp-document-name-regex", "$^"), "invoice.pdf")
+        ], "an unrelated document matched a policy class; the regex is too broad"

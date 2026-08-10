@@ -75,6 +75,10 @@ X_AWS_IDP_SOURCE_PAGE_TYPES = "x-aws-idp-source-page-types"
 # ============================================================================
 # Marks a schema as a policy/rule type (for rule validation)
 X_AWS_IDP_POLICY_TYPE = "x-aws-idp-policy-type"
+# Legacy/raw-discovery discriminator. The rules-discovery LLM emits this name and
+# older hand-written configs use it; readers accept it as a fallback so such a
+# class is matched rather than silently ignored. Writers emit POLICY_TYPE.
+X_AWS_IDP_RULE_TYPE = "x-aws-idp-rule-type"
 
 # Note: Policy classes use the same regex fields as document types
 # X_AWS_IDP_DOCUMENT_NAME_REGEX - Pattern to match document name for policy filtering
