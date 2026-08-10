@@ -403,6 +403,57 @@ class TestPipelineHookPreservation:
         assert cfg.preprocessing.arn is None
         assert cfg.preprocessing.args == []
 
+    def test_postprocessing_flat_hook_survives_round_trip(self):
+        """The flat `postprocessing` section is the mirror of `preprocessing` and
+        needs the same protection: dropped on a round-trip, the final delivery
+        hook would silently stop running after any Save-as-Version /
+        applyFeatureConfigPreset."""
+        cfg_dict = {
+            "postprocessing": {
+                "enabled": True,
+                "featureId": "delivery",
+                "arn": "arn:aws:lambda:us-west-2:111122223333:function:DeliverHook",
+                "onError": "continue",
+                "args": [{"key": "endpoint", "value": "https://sap.example/ingest"}],
+            }
+        }
+        dumped = IDPConfig.model_validate(cfg_dict).model_dump(mode="python")
+        pp = dumped["postprocessing"]
+        assert pp["enabled"] is True
+        assert pp["arn"].endswith(":DeliverHook")
+        assert pp["onError"] == "continue"
+        assert pp["featureId"] == "delivery"
+        assert {
+            "key": "endpoint",
+            "value": "https://sap.example/ingest",
+        } in pp["args"]
+
+    def test_postprocessing_defaults(self):
+        """Inert by default: no ARN, disabled, empty args — the dispatcher finds
+        no hook and the workflow tail is unchanged."""
+        cfg = IDPConfig.model_validate({})
+        assert cfg.postprocessing.enabled is False
+        assert cfg.postprocessing.arn is None
+        assert cfg.postprocessing.args == []
+        assert cfg.postprocessing.allowDocumentUpdate is True
+
+    def test_both_flat_hook_sections_coexist(self):
+        """A config may carry both flat hooks; neither round-trip clobbers the
+        other (they are separate top-level sections)."""
+        cfg = IDPConfig.model_validate(
+            {
+                "preprocessing": {"enabled": True, "arn": "arn:pre", "onError": "fail"},
+                "postprocessing": {"enabled": True, "arn": "arn:post"},
+            }
+        )
+        dumped = cfg.model_dump(mode="python")
+        assert dumped["preprocessing"]["arn"] == "arn:pre"
+        assert dumped["preprocessing"]["onError"] == "fail"
+        assert dumped["postprocessing"]["arn"] == "arn:post"
+        # Default onError differs by intent: preprocessing gates, postprocessing
+        # must not fail an already-processed document by accident.
+        assert dumped["postprocessing"]["onError"] == "continue"
+
     def test_sparse_rule_validation_overlay_keeps_hook_and_merges_defaults(self):
         """The real failure mode: a sparse preset overlay carrying only
         rule_validation.postHook must keep the hook AND inherit classification

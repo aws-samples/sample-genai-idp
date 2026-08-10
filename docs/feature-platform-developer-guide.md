@@ -113,6 +113,10 @@ workflow. There are two kinds:
   BDA/pipeline routing decision (so it fires in both processing modes, even
   with OCR disabled), operating on the *source document*. While it runs the
   document's visible status is `PREPROCESSING`.
+- **`postprocessing`** — a **single** hook that runs LAST, after evaluation and
+  before the workflow's terminal state (also on the shared tail, so it too fires
+  in both processing modes), operating on the *finished document*. Its mutation
+  becomes the workflow output, so it reaches the tracking row, reporting, and UI.
 - **Five post-step points** — `postOcr`, `postClassification`,
   `postExtraction`, `postRuleValidation`, `postSummarization` — a **list** of
   hooks invoked after the corresponding step, to enrich, validate, or react to
@@ -175,6 +179,10 @@ Three things to know:
 - **`postExtraction` is section-scoped** (it runs inside the section Map), so
   only section-level changes propagate there. Use `postClassification` or
   `postRuleValidation` for whole-document changes.
+- **`postprocessing` has nothing downstream**, so its mutation matters only
+  because it *is* the workflow output — that is what the tracker persists to
+  DynamoDB, reporting, and the UI. It cannot set a terminal `status`, though: a
+  successful execution is forced to `COMPLETED`.
 - **Make mutations idempotent.** The workflow retries a hook dispatch on
   transient Lambda faults, so a mutation that *appends* can apply twice while
   one that *sets* is safe.
@@ -204,9 +212,10 @@ Create (and clears them on Delete) — the same custom-resource pattern as
 `{ featureId, arn, order (default 100), onError (default continue), enabled, args }`;
 `onError` is `continue` | `skip-remaining` | `fail`.
 
-**`preprocessing` shape.** Unlike the post-step lists, `preprocessing` is a
-standalone top-level config section holding ONE flat hook (its fields live
-directly on the section, no list), editable in the View/Edit Configuration UI:
+**`preprocessing` / `postprocessing` shape.** Unlike the post-step lists, these
+two are standalone top-level config sections each holding ONE flat hook (its
+fields live directly on the section, no list), editable in the View/Edit
+Configuration UI:
 
 ```yaml
 preprocessing:
@@ -216,6 +225,14 @@ preprocessing:
   onError: fail               # continue | fail
   args:
     - { key: mode, value: redactcopy_and_stop }
+
+postprocessing:
+  enabled: true               # default false
+  featureId: my-delivery
+  arn: <hook-lambda-arn>
+  onError: continue           # continue (recommended) | fail
+  args:
+    - { key: endpoint, value: "https://erp.example/ingest" }
 ```
 
 For `preprocessing`, `onError: fail` is terminal: a failed hook ends the
@@ -223,9 +240,26 @@ execution in a `PreprocessingHookFailed` Fail state and **never** falls through
 to processing the un-preprocessed original (essential when the hook gates
 processing, e.g. PII redaction). Use `fail` whenever the hook must gate.
 
+For `postprocessing`, keep the `continue` default unless the hook truly gates
+delivery — `fail` marks a document FAILED after every processing step already
+succeeded. Two more things to know about this point:
+
+- It runs **inside** the execution, so a slow hook extends per-document latency
+  and holds a concurrency slot. For fire-and-forget delivery use the
+  [EventBridge post-processing hook](post-processing-lambda-hook.md) instead.
+- It fires **while HITL review is pending** (and again after review completes),
+  so branch on the document's `hitl_status` / `hitl_triggered` /
+  `hitl_sections_pending` fields — remembering they are omitted when falsy, so
+  absent means "no HITL" — and make the hook idempotent.
+
+Because each of these points holds a *single* hook, only one feature can own it:
+registering over another feature's hook is refused rather than silently
+disabling it.
+
 **Escape hatch (no feature install).** For custom business logic outside the
 feature-install flow, an admin can add `postHook` entries — or fill in the
-`preprocessing` section — in a config version directly (same shapes as above).
+`preprocessing` / `postprocessing` sections — in a config version directly (same
+shapes as above).
 The hook Lambda still needs the `idp:feature-id` tag or a `GENAIIDP-*` name to
 clear the dispatcher's IAM check. This is handy for one-off integrations, but
 installable features should use `registerFeatureHooks` so hooks are

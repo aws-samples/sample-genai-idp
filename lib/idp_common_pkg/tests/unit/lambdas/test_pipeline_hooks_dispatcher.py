@@ -1571,3 +1571,172 @@ def test_noop_reports_the_resolved_config_version(monkeypatch):
     # The state-machine-critical fields are still unconditionally present.
     assert out["halt"] is False
     assert out["document"] == {"id": "w2"}
+
+
+# ---------------------------------------------------------------------------
+# postprocessing — the standalone FINAL hook point (mirror of preprocessing)
+# ---------------------------------------------------------------------------
+
+
+def test_postprocessing_reads_single_flat_hook(monkeypatch):
+    """`postprocessing` is a flat single-hook section like `preprocessing`:
+    arn/args/onError live directly on it, with no postHook list — even though
+    the point name starts with "post"."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+
+    class _Table:
+        def get_item(self, Key):
+            return {
+                "Item": {
+                    "Configuration": "Config#default",
+                    "postprocessing": {
+                        "enabled": True,
+                        "featureId": "delivery",
+                        "arn": "arn:deliver",
+                        "onError": "continue",
+                        "args": [{"key": "endpoint", "value": "https://sap"}],
+                    },
+                }
+            }
+
+    hooks = mod._read_hooks_from_config(_Table(), "default", "postprocessing")
+    assert len(hooks) == 1
+    assert hooks[0]["featureId"] == "delivery"
+    assert hooks[0]["arn"] == "arn:deliver"
+    assert hooks[0]["args"] == [{"key": "endpoint", "value": "https://sap"}]
+
+
+def test_postprocessing_is_flat_not_list_based(monkeypatch):
+    """Regression guard for the prefix heuristic this replaced: `postprocessing`
+    must NOT be read as a `postprocessing.postHook` list. A section carrying only
+    a postHook list yields no hook (there is no flat arn), which would have
+    silently swallowed a misconfigured entry."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    assert mod._is_flat_hook_point("postprocessing") is True
+    assert mod._is_flat_hook_point("preprocessing") is True
+    assert mod._is_flat_hook_point("postOcr") is False
+
+    class _Table:
+        def get_item(self, Key):
+            return {
+                "Item": {
+                    "Configuration": "Config#default",
+                    "postprocessing": {
+                        "postHook": [{"featureId": "x", "arn": "arn:x"}],
+                    },
+                }
+            }
+
+    assert mod._read_hooks_from_config(_Table(), "default", "postprocessing") == []
+
+
+def test_postprocessing_disabled_or_arnless_yields_no_hook(monkeypatch):
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+
+    class _Disabled:
+        def get_item(self, Key):
+            return {
+                "Item": {
+                    "Configuration": "Config#d",
+                    "postprocessing": {"enabled": False, "arn": "arn:x"},
+                }
+            }
+
+    class _NoArn:
+        def get_item(self, Key):
+            return {
+                "Item": {
+                    "Configuration": "Config#d",
+                    "postprocessing": {"enabled": True},
+                }
+            }
+
+    assert mod._read_hooks_from_config(_Disabled(), "d", "postprocessing") == []
+    assert mod._read_hooks_from_config(_NoArn(), "d", "postprocessing") == []
+
+
+def test_postprocessing_hook_can_mutate_the_final_document(monkeypatch):
+    """A postprocessing mutation is the last word on the document: the state
+    machine copies it into the workflow output, which the workflow tracker
+    persists."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    inbound = {
+        "compressed": True,
+        "s3_uri": "s3://wb/compressed_documents/w2.pdf/eval.json",
+        "document_id": "w2.pdf",
+    }
+    _mutation_env(
+        monkeypatch,
+        mod,
+        [_hook()],
+        lambda h, p: _ok(
+            {
+                "updatedDocument": {
+                    "compressed": True,
+                    "s3_uri": "s3://wb/compressed_documents/w2.pdf/delivered.json",
+                    "document_id": "w2.pdf",
+                }
+            }
+        ),
+    )
+    out = mod.lambda_handler({"hookPoint": "postprocessing", "document": inbound}, None)
+    assert out["document"]["s3_uri"].endswith("delivered.json")
+    assert out["documentUpdatedBy"] == ["f"]
+
+
+def test_postprocessing_halt_request_is_ignored(monkeypatch):
+    """There is nothing downstream to skip at `postprocessing`, so a `halt` is
+    reported as ignored rather than returned as a halt the state machine would
+    silently drop."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    _mutation_env(monkeypatch, mod, [_hook()], lambda h, p: _ok({"halt": True}))
+    out = mod.lambda_handler(
+        {"hookPoint": "postprocessing", "document": {"id": "w2"}}, None
+    )
+    assert out["halt"] is False
+    assert out["haltIgnored"] is True
+    # The document still flows through untouched.
+    assert out["document"] == {"id": "w2"}
+
+
+def test_preprocessing_halt_still_honored(monkeypatch):
+    """Guard the other side of _HALT_CAPABLE_POINTS: gating `halt` must not
+    have broken the PII-redaction short-circuit."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    _mutation_env(monkeypatch, mod, [_hook()], lambda h, p: _ok({"halt": True}))
+    out = mod.lambda_handler(
+        {"hookPoint": "preprocessing", "document": {"id": "w2"}}, None
+    )
+    assert out["halt"] is True
+    assert "haltIgnored" not in out
+
+
+def test_postprocessing_hook_sees_hitl_status(monkeypatch):
+    """The hook decides what to do based on HITL state, so the fields the
+    document carries must reach it verbatim (the workflow does not skip the hook
+    while a review is pending)."""
+    monkeypatch.setenv("CONFIGURATION_TABLE_NAME", "ConfigTable")
+    mod = _reload()
+    inbound = {
+        "id": "w2.pdf",
+        "hitl_status": "PendingReview",
+        "hitl_triggered": True,
+        "hitl_sections_pending": ["1"],
+    }
+    seen = {}
+
+    def _capture(h, payload):
+        seen.update(payload)
+        return _ok({})
+
+    _mutation_env(monkeypatch, mod, [_hook()], _capture)
+    mod.lambda_handler({"hookPoint": "postprocessing", "document": inbound}, None)
+    assert seen["document"]["hitl_status"] == "PendingReview"
+    assert seen["document"]["hitl_triggered"] is True
+    assert seen["hookPoint"] == "postprocessing"

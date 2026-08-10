@@ -152,7 +152,7 @@ flowchart LR
 |-----------|----------|---------|
 | `FeaturePlatformStack` | nested stack from `feature-platform/main-stack-extensions/template.yaml` | Owns the `InstalledFeatures` table, the feature-platform Lambdas, and AppSync data sources / resolvers |
 | `FeatureBucket` | main `template.yaml`, condition-gated on `EnableFeaturePlatform` | Holds the catalog of published features (CFN template + UI bundle + `feature.yaml` manifest per feature). Auto-created and pre-populated with the bundled sample feature unless `FeaturePlatformFeatureBucket` is supplied. |
-| Pipeline hooks | `patterns/unified/` (`PipelineHooksDispatcherFunction` + `preprocessing` / `postHook` config) | Lets features inject Lambdas at the `preprocessing` point and five post-step extension points in the processing workflow. Inert when no hooks are registered. |
+| Pipeline hooks | `patterns/unified/` (`PipelineHooksDispatcherFunction` + `preprocessing` / `postprocessing` / `postHook` config) | Lets features inject Lambdas at the `preprocessing` and `postprocessing` points (which bracket the pipeline) plus five post-step extension points in between. Inert when no hooks are registered. |
 | Feature stack | standalone CFN template published by the author via `idp-feature-cli publish` | Creates the feature's own resources + registers into the main stack |
 
 ### GraphQL surface
@@ -176,13 +176,19 @@ Each GraphQL operation is backed by a Lambda under
 Features can inject custom Lambdas at extension points in the unified
 processing workflow. There are two kinds:
 
-- **`preprocessing`** — a single hook that runs **FIRST**, before the
-  BDA/pipeline routing decision, so it fires in both processing modes and even
-  when OCR is disabled. It operates on the *source document* (before any OCR
-  output exists) and can **halt** the execution by returning `halt: true` —
-  used by the [PII Anonymization extension](extensions/pii-anonymizer.md) to
-  short-circuit an original whose only purpose was to spawn a redacted copy.
-  While it runs, the document's status shows **`PREPROCESSING`**.
+- **Two standalone single-hook points** that bracket the pipeline:
+  - **`preprocessing`** — runs **FIRST**, before the BDA/pipeline routing
+    decision, so it fires in both processing modes and even when OCR is
+    disabled. It operates on the *source document* (before any OCR output
+    exists) and can **halt** the execution by returning `halt: true` — used by
+    the [PII Anonymization extension](extensions/pii-anonymizer.md) to
+    short-circuit an original whose only purpose was to spawn a redacted copy.
+    While it runs, the document's status shows **`PREPROCESSING`**.
+  - **`postprocessing`** — runs **LAST**, after evaluation and before the
+    workflow's terminal state, also on the shared tail so it fires in both
+    processing modes. It operates on the *finished document*, and a mutation
+    there is the last word: it reaches the persisted tracking row, the
+    reporting/Athena rows, and the UI.
 - **Five post-step points** — `postOcr`, `postClassification`,
   `postExtraction`, `postRuleValidation`, `postSummarization` — invoked after
   the corresponding step. (`postAssessment` was removed in v0.6 when
@@ -196,10 +202,11 @@ that point.
 version. With none registered the dispatcher returns after a single DynamoDB
 read and the pipeline is unchanged.
 
-**`preprocessing` shape** — a standalone top-level config section holding ONE
-flat hook (no list; the hook's own settings travel in generic `args` key/value
-pairs, keeping the platform hook-agnostic). Editable in the View/Edit
-Configuration UI:
+**`preprocessing` / `postprocessing` shape** — each is a standalone top-level
+config section holding ONE flat hook (no list; the hook's own settings travel in
+generic `args` key/value pairs, keeping the platform hook-agnostic). Both are
+editable in the View/Edit Configuration UI — Preprocessing appears just above
+OCR, Postprocessing just below Evaluation:
 
 ```yaml
 preprocessing:
@@ -212,7 +219,23 @@ preprocessing:
                               # through to processing the unprocessed original)
   args:                       # hook-specific settings, opaque to the platform
     - { key: mode, value: redactcopy_and_stop }
+  allowDocumentUpdate: true   # default true — see "Modifying the document"
+
+postprocessing:
+  enabled: true               # default false
+  featureId: my-delivery      # owner label (for traceability)
+  arn: <hook-lambda-arn>      # Lambda to invoke
+  onError: continue           # continue (recommended) | fail — `fail` marks an
+                              # otherwise-successful document FAILED, so use it
+                              # only when the hook genuinely gates delivery
+  args:
+    - { key: endpoint, value: "https://erp.example/ingest" }
+  allowDocumentUpdate: true   # default true
 ```
+
+Because each is a *single* hook, only one feature can own it — the host refuses
+a registration that would overwrite another feature's hook, rather than silently
+disabling it.
 
 **`postHook` entry shape** (per step, in the active config version):
 
@@ -240,11 +263,34 @@ extraction:
 It returns any JSON result (surfaced under `$.HookResults`). A `preprocessing`
 hook may include `"halt": true` in its result to end the execution (the
 document is marked according to the hook's semantics — e.g.
-`REDACTED_SUPERSEDED` for PII redaction). `onError` controls failure handling:
+`REDACTED_SUPERSEDED` for PII redaction). `halt` is **only** actionable at
+`preprocessing`; at any later point — `postprocessing` especially — there is
+nothing left to skip, so the dispatcher logs it and reports `haltIgnored: true`
+rather than appearing to act on it. `onError` controls failure handling:
 `continue` (log and proceed), `skip-remaining` (stop later hooks at that
 point), or `fail` (fail the workflow — for `preprocessing` this stops the
 execution in a terminal `PreprocessingHookFailed` state rather than continuing
 to normal processing).
+
+**At `postprocessing`, prefer `onError: continue`** (the default). By the time it
+runs, every expensive step has succeeded and the output objects are written, so
+`fail` turns a delivery-integration error into a FAILED document. It also runs
+*inside* the execution: a slow hook adds directly to per-document latency and
+holds its concurrency slot until it returns. For fire-and-forget downstream
+delivery that must not do either, use the
+[EventBridge post-processing hook](post-processing-lambda-hook.md) instead —
+the two mechanisms coexist and are compared there.
+
+**HITL and `postprocessing`.** The workflow does *not* skip the hook while a
+human review is pending: `MarkHITLPending` lets the execution complete, and the
+document is re-queued after review (so the hook fires again). The hook decides
+what to do from the document's own HITL fields — `hitl_status`
+(`PendingReview` | `InProgress` | `Completed` | `Skipped`), `hitl_triggered`,
+`hitl_sections_pending`, `hitl_sections_completed`, and `hitl_metadata`. Note
+these are **omitted when falsy**, so treat an absent field as "no HITL": gate
+delivery on `hitl_status in (None, "Completed", "Skipped")` rather than
+inspecting `hitl_status == "PendingReview"` alone, and keep the hook idempotent
+because it will be invoked once per pass.
 
 **Modifying the document (optional)** — a hook is not limited to observing. To
 change what the *next* workflow step consumes, return the modified document
@@ -316,6 +362,13 @@ to observe-only.
 | `postExtraction` | **A single section** (runs inside the Map) | Assessment, then `sections[0]` + `metering` are merged into the final document — top-level and page-level changes made here are discarded |
 | `postRuleValidation` | Whole document | Summarization, evaluation, final output |
 | `postSummarization` | Whole document | Evaluation and the final workflow output |
+| `postprocessing` | Whole document, fully processed | Nothing downstream in the workflow — but it *is* the workflow output, so it reaches the persisted tracking row, the reporting/Athena rows, and the UI |
+
+One thing a `postprocessing` mutation **cannot** do is set a terminal status: the
+workflow tracker forces `COMPLETED` on a successful execution (only
+`REDACTED_SUPERSEDED` is honored, which the preprocessing halt path sets). Record
+delivery outcomes in your own store or in the document's `metadata`, not in
+`status`.
 
 **Security** — the dispatcher's `lambda:InvokeFunction` is scoped so a hook
 Lambda must either carry the `idp:feature-id` resource tag (ABAC, used by

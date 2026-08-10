@@ -225,3 +225,145 @@ def test_compressed_active_row_is_decompressed_before_hooks_are_added(
     assert active["ocr"]["enabled"] is True
     assert active["classes"] == [{"name": "PA-Administrative"}]
     assert active["rule_validation"]["postHook"][0]["featureId"] == "claims-pack"
+
+
+# ---------------------------------------------------------------------------
+# Flat single-hook points (preprocessing / postprocessing)
+# ---------------------------------------------------------------------------
+
+_FLAT_ARN = "arn:aws:lambda:us-east-1:123456789012:function:deliver-hook"
+
+
+def _flat_hook(point: str, arn: str = _FLAT_ARN, **over):
+    h = {"point": point, "arn": arn, "onError": "continue", "enabled": True}
+    h.update(over)
+    return h
+
+
+@pytest.mark.parametrize("point", ["preprocessing", "postprocessing"])
+def test_flat_point_registers_onto_the_section_itself(
+    monkeypatch, configuration_table, load_lambda, point
+):
+    """`preprocessing`/`postprocessing` are standalone SINGLE-hook sections: the
+    ARN goes directly on the section, not into a `postHook` list. Registering
+    either previously failed outright ("Invalid hook point"), which is why the
+    PII Anonymizer had to bake its ARN into a config preset instead."""
+    mod = _preload(monkeypatch, load_lambda)
+    _seed_versions("zz-active-v1", filler=2)
+
+    result = mod.handler(_register_event("deliver", [_flat_hook(point)]), None)
+    assert result["hookCount"] == 1
+
+    active = _table().get_item(Key={"Configuration": "Config#zz-active-v1"})["Item"]
+    section = active[point]
+    assert section["arn"] == _FLAT_ARN
+    assert section["featureId"] == "deliver"
+    assert section["enabled"] is True
+    # No list is created — the dispatcher reads the flat fields.
+    assert "postHook" not in section
+
+
+@pytest.mark.parametrize("point", ["preprocessing", "postprocessing"])
+def test_flat_point_registration_preserves_preset_args(
+    monkeypatch, configuration_table, load_lambda, point
+):
+    """A feature's config preset typically ships the section's `args` and leaves
+    the ARN blank until its stack exists. Registration must fill in the ARN
+    without discarding those args."""
+    mod = _preload(monkeypatch, load_lambda)
+    _seed_versions("zz-active-v1", filler=2)
+    table = _table()
+    item = table.get_item(Key={"Configuration": "Config#zz-active-v1"})["Item"]
+    item[point] = {"args": [{"key": "mode", "value": "deliver_and_notify"}]}
+    table.put_item(Item=item)
+
+    mod.handler(_register_event("deliver", [_flat_hook(point)]), None)
+
+    section = table.get_item(Key={"Configuration": "Config#zz-active-v1"})["Item"][
+        point
+    ]
+    assert section["args"] == [{"key": "mode", "value": "deliver_and_notify"}]
+    assert section["arn"] == _FLAT_ARN
+
+
+@pytest.mark.parametrize("point", ["preprocessing", "postprocessing"])
+def test_flat_point_unregister_clears_only_its_own_hook(
+    monkeypatch, configuration_table, load_lambda, point
+):
+    """Uninstall disables the section and drops the ARN, but leaves `args` so a
+    re-install restores the previous behavior."""
+    mod = _preload(monkeypatch, load_lambda)
+    _seed_versions("zz-active-v1", filler=2)
+    mod.handler(_register_event("deliver", [_flat_hook(point)]), None)
+
+    mod.handler(
+        make_appsync_event("unregisterFeatureHooks", {"featureId": "deliver"}), None
+    )
+    section = _table().get_item(Key={"Configuration": "Config#zz-active-v1"})["Item"][
+        point
+    ]
+    assert section["enabled"] is False
+    assert section["arn"] is None
+    assert "args" in section
+
+
+@pytest.mark.parametrize("point", ["preprocessing", "postprocessing"])
+def test_flat_point_refuses_to_hijack_another_features_hook(
+    monkeypatch, configuration_table, load_lambda, point
+):
+    """A flat point holds exactly ONE hook. Silently overwriting it would
+    disable the owning feature with no signal, so registration fails loudly."""
+    mod = _preload(monkeypatch, load_lambda)
+    _seed_versions("zz-active-v1", filler=2)
+    mod.handler(_register_event("pii-anonymizer", [_flat_hook(point)]), None)
+
+    with pytest.raises(ValueError, match="already holds a hook"):
+        mod.handler(
+            _register_event("other-feature", [_flat_hook(point, arn=_FLAT_ARN + "2")]),
+            None,
+        )
+    # The original owner survives untouched.
+    section = _table().get_item(Key={"Configuration": "Config#zz-active-v1"})["Item"][
+        point
+    ]
+    assert section["featureId"] == "pii-anonymizer"
+    assert section["arn"] == _FLAT_ARN
+
+
+@pytest.mark.parametrize("point", ["preprocessing", "postprocessing"])
+def test_flat_point_re_registration_by_the_same_owner_is_idempotent(
+    monkeypatch, configuration_table, load_lambda, point
+):
+    """A stack Update re-invokes registration; the same feature must be able to
+    refresh its own ARN."""
+    mod = _preload(monkeypatch, load_lambda)
+    _seed_versions("zz-active-v1", filler=2)
+    mod.handler(_register_event("deliver", [_flat_hook(point)]), None)
+
+    new_arn = _FLAT_ARN + "-v2"
+    result = mod.handler(
+        _register_event("deliver", [_flat_hook(point, arn=new_arn)]), None
+    )
+    assert result["hookCount"] == 1
+    section = _table().get_item(Key={"Configuration": "Config#zz-active-v1"})["Item"][
+        point
+    ]
+    assert section["arn"] == new_arn
+    assert section["featureId"] == "deliver"
+
+
+def test_flat_and_list_points_register_together(
+    monkeypatch, configuration_table, load_lambda
+):
+    """One feature may own the flat postprocessing hook AND contribute a
+    post-step hook; both shapes must be written in a single call."""
+    mod = _preload(monkeypatch, load_lambda)
+    _seed_versions("zz-active-v1", filler=2)
+
+    result = mod.handler(
+        _register_event("deliver", [_flat_hook("postprocessing"), _HOOK]), None
+    )
+    assert result["hookCount"] == 2
+    item = _table().get_item(Key={"Configuration": "Config#zz-active-v1"})["Item"]
+    assert item["postprocessing"]["arn"] == _FLAT_ARN
+    assert item["rule_validation"]["postHook"][0]["featureId"] == "deliver"

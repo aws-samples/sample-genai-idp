@@ -5,9 +5,15 @@
 
 A pipeline hook is a Lambda the unified workflow invokes at an extension point
 (``preprocessing``, ``postOcr``, ``postClassification``, ``postExtraction``,
-``postRuleValidation``, ``postSummarization``) via the host's pipeline-hooks
-dispatcher. A hook may simply observe, or it may hand a MODIFIED
+``postRuleValidation``, ``postSummarization``, ``postprocessing``) via the host's
+pipeline-hooks dispatcher. A hook may simply observe, or it may hand a MODIFIED
 :class:`~idp_common.models.Document` back for the next step to consume.
+
+``preprocessing`` (first) and ``postprocessing`` (last) are standalone
+single-hook points; the ``post*`` step points in between each hold a list. At
+``postprocessing`` there is no next step — the returned document IS the workflow
+output, which the host's tracker persists to the tracking table, reporting, and
+the UI.
 
 This module makes the safe round-trip two calls::
 

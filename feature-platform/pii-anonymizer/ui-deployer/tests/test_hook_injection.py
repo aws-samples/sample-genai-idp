@@ -1,7 +1,7 @@
 """Unit tests for the ui-deployer's config-preset hook injection.
 
 The crux of the feature's correctness: the preprocessing hook must be baked
-INTO the config preset (under preprocessing.preHook) so it travels with the
+INTO the config preset (onto its flat `preprocessing` section) so it travels with the
 version an admin activates — registering it into the active version separately
 would orphan it the moment the preset is activated.
 
