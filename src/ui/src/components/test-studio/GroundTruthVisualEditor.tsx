@@ -18,7 +18,20 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Alert, Box, Button, FormField, Header, Input, SegmentedControl, SpaceBetween, Spinner, Tabs } from '@cloudscape-design/components';
+import {
+  Alert,
+  Box,
+  Button,
+  FormField,
+  Header,
+  Input,
+  Select,
+  SegmentedControl,
+  SpaceBetween,
+  Spinner,
+  Tabs,
+} from '@cloudscape-design/components';
+import type { SelectProps } from '@cloudscape-design/components';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from '../../api/client-shim';
 import { getFilePresignedUrl, uploadDocument } from '../../graphql/generated';
@@ -88,6 +101,10 @@ const GroundTruthVisualEditor = ({
   const [error, setError] = useState<string | null>(null);
   const [activeFieldGeometry, setActiveFieldGeometry] = useState<Record<string, unknown> | null>(null);
   const [collapsedPaths, setCollapsedPaths] = useState<Set<string>>(new Set());
+  // Same filter the HITL review editor offers. On a document with 169 fields the
+  // handful below threshold are what a reviewer is actually there for, and
+  // scrolling to find them is most of the work.
+  const [filterMode, setFilterMode] = useState<SelectProps.Option>({ label: 'Show all fields', value: 'none' });
   const [activeTabId, setActiveTabId] = useState('visual');
 
   const selectedSection = sections.find((s) => s.sectionId === selectedSectionId) ?? sections[0];
@@ -375,19 +392,32 @@ const GroundTruthVisualEditor = ({
                         </FormField>
                       )}
                       {inferenceResult ? (
-                        <FormFieldRenderer
-                          fieldKey="Document Data"
-                          value={inferenceResult}
-                          onChange={updateInferenceResult}
-                          isReadOnly={isReadOnly}
-                          onFieldFocus={handleFieldFocus}
-                          onFieldDoubleClick={handleFieldFocus}
-                          path={[]}
-                          explainabilityInfo={explainabilityInfo}
-                          collapsedPaths={collapsedPaths}
-                          onToggleCollapse={handleToggleCollapse}
-                          displayPath={[]}
-                        />
+                        <>
+                          <FormField label="Fields to show">
+                            <Select
+                              selectedOption={filterMode}
+                              onChange={({ detail }) => setFilterMode(detail.selectedOption)}
+                              options={[
+                                { label: 'Show all fields', value: 'none' },
+                                { label: 'Confidence alerts only', value: 'confidence-alerts' },
+                              ]}
+                            />
+                          </FormField>
+                          <FormFieldRenderer
+                            fieldKey="Document Data"
+                            value={inferenceResult}
+                            onChange={updateInferenceResult}
+                            isReadOnly={isReadOnly}
+                            onFieldFocus={handleFieldFocus}
+                            onFieldDoubleClick={handleFieldFocus}
+                            path={[]}
+                            explainabilityInfo={explainabilityInfo}
+                            collapsedPaths={collapsedPaths}
+                            onToggleCollapse={handleToggleCollapse}
+                            filterMode={filterMode.value}
+                            displayPath={[]}
+                          />
+                        </>
                       ) : (
                         <Alert type="warning">This baseline has no inference_result — use the JSON editor tab.</Alert>
                       )}

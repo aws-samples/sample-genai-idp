@@ -1446,7 +1446,11 @@ def _harvest_label_job(job):
 
         try:
             if _write_draft_labels_for_doc(
-                test_set_bucket, test_set_id, file_name, doc.get("Sections") or []
+                test_set_bucket,
+                test_set_id,
+                file_name,
+                doc.get("Sections") or [],
+                config_version=job.get("configVersion") or doc.get("ConfigVersion"),
             ):
                 labeled += 1
             # Stamp the owning test set onto the pipeline document. Without this
@@ -1506,7 +1510,9 @@ def _harvest_label_job(job):
     return updated
 
 
-def _write_draft_labels_for_doc(test_set_bucket, test_set_id, file_name, sections):
+def _write_draft_labels_for_doc(
+    test_set_bucket, test_set_id, file_name, sections, config_version=None
+):
     """Write one document's sections into the test-set baseline as draft labels.
 
     Returns True if anything was written. Sections already reviewed by a human
@@ -1538,6 +1544,17 @@ def _write_draft_labels_for_doc(test_set_bucket, test_set_id, file_name, section
         inference = result.get("inference_result")
         min_conf = _min_confidence(explainability, inference)
         result["labelSource"] = LABEL_SOURCE_DRAFT
+        # Record which config produced these labels. completeSectionReview reads
+        # metadata.config_version to key the confidence curve, so without this
+        # every review observation landed in the version-agnostic _aggregate curve
+        # while scoring observations went to the per-version one — the two halves
+        # of the calibration signal never combined.
+        if config_version:
+            metadata = result.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+            metadata.setdefault("config_version", config_version)
+            result["metadata"] = metadata
         if min_conf is not None:
             result["minConfidence"] = min_conf
             threshold = _confidence_threshold(explainability, inference)

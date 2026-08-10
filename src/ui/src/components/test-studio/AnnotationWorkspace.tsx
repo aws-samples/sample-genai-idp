@@ -40,15 +40,17 @@ import {
   Grid,
   Header,
   ProgressBar,
+  Pagination,
   SegmentedControl,
   SpaceBetween,
   Spinner,
   StatusIndicator,
+  TextFilter,
 } from '@cloudscape-design/components';
 import type { FlashbarProps } from '@cloudscape-design/components';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from '../../api/client-shim';
-import { getAnnotationQueue, claimReview, completeSectionReview } from '../../graphql/generated';
+import { getAnnotationQueue, claimReview, releaseReview, completeSectionReview } from '../../graphql/generated';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
@@ -99,6 +101,9 @@ const QUEUE_PAGE_SIZE = 100;
 
 const LABEL_JOB_POLL_MS = 5000;
 
+/** Rows per page in the queue rail. */
+const QUEUE_ROWS_PER_PAGE = 20;
+
 const AnnotationWorkspace = (): React.JSX.Element => {
   const { testSetId } = useParams<{ testSetId: string }>();
   const { navigationOpen, setNavigationOpen } = useAppContext();
@@ -112,6 +117,10 @@ const AnnotationWorkspace = (): React.JSX.Element => {
   const [error, setError] = useState<string | null>(null);
   const [claimWarning, setClaimWarning] = useState<string | null>(null);
   const [isConfirming, setIsConfirming] = useState(false);
+  const [isClaiming, setIsClaiming] = useState(false);
+  const [railCollapsed, setRailCollapsed] = useState(false);
+  const [queueFilter, setQueueFilter] = useState('');
+  const [queuePage, setQueuePage] = useState(1);
   const [docView, setDocView] = useState<DocView>('ground-truth');
   const [flashItems, setFlashItems] = useState<FlashbarProps.MessageDefinition[]>([]);
 
@@ -185,49 +194,63 @@ const AnnotationWorkspace = (): React.JSX.Element => {
   const selected = useMemo(() => queue?.documents.find((d) => d.objectKey === selectedKey) ?? null, [queue, selectedKey]);
 
   /**
-   * Claim the document before editing, so two annotators can't unknowingly work
-   * the same one. An already-claimed rejection is not an error state — surface it
-   * and move on to the next available document.
+   * Select a document for viewing. Deliberately does NOT claim it.
+   *
+   * Opening used to claim automatically, which meant browsing the queue silently
+   * locked documents away from teammates — an annotator who clicked three
+   * documents to see what was in them had taken all three. Viewing is free;
+   * claiming is an explicit act.
    */
-  const claimAndSelect = useCallback(
-    async (item: QueueItem) => {
-      setClaimWarning(null);
-      setSelectedKey(item.objectKey);
-      if (!item.reviewObjectKey || item.claimedByMe) return;
-      try {
-        await client.graphql({ query: claimReview, variables: { objectKey: item.reviewObjectKey } });
-      } catch (err) {
-        const message = String((err as { errors?: { message?: string }[] })?.errors?.[0]?.message ?? err);
-        logger.warn('Could not claim document:', message);
-        setClaimWarning(
-          message.includes('already claimed')
-            ? `${item.objectKey} was just claimed by someone else. Pick another document from the queue.`
-            : `Could not claim ${item.objectKey}: ${message}`,
-        );
-        await loadQueue(false);
-      }
-    },
-    [loadQueue],
-  );
+  const selectDocument = useCallback((item: QueueItem) => {
+    setClaimWarning(null);
+    setSelectedKey(item.objectKey);
+  }, []);
+
+  /** Take ownership so no one else edits this document at the same time. */
+  const claimSelected = useCallback(async () => {
+    if (!selected?.reviewObjectKey) return;
+    setClaimWarning(null);
+    setIsClaiming(true);
+    try {
+      await client.graphql({ query: claimReview, variables: { objectKey: selected.reviewObjectKey } });
+      await loadQueue(true);
+    } catch (err) {
+      const message = String((err as { errors?: { message?: string }[] })?.errors?.[0]?.message ?? err);
+      logger.warn('Could not claim document:', message);
+      // Losing a race is normal in a shared queue, not an error state.
+      setClaimWarning(
+        message.includes('already claimed')
+          ? `${selected.objectKey} was just claimed by someone else. Pick another document from the queue.`
+          : `Could not claim ${selected.objectKey}: ${message}`,
+      );
+      await loadQueue(false);
+    } finally {
+      setIsClaiming(false);
+    }
+  }, [selected, loadQueue]);
 
   /**
-   * Claim whatever the queue landed us on — once per document.
+   * Give a claim back without completing the review.
    *
-   * `attemptedClaims` is load-bearing. A failed claim calls loadQueue, which
-   * produces a new `selected` object identity, which re-fires this effect, which
-   * fails again: an infinite retry loop whose only visible symptom was a warning
-   * alert flashing on and off. Recording the attempt breaks the cycle, so a
-   * document that cannot be claimed is reported once and left alone.
+   * Without this an abandoned claim was only ever released by the same annotator
+   * finishing it, so a document someone opened and walked away from was stuck for
+   * everyone else.
    */
-  const [attemptedClaims, setAttemptedClaims] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    if (!selected || selected.claimedByMe || !selected.available) return;
-    if (!selected.reviewObjectKey) return;
-    if (attemptedClaims.has(selected.objectKey)) return;
-    setAttemptedClaims((prev) => new Set(prev).add(selected.objectKey));
-    claimAndSelect(selected);
-  }, [selected, claimAndSelect, attemptedClaims]);
+  const releaseSelected = useCallback(async () => {
+    if (!selected?.reviewObjectKey) return;
+    setClaimWarning(null);
+    setIsClaiming(true);
+    try {
+      await client.graphql({ query: releaseReview, variables: { objectKey: selected.reviewObjectKey } });
+      await loadQueue(true);
+    } catch (err) {
+      logger.error('Could not release document:', err);
+      const message = (err as { errors?: { message?: string }[] })?.errors?.[0]?.message;
+      setClaimWarning(message || `Could not release ${selected.objectKey}.`);
+    } finally {
+      setIsClaiming(false);
+    }
+  }, [selected, loadQueue]);
 
   /**
    * Persist a reviewed section through the review API. Replaces the editor's
@@ -324,6 +347,22 @@ const AnnotationWorkspace = (): React.JSX.Element => {
     },
     [advanceToNext],
   );
+
+  // Filter + paginate the rail. A 50-document queue in a fixed-height column is
+  // unusable without them, and the queue is deliberately capped rather than
+  // infinite so these bound what a reviewer scrolls.
+  const filteredQueue = useMemo(() => {
+    const all = queue?.documents ?? [];
+    if (!queueFilter.trim()) return all;
+    const needle = queueFilter.trim().toLowerCase();
+    return all.filter((d) => d.objectKey.toLowerCase().includes(needle));
+  }, [queue, queueFilter]);
+
+  const queuePageCount = Math.max(1, Math.ceil(filteredQueue.length / QUEUE_ROWS_PER_PAGE));
+  const pagedQueue = useMemo(() => {
+    const start = (queuePage - 1) * QUEUE_ROWS_PER_PAGE;
+    return filteredQueue.slice(start, start + QUEUE_ROWS_PER_PAGE);
+  }, [filteredQueue, queuePage]);
 
   const progressPct = queue && queue.totalDocs > 0 ? Math.round((queue.reviewedDocs / queue.totalDocs) * 100) : 0;
 
@@ -423,64 +462,105 @@ const AnnotationWorkspace = (): React.JSX.Element => {
         )}
 
         {queue && queue.documents.length > 0 && testSetBucket && (
-          <Grid gridDefinition={[{ colspan: { default: 12, m: 3 } }, { colspan: { default: 12, m: 9 } }]}>
+          <Grid
+            gridDefinition={
+              railCollapsed
+                ? [{ colspan: { default: 12, m: 1 } }, { colspan: { default: 12, m: 11 } }]
+                : [{ colspan: { default: 12, m: 3 } }, { colspan: { default: 12, m: 9 } }]
+            }
+          >
             <Container
               header={
-                <Header variant="h3" counter={`(${queue.documents.length})`}>
-                  Review queue
+                <Header
+                  variant="h3"
+                  counter={railCollapsed ? undefined : `(${filteredQueue.length})`}
+                  actions={
+                    <Button
+                      variant="inline-icon"
+                      iconName={railCollapsed ? 'angle-right' : 'angle-left'}
+                      ariaLabel={railCollapsed ? 'Expand review queue' : 'Collapse review queue'}
+                      onClick={() => setRailCollapsed((v) => !v)}
+                    />
+                  }
+                >
+                  {railCollapsed ? '' : 'Review queue'}
                 </Header>
               }
             >
-              <Cards
-                items={queue.documents}
-                trackBy="objectKey"
-                selectionType="single"
-                selectedItems={selected ? [selected] : []}
-                onSelectionChange={({ detail }) => {
-                  const item = detail.selectedItems[0];
-                  if (item) claimAndSelect(item);
-                }}
-                isItemDisabled={(item) => !item.available}
-                cardDefinition={{
-                  header: (item) => (
-                    <Box fontSize="body-s" fontWeight="bold">
-                      {item.objectKey}
-                    </Box>
-                  ),
-                  sections: [
-                    {
-                      id: 'meta',
-                      content: (item) => (
-                        <SpaceBetween direction="horizontal" size="xxs">
-                          {renderConfidence(item.minConfidence, item.confidenceThreshold)}
-                          {renderLabelSource(item.labelSource)}
-                        </SpaceBetween>
+              {railCollapsed ? (
+                <Box fontSize="body-s" color="text-body-secondary" textAlign="center">
+                  {filteredQueue.length}
+                </Box>
+              ) : (
+                <SpaceBetween size="s">
+                  <TextFilter
+                    filteringText={queueFilter}
+                    filteringPlaceholder="Find a document"
+                    onChange={({ detail }) => {
+                      setQueueFilter(detail.filteringText);
+                      setQueuePage(1);
+                    }}
+                    countText={queueFilter ? `${filteredQueue.length} match${filteredQueue.length === 1 ? '' : 'es'}` : ''}
+                  />
+                  <Cards
+                    items={pagedQueue}
+                    trackBy="objectKey"
+                    selectionType="single"
+                    selectedItems={selected ? [selected] : []}
+                    onSelectionChange={({ detail }) => {
+                      const item = detail.selectedItems[0];
+                      if (item) selectDocument(item);
+                    }}
+                    isItemDisabled={(item) => item.reviewed}
+                    cardDefinition={{
+                      header: (item) => (
+                        <Box fontSize="body-s" fontWeight="bold">
+                          {item.objectKey}
+                        </Box>
                       ),
-                    },
-                    {
-                      id: 'claim',
-                      content: (item) => {
-                        if (item.reviewed) return <StatusIndicator type="success">Reviewed</StatusIndicator>;
-                        if (item.claimedByMe) return <Badge color="blue">You have this</Badge>;
-                        if (item.claimedBy) return <StatusIndicator type="in-progress">{item.claimedBy}</StatusIndicator>;
-                        // Authored ground truth has no pipeline copy to review, so
-                        // it can be inspected but not annotated. Say so rather than
-                        // letting the reviewer discover it by clicking.
-                        if (!item.reviewObjectKey) {
-                          return (
-                            <Box fontSize="body-s" color="text-body-secondary">
-                              Ground truth — nothing to review
-                            </Box>
-                          );
-                        }
-                        return null;
-                      },
-                    },
-                  ],
-                }}
-                cardsPerRow={[{ cards: 1 }]}
-                empty={<Box textAlign="center">No documents to review.</Box>}
-              />
+                      sections: [
+                        {
+                          id: 'meta',
+                          content: (item) => (
+                            <SpaceBetween direction="horizontal" size="xxs">
+                              {renderConfidence(item.minConfidence, item.confidenceThreshold)}
+                              {renderLabelSource(item.labelSource)}
+                            </SpaceBetween>
+                          ),
+                        },
+                        {
+                          id: 'claim',
+                          content: (item) => {
+                            if (item.reviewed) return <StatusIndicator type="success">Reviewed</StatusIndicator>;
+                            if (item.claimedByMe) return <Badge color="blue">You have this</Badge>;
+                            if (item.claimedBy) return <StatusIndicator type="in-progress">{item.claimedBy}</StatusIndicator>;
+                            // Authored ground truth has no pipeline copy to review, so
+                            // it can be inspected but not annotated. Say so rather than
+                            // letting the reviewer discover it by clicking.
+                            if (!item.reviewObjectKey) {
+                              return (
+                                <Box fontSize="body-s" color="text-body-secondary">
+                                  Ground truth — nothing to review
+                                </Box>
+                              );
+                            }
+                            return null;
+                          },
+                        },
+                      ],
+                    }}
+                    cardsPerRow={[{ cards: 1 }]}
+                    empty={<Box textAlign="center">No documents to review.</Box>}
+                  />
+                  {queuePageCount > 1 && (
+                    <Pagination
+                      currentPageIndex={queuePage}
+                      pagesCount={queuePageCount}
+                      onChange={({ detail }) => setQueuePage(detail.currentPageIndex)}
+                    />
+                  )}
+                </SpaceBetween>
+              )}
             </Container>
 
             <SpaceBetween size="s">
@@ -518,6 +598,20 @@ const AnnotationWorkspace = (): React.JSX.Element => {
                     <Button onClick={advanceToNext} disabled={isLoading}>
                       Skip to next document
                     </Button>
+                    {/* Claiming is explicit: opening a document to look at it does
+                        not lock it away from teammates. Release gives a claim back
+                        without completing the review, so a document someone opened
+                        and abandoned is not stuck for everyone else. */}
+                    {selected.reviewObjectKey && !selected.claimedByMe && !selected.reviewed && (
+                      <Button onClick={claimSelected} loading={isClaiming} disabled={isLoading || Boolean(selected.claimedBy)}>
+                        {selected.claimedBy ? `Claimed by ${selected.claimedBy}` : 'Claim this document'}
+                      </Button>
+                    )}
+                    {selected.claimedByMe && (
+                      <Button onClick={releaseSelected} loading={isClaiming} disabled={isLoading}>
+                        Release claim
+                      </Button>
+                    )}
                     {/* The common case: the draft labels are already right, so
                         there is nothing to edit. Without this the reviewer could
                         only "skip", which advances the cursor but never marks the

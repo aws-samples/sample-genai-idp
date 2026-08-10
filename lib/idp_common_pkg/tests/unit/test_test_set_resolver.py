@@ -2385,6 +2385,102 @@ class TestTestSetResolver:
         assert by_key["drafted.pdf"]["reviewObjectKey"] == "run1/drafted.pdf"
         assert by_key["gt.pdf"]["reviewObjectKey"] is None
 
+    def test_harvest_records_the_config_that_produced_the_labels(self, labeling_env):
+        """completeSectionReview keys the confidence curve on this.
+
+        It reads metadata.config_version off the baseline to decide which curve a
+        review observation belongs to. The harvester never wrote that field, so
+        every review landed in the version-agnostic _aggregate curve while scoring
+        runs wrote to the per-version one — the two halves of the calibration
+        signal never combined. Observed live: fake-w2 had 8048 scoring / 0 review
+        observations, the bank statements 169 review / 0 scoring.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        uri = _seed_pipeline_result(
+            s3, "ts1-run/a.pdf/sections/1/result.json", {"vendor": "Acme"}
+        )
+        _seed_completed_run(
+            table,
+            "ts1-run",
+            "ts1",
+            ["a.pdf"],
+            {"a.pdf": [{"Id": "1", "OutputJSONUri": uri}]},
+        )
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#ts1-run",
+                "testSetId": "ts1",
+                "jobId": "ts1-run",
+                "status": "RUNNING",
+                "configVersion": "my-config-v2",
+                "total": 1,
+                "labeled": 0,
+            }
+        )
+
+        test_set_index.get_draft_label_job({"testSetId": "ts1", "jobId": "ts1-run"})
+
+        body = json.loads(
+            s3.get_object(
+                Bucket="test-set-bucket",
+                Key="ts1/baseline/a.pdf/sections/1/result.json",
+            )["Body"].read()
+        )
+        assert body["metadata"]["config_version"] == "my-config-v2"
+
+    def test_harvest_preserves_a_config_version_already_in_metadata(self, labeling_env):
+        """The pipeline's own value wins — setdefault, not overwrite."""
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        s3.put_object(
+            Bucket="output-bucket",
+            Key="ts1-run/a.pdf/sections/1/result.json",
+            Body=json.dumps(
+                {
+                    "inference_result": {"vendor": "Acme"},
+                    "metadata": {"config_version": "from-pipeline"},
+                }
+            ).encode(),
+        )
+        _seed_completed_run(
+            table,
+            "ts1-run",
+            "ts1",
+            ["a.pdf"],
+            {
+                "a.pdf": [
+                    {
+                        "Id": "1",
+                        "OutputJSONUri": "s3://output-bucket/ts1-run/a.pdf/sections/1/result.json",
+                    }
+                ]
+            },
+        )
+        table.put_item(
+            Item={
+                "PK": "testset#ts1",
+                "SK": "labeljob#ts1-run",
+                "testSetId": "ts1",
+                "jobId": "ts1-run",
+                "status": "RUNNING",
+                "configVersion": "from-job",
+                "total": 1,
+                "labeled": 0,
+            }
+        )
+
+        test_set_index.get_draft_label_job({"testSetId": "ts1", "jobId": "ts1-run"})
+
+        body = json.loads(
+            s3.get_object(
+                Bucket="test-set-bucket",
+                Key="ts1/baseline/a.pdf/sections/1/result.json",
+            )["Body"].read()
+        )
+        assert body["metadata"]["config_version"] == "from-pipeline"
+
     def test_queue_harvests_the_running_label_job(self, labeling_env):
         """Found live: the queue never advanced draft labeling.
 
