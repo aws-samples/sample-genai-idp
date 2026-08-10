@@ -269,8 +269,16 @@ export const reviewerNavItems = [{ type: 'link', text: 'Document List', href: `#
  * which handles both cases.
  */
 export const buildAnnotatorNavItems = (allowedTestSets: string[] | null): Array<Record<string, unknown>> => {
+  const items: Array<Record<string, unknown>> = [];
   if (allowedTestSets && allowedTestSets.length === 1) {
-    return [{ type: 'link', text: 'My annotation queue', href: testSetAnnotateHref(allowedTestSets[0]) }];
+    // "One link, one queue" for the common case.
+    items.push({ type: 'link', text: 'My annotation queue', href: testSetAnnotateHref(allowedTestSets[0]) });
+    // Always reachable, even when the shortcut above is taken. The scope this nav
+    // is built from is fetched once on mount, so an annotator assigned a second
+    // set mid-session would otherwise keep being sent straight into the first one
+    // with no way to discover the new assignment short of a reload.
+    items.push({ type: 'link', text: 'All my assignments', href: `#${ANNOTATE_LANDING_PATH}` });
+    return items;
   }
   return [{ type: 'link', text: 'My annotation queues', href: `#${ANNOTATE_LANDING_PATH}` }];
 };

@@ -39,10 +39,17 @@ UNSCOPED_GROUPS = ("Admin", "Author")
 ANNOTATOR_GROUP = "Annotator"
 
 # Scope lookups happen on every queue read and every review operation, so they
-# are cached briefly per Lambda container. The TTL is short because it bounds how
-# long a *revoked* annotator keeps access — the reason this is 5 minutes and not
-# an hour.
+# are cached briefly per Lambda container. The TTL bounds how long a *revoked*
+# annotator keeps access — the reason this is 5 minutes and not an hour.
 _SCOPE_CACHE_TTL_SECONDS = 300
+
+# An *empty* scope is cached far more briefly. The two directions are not
+# symmetric: being slow to revoke is a deliberate trade for read cost, but being
+# slow to GRANT is just a defect. Caching a denial for the full TTL meant an
+# annotator who tried before being assigned kept getting "not assigned to this
+# test set" for five minutes after access was granted — with the error telling
+# them to ask for the assignment they already had.
+_EMPTY_SCOPE_CACHE_TTL_SECONDS = 10
 _scope_cache: Dict[str, Dict[str, Any]] = {}
 
 
@@ -103,8 +110,14 @@ def get_allowed_test_sets(email: str, users_table: Any = None) -> Optional[List[
 
     now = time.time()
     cached = _scope_cache.get(email)
-    if cached and (now - cached["timestamp"]) < _SCOPE_CACHE_TTL_SECONDS:
-        return cached["scope"]
+    if cached:
+        ttl = (
+            _SCOPE_CACHE_TTL_SECONDS
+            if cached["scope"]
+            else _EMPTY_SCOPE_CACHE_TTL_SECONDS
+        )
+        if (now - cached["timestamp"]) < ttl:
+            return cached["scope"]
 
     scope: Optional[List[str]] = None
     table = users_table

@@ -11,6 +11,9 @@ and they assert the *deny* direction, including for the states where a naive
 implementation would fail open (no scope recorded, lookup error, unknown role).
 """
 
+import time
+from unittest.mock import MagicMock
+
 import boto3
 import pytest
 from moto import mock_aws
@@ -258,3 +261,61 @@ class TestVisibleTestSets:
 
     def test_direct_invoke_sees_everything(self, users_table):
         assert visible_test_sets({}, ["ts-a", "ts-b"], users_table) == ["ts-a", "ts-b"]
+
+
+@pytest.mark.unit
+class TestScopeCacheAsymmetry:
+    """Being slow to revoke is a deliberate trade; being slow to grant is a bug.
+
+    The cache exists because scope is read on every queue read and every review
+    operation. Its TTL bounds how long a REVOKED annotator keeps access, which is
+    the direction that matters for security. Caching a *denial* for that same
+    duration had no such justification and produced the opposite of a security
+    property: an annotator who tried before being assigned kept seeing "not
+    assigned to this test set" for five minutes after access was granted, with the
+    error telling them to ask for the assignment they already had.
+    """
+
+    def test_an_empty_scope_is_cached_far_more_briefly_than_a_real_one(self):
+        assert (
+            testset_scope._EMPTY_SCOPE_CACHE_TTL_SECONDS
+            < testset_scope._SCOPE_CACHE_TTL_SECONDS
+        )
+
+    def test_a_denial_does_not_outlive_the_grant_that_follows_it(self, monkeypatch):
+        """A newly granted scope must be visible almost immediately."""
+        testset_scope.clear_scope_cache()
+        table = MagicMock()
+        # First lookup: no assignment yet.
+        table.query.return_value = {"Items": [{"allowedTestSets": []}]}
+        assert testset_scope.get_allowed_test_sets("a@example.com", table) is None
+
+        # Access is granted moments later.
+        table.query.return_value = {"Items": [{"allowedTestSets": ["set-a"]}]}
+
+        # Just past the short empty-scope TTL, the grant is picked up.
+        now = time.time()
+        monkeypatch.setattr(
+            testset_scope.time,
+            "time",
+            lambda: now + testset_scope._EMPTY_SCOPE_CACHE_TTL_SECONDS + 1,
+        )
+        assert testset_scope.get_allowed_test_sets("a@example.com", table) == ["set-a"]
+
+    def test_a_real_scope_still_uses_the_full_ttl(self, monkeypatch):
+        """Read cost is the reason the cache exists; don't undo it for grants."""
+        testset_scope.clear_scope_cache()
+        table = MagicMock()
+        table.query.return_value = {"Items": [{"allowedTestSets": ["set-a"]}]}
+        assert testset_scope.get_allowed_test_sets("b@example.com", table) == ["set-a"]
+        calls_after_first = table.query.call_count
+
+        now = time.time()
+        monkeypatch.setattr(
+            testset_scope.time,
+            "time",
+            lambda: now + testset_scope._EMPTY_SCOPE_CACHE_TTL_SECONDS + 1,
+        )
+        # Still cached — a populated scope is not re-read on the short TTL.
+        assert testset_scope.get_allowed_test_sets("b@example.com", table) == ["set-a"]
+        assert table.query.call_count == calls_after_first
