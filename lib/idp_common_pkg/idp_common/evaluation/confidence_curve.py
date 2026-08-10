@@ -109,8 +109,9 @@ TIER_EXPLANATIONS = {
         "least partially measured on this test set"
     ),
     QualityTier.BRONZE: (
-        "labels exist, but accuracy is estimated from a cross-set prior rather "
-        "than measured here — review or score this set to earn a higher tier"
+        "below 95% estimated label accuracy, or accuracy is still estimated from "
+        "a cross-set prior rather than measured here — review or score this set "
+        "to earn a higher tier"
     ),
     QualityTier.UNRATED: (
         "confidence cannot be trusted to rank errors on this set, so no accuracy "

@@ -33,6 +33,7 @@ import {
   BreadcrumbGroup,
   Button,
   Cards,
+  ColumnLayout,
   Container,
   ContentLayout,
   CopyToClipboard,
@@ -41,6 +42,7 @@ import {
   Header,
   ProgressBar,
   Pagination,
+  Popover,
   SegmentedControl,
   SpaceBetween,
   Spinner,
@@ -50,7 +52,7 @@ import {
 import type { FlashbarProps } from '@cloudscape-design/components';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from '../../api/client-shim';
-import { getAnnotationQueue, claimReview, releaseReview, completeSectionReview } from '../../graphql/generated';
+import { getAnnotationQueue, claimReview, releaseReview, completeSectionReview, estimateReviewEffort } from '../../graphql/generated';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
@@ -101,6 +103,8 @@ const QUEUE_PAGE_SIZE = 100;
 
 const LABEL_JOB_POLL_MS = 5000;
 
+const formatPct = (fraction: number): string => (Number.isFinite(fraction) ? `${(fraction * 100).toFixed(1)}%` : '—');
+
 /** Rows per page in the queue rail. */
 const QUEUE_ROWS_PER_PAGE = 20;
 
@@ -123,6 +127,48 @@ const AnnotationWorkspace = (): React.JSX.Element => {
   const [queuePage, setQueuePage] = useState(1);
   const [docView, setDocView] = useState<DocView>('ground-truth');
   const [flashItems, setFlashItems] = useState<FlashbarProps.MessageDefinition[]>([]);
+
+  /**
+   * What the review is buying, refreshed as documents are completed.
+   *
+   * This is the answer to "I annotate the low-confidence documents and nothing
+   * improves". Review does NOT raise a field's confidence — that is the model's
+   * own assessment and the calibration curve reads it, so overwriting it would
+   * destroy the observation. What review improves is the *estimate*: residual
+   * error falls and estimateConfidence moves off `prior` as the curve learns.
+   * None of that was visible anywhere, so the payoff for reviewing was invisible.
+   */
+  const [impact, setImpact] = useState<{
+    baselineError: number;
+    residualError: number;
+    estimateConfidence: string;
+    qualityTier?: string | null;
+    qualityTierReason?: string | null;
+    totalObservations: number;
+  } | null>(null);
+
+  const loadImpact = useCallback(async () => {
+    if (!testSetId) return;
+    try {
+      const response = await client.graphql({
+        query: estimateReviewEffort,
+        variables: { testSetId },
+      });
+      const est = response.data?.estimateReviewEffort;
+      if (!est) return;
+      setImpact({
+        baselineError: est.baselineError ?? 0,
+        residualError: est.residualError ?? 0,
+        estimateConfidence: est.estimateConfidence ?? 'prior',
+        qualityTier: est.qualityTier,
+        qualityTierReason: est.qualityTierReason,
+        totalObservations: est.calibration?.totalObservations ?? 0,
+      });
+    } catch (err) {
+      // Best-effort: the queue is fully usable without this panel.
+      logger.debug('Could not load review impact:', err);
+    }
+  }, [testSetId]);
 
   const loadQueue = useCallback(
     async (preserveSelection = true) => {
@@ -167,7 +213,8 @@ const AnnotationWorkspace = (): React.JSX.Element => {
 
   useEffect(() => {
     loadQueue(false);
-  }, [loadQueue]);
+    loadImpact();
+  }, [loadQueue, loadImpact]);
 
   const labelJobRunning = queue?.labelJobStatus === 'RUNNING';
   const [pollTick, setPollTick] = useState(0);
@@ -277,6 +324,8 @@ const AnnotationWorkspace = (): React.JSX.Element => {
   const advanceToNext = useCallback(async () => {
     const current = selectedKey;
     await loadQueue(false);
+    // Each completed review feeds the curve, so the estimate moves as work lands.
+    loadImpact();
     setQueue((data) => {
       if (data) {
         const next = data.documents.find((d) => d.available && d.objectKey !== current);
@@ -284,7 +333,7 @@ const AnnotationWorkspace = (): React.JSX.Element => {
       }
       return data;
     });
-  }, [loadQueue, selectedKey]);
+  }, [loadQueue, loadImpact, selectedKey]);
 
   /**
    * Confirm the draft labels are already correct, with no edits.
@@ -422,6 +471,51 @@ const AnnotationWorkspace = (): React.JSX.Element => {
                   (queue.claimedByOthers > 0 ? ` · ${queue.claimedByOthers} in progress by others` : '')
                 }
               />
+              {impact && (
+                <ColumnLayout columns={3} variant="text-grid">
+                  <div>
+                    <Box variant="awsui-key-label">Estimated label accuracy</Box>
+                    <Box fontSize="heading-m">{formatPct(1 - impact.baselineError)}</Box>
+                    <Box fontSize="body-s" color="text-body-secondary">
+                      {impact.residualError < impact.baselineError
+                        ? `${formatPct(1 - impact.residualError)} after the recommended review`
+                        : 'reviewing more will refine this'}
+                    </Box>
+                  </div>
+                  <div>
+                    <Box variant="awsui-key-label">Evidence</Box>
+                    <Box fontSize="heading-m">{impact.totalObservations.toLocaleString()}</Box>
+                    <Box fontSize="body-s" color="text-body-secondary">
+                      {/* Named plainly: "prior" means the number comes from other
+                          sets, not this one, and reviewing is what changes that. */}
+                      {impact.estimateConfidence === 'prior'
+                        ? 'measurements — estimate still based on other sets'
+                        : `measurements — ${impact.estimateConfidence.replace('-', ' ')} on this set`}
+                    </Box>
+                  </div>
+                  <div>
+                    <Box variant="awsui-key-label">Quality</Box>
+                    {impact.qualityTier ? (
+                      <Popover
+                        dismissButton={false}
+                        position="top"
+                        size="medium"
+                        triggerType="custom"
+                        content={impact.qualityTierReason ?? ''}
+                      >
+                        <Badge color={impact.qualityTier === 'gold' ? 'green' : impact.qualityTier === 'silver' ? 'blue' : 'grey'}>
+                          {impact.qualityTier.charAt(0).toUpperCase() + impact.qualityTier.slice(1)}
+                        </Badge>
+                      </Popover>
+                    ) : (
+                      <Box fontSize="body-s" color="text-body-secondary">
+                        -
+                      </Box>
+                    )}
+                  </div>
+                </ColumnLayout>
+              )}
+
               {/* Be explicit when the ranking covers only part of the set —
                   otherwise "worst-first" implies the whole set was ranked. */}
               {queue.inspectedDocs != null && queue.inspectedDocs < queue.totalDocs && (
