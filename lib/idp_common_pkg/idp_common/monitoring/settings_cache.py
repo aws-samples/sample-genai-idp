@@ -39,6 +39,11 @@ import boto3
 
 logger = logging.getLogger(__name__)
 
+#: Retry window used when the first-ever SSM load fails and the cache is still
+#: empty. Deliberately much shorter than the TTL so callers don't silently run
+#: with no settings at all for the full TTL period.
+_EMPTY_CACHE_RETRY_SECONDS = 30
+
 
 class SettingsCache:
     """
@@ -67,6 +72,14 @@ class SettingsCache:
         # get() returns empty (observed as "CloudWatchLogGroups not found in SSM
         # Settings" on cold starts). None makes "never loaded" always-expired.
         self._cache_time: Optional[float] = None
+        # Explicit monotonic deadline for the next allowed refresh attempt, used
+        # instead of back-dating _cache_time. Back-dating (_cache_time =
+        # monotonic() - ttl + 30) produced a value whose meaning depended on the
+        # clock's origin: time.monotonic() counts from boot, so on a young
+        # container it can be smaller than the TTL and the subtraction goes
+        # negative, making the "age" arithmetic nonsense (GitHub #609). A
+        # forward-looking deadline never depends on the origin.
+        self._retry_after: Optional[float] = None
         self._ttl: int = ttl_seconds
         self._lock: threading.Lock = threading.Lock()
         self._ssm_client: Optional[Any] = ssm_client
@@ -82,7 +95,18 @@ class SettingsCache:
         return self._ssm_client
 
     def _is_expired(self) -> bool:
-        """Return True if the cache has passed its TTL or has never been loaded."""
+        """
+        Return True if a refresh is due.
+
+        A refresh is due when the cache has never been loaded or has passed its
+        TTL — except while a post-failure retry deadline is pending, which holds
+        the refresh back until that deadline passes.
+        """
+        if self._retry_after is not None:
+            # A refresh attempt failed; hold off until the retry deadline.
+            if time.monotonic() < self._retry_after:
+                return False
+            return True
         if self._cache_time is None:
             return True
         return (time.monotonic() - self._cache_time) > self._ttl
@@ -114,6 +138,7 @@ class SettingsCache:
             settings: Dict[str, Any] = json.loads(raw_value)
             self._cache = settings
             self._cache_time = time.monotonic()
+            self._retry_after = None  # success — back to normal TTL expiry
             logger.debug(
                 "Settings cache refreshed from SSM parameter '%s' (%d keys)",
                 param_name,
@@ -125,15 +150,16 @@ class SettingsCache:
                 param_name,
                 exc,
             )
-            # Keep the stale cache rather than crashing callers.
-            # If data was already cached (stale), defer the next retry for a full TTL
-            # to avoid hammering SSM.  If the cache is still empty (first-ever load),
-            # use a much shorter retry window (30 s) so callers don't silently run
-            # with no settings for the full TTL period.
-            if self._cache:
-                self._cache_time = time.monotonic()  # stale data available — full TTL
-            else:
-                self._cache_time = time.monotonic() - self._ttl + 30  # retry in 30 s
+            # Keep the stale cache rather than crashing callers, and set an
+            # explicit forward-looking deadline for the next attempt.
+            # If data was already cached (stale), defer the next retry for a full
+            # TTL to avoid hammering SSM.  If the cache is still empty (first-ever
+            # load), use a much shorter window so callers don't silently run with
+            # no settings for the full TTL period.
+            delay = (
+                self._ttl if self._cache else min(_EMPTY_CACHE_RETRY_SECONDS, self._ttl)
+            )
+            self._retry_after = time.monotonic() + delay
 
     # ------------------------------------------------------------------
     # Public API
@@ -189,6 +215,10 @@ class SettingsCache:
             # None (not 0.0) so the next _is_expired() returns True regardless of
             # the current monotonic clock value (see __init__ for why).
             self._cache_time = None
+            # Also drop any pending post-failure retry deadline — an explicit
+            # invalidate() means "refresh now", and a pending deadline would
+            # otherwise suppress that refresh.
+            self._retry_after = None
 
 
 # ---------------------------------------------------------------------------
