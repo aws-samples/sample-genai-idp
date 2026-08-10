@@ -1692,6 +1692,8 @@ export type ReviewEffortEstimate = {
   effortMinutes: Scalars['Float']['output'];
   estimateConfidence: Scalars['String']['output'];
   impliedCutoff?: Maybe<Scalars['Float']['output']>;
+  qualityTier?: Maybe<Scalars['String']['output']>;
+  qualityTierReason?: Maybe<Scalars['String']['output']>;
   recommendReviewAll: Scalars['Boolean']['output'];
   reliabilityTable: Array<ReliabilityBin>;
   residualError: Scalars['Float']['output'];

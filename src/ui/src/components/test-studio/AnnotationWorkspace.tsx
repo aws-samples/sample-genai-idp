@@ -534,13 +534,17 @@ const AnnotationWorkspace = (): React.JSX.Element => {
                             if (item.reviewed) return <StatusIndicator type="success">Reviewed</StatusIndicator>;
                             if (item.claimedByMe) return <Badge color="blue">You have this</Badge>;
                             if (item.claimedBy) return <StatusIndicator type="in-progress">{item.claimedBy}</StatusIndicator>;
-                            // Authored ground truth has no pipeline copy to review, so
-                            // it can be inspected but not annotated. Say so rather than
-                            // letting the reviewer discover it by clicking.
+                            // No pipeline copy means nothing to claim — but the reason
+                            // differs and the distinction matters. An unlabeled
+                            // document needs a labeling run; authored ground truth
+                            // needs nothing. Keying only on the missing review key
+                            // labelled BOTH "Ground truth", which contradicted the
+                            // "Unlabeled" badge right above it.
                             if (!item.reviewObjectKey) {
+                              const isUnlabeled = !item.labelSource;
                               return (
                                 <Box fontSize="body-s" color="text-body-secondary">
-                                  Ground truth — nothing to review
+                                  {isUnlabeled ? 'Not labeled yet — generate draft labels first' : 'Ground truth — nothing to review'}
                                 </Box>
                               );
                             }

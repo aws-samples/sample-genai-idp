@@ -100,6 +100,24 @@ export const renderConfidence = (value?: number | null, threshold?: number | nul
   );
 };
 
+/**
+ * Where this document stands in the review loop — as distinct from the model's
+ * confidence, which review never changes.
+ */
+export const renderReviewState = (labelSource?: string | null): React.JSX.Element => {
+  if (labelSource === 'reviewed-human') {
+    return <StatusIndicator type="success">Reviewed</StatusIndicator>;
+  }
+  if (labelSource === 'draft-machine') {
+    return <StatusIndicator type="pending">Awaiting review</StatusIndicator>;
+  }
+  if (!labelSource) {
+    return <StatusIndicator type="info">Unlabeled</StatusIndicator>;
+  }
+  // Uploaded or generated ground truth: authored, so there is nothing to review.
+  return <StatusIndicator type="success">Ground truth</StatusIndicator>;
+};
+
 export const formatSize = (size?: number | null): string => {
   if (size === null || size === undefined) return '-';
   if (size < 1024) return `${size} B`;
@@ -402,9 +420,23 @@ const TestSetDetail = (): React.JSX.Element => {
                 },
                 {
                   id: 'minConfidence',
-                  header: 'Confidence',
+                  // Named for what it is: the single weakest field, not an average
+                  // or a document score. A bare "Confidence" header invited reading
+                  // 28% as "this document is 28% good" when the other 30 fields
+                  // were above 0.99.
+                  header: 'Lowest field confidence',
                   cell: (item: TestSetDocumentItem) => renderConfidence(item.minConfidence, item.confidenceThreshold),
                   sortingField: 'minConfidence',
+                },
+                {
+                  id: 'reviewState',
+                  // The column that MOVES as annotation progresses. Lowest-field
+                  // confidence is the model's own assessment and deliberately does
+                  // not change when a human reviews — so without this there was
+                  // nothing on screen reflecting review effort.
+                  header: 'Review state',
+                  cell: (item: TestSetDocumentItem) => renderReviewState(item.labelSource),
+                  sortingField: 'labelSource',
                 },
                 {
                   id: 'size',

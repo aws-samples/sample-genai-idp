@@ -292,6 +292,8 @@ export const estimateReviewEffort = /* GraphQL */ `
   query EstimateReviewEffort($testSetId: String!, $targetAccuracy: Float, $configVersion: String) {
     estimateReviewEffort(testSetId: $testSetId, targetAccuracy: $targetAccuracy, configVersion: $configVersion) {
       testSetId
+      qualityTier
+      qualityTierReason
       targetAccuracy
       configVersion
       docsToReview

@@ -74,6 +74,51 @@ MIN_BINS_FOR_SIGNAL = 3
 # and recommend reviewing everything instead of a small worst-first sample.
 ECE_UNRELIABLE_THRESHOLD = 0.15
 
+# Quality tiers. A tier is a claim about a test set's *label* accuracy, so it must
+# be earnable and losable from measurement rather than asserted by a user —
+# otherwise it is decoration. Expressed as accuracy (1 - baseline_error) because
+# that is the question a tier answers: "how good is this ground truth?"
+GOLD_ACCURACY = 0.99
+SILVER_ACCURACY = 0.95
+
+
+class QualityTier(str, Enum):
+    """A test set's label-quality tier, derived from its measured curve.
+
+    Deliberately not a user-set field. GOLD requires the curve to be genuinely
+    measured on this set, because a 99% figure computed from a cross-set prior is
+    not evidence about *these* labels.
+    """
+
+    GOLD = "gold"
+    SILVER = "silver"
+    BRONZE = "bronze"
+    # Confidence cannot be trusted to rank correctness here (degenerate, or
+    # worse-than-chance ranking), so no accuracy claim is defensible — the case a
+    # badge must refuse to dress up as Bronze.
+    UNRATED = "unrated"
+
+
+TIER_EXPLANATIONS = {
+    QualityTier.GOLD: (
+        "at least 99% estimated label accuracy, measured on this test set "
+        "(not extrapolated from a prior)"
+    ),
+    QualityTier.SILVER: (
+        "at least 95% estimated label accuracy, with the confidence curve at "
+        "least partially measured on this test set"
+    ),
+    QualityTier.BRONZE: (
+        "labels exist, but accuracy is estimated from a cross-set prior rather "
+        "than measured here — review or score this set to earn a higher tier"
+    ),
+    QualityTier.UNRATED: (
+        "confidence cannot be trusted to rank errors on this set, so no accuracy "
+        "claim is defensible — reviewing a subset would not be meaningful"
+    ),
+}
+
+
 # AUROC below which confidence cannot usefully *rank* correctness, which is the
 # only thing worst-first review needs from it. 0.5 is chance; anything at or
 # under this is no better than reviewing at random.
@@ -479,6 +524,32 @@ class ConfidenceCurve:
         )
 
 
+def quality_tier(
+    baseline_error: float,
+    estimate_confidence: "EstimateConfidence",
+    calibration: "CalibrationHealth",
+) -> "QualityTier":
+    """Derive a test set's quality tier from its measured curve.
+
+    Gated on *measurement*, not just on the number: a 99% accuracy computed from a
+    cross-set prior says nothing about these labels, so it cannot earn GOLD. An
+    unreliable curve is UNRATED rather than a low tier, because the problem is
+    that the estimate means nothing — not that the labels are bad.
+    """
+    if not calibration.reliable:
+        return QualityTier.UNRATED
+
+    accuracy = 1.0 - baseline_error
+    if accuracy >= GOLD_ACCURACY and estimate_confidence is EstimateConfidence.MEASURED:
+        return QualityTier.GOLD
+    if accuracy >= SILVER_ACCURACY and estimate_confidence in (
+        EstimateConfidence.MEASURED,
+        EstimateConfidence.PARTIALLY_MEASURED,
+    ):
+        return QualityTier.SILVER
+    return QualityTier.BRONZE
+
+
 @dataclass
 class ReviewEstimate:
     """What the estimator tells a user, plus how much to trust it."""
@@ -499,8 +570,16 @@ class ReviewEstimate:
     recommend_review_all: bool
     burndown: List[Dict[str, Any]]
 
+    @property
+    def tier(self) -> "QualityTier":
+        return quality_tier(
+            self.baseline_error, self.estimate_confidence, self.calibration
+        )
+
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "qualityTier": self.tier.value,
+            "qualityTierReason": TIER_EXPLANATIONS[self.tier],
             "docsToReview": self.docs_to_review,
             "docsToReviewLow": self.docs_to_review_low,
             "docsToReviewHigh": self.docs_to_review_high,

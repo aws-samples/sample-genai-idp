@@ -483,3 +483,81 @@ class TestReliabilityTable:
         # Blended still returns something usable so the estimator never divides
         # by an empty bin.
         assert low_bin["blendedAccuracy"] is not None
+
+
+@pytest.mark.unit
+class TestQualityTier:
+    """A tier is a claim about label accuracy, so it must be earned from
+    measurement rather than asserted — these pin what earns and loses one."""
+
+    @staticmethod
+    def _health(**kw):
+        d = dict(
+            ece=0.03,
+            bin_coverage=6,
+            total_observations=4000,
+            degenerate=False,
+            overconfident=False,
+            auroc=0.88,
+            undiscriminating=False,
+        )
+        d.update(kw)
+        return cc.CalibrationHealth(**d)
+
+    def test_measured_and_accurate_earns_gold(self):
+        tier = cc.quality_tier(0.005, EstimateConfidence.MEASURED, self._health())
+        assert tier is cc.QualityTier.GOLD
+
+    def test_a_prior_driven_number_cannot_earn_gold_or_silver(self):
+        """99.5% computed from a cross-set prior says nothing about THESE labels.
+
+        The accuracy figure alone is not evidence, so a cold-start set stays
+        Bronze however good the extrapolated number looks.
+        """
+        tier = cc.quality_tier(0.005, EstimateConfidence.PRIOR, self._health())
+        assert tier is cc.QualityTier.BRONZE
+
+    def test_partially_measured_can_reach_silver(self):
+        tier = cc.quality_tier(
+            0.005, EstimateConfidence.PARTIALLY_MEASURED, self._health()
+        )
+        assert tier is cc.QualityTier.SILVER
+
+    def test_accuracy_below_the_gold_bar_is_silver(self):
+        tier = cc.quality_tier(0.03, EstimateConfidence.MEASURED, self._health())
+        assert tier is cc.QualityTier.SILVER
+
+    def test_unreliable_confidence_is_unrated_not_a_low_tier(self):
+        """The problem is that the estimate means nothing, not that labels are bad.
+
+        Ranking worse than chance, degenerate confidence, or overconfidence each
+        make a subset review indefensible — so no accuracy claim is available.
+        Reporting Bronze would dress that up as a mere quality difference.
+        """
+        for kw in (
+            {"undiscriminating": True},
+            {"degenerate": True},
+            {"overconfident": True},
+        ):
+            tier = cc.quality_tier(
+                0.005, EstimateConfidence.MEASURED, self._health(**kw)
+            )
+            assert tier is cc.QualityTier.UNRATED, kw
+
+    def test_every_tier_has_a_plain_language_reason(self):
+        """The badge is meaningless without one, so none may be missing."""
+        for tier in cc.QualityTier:
+            reason = cc.TIER_EXPLANATIONS[tier]
+            assert reason and len(reason) > 20, tier
+
+    def test_estimate_exposes_its_tier_and_reason(self):
+        curve = _calibrated_curve()
+        estimate = estimate_for_target(
+            curve,
+            target_accuracy=0.99,
+            total_docs=50,
+            doc_confidences=_doc_confidences(50),
+        )
+        payload = estimate.to_dict()
+        assert payload["qualityTier"] in {t.value for t in cc.QualityTier}
+        assert payload["qualityTierReason"]

@@ -834,6 +834,13 @@ type CalibrationHealth @aws_cognito_user_pools @aws_iam {
 
 type ReviewEffortEstimate @aws_cognito_user_pools @aws_iam {
   testSetId: String!
+  # Label-quality tier: "gold" | "silver" | "bronze" | "unrated". Derived from the
+  # measured curve, never set by a user, so it can be earned and lost. "unrated"
+  # means confidence cannot rank errors on this set, so no accuracy claim is
+  # defensible — deliberately not dressed up as a low tier.
+  qualityTier: String
+  # Plain-language reason for the tier, for a tooltip.
+  qualityTierReason: String
   targetAccuracy: Float!
   configVersion: String
   docsToReview: Int!

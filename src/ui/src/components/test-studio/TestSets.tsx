@@ -1,6 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { SelectProps } from '@cloudscape-design/components';
 import {
@@ -12,6 +12,7 @@ import {
   Table,
   Box,
   Modal,
+  Popover,
   FormField,
   Input,
   Alert,
@@ -29,6 +30,7 @@ import {
   addDocumentsToTestSetFromUpload,
   deleteTestSets,
   getTestSets,
+  estimateReviewEffort,
   listBucketFiles,
   updateTestSet,
   publishTestSetVersion,
@@ -123,12 +125,50 @@ const TestSets = (): React.JSX.Element => {
   const [addDocsZipFile, setAddDocsZipFile] = useState<File | null>(null);
   const addDocsFileInputRef = React.useRef<HTMLInputElement | null>(null);
 
+  /**
+   * Quality tier per test set, fetched lazily.
+   *
+   * A tier is a claim about label accuracy, so it comes from estimateReviewEffort
+   * (which derives it from the measured curve) rather than being stored on the set
+   * — that keeps it earnable and losable instead of a field someone can assert.
+   * One call per row, which is fine at this scale; if the list grows this wants a
+   * batch endpoint.
+   */
+  const [tiers, setTiers] = useState<Record<string, { tier: string; reason: string }>>({});
+
+  const loadTiers = useCallback(async (sets: TestSetItem[]) => {
+    const client2 = generateClient();
+    await Promise.all(
+      sets.map(async (set) => {
+        // Only labeled sets can have a tier — there is nothing to assess otherwise.
+        if (!set.labelState || set.labelState === 'unlabeled') return;
+        try {
+          const response = await client2.graphql({
+            query: estimateReviewEffort,
+            variables: { testSetId: set.id },
+          });
+          const est = response.data?.estimateReviewEffort;
+          if (est?.qualityTier) {
+            setTiers((prev) => ({
+              ...prev,
+              [set.id]: { tier: est.qualityTier as string, reason: (est.qualityTierReason as string) || '' },
+            }));
+          }
+        } catch (err) {
+          // A missing tier is not an error state — the column just stays blank.
+          console.debug(`No quality tier for ${set.id}:`, err);
+        }
+      }),
+    );
+  }, []);
+
   const loadTestSets = async () => {
     try {
       console.log('TestSets: Loading test sets...');
       const result = await client.graphql({ query: getTestSets });
       console.log('TestSets: GraphQL result:', result);
       const backendTestSets = result.data.getTestSets || [];
+      loadTiers(backendTestSets as TestSetItem[]);
 
       // Upsert: merge backend data with existing UI state, deduplicating by id
       setTestSets((prevTestSets) => {
@@ -654,6 +694,26 @@ const TestSets = (): React.JSX.Element => {
         return item.labelState ? badges[item.labelState] || item.labelState : '-';
       },
       sortingField: 'labelState',
+    },
+    {
+      id: 'qualityTier',
+      header: 'Quality',
+      cell: (item: TestSetItem) => {
+        const entry = tiers[item.id];
+        if (!entry) return <Box color="text-status-inactive">-</Box>;
+        const colors: Record<string, 'green' | 'blue' | 'grey' | 'severity-neutral'> = {
+          gold: 'green',
+          silver: 'blue',
+          bronze: 'grey',
+          unrated: 'severity-neutral',
+        };
+        const label = entry.tier.charAt(0).toUpperCase() + entry.tier.slice(1);
+        return (
+          <Popover dismissButton={false} position="top" size="medium" triggerType="custom" content={entry.reason}>
+            <Badge color={colors[entry.tier] || 'grey'}>{label}</Badge>
+          </Popover>
+        );
+      },
     },
     {
       id: 'version',
