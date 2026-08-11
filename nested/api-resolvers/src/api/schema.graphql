@@ -1260,6 +1260,10 @@ type Mutation {
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   removeDocumentsFromTestSet(testSetId: String!, fileNames: [String!]!): TestSet
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  # Discard machine drafts and re-label; reviewed/uploaded/generated ground truth
+  # is never touched.
+  clearDraftLabels(testSetId: String!): TestSet
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   generateDraftLabels(input: GenerateDraftLabelsInput!): DraftLabelJob
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   # Annotator-reachable: correcting a misclassified document is annotation work,

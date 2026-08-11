@@ -24,7 +24,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import {
   Alert,
   AppLayout,
@@ -59,6 +59,7 @@ import Navigation from '../genaiidp-layout/navigation';
 import { appLayoutLabels } from '../common/labels';
 import FileViewer from '../document-viewer/FileViewer';
 import GroundTruthVisualEditor from './GroundTruthVisualEditor';
+import ReviewCelebration from './ReviewCelebration';
 import type { TestSetDocumentSectionRef } from './GroundTruthVisualEditor';
 import { TEST_STUDIO_PATH, testSetDetailHref, testSetAnnotateHref } from '../../routes/constants';
 import { renderAlertCount, renderLabelSource, renderQualityTier } from './TestSetDetail';
@@ -111,6 +112,10 @@ const QUEUE_ROWS_PER_PAGE = 20;
 
 const AnnotationWorkspace = (): React.JSX.Element => {
   const { testSetId } = useParams<{ testSetId: string }>();
+  // ?doc= preselects one document, so the list's per-row Annotate action opens
+  // the queue on the document the user was already looking at.
+  const [searchParams] = useSearchParams();
+  const requestedDoc = searchParams.get('doc');
   const { navigationOpen, setNavigationOpen } = useAppContext();
   const { settings } = useSettingsContext();
   const { canAnnotate, isAnnotatorOnly, loading: roleLoading } = useUserRole();
@@ -128,6 +133,8 @@ const AnnotationWorkspace = (): React.JSX.Element => {
   const [queuePage, setQueuePage] = useState(1);
   const [docView, setDocView] = useState<DocView>('ground-truth');
   const [flashItems, setFlashItems] = useState<FlashbarProps.MessageDefinition[]>([]);
+  // Incremented on each completed document to fire the confetti burst.
+  const [celebration, setCelebration] = useState(0);
 
   /**
    * What the review is buying, refreshed as documents are completed.
@@ -188,10 +195,14 @@ const AnnotationWorkspace = (): React.JSX.Element => {
         }
         setQueue(data);
         // Land on the first document the server says this caller can take,
-        // unless we are already working one.
+        // unless we are already working one — or the URL named one, which is how
+        // the per-document Annotate action in the list arrives here.
         setSelectedKey((current) => {
           if (preserveSelection && current && data.documents.some((d) => d.objectKey === current)) {
             return current;
+          }
+          if (requestedDoc && data.documents.some((d) => d.objectKey === requestedDoc)) {
+            return requestedDoc;
           }
           return data.nextObjectKey ?? data.documents.find((d) => d.available)?.objectKey ?? null;
         });
@@ -209,7 +220,7 @@ const AnnotationWorkspace = (): React.JSX.Element => {
         setIsLoading(false);
       }
     },
-    [testSetId],
+    [testSetId, requestedDoc],
   );
 
   useEffect(() => {
@@ -372,6 +383,7 @@ const AnnotationWorkspace = (): React.JSX.Element => {
           id: 'annotation-confirmed',
         },
       ]);
+      setCelebration((n) => n + 1);
       await advanceToNext();
     } catch (err) {
       logger.error('Error confirming labels:', err);
@@ -393,6 +405,7 @@ const AnnotationWorkspace = (): React.JSX.Element => {
           id: 'annotation-saved',
         },
       ]);
+      setCelebration((n) => n + 1);
       advanceToNext();
     },
     [advanceToNext],
@@ -415,6 +428,48 @@ const AnnotationWorkspace = (): React.JSX.Element => {
   }, [filteredQueue, queuePage]);
 
   const progressPct = queue && queue.totalDocs > 0 ? Math.round((queue.reviewedDocs / queue.totalDocs) * 100) : 0;
+
+  const queueLink = `${window.location.origin}/${testSetAnnotateHref(testSetId ?? '')}`;
+
+  /**
+   * Per-document actions, rendered in the editor pane's header rather than below
+   * it.
+   *
+   * Spencer: "those buttons belong on the head up top if they're important...
+   * skip to the next document also belongs up top." On a long document the
+   * footer buttons were below the fold, so finishing a document meant scrolling
+   * past every field to find the button that says you are done.
+   */
+  const documentActions = selected && (
+    <SpaceBetween direction="horizontal" size="xs">
+      <Button onClick={advanceToNext} disabled={isLoading}>
+        Skip to next document
+      </Button>
+      {/* Claiming is explicit: opening a document to look at it does not lock it
+          away from teammates. Release gives a claim back without completing the
+          review, so a document someone opened and abandoned is not stuck. */}
+      {selected.reviewObjectKey && !selected.claimedByMe && !selected.reviewed && (
+        <Button variant="primary" onClick={claimSelected} loading={isClaiming} disabled={isLoading || Boolean(selected.claimedBy)}>
+          {selected.claimedBy ? `Claimed by ${selected.claimedBy}` : 'Claim this document'}
+        </Button>
+      )}
+      {/* Claimed state is a different button, not the same one relabelled —
+          Spencer asked for the color to toggle so the claim is visible at a
+          glance rather than read. */}
+      {selected.claimedByMe && (
+        <Button iconName="check" onClick={releaseSelected} loading={isClaiming} disabled={isLoading}>
+          Claimed by you — release
+        </Button>
+      )}
+      {/* The common case: the draft labels are already right, so there is nothing
+          to edit. Without this the reviewer could only "skip", which advances the
+          cursor but never marks the document reviewed — so a correct document
+          could never be completed and the queue never drained. */}
+      <Button variant="primary" onClick={handleConfirmCorrect} loading={isConfirming} disabled={isLoading || !selected.reviewObjectKey}>
+        Labels are correct — mark reviewed
+      </Button>
+    </SpaceBetween>
+  );
 
   const content = (
     <ContentLayout
@@ -439,7 +494,7 @@ const AnnotationWorkspace = (): React.JSX.Element => {
                 <CopyToClipboard
                   variant="button"
                   copyButtonText="Copy queue link"
-                  textToCopy={`${window.location.origin}/${testSetAnnotateHref(testSetId ?? '')}`}
+                  textToCopy={queueLink}
                   copySuccessText="Queue link copied — share it with an assigned annotator"
                   copyErrorText="Could not copy the queue link"
                 />
@@ -448,6 +503,17 @@ const AnnotationWorkspace = (): React.JSX.Element => {
           >
             Annotate: {testSetId}
           </Header>
+          {/* The whole link, selectable. Spencer: "have the full thing where you
+              can mouse over it and copy" — a copy button alone gives no way to see
+              or verify what is on the clipboard before pasting it into Slack. */}
+          {!isAnnotatorOnly && (
+            <CopyToClipboard
+              variant="inline"
+              textToCopy={queueLink}
+              copySuccessText="Queue link copied"
+              copyErrorText="Could not copy the queue link"
+            />
+          )}
         </SpaceBetween>
       }
     >
@@ -652,6 +718,9 @@ const AnnotationWorkspace = (): React.JSX.Element => {
             </Container>
 
             <SpaceBetween size="s">
+              <Header variant="h3" actions={documentActions}>
+                {selected ? selected.objectKey : 'No document selected'}
+              </Header>
               <SegmentedControl
                 selectedId={docView}
                 onChange={({ detail }) => setDocView(detail.selectedId as DocView)}
@@ -682,42 +751,6 @@ const AnnotationWorkspace = (): React.JSX.Element => {
                   onReextracted={() => loadQueue(false)}
                 />
               )}
-              {selected && (
-                <Box textAlign="right">
-                  <SpaceBetween direction="horizontal" size="xs">
-                    <Button onClick={advanceToNext} disabled={isLoading}>
-                      Skip to next document
-                    </Button>
-                    {/* Claiming is explicit: opening a document to look at it does
-                        not lock it away from teammates. Release gives a claim back
-                        without completing the review, so a document someone opened
-                        and abandoned is not stuck for everyone else. */}
-                    {selected.reviewObjectKey && !selected.claimedByMe && !selected.reviewed && (
-                      <Button onClick={claimSelected} loading={isClaiming} disabled={isLoading || Boolean(selected.claimedBy)}>
-                        {selected.claimedBy ? `Claimed by ${selected.claimedBy}` : 'Claim this document'}
-                      </Button>
-                    )}
-                    {selected.claimedByMe && (
-                      <Button onClick={releaseSelected} loading={isClaiming} disabled={isLoading}>
-                        Release claim
-                      </Button>
-                    )}
-                    {/* The common case: the draft labels are already right, so
-                        there is nothing to edit. Without this the reviewer could
-                        only "skip", which advances the cursor but never marks the
-                        document reviewed — so a correct document could never be
-                        completed and the queue never drained. */}
-                    <Button
-                      variant="primary"
-                      onClick={handleConfirmCorrect}
-                      loading={isConfirming}
-                      disabled={isLoading || !selected.reviewObjectKey}
-                    >
-                      Labels are correct — mark reviewed
-                    </Button>
-                  </SpaceBetween>
-                </Box>
-              )}
             </SpaceBetween>
           </Grid>
         )}
@@ -746,16 +779,19 @@ const AnnotationWorkspace = (): React.JSX.Element => {
   }
 
   return (
-    <AppLayout
-      headerSelector="#top-navigation"
-      ariaLabels={appLayoutLabels}
-      navigation={<Navigation />}
-      navigationOpen={navigationOpen}
-      onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
-      toolsHide
-      notifications={<Flashbar items={flashItems} />}
-      content={content}
-    />
+    <>
+      <ReviewCelebration trigger={celebration} />
+      <AppLayout
+        headerSelector="#top-navigation"
+        ariaLabels={appLayoutLabels}
+        navigation={<Navigation />}
+        navigationOpen={navigationOpen}
+        onNavigationChange={({ detail }) => setNavigationOpen(detail.open)}
+        toolsHide
+        notifications={<Flashbar items={flashItems} />}
+        content={content}
+      />
+    </>
   );
 };
 

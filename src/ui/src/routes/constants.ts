@@ -40,7 +40,8 @@ export const testSetDocumentHref = (testSetId: string, objectKey: string, view?:
  * annotator — it only navigates; access is enforced server-side against the
  * user's allowedTestSets, so a leaked link grants nothing on its own.
  */
-export const testSetAnnotateHref = (testSetId: string): string => `#${TEST_SET_DETAIL_PATH}/${encodeURIComponent(testSetId)}/annotate`;
+export const testSetAnnotateHref = (testSetId: string, objectKey?: string): string =>
+  `#${TEST_SET_DETAIL_PATH}/${encodeURIComponent(testSetId)}/annotate${objectKey ? `?doc=${encodeURIComponent(objectKey)}` : ''}`;
 /**
  * Landing page for an annotator assigned to more than one test set (or before
  * their scope has resolved). Lists their queues; a single-set annotator is sent

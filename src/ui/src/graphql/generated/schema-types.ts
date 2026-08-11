@@ -718,6 +718,7 @@ export type Mutation = {
   applyFeatureConfigPreset: FeatureConfigPresetResult;
   autoDetectSections?: Maybe<Scalars['String']['output']>;
   claimReview?: Maybe<Document>;
+  clearDraftLabels?: Maybe<TestSet>;
   completeSectionReview?: Maybe<Document>;
   copyToBaseline: CopyToBaselineResponse;
   createDocument?: Maybe<CreateDocumentOutput>;
@@ -876,6 +877,11 @@ export type MutationAutoDetectSectionsArgs = {
 
 export type MutationClaimReviewArgs = {
   objectKey: Scalars['String']['input'];
+};
+
+
+export type MutationClearDraftLabelsArgs = {
+  testSetId: Scalars['String']['input'];
 };
 
 

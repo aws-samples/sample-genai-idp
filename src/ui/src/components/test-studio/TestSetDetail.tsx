@@ -22,6 +22,7 @@ import {
   ContentLayout,
   Header,
   Link,
+  Modal,
   Pagination,
   Popover,
   SpaceBetween,
@@ -31,7 +32,7 @@ import {
 } from '@cloudscape-design/components';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from '../../api/client-shim';
-import { getTestSetDocuments, generateDraftLabels, getDraftLabelJob } from '../../graphql/generated';
+import { getTestSetDocuments, generateDraftLabels, getDraftLabelJob, clearDraftLabels } from '../../graphql/generated';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
 import Navigation from '../genaiidp-layout/navigation';
@@ -239,6 +240,9 @@ const TestSetDetail = (): React.JSX.Element => {
   const [isStartingLabels, setIsStartingLabels] = useState(false);
   const [showEffortModal, setShowEffortModal] = useState(false);
   const [showLabelModal, setShowLabelModal] = useState(false);
+  const [showClearDraftsModal, setShowClearDraftsModal] = useState(false);
+  const [isClearingDrafts, setIsClearingDrafts] = useState(false);
+  const [clearedMessage, setClearedMessage] = useState<string | null>(null);
   // Default to worst-first once any document carries confidence — the whole point
   // of draft labels is to review the least trustworthy ones first.
   const [worstFirst, setWorstFirst] = useState(true);
@@ -295,6 +299,29 @@ const TestSetDetail = (): React.JSX.Element => {
   const handlePageChange = (pageIndex: number) => {
     setCurrentPageIndex(pageIndex);
     fetchPage(pageIndex, pageTokens);
+  };
+
+  const handleClearDraftLabels = async () => {
+    setIsClearingDrafts(true);
+    setError(null);
+    try {
+      const response = await client.graphql({
+        query: clearDraftLabels,
+        variables: { testSetId: testSetId ?? '' },
+      });
+      setShowClearDraftsModal(false);
+      // The job pointer is gone server-side, so drop the local banner too or it
+      // keeps describing a run whose output no longer exists.
+      setLabelJob(null);
+      setClearedMessage(response.data?.clearDraftLabels?.lastAddResult ?? 'Draft labels cleared.');
+      fetchPage(1, [null]);
+      setCurrentPageIndex(1);
+    } catch (err) {
+      logger.error('Error clearing draft labels:', err);
+      setError('Failed to clear draft labels. Please try again.');
+    } finally {
+      setIsClearingDrafts(false);
+    }
   };
 
   const handleGenerateDraftLabels = async (configVersion?: string, objectKeys?: string[]) => {
@@ -440,6 +467,12 @@ const TestSetDetail = (): React.JSX.Element => {
               </Alert>
             )}
 
+            {clearedMessage && (
+              <Alert type="success" dismissible onDismiss={() => setClearedMessage(null)}>
+                {clearedMessage} Generate draft labels again to re-label with a different configuration.
+              </Alert>
+            )}
+
             {labelJob && labelJob.status === 'COMPLETED' && (
               <Alert type="success" dismissible onDismiss={() => setLabelJob(null)}>
                 Draft labeling complete — {labelJob.labeled} document(s) labeled
@@ -453,7 +486,9 @@ const TestSetDetail = (): React.JSX.Element => {
                 <Header
                   counter={`(${filteredDocs.length})`}
                   description={
-                    hasConfidence ? 'Confidence is the lowest per-field score in each document — review the weakest first.' : undefined
+                    hasConfidence
+                      ? 'Confidence alerts are the fields below their configured threshold — review the documents with the most first.'
+                      : undefined
                   }
                   actions={
                     <SpaceBetween direction="horizontal" size="xs">
@@ -475,6 +510,15 @@ const TestSetDetail = (): React.JSX.Element => {
                           before committing a team, not discovered mid-queue. */}
                       <Button onClick={() => setShowEffortModal(true)} iconName="user-profile">
                         Annotate
+                      </Button>
+                      {/* Re-labeling with a corrected config is the normal loop
+                          while tuning one, and the harvest only REPLACES a draft
+                          when the new run produces a section for it — so a run that
+                          splits differently leaves orphans that keep dragging the
+                          document's confidence down. Without this the only way back
+                          to a clean set was deleting and recreating it. */}
+                      <Button onClick={() => setShowClearDraftsModal(true)} disabled={isLoading || labelJob?.status === 'RUNNING'}>
+                        Clear draft labels
                       </Button>
                       <Button iconName="refresh" onClick={() => fetchPage(currentPageIndex, pageTokens)} disabled={isLoading}>
                         Refresh
@@ -545,6 +589,19 @@ const TestSetDetail = (): React.JSX.Element => {
                   header: 'GT sections',
                   cell: (item: TestSetDocumentItem) => item.sections.length,
                 },
+                {
+                  id: 'rowActions',
+                  header: '',
+                  // David: "you can also have an annotate button per document, by
+                  // the way, I would like to scroll down." Reaching one specific
+                  // document previously meant opening the queue and finding it,
+                  // even when you were already looking at it here.
+                  cell: (item: TestSetDocumentItem) => (
+                    <Button variant="inline-link" href={testSetAnnotateHref(testSetId ?? '', item.objectKey)}>
+                      Annotate
+                    </Button>
+                  ),
+                },
               ]}
               items={visibleDocs}
               loading={isLoading}
@@ -593,6 +650,37 @@ const TestSetDetail = (): React.JSX.Element => {
                 navigate(testSetAnnotateHref(testSetId ?? '').replace(/^#/, ''));
               }}
             />
+
+            <Modal
+              visible={showClearDraftsModal}
+              onDismiss={() => setShowClearDraftsModal(false)}
+              header="Clear draft labels"
+              footer={
+                <Box float="right">
+                  <SpaceBetween direction="horizontal" size="xs">
+                    <Button variant="link" onClick={() => setShowClearDraftsModal(false)}>
+                      Cancel
+                    </Button>
+                    <Button variant="primary" onClick={handleClearDraftLabels} loading={isClearingDrafts}>
+                      Clear draft labels
+                    </Button>
+                  </SpaceBetween>
+                </Box>
+              }
+            >
+              <SpaceBetween size="s">
+                <Box>
+                  Deletes every machine-generated draft label in this test set, leaving the documents in place so you can re-label them with
+                  a different configuration.
+                </Box>
+                {/* Say plainly what is NOT deleted: the fear here is losing the
+                    team's annotation work to a config retry. */}
+                <Alert type="info">
+                  Reviewed labels, and any ground truth you uploaded or generated, are kept. Only labels tagged <b>Draft (machine)</b> are
+                  removed.
+                </Alert>
+              </SpaceBetween>
+            </Modal>
           </SpaceBetween>
         </ContentLayout>
       }

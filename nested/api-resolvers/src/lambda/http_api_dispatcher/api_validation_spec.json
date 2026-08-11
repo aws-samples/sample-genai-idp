@@ -229,6 +229,17 @@
         }
       ]
     },
+    "clearDraftLabels": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "testSetId",
+          "non_null": true,
+          "type": "String"
+        }
+      ]
+    },
     "compareDocumentVersions": {
       "args": [
         {

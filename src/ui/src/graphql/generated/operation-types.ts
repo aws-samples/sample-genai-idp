@@ -718,6 +718,7 @@ export type Mutation = {
   applyFeatureConfigPreset: FeatureConfigPresetResult;
   autoDetectSections?: Maybe<Scalars['String']['output']>;
   claimReview?: Maybe<Document>;
+  clearDraftLabels?: Maybe<TestSet>;
   completeSectionReview?: Maybe<Document>;
   copyToBaseline: CopyToBaselineResponse;
   createDocument?: Maybe<CreateDocumentOutput>;
@@ -876,6 +877,11 @@ export type MutationAutoDetectSectionsArgs = {
 
 export type MutationClaimReviewArgs = {
   objectKey: Scalars['String']['input'];
+};
+
+
+export type MutationClearDraftLabelsArgs = {
+  testSetId: Scalars['String']['input'];
 };
 
 
@@ -2158,6 +2164,13 @@ export type ClaimReviewMutationVariables = Exact<{
 
 
 export type ClaimReviewMutation = { claimReview?: { ObjectKey?: string | null, ObjectStatus?: string | null, HITLStatus?: string | null, HITLReviewOwner?: string | null, HITLReviewOwnerEmail?: string | null } | null };
+
+export type ClearDraftLabelsMutationVariables = Exact<{
+  testSetId: Scalars['String']['input'];
+}>;
+
+
+export type ClearDraftLabelsMutation = { clearDraftLabels?: { id: string, name: string, fileCount?: number | null, status?: string | null, createdAt: string, lastAddResult?: string | null } | null };
 
 export type CompleteSectionReviewMutationVariables = Exact<{
   objectKey: Scalars['String']['input'];

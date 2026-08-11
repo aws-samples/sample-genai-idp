@@ -127,6 +127,8 @@ def handler(event, context):
         return update_test_set(event["arguments"])
     elif field_name == "removeDocumentsFromTestSet":
         return remove_documents_from_test_set(event["arguments"])
+    elif field_name == "clearDraftLabels":
+        return clear_draft_labels(event["arguments"])
     elif field_name == "deleteTestSets":
         return delete_test_sets(event["arguments"])
     elif field_name == "getTestSets":
@@ -1910,6 +1912,94 @@ def remove_documents_from_test_set(args):
         "createdAt": meta.get("createdAt"),
         "lastAddResult": f"Removed {removed} document(s)",
     }
+
+
+def clear_draft_labels(args):
+    """Delete a test set's machine draft labels, keeping its documents.
+
+    Re-labeling a set with a corrected config is the common loop while tuning
+    one, but the harvest only *replaces* a draft when the new run produces a
+    section for it — so a run that splits a document differently leaves the old
+    sections behind, and orphans keep dragging the document's confidence down.
+    Until now the only way back to a clean unlabeled set was deleting and
+    recreating it, or a script.
+
+    Only ``draft-machine`` labels are removed. Reviewed, uploaded and generated
+    ground truth is left alone: this is for discarding machine output, not for
+    throwing away human work, and an annotator's corrections must not be
+    collateral damage of a config retry.
+    """
+    test_set_id = args["testSetId"]
+    if not validate_test_set_name(test_set_id):
+        raise Exception("Invalid test set id")
+
+    meta = db_client.get_item({"PK": f"testset#{test_set_id}", "SK": "metadata"})
+    if not meta:
+        raise Exception(f"Test set '{test_set_id}' not found")
+
+    test_set_bucket = os.environ["TEST_SET_BUCKET"]
+    paginator = s3_client.get_paginator("list_objects_v2")
+    candidates = []
+    for page in paginator.paginate(
+        Bucket=test_set_bucket, Prefix=f"{test_set_id}/baseline/"
+    ):
+        candidates.extend(
+            obj["Key"]
+            for obj in page.get("Contents", [])
+            if obj["Key"].endswith("/result.json")
+        )
+
+    to_delete = [
+        key
+        for key in candidates
+        if not _existing_label_is_human(test_set_bucket, key)
+        and _existing_label_is_draft(test_set_bucket, key)
+    ]
+
+    for i in range(0, len(to_delete), 1000):
+        s3_client.delete_objects(
+            Bucket=test_set_bucket,
+            Delete={"Objects": [{"Key": k} for k in to_delete[i : i + 1000]]},
+        )
+
+    kept = len(candidates) - len(to_delete)
+    # Drop the label-job pointer too, or the set keeps reporting a job whose
+    # output no longer exists.
+    db_client.update_item(
+        key={"PK": f"testset#{test_set_id}", "SK": "metadata"},
+        update_expression="SET lastAddResult = :r REMOVE labelJobId, labelJobStatus",
+        expression_attribute_values={
+            ":r": f"Cleared {len(to_delete)} draft label section(s)"
+        },
+    )
+
+    logger.info(
+        f"Cleared {len(to_delete)} draft label section(s) from {test_set_id}; "
+        f"kept {kept} non-draft label(s)"
+    )
+    return {
+        "id": test_set_id,
+        "name": meta.get("name"),
+        "fileCount": _as_int(meta.get("fileCount")) or 0,
+        "status": meta.get("status"),
+        "createdAt": meta.get("createdAt"),
+        "lastAddResult": f"Cleared {len(to_delete)} draft label section(s)",
+    }
+
+
+def _existing_label_is_draft(test_set_bucket, key):
+    """True when this label is explicitly a machine draft.
+
+    Deliberately not "not human": a baseline with no labelSource at all was
+    supplied as ground truth when the set was created, and deleting it would
+    destroy data the user provided.
+    """
+    try:
+        body = s3_client.get_object(Bucket=test_set_bucket, Key=key)["Body"].read()
+        return json.loads(body).get("labelSource") == LABEL_SOURCE_DRAFT
+    except Exception as e:  # noqa: BLE001 — an unreadable label is not deletable
+        logger.warning(f"Could not read {key} to check label source: {e}")
+        return False
 
 
 def update_test_set(args):

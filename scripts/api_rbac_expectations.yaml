@@ -393,6 +393,11 @@ operations:
     kind: mutation
     enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
     args: { input: { testSetId: "nonexistent-test-set", objectKey: "__x__" } }
+  clearDraftLabels:
+    groups: [Admin, Author]
+    kind: mutation
+    enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
+    args: { testSetId: "nonexistent-test-set" }
   publishTestSetVersion:
     groups: [Admin, Author]
     kind: mutation

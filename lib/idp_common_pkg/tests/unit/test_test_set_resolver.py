@@ -2285,6 +2285,64 @@ class TestTestSetResolver:
         assert written["labelSource"] == "reviewed-human"
         assert written["document_class"]["type"] == "bank-check"
 
+    def test_clear_draft_labels_keeps_human_and_authored_ground_truth(
+        self, labeling_env
+    ):
+        """Clearing drafts must never be a way to lose annotation work.
+
+        The fear this addresses is real: re-labeling with a corrected config is the
+        normal tuning loop, and if that discarded the team's corrections nobody
+        could safely retry. Only labels explicitly tagged draft-machine go —
+        deliberately not "everything that isn't reviewed-human", because a baseline
+        with NO labelSource was supplied as ground truth when the set was created.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=3)
+        cases = {
+            "draft.pdf": {"labelSource": "draft-machine"},
+            "reviewed.pdf": {"labelSource": "reviewed-human"},
+            "authored.pdf": {},  # No labelSource: uploaded/generated ground truth.
+        }
+        for name, body in cases.items():
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+            s3.put_object(
+                Bucket="test-set-bucket",
+                Key=f"ts1/baseline/{name}/sections/1/result.json",
+                Body=json.dumps({**body, "inference_result": {"f": "v"}}).encode(),
+            )
+        table.update_item(
+            Key={"PK": "testset#ts1", "SK": "metadata"},
+            UpdateExpression="SET labelJobId = :j, labelJobStatus = :s",
+            ExpressionAttributeValues={":j": "old-run", ":s": "COMPLETED"},
+        )
+
+        result = test_set_index.clear_draft_labels({"testSetId": "ts1"})
+
+        surviving = {
+            obj["Key"]
+            for obj in s3.list_objects_v2(
+                Bucket="test-set-bucket", Prefix="ts1/baseline/"
+            ).get("Contents", [])
+        }
+        assert "ts1/baseline/draft.pdf/sections/1/result.json" not in surviving
+        assert "ts1/baseline/reviewed.pdf/sections/1/result.json" in surviving
+        assert "ts1/baseline/authored.pdf/sections/1/result.json" in surviving
+        # The documents themselves stay — this clears labels, not the set.
+        inputs = {
+            obj["Key"]
+            for obj in s3.list_objects_v2(
+                Bucket="test-set-bucket", Prefix="ts1/input/"
+            ).get("Contents", [])
+        }
+        assert len(inputs) == 3
+        assert "1" in result["lastAddResult"]
+
+        # The stale job pointer is dropped, or the set keeps reporting a run whose
+        # output no longer exists.
+        meta = table.get_item(Key={"PK": "testset#ts1", "SK": "metadata"})["Item"]
+        assert "labelJobId" not in meta
+        assert "labelJobStatus" not in meta
+
     def test_queue_sorts_ground_truth_last_and_unlabeled_first(self, labeling_env):
         """Two kinds of "no confidence" must not sort the same.
 
