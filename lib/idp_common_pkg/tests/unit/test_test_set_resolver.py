@@ -1292,6 +1292,51 @@ class TestTestSetResolver:
         assert test_set_index._min_confidence(explainability, inference) == 0.8
         assert test_set_index._confidence_threshold(explainability, inference) == 0.9
 
+    def test_alert_counts_uses_each_field_own_threshold(self):
+        """A field is an alert relative to its own bar, not a global one.
+
+        0.85 passes under a 0.8 threshold and fails under 0.9, so counting against
+        a single constant would contradict the assessment config on one of them.
+        """
+        explainability = [
+            {
+                "passes": {"confidence": 0.85, "confidence_threshold": 0.8},
+                "fails": {"confidence": 0.85, "confidence_threshold": 0.9},
+            }
+        ]
+        assert test_set_index._alert_counts(explainability) == (1, 2)
+
+    def test_alert_counts_falls_back_to_the_default_threshold(self):
+        """Assessment output without thresholds still has to yield a count."""
+        explainability = [{"a": {"confidence": 0.95}, "b": {"confidence": 0.5}}]
+        assert test_set_index._alert_counts(explainability) == (1, 2)
+
+    def test_alert_counts_excludes_absent_fields(self):
+        """Same reason as _min_confidence: a blank box is not an alert.
+
+        Counting it would make every sparsely-populated form look like it needed
+        review, which is what made generated W-2 sets read as worthless.
+        """
+        explainability = [
+            {
+                "employer_name": {"confidence": 0.997},
+                "locality_name": {"confidence": 0.0},
+                "shaky": {"confidence": 0.3},
+            }
+        ]
+        inference = {
+            "employer_name": "CloudNest",
+            "locality_name": None,
+            "shaky": "maybe",
+        }
+        assert test_set_index._alert_counts(explainability) == (2, 3)
+        assert test_set_index._alert_counts(explainability, inference) == (1, 2)
+
+    def test_alert_counts_reports_none_without_confidence_data(self):
+        """None means "no confidence data", which is not the same as zero alerts."""
+        assert test_set_index._alert_counts(None) == (None, None)
+        assert test_set_index._alert_counts({"vendor": {}}) == (None, None)
+
     def test_generate_draft_labels_delegates_to_the_test_runner(self, labeling_env):
         table, _ = labeling_env
         _seed_test_set(table, "ts1", fileCount=2)
@@ -2136,6 +2181,56 @@ class TestTestSetResolver:
         order = [d["objectKey"] for d in result["documents"]]
         assert order == ["bare.pdf", "draft.pdf", "gt.pdf"], order
         assert result["nextObjectKey"] == "bare.pdf"
+
+    def test_queue_orders_by_alert_count_not_lowest_confidence(self, labeling_env):
+        """Review work is the number of fields to check, not the worst score.
+
+        many.pdf has three fields below their threshold; one.pdf has a single
+        weaker field. Ordering by minConfidence puts one.pdf first even though
+        many.pdf is three times the work — which is why the queue counts alerts and
+        uses confidence only to break ties.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=2)
+        for name in ("many.pdf", "one.pdf"):
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/many.pdf/sections/1/result.json",
+            Body=json.dumps(
+                {
+                    "labelSource": "draft-machine",
+                    "explainability_info": [
+                        {
+                            "a": {"confidence": 0.5, "confidence_threshold": 0.9},
+                            "b": {"confidence": 0.6, "confidence_threshold": 0.9},
+                            "c": {"confidence": 0.7, "confidence_threshold": 0.9},
+                        }
+                    ],
+                    "inference_result": {"a": "1", "b": "2", "c": "3"},
+                }
+            ).encode(),
+        )
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/one.pdf/sections/1/result.json",
+            Body=json.dumps(
+                {
+                    "labelSource": "draft-machine",
+                    "explainability_info": [
+                        {"a": {"confidence": 0.2, "confidence_threshold": 0.9}}
+                    ],
+                    "inference_result": {"a": "1"},
+                }
+            ).encode(),
+        )
+
+        result = test_set_index.get_annotation_queue({"testSetId": "ts1"}, None)
+        by_key = {d["objectKey"]: d for d in result["documents"]}
+        assert by_key["many.pdf"]["alertCount"] == 3
+        assert by_key["many.pdf"]["fieldCount"] == 3
+        assert by_key["one.pdf"]["alertCount"] == 1
+        assert [d["objectKey"] for d in result["documents"]] == ["many.pdf", "one.pdf"]
 
     def test_estimate_excludes_ground_truth_from_reviewable_work(self, labeling_env):
         """Reviewing authored labels is not work the estimate should ask for."""

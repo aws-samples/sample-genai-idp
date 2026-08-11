@@ -13,8 +13,8 @@
  * Deliberately thin. The annotation surface IS the existing
  * GroundTruthVisualEditor — the same component the owner-facing document detail
  * page uses — and everything genuinely new here is the queue rail, the shared
- * progress banner, and "Save & next". Documents are ordered lowest-confidence
- * first so each review removes the most expected error.
+ * progress banner, and "Save & next". Documents are ordered by confidence-alert
+ * count so each review removes the most expected error.
  *
  * Saves route through completeSectionReview rather than the editor's default
  * direct-to-S3 write. That is what engages claim-to-lock, tags the label
@@ -62,7 +62,7 @@ import FileViewer from '../document-viewer/FileViewer';
 import GroundTruthVisualEditor from './GroundTruthVisualEditor';
 import type { TestSetDocumentSectionRef } from './GroundTruthVisualEditor';
 import { TEST_STUDIO_PATH, testSetDetailHref, testSetAnnotateHref } from '../../routes/constants';
-import { renderConfidence, renderLabelSource } from './TestSetDetail';
+import { renderAlertCount, renderLabelSource } from './TestSetDetail';
 
 const client = generateClient();
 const logger = new ConsoleLogger('AnnotationWorkspace');
@@ -74,6 +74,8 @@ export interface QueueItem {
   reviewObjectKey?: string | null;
   minConfidence?: number | null;
   confidenceThreshold?: number | null;
+  alertCount?: number | null;
+  fieldCount?: number | null;
   labelSource?: string | null;
   sectionCount: number;
   sections?: TestSetDocumentSectionRef[] | null;
@@ -432,7 +434,7 @@ const AnnotationWorkspace = (): React.JSX.Element => {
           )}
           <Header
             variant="h1"
-            description="Review the lowest-confidence documents first — each one you correct removes the most likely error."
+            description="Review the documents with the most confidence alerts first — each one you correct removes the most likely errors."
             actions={
               !isAnnotatorOnly && (
                 <CopyToClipboard
@@ -617,7 +619,9 @@ const AnnotationWorkspace = (): React.JSX.Element => {
                           id: 'meta',
                           content: (item) => (
                             <SpaceBetween direction="horizontal" size="xxs">
-                              {renderConfidence(item.minConfidence, item.confidenceThreshold)}
+                              {/* Alerts first: it is what the ordering is based on
+                                  and what tells the annotator how much is here. */}
+                              {renderAlertCount(item.alertCount, item.fieldCount, item.minConfidence, item.confidenceThreshold)}
                               {renderLabelSource(item.labelSource)}
                             </SpaceBetween>
                           ),

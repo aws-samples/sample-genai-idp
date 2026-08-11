@@ -386,6 +386,8 @@ export const getAnnotationQueue = /* GraphQL */ `
         reviewObjectKey
         minConfidence
         confidenceThreshold
+        alertCount
+        fieldCount
         labelSource
         sectionCount
         sections {
@@ -851,6 +853,8 @@ export const getTestSetDocuments = /* GraphQL */ `
         labelSource
         minConfidence
         confidenceThreshold
+        alertCount
+        fieldCount
       }
       nextToken
       activeLabelJobId

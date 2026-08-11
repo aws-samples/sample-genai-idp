@@ -16,6 +16,8 @@ query GetAnnotationQueue($testSetId: String!, $limit: Int, $includeCompleted: Bo
       reviewObjectKey
       minConfidence
       confidenceThreshold
+      alertCount
+      fieldCount
       labelSource
       sectionCount
       sections {

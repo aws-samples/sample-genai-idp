@@ -82,10 +82,12 @@ export type AnnotationQueue = {
 };
 
 export type AnnotationQueueItem = {
+  alertCount?: Maybe<Scalars['Int']['output']>;
   available: Scalars['Boolean']['output'];
   claimedBy?: Maybe<Scalars['String']['output']>;
   claimedByMe: Scalars['Boolean']['output'];
   confidenceThreshold?: Maybe<Scalars['Float']['output']>;
+  fieldCount?: Maybe<Scalars['Int']['output']>;
   inputKey: Scalars['String']['output'];
   labelSource?: Maybe<Scalars['String']['output']>;
   minConfidence?: Maybe<Scalars['Float']['output']>;
@@ -1900,7 +1902,9 @@ export type TestSet = {
 };
 
 export type TestSetDocument = {
+  alertCount?: Maybe<Scalars['Int']['output']>;
   confidenceThreshold?: Maybe<Scalars['Float']['output']>;
+  fieldCount?: Maybe<Scalars['Int']['output']>;
   inputKey: Scalars['String']['output'];
   labelSource?: Maybe<Scalars['String']['output']>;
   lastModified?: Maybe<Scalars['AWSDateTime']['output']>;

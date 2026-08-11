@@ -255,7 +255,7 @@ const ReviewEffortModal = ({ visible, testSetId, configVersion, onDismiss, onCon
               {estimate.calibration.auroc !== null && estimate.calibration.auroc !== undefined
                 ? ` (AUROC ${estimate.calibration.auroc.toFixed(2)}, where 0.5 is a coin flip)`
                 : ''}
-              , so reviewing the lowest-confidence documents would find no more errors than reviewing at random. Review everything, or
+              , so reviewing the documents with the most confidence alerts would find no more errors than reviewing at random. Review everything, or
               change the confidence model for this config version and re-score.
             </Alert>
           )}
@@ -267,7 +267,7 @@ const ReviewEffortModal = ({ visible, testSetId, configVersion, onDismiss, onCon
               items={[
                 {
                   value: 'worst-first',
-                  label: 'Review the lowest-confidence documents',
+                  label: 'Review the documents with the most confidence alerts',
                   description: estimate
                     ? `Focus effort where the model is least sure — about ${estimate.docsToReview} of ${estimate.totalDocs} documents (${estimate.docsToReviewLow}–${estimate.docsToReviewHigh}). Highest accuracy gain per hour.`
                     : 'Focus human effort where the model is least sure. Highest accuracy gain per hour.',
@@ -337,7 +337,7 @@ const ReviewEffortModal = ({ visible, testSetId, configVersion, onDismiss, onCon
                   description={
                     estimate.impliedCutoff !== null && estimate.impliedCutoff !== undefined
                       ? `Implied confidence cutoff ≈${estimate.impliedCutoff.toFixed(2)} — documents below this get reviewed.`
-                      : 'Documents are reviewed lowest-confidence first until the target is met.'
+                      : 'Documents with the most confidence alerts are reviewed first, until the target is met.'
                   }
                 >
                   <SpaceBetween size="xs">

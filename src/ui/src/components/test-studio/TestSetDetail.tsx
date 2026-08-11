@@ -23,6 +23,7 @@ import {
   Header,
   Link,
   Pagination,
+  Popover,
   SpaceBetween,
   StatusIndicator,
   Table,
@@ -55,6 +56,8 @@ export interface TestSetDocumentItem {
   labelSource?: string | null;
   minConfidence?: number | null;
   confidenceThreshold?: number | null;
+  alertCount?: number | null;
+  fieldCount?: number | null;
 }
 
 /**
@@ -97,6 +100,44 @@ export const renderConfidence = (value?: number | null, threshold?: number | nul
     <Box color={color} fontWeight={below ? 'bold' : 'normal'}>
       {pct.toFixed(1)}%
     </Box>
+  );
+};
+
+/**
+ * How many fields need a human, as a count rather than a score.
+ *
+ * This is the same signal human review uses in the Document List: a field below
+ * its configured threshold is an alert, and whether it missed by 2 points or 40
+ * does not change that somebody has to look at it. A count also describes the
+ * work in the way an annotator meets it — eight weak fields is eight things to
+ * check — where a single lowest score does not. The score is still available in
+ * the popover, since the calibration curve is built on it.
+ */
+export const renderAlertCount = (
+  alertCount?: number | null,
+  fieldCount?: number | null,
+  minConfidence?: number | null,
+  threshold?: number | null,
+): React.JSX.Element | string => {
+  if (alertCount === null || alertCount === undefined) return '-';
+  const detail = (
+    <SpaceBetween size="xxs">
+      <Box variant="span">
+        Lowest field confidence: {minConfidence === null || minConfidence === undefined ? '-' : renderConfidence(minConfidence, threshold)}
+      </Box>
+      <Box variant="span" fontSize="body-s" color="text-body-secondary">
+        {threshold === null || threshold === undefined
+          ? 'Alerts count fields below the default 80% threshold.'
+          : `Alerts count fields below their configured threshold (${((threshold <= 1 ? threshold * 100 : threshold) as number).toFixed(0)}%).`}
+      </Box>
+    </SpaceBetween>
+  );
+  return (
+    <Popover dismissButton={false} position="top" size="medium" triggerType="custom" content={detail}>
+      <Box color={alertCount > 0 ? 'text-status-error' : 'text-status-success'} fontWeight={alertCount > 0 ? 'bold' : 'normal'}>
+        {alertCount === 0 ? `None of ${fieldCount ?? 0} fields` : `${alertCount} of ${fieldCount ?? 0} fields`}
+      </Box>
+    </Popover>
   );
 };
 
@@ -355,7 +396,7 @@ const TestSetDetail = (): React.JSX.Element => {
               <Alert type="success" dismissible onDismiss={() => setLabelJob(null)}>
                 Draft labeling complete — {labelJob.labeled} document(s) labeled
                 {labelJob.skippedAlreadyLabeled ? `, ${labelJob.skippedAlreadyLabeled} skipped (already had ground truth)` : ''}. Review the
-                lowest-confidence documents first, then publish a version to freeze them as ground truth.
+                documents with the most confidence alerts first, then publish a version to freeze them as ground truth.
               </Alert>
             )}
 
@@ -419,19 +460,22 @@ const TestSetDetail = (): React.JSX.Element => {
                   sortingField: 'labelSource',
                 },
                 {
-                  id: 'minConfidence',
-                  // Named for what it is: the single weakest field, not an average
-                  // or a document score. A bare "Confidence" header invited reading
-                  // 28% as "this document is 28% good" when the other 30 fields
-                  // were above 0.99.
-                  header: 'Lowest field confidence',
-                  cell: (item: TestSetDocumentItem) => renderConfidence(item.minConfidence, item.confidenceThreshold),
-                  sortingField: 'minConfidence',
+                  id: 'alertCount',
+                  // What the rest of the product shows for human review: the number
+                  // of fields below their threshold, not a score. A bare percentage
+                  // invited reading 28% as "this document is 28% good" when the
+                  // other 30 fields were above 0.99 — and it said nothing about how
+                  // much work the document actually is. The score lives in the
+                  // cell's popover.
+                  header: 'Confidence alerts',
+                  cell: (item: TestSetDocumentItem) =>
+                    renderAlertCount(item.alertCount, item.fieldCount, item.minConfidence, item.confidenceThreshold),
+                  sortingField: 'alertCount',
                 },
                 {
                   id: 'reviewState',
-                  // The column that MOVES as annotation progresses. Lowest-field
-                  // confidence is the model's own assessment and deliberately does
+                  // The column that MOVES as annotation progresses. Confidence
+                  // alerts come from the model's own assessment and deliberately do
                   // not change when a human reviews — so without this there was
                   // nothing on screen reflecting review effort.
                   header: 'Review state',

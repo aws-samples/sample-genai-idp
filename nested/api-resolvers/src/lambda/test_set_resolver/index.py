@@ -989,6 +989,43 @@ def _confidence_threshold(explainability_info, inference_result=None):
     return min(found, key=lambda triple: triple[0])[1]
 
 
+# The bar a field is measured against when its own assessment carries no
+# threshold. Matches the UI's fallback so a document's alert count means the same
+# thing on both sides of the API.
+DEFAULT_ALERT_THRESHOLD = 0.8
+
+
+def _alert_counts(explainability_info, inference_result=None):
+    """(alerts, fields): how many fields fall below their configured threshold.
+
+    This — not the single lowest score — is how the rest of the product decides a
+    document needs a human: a field below its threshold is an alert, and whether
+    it missed by 2 points or 40 does not change what has to happen. A count also
+    ranks review work in the way an annotator experiences it, since a document
+    with eight weak fields is more work than one with a single weak field at a
+    lower score.
+
+    Absent fields are excluded on the same grounds as in :func:`_min_confidence`:
+    a blank box scores 0.0 with a reason like "no employer EIN found", which is a
+    correct reading rather than an alert, and counting it would make every
+    sparsely-populated form look like it needed review.
+    """
+    found = _walk_confidence_named(explainability_info)
+    if not found:
+        return None, None
+    if inference_result is not None:
+        absent = _absent_field_paths(inference_result)
+        populated = [f for f in found if f[2] not in absent]
+        if populated:
+            found = populated
+    alerts = sum(
+        1
+        for confidence, threshold, _ in found
+        if confidence < (threshold if threshold is not None else DEFAULT_ALERT_THRESHOLD)
+    )
+    return alerts, len(found)
+
+
 # ---------------------------------------------------------------------------
 # Review-effort estimator: "how many documents must a human review to reach a
 # target accuracy?" Reads the measured confidence→accuracy curve for this test
@@ -1070,6 +1107,8 @@ def get_annotation_queue(args, event=None):
                 ),
                 "minConfidence": doc.get("minConfidence"),
                 "confidenceThreshold": doc.get("confidenceThreshold"),
+                "alertCount": doc.get("alertCount"),
+                "fieldCount": doc.get("fieldCount"),
                 "labelSource": doc.get("labelSource"),
                 "sectionCount": len(doc.get("sections") or []),
                 "sections": doc.get("sections") or [],
@@ -1082,7 +1121,14 @@ def get_annotation_queue(args, event=None):
         )
 
     def sort_key(entry):
-        """Worst-first. Unlabeled sorts first, authored ground truth last.
+        """Most-alerts-first. Unlabeled sorts first, authored ground truth last.
+
+        Ordered by the number of fields below their configured threshold, not by
+        the single lowest score — a document with eight weak fields is more review
+        work than one with a single weak field at a slightly lower confidence, and
+        the alert count is how the rest of the product decides a document needs a
+        human. minConfidence breaks ties, so equal-alert documents still surface
+        the shakiest one first.
 
         "No confidence" means two different things. An unlabeled document has had
         nothing attempted, so it needs the most attention. Ground truth was
@@ -1093,10 +1139,12 @@ def get_annotation_queue(args, event=None):
         """
         confidence = entry["minConfidence"]
         if confidence is not None:
-            return (0, confidence, entry["objectKey"])
+            # Negated so more alerts sort earlier while confidence still sorts
+            # ascending within a tie.
+            return (0, -(entry["alertCount"] or 0), confidence, entry["objectKey"])
         if entry["labelSource"] in (None, LABEL_SOURCE_DRAFT):
-            return (-1, 0.0, entry["objectKey"])
-        return (1, 0.0, entry["objectKey"])
+            return (-1, 0, 0.0, entry["objectKey"])
+        return (1, 0, 0.0, entry["objectKey"])
 
     entries.sort(key=sort_key)
 
@@ -2258,14 +2306,16 @@ def get_test_set_documents(args):
 
 
 def _attach_label_metadata(test_set_bucket, documents):
-    """Add labelSource + minConfidence to each document on a page.
+    """Add labelSource, alert counts and minConfidence to each document on a page.
 
     The label state lives inside each section's baseline result.json, so this
     reads them — bounded to one page of documents (<=1000 sections) and fetched
     concurrently, since the calls are pure I/O and would otherwise serialize
-    into a slow page load. A document's confidence is the *minimum* across its
-    sections' fields: worst-first review should surface a document because of
-    its weakest field, not an average that hides it.
+    into a slow page load.
+
+    Alert counts sum across a document's sections (a document with weak fields in
+    two sections is more review work than one), while minConfidence takes the
+    minimum: it names the single weakest field, so an average would hide it.
 
     Best-effort per section: an unreadable result.json leaves that section out
     rather than failing the whole listing.
@@ -2279,6 +2329,8 @@ def _attach_label_metadata(test_set_bucket, documents):
             doc["labelSource"] = None
             doc["minConfidence"] = None
             doc["confidenceThreshold"] = None
+            doc["alertCount"] = None
+            doc["fieldCount"] = None
         return
 
     def read(key):
@@ -2289,7 +2341,10 @@ def _attach_label_metadata(test_set_bucket, documents):
             logger.warning(f"Could not read baseline label {key}: {e}")
             return None
 
-    per_doc = {id(doc): {"sources": [], "confidences": []} for doc, _ in tasks}
+    per_doc = {
+        id(doc): {"sources": [], "confidences": [], "alerts": [], "fields": []}
+        for doc, _ in tasks
+    }
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=min(len(tasks), 16)
     ) as executor:
@@ -2326,9 +2381,15 @@ def _attach_label_metadata(test_set_bucket, documents):
                 if threshold is None:
                     threshold = result.get("confidenceThreshold")
                 bucket_for_doc["confidences"].append((float(confidence), threshold))
+            alerts, fields = _alert_counts(result.get("explainability_info"), inference)
+            if alerts is not None:
+                bucket_for_doc["alerts"].append(alerts)
+                bucket_for_doc["fields"].append(fields)
 
     for doc in documents:
-        collected = per_doc.get(id(doc), {"sources": [], "confidences": []})
+        collected = per_doc.get(
+            id(doc), {"sources": [], "confidences": [], "alerts": [], "fields": []}
+        )
         sources = collected["sources"]
         confidences = collected["confidences"]
         # A document counts as reviewed only when every section is.
@@ -2347,6 +2408,12 @@ def _attach_label_metadata(test_set_bucket, documents):
         else:
             doc["minConfidence"] = None
             doc["confidenceThreshold"] = None
+        if collected["alerts"]:
+            doc["alertCount"] = sum(collected["alerts"])
+            doc["fieldCount"] = sum(collected["fields"])
+        else:
+            doc["alertCount"] = None
+            doc["fieldCount"] = None
 
 
 def _is_valid_test_set_structure(s3_client, bucket, prefix):

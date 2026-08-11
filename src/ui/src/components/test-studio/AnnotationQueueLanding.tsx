@@ -189,7 +189,7 @@ const AnnotationQueueLanding = (): React.JSX.Element => {
                     },
                     {
                       id: 'action',
-                      content: (item) => <Link href={testSetAnnotateHref(item.id)}>Open queue — review lowest-confidence first</Link>,
+                      content: (item) => <Link href={testSetAnnotateHref(item.id)}>Open queue — most confidence alerts first</Link>,
                     },
                   ],
                 }}
