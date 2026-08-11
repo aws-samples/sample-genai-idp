@@ -71,7 +71,7 @@ export const CREATE_SOURCES: CreateSourceMeta[] = [
   },
   {
     value: 'existing-files',
-    label: 'From files already in a bucket',
+    label: "From files you've already processed",
     description: 'Match documents already in the input or test set bucket by file pattern.',
     outcome: 'Labeled where baselines exist',
   },

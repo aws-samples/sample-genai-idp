@@ -171,7 +171,7 @@ const GenerateDraftLabelsModal = ({ visible, testSetId, documents, onDismiss, on
         <FormField label="Documents to label">
           <SpaceBetween size="s">
             <Checkbox checked={selectAll} onChange={({ detail }) => setSelectAll(detail.checked)}>
-              Label every document that needs it ({labelable.length})
+              Extract labels for every document that needs them ({labelable.length})
               {protectedCount > 0 ? ` — skipping ${protectedCount} with existing ground truth` : ''}
             </Checkbox>
 
@@ -195,7 +195,7 @@ const GenerateDraftLabelsModal = ({ visible, testSetId, documents, onDismiss, on
                   },
                   {
                     id: 'labels',
-                    header: 'Labels',
+                    header: 'Extraction labels',
                     cell: (item: TestSetDocumentItem) => renderLabelSource(item.labelSource),
                   },
                   {

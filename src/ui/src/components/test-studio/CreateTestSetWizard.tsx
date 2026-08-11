@@ -26,6 +26,7 @@ import {
   FormField,
   Input,
   KeyValuePairs,
+  Link,
   Modal,
   Select,
   SpaceBetween,
@@ -38,6 +39,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from '../../api/client-shim';
 import { addTestSet, addTestSetFromUpload, listBucketFiles, validateTestFileName } from '../../graphql/generated';
 import { getErrorMessage } from '../../utils/errorUtils';
+import { DISCOVERY_PATH } from '../../routes/constants';
 import useGenerateSyntheticForm from './useGenerateSyntheticForm';
 import {
   BUCKET_OPTIONS,
@@ -298,6 +300,28 @@ const CreateTestSetWizard = ({
 
   const sourceStep = (
     <SpaceBetween size="l">
+      {/* David: "let's say I'm a customer, I have documents, I have no labels, I
+          have no schema, I have no nothing except documents" — the wizard used to
+          take that person all the way to the generate-labels step before telling
+          them they needed a configuration. He was explicit that the fix is NOT a
+          new path ("I'm not proposing any new paths. I'm proposing telling the
+          user, use this path to accomplish this task"), so this states the two
+          prerequisites and links to the paths that already exist. */}
+      <Alert type="info" header="What a test set needs">
+        <SpaceBetween size="xs">
+          <Box>
+            <b>Documents</b> — upload them here, or point at ones you have already processed.
+          </Box>
+          <Box>
+            <b>A configuration</b> that says what to extract — the fields you care about, per document class. Labeling cannot be generated
+            without one.
+          </Box>
+          <Box fontSize="body-s">
+            No configuration yet? <Link href={`#${DISCOVERY_PATH}`}>Discovery</Link> infers classes and fields from example documents, or
+            use Quick Start from the welcome page to describe them in your own words.
+          </Box>
+        </SpaceBetween>
+      </Alert>
       <FormField label="How do you want to create this test set?" stretch>
         <Tiles
           value={source}
@@ -461,14 +485,15 @@ const CreateTestSetWizard = ({
       {source === 'upload-documents' && (
         <Alert type="info" header="Next step after this">
           This set arrives without ground truth. Open it and choose <strong>Generate draft labels</strong> to label it with the active
-          configuration, then review the least confident documents.
+          configuration, then review the documents with the most confidence alerts. Labeling needs a configuration that defines what to
+          extract — if you do not have one yet, start with <Link href={`#${DISCOVERY_PATH}`}>Discovery</Link>.
         </Alert>
       )}
     </SpaceBetween>
   );
 
   return (
-    <Modal visible={visible} onDismiss={close} header="Create test set" size="large">
+    <Modal visible={visible} onDismiss={close} header="Create or update test set" size="large">
       <Wizard
         activeStepIndex={activeStep}
         onNavigate={({ detail }) => {

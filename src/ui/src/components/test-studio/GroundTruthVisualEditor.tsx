@@ -506,11 +506,11 @@ const GroundTruthVisualEditor = ({
                     <SpaceBetween size="s">
                       {documentClassType !== undefined && (
                         <FormField
-                          label="Document class"
+                          label="Class label"
                           description={
                             classOptions.length > 0
-                              ? 'Expected classification for this section, from this config version.'
-                              : 'Expected classification for this section.'
+                              ? 'What this section is classified as, from this config version. Distinct from the extraction labels below.'
+                              : 'What this section is classified as. Distinct from the extraction labels below.'
                           }
                         >
                           <SpaceBetween size="xs">

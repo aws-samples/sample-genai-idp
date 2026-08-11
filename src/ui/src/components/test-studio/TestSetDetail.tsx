@@ -547,7 +547,11 @@ const TestSetDetail = (): React.JSX.Element => {
                 },
                 {
                   id: 'labelSource',
-                  header: 'Labels',
+                  // David: "the use of the term label should be very precise.
+                  // Extraction labels, class labels, split labels, those are all
+                  // different things." This column is provenance for the extracted
+                  // field values, not for the class.
+                  header: 'Extraction labels',
                   cell: (item: TestSetDocumentItem) => renderLabelSource(item.labelSource),
                   sortingField: 'labelSource',
                 },
