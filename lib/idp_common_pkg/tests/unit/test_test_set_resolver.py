@@ -2249,6 +2249,62 @@ class TestTestSetResolver:
         assert written["labelSource"] == "draft-machine"
         assert written["document_class"]["type"] == "bank-check"
 
+    def test_reextract_never_demotes_authored_ground_truth(self, labeling_env):
+        """Found live on IDP-dev-stack5: re-extracting one document of the
+        pre-deployed realkie-fcc-verified benchmark demoted its VERIFIED label to
+        draft-machine, which the harvest would then have replaced with a machine
+        guess.
+
+        A baseline with no labelSource was supplied when the test set was created —
+        nobody predicted it, so there is nothing for a re-extraction to correct.
+        Only a reviewed-human label is demoted (that one IS a prediction someone
+        confirmed, and the annotator has just said it is wrong). The class
+        correction still lands either way.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/gt.pdf", Body=b"x")
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/gt.pdf/sections/1/result.json",
+            # No labelSource: authored ground truth.
+            Body=json.dumps(
+                {
+                    "document_class": {"type": "bank-statement"},
+                    "inference_result": {"verified_field": "authoritative"},
+                }
+            ).encode(),
+        )
+
+        with patch.object(test_set_index, "boto3") as mock_boto3:
+            mock_lambda = MagicMock()
+            mock_lambda.invoke.return_value = {
+                "Payload": MagicMock(read=lambda: b'{"testRunId": "r"}')
+            }
+            mock_boto3.client.return_value = mock_lambda
+            test_set_index.reextract_test_set_document(
+                {
+                    "input": {
+                        "testSetId": "ts1",
+                        "objectKey": "gt.pdf",
+                        "documentClass": "bank-check",
+                    }
+                }
+            )
+
+        written = json.loads(
+            s3.get_object(
+                Bucket="test-set-bucket",
+                Key="ts1/baseline/gt.pdf/sections/1/result.json",
+            )["Body"].read()
+        )
+        # The correction lands...
+        assert written["document_class"]["type"] == "bank-check"
+        # ...but the label keeps its provenance, so the harvest leaves it alone and
+        # the verified values survive.
+        assert "labelSource" not in written or written["labelSource"] is None
+        assert written["inference_result"]["verified_field"] == "authoritative"
+
     def test_reextract_without_a_class_leaves_the_existing_one(self, labeling_env):
         """Re-running under the same class is legitimate (e.g. a config fix)."""
         table, s3 = labeling_env

@@ -896,13 +896,23 @@ def _set_baseline_document_class(test_set_bucket, test_set_id, object_key, class
     sections the run will overwrite: if the run fails, the annotator's correction
     is still recorded rather than silently lost.
 
-    Sections are also demoted to ``draft-machine``. This is deliberate and is the
-    one place a human-reviewed label is downgraded: the harvest refuses to
-    overwrite reviewed labels, so without this a re-extract of a document someone
-    had already confirmed would run to completion and write nothing — reporting
-    success while leaving the wrong-class fields in place. Asking to re-extract
-    after correcting the class *is* a statement that the current labels are wrong,
-    so they stop counting as confirmed. The UI says so before calling this.
+    A ``reviewed-human`` section is demoted to ``draft-machine``. This is the one
+    place a reviewed label is downgraded, and it is deliberate: the harvest refuses
+    to overwrite reviewed labels, so without this a re-extract of a document
+    someone had already confirmed would run to completion and write nothing —
+    reporting success while leaving the wrong-class fields in place. Asking to
+    re-extract after correcting the class *is* a statement that the current labels
+    are wrong. The UI says so before calling this.
+
+    **Authored ground truth is never demoted.** A baseline carrying no
+    ``labelSource`` was supplied when the test set was created (zip upload,
+    pattern-based, or synthetic) — nobody predicted it, so there is nothing for a
+    re-extraction to correct, and overwriting it would replace authoritative data
+    with a machine guess. Found live: re-extracting one document of the
+    pre-deployed ``realkie-fcc-verified`` benchmark demoted its verified label,
+    which the harvest would then have replaced. The class correction still lands
+    (that much is a genuine fix to metadata), but the label keeps its provenance
+    and the harvest leaves it alone.
     """
     prefix = f"{test_set_id}/baseline/{object_key}/sections/"
     paginator = s3_client.get_paginator("list_objects_v2")
@@ -914,6 +924,7 @@ def _set_baseline_document_class(test_set_bucket, test_set_id, object_key, class
             if obj["Key"].endswith("/result.json")
         )
 
+    demoted = 0
     for key in keys:
         try:
             body = s3_client.get_object(Bucket=test_set_bucket, Key=key)["Body"].read()
@@ -926,7 +937,9 @@ def _set_baseline_document_class(test_set_bucket, test_set_id, object_key, class
             doc_class = {}
         doc_class["type"] = class_type
         result["document_class"] = doc_class
-        result["labelSource"] = LABEL_SOURCE_DRAFT
+        if result.get("labelSource") == LABEL_SOURCE_HUMAN:
+            result["labelSource"] = LABEL_SOURCE_DRAFT
+            demoted += 1
         s3_client.put_object(
             Bucket=test_set_bucket,
             Key=key,
@@ -934,7 +947,8 @@ def _set_baseline_document_class(test_set_bucket, test_set_id, object_key, class
             ContentType="application/json",
         )
     logger.info(
-        f"Set class '{class_type}' on {len(keys)} baseline section(s) of {prefix}"
+        f"Set class '{class_type}' on {len(keys)} baseline section(s) of {prefix}; "
+        f"demoted {demoted} reviewed label(s) so the harvest can replace them"
     )
 
 

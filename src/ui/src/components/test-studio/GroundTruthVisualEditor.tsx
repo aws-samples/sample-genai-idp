@@ -555,8 +555,12 @@ const GroundTruthVisualEditor = ({
                                 }
                               >
                                 These fields were extracted as <b>{savedClassType}</b>. Re-extract to replace them with ones the{' '}
-                                <b>{documentClassType}</b> schema produces. Any existing labels for this document, including confirmed ones,
-                                are replaced.
+                                <b>{documentClassType}</b> schema produces.
+                                {localData?.labelSource === 'reviewed-human'
+                                  ? ' This document was already marked reviewed; re-extracting discards those confirmed values.'
+                                  : localData?.labelSource === 'draft-machine'
+                                    ? ' The current draft labels for this document are replaced.'
+                                    : ' The class is corrected, but this document has authored ground truth, so its field values are kept.'}
                               </Alert>
                             )}
                             {classChanged && !testSetId && (
