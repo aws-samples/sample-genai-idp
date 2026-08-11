@@ -2232,17 +2232,15 @@ Resources:
             collapsible: true
             defaultExpanded: false
             sectionLabel: Postprocessing
+            # Kept to one line, parallel to the Preprocessing section above.
+            # The caveats that used to live here (in-workflow latency, and the
+            # EventBridge PostProcessingLambdaHookFunctionArn alternative for
+            # fire-and-forget delivery) belong in the docs, not a UI section
+            # header: see docs/post-processing-lambda-hook.md, which carries the
+            # full "which mechanism do I want?" comparison.
             description: >-
               A single generic postprocessing hook (Lambda ARN + args) that runs
-              LAST, after evaluation and before the workflow completes, in both
-              processing modes. The mirror image of Preprocessing. The hook
-              receives the finished document and may return an `updatedDocument`
-              — the last word on what gets persisted to the tracking table,
-              reporting/Athena, and the UI. It runs INSIDE the workflow, so a
-              slow hook adds directly to per-document latency; for
-              fire-and-forget downstream delivery prefer the separate
-              PostProcessingLambdaHookFunctionArn stack parameter (EventBridge,
-              asynchronous, cannot modify the document).
+              LAST, after evaluation, in both processing modes.
             properties:
               enabled:
                 type: boolean
@@ -2261,11 +2259,9 @@ Resources:
                 enum: ["continue", "fail"]
                 default: continue
                 description: >-
-                  Behavior when the hook errors. `continue` (recommended) keeps
-                  the fully-processed document and completes normally, logging
-                  the error in the execution history. `fail` marks the whole
-                  document FAILED even though every processing step succeeded —
-                  use it only when the hook genuinely gates delivery.
+                  Behavior when the hook errors. `fail` marks the document FAILED
+                  even though every processing step succeeded — use it only when
+                  the hook genuinely gates delivery.
                 order: 2
               args:
                 type: array
