@@ -90,6 +90,7 @@ FIELD_ALIASES: Dict[str, str] = {
     "getTestSetVersions": "addDocumentsToTestSet",
     "listBucketFiles": "addDocumentsToTestSet",
     "publishTestSetVersion": "addDocumentsToTestSet",
+    "reextractTestSetDocument": "addDocumentsToTestSet",
     "removeDocumentsFromTestSet": "addDocumentsToTestSet",
     "updateTestSet": "addDocumentsToTestSet",
     "validateTestFileName": "addDocumentsToTestSet",

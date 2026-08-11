@@ -1195,6 +1195,17 @@
         }
       ]
     },
+    "reextractTestSetDocument": {
+      "args": [
+        {
+          "elem_non_null": false,
+          "is_list": false,
+          "name": "input",
+          "non_null": true,
+          "type": "ReextractTestSetDocumentInput"
+        }
+      ]
+    },
     "registerFeature": {
       "args": [
         {
@@ -2496,6 +2507,36 @@
         "name": "setAsActiveReference",
         "non_null": false,
         "type": "Boolean"
+      }
+    ],
+    "ReextractTestSetDocumentInput": [
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "testSetId",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "objectKey",
+        "non_null": true,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "documentClass",
+        "non_null": false,
+        "type": "String"
+      },
+      {
+        "elem_non_null": false,
+        "is_list": false,
+        "name": "configVersion",
+        "non_null": false,
+        "type": "String"
       }
     ],
     "RegisterFeatureHooksInput": [

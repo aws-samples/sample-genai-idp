@@ -930,6 +930,17 @@ type AnnotationQueue @aws_cognito_user_pools @aws_iam {
   labelJobTotal: Int
 }
 
+input ReextractTestSetDocumentInput {
+  testSetId: String!
+  objectKey: String!
+  # The corrected class. Written to the document's baseline sections before the
+  # run so extraction uses it instead of re-deciding the class. Omit to re-extract
+  # under the class the document already carries.
+  documentClass: String
+  # Defaults to the config version the set was last labeled with.
+  configVersion: String
+}
+
 input GenerateDraftLabelsInput {
   testSetId: String!
   # Defaults to the deployment's active config when omitted.
@@ -1251,6 +1262,10 @@ type Mutation {
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   generateDraftLabels(input: GenerateDraftLabelsInput!): DraftLabelJob
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
+  # Annotator-reachable: correcting a misclassified document is annotation work,
+  # scoped per test set by the resolver via allowedTestSets.
+  reextractTestSetDocument(input: ReextractTestSetDocumentInput!): DraftLabelJob
+    @aws_cognito_user_pools(cognito_groups: ["Admin", "Author", "Annotator"])
   sendTestRunToReview(testRunId: String!): SendTestRunToReviewResult
     @aws_cognito_user_pools(cognito_groups: ["Admin", "Author"])
   # Fine-Tuning (Admin + Author)

@@ -386,6 +386,13 @@ operations:
     enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
     # schema: generateDraftLabels(input: GenerateDraftLabelsInput!)
     args: { input: {} }
+  reextractTestSetDocument:
+    # Annotator corrects a misclassified document in their own set; the resolver
+    # additionally enforces allowedTestSets per set.
+    groups: [Admin, Author, Annotator]
+    kind: mutation
+    enforced_in: nested/api-resolvers/src/lambda/test_set_resolver/index.py
+    args: { input: { testSetId: "nonexistent-test-set", objectKey: "__x__" } }
   publishTestSetVersion:
     groups: [Admin, Author]
     kind: mutation

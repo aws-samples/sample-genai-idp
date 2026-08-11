@@ -255,8 +255,8 @@ const ReviewEffortModal = ({ visible, testSetId, configVersion, onDismiss, onCon
               {estimate.calibration.auroc !== null && estimate.calibration.auroc !== undefined
                 ? ` (AUROC ${estimate.calibration.auroc.toFixed(2)}, where 0.5 is a coin flip)`
                 : ''}
-              , so reviewing the documents with the most confidence alerts would find no more errors than reviewing at random. Review everything, or
-              change the confidence model for this config version and re-score.
+              , so reviewing the documents with the most confidence alerts would find no more errors than reviewing at random. Review
+              everything, or change the confidence model for this config version and re-score.
             </Alert>
           )}
 

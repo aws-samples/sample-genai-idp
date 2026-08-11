@@ -34,8 +34,10 @@ import {
 import type { SelectProps } from '@cloudscape-design/components';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from '../../api/client-shim';
-import { getFilePresignedUrl, uploadDocument } from '../../graphql/generated';
+import { getFilePresignedUrl, uploadDocument, reextractTestSetDocument, getDraftLabelJob } from '../../graphql/generated';
 import useAppContext from '../../contexts/app';
+import useConfiguration from '../../hooks/use-configuration';
+import { getConfigClassOptions } from '../common/config-class-options';
 import PageImageViewer from '../common/PageImageViewer';
 import FormFieldRenderer from '../document-viewer/FormFieldRenderer';
 import JSONEditorTab from '../document-viewer/JSONEditorTab';
@@ -43,6 +45,12 @@ import useTestDocPages from '../../hooks/use-test-doc-pages';
 
 const client = generateClient();
 const logger = new ConsoleLogger('GroundTruthVisualEditor');
+
+const REEXTRACT_POLL_MS = 3000;
+// Generous: a re-extract is a full pipeline pass (OCR is skipped, extraction and
+// assessment are not), and giving up early would report failure on a run that is
+// about to succeed.
+const REEXTRACT_TIMEOUT_MS = 5 * 60 * 1000;
 
 export interface TestSetDocumentSectionRef {
   sectionId: string;
@@ -73,6 +81,14 @@ interface GroundTruthVisualEditorProps {
   onSave?: (sectionId: string, data: Record<string, unknown>) => Promise<void>;
   /** Label for the save button (the queue uses "Save & next in queue"). */
   saveButtonText?: string;
+  /** Called after a re-extract completes, so the caller can refresh its queue. */
+  onReextracted?: () => void;
+  /**
+   * Owning test set. Required to offer re-extraction after a class correction —
+   * reextractTestSetDocument starts a one-document labeling run keyed on the set.
+   * The editor is otherwise usable without it.
+   */
+  testSetId?: string;
 }
 
 const getSectionLabel = (sectionId: string, data: Record<string, unknown> | null): string => {
@@ -89,6 +105,8 @@ const GroundTruthVisualEditor = ({
   onSaved,
   onSave,
   saveButtonText,
+  onReextracted,
+  testSetId,
 }: GroundTruthVisualEditorProps): React.JSX.Element => {
   const { user } = useAppContext();
   const { pages, isLoading: pagesLoading, error: pagesError, previewUnavailable } = useTestDocPages(bucket, inputKey);
@@ -106,6 +124,15 @@ const GroundTruthVisualEditor = ({
   // scrolling to find them is most of the work.
   const [filterMode, setFilterMode] = useState<SelectProps.Option>({ label: 'Show all fields', value: 'none' });
   const [activeTabId, setActiveTabId] = useState('visual');
+  const [isReextracting, setIsReextracting] = useState(false);
+  const [reextractNote, setReextractNote] = useState<string | null>(null);
+  // The class the loaded baseline was extracted under. Comparing against the
+  // current selection is what tells us the fields no longer match the class, and
+  // therefore whether re-extraction is owed.
+  const [savedClassType, setSavedClassType] = useState<string | undefined>(undefined);
+  // Bumped to force a baseline re-read after a re-extract rewrites it under the
+  // corrected class; the key alone would not change.
+  const [reloadToken, setReloadToken] = useState(0);
 
   const selectedSection = sections.find((s) => s.sectionId === selectedSectionId) ?? sections[0];
 
@@ -141,8 +168,11 @@ const GroundTruthVisualEditor = ({
         if (!s3Response.ok) throw new Error(`S3 fetch failed: ${s3Response.status}`);
         const text = await s3Response.text();
         if (cancelled) return;
-        setLocalData(JSON.parse(text));
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        setLocalData(parsed);
         setOriginalJson(text);
+        setSavedClassType((parsed.document_class as Record<string, unknown> | undefined)?.type as string | undefined);
+        setReextractNote(null);
       } catch (err) {
         logger.error('Error loading baseline:', err);
         if (!cancelled) setError(`Failed to load ground truth: ${(err as Error).message}`);
@@ -154,7 +184,7 @@ const GroundTruthVisualEditor = ({
     return () => {
       cancelled = true;
     };
-  }, [bucket, selectedSection?.baselineKey]);
+  }, [bucket, selectedSection?.baselineKey, reloadToken]);
 
   const hasChanges = useMemo(() => {
     if (!localData || originalJson === null) return false;
@@ -193,6 +223,21 @@ const GroundTruthVisualEditor = ({
 
   const documentClassType = (localData?.document_class as Record<string, unknown> | undefined)?.type as string | undefined;
 
+  // The classes this document's own config version defines — not the deployment's
+  // current active config, which may have moved on since the labels were written.
+  // _write_draft_labels_for_doc stamps metadata.config_version for exactly this.
+  const baselineConfigVersion =
+    ((localData?.metadata as Record<string, unknown> | undefined)?.config_version as string | undefined) || 'default';
+  const { mergedConfig } = useConfiguration(baselineConfigVersion);
+  const classOptions = useMemo(() => getConfigClassOptions(mergedConfig), [mergedConfig]);
+  // A class the config no longer lists must still be selectable, or correcting a
+  // document whose class was since renamed would silently blank the field.
+  const classOptionsWithCurrent = useMemo(() => {
+    if (!documentClassType || classOptions.some((o) => o.value === documentClassType)) return classOptions;
+    return [{ label: documentClassType, value: documentClassType, description: 'Not defined in this config version' }, ...classOptions];
+  }, [classOptions, documentClassType]);
+  const classChanged = Boolean(savedClassType) && documentClassType !== savedClassType;
+
   const updateInferenceResult = (newValue: Record<string, unknown>) => {
     if (isReadOnly || !localData) return;
     const updated = { ...localData };
@@ -210,6 +255,63 @@ const GroundTruthVisualEditor = ({
     if (isReadOnly || !localData) return;
     const docClass = { ...((localData.document_class as Record<string, unknown>) ?? {}), type: newType };
     setLocalData({ ...localData, document_class: docClass });
+  };
+
+  /**
+   * Re-run extraction under the corrected class, then reload the new labels.
+   *
+   * Blocks until the labels are actually replaced rather than returning on the
+   * job being queued: the point of the button is that the fields on screen are
+   * wrong, so handing back control while they are still wrong just moves the
+   * confusion. Labels are harvested on read, so polling getDraftLabelJob is also
+   * what drives the write-back — this loop is not merely observing.
+   */
+  const handleReextract = async () => {
+    if (!documentClassType || !testSetId) return;
+    setIsReextracting(true);
+    setError(null);
+    setReextractNote(null);
+    try {
+      const started = await client.graphql({
+        query: reextractTestSetDocument,
+        variables: {
+          input: { testSetId, objectKey, documentClass: documentClassType, configVersion: baselineConfigVersion },
+        },
+      });
+      const job = started.data?.reextractTestSetDocument;
+      if (!job?.jobId) throw new Error('No job returned');
+
+      const deadline = Date.now() + REEXTRACT_TIMEOUT_MS;
+      let status = job.status;
+      while (status === 'RUNNING' && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, REEXTRACT_POLL_MS));
+        const polled = await client.graphql({
+          query: getDraftLabelJob,
+          variables: { testSetId, jobId: job.jobId },
+        });
+        status = polled.data?.getDraftLabelJob?.status ?? status;
+        if (status === 'FAILED') {
+          throw new Error(polled.data?.getDraftLabelJob?.error || 'Re-extraction failed');
+        }
+      }
+      if (status === 'RUNNING') {
+        // Not an error: the job is still going and the harvest is idempotent, so
+        // say where it stands instead of implying it failed.
+        setReextractNote(
+          'Re-extraction is taking longer than expected. It is still running — reopen this document shortly to see the new fields.',
+        );
+        return;
+      }
+
+      setReloadToken((token) => token + 1);
+      setReextractNote(`Re-extracted as ${documentClassType}.`);
+      if (onReextracted) onReextracted();
+    } catch (err) {
+      logger.error('Re-extraction failed:', err);
+      setError(`Could not re-extract this document: ${(err as Error).message}`);
+    } finally {
+      setIsReextracting(false);
+    }
   };
 
   const handleSave = async () => {
@@ -378,12 +480,68 @@ const GroundTruthVisualEditor = ({
                   content: (
                     <SpaceBetween size="s">
                       {documentClassType !== undefined && (
-                        <FormField label="Document class" description="Expected classification for this section">
-                          <Input
-                            value={documentClassType ?? ''}
-                            onChange={({ detail }) => updateDocumentClass(detail.value)}
-                            disabled={isReadOnly}
-                          />
+                        <FormField
+                          label="Document class"
+                          description={
+                            classOptions.length > 0
+                              ? 'Expected classification for this section, from this config version.'
+                              : 'Expected classification for this section.'
+                          }
+                        >
+                          <SpaceBetween size="xs">
+                            {/* A dropdown of the config's classes, not free text: a
+                                class the config has no schema for cannot be
+                                extracted against, so offering it invites a
+                                correction that can never take effect. Falls back to
+                                free text when no config resolves. */}
+                            {classOptions.length > 0 ? (
+                              <Select
+                                selectedOption={
+                                  documentClassType
+                                    ? (classOptionsWithCurrent.find((o) => o.value === documentClassType) ?? {
+                                        label: documentClassType,
+                                        value: documentClassType,
+                                      })
+                                    : null
+                                }
+                                onChange={({ detail }) => updateDocumentClass(detail.selectedOption.value ?? '')}
+                                options={classOptionsWithCurrent}
+                                disabled={isReadOnly || isReextracting}
+                                placeholder="Choose a document class"
+                              />
+                            ) : (
+                              <Input
+                                value={documentClassType ?? ''}
+                                onChange={({ detail }) => updateDocumentClass(detail.value)}
+                                disabled={isReadOnly}
+                              />
+                            )}
+                            {/* Correcting the class is only half the fix: the fields
+                                below it were extracted against the wrong schema, so
+                                offer the re-extract that replaces them. */}
+                            {classChanged && testSetId && (
+                              <Alert
+                                type="info"
+                                header="Fields still reflect the previous class"
+                                action={
+                                  <Button onClick={handleReextract} loading={isReextracting} disabled={isReadOnly}>
+                                    Change class &amp; re-extract
+                                  </Button>
+                                }
+                              >
+                                These fields were extracted as <b>{savedClassType}</b>. Re-extract to replace them with ones the{' '}
+                                <b>{documentClassType}</b> schema produces. Any existing labels for this document, including confirmed ones,
+                                are replaced.
+                              </Alert>
+                            )}
+                            {classChanged && !testSetId && (
+                              <Alert type="warning">
+                                The class will be saved, but this document has no processing run to re-extract from, so its fields will
+                                still reflect the previous class.
+                              </Alert>
+                            )}
+                            {reextractNote && <Alert type="success">{reextractNote}</Alert>}
+                          </SpaceBetween>
                         </FormField>
                       )}
                       {splitPageIndices !== undefined && (

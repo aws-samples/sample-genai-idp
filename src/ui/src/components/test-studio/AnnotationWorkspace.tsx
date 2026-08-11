@@ -692,6 +692,8 @@ const AnnotationWorkspace = (): React.JSX.Element => {
                   onSave={handleSave}
                   onSaved={handleSaved}
                   saveButtonText="Save & next in queue"
+                  testSetId={testSetId}
+                  onReextracted={() => loadQueue(false)}
                 />
               )}
               {selected && (

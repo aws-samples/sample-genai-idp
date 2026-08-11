@@ -739,6 +739,7 @@ export type Mutation = {
   processChanges: ProcessChangesResponse;
   publishCircuitBreakerStatus?: Maybe<CircuitBreakerStatus>;
   publishTestSetVersion?: Maybe<TestSetVersion>;
+  reextractTestSetDocument?: Maybe<DraftLabelJob>;
   /** Called by a feature stack's RegisterFeature custom resource once the stack has deployed. */
   registerFeature: InstalledFeature;
   /**
@@ -988,6 +989,11 @@ export type MutationPublishCircuitBreakerStatusArgs = {
 
 export type MutationPublishTestSetVersionArgs = {
   input: PublishTestSetVersionInput;
+};
+
+
+export type MutationReextractTestSetDocumentArgs = {
+  input: ReextractTestSetDocumentInput;
 };
 
 
@@ -1642,6 +1648,13 @@ export type QuotasUsed = {
   bedrock_models?: Maybe<Scalars['AWSJSON']['output']>;
 };
 
+export type ReextractTestSetDocumentInput = {
+  configVersion?: InputMaybe<Scalars['String']['input']>;
+  documentClass?: InputMaybe<Scalars['String']['input']>;
+  objectKey: Scalars['String']['input'];
+  testSetId: Scalars['String']['input'];
+};
+
 /**
  * Input for registerFeatureHooks. Replaces the prior hook set for this
  * feature in its entirety (idempotent).
@@ -2286,6 +2299,13 @@ export type PublishTestSetVersionMutationVariables = Exact<{
 
 
 export type PublishTestSetVersionMutation = { publishTestSetVersion?: { testSetId: string, version: number, label?: string | null, notes?: string | null, fileCount?: number | null, activeReference?: number | null, createdAt?: string | null, createdBy?: string | null } | null };
+
+export type ReextractTestSetDocumentMutationVariables = Exact<{
+  input: ReextractTestSetDocumentInput;
+}>;
+
+
+export type ReextractTestSetDocumentMutation = { reextractTestSetDocument?: { jobId: string, testSetId: string, status: string, total?: number | null, labeled?: number | null, configVersion?: string | null, error?: string | null, createdAt?: string | null, completedAt?: string | null } | null };
 
 export type ReleaseReviewMutationVariables = Exact<{
   objectKey: Scalars['String']['input'];

@@ -80,7 +80,14 @@ def _caller_in_groups(event, allowed):
 # route to it. Each of these enforces per-set scope internally via
 # assert_can_access_test_set — reaching the operation is not the same as being
 # allowed to see a given set.
-ANNOTATOR_ALLOWED_FIELDS = ("getAnnotationQueue", "getTestSetDocuments")
+ANNOTATOR_ALLOWED_FIELDS = (
+    "getAnnotationQueue",
+    "getTestSetDocuments",
+    # Correcting a misclassified document is annotation work, not test-set
+    # management: it only re-labels one document in a set the annotator is already
+    # assigned to, and the alternative is that a wrong class blocks them entirely.
+    "reextractTestSetDocument",
+)
 
 
 def handler(event, context):
@@ -136,6 +143,13 @@ def handler(event, context):
         return get_test_set_versions(event["arguments"])
     elif field_name == "generateDraftLabels":
         return generate_draft_labels(event["arguments"], event)
+    elif field_name == "reextractTestSetDocument":
+        # Annotators correct classes in their own sets, so scope is enforced per
+        # set here — group membership alone would let one annotator re-run
+        # documents in another effort's set.
+        input_data = event["arguments"].get("input", event["arguments"])
+        assert_can_access_test_set(event, input_data.get("testSetId") or "")
+        return reextract_test_set_document(event["arguments"], event)
     elif field_name == "getDraftLabelJob":
         return get_draft_label_job(event["arguments"])
     elif field_name == "estimateReviewEffort":
@@ -815,6 +829,111 @@ def generate_draft_labels(args, event=None):
         f"({job_item['total']} document(s), configVersion={config_version})"
     )
     return _label_job_to_result(job_item)
+
+
+def reextract_test_set_document(args, event=None):
+    """Re-run extraction for one document after its class was corrected.
+
+    An annotator who finds a bank check classified as a bank statement can fix the
+    class, but the fields underneath it were extracted against the wrong schema —
+    so the correction is only half the work. This re-runs the document and lets the
+    ordinary harvest replace its draft labels with ones the right schema produced.
+
+    Implemented as its own labeling job rather than through ``processChanges``
+    because the write-back is what matters here: draft labels are harvested from
+    the job identified by the *set's* ``labelJobId``, so a document reprocessed
+    outside a job of its own would extract correctly and then never reach the
+    baseline. Starting a one-document job keeps the existing harvest path — and
+    its overwrite safety, pruning and curve bookkeeping — exactly as it is.
+
+    The class is pinned by writing it to the baseline first: the copier stamps
+    provenance metadata, and classification is skipped for pages that already
+    carry a class, so the run extracts against the class the annotator chose
+    instead of re-deciding it.
+    """
+    input_data = args.get("input", args)
+    test_set_id = input_data["testSetId"]
+    object_key = input_data["objectKey"]
+    document_class = input_data.get("documentClass")
+
+    if not validate_test_set_name(test_set_id):
+        raise Exception("Invalid test set id")
+
+    meta = db_client.get_item({"PK": f"testset#{test_set_id}", "SK": "metadata"})
+    if not meta:
+        raise Exception(f"Test set '{test_set_id}' not found")
+
+    test_set_bucket = os.environ["TEST_SET_BUCKET"]
+    if document_class:
+        _set_baseline_document_class(
+            test_set_bucket, test_set_id, object_key, document_class
+        )
+
+    config_version = input_data.get("configVersion") or meta.get("labelJobConfigVersion")
+    result = generate_draft_labels(
+        {
+            "input": {
+                "testSetId": test_set_id,
+                "objectKeys": [object_key],
+                "configVersion": config_version,
+            }
+        },
+        event,
+    )
+    logger.info(
+        f"Re-extracting {object_key} in {test_set_id} as "
+        f"'{document_class or 'its existing class'}' via job {result['jobId']}"
+    )
+    return result
+
+
+def _set_baseline_document_class(test_set_bucket, test_set_id, object_key, class_type):
+    """Stamp a corrected class onto every section of a document's baseline.
+
+    Written before the run so the extraction uses it, and written even for
+    sections the run will overwrite: if the run fails, the annotator's correction
+    is still recorded rather than silently lost.
+
+    Sections are also demoted to ``draft-machine``. This is deliberate and is the
+    one place a human-reviewed label is downgraded: the harvest refuses to
+    overwrite reviewed labels, so without this a re-extract of a document someone
+    had already confirmed would run to completion and write nothing — reporting
+    success while leaving the wrong-class fields in place. Asking to re-extract
+    after correcting the class *is* a statement that the current labels are wrong,
+    so they stop counting as confirmed. The UI says so before calling this.
+    """
+    prefix = f"{test_set_id}/baseline/{object_key}/sections/"
+    paginator = s3_client.get_paginator("list_objects_v2")
+    keys = []
+    for page in paginator.paginate(Bucket=test_set_bucket, Prefix=prefix):
+        keys.extend(
+            obj["Key"]
+            for obj in page.get("Contents", [])
+            if obj["Key"].endswith("/result.json")
+        )
+
+    for key in keys:
+        try:
+            body = s3_client.get_object(Bucket=test_set_bucket, Key=key)["Body"].read()
+            result = json.loads(body)
+        except Exception as e:  # noqa: BLE001 — one unreadable section must not block
+            logger.warning(f"Could not read baseline section {key} to set class: {e}")
+            continue
+        doc_class = result.get("document_class")
+        if not isinstance(doc_class, dict):
+            doc_class = {}
+        doc_class["type"] = class_type
+        result["document_class"] = doc_class
+        result["labelSource"] = LABEL_SOURCE_DRAFT
+        s3_client.put_object(
+            Bucket=test_set_bucket,
+            Key=key,
+            Body=json.dumps(result, indent=2).encode("utf-8"),
+            ContentType="application/json",
+        )
+    logger.info(
+        f"Set class '{class_type}' on {len(keys)} baseline section(s) of {prefix}"
+    )
 
 
 def _label_job_to_result(item):

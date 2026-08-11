@@ -2144,6 +2144,147 @@ class TestTestSetResolver:
         assert payload["arguments"]["input"]["objectKeys"] == ["a.pdf"]
         assert result["skippedAlreadyLabeled"] == 0
 
+    def test_reextract_pins_the_corrected_class_and_labels_one_document(
+        self, labeling_env
+    ):
+        """Correcting the class must actually reach the extraction.
+
+        The class is written to the baseline before the run because the pipeline
+        skips classification for pages that already carry one — that is what makes
+        the re-run extract against the class the annotator chose rather than
+        re-deciding it. Only the named document is processed.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=2)
+        for name in ("check.pdf", "other.pdf"):
+            s3.put_object(Bucket="test-set-bucket", Key=f"ts1/input/{name}", Body=b"x")
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/check.pdf/sections/1/result.json",
+            Body=json.dumps(
+                {
+                    "labelSource": "draft-machine",
+                    "document_class": {"type": "bank-statement"},
+                    "inference_result": {"account_number": "123"},
+                }
+            ).encode(),
+        )
+
+        with patch.object(test_set_index, "boto3") as mock_boto3:
+            mock_lambda = MagicMock()
+            mock_lambda.invoke.return_value = {
+                "Payload": MagicMock(read=lambda: b'{"testRunId": "ts1-reextract"}')
+            }
+            mock_boto3.client.return_value = mock_lambda
+            result = test_set_index.reextract_test_set_document(
+                {
+                    "input": {
+                        "testSetId": "ts1",
+                        "objectKey": "check.pdf",
+                        "documentClass": "bank-check",
+                    }
+                }
+            )
+
+        assert result["jobId"] == "ts1-reextract"
+        payload = json.loads(mock_lambda.invoke.call_args.kwargs["Payload"])
+        assert payload["arguments"]["input"]["objectKeys"] == ["check.pdf"]
+
+        written = json.loads(
+            s3.get_object(
+                Bucket="test-set-bucket",
+                Key="ts1/baseline/check.pdf/sections/1/result.json",
+            )["Body"].read()
+        )
+        assert written["document_class"]["type"] == "bank-check"
+
+    def test_reextract_demotes_a_reviewed_label_so_the_harvest_can_replace_it(
+        self, labeling_env
+    ):
+        """The one place a reviewed label is deliberately downgraded.
+
+        The harvest refuses to overwrite reviewed-human labels. Without demoting
+        them, re-extracting a document someone had already confirmed would run to
+        completion and write nothing — reporting success while leaving the
+        wrong-class fields in place. Asking to re-extract after correcting the
+        class IS a statement that the current labels are wrong.
+        """
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/check.pdf", Body=b"x")
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/check.pdf/sections/1/result.json",
+            Body=json.dumps(
+                {
+                    "labelSource": "reviewed-human",
+                    "document_class": {"type": "bank-statement"},
+                    "inference_result": {"account_number": "123"},
+                }
+            ).encode(),
+        )
+
+        with patch.object(test_set_index, "boto3") as mock_boto3:
+            mock_lambda = MagicMock()
+            mock_lambda.invoke.return_value = {
+                "Payload": MagicMock(read=lambda: b'{"testRunId": "ts1-reextract"}')
+            }
+            mock_boto3.client.return_value = mock_lambda
+            test_set_index.reextract_test_set_document(
+                {
+                    "input": {
+                        "testSetId": "ts1",
+                        "objectKey": "check.pdf",
+                        "documentClass": "bank-check",
+                    }
+                }
+            )
+
+        written = json.loads(
+            s3.get_object(
+                Bucket="test-set-bucket",
+                Key="ts1/baseline/check.pdf/sections/1/result.json",
+            )["Body"].read()
+        )
+        assert written["labelSource"] == "draft-machine"
+        assert written["document_class"]["type"] == "bank-check"
+
+    def test_reextract_without_a_class_leaves_the_existing_one(self, labeling_env):
+        """Re-running under the same class is legitimate (e.g. a config fix)."""
+        table, s3 = labeling_env
+        _seed_test_set(table, "ts1", fileCount=1)
+        s3.put_object(Bucket="test-set-bucket", Key="ts1/input/check.pdf", Body=b"x")
+        s3.put_object(
+            Bucket="test-set-bucket",
+            Key="ts1/baseline/check.pdf/sections/1/result.json",
+            Body=json.dumps(
+                {
+                    "labelSource": "reviewed-human",
+                    "document_class": {"type": "bank-check"},
+                }
+            ).encode(),
+        )
+
+        with patch.object(test_set_index, "boto3") as mock_boto3:
+            mock_lambda = MagicMock()
+            mock_lambda.invoke.return_value = {
+                "Payload": MagicMock(read=lambda: b'{"testRunId": "r"}')
+            }
+            mock_boto3.client.return_value = mock_lambda
+            test_set_index.reextract_test_set_document(
+                {"input": {"testSetId": "ts1", "objectKey": "check.pdf"}}
+            )
+
+        written = json.loads(
+            s3.get_object(
+                Bucket="test-set-bucket",
+                Key="ts1/baseline/check.pdf/sections/1/result.json",
+            )["Body"].read()
+        )
+        # No class given, so nothing is rewritten — including the review tag.
+        assert written["labelSource"] == "reviewed-human"
+        assert written["document_class"]["type"] == "bank-check"
+
     def test_queue_sorts_ground_truth_last_and_unlabeled_first(self, labeling_env):
         """Two kinds of "no confidence" must not sort the same.
 

@@ -739,6 +739,7 @@ export type Mutation = {
   processChanges: ProcessChangesResponse;
   publishCircuitBreakerStatus?: Maybe<CircuitBreakerStatus>;
   publishTestSetVersion?: Maybe<TestSetVersion>;
+  reextractTestSetDocument?: Maybe<DraftLabelJob>;
   /** Called by a feature stack's RegisterFeature custom resource once the stack has deployed. */
   registerFeature: InstalledFeature;
   /**
@@ -988,6 +989,11 @@ export type MutationPublishCircuitBreakerStatusArgs = {
 
 export type MutationPublishTestSetVersionArgs = {
   input: PublishTestSetVersionInput;
+};
+
+
+export type MutationReextractTestSetDocumentArgs = {
+  input: ReextractTestSetDocumentInput;
 };
 
 
@@ -1640,6 +1646,13 @@ export type QuotaRequirement = {
 
 export type QuotasUsed = {
   bedrock_models?: Maybe<Scalars['AWSJSON']['output']>;
+};
+
+export type ReextractTestSetDocumentInput = {
+  configVersion?: InputMaybe<Scalars['String']['input']>;
+  documentClass?: InputMaybe<Scalars['String']['input']>;
+  objectKey: Scalars['String']['input'];
+  testSetId: Scalars['String']['input'];
 };
 
 /**
